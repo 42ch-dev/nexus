@@ -270,7 +270,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
 #[must_use]
 pub fn maybe_render_preset_run_help() -> Option<String> {
     let argv: Vec<String> = std::env::args().collect();
-    let preset_id = extract_run_help_target(&argv)?;
+    let (group, preset_id) = extract_run_help_target(&argv)?;
     // Best-effort manifest resolution; None on any failure.
     let nexus_home = crate::config::nexus_home().ok()?;
     // R-V146P2-QC3-S2: build the capability registry exactly once for this
@@ -282,7 +282,7 @@ pub fn maybe_render_preset_run_help() -> Option<String> {
     // reconstruction inside the decision logic) makes that contract visible
     // and lets the resolve+format decision be unit-tested directly.
     let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
-    render_rich_preset_help(&preset_id, &nexus_home, &caps)
+    render_rich_preset_help(&group, &preset_id, &nexus_home, &caps)
 }
 
 /// Resolve a preset manifest and render its enriched `--help` text if it
@@ -294,9 +294,13 @@ pub fn maybe_render_preset_run_help() -> Option<String> {
 /// `std::env::args()` / global config, and the registry is not rebuilt
 /// inside the decision function.
 ///
+/// `group` is the invoked top-level group (`"creator"` or `"preset"`,
+/// F-006) — used only for the usage line in the rendered help.
+///
 /// Returns `None` when the preset is unknown or declares no `cli_args`
 /// (clap's generic help should render instead).
 fn render_rich_preset_help(
+    group: &str,
     preset_id: &str,
     nexus_home: &std::path::Path,
     caps: &nexus_orchestration::capability::CapabilityRegistry,
@@ -315,32 +319,44 @@ fn render_rich_preset_help(
         return None;
     }
     let description = &loaded.manifest.preset.description;
-    Some(format_preset_run_help(preset_id, description, cli_args))
+    Some(format_preset_run_help(
+        group,
+        preset_id,
+        description,
+        cli_args,
+    ))
 }
 
-/// Pure argv parser: extract the `preset_id` targeted by a
+/// Pure argv parser: extract the `(group, preset_id)` targeted by a
 /// `creator run <preset_id> ... --help` (or `-h`) invocation.
 ///
-/// Returns `Some(preset_id)` only when:
-/// - the `creator` token is present, immediately followed by `run`,
+/// Also matches the canonical `preset run <preset_id> ... --help` form
+/// (F-006): `preset run` flattens the same `RunCommand`, so the rich help
+/// interception must fire for both surfaces.
+///
+/// Returns `Some((group, preset_id))` only when:
+/// - the `creator` token is present, immediately followed by `run`, OR the
+///   `preset` token is present, immediately followed by `run`,
 /// - a non-dash `preset_id` token follows `run`, AND
 /// - `--help` / `-h` appears AFTER the `preset_id` token.
 ///
-/// Returns `None` for: bare `creator run --help` (no `preset_id` before help),
-/// non-`run` subcommands, or invocations without a help flag. Pure / no I/O —
-/// hermetically testable.
-fn extract_run_help_target(argv: &[String]) -> Option<String> {
-    let creator_idx = argv.iter().position(|t| t == "creator")?;
-    let after_creator = &argv[creator_idx..];
-    if after_creator.len() < 2 || after_creator[1] != "run" {
+/// Returns `None` for: bare `creator run --help` / `preset run --help` (no
+/// `preset_id` before help), non-`run` subcommands, or invocations without a
+/// help flag. Pure / no I/O — hermetically testable.
+fn extract_run_help_target(argv: &[String]) -> Option<(String, String)> {
+    // Match either `creator run` or `preset run` (F-006).
+    let group_idx = argv.iter().position(|t| t == "creator" || t == "preset")?;
+    let group = argv[group_idx].clone();
+    let after_group = &argv[group_idx..];
+    if after_group.len() < 2 || after_group[1] != "run" {
         return None;
     }
-    let after_run = &after_creator[2..];
+    let after_run = &after_group[2..];
     let mut preset_id: Option<&String> = None;
     for tok in after_run {
         if tok == "--help" || tok == "-h" {
             // Help requested — fire only if a preset_id preceded it.
-            return preset_id.cloned();
+            return preset_id.cloned().map(|id| (group, id));
         }
         if preset_id.is_none() && !tok.starts_with('-') {
             preset_id = Some(tok);
@@ -349,17 +365,26 @@ fn extract_run_help_target(argv: &[String]) -> Option<String> {
     None
 }
 
-/// Render a `--help` block for `creator run <preset_id>` that lists both the
-/// global `RunCommand` flags and the preset's manifest-declared `cli_args`.
+/// Render a `--help` block for `creator run <preset_id>` / `preset run
+/// <preset_id>` that lists both the global `RunCommand` flags and the
+/// preset's manifest-declared `cli_args`.
 ///
-/// Pure over `(preset_id, description, cli_args)` — hermetically testable
-/// without loading any manifest from disk.
-fn format_preset_run_help(preset_id: &str, description: &str, cli_args: &[PresetCliArg]) -> String {
+/// `group` is the invoked top-level group (`"creator"` or `"preset"`,
+/// F-006) so the usage line matches the surface the user typed.
+///
+/// Pure over `(group, preset_id, description, cli_args)` — hermetically
+/// testable without loading any manifest from disk.
+fn format_preset_run_help(
+    group: &str,
+    preset_id: &str,
+    description: &str,
+    cli_args: &[PresetCliArg],
+) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "nexus42 creator run {preset_id} [<work_id>] [global flags] [preset args...]"
+        "nexus42 {group} run {preset_id} [<work_id>] [global flags] [preset args...]"
     );
     let _ = writeln!(out);
     // R-V146P2-QC2-W: sanitize manifest-supplied description before rendering
@@ -1470,8 +1495,8 @@ mod tests {
             .map(String::from)
             .collect();
         assert_eq!(
-            extract_run_help_target(&argv).as_deref(),
-            Some("novel-review-master")
+            extract_run_help_target(&argv),
+            Some(("creator".to_string(), "novel-review-master".to_string()))
         );
     }
 
@@ -1489,8 +1514,8 @@ mod tests {
         .map(String::from)
         .collect();
         assert_eq!(
-            extract_run_help_target(&argv).as_deref(),
-            Some("novel-review-master"),
+            extract_run_help_target(&argv),
+            Some(("creator".to_string(), "novel-review-master".to_string())),
         );
     }
 
@@ -1501,9 +1526,44 @@ mod tests {
             .map(String::from)
             .collect();
         assert_eq!(
-            extract_run_help_target(&argv).as_deref(),
-            Some("novel-writing"),
+            extract_run_help_target(&argv),
+            Some(("creator".to_string(), "novel-writing".to_string())),
         );
+    }
+
+    #[test]
+    fn extract_run_help_target_preset_group_matches() {
+        // F-006: `preset run <id> --help` must fire the same interception.
+        let argv: Vec<String> = ["nexus42", "preset", "run", "novel-review-master", "--help"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert_eq!(
+            extract_run_help_target(&argv),
+            Some(("preset".to_string(), "novel-review-master".to_string())),
+        );
+    }
+
+    #[test]
+    fn extract_run_help_target_preset_group_short_h() {
+        let argv: Vec<String> = ["nexus42", "preset", "run", "novel-writing", "-h"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert_eq!(
+            extract_run_help_target(&argv),
+            Some(("preset".to_string(), "novel-writing".to_string())),
+        );
+    }
+
+    #[test]
+    fn extract_run_help_target_preset_group_help_without_preset_returns_none() {
+        // `preset run --help` → generic clap help; no preset_id before help.
+        let argv: Vec<String> = ["nexus42", "preset", "run", "--help"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert!(extract_run_help_target(&argv).is_none());
     }
 
     #[test]
@@ -1583,6 +1643,7 @@ mod tests {
             },
         ];
         let out = format_preset_run_help(
+            "creator",
             "novel-review-master",
             "Surface open findings for human master review.",
             &args,
@@ -1641,8 +1702,12 @@ mod tests {
             default: None,
             description: "Chapter number to review".to_string(),
         }];
-        let out =
-            format_preset_run_help("novel-manuscript-audit-review", "On-demand review.", &args);
+        let out = format_preset_run_help(
+            "creator",
+            "novel-manuscript-audit-review",
+            "On-demand review.",
+            &args,
+        );
         assert!(out.contains("--chapter"), "help must list --chapter: {out}");
         assert!(
             out.contains("<INTEGER>"),
@@ -1657,13 +1722,35 @@ mod tests {
     #[test]
     fn format_help_empty_cli_args_section() {
         // A preset with no cli_args still renders a coherent section.
-        let out = format_preset_run_help("novel-brainstorm", "Brainstorm a novel.", &[]);
+        let out = format_preset_run_help("creator", "novel-brainstorm", "Brainstorm a novel.", &[]);
         assert!(
             out.contains("declares no preset-specific flags"),
             "empty cli_args must render a placeholder line: {out}"
         );
         // Global flags still present so the help is usable.
         assert!(out.contains("--json"));
+    }
+
+    #[test]
+    fn format_help_usage_line_matches_invoked_group() {
+        // F-006: the usage line must reflect the group the user typed.
+        let args = vec![PresetCliArg {
+            name: "finding-id".to_string(),
+            r#type: PresetCliArgType::String,
+            required: false,
+            default: None,
+            description: "Filter to a specific finding ID".to_string(),
+        }];
+        let creator_out = format_preset_run_help("creator", "novel-review-master", "desc", &args);
+        assert!(
+            creator_out.contains("nexus42 creator run novel-review-master"),
+            "creator usage line: {creator_out}"
+        );
+        let preset_out = format_preset_run_help("preset", "novel-review-master", "desc", &args);
+        assert!(
+            preset_out.contains("nexus42 preset run novel-review-master"),
+            "preset usage line: {preset_out}"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1699,6 +1786,7 @@ mod tests {
         // invariant here — if a future edit drops the trailing newline, the
         // flush-before-exit path would emit a half-line to piped consumers.
         let with_args = format_preset_run_help(
+            "creator",
             "novel-manuscript-audit-review",
             "On-demand review.",
             &[PresetCliArg {
@@ -1714,7 +1802,8 @@ mod tests {
             "rich help must end with newline (flush-safe): {with_args:?}"
         );
 
-        let without_args = format_preset_run_help("novel-brainstorm", "Brainstorm a novel.", &[]);
+        let without_args =
+            format_preset_run_help("creator", "novel-brainstorm", "Brainstorm a novel.", &[]);
         assert!(
             without_args.ends_with('\n'),
             "generic help must end with newline (flush-safe): {without_args:?}"
@@ -1736,7 +1825,12 @@ mod tests {
         // core does not reconstruct it internally (the qc3 S-2 concern).
         let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
         let empty_home = std::env::temp_dir().join("nexus42_wl_a_qc3_s2_empty_home");
-        let rendered = render_rich_preset_help("novel-manuscript-audit-review", &empty_home, &caps);
+        let rendered = render_rich_preset_help(
+            "creator",
+            "novel-manuscript-audit-review",
+            &empty_home,
+            &caps,
+        );
         let help = rendered.expect("novel-manuscript-audit-review declares cli_args → rich help");
         assert!(
             help.contains("nexus42 creator run novel-manuscript-audit-review"),
@@ -1755,7 +1849,7 @@ mod tests {
         // the injected core.
         let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
         let empty_home = std::env::temp_dir().join("nexus42_wl_a_qc3_s2_empty_home_b");
-        let rendered = render_rich_preset_help("novel-brainstorm", &empty_home, &caps);
+        let rendered = render_rich_preset_help("creator", "novel-brainstorm", &empty_home, &caps);
         assert!(
             rendered.is_none(),
             "novel-brainstorm declares no cli_args → None (generic clap help); got: {rendered:?}"
@@ -1768,7 +1862,8 @@ mod tests {
         // falling through to clap. Pins the error-suppression branch.
         let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
         let empty_home = std::env::temp_dir().join("nexus42_wl_a_qc3_s2_empty_home_c");
-        let rendered = render_rich_preset_help("does-not-exist-preset", &empty_home, &caps);
+        let rendered =
+            render_rich_preset_help("creator", "does-not-exist-preset", &empty_home, &caps);
         assert!(
             rendered.is_none(),
             "unknown preset must return None (no rich help); got: {rendered:?}"
@@ -1781,7 +1876,7 @@ mod tests {
         // before terminal rendering so ANSI/control chars cannot corrupt
         // the help output.
         let dirty = "Bad \x1B[31mred\x1B[0m\x07 description";
-        let out = format_preset_run_help("novel-brainstorm", dirty, &[]);
+        let out = format_preset_run_help("creator", "novel-brainstorm", dirty, &[]);
         assert!(
             !out.contains('\x1B'),
             "ANSI escape must be stripped from description: {out}"

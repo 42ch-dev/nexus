@@ -25,6 +25,23 @@ where
         .expect("wire_cast: deserialize (types are drift-gate-proven equivalent)")
 }
 
+/// Derive the RAW user home from the `.nexus42` root.
+///
+/// `nexus-home-layout` helpers take the raw user home and join `.nexus42`
+/// internally (conventions/nexus-home-layout-path-helpers.md); passing the
+/// `.nexus42` root double-nests to `<home>/.nexus42/.nexus42/...` (F-QA-001).
+/// Same derivation as the V1.170 boot.rs Deviation #1 fix (`boot.rs:287-297`).
+pub(crate) fn raw_user_home(
+    nexus_home: &std::path::Path,
+) -> Result<&std::path::Path, crate::api::errors::NexusApiError> {
+    nexus_home
+        .parent()
+        .ok_or_else(|| crate::api::errors::NexusApiError::Internal {
+            code: "NEXUS_HOME_PARENT_MISSING".to_string(),
+            message: "nexus_home has no parent directory".to_string(),
+        })
+}
+
 pub mod acp;
 pub mod agent_host;
 pub mod chapters;

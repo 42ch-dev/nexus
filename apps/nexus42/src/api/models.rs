@@ -186,6 +186,9 @@ pub struct LogoutCreatorResponse {
 pub struct PresetSummary {
     pub id: String,
     pub source: String,
+    /// Declared run intents (V1.33 §5). Empty if the preset doesn't declare any.
+    #[serde(default)]
+    pub run_intents: Vec<String>,
 }
 
 /// Response from `GET /v1/daemon/presets`.
@@ -203,7 +206,7 @@ pub struct ScaffoldPresetRequest {
 }
 
 /// Response from `POST /v1/daemon/presets`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScaffoldPresetResponse {
     pub id: String,
     pub path: String,

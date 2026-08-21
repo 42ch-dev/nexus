@@ -120,6 +120,9 @@ async fn async_main(cli: Cli) -> Result<()> {
         Some(Commands::System { command }) => {
             nexus42::commands::system::run(command, &config).await
         }
+        Some(Commands::Preset { command }) => {
+            nexus42::commands::preset::run(command, &config).await
+        }
         Some(Commands::Desktop { command }) => nexus42::commands::desktop::run(command).await,
         Some(Commands::Platform { command }) => {
             nexus42::commands::platform::run(command, &config, &output_format).await

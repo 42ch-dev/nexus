@@ -107,6 +107,10 @@ fn orchestration_routes() -> Router<WorkspaceState> {
             "/v1/daemon/orchestration/presets/:id",
             post(handlers::orchestration::presets::reload_preset),
         )
+        .route(
+            "/v1/daemon/orchestration/presets/:id/profile",
+            get(handlers::orchestration::presets::get_preset_profile),
+        )
         // Schedule management routes (WS7)
         .route(
             "/v1/daemon/orchestration/schedules",

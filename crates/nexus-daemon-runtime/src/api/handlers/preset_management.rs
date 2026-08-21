@@ -9,6 +9,7 @@
 #![allow(clippy::missing_errors_doc)]
 
 use crate::api::errors::NexusApiError;
+use crate::api::handlers::raw_user_home;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, State};
 use axum::Json;
@@ -139,8 +140,11 @@ fn list_embedded_ids() -> Vec<String> {
 }
 
 /// List user preset IDs from filesystem.
-fn list_user_ids(nexus_home: &std::path::Path) -> Vec<String> {
-    nexus_home_layout::list_user_preset_ids(nexus_home)
+///
+/// `home` is the RAW user home (`$HOME`); `nexus_home_layout` helpers join
+/// `.nexus42` internally (conventions/nexus-home-layout-path-helpers.md).
+fn list_user_ids(home: &std::path::Path) -> Vec<String> {
+    nexus_home_layout::list_user_preset_ids(home)
 }
 
 /// List system preset IDs from filesystem.
@@ -208,7 +212,7 @@ pub async fn list_presets(
         })
         .collect();
 
-    let user = list_user_ids(nexus_home)
+    let user = list_user_ids(raw_user_home(nexus_home)?)
         .into_iter()
         .map(|id| PresetSummary {
             id,
@@ -235,7 +239,11 @@ pub async fn scaffold_preset(
     validate_preset_name(&req.name)?;
 
     let nexus_home = state.nexus_home();
-    let bundle_dir = user_preset_bundle_dir(nexus_home, &req.name);
+    // `user_preset_bundle_dir` takes the RAW user home and joins `.nexus42`
+    // internally (conventions/nexus-home-layout-path-helpers.md); passing the
+    // `.nexus42` root would double-nest to `~/.nexus42/.nexus42/presets/<id>`
+    // and diverge from the canonical `scan_user_presets` layout (F-QA-001).
+    let bundle_dir = user_preset_bundle_dir(raw_user_home(nexus_home)?, &req.name);
 
     if bundle_dir.exists() {
         return Err(NexusApiError::Conflict(format!(
@@ -486,7 +494,7 @@ pub async fn reload_preset(
 
     // Try user preset
     let nexus_home = state.nexus_home();
-    let bundle_dir = user_preset_bundle_dir(nexus_home, &preset_id);
+    let bundle_dir = user_preset_bundle_dir(raw_user_home(nexus_home)?, &preset_id);
     if !bundle_dir.join("preset.yaml").exists() {
         // Try system preset
         let system_dir = system_preset_dir_for_id(nexus_home, &preset_id);
@@ -522,7 +530,7 @@ fn locate_preset(
         return Ok(("embedded".to_string(), None));
     }
 
-    let user_dir = user_preset_bundle_dir(nexus_home, preset_id);
+    let user_dir = user_preset_bundle_dir(raw_user_home(nexus_home)?, preset_id);
     if user_dir.join("preset.yaml").exists() {
         return Ok(("user".to_string(), Some(user_dir)));
     }
@@ -699,7 +707,8 @@ mod tests {
     #[tokio::test]
     async fn scaffold_creates_bundle() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
-        let nexus_home = tmp.path().to_path_buf();
+        let nexus_home = tmp.path().join(".nexus42");
+        std::fs::create_dir_all(&nexus_home).expect("create nexus_home dir");
         let db_path = nexus_home.join("state.db");
         let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
         nexus_local_db::run_migrations(&pool)
@@ -725,7 +734,8 @@ mod tests {
     #[tokio::test]
     async fn scaffold_rejects_duplicate() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
-        let nexus_home = tmp.path().to_path_buf();
+        let nexus_home = tmp.path().join(".nexus42");
+        std::fs::create_dir_all(&nexus_home).expect("create nexus_home dir");
         let db_path = nexus_home.join("state.db");
         let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
         nexus_local_db::run_migrations(&pool)
@@ -795,8 +805,13 @@ states:
         assert_eq!(resp.id.as_deref(), Some("test"));
     }
 
+    /// Check a user preset bundle exists at the canonical layout:
+    /// `<nexus_home>/presets/<name>/preset.yaml` (the layout
+    /// `scan_user_presets` / `resolve_preset` use — F-QA-001).
     fn bundle_dir_exists(nexus_home: &std::path::Path, name: &str) -> bool {
-        user_preset_bundle_dir(nexus_home, name)
+        nexus_home
+            .join("presets")
+            .join(name)
             .join("preset.yaml")
             .exists()
     }
@@ -1193,7 +1208,8 @@ states:
     async fn get_preset_returns_user_bundle() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
         let state = {
-            let nexus_home = tmp.path().to_path_buf();
+            let nexus_home = tmp.path().join(".nexus42");
+            std::fs::create_dir_all(&nexus_home).expect("create nexus_home dir");
             let db_path = nexus_home.join("state.db");
             let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
             nexus_local_db::run_migrations(&pool)
@@ -1225,7 +1241,8 @@ states:
     async fn get_preset_returns_embedded_preset() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
         let state = {
-            let nexus_home = tmp.path().to_path_buf();
+            let nexus_home = tmp.path().join(".nexus42");
+            std::fs::create_dir_all(&nexus_home).expect("create nexus_home dir");
             let db_path = nexus_home.join("state.db");
             let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
             nexus_local_db::run_migrations(&pool)
@@ -1251,7 +1268,8 @@ states:
     async fn get_preset_returns_system_preset() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
         let state = {
-            let nexus_home = tmp.path().to_path_buf();
+            let nexus_home = tmp.path().join(".nexus42");
+            std::fs::create_dir_all(&nexus_home).expect("create nexus_home dir");
             let db_path = nexus_home.join("state.db");
             let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
             nexus_local_db::run_migrations(&pool)
@@ -1280,7 +1298,8 @@ states:
     async fn reload_preset_accepts_qualified_system_id() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
         let state = {
-            let nexus_home = tmp.path().to_path_buf();
+            let nexus_home = tmp.path().join(".nexus42");
+            std::fs::create_dir_all(&nexus_home).expect("create nexus_home dir");
             let db_path = nexus_home.join("state.db");
             let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
             nexus_local_db::run_migrations(&pool)
@@ -1305,7 +1324,8 @@ states:
     async fn update_preset_mutates_user_yaml() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
         let state = {
-            let nexus_home = tmp.path().to_path_buf();
+            let nexus_home = tmp.path().join(".nexus42");
+            std::fs::create_dir_all(&nexus_home).expect("create nexus_home dir");
             let db_path = nexus_home.join("state.db");
             let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
             nexus_local_db::run_migrations(&pool)
@@ -1352,8 +1372,11 @@ states:
         .0;
         assert!(resp.updated);
 
-        let yaml_path =
-            user_preset_bundle_dir(state.nexus_home(), "update-test").join("preset.yaml");
+        let yaml_path = user_preset_bundle_dir(
+            state.nexus_home().parent().expect("nexus_home parent"),
+            "update-test",
+        )
+        .join("preset.yaml");
         let written = std::fs::read_to_string(yaml_path).expect("read yaml");
         assert!(written.contains("updated description"));
     }
@@ -1362,7 +1385,8 @@ states:
     async fn update_preset_rejects_embedded() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
         let state = {
-            let nexus_home = tmp.path().to_path_buf();
+            let nexus_home = tmp.path().join(".nexus42");
+            std::fs::create_dir_all(&nexus_home).expect("create nexus_home dir");
             let db_path = nexus_home.join("state.db");
             let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
             nexus_local_db::run_migrations(&pool)
@@ -1387,7 +1411,8 @@ states:
     async fn delete_preset_removes_user_bundle() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
         let state = {
-            let nexus_home = tmp.path().to_path_buf();
+            let nexus_home = tmp.path().join(".nexus42");
+            std::fs::create_dir_all(&nexus_home).expect("create nexus_home dir");
             let db_path = nexus_home.join("state.db");
             let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
             nexus_local_db::run_migrations(&pool)
@@ -1417,7 +1442,8 @@ states:
     async fn delete_preset_rejects_embedded() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
         let state = {
-            let nexus_home = tmp.path().to_path_buf();
+            let nexus_home = tmp.path().join(".nexus42");
+            std::fs::create_dir_all(&nexus_home).expect("create nexus_home dir");
             let db_path = nexus_home.join("state.db");
             let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
             nexus_local_db::run_migrations(&pool)
