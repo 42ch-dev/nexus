@@ -1,16 +1,61 @@
 # Architecture Patterns (compound output)
 
-Distilled reusable patterns captured by `mstar-compound` at iteration-close. Parent rules: [`../AGENTS.md`](../AGENTS.md).
+Distilled reusable patterns captured by `mstar-compound` at iteration-close. Parent rules: [`../AGENTS.md`](../AGENTS.md). Full index with per-doc update history: [`../README.md`](../README.md) (knowledge root — authoritative; this sub-index lists the current docs).
 
-| Document | Source iteration | Pattern |
-| --- | --- | --- |
-| [resolved-residual-verification.md](resolved-residual-verification.md) | V1.86 | `lifecycle: resolved` is a claim, not a guarantee — verify the class on current `main`; 2 of 5 V1.86 same-class "resolved" residuals were insufficient |
-| [bounded-drain-completion-contract.md](bounded-drain-completion-contract.md) | V1.80 | `has_more` must reflect queue advancement, not rows attempted |
-| [contracts-gap-on-shipped-backend.md](contracts-gap-on-shipped-backend.md) | V1.78 | shipping a backend before its wire contracts → normalize hand-written DTOs after |
-| [fingerprint-cached-live-aggregate.md](fingerprint-cached-live-aggregate.md) | V1.81/V1.82 | fingerprint-gated recompute of a live aggregate; threshold-saturated response field |
-| [on-demand-synthesis-read-path-invariant.md](on-demand-synthesis-read-path-invariant.md) | V1.81 | LLM synthesis gated behind `force_regenerate`; read path never triggers compute |
-| [pagination-cursor-without-total-count-labels.md](pagination-cursor-without-total-count-labels.md) | V1.79 | cursor pagination without a total count — label discipline |
-| [canvas-surface-implementation-pattern.md](canvas-surface-implementation-pattern.md) | V1.7x | React Flow canvas surface + structured write-boundary |
-| [nexus-brand-token-hierarchy.md](nexus-brand-token-hierarchy.md) | V1.83/V1.84/V1.94 | root DESIGN.md brand SSOT → app consumption mappings; V1.94 corrects the dark-mode button contrast rule (white-on-cyan, not deep-blue-on-cyan) |
-| [daemon-ready-gate-pattern.md](daemon-ready-gate-pattern.md) | V1.94 | single source of truth (SidecarManager) + multiple observers (setup wizard step 2 + per-launch splash + crash banner) of `onDaemonStatusChanged`; avoid `is_daemon_ready()` commands |
-| [local-environment-scan-safety-boundary.md](local-environment-scan-safety-boundary.md) | V1.94 | five normative constraints for any "scan local environment for installed tools" feature (registry-known names only; bounded concurrency; ≤2s timeout; no shell expansion; no user-supplied commands during scan) |
+| Document | Pattern |
+| --- | --- |
+| [acp-registry-id-matching.md](acp-registry-id-matching.md) | ACP registry matching: id vs display name — match priority/pinning lists by `registry_agent_id` (stable), not by `name` (mutable label) |
+| [action-registry-command-palette.md](action-registry-command-palette.md) | Action registry + command palette — module store + `useSyncExternalStore`, render-time `available?()`, `useHotkey` conflict-avoidance, WAI-ARIA combobox |
+| [asymmetric-setup-completed-context.md](asymmetric-setup-completed-context.md) | Asymmetric setup-completed context — optimistic `true` for wizard Finish vs await-then-clear `false` for Settings Re-run; prevents SetupGate bounce |
+| [badge-soft-solid-tone.md](badge-soft-solid-tone.md) | Badge soft/solid tone axis |
+| [bounded-drain-completion-contract.md](bounded-drain-completion-contract.md) | Bounded drain-completion contract for synchronous local pipelines — `has_more` must reflect queue advancement, not rows attempted |
+| [bounded-sync-async-bridge-event-loop.md](bounded-sync-async-bridge-event-loop.md) | Bounded sync→async bridge for event-loop handlers — Semaphore-bounded blocking pool, one shared deadline, response byte cap |
+| [bundler-agnostic-component-library-assets.md](bundler-agnostic-component-library-assets.md) | Bundler-agnostic component library assets — a tsup/esbuild-built React component library cannot import `.svg` in source; consumer resolves URL via `src` prop |
+| [canvas-surface-extraction-pattern.md](canvas-surface-extraction-pattern.md) | Canvas surface extraction — additive enum, single graph source, stable factory, write-boundary reuse, wire-free verification gate |
+| [canvas-surface-implementation-pattern.md](canvas-surface-implementation-pattern.md) | Canvas surface implementation — six-layer coupled contract + projection data-completeness + spatial edges + fixture-projection + viewport guard + layer 11 discoverability |
+| [chronos-titlebar-overlay.md](chronos-titlebar-overlay.md) | Chronos titlebar Overlay — Tauri v2 `titleBarStyle: Overlay` + native traffic lights, non-interactive drag regions only, maximize IPC |
+| [compute-pillar-invoke-and-runs-history.md](compute-pillar-invoke-and-runs-history.md) | Compute pillar — daemon invoke route + Runs history semantics: canon-only projection, retain-by-default + manual Clear, sandbox honesty |
+| [connect-host-opt-in-feature-gate.md](connect-host-opt-in-feature-gate.md) | Connect Host — opt-in feature gate for a heavy transport dep (N-C0): default graph free of the dep, total op-refusal via `invoke_handler = None` |
+| [contracts-gap-on-shipped-backend.md](contracts-gap-on-shipped-backend.md) | Closing the contracts/codegen gap on a shipped handler with hand-written DTOs |
+| [creator-bootstrap-two-store-materialization.md](creator-bootstrap-two-store-materialization.md) | Creator bootstrap materializes TWO stores — minting an identity + setting active config is insufficient; first workspace write FK-prechecks the `creators` row |
+| [creator-shell-content-mode-pattern.md](creator-shell-content-mode-pattern.md) | Creator shell content mode — `CreatorEntitySelectionContext` SSOT for Create page vs Controller stub; Back clears selection |
+| [daemon-api-remote-bind-gate.md](daemon-api-remote-bind-gate.md) | Daemon API remote-bind gate — opt-in non-loopback bind gated by API key + explicit flag, enforced before `TcpListener::bind` |
+| [daemon-creator-display-name-dual-store.md](daemon-creator-display-name-dual-store.md) | Daemon creator `display_name` dual-store SSOT — SQL `creators` table and `creator_identity_cache.json` are independent stores; any write must UPSERT both |
+| [daemon-creator-pool-lazy-attach.md](daemon-creator-pool-lazy-attach.md) | Daemon creator pool lazy-attach — `ensure_creator_pool()` before pool access on Tier-1 handlers after `ensureSetupBootstrap` |
+| [daemon-matchit-colon-capture.md](daemon-matchit-colon-capture.md) | Daemon Axum/matchit routes must use `:param` colon capture — `{param}` braces never match → empty-body framework 404 |
+| [daemon-ready-gate-pattern.md](daemon-ready-gate-pattern.md) | Daemon-ready gate — single source of truth (`SidecarManager`) + multiple observers; subscribe to `onDaemonStatusChanged`, do NOT add `is_daemon_ready()` commands |
+| [editorial-typography-voice-split.md](editorial-typography-voice-split.md) | Content voice (serif display tier) vs interface voice (sans) discipline — `Card.Title` `voice` prop; greppable both directions, test-pinned |
+| [fingerprint-cached-live-aggregate.md](fingerprint-cached-live-aggregate.md) | Fingerprint-cached live aggregate — decouple polled-endpoint read-path cost from a sound exact count |
+| [gate-vs-execution-module-scope-pin.md](gate-vs-execution-module-scope-pin.md) | Module-scope gate bypass — gate-verified id ≠ executed id; fix = key-presence pin + pin the final id through orchestration |
+| [gui-process-path-enrichment.md](gui-process-path-enrichment.md) | GUI-process PATH enrichment for agent CLI discovery — `login_equivalent_bin_dirs()` resolves active versions; no shell-out; existence-gated |
+| [header-key-csrf-defence.md](header-key-csrf-defence.md) | Header-key auth is its own CSRF defence — custom `X-API-Key` header + Origin allowlist + CORS preflight make a separate CSRF token framework redundant |
+| [local-environment-scan-safety-boundary.md](local-environment-scan-safety-boundary.md) | Local-environment scan safety boundary — five normative constraints for any "scan local environment for installed tools" feature (registry-known names only; bounded concurrency; ≤2s timeout; no shell expansion; no user-supplied commands during scan) |
+| [native-cli-provider-adapter-pattern.md](native-cli-provider-adapter-pattern.md) | Native CLI provider adapter pattern + ACP registry bare-command extraction — per-invocation vs persistent lifecycle, NATIVE_PREFERRED_FAMILIES dedup |
+| [nexus-brand-token-hierarchy.md](nexus-brand-token-hierarchy.md) | Nexus brand & design token hierarchy — root DESIGN pair is the sole token SSOT → `@nexus/design-tokens` → `@42ch/nexus-ui` brand → app implementation |
+| [on-demand-synthesis-read-path-invariant.md](on-demand-synthesis-read-path-invariant.md) | On-demand synthesis read-path invariant — gate every LLM call behind explicit intent; verify the poll path never reaches the synthesizer |
+| [outbound-observation-peer-bookkeeping.md](outbound-observation-peer-bookkeeping.md) | Outbound-observation peer bookkeeping (N-C3) — record ONLY manifest-backed OUTBOUND Connect observations at `connect()` return; `manifest_json` single source of truth |
+| [pagination-cursor-without-total-count-labels.md](pagination-cursor-without-total-count-labels.md) | Cursor pagination without `total` — render honest "N+" lower-bound count labels via `has_more` |
+| [profile-aware-reading-chrome.md](profile-aware-reading-chrome.md) | Profile-aware reading chrome — map `work_profile` → token-driven ReactMarkdown renderers while preserving the read-only invariant |
+| [resolved-residual-verification.md](resolved-residual-verification.md) | Residual lifecycle is a claim, not a guarantee — verify against current `main` HEAD; a `deferred`-to-V1.(N+1) residual may already be satisfied |
+| [scope-discriminated-port-persistence.md](scope-discriminated-port-persistence.md) | Route single-method spoke port outputs to multiple nexus homes via extensions.nexus discriminator (world_id vs work_id) |
+| [self-hosted-ofl-font-wiring.md](self-hosted-ofl-font-wiring.md) | Self-hosted OFL font pattern — canonical provenance, bundler-agnostic package boundary, `@font-face` in shared tokens.css, bundle gate ≤ 80 KB gz/weight |
+| [self-signed-tls-listener-integration.md](self-signed-tls-listener-integration.md) | Self-signed TLS listener integration (rcgen + rustls + axum-server) — SAN must include the non-loopback bind host or remote-client hostname validation fails before TOFU |
+| [settings-modal-primary-host.md](settings-modal-primary-host.md) | Settings modal primary host — one `SettingsModalHost`, section-descriptor SSOT, deep links over safe background, BrowserRouter dirty leave |
+| [spoke-adapter-conversion-seam.md](spoke-adapter-conversion-seam.md) | SPOKE adapter conversion-seam: product domain type ↔ spoke wire type; sole extension point for body schema evolution |
+| [spoke-adapter-port-orchestration-adoption.md](spoke-adapter-port-orchestration-adoption.md) | SPOKE adapter port + orchestration adoption (Surface B) — production `NexusAdapter`, production-vs-stub family matrix, orchestrator-cutover-on-write-paths |
+| [spoke-dialect-default-on-engine.md](spoke-dialect-default-on-engine.md) | Spoke-dialect consumption as a default-on engine — consumer-only, handbook truth-table logic, ReDoS-safe `regex` crate, neutral-only byte-equivalence HARD golden |
+| [spoke-op-gate-at-adapter-boundary.md](spoke-op-gate-at-adapter-boundary.md) | Spoke-op validation gates live at the nexus-spoke-adapter boundary; storage crates stay pure |
+| [tailwind-content-scan-for-package-primitives.md](tailwind-content-scan-for-package-primitives.md) | Tailwind `content` must scan `packages/nexus-ui/src` or package-only utilities silently never emit |
+| [tailwind-theme-key-routing-for-sizing-tokens.md](tailwind-theme-key-routing-for-sizing-tokens.md) | Tailwind theme-key routing for sizing tokens — `max-w-*`/`p-*`/`h-*`/`w-*` must be registered under `maxWidth`/`padding`/`spacing` or Tailwind silently emits nothing |
+| [third-party-codegen-adoption.md](third-party-codegen-adoption.md) | Third-party codegen adoption — jstt + typify replace bespoke generators; schemas frozen; drift + clippy gates, not byte-identical output |
+| [three-layer-timeline-projection.md](three-layer-timeline-projection.md) | Three-layer Timeline projection pattern — per-layer adapter factory + URL `?layer=` persistence + cross-surface navigation hooks; 3×2 matrix (World×Work) |
+| [two-gate-token-isolation-composition.md](two-gate-token-isolation-composition.md) | Capability-token two-gate isolation composition — enforcement is COMPOSED not duplicated: spoke-side gate + nexus `PeerScope` allowlist intersection |
+| [ui-component-promotion-workflow.md](ui-component-promotion-workflow.md) | UI component promotion workflow — Studio-first: compose View fixtures → promote pure primitives to `@42ch/nexus-ui` → integrate via thin re-export wrappers; mechanically-enforced guardrails |
+| [user-layer-entrance-split.md](user-layer-entrance-split.md) | User-layer entrance split — orthogonal usage axis (`developer`\|`content-creator`) with single route table + typed registry + guard; every shell surface must consume the axis |
+| [verify-stored-row-scope-before-cas-write.md](verify-stored-row-scope-before-cas-write.md) | Verify the **stored** row's scope before an optimistic-concurrency write — payload-claimed scope ≠ stored-row scope; gate on stored scope via adapter read ports |
+| [vite-daemon-proxy-boot-window.md](vite-daemon-proxy-boot-window.md) | Vite `/v1/daemon` proxy: map `ECONNREFUSED` → 503 (not 500); gate pre-ready queries inside `DaemonLaunchGate` |
+| [web-i18n-pattern.md](web-i18n-pattern.md) | Web i18n architecture pattern — LocaleProvider mirrors ThemeProvider; nine-namespace catalog; Command labelKey + palette render-time resolution |
+| [workspace-parent-shell-ia.md](workspace-parent-shell-ia.md) | Workspace-parent shell IA — 工作区 footer always on; 创作/编排 modes; hub create in sidebar `panelContent`; inline World\|Work tabs + form + direct API submit |
+| [world-vs-work-canvas-scope.md](world-vs-work-canvas-scope.md) | World vs Work scope discipline for Canvas surfaces — spine surfaces are World-scoped, projection surfaces are Work-scoped; do not cross-compose scoped data sources |
+| [shared-validation-core-migration.md](shared-validation-core-migration.md) | Shared validation core migration — CLI → library crate so daemon + CLI share one validator with byte-identical stable error codes; re-export + From impl; fold the resolver (V1.171 P2) |
+| [cas-preimage-empty-unset-consistency.md](cas-preimage-empty-unset-consistency.md) | CAS pre-image consistency — empty ≡ unset invariant must be shared by marker + CAS; client pre-image from raw blob or stable 400, never from parsed fields (V1.171 P2) |

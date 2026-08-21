@@ -57,10 +57,26 @@ function GuardTree({ onPathname }: { onPathname: (p: string) => void }) {
             }
           />
           <Route
+            path="strategies/:presetId/profile"
+            element={
+              <EntranceGuard>
+                <div data-testid="profile-route">Profile</div>
+              </EntranceGuard>
+            }
+          />
+          <Route
             path="sessions"
             element={
               <EntranceGuard>
                 <div data-testid="sessions-route">Sessions</div>
+              </EntranceGuard>
+            }
+          />
+          <Route
+            path="schedule"
+            element={
+              <EntranceGuard>
+                <div data-testid="schedule-route">Schedule</div>
               </EntranceGuard>
             }
           />
@@ -128,6 +144,21 @@ describe('EntranceGuard redirects (AR-19)', () => {
     expect(resolvedPath).toBe('/works');
   });
 
+  it('bounces Create on /schedule (V1.171 P2 — schedule CRUD stays develop-only; no creator chrome)', async () => {
+    // P2 PL-15/PL-8: the schedule operator surface stays hidden on the Create
+    // entrance even though the page now carries create/edit/delete chrome —
+    // the existing develop-only rule must keep bouncing it (AR-28).
+    let resolvedPath = '';
+    renderGuardTree(['/schedule'], (p) => (resolvedPath = p));
+    await waitFor(() => {
+      expect(screen.getByTestId('works-route')).toBeInTheDocument();
+    });
+    expect(resolvedPath).toBe('/works');
+    expect(
+      screen.queryByText('Available in the Develop layout — switch entrance to use this.'),
+    ).toBeInTheDocument();
+  });
+
   it('bounces Create on a hidden settings section (/settings/agent)', async () => {
     renderGuardTree(['/settings/agent']);
     await waitFor(() => {
@@ -151,6 +182,21 @@ describe('EntranceGuard redirects (AR-19)', () => {
     await waitFor(() => {
       expect(screen.getByTestId('canvas-route')).toBeInTheDocument();
     });
+    expect(
+      screen.queryByText('Available in the Develop layout — switch entrance to use this.'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('passes Create through the strategy profile deep link (no bounce, no toast, no new guard)', async () => {
+    // V1.171 P1 (PL-13/AR-28): `/strategies/:presetId/profile` longest-prefix
+    // matches the canvas rule (`/strategies/:presetId` develop-only +
+    // allowDeepLink) — the profile view is not a new bounce surface.
+    let resolvedPathname = '';
+    renderGuardTree(['/strategies/preset-1/profile'], (p) => (resolvedPathname = p));
+    await waitFor(() => {
+      expect(screen.getByTestId('profile-route')).toBeInTheDocument();
+    });
+    expect(resolvedPathname).toBe('/strategies/preset-1/profile');
     expect(
       screen.queryByText('Available in the Develop layout — switch entrance to use this.'),
     ).not.toBeInTheDocument();
@@ -287,6 +333,7 @@ describe('resolveEntranceBounce (AR-19 classification)', () => {
 
   it('passes allow-deep-link and both-visibility surfaces through', () => {
     expect(resolveEntranceBounce('content-creator', '/strategies/p1', '')).toBeNull();
+    expect(resolveEntranceBounce('content-creator', '/strategies/p1/profile', '')).toBeNull();
     expect(resolveEntranceBounce('content-creator', '/settings/workspace', '')).toBeNull();
     expect(resolveEntranceBounce('content-creator', '/settings/appearance', '')).toBeNull();
     expect(resolveEntranceBounce('content-creator', '/works', '')).toBeNull();

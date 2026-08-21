@@ -25,9 +25,26 @@ export type {
   ClearRunsResponse,
   DaemonHealth,
   DiscardRunResponse,
+  EditScheduleRequest,
   ListRunsQuery,
   NexusClient,
+  UpdateWorkCronRequest,
+  WorkCronResponse,
+  WorkCronRole,
+  WorkCronRoles,
 } from './types';
+export type {
+  PresetProfileConditionalRule,
+  PresetProfileEnterAction,
+  PresetProfileExitWhen,
+  PresetProfileLabeledNext,
+  PresetProfileLanes,
+  PresetProfileNext,
+  PresetProfileResponse,
+  PresetProfileRole,
+  PresetProfileSignal,
+  PresetProfileState,
+} from './preset-profile';
 export {
   createConnectionStorage,
   normalizeEndpointUrl,

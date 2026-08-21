@@ -22,155 +22,51 @@ use clap::Subcommand;
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 
-// ── Default schedule table (spec §2.2) ───────────────────────────────────
+// ── Shared WorkSchedule model + validation core (V1.171 P2 AR-29) ────────
+//
+// The per-Work cron model, defaults, normalizer, validators, and stable error
+// code constants now live in `nexus-orchestration::schedule::work_schedule`
+// (the daemon cannot depend on the CLI crate; the HTTP surface and the CLI
+// must share one validation core). Re-export here so existing call sites —
+// including this module's own handlers and tests — keep resolving the same
+// names.
+pub use nexus_orchestration::schedule::work_schedule::{
+    normalize_cron_fields,
+    validate_cron_expr,
+    validate_tz,
+    // The model + default table, re-exported for CLI-facing surfaces.
+    RoleSchedule,
+    RolesSchedule,
+    WorkSchedule,
+    DEFAULT_BRAINSTORM_CRON,
+    DEFAULT_REVIEW_CRON,
+    DEFAULT_TZ,
+    DEFAULT_WRITE_CRON,
+    ERR_ALL_DISABLED,
+    ERR_CONFLICTING_FLAGS,
+    // Stable error code constants (AC #5 of cron-staggering spec §3.1).
+    ERR_INVALID_CRON,
+    ERR_INVALID_TZ,
+};
 
-/// Canonical default cron expressions per role (spec §2.1 / §2.2).
-///
-/// These match the novels-system reference table. When `works.schedule_json`
-/// is empty/NULL, the daemon uses defaults from this table.
-const DEFAULT_BRAINSTORM_CRON: &str = "0 3,9,15,21 * * *";
-const DEFAULT_WRITE_CRON: &str = "0 4,10,16,22 * * *";
-const DEFAULT_REVIEW_CRON: &str = "0,30 * * * *";
-const DEFAULT_TZ: &str = "UTC";
-
-// ── WorkSchedule serde model (spec §2.1) ─────────────────────────────────
-
-/// Per-role cron entry (spec §2.1).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct RoleSchedule {
-    /// 5-field cron expression (author local TZ).
-    pub cron: String,
-    /// Per-role opt-out without removing the schedule.
-    pub enabled: bool,
-}
-
-/// The three-role staggering set (spec §2.1 `roles`).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct RolesSchedule {
-    /// `brainstorm` → `novel-brainstorm` preset.
-    pub brainstorm: RoleSchedule,
-    /// `write` → `novel-write` preset.
-    pub write: RoleSchedule,
-    /// `review` → `novel-review-master` preset.
-    pub review: RoleSchedule,
-}
-
-/// Full per-Work cron configuration (spec §2.1 top-level shape).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct WorkSchedule {
-    /// IANA timezone string. Daemon converts to UTC for cron firing.
-    pub tz: String,
-    /// Per-role cron entries.
-    pub roles: RolesSchedule,
-}
-
-impl WorkSchedule {
-    /// Build the all-defaults schedule (spec §2.3: empty/NULL → defaults).
-    #[must_use]
-    pub fn defaults() -> Self {
-        Self {
-            tz: DEFAULT_TZ.to_string(),
-            roles: RolesSchedule {
-                brainstorm: RoleSchedule {
-                    cron: DEFAULT_BRAINSTORM_CRON.to_string(),
-                    enabled: true,
-                },
-                write: RoleSchedule {
-                    cron: DEFAULT_WRITE_CRON.to_string(),
-                    enabled: true,
-                },
-                review: RoleSchedule {
-                    cron: DEFAULT_REVIEW_CRON.to_string(),
-                    enabled: true,
-                },
-            },
-        }
+/// Map shared validation failures onto the CLI's config-error surface. The
+/// message carries the stable code prefix exactly as before the unification,
+/// so rendered output is unchanged.
+impl From<nexus_orchestration::schedule::work_schedule::CronValidationError> for CliError {
+    fn from(err: nexus_orchestration::schedule::work_schedule::CronValidationError) -> Self {
+        Self::Config(err.message)
     }
-
-    /// Serialize to the `schedule_json` blob text.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CliError::Other`] only if serialization fails (cannot happen
-    /// for this struct shape in practice).
-    fn to_json_string(&self) -> Result<String> {
-        serde_json::to_string(self)
-            .map_err(|e| CliError::Other(format!("schedule_json serialization failed: {e}")))
-    }
-}
-
-// ── Validation (spec §3.1; AC #5) ────────────────────────────────────────
-
-/// Stable error codes for cron config validation (AC #5).
-const ERR_INVALID_CRON: &str = "E_CRON_INVALID_EXPR";
-const ERR_INVALID_TZ: &str = "E_CRON_INVALID_TZ";
-
-const ERR_ALL_DISABLED: &str = "E_CRON_ALL_ROLES_DISABLED";
-/// R-V150-WLA-04 (V1.50 P-last WL-A / cron-foundation qc3 S-004): stable
-/// error code for the `--<role> EXPR --no-<role>` self-contradiction.
-/// Without this guard `apply_set_args` silently last-write-wins, leaving
-/// the role disabled while a cron expression is stored — confusing for
-/// authors reading the schedule back.
-const ERR_CONFLICTING_FLAGS: &str = "E_CRON_CONFLICTING_FLAGS";
-
-/// Validate a 5-field cron expression via the `cron` crate.
-///
-/// The `cron` crate (zslayton) requires ≥6 fields (seconds first). Standard
-/// crontab expressions are 5-field, so we prepend `0 ` (seconds=0) when the
-/// input has exactly 5 fields. This preserves semantics:
-/// `"0 3,9,15,21 * * *"` (min=0, hour=3/9/15/21) → `"0 0 3,9,15,21 * * *"`
-/// (sec=0, min=0, hour=3/9/15/21).
-///
-/// # Errors
-///
-/// Returns [`CliError::Config`] with stable code `E_CRON_INVALID_EXPR` when the
-/// expression does not parse.
-pub fn validate_cron_expr(expr: &str) -> Result<()> {
-    let normalized = normalize_cron_fields(expr);
-    if cron::Schedule::from_str(&normalized).is_err() {
-        return Err(CliError::Config(format!(
-            "[{ERR_INVALID_CRON}] invalid cron expression: '{expr}'"
-        )));
-    }
-    Ok(())
-}
-
-/// Normalize a cron expression to the `cron` crate's ≥6-field format.
-///
-/// 5-field input → prepend `0 ` (seconds=0). 6/7-field input is returned
-/// unchanged. Whitespace-only or empty input is left as-is so the parser
-/// produces a meaningful error.
-fn normalize_cron_fields(expr: &str) -> String {
-    let trimmed = expr.trim();
-    let field_count = trimmed.split_whitespace().count();
-    if field_count == 5 {
-        format!("0 {trimmed}")
-    } else {
-        trimmed.to_string()
-    }
-}
-
-/// Validate an IANA timezone string via `chrono-tz`.
-///
-/// # Errors
-///
-/// Returns [`CliError::Config`] with stable code `E_CRON_INVALID_TZ` when the
-/// timezone string is not a known IANA zone.
-pub fn validate_tz(tz: &str) -> Result<()> {
-    if chrono_tz::Tz::from_str(tz).is_err() {
-        return Err(CliError::Config(format!(
-            "[{ERR_INVALID_TZ}] invalid IANA timezone: '{tz}'"
-        )));
-    }
-    Ok(())
 }
 
 // ── Resolve stored blob → effective schedule ─────────────────────────────
 
 /// Resolve a stored `schedule_json` blob into an effective [`WorkSchedule`].
 ///
-/// Empty/NULL/absent/unparseable → all defaults (spec §2.3). A partial blob is
-/// not merged field-by-field: malformed JSON falls back to defaults so the
+/// Thin CLI-side wrapper over the shared core
+/// [`WorkSchedule::resolve`](nexus_orchestration::schedule::work_schedule::WorkSchedule::resolve)
+/// (F-006: the daemon HTTP surface and the CLI now share one resolver).
+/// Empty/NULL/absent/unparseable → all defaults (spec §2.3). A partial blob
+/// is not merged field-by-field: malformed JSON falls back to defaults so the
 /// daemon never fires from a corrupt schedule.
 ///
 /// # Errors
@@ -178,10 +74,7 @@ pub fn validate_tz(tz: &str) -> Result<()> {
 /// Does not error — falls back to defaults on any malformation.
 #[must_use]
 pub fn resolve_schedule(stored: Option<&str>) -> WorkSchedule {
-    let Some(json) = stored.filter(|s| !s.is_empty()) else {
-        return WorkSchedule::defaults();
-    };
-    serde_json::from_str::<WorkSchedule>(json).unwrap_or_else(|_| WorkSchedule::defaults())
+    WorkSchedule::resolve(stored).0
 }
 
 // ── CLI set-args application ─────────────────────────────────────────────
@@ -724,7 +617,8 @@ async fn handle_set(
     };
 
     let schedule = apply_set_args(base, &effective_args)?;
-    let blob = schedule.to_json_string()?;
+    let blob = serde_json::to_string(&schedule)
+        .map_err(|e| CliError::Other(format!("schedule_json serialization failed: {e}")))?;
     let now = chrono::Utc::now().to_rfc3339();
 
     // R-V150P0-W5: CAS write inside a transaction. `stored` is the expected
@@ -892,13 +786,13 @@ mod tests {
     #[test]
     fn validate_errors_carry_stable_codes() {
         let err = validate_cron_expr("garbage").unwrap_err();
-        let msg = error_message(&err);
+        let msg = err.message;
         assert!(
             msg.contains(ERR_INVALID_CRON),
             "cron error must carry stable code {ERR_INVALID_CRON}: {msg}"
         );
         let err = validate_tz("Mars/Olympus").unwrap_err();
-        let msg = error_message(&err);
+        let msg = err.message;
         assert!(
             msg.contains(ERR_INVALID_TZ),
             "tz error must carry stable code {ERR_INVALID_TZ}: {msg}"

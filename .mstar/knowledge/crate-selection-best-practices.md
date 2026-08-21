@@ -38,6 +38,7 @@ Any dependency used by **two or more** workspace crates MUST be declared once un
 - **Protocol / ABI sensitive crates** (`agent-client-protocol`, `graph-flow`): pin exactly with `=X.Y.Z`. Rationale: wire-level breakage is silent until runtime.
 - **Other crates**: caret `X.Y` (e.g. `"1.0"`, `"0.12"`). Cargo resolves the latest compatible patch.
 - **Forbidden**: bare `*`, unqualified git dependencies in production crates, path dependencies to directories outside the workspace.
+- **Carve-out (V1.170)**: standalone crates under `modules/` that are **excluded** from the workspace (root `Cargo.toml` `exclude = ["modules/nexus-module-manifest"]`) MAY be path-dependencies of workspace crates — the `exclude` entry resolves the otherwise-conflicting workspace membership (see [standalone-crate-monorepo-topology.md](engineering/standalone-crate-monorepo-topology.md)). The ban on path deps to directories outside the workspace still applies to anything not excluded this way.
 
 ### 1.3 Feature-flag whitelist
 

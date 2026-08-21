@@ -5,7 +5,7 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | Subtree | Role |
 | --- | --- |
 | **[`../specs/`](../specs/README.md)** | Normative OSS specifications |
-| **[`architecture-patterns/`](architecture-patterns/)** | Distilled reusable patterns (compound output) |
+| **[`architecture-patterns/`](architecture-patterns/)** | Distilled reusable patterns (compound output) — [sub-index](architecture-patterns/README.md) |
 | **[`api-design/`](api-design/)** | Distilled reusable API design patterns (compound output) |
 | **This directory (root files)** | Cross-cutting policy, boundaries |
 
@@ -237,3 +237,11 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | [engineering/standalone-crate-monorepo-topology.md](engineering/standalone-crate-monorepo-topology.md) | Standalone crate topology in a Cargo workspace — empty `[workspace]` tail table for every in-repo publishable crate; root `exclude` only where a workspace member path-depends (the resolution-conflict mechanics); crates.io-vs-path consumption; literal pins without `workspace = true` (V1.170 P0 AR-1 distilled; compound V1.170) |
 | [engineering/compute-module-sdk-authoring-pattern.md](engineering/compute-module-sdk-authoring-pattern.md) | Compute module SDK authoring pattern — `nexus_entry!` macro + trait entry for additive DR-49, typed envelope + `Value` passthrough drift-surface minimization, wire-required vs lock-assumed WorldRef lesson, three-layer drift guard (golden fixtures + mirror-gap script + behavioral parity CI), validator mirroring with shared corpus, host-import sentinel mapping, mini-host honesty boundary (V1.170 P0 AR-2..AR-12 distilled; compound V1.170) |
 | [architecture-patterns/user-layer-entrance-split.md](architecture-patterns/user-layer-entrance-split.md) | User-layer entrance split — orthogonal usage axis (`developer`\|`content-creator`) with single route table + typed registry + guard + entrance-aware index redirect + `setup_completed`-class persistence seams; **enforcement-path rule**: every shell surface (settings rail, titlebar gear, mobile nav, wizard re-run) must consume the axis — route-guard alone yields one QC Warning per unwired surface (V1.170 P1 EL-1..8 + AR-15..22 distilled; compound V1.170) |
+
+### V1.171 additions
+
+| Document | Description |
+| --- | --- |
+| [architecture-patterns/shared-validation-core-migration.md](architecture-patterns/shared-validation-core-migration.md) | Shared validation core migration — moving a model/validator out of a CLI binary into a library crate so a daemon can consume it; CLI re-exports via `pub use` + `From` impl keeping error messages byte-identical; fold the resolver too (V1.171 P2 AR-29 distilled; compound V1.171) |
+| [architecture-patterns/cas-preimage-empty-unset-consistency.md](architecture-patterns/cas-preimage-empty-unset-consistency.md) | CAS pre-image consistency — when a stored column treats NULL ≡ empty as "unset", the `is_default` marker and the CAS pre-check must use the same invariant; a client reconstructing a pre-image from parsed fields cannot byte-match arbitrary stored blobs (raw-blob echo or stable 400 rejection); test the empty-string round-trip (V1.171 P2 QC3 W-2 distilled; compound V1.171) |
+| [conventions/wire-contracts-frozen-verification.md](conventions/wire-contracts-frozen-verification.md) | **Updated** — additive local-orchestration wire posture (AR-33): iterations shipping hand-coded local-tier DTOs + new daemon routes must NOT claim `wire_contracts_changed: false`; apply the 8-point gate with expected-diff exemptions (schemas/generated/packages stay binding) (V1.171 AR-33 distilled; compound V1.171) |

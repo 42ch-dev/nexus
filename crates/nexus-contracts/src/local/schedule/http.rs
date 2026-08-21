@@ -7,11 +7,13 @@
 //! - `POST`   `/v1/daemon/orchestration/schedules`
 //! - `GET`    `/v1/daemon/orchestration/schedules`
 //! - `GET`    `/v1/daemon/orchestration/schedules/{schedule_id}`
+//! - `PATCH`  `/v1/daemon/orchestration/schedules/{schedule_id}` — edit label/metadata (V1.171 P2 AR-29)
 //! - `PATCH`  `/v1/daemon/orchestration/schedules/{schedule_id}/core-context`
 //! - `GET`    `/v1/daemon/orchestration/schedules/{schedule_id}/core-context`
 //! - `GET`    `/v1/daemon/orchestration/schedules/{schedule_id}/core-context-history`
 //! - `POST`   `/v1/daemon/orchestration/schedules/{schedule_id}/signal`
 //! - `DELETE` `/v1/daemon/orchestration/schedules/{schedule_id}`
+//! - `GET`/`PUT` `/v1/daemon/works/{work_id}/cron` — per-Work cron config (V1.171 P2 AR-29)
 
 use crate::generated::daemon_api::kb::pagination_info::PaginationInfo;
 use serde::{Deserialize, Serialize};
@@ -194,6 +196,92 @@ pub struct SignalScheduleResponse {
 }
 
 // ---------------------------------------------------------------------------
+// PATCH /schedules/{schedule_id} — Edit label/metadata (V1.171 P2 AR-29)
+// ---------------------------------------------------------------------------
+
+/// Partial edit of schedule metadata (AR-29). Only `label` is updateable
+/// today; the `creator_schedules` table carries no other metadata columns.
+/// Status/core-context have dedicated endpoints (AR-31).
+///
+/// Asymmetry vs [`AddScheduleRequest`]: on `POST /schedules` the label is
+/// stored verbatim, while on this PATCH `""` is normalized to NULL, i.e. a
+/// label cleared (never stored as an empty string).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditScheduleRequest {
+    /// New label. `null` / absent → label unchanged. `Some("")` clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// GET/PUT /v1/daemon/works/{work_id}/cron — per-Work cron config (V1.171 P2 AR-29)
+// ---------------------------------------------------------------------------
+
+/// One role's cron entry inside the per-Work schedule (spec §2.1 of
+/// `cron-staggering.md`). Mirrors the shared `WorkSchedule` model in
+/// `nexus-orchestration::schedule::work_schedule`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkCronRoleDto {
+    /// 5-field cron expression (author local TZ).
+    pub cron: String,
+    /// Per-role opt-out without removing the schedule.
+    pub enabled: bool,
+}
+
+/// The three-role staggering set (spec §2.1 `roles`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkCronRolesDto {
+    /// `brainstorm` → `novel-brainstorm` preset.
+    pub brainstorm: WorkCronRoleDto,
+    /// `write` → `novel-write` preset.
+    pub write: WorkCronRoleDto,
+    /// `review` → `novel-review-master` preset.
+    pub review: WorkCronRoleDto,
+}
+
+/// `GET /v1/daemon/works/{work_id}/cron` response — the effective per-Work
+/// cron configuration.
+///
+/// Returns the stored `works.schedule_json` (or the spec defaults when
+/// unset), plus an `is_default` marker so the UI can honestly say "using
+/// defaults" (AR-29 / AR-30).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkCronResponse {
+    /// IANA timezone string. Daemon converts to UTC for cron firing.
+    pub tz: String,
+    /// Per-role cron entries.
+    pub roles: WorkCronRolesDto,
+    /// `true` when `works.schedule_json` is unset/empty and this payload is
+    /// the spec-default schedule; `false` once a schedule has been written.
+    pub is_default: bool,
+}
+
+/// `PUT /v1/daemon/works/{work_id}/cron` request — full replacement of the
+/// per-Work cron configuration.
+///
+/// The body is the complete `WorkSchedule` shape; `expected_current_json` is
+/// an optional CAS pre-image — the exact stored `schedule_json` text that
+/// must match for the write to apply. An empty/whitespace string means "the
+/// stored config must currently be unset" (same as the default state);
+/// omitting the field means the write is guarded against the current stored
+/// value read at write time (a concurrent writer still fails the CAS with a
+/// 409 — never a blind clobber).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateWorkCronRequest {
+    /// IANA timezone string. Daemon converts to UTC for cron firing.
+    pub tz: String,
+    /// Per-role cron entries.
+    pub roles: WorkCronRolesDto,
+    /// CAS pre-image: the exact stored `schedule_json` blob. An
+    /// empty/whitespace value means "must currently be unset (defaults)";
+    /// `null`/absent means the write is guarded against the stored value read
+    /// at write time (snapshot CAS — never unconditional). Pass the value
+    /// returned by a prior `GET` to guard against concurrent writers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_current_json: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
 // DELETE /schedules/{schedule_id} — Remove Schedule
 // ---------------------------------------------------------------------------
 
@@ -345,5 +433,84 @@ mod tests {
         let q: ListSchedulesQuery = serde_json::from_str(json).unwrap();
         assert!(q.creator_id.is_none());
         assert!(q.status.is_none());
+    }
+
+    #[test]
+    fn edit_schedule_request_roundtrip() {
+        let req = EditScheduleRequest {
+            label: Some("edited label".to_string()),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let back: EditScheduleRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.label.as_deref(), Some("edited label"));
+
+        // Absent label deserializes as None (unchanged).
+        let absent: EditScheduleRequest = serde_json::from_str("{}").unwrap();
+        assert!(absent.label.is_none());
+        // explicit null also None.
+        let null_label: EditScheduleRequest = serde_json::from_str(r#"{"label":null}"#).unwrap();
+        assert!(null_label.label.is_none());
+    }
+
+    #[test]
+    fn work_cron_dto_roundtrip() {
+        let req = UpdateWorkCronRequest {
+            tz: "Asia/Shanghai".to_string(),
+            roles: WorkCronRolesDto {
+                brainstorm: WorkCronRoleDto {
+                    cron: "0 9 * * *".to_string(),
+                    enabled: true,
+                },
+                write: WorkCronRoleDto {
+                    cron: "0 10 * * *".to_string(),
+                    enabled: false,
+                },
+                review: WorkCronRoleDto {
+                    cron: "0,30 * * * *".to_string(),
+                    enabled: true,
+                },
+            },
+            expected_current_json: Some(r#"{"tz":"UTC"}"#.to_string()),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let back: UpdateWorkCronRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.tz, "Asia/Shanghai");
+        assert_eq!(back.roles.brainstorm.cron, "0 9 * * *");
+        assert!(!back.roles.write.enabled);
+        assert_eq!(
+            back.expected_current_json.as_deref(),
+            Some(r#"{"tz":"UTC"}"#)
+        );
+
+        // expected_current_json is optional.
+        let no_cas: UpdateWorkCronRequest = serde_json::from_str(
+            r#"{"tz":"UTC","roles":{"brainstorm":{"cron":"0 3,9,15,21 * * *","enabled":true},"write":{"cron":"0 4,10,16,22 * * *","enabled":true},"review":{"cron":"0,30 * * * *","enabled":true}}}"#,
+        )
+        .unwrap();
+        assert!(no_cas.expected_current_json.is_none());
+
+        // GET response carries the is_default marker.
+        let resp = WorkCronResponse {
+            tz: "UTC".to_string(),
+            roles: WorkCronRolesDto {
+                brainstorm: WorkCronRoleDto {
+                    cron: "0 3,9,15,21 * * *".to_string(),
+                    enabled: true,
+                },
+                write: WorkCronRoleDto {
+                    cron: "0 4,10,16,22 * * *".to_string(),
+                    enabled: true,
+                },
+                review: WorkCronRoleDto {
+                    cron: "0,30 * * * *".to_string(),
+                    enabled: true,
+                },
+            },
+            is_default: true,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let back: WorkCronResponse = serde_json::from_str(&json).unwrap();
+        assert!(back.is_default);
+        assert_eq!(back.roles.review.cron, "0,30 * * * *");
     }
 }

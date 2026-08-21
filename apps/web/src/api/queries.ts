@@ -16,6 +16,7 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
+  type UseQueryResult,
 } from '@tanstack/react-query';
 import type {
   BatchUpdateFindingsRequest,
@@ -74,7 +75,15 @@ import type {
 
 import { useToast } from '@/lib/use-toast';
 import { useDesktopCapabilities, useNexusClient } from '@/lib/client-context';
-import { NexusClientError, type ClearRunsQuery, type ListRunsQuery } from '@/lib/nexus';
+import {
+  NexusClientError,
+  type ClearRunsQuery,
+  type EditScheduleRequest,
+  type ListRunsQuery,
+  type NexusClient,
+  type PresetProfileResponse,
+  type UpdateWorkCronRequest,
+} from '@/lib/nexus';
 import { shortId } from '@/lib/format';
 import { queryKeys } from '@/lib/nexus/query-keys';
 import { useActiveCreatorId as useActiveCreatorIdFromContext } from '@/lib/active-creator-context';
@@ -155,6 +164,23 @@ export function useSchedules(query?: ListSchedulesQuery) {
       const res = await client.listSchedules(query);
       return res.items;
     },
+  });
+}
+
+// ── Per-Work cron config (V1.171 P2 AR-29) ───────────────────────────────────
+
+/**
+ * `GET /v1/daemon/works/{work_id}/cron` — the effective per-Work cron
+ * configuration (stored `works.schedule_json` or the spec defaults when
+ * unset, plus the `is_default` honesty marker). Disabled until a work id is
+ * provided.
+ */
+export function useWorkCron(workId: string | undefined) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.worksCron.detail(workId ?? ''),
+    queryFn: () => client.getWorkCron(workId!),
+    enabled: Boolean(workId),
   });
 }
 
@@ -347,6 +373,50 @@ export function usePresets() {
   });
 }
 
+/**
+ * `GET /v1/daemon/orchestration/presets/{id}/profile` (V1.171 P1 — AR-27).
+ *
+ * Manifest-derived profile for any resolvable preset (lanes, states, roles,
+ * capabilities, declared signals). Missing/unknown ids resolve to a query
+ * error (the daemon 404s — PL-2); the strategy catalog renders a graceful
+ * id + list-facts summary instead of treating the preset as gone (PL-13).
+ *
+ * Staleness contract: the profile changes only when the preset manifest is
+ * scaffolded/reloaded/deleted, so it is cached well past the app-wide 15s
+ * default before a background refetch. The write mutations clear it
+ * explicitly — `useScaffoldPreset` / `useReloadPreset` / `useDeletePreset`
+ * invalidate `queryKeys.presets.all`, whose `['presets']` prefix covers the
+ * list plus every `['presets','profile',<id>]` key — so a manifest change
+ * refetches promptly regardless of staleness (QC1 W-1 / QC3 W-1 fix).
+ */
+
+/** Query result of {@link usePresetProfile} — consumed by the strategy
+ * catalog rows (lanes / loading / error flags) and the profile drill-down. */
+export type PresetProfileQuery = UseQueryResult<PresetProfileResponse, Error>;
+
+/**
+ * Query options for `GET /v1/daemon/orchestration/presets/{id}/profile`.
+ *
+ * Shared between `usePresetProfile` (single preset — detail page) and the
+ * strategy catalog's `useQueries` fan-out so both consume the SAME
+ * `['presets','profile',<id>]` cache key and staleness policy: navigating
+ * catalog → profile is a cache hit, and `presets.all` invalidation (F-1)
+ * clears both.
+ */
+export function presetProfileQueryOptions(presetId: string | undefined, client: NexusClient) {
+  return {
+    queryKey: queryKeys.presets.profile(presetId ?? ''),
+    queryFn: async () => client.getPresetProfile(presetId ?? ''),
+    enabled: Boolean(presetId),
+    staleTime: 5 * 60_000,
+  };
+}
+
+export function usePresetProfile(presetId: string | undefined) {
+  const client = useNexusClient();
+  return useQuery(presetProfileQueryOptions(presetId, client));
+}
+
 // ── Timeline (V1.126 P2; V1.127 P0 T2 infinite pagination) ────────────────────
 
 /**
@@ -449,6 +519,113 @@ export function useCreateWorld() {
       void qc.invalidateQueries({ queryKey: queryKeys.timeline.all });
     },
     onError: (error) => errorToast(error, 'error.couldNotCreateWorld'),
+  });
+}
+
+export interface CreateScheduleArgs {
+  creatorId: string;
+  presetId: string;
+  label?: string;
+  seed?: string;
+}
+
+/**
+ * Create a schedule (V1.171 P2 — PL-15/PL-16). Wraps the existing
+ * `POST /v1/daemon/orchestration/schedules` endpoint with the honest
+ * `AddScheduleRequest` fields only (preset + optional label/seed — no new
+ * scheduler fields, no firing-cadence promise). Invalidates the schedules
+ * list on success so the new row renders (same pattern as the canvas
+ * `useRunStrategy` precedent).
+ */
+export function useCreateSchedule() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  const { t } = useTranslation('schedule');
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (args: CreateScheduleArgs) =>
+      client.addSchedule({
+        creator_id: args.creatorId,
+        preset_id: args.presetId,
+        ...(args.label ? { label: args.label } : {}),
+        ...(args.seed ? { seed: args.seed } : {}),
+      }),
+    onSuccess: (_data, args) => {
+      toast({ variant: 'success', title: t('create.toastCreated'), description: args.presetId });
+      void qc.invalidateQueries({ queryKey: queryKeys.schedules.all });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotCreateSchedule'),
+  });
+}
+
+/**
+ * Edit a schedule's label (V1.171 P2 — PL-16/AR-29). Wraps
+ * `PATCH /v1/daemon/orchestration/schedules/{schedule_id}`; `label: ""`
+ * clears the label to NULL. Invalidates the schedules list + detail on
+ * success so the edited row renders fresh.
+ */
+export function useEditSchedule() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (vars: { scheduleId: string; request: EditScheduleRequest }) =>
+      client.editSchedule(vars.scheduleId, vars.request),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.schedules.all });
+      void qc.invalidateQueries({ queryKey: queryKeys.schedules.detail(vars.scheduleId) });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotUpdateSchedule'),
+  });
+}
+
+/**
+ * Replace a Work's cron config (V1.171 P2 — PL-16/AR-29). Wraps
+ * `PUT /v1/daemon/works/{work_id}/cron` with the CAS pre-image
+ * (`expected_current_json`) the caller captured from a prior GET. A 409
+ * conflict surfaces via the error toast; the caller re-GETs and re-applies.
+ * Invalidates the Work's cron query AND the works tree on success — the PUT
+ * bumps `works.updated_at`, so the schedule page's Works table must refresh
+ * its "Updated" column (F-009).
+ */
+export function usePutWorkCron() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (vars: { workId: string; request: UpdateWorkCronRequest }) =>
+      client.putWorkCron(vars.workId, vars.request),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.worksCron.detail(vars.workId) });
+      // F-009: the PUT bumps works.updated_at; refetch the Works lists so the
+      // row timestamp refreshes after a cron save.
+      void qc.invalidateQueries({ queryKey: queryKeys.works.all });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotUpdateWorkCron'),
+  });
+}
+
+/**
+ * Delete a schedule (V1.171 P2 — PL-15/AR-31). Wraps
+ * `DELETE /v1/daemon/orchestration/schedules/{schedule_id}` — the daemon
+ * cancels non-terminal schedules before deletion and responds `200` with
+ * `{ deleted: true }`. Unknown ids resolve to 404; any refusal (non-terminal
+ * enforcement) surfaces via the shared error toast — no client-side
+ * pre-filter. Invalidates the whole `['schedules']` key set on success so the
+ * deleted row leaves the list and the by-preset/strategy-cache views refetch
+ * (mirrors `useDeletePreset`).
+ */
+export function useDeleteSchedule() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (scheduleId: string) => client.deleteSchedule(scheduleId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.schedules.all });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotDeleteSchedule'),
   });
 }
 
@@ -663,7 +840,10 @@ export function useScaffoldPreset() {
   return useMutation({
     mutationFn: (request: ScaffoldPresetRequest) => client.scaffoldPreset(request),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: queryKeys.presets.list() });
+      // Invalidate the whole `['presets']` key set (list + every profile) so
+      // newly scaffolded manifests surface in catalog lanes immediately
+      // (QC1 W-1 / QC3 W-1).
+      void qc.invalidateQueries({ queryKey: queryKeys.presets.all });
     },
     onError: (error) => errorToast(error, 'error.couldNotScaffoldPreset'),
   });
@@ -690,7 +870,11 @@ export function useReloadPreset() {
     mutationFn: (presetId: string) => client.reloadPreset(presetId),
     onSuccess: (_data, presetId) => {
       toast({ variant: 'success', title: t('toast.presetReloaded'), description: presetId });
-      void qc.invalidateQueries({ queryKey: queryKeys.presets.list() });
+      // Reload re-reads the manifest from disk — lanes/roles/capabilities can
+      // change. `presets.all` (prefix `['presets']`) invalidates the list and
+      // every `['presets','profile',<id>]` key so mounted catalog lane badges
+      // refresh without navigation (QC1 W-1 / QC3 W-1).
+      void qc.invalidateQueries({ queryKey: queryKeys.presets.all });
     },
     onError: (error) => errorToast(error, 'error.couldNotReloadPreset'),
   });
@@ -709,7 +893,9 @@ export function useDeletePreset() {
   return useMutation({
     mutationFn: (presetId: string) => client.deletePreset(presetId),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: queryKeys.presets.list() });
+      // Whole `['presets']` key set — the deleted preset leaves the list and
+      // its profile key is dropped from the cache (QC1 W-1 / QC3 W-1).
+      void qc.invalidateQueries({ queryKey: queryKeys.presets.all });
     },
     onError: (error) => errorToast(error, 'error.couldNotDeletePreset'),
   });

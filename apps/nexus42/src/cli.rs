@@ -9,7 +9,8 @@ use crate::commands::connect::ConnectCommand;
 use crate::commands::{
     acp::AcpCommand, acp_worker::AcpWorkerArgs, compute::ComputeCommand, creator::CreatorCommand,
     daemon::DaemonCommand, daemon_run::DaemonRunArgs, desktop::DesktopCommand,
-    host_call::HostCallArgs, platform::PlatformCommand, sync::SyncCommand, system::SystemCommand,
+    host_call::HostCallArgs, platform::PlatformCommand, preset::PresetCommand, sync::SyncCommand,
+    system::SystemCommand,
 };
 use clap::{Parser, Subcommand};
 
@@ -138,6 +139,23 @@ pub enum Commands {
     System {
         #[command(subcommand)]
         command: SystemCommand,
+    },
+
+    /// Preset strategy surface (list, show, validate, scaffold, run, trigger)
+    ///
+    /// Canonical developer-facing preset group (PL-5, AR-24). `system preset`
+    /// remains a working compatibility alias for one release (PL-6).
+    ///
+    /// Hidden from `--help` for the current release: the V1.35 command-surface
+    /// lock (`.mstar/specs/cli-spec.md` §6) fixes the visible top-level groups
+    /// to `creator|daemon|acp|platform|system` — no new parallel top-level
+    /// groups. The `preset` group is a deliberate resolution of AR-24 (new
+    /// canonical group) vs that lock: callable but not yet advertised, same
+    /// posture as the deprecated `sync` alias (S-001).
+    #[command(hide = true)]
+    Preset {
+        #[command(subcommand)]
+        command: PresetCommand,
     },
 
     /// Hidden: deprecated top-level sync alias — use `platform sync` instead.

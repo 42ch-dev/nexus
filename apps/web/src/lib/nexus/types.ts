@@ -46,6 +46,7 @@ import type {
   CreateWorldResponse,
   CreatorDetail,
   DeletePendingReviewResponse,
+  DeleteScheduleResponse,
   EditCoreContextRequest,
   EditCoreContextResponse,
   FindingDetailResponse,
@@ -99,6 +100,7 @@ import type {
   ScaffoldPresetResponse,
   ScanRequest,
   ScanResponse,
+  ScheduleSummary,
   SessionDetailResponse,
   SetActiveCreatorRequest,
   SetActiveCreatorResponse,
@@ -145,6 +147,8 @@ import type {
   WorldRuleUpdateRequest,
   WorldRulesListResponse,
 } from '@42ch/nexus-contracts';
+
+import type { PresetProfileResponse } from './preset-profile';
 
 /** Daemon health probe result (`GET /v1/daemon/runtime/health`). App-side type. */
 export interface DaemonHealth {
@@ -227,6 +231,73 @@ export interface ListTimelineEventsQuery {
   limit?: number;
   /** Opaque cursor from a previous page's `next_cursor`. */
   cursor?: string;
+}
+
+/**
+ * `PATCH /v1/daemon/orchestration/schedules/{schedule_id}` request (V1.171 P2
+ * AR-29). App-side mirror of the hand-coded Rust `EditScheduleRequest` 1:1
+ * (snake_case wire — local tier, NOT generated, NOT in `schemas/`). Only
+ * `label` is updateable today; absent/null keeps the current label, `""`
+ * clears it to NULL (never stored as an empty string).
+ */
+export interface EditScheduleRequest {
+  /** New label. Absent → unchanged; `""` → cleared to NULL. */
+  label?: string;
+}
+
+/** One role's cron entry inside the per-Work schedule (AR-29). */
+export interface WorkCronRole {
+  /** 5-field cron expression (author local TZ). */
+  cron: string;
+  /** Per-role opt-out without removing the schedule. */
+  enabled: boolean;
+}
+
+/** The three-role staggering set (AR-29). */
+export interface WorkCronRoles {
+  /** `brainstorm` → `novel-brainstorm` preset. */
+  brainstorm: WorkCronRole;
+  /** `write` → `novel-write` preset. */
+  write: WorkCronRole;
+  /** `review` → `novel-review-master` preset. */
+  review: WorkCronRole;
+}
+
+/**
+ * `GET /v1/daemon/works/{work_id}/cron` response (V1.171 P2 AR-29). App-side
+ * mirror of the hand-coded Rust `WorkCronResponse` 1:1. `is_default` is the
+ * honesty marker (AR-30): true when `works.schedule_json` is unset and this
+ * payload is the spec-default schedule.
+ */
+export interface WorkCronResponse {
+  /** IANA timezone string. Daemon converts to UTC for cron firing. */
+  tz: string;
+  /** Per-role cron entries. */
+  roles: WorkCronRoles;
+  /** True when the stored config is unset and this is the spec defaults. */
+  is_default: boolean;
+}
+
+/**
+ * `PUT /v1/daemon/works/{work_id}/cron` request (V1.171 P2 AR-29). App-side
+ * mirror of the hand-coded Rust `UpdateWorkCronRequest` 1:1. The body is the
+ * complete `WorkSchedule` shape; `expected_current_json` is the optional CAS
+ * pre-image — the exact stored `schedule_json` blob that must match for the
+ * write to apply. Empty/whitespace means "must currently be unset"; absent
+ * means the write is guarded against the current stored value read at write
+ * time (snapshot CAS — never unconditional).
+ */
+export interface UpdateWorkCronRequest {
+  /** IANA timezone string. Daemon converts to UTC for cron firing. */
+  tz: string;
+  /** Per-role cron entries. */
+  roles: WorkCronRoles;
+  /**
+   * CAS pre-image: the exact stored `schedule_json` blob. Pass the value
+   * reconstructed from a prior `GET` (the `{ tz, roles }` shape — `is_default`
+   * is not part of the stored blob) to guard against concurrent writers.
+   */
+  expected_current_json?: string;
 }
 
 /**
@@ -327,6 +398,37 @@ export interface NexusClient {
     scheduleId: string,
     request: EditCoreContextRequest,
   ): Promise<EditCoreContextResponse>;
+  /**
+   * `PATCH /v1/daemon/orchestration/schedules/{schedule_id}` — edit schedule
+   * label/metadata (V1.171 P2 AR-29). Only `label` is updateable today;
+   * absent keeps the current label, `""` clears it to NULL. 404 on unknown
+   * id; the response is the updated {@link ScheduleSummary}.
+   */
+  editSchedule(scheduleId: string, request: EditScheduleRequest): Promise<ScheduleSummary>;
+  /**
+   * `GET /v1/daemon/works/{work_id}/cron` — effective per-Work cron config
+   * (V1.171 P2 AR-29). Returns the stored `works.schedule_json` (or the spec
+   * defaults when unset) plus the `is_default` honesty marker (AR-30). 404 on
+   * unknown work.
+   */
+  getWorkCron(workId: string): Promise<WorkCronResponse>;
+  /**
+   * `PUT /v1/daemon/works/{work_id}/cron` — replace the per-Work cron config
+   * (V1.171 P2 AR-29). Full-body `WorkSchedule` replacement, CAS-guarded via
+   * `expected_current_json` (409 conflict on pre-image mismatch with a retry
+   * hint; 400 with stable codes `E_CRON_INVALID_EXPR` / `E_CRON_INVALID_TZ`
+   * on invalid input; 404 on unknown work).
+   */
+  putWorkCron(workId: string, request: UpdateWorkCronRequest): Promise<WorkCronResponse>;
+  /**
+   * `DELETE /v1/daemon/orchestration/schedules/{schedule_id}` — remove a
+   * schedule (V1.171 P2 — PL-15/AR-31). The daemon cancels non-terminal
+   * schedules before deletion and responds `200` with
+   * `{ deleted: true }`; unknown ids resolve to 404. Errors (including any
+   * non-terminal refusal) surface via the shared error toast — the UI does
+   * not pre-filter client-side beyond the daemon's enforcement.
+   */
+  deleteSchedule(scheduleId: string): Promise<DeleteScheduleResponse>;
 
   // ── Capabilities ──────────────────────────────────────────────────────────
   /** `GET /v1/daemon/orchestration/capabilities` — cursor list (F-P3/F-F1; canonical `items` key). */
@@ -376,6 +478,15 @@ export interface NexusClient {
   updatePreset(presetId: string, request: UpdatePresetRequest): Promise<UpdatePresetResponse>;
   /** `DELETE /v1/daemon/presets/{id}` — delete a user preset bundle; 204 No Content (V1.67 G2 promotion). */
   deletePreset(presetId: string): Promise<void>;
+
+  // ── Preset profiles (V1.171 P1 — AR-27) ───────────────────────────────────
+  /**
+   * `GET /v1/daemon/orchestration/presets/{id}/profile` — manifest-derived
+   * profile (trigger lanes, states, roles, capabilities, declared signals)
+   * for any resolvable preset. The app-side type mirrors the hand-coded Rust
+   * DTO 1:1 (camelCase); unknown ids resolve to 404 (PL-2).
+   */
+  getPresetProfile(presetId: string): Promise<PresetProfileResponse>;
 
   // ── Strategy canvas (V1.71 Track A) ───────────────────────────────────────
   /** `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/patch` — patch a state. */

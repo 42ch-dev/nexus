@@ -14,6 +14,14 @@ export const queryKeys = {
     details: () => [...queryKeys.works.all, 'detail'] as const,
     detail: (workId: string) => [...queryKeys.works.details(), workId] as const,
   },
+  // V1.171 P2 AR-29 — per-Work cron config (`GET/PUT /v1/daemon/works/{work_id}/cron`).
+  // Nested under `works` so a Work-scoped invalidation can refresh it, but
+  // keyed by its own `cron` segment so the PUT mutation can invalidate exactly
+  // the edited Work's cron query.
+  worksCron: {
+    all: ['works', 'cron'] as const,
+    detail: (workId: string) => [...queryKeys.worksCron.all, workId] as const,
+  },
   sessions: {
     all: ['sessions'] as const,
     list: (query?: object) => [...queryKeys.sessions.all, 'list', query ?? {}] as const,
@@ -47,6 +55,11 @@ export const queryKeys = {
     // `invalidateQueries` wiring lands in V1.70 when the canvas consumes these.
     details: () => [...queryKeys.presets.all, 'detail'] as const,
     detail: (presetId: string) => [...queryKeys.presets.details(), presetId] as const,
+    // V1.171 P1 — per-preset profile (AR-27). Under `presets.all` so the
+    // scaffold/reload/delete mutations invalidate the whole `['presets']`
+    // key set and refresh catalog lanes after a manifest change — see the
+    // staleness contract on `usePresetProfile`.
+    profile: (presetId: string) => [...queryKeys.presets.all, 'profile', presetId] as const,
   },
   // V1.94 — Creator profile switcher + agent scan.
   creators: {

@@ -14,17 +14,18 @@ Distilled from the V1.139→V1.169 spoke upgrade series (most recently 0.10.0 �
 
 ## Context
 
-spoke releases bundle Rust crates + npm packages + schemas + a drift gate that CI enforces. A pin bump that only touches `Cargo.toml` fails CI (`tooling/check-wire-drift.sh` requires all five pins — 3 crates + 2 npm packages — to equal `SPOKE_PIN`) and misses breakage hidden behind cargo features and examples.
+spoke releases bundle Rust crates + npm packages + schemas + a drift gate that CI enforces. A pin bump that only touches `Cargo.toml` fails CI (`tooling/check-wire-drift.sh` requires all five pins — 3 crates + 2 npm packages — plus the `strategy-samples/**` docs pins (Gate 1c) to equal `SPOKE_PIN`) and misses breakage hidden behind cargo features and examples.
 
 ## Guidance
 
 1. **Bump all five pins in lockstep**: 3 `Cargo.toml` workspace pins + 2 npm pins (`packages/nexus-contracts/package.json` + wherever `@42ch/spoke-*` resolves) + `SPOKE_PIN` in `tooling/check-wire-drift.sh`. Refresh `Cargo.lock` surgically: `cargo update -p spoke-schemas -p spoke-operations -p spoke-connect` — never a wholesale update; review the lock diff for unrelated churn.
-2. **Refresh `pnpm-lock.yaml`** via the repo's lockfile flow (V1.164 precedent). Note: a local user `~/.npmrc` `minimumReleaseAge` policy can block fresh packages on frozen install locally — CI is unaffected; hashes come from pnpm's own resolution.
-3. **Compile BOTH graphs with `--all-targets`**: `cargo check --workspace --all-targets` and `--workspace --all-targets --features nexus42/connect-host`. Feature-gated **examples** only compile under `--all-targets` — the V1.169 bump surfaced a 4th `HostCapabilityManifest` struct-literal site in an example that the 3 known sites list missed.
-4. **Upstream additive struct fields break struct literals** — expect them at every literal-construction site (see also [codegen-optional-field-callsite-coverage.md](codegen-optional-field-callsite-coverage.md)). Honest-empty declarations stay honest: `tools: Vec::new()` + upstream serde `skip_serializing_if` keeps the wire member omitted.
-5. **Pin the refusal/honesty contract with tests when upstream adds a capability surface**: new op families (e.g. `tools.*` dispatch-gate prefix rule in 0.11.0) get (a) handler-level refusal tests (the SERVED_OPS gate precedes lane acquisition — probe it), (b) session-level refusal-matrix rows, (c) manifest assertions (no fabricated capability, wire-omitted members).
-6. **Feature-graph evidence set**: default graph libp2p-free (`cargo tree -p nexus42 -i libp2p` → absent), single libp2p version feature-on, single `regress` version both graphs.
-7. **Record the trail** in the `Cargo.toml` pin comment block (per-iteration section, upstream change summary) and align `.mstar/specs/spoke-adapter-architecture.md` §1.1/§5.2 pins in the same commit.
+2. **Keep `strategy-samples/**` docs pins lockstep (Gate 1c, V1.170)**: every `@42ch/spoke-connect@<version>` occurrence in the integrator docs tree (README + forkable game-narrative templates) must equal `SPOKE_PIN` — `check-wire-drift.sh` Gate 1c greps the whole `strategy-samples/` tree and fails on any stale pin. Integrators copy the template bundles, so a stale pin there is the same rot channel the gate exists to close; sweep the tree with the same grep before bumping.
+3. **Refresh `pnpm-lock.yaml`** via the repo's lockfile flow (V1.164 precedent). Note: a local user `~/.npmrc` `minimumReleaseAge` policy can block fresh packages on frozen install locally — CI is unaffected; hashes come from pnpm's own resolution.
+4. **Compile BOTH graphs with `--all-targets`**: `cargo check --workspace --all-targets` and `--workspace --all-targets --features nexus42/connect-host`. Feature-gated **examples** only compile under `--all-targets` — the V1.169 bump surfaced a 4th `HostCapabilityManifest` struct-literal site in an example that the 3 known sites list missed.
+5. **Upstream additive struct fields break struct literals** — expect them at every literal-construction site (see also [codegen-optional-field-callsite-coverage.md](codegen-optional-field-callsite-coverage.md)). Honest-empty declarations stay honest: `tools: Vec::new()` + upstream serde `skip_serializing_if` keeps the wire member omitted.
+6. **Pin the refusal/honesty contract with tests when upstream adds a capability surface**: new op families (e.g. `tools.*` dispatch-gate prefix rule in 0.11.0) get (a) handler-level refusal tests (the SERVED_OPS gate precedes lane acquisition — probe it), (b) session-level refusal-matrix rows, (c) manifest assertions (no fabricated capability, wire-omitted members).
+7. **Feature-graph evidence set**: default graph libp2p-free (`cargo tree -p nexus42 -i libp2p` → absent), single libp2p version feature-on, single `regress` version both graphs.
+8. **Record the trail** in the `Cargo.toml` pin comment block (per-iteration section, upstream change summary) and align `.mstar/specs/spoke-adapter-architecture.md` §1.1/§5.2 pins in the same commit.
 
 ## Why This Matters
 

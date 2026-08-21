@@ -75,6 +75,27 @@ pub const NOVEL_WRITE_PRESET_ID: &str = "novel-write";
 /// role→preset mapping.
 pub const NOVEL_REVIEW_MASTER_PRESET_ID: &str = "novel-review-master";
 
+/// The three works-cron role preset ids (brainstorm / write / review).
+///
+/// Single source of truth for cron-role membership (AR-21): consumed by
+/// [`crate::schedule::cron_supervisor::role_preset`] (via the individual
+/// constants) and by the daemon profile lane classifier (`profile_lanes` in
+/// `nexus-daemon-runtime`). Adding a new cron-role preset here automatically
+/// updates both consumers — never maintain a second membership list
+/// (W-001/F-004).
+pub const CRON_ROLE_PRESET_IDS: [&str; 3] = [
+    NOVEL_BRAINSTORM_PRESET_ID,
+    NOVEL_WRITE_PRESET_ID,
+    NOVEL_REVIEW_MASTER_PRESET_ID,
+];
+
+/// Returns the canonical works-cron role preset ids (brainstorm / write /
+/// review per `RolesSchedule`).
+#[must_use]
+pub const fn cron_role_preset_ids() -> &'static [&'static str] {
+    &CRON_ROLE_PRESET_IDS
+}
+
 /// Game-bible design-writing preset id — `design-writing` (V1.55 P2).
 ///
 /// LLM-driven per-section drafting + design 五问 review loop for game-bible
@@ -90,8 +111,9 @@ pub const DESIGN_WRITING_PRESET_ID: &str = "design-writing";
 #[cfg(test)]
 mod tests {
     use super::{
-        DESIGN_WRITING_PRESET_ID, NOVEL_BRAINSTORM_PRESET_ID, NOVEL_CHAPTER_REVIEW_PRESET_ID,
-        NOVEL_REVIEW_MASTER_PRESET_ID, NOVEL_WRITE_PRESET_ID, NOVEL_WRITING_PRESET_ID,
+        cron_role_preset_ids, DESIGN_WRITING_PRESET_ID, NOVEL_BRAINSTORM_PRESET_ID,
+        NOVEL_CHAPTER_REVIEW_PRESET_ID, NOVEL_REVIEW_MASTER_PRESET_ID, NOVEL_WRITE_PRESET_ID,
+        NOVEL_WRITING_PRESET_ID,
     };
 
     /// Guard against accidental rename: the wire value is part of the
@@ -126,5 +148,31 @@ mod tests {
     #[test]
     fn design_writing_preset_id_value_is_frozen() {
         assert_eq!(DESIGN_WRITING_PRESET_ID, "design-writing");
+    }
+
+    /// W-001/F-004: the cron-role membership list is the single source of
+    /// truth consumed by both `cron_supervisor::role_preset` and the daemon
+    /// profile lane classifier. Freeze the membership so a rename/removal is
+    /// a deliberate change, not a silent desync.
+    #[test]
+    fn cron_role_preset_ids_membership_is_frozen() {
+        assert_eq!(
+            cron_role_preset_ids(),
+            &[
+                NOVEL_BRAINSTORM_PRESET_ID,
+                NOVEL_WRITE_PRESET_ID,
+                NOVEL_REVIEW_MASTER_PRESET_ID,
+            ]
+        );
+        // Every member is a real embedded preset id (the cron evaluator
+        // enqueues schedules with these ids).
+        for id in cron_role_preset_ids() {
+            assert!(
+                crate::preset::list_embedded_presets()
+                    .iter()
+                    .any(|e| e == id),
+                "cron-role preset '{id}' must exist in the embedded preset tree"
+            );
+        }
     }
 }
