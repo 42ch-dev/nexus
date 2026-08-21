@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "state_delta": [
+    {
+      "op": "sub",
+      "path": "character.current_hp",
+      "target_key_block_id": "kb-def",
+      "value": 15
+    }
+  ],
+  "timeline_events": [
+    {
+      "event_id": "evt_state_update_1",
+      "event_type": "state_update",
+      "status": "canon"
+    }
+  ],
+  "new_key_blocks": [],
+  "battle_report": {
+    "kind": "combat",
+    "attacker_id": "kb-atk",
+    "defender_id": "kb-def",
+    "damage": 15,
+    "defender_hp_before": 100,
+    "defender_hp_after": 85
+  }
+}

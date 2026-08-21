@@ -1,15 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router';
-import {
-  BrainCircuit,
-  CalendarClock,
-  ListChecks,
-  Sparkles,
-} from 'lucide-react';
 
 import { useCreateWork, useCreateWorld } from '@/api/queries';
 import { FooterProfiles } from '@/components/layout/footer-profiles';
+import { useEntrance } from '@/lib/entrance-context';
+import { ENTRANCE_BY_ID } from '@/components/layout/entrance-registry';
 import {
   CreatorShellContent,
   type CreatorShellInlineWorkSubmit,
@@ -127,9 +123,37 @@ function CreatorCreatePanel() {
 const CREATOR_HUB_PATH = '/works';
 const ORCHESTRATOR_HUB_PATH = '/strategies';
 
+/**
+ * Footer "Switch entrance" affordance (V1.170 P1 — AR-15 / EL §2).
+ *
+ * Persistent shell-chrome control — NOT a third top-level tab (the
+ * Creator | Orchestrator tabs stay untouched). Opens the identity page, which
+ * is the two-option control; only its Continue persists (AR-20). Shows the
+ * current layout name so the affordance doubles as a status readout.
+ */
+function EntranceSwitchControl() {
+  const { t } = useTranslation('shell');
+  const { entrance } = useEntrance();
+  const navigate = useNavigate();
+  return (
+    <button
+      type="button"
+      onClick={() => navigate('/entrance')}
+      data-testid="entrance-switch-control"
+      className="flex w-full items-center justify-between gap-2 rounded-control px-2 py-1.5 text-button-14 font-button text-gray-700 transition-colors duration-state ease-standard motion-reduce:transition-none hover:bg-gray-alpha-100 hover:text-gray-1000 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700"
+    >
+      <span>{t('entrance.switchLabel')}</span>
+      <span className="text-label-12 font-medium text-gray-900">
+        {t(`entrance.layout.${ENTRANCE_BY_ID[entrance].id}`)}
+      </span>
+    </button>
+  );
+}
+
 export function Sidebar() {
   const { t } = useTranslation('shell');
   const { pathname } = useLocation();
+  const { entrance } = useEntrance();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<ShellSidebarTab>(() => tabFromPathname(pathname));
 
@@ -145,28 +169,20 @@ export function Sidebar() {
     setActiveTab(tab);
   }
 
-  const orchestratorGroups: ShellNavGroup[] = useMemo(
-    () => [
-      {
-        id: 'memory',
-        label: t('nav.memory'),
-        items: [{ to: '/memory', label: t('nav.memory'), icon: BrainCircuit }],
-      },
-      {
-        id: 'strategies',
-        label: t('nav.strategies'),
-        items: [{ to: '/strategies', label: t('nav.strategies'), icon: Sparkles }],
-      },
-      {
-        id: 'runtime',
-        label: t('nav.runtime'),
-        items: [
-          { to: '/sessions', label: t('nav.sessions'), icon: ListChecks },
-          { to: '/schedule', label: t('nav.schedule'), icon: CalendarClock },
-        ],
-      },
-    ],
-    [t],
+  // V1.170 P1 (AR-15) — the nav slot renders the entrance-filtered tree from
+  // the registry (labels are `shell` i18n keys, resolved here). Create omits
+  // the EL §3 hide-table surfaces; Develop shows the full Control Room + hub.
+  // The Creator|Orchestrator tabs stay untouched — entrance is a separate
+  // axis (`tabFromPathname` unchanged), so the groups render in the
+  // orchestrator nav slot exactly like the V1.94 orchestrator groups did.
+  const navGroups: ShellNavGroup[] = useMemo(
+    () =>
+      ENTRANCE_BY_ID[entrance].navGroups.map((group) => ({
+        ...group,
+        label: t(group.label),
+        items: group.items.map((item) => ({ ...item, label: t(item.label) })),
+      })),
+    [entrance, t],
   );
 
   const creatorPanel = activeTab === 'creator' ? <CreatorCreatePanel /> : undefined;
@@ -176,10 +192,15 @@ export function Sidebar() {
       <ShellSidebarChrome
         activeTab={activeTab}
         activeRoute={pathname}
-        navGroups={activeTab === 'orchestrator' ? orchestratorGroups : []}
+        navGroups={activeTab === 'orchestrator' ? navGroups : []}
         panelContent={creatorPanel}
         onTabChange={handleTabChange}
-        footer={<FooterProfiles />}
+        footer={
+          <>
+            <EntranceSwitchControl />
+            <FooterProfiles />
+          </>
+        }
         creatorTabLabel={t('nav.creator')}
         orchestratorTabLabel={t('nav.orchestrator')}
         primaryNavigationAriaLabel={t('aria.primaryNavigation')}

@@ -122,9 +122,11 @@ Window chrome / app menu / native dialogs / desktop context menu / daemon-status
 Desktop first-launch is a **two-phase entry** (V1.105):
 
 1. **Launch ritual** — fullscreen `DaemonLaunchGate` until the bundled sidecar is Ready (every launch; not a wizard step).
-2. **Setup wizard** — after Ready, three author-facing steps only: **Agent → Workspace → Done** (see §13.10.3).
+2. **Setup wizard** — after Ready, four author-facing steps: **Entrance → Agent → Workspace → Done** (V1.170 P1 AR-17; see §13.10.3).
 
 The `setup_completed` marker still gates main UI vs `/setup` **after** Ready — absent or `false` → wizard; `true` → main UI.
+
+**Entrance persistence (V1.170 P1, AR-16):** the wizard's Entrance step writes the User-layer entrance (`developer` | `content-creator`) through the Tauri IPC pair `get_entrance` / `set_entrance` into the `entrance` key of `~/.nexus42/config.toml` — the same file and durability class as `setup_completed` — before `markCompleted()`. Returning installs skip the Entrance step when an entrance is already stored; unset/failed reads resolve `content-creator` without writing. The daemon never sees the entrance (client-owned config only; `wire_contracts_changed: false`).
 
 > **Current product authority:** §13.10. Sections §13.2–§13.9 record historical V1.94–V1.100 behavior for traceability.
 
@@ -208,7 +210,7 @@ On desktop builds, `ClientProvider` returns `TauriClient` + `TauriDesktopCapabil
 
 ### 13.7 V1.96 Amendments — Setup Wizard Surface rework & daemon diagnostic chain
 
-> **Supersession (V1.105):** §13.10.3 three-step IA; portrait top Steps (§13.10.5 / `portrait-wizard-shell.md`); daemon diagnostics on `DaemonLaunchGate` splash — not wizard step 2. Toast/CTA/Browse patterns below remain valid where §13.10 references them.
+> **Supersession (V1.105):** §13.10.3 four-step IA (Entrance-first since V1.170 P1); portrait top Steps (§13.10.5 / `portrait-wizard-shell.md`); daemon diagnostics on `DaemonLaunchGate` splash — not wizard step 2. Toast/CTA/Browse patterns below remain valid where §13.10 references them.
 
 **Product behavior target (author-visible).** These describe what the user sees and does after the V1.96 changes. Technical token names, React implementation, and Rust sidecar mechanics are out of scope for this spec (see DESIGN.md and the implement plan).
 
@@ -321,9 +323,9 @@ The Tauri `.setup()` hook in `apps/desktop/src-tauri/src/lib.rs` now reads `setu
 
 V1.100 does not change daemon routes, JSON schemas, generated TypeScript/Rust contracts, or `@42ch/nexus-contracts` (`wire_contracts_changed: false`). The bootstrap is Tauri IPC only — it writes to `~/.nexus42/config.toml` through the existing Tauri Rust layer; the daemon reads the same config file it already reads at boot. No daemon boot-without-creator mode is introduced **(superseded for boot behavior by §13.11 V1.118)**.
 
-### 13.10 V1.105 Amendments — First-launch wizard reshape (Agent-first + app-level Daemon gate)
+### 13.10 V1.105 Amendments — First-launch wizard reshape (Entrance-first + app-level Daemon gate)
 
-**Product behavior target.** V1.105 makes daemon readiness a **launch ritual** (fullscreen gate) and reduces the setup wizard to three author choices. **Iteration SSOT:** .
+**Product behavior target.** V1.105 makes daemon readiness a **launch ritual** (fullscreen gate) and reduces the setup wizard to author choices; V1.170 P1 (AR-17) adds the Entrance step first (Entrance → Agent → Workspace → Done). **Iteration SSOT:** .
 
 #### 13.10.1 Rule 13 rewrite — always auto-start sidecar (D2)
 
@@ -344,22 +346,25 @@ The wizard **no longer** owns daemon start via a Daemon step or `startDaemon` IP
 - `setup_completed` marker still gates main UI vs `/setup` **after** Ready — unchanged semantics from §13.3.
 - Wizard step 2 (Daemon Ready) from §13.2 is **retired** as a numbered step; diagnostic UX (timeout, retry, `resetLocalDatabase`) lives on `daemon-ready-splash.tsx` / outer gate.
 
-#### 13.10.3 Three-step wizard flow (supersedes §13.2 four-step table for current product)
+#### 13.10.3 Four-step wizard flow (supersedes §13.2 four-step table for current product)
 
 | Step | Title | Action |
 |------|-------|--------|
-| 1 | Agent | `POST /v1/daemon/agent-host/scan`; AgentPicker + custom command |
-| 2 | Workspace | Default `~/Documents/nexus/default` + Browse; `ensureSetupBootstrap` on Continue |
-| 3 | Done | `setAgentProfile` + `setup_completed=true` → main UI |
+| 1 | Entrance | Two option cards (Content creator / Developer); writes `WizardState.entrance` (init `content-creator`); persisted via `set_entrance` IPC in `finish()` **before** `setup_completed=true` (V1.170 P1 AR-16/AR-17) |
+| 2 | Agent | `POST /v1/daemon/agent-host/scan`; AgentPicker + custom command |
+| 3 | Workspace | Default `~/Documents/nexus/default` + Browse; `ensureSetupBootstrap` on Continue |
+| 4 | Done | `setAgentProfile` + `setup_completed=true` → main UI |
 
 **Removed:** Welcome + Workspace as step 1; Daemon as step 2.
+
+**Entrance persistence (V1.170 P1, AR-16):** `get_entrance` / `set_entrance` read/write the `entrance` key in `~/.nexus42/config.toml` (same durability class as `setup_completed`), registered in the Tauri `invoke_handler`; `DesktopCapabilities` exposes `getEntrance()` / `setEntrance(value)` and screens depend on the interface, never `window.__TAURI__`. Returning installs with a stored entrance skip the Entrance step; unset/stale values resolve `content-creator` without writing. The daemon reads only the config keys it already reads at boot — no daemon change, no User entity (`wire_contracts_changed: false`).
 
 Bootstrap timing moves to Workspace Continue (not between Welcome and Daemon as in V1.100 §13.9.1).
 
 #### 13.10.4 Settings Re-run Setup (V1.103 R1)
 
 - Re-run still clears `setup_completed` marker only (`settings-setup-section.md`).
-- After confirm: fullscreen gate → `/setup` on Agent step (new IA).
+- After confirm: fullscreen gate → `/setup` on Entrance step (new IA; V1.170 P1 — the stored entrance is re-offered as the pre-highlighted default).
 - Workspace path and agent profile files are **not** deleted.
 
 #### 13.10.5 Contract boundary

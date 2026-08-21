@@ -1242,6 +1242,8 @@ mod tests {
         }
     }
 
+    // `unused_async_trait_impl` (clippy 1.98): test stub, no async I/O — trait contract.
+    #[allow(clippy::unused_async_trait_impl)]
     impl DirectiveStore for TestDirectiveStore {
         async fn load_active(
             &self,

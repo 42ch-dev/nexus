@@ -12,6 +12,10 @@ workspace = true
 
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
+# V1.170 P0 (AR-8): shared manifest contract + wasm_sha256 injection, extracted
+# from this crate. Non-workspace path dep — legal because the root workspace
+# `exclude`s the crate (AR-1).
+nexus-module-manifest = { path = "../../modules/nexus-module-manifest" }
 # wasmtime: Bytecode Alliance runtime (compass Q1). Pinned to the v46 line.
 # cranelift is the default compiler; fuel + epoch interruption provide the
 # compute-bound and wall-time sandbox guards (compass Q6).
@@ -38,7 +42,7 @@ tempfile = { workspace = true }
 wat = "1"
 
 [build-dependencies]
-# build.rs injects the `wasm_sha256` pairing field into the staged embedded
-# manifest, computed from the compiled `.wasm` bytes (Greptile P1).
-serde_json = { workspace = true }
-sha2 = { workspace = true }
+# V1.170 P0 (AR-8): build.rs delegates `inject_wasm_sha256` to the shared
+# helper in `nexus-module-manifest` (byte-identical staged-manifest bar).
+# serde_json/sha2 moved into that crate with the extracted helper.
+nexus-module-manifest = { path = "../../modules/nexus-module-manifest" }

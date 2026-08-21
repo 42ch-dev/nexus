@@ -14,7 +14,7 @@ This repository ships everything you use together:
 | Strategy samples | [`game-narrative/`](./game-narrative/) and [`react-trpg-turn/`](./react-trpg-turn/) | Forkable strategy bundles: capability routing + prompt templates for lore import lanes (game-narrative) and for a TRPG turn loop (react-trpg-turn). Nothing here is compiled into any binary. |
 | Validator | [`validate.sh`](./validate.sh) | One command, daemon-free: runs the real validator core on any strategy directory. |
 | WASM compute modules | `~/.nexus42/modules/<id>/` (see [Compute](#5-compute-basic-combat-n-c2-compute-half)) | Operator-installed, host-local compute modules (e.g. `modules/basic-combat`) the runtime invokes over Connect. Bytes are never peer-supplied. |
-| Connect SDK | `@42ch/spoke-connect@0.9.2` (npm) | Your backend's connection + invoke surface to the runtime (and to any SPOKE connect host). |
+| Connect SDK | `@42ch/spoke-connect@0.11.1` (npm) | Your backend's connection + invoke surface to the runtime (and to any SPOKE connect host). |
 
 **The division of labor (read this first).** The strategy declares *capability
 routing and prompt templates* — it does not execute on the runtime. Your
@@ -32,7 +32,7 @@ never computes, rewrites, or overrides settlement results.
    temp dir keeps a run hermetic).
 3. Start the runtime; the readiness line is `nexus-runtime: Connect Host
    (N-C2 E2) ready`.
-4. Install the Connect SDK: `npm install @42ch/spoke-connect@0.9.2`, and
+4. Install the Connect SDK: `npm install @42ch/spoke-connect@0.11.1`, and
    allowlist your peer (with `module_scope` for compute).
 5. Import lore: `upsert` → `promote` → `relate` over Connect (N-C1 write ops).
 6. Reason: `check` / `assemble` over Connect (N-C2 read half).
@@ -156,10 +156,10 @@ nexus42 creator world create --title "E2 demo world"       # creates a world; no
 ## 2. Connect with the SDK
 
 The TypeScript SDK is published as **`@42ch/spoke-connect`** (this is the
-canonical name — not `spoke-connect-ts`), pinned exactly to **0.9.2**:
+canonical name — not `spoke-connect-ts`), pinned exactly to **0.11.1**:
 
 ```bash
-npm install @42ch/spoke-connect@0.9.2
+npm install @42ch/spoke-connect@0.11.1
 ```
 
 The SDK ships the connect wire family: the core session helpers (`.`), a Node
@@ -681,7 +681,7 @@ idempotency ledger.
 - Reference module: [`../modules/basic-combat/`](../modules/basic-combat/)
 - Headless runtime spec: [`../.mstar/specs/daemon-runtime.md`](../.mstar/specs/daemon-runtime.md) §4.6
 - Connect invoke surface (N-C2 E2): `apps/nexus42/src/commands/connect/invoke.rs`
-- Connect SDK + wire family: `@42ch/spoke-connect@0.9.2` on npm
+- Connect SDK + wire family: `@42ch/spoke-connect@0.11.1` on npm
 - SPOKE connect-demo (runnable mock host + third-party RemoteAdapter client):
   `../../spoke/examples/connect-demo` — the TS-side story: a `BaselinePorts`
   adapter served by a spec-faithful `ConnectHost` over WebSocket, dialed by

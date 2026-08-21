@@ -2,13 +2,14 @@
 # ---------------------------------------------------------------------------
 # check-wire-drift.sh — Wire/local schema drift detection CI gate
 #
-# Two gates:
+# Gates:
 #   1. Spoke version conformance — the lockstep spoke pin (spoke-adapter-
-#      architecture spec §1.1/§5.2) is honored in both the Rust workspace
-#      Cargo.toml and the root npm package.json, for ALL spoke packages
-#      (spoke-schemas + spoke-operations + spoke-connect crates;
-#      @42ch/spoke-schemas + @42ch/spoke-operations npm). All five pins must
-#      match.
+#      architecture spec §1.1/§5.2) is honored in the Rust workspace
+#      Cargo.toml (1a), the root npm package.json (1b), and the integrator
+#      docs `strategy-samples/README.md` (1c, V1.170 P0 AR-13), for ALL spoke
+#      packages (spoke-schemas + spoke-operations + spoke-connect crates;
+#      @42ch/spoke-schemas + @42ch/spoke-operations npm; @42ch/spoke-connect
+#      docs). All pins must match.
 #   2. Schema drift detection — the integration test that validates JSON Schema
 #      wire contracts match their corresponding Rust struct definitions.
 #
@@ -69,6 +70,27 @@ for pkg in @42ch/spoke-schemas @42ch/spoke-operations; do
   fi
   echo "OK: package.json ${pkg} = ${npm_spoke}"
 done
+
+# ── Gate 1c: docs-pin conformance (strategy-samples/ tree) ─────────────────
+# Every `@42ch/spoke-connect@<version>` occurrence in the integrator docs
+# must equal the lockstep pin — the doc cannot rot back to an older spoke
+# release (V1.170 P0, AR-13). Scoped to the WHOLE sample tree (README +
+# forkable game-narrative templates), not just the README: integrators copy
+# the template bundles, so a stale pin there is the same rot channel AR-13
+# exists to close (P0 QC fix wave, qc1 W-1).
+bad_doc_pin=0
+while IFS= read -r ver; do
+  if [ "$ver" != "$SPOKE_PIN" ]; then
+    echo "FAIL: strategy-samples/** pins @42ch/spoke-connect@${ver} != pin '${SPOKE_PIN}'"
+    bad_doc_pin=1
+  fi
+done < <(grep -oRE '@42ch/spoke-connect@[0-9]+\.[0-9]+\.[0-9]+' "${PROJECT_ROOT}/strategy-samples" | sed -E 's/.*@//')
+
+if [ "$bad_doc_pin" != "0" ]; then
+  echo "FAIL: strategy-samples/** docs pin is not lockstep with SPOKE_PIN=${SPOKE_PIN}"
+  exit 1
+fi
+echo "OK: strategy-samples/** @42ch/spoke-connect pins = ${SPOKE_PIN}"
 echo ""
 
 echo "=== Wire Schema Drift Detection ==="

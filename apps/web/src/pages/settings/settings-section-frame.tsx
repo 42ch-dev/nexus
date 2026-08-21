@@ -21,6 +21,12 @@ export interface SettingsSectionFrameProps {
   children: ReactNode;
   /** Optional helper under the title row — modal host usually omits (title is Dialog). */
   showPageChrome?: boolean;
+  /**
+   * Sections hidden from the rail on this entrance (AR-15 Create hide-table).
+   * The host supplies them from the entrance registry — the frame stays
+   * presentational (plan QC W-2: `hiddenSettingsSections` must be consumed).
+   */
+  hiddenSettingsSections?: readonly SettingsSectionId[];
 }
 
 export function SettingsSectionFrame({
@@ -28,6 +34,7 @@ export function SettingsSectionFrame({
   onSelectSection,
   children,
   showPageChrome = false,
+  hiddenSettingsSections = [],
 }: SettingsSectionFrameProps) {
   const { t } = useTranslation('settings');
 
@@ -51,7 +58,9 @@ export function SettingsSectionFrame({
           className="flex w-44 shrink-0 flex-col gap-0.5 border-r border-gray-alpha-200 px-3 py-2"
           data-testid="settings-section-nav"
         >
-          {SETTINGS_SECTION_DESCRIPTORS.map(({ id, labelKey, icon: Icon }) => {
+          {SETTINGS_SECTION_DESCRIPTORS.filter(
+            ({ id }) => !hiddenSettingsSections.includes(id),
+          ).map(({ id, labelKey, icon: Icon }) => {
             const active = activeSection === id;
             return (
               <button

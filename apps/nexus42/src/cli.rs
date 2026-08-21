@@ -7,9 +7,9 @@
 #[cfg(feature = "connect-host")]
 use crate::commands::connect::ConnectCommand;
 use crate::commands::{
-    acp::AcpCommand, acp_worker::AcpWorkerArgs, creator::CreatorCommand, daemon::DaemonCommand,
-    daemon_run::DaemonRunArgs, desktop::DesktopCommand, host_call::HostCallArgs,
-    platform::PlatformCommand, sync::SyncCommand, system::SystemCommand,
+    acp::AcpCommand, acp_worker::AcpWorkerArgs, compute::ComputeCommand, creator::CreatorCommand,
+    daemon::DaemonCommand, daemon_run::DaemonRunArgs, desktop::DesktopCommand,
+    host_call::HostCallArgs, platform::PlatformCommand, sync::SyncCommand, system::SystemCommand,
 };
 use clap::{Parser, Subcommand};
 
@@ -39,7 +39,18 @@ pub struct Cli {
     verbose: bool,
 
     /// Output format (text or json)
-    #[arg(short = 'o', long = "output", global = true, default_value = "text")]
+    // NOTE (qc1 S-3): this GLOBAL flag is a hard text|json gate for every
+    // command — clap rejects any other value before dispatch. Future
+    // commands needing a different output vocabulary must use a LOCAL arg
+    // (the `acp registry list --format` precedent), NOT widen this
+    // value_parser.
+    #[arg(
+        short = 'o',
+        long = "output",
+        global = true,
+        default_value = "text",
+        value_parser = ["text", "json"]
+    )]
     output_format: String,
 }
 
@@ -96,6 +107,19 @@ pub enum Commands {
     Acp {
         #[command(subcommand)]
         command: AcpCommand,
+    },
+
+    /// Compute module authoring loop (V1.170 P0, AR-9) — build, validate,
+    /// install, and run WASM compute modules.
+    ///
+    /// `build`, `validate`, and `install` are daemon-free (the author loop
+    /// needs no runtime); `run` is a thin HTTP client over
+    /// `POST /v1/daemon/compute/run` (+ `--accept`). The group carries no
+    /// `connect-host` feature dependency — the default daemon graph stays
+    /// libp2p-free.
+    Compute {
+        #[command(subcommand)]
+        command: ComputeCommand,
     },
 
     /// Manage the Tauri desktop shell (build, sign, diagnostics)

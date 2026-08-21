@@ -92,7 +92,7 @@ describe('Setup wizard active contrast — Studio fixture (P0G-4)', () => {
     renderWizardFixtures();
 
     const activeCircle = workspaceActiveCircle();
-    expect(activeCircle).toHaveTextContent('2');
+    expect(activeCircle).toHaveTextContent('3');
     expect(activeCircle).toHaveClass('bg-setup-wizard-step-circle-active-bg');
     expect(activeCircle).toHaveClass('text-setup-wizard-step-circle-active-text');
     expect(activeCircle).not.toHaveClass('text-brand-deep-blue');

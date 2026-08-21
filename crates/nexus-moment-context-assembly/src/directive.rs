@@ -232,6 +232,9 @@ pub trait DirectiveStore {
 #[derive(Debug, Default)]
 pub struct NoDirectiveStore;
 
+// `unused_async_trait_impl` (new in clippy 1.98): the no-op methods perform no
+// async I/O; `async` is by `DirectiveStore` trait contract — toolchain-drift debt.
+#[allow(clippy::unused_async_trait_impl)]
 impl DirectiveStore for NoDirectiveStore {
     async fn load_active(
         &self,

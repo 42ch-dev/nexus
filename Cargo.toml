@@ -18,6 +18,14 @@ members = [
     "crates/nexus-cloud-domain",
     "crates/nexus-local-db",
 ]
+# V1.170 P0 (AR-1): `nexus-module-manifest` is a standalone non-workspace crate
+# (own empty `[workspace]` table) that workspace members path-depend on
+# (`nexus-wasm-host` deps + build-deps, later `apps/nexus42`). A path
+# dependency from a workspace member onto a crate carrying its own
+# `[workspace]` otherwise conflicts with Cargo's workspace resolution, so the
+# crate is excluded here. `nexus-module-sdk` / `nexus-module-test` need no
+# exclude: nothing in the workspace path-depends on them.
+exclude = ["modules/nexus-module-manifest"]
 resolver = "2"
 
 [workspace.package]

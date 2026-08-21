@@ -4,7 +4,9 @@ import { useTranslation } from 'react-i18next';
 import { NexusInkLogo } from '@/components/brand/nexus-ink-logo';
 import { DaemonHealthIndicator } from '@/components/daemon-health-indicator';
 import { ChronosTitlebarChrome } from '@/components/layout/presentational/chronos-titlebar-chrome';
+import { firstSettingsSectionFor } from '@/components/layout/entrance-registry';
 import { useSettingsModal } from '@/components/layout/settings-modal-context';
+import { useEntrance } from '@/lib/entrance-context';
 import { Button } from '@/components/ui/button';
 import { useTheme } from '@/components/theme-provider';
 import { useDesktopCapabilities } from '@/lib/client-context';
@@ -23,6 +25,11 @@ export function ChronosTitlebar({ title }: ChronosTitlebarProps) {
   const { resolvedTheme, toggleTheme } = useTheme();
   const desktop = useDesktopCapabilities();
   const { openSettings } = useSettingsModal();
+  const { entrance } = useEntrance();
+  // W-2 (plan QC): the gear opens the first section VISIBLE on this entrance —
+  // Create must not land on the develop-only `agent` default (the guard would
+  // bounce the whole app); Develop keeps the full Control Room default.
+  const settingsSection = firstSettingsSectionFor(entrance);
   const isDark = resolvedTheme === 'dark';
   const themeLabel = isDark
     ? t('theme.switchToLight')
@@ -56,7 +63,7 @@ export function ChronosTitlebar({ title }: ChronosTitlebarProps) {
           aria-label={t('settings.title')}
           title={t('settings.title')}
           className={inkControlClass}
-          onClick={(event) => openSettings('agent', event.currentTarget)}
+          onClick={(event) => openSettings(settingsSection, event.currentTarget)}
         >
           <Settings className="h-4 w-4" aria-hidden />
         </button>

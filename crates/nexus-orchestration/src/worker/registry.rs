@@ -258,6 +258,9 @@ impl Default for MockSpawner {
     }
 }
 
+// `unused_async_trait_impl` (new in clippy 1.98): the mock's `spawn` performs
+// no async I/O; `async` is by `WorkerSpawner` trait contract — toolchain-drift debt.
+#[allow(clippy::unused_async_trait_impl)]
 impl WorkerSpawner for MockSpawner {
     async fn spawn(
         &self,

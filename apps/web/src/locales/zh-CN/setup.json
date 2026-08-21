@@ -1,5 +1,20 @@
 {
   "step": {
+    "entrance": {
+      "title": "你如何使用 Nexus？",
+      "description": "这将选择你的工作区布局。它不是你的写作身份 — 创作者档案保持不变。",
+      "optionsLabel": "工作区布局",
+      "option": {
+        "contentCreator": {
+          "title": "内容创作者",
+          "description": "写作与世界构建。智能体为你提供帮助。你无需安装模块或编辑预设。"
+        },
+        "developer": {
+          "title": "开发者",
+          "description": "在 Nexus 上构建。模块、预设、能力、Connect 以及完整的控制室。"
+        }
+      }
+    },
     "agent": {
       "title": "选择智能体",
       "description": "Nexus 使用智能体来运行策略。选择一个已发现的智能体以继续。",
@@ -17,6 +32,7 @@
   },
   "progress": {
     "label": "设置向导进度",
+    "entrance": "入口",
     "agent": "智能体",
     "workspace": "工作区",
     "done": "完成"

@@ -644,7 +644,11 @@ impl WorkerManager {
     /// # Errors
     ///
     /// Returns [`WorkerError`] if process spawning or IPC initialization fails.
-    #[allow(clippy::too_many_lines, clippy::unused_async)]
+    #[allow(
+        clippy::too_many_lines,
+        clippy::unused_async,
+        clippy::unused_async_trait_impl
+    )]
     pub async fn spawn_with_grace(
         &self,
         spec: &WorkerSpec,

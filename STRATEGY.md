@@ -2,65 +2,71 @@
 
 ## Vision
 
-**Nexus is the local-first creative-writing tool where a World's Timeline is the central instrument, AI agents are harnessed through Canvas, and Computable modules make worlds react.**
-
-A Nexus Timeline is not one line — it is **three instruments at three scales**: **Brief** (world shape), **Narrative** (events at human pace — the Timeline layer, distinct from prose-craft narrative writing), and **Moment** (scene precision — the Timeline layer, distinct from Moment Context Assembly) — World timelines lead from the Brief; Work timelines lead from the Moments.
-
-Nexus is a **local-first, AI-agent-driven creative writing tool** that uses an infinite canvas to organize ideas and orchestrate the writing workflow — putting authors in full control of their craft and data. After V1.121 the surfaces were functionally rich but narratively scattered: the product read as a feature list, not a thesis. The V1.122 pivot canonizes the three pillars the product has been building toward. V1.123 deepens Timeline into Brief · Narrative · Moment with a World/Work layer split.
+**Nexus is a local-first narrative-orchestration platform.** Developers get an orchestratable creator-agent service — Harness (preset engine + agent host + capability registry + skills) plus Computable modules they can author and ship. The first-party authoring app is the **reference creator surface** for non-dev authors: Canvas + Timeline remain how humans steer worlds, not a separate product family.
 
 ### Three pillars
 
-| Pillar | Means (author language) | Maps to in the codebase |
+| Pillar | Means (developer + author) | Maps to in the codebase |
 |--------|-------------------------|-------------------------|
-| **Harness** | How an author *harnesses* AI agents to execute creative work — control strategy, orchestration, capability routing, presets. | `crates/nexus-orchestration/` + `crates/nexus-agent-host/` + `crates/nexus-acp-host/` + capability registry + presets. Surfaced in UI as **Harness** — the user-visible pillar-entry rename **Strategy / Strategies → Harness** landed in V1.156 P3 (closes `DF-V1122-HARNESS-RENAME`); **Preset stays** as the mechanism name under Harness (product lock: [.mstar/iterations/v1.156/specs/product-locks.md](.mstar/iterations/v1.156/specs/product-locks.md) PD-4). Internal identifiers (route `/strategies`, `CanvasSurfaceKind = 'strategy'`, `preset` wire fields, CSS classes, hook names) stay unchanged. Specs: [orchestration-engine.md](.mstar/specs/orchestration-engine.md), [agent-host.md](.mstar/specs/agent-host.md), [capability-registry.md](.mstar/specs/capability-registry.md). |
-| **Canvas** | The spatial steering surface where authors see and shape their world — with **Timeline-centric World building** as the hero entry surface. Timeline is experienced as **three layers** — **Brief** / **Narrative** / **Moment** — with domain split: **World Timeline** = Brief+Narrative (Brief-led); **Work Timeline** = Narrative+Moment (Moment-led peer surface; Work entry stays Outline). | `apps/web` React Flow canvas surfaces (`CanvasSurfaceKind = "strategy" \| "outline" \| "world-kb-entities" \| "world-kb-relationships" \| "timeline" \| "work-timeline"`). Timeline is the default **World-entry** surface (V1.122; default layer Brief when data exists from V1.123); Work entry stays Outline (V1.118); Work Timeline is a peer from V1.123. Spec: [canvas-strategy-surface.md](.mstar/specs/canvas-strategy-surface.md). |
-| **Computable** | The WASM layer that makes worlds *react* — combat resolution, dice, relationship-graph computation, user-authored modules. Not just stored prose. | Native WASM host (`wasmtime`) + compute-module ABI + combat-engine preset (shipped V1.62; foundation V1.114). Specs: [compute-module-abi.md](.mstar/specs/compute-module-abi.md), [wasm-host.md](.mstar/specs/wasm-host.md). |
+| **Harness** | How developers *and* authors harness AI agents: presets, orchestration, capability routing, skills. Developers configure and author this service; authors consume named modes without operator chrome. | `crates/nexus-orchestration/` + `crates/nexus-agent-host/` + `crates/nexus-acp-host/` + capability registry + presets. Surfaced in UI as **Harness** — the user-visible pillar-entry rename **Strategy / Strategies → Harness** landed in V1.156 P3 (closes `DF-V1122-HARNESS-RENAME`); **Preset stays** as the mechanism name under Harness (product lock: [.mstar/iterations/v1.156/specs/product-locks.md](.mstar/iterations/v1.156/specs/product-locks.md) PD-4). Internal identifiers (route `/strategies`, `CanvasSurfaceKind = 'strategy'`, `preset` wire fields, CSS classes, hook names) stay unchanged. Specs: [orchestration-engine.md](.mstar/specs/orchestration-engine.md), [agent-host.md](.mstar/specs/agent-host.md), [capability-registry.md](.mstar/specs/capability-registry.md). |
+| **Canvas** | Spatial steering for the reference creator surface — **Timeline-centric World building** as the hero author entry. Timeline is **three layers** — **Brief** / **Narrative** / **Moment** — **World Timeline** = Brief+Narrative (Brief-led); **Work Timeline** = Narrative+Moment (Moment-led peer; Work entry stays Outline). Strategy canvas is the developer explainability surface for daemon-path presets. | `apps/web` React Flow canvas surfaces (`CanvasSurfaceKind = "strategy" \| "outline" \| "world-kb-entities" \| "world-kb-relationships" \| "timeline" \| "work-timeline"`). Timeline is the default **World-entry** surface (V1.122; default layer Brief when data exists from V1.123); Work entry stays Outline (V1.118); Work Timeline is a peer from V1.123. Spec: [canvas-strategy-surface.md](.mstar/specs/canvas-strategy-surface.md). |
+| **Computable** | The WASM layer that makes worlds *react* — combat, dice, graph computation, integrator modules. Developers author modules via the official SDK; authors run installed modules (review-then-apply). | Native WASM host (`wasmtime`) + compute-module ABI + combat-engine preset (shipped V1.62; foundation V1.114). Specs: [compute-module-abi.md](.mstar/specs/compute-module-abi.md), [wasm-host.md](.mstar/specs/wasm-host.md). |
 
-**Spine vs projection** (locked product model): **World + Timeline + KnowledgeEntry + Fork** are the *spine* (the truth of the narrative universe); **Work + Outline + Manuscript** are *projections* (the authoring plan and prose bound to a World). Timeline is the World's *when* axis at three scales (Brief · Narrative · Moment); Outline is the Work's structural projection; Work Timeline is the Work's when-axis peer (Narrative · Moment). Dual entry defaults encode the model — **World first for World building (Timeline, Brief-led); Work first for chapter writing (Outline), with Work Timeline reachable for scene precision.** See [CONCEPTS.md](CONCEPTS.md) § *Three Pillars* and § *Brief* / *Narrative* / *Moment* for the domain-term framing.
+**Spine vs projection** (locked product model — both audiences): **World + Timeline + KnowledgeEntry + Fork** are the *spine* (truth of the narrative universe the service stores and Connect serves); **Work + Outline + Manuscript** are *projections* (the authoring plan and prose bound to a World). Timeline is the World's *when* axis at three scales (Brief · Narrative · Moment); Outline is the Work's structural projection; Work Timeline is the Work's when-axis peer (Narrative · Moment). Dual authoring defaults: **World first for World building (Timeline, Brief-led); Work first for chapter writing (Outline), with Work Timeline for scene precision.** See [CONCEPTS.md](CONCEPTS.md) § *Three Pillars* and § *Brief* / *Narrative* / *Moment*.
 
 ## What we build
 
-Three product surfaces, all open-source, targeting creative writers — novelists, worldbuilders, essayists:
+Three **consumption ends** (no new first-party apps) plus developer-facing assets:
 
-| Surface | Tech | Role | What it does |
-|---------|------|------|-------------|
-| **`nexus42`** | Rust (CLI + daemon) | **Producer** | CLI commands, daemon lifecycle, local HTTP API, orchestration, World KB management |
-| **`web`** | TypeScript (React SPA) | **Consumer** | "Control Room + Setup" UI — served by the daemon, provides the infinite canvas and structured writing interface |
-| **`desktop`** | TypeScript + Tauri v2 (Rust) | **Consumer** | Native desktop shell — wraps the web SPA, adds OS-level capabilities (file open, reveal in Finder, sidecar lifecycle) |
+| Consumption end | Surface | Role |
+|-----------------|---------|------|
+| **Developers** | `nexus42` CLI + Daemon HTTP API + Connect host | Primary audience. Full operator/config surface, module/strategy authoring DX, capability registry, Run Studio, Develop hub. |
+| **Content creators** | `apps/web` + `apps/desktop` (same SPA, **Create** layout) | Reference creator surface: World/Work, Timeline/Outline/KB, findings, memory, guided Run of *installed* modules. Operator chrome hidden. |
+| **Third-party users** | `nexus-runtime` + Connect (PD-09 / FL-R) | End users of *integrator* products. Partner UI lives outside this repo. No first-party player. |
 
-Shared needs they serve:
+| Asset | Role |
+|-------|------|
+| **`nexus42`** (Rust CLI + daemon) | Producer: CLI, daemon lifecycle, local HTTP API, orchestration, World KB |
+| **`web`** (React SPA) | Single SPA, two layout trees (`Create` / `Develop`) selected by User-layer entrance — not a second build |
+| **`desktop`** (Tauri v2) | Native shell of the same SPA (file/OS/sidecar); entrance is a setup-wizard step |
+| **Official compute-module SDK** | Standalone crates.io-publishable crate + shared manifest helper; scaffold/build/validate/install/run without hand-copied ABI |
+| **Strategy / module authoring DX** | CLI groups, validators, embedded skills/demos; strategy canvas as explainability SSOT on the developer layout |
+| **Entrance split** | User-layer identity `developer` \| `content-creator`, orthogonal to agent-layer Creator profiles |
 
-- **Local-first privacy** — data stays on their machine by default; cloud sync is optional
-- **AI agent orchestration** — leverage the user's own local agents (via ACP or native) to assist in writing, worldbuilding, and narrative structuring, without forcing extra tooling burden
-- **Infinite canvas** — visual, non-linear organization of creative material (worlds, outlines, manuscripts, knowledge entries)
-- **Structured narrative tools** — timelines, forks, manuscripts, world knowledge bases — beyond what a plain text editor provides
+Shared: local-first privacy; harness the user's own ACP/native agents; structured narrative spine (timelines, forks, manuscripts, World KB); WASM compute with review-then-apply.
 
 ## What we don't build
 
-- **A cloud platform** — this repo is the open-source CLI/daemon only (the cloud/web platform lives in the private `nexus-platform` repo)
-- **A general-purpose note-taking app** — focus is creative writing, not generic notes
-- **A competing IDE or editor** — we integrate with the user's existing tools and agents, not replace them
+- **A cloud platform** — this repo is the open-source CLI/daemon (cloud/web platform lives in private `nexus-platform`)
+- **A general-purpose note-taking app** — narrative orchestration + reference authoring, not generic notes
+- **A competing IDE or editor** — we integrate with the user's tools and agents, not replace them
+- **A new first-party player app for third-party users** (PD-09) — partners ship their UI; we ship runtime + Connect
+- **An MCP server** (DF-49 cancelled) — CLI is an ACP **client**, not a server
+- **User-authored capability plugin ABI before V1.5+** (DR-10) — configure builtins + modules + presets; browsing the registry ≠ a plugin ABI
 
 ## Guiding Principles
 
-1. **Local-first by default.** Cloud sync is an opt-in feature, never a requirement. The tool works fully offline.
-2. **Wire contracts are truth.** JSON Schema is the single source of truth for all cross-language types. No parallel DTO sets.
-3. **Simplicity over premature abstraction.** Don't abstract before there are three concrete use cases. Don't add features until the pattern is proven.
-4. **Leverage, don't burden.** Directly use the user's local existing Agent infrastructure (ACP or native) — do not introduce extra agents, runtimes, or accounts the user didn't ask for.
+1. **Local-first by default.** Cloud sync is opt-in. The tool works fully offline.
+2. **Wire contracts are truth.** JSON Schema is the single source of truth for cross-language types. No parallel DTO sets.
+3. **Simplicity over premature abstraction.** Don't abstract before three concrete use cases. Don't add features until the pattern is proven.
+4. **Leverage, don't burden.** Use the user's existing local Agent infrastructure (ACP or native) — no extra agents, runtimes, or accounts they didn't ask for.
+5. **SDK and interfaces first.** Developers consume official SDKs, CLI, and registries; first-party UI is a projection of those contracts, not a second implementation.
 
 ## Technology Direction
 
 | Choice | Rationale |
 |--------|-----------|
-| **Rust** for CLI + daemon | Performance, memory safety, strong ecosystem for local-first tools (sqlx, tokio, wasmtime) |
-| **ACP** for agent interoperability | Standard protocol over bespoke — aligns with industry direction; CLI is an ACP client, not a server |
-| **JSON Schema → codegen** | Cross-language contracts from a single source — generates TypeScript (npm) and Rust types |
+| **Rust** for CLI + daemon | Performance, memory safety, local-first ecosystem (sqlx, tokio, wasmtime) |
+| **ACP** for agent interoperability | Standard protocol; CLI is an ACP client, not a server |
+| **JSON Schema → codegen** | Cross-language contracts from one source (TypeScript + Rust) |
 | **SQLite** (via sqlx) | Local-first persistence — simple, portable, zero-ops |
 | **Native WASM host** (via wasmtime) | Embeddable compute without browser dependency |
-| **Axum** for local HTTP API | Modern, type-safe Rust web framework for the local API surface |
-| **React SPA** (`apps/web`) | Local-first Control Room + Setup UI — served by the daemon, Tauri-ready |
-| **Tauri v2** (`apps/desktop`) | Cross-platform desktop shell wrapping the web SPA with native OS capabilities |
-| **Pre-1.0** | Breaking changes expected and allowed; no deprecation period |
+| **Standalone module SDK** (crates.io-publishable) | Guest modules cannot depend on the workspace; official crate owns ABI glue, envelopes, sentinels |
+| **Axum** for local HTTP API | Type-safe Rust web framework for the local API |
+| **React SPA** (`apps/web`) | One daemon-served SPA; Control Room + Setup + dual layout trees |
+| **Entrance split = single SPA, two layouts** | No second web build, no second embed; typed entrance registry + route guards |
+| **Tauri v2** (`apps/desktop`) | Desktop shell of the same SPA; native OS + persisted entrance |
+| **Pre-1.0** | Breaking changes expected; no deprecation period |
 
 ## Decision Log
 
@@ -115,3 +121,4 @@ Shared needs they serve:
 | V1.166 — Quality-loop close-out (DR-64): rules-driven check evaluator + Control Room world-findings/rules surface | **Context:** DR-64 (real run_checker evaluator) was unlocked by V1.165's world findings home; the check callback shipped V1.164 as the mental pair only, `spoke_rules` had no production write path, and world findings were invisible in the product UI. **Decision (grill-me lock):** deterministic structured-constraint evaluator over four families (module_presence/module_absence/required_field/observer_cardinality) with the carrier at `extensions.nexus.constraint` (spoke leaves statement grammar product-owned); world scoping via adapter-crate wrapper `orchestrate_check_world_scoped` adopted by BOTH production callers (daemon + Connect N-C2) with fail-closed foreign/embedded reject — a spoke port split needs a release; CLI-first rule authoring (`creator world rule add/list/deactivate`); read surface at `/worlds/:worldId/findings` (findings panel + rules read-only section, PD-2). NL agent-judge lane deferred (DR-70, dogfood-gated). QC tri caught F-001 (manifest compile guard certifying the pre-wrapper entrypoint) — fixed wave; both plans tri-Approve + QA PASS zero-residual; `wire_contracts_changed: true` (addive world-rules-list-response DTO). | V1.166 (Aug 2026) |
 | V1.167 — Dogfood sweep of the V1.164–166 window + local-only creator bootstrap | **Context:** three consecutive iterations (V1.164–166) shipped without real-surface usage; all three next-iteration candidates (DR-70 NL lane, mental-field authoring, rules UI) were dogfood-gated; separately 3 dependabot alerts on Cargo.lock entries. **Decision (grill-me lock):** dogfood-driven fix round over the full V1.164–166 window with rule-based triage (A must-fix / B tracker candidate / C nit; single consolidated scope gate). Dogfood (P0) validated all lanes and produced an evidence-backed findings register; the one confirmed Class-A (DF-A-02) shipped as `creator register --local` — complete local-only bootstrap materializing BOTH stores (persistent `ctr_local*` identity + active-creator config + workspace `creators` row via new `nexus-local-db::ensure_creator_row`), eliminating the platform-auth dead-end under the paused platform integration and the undocumented HTTP-upsert workaround; dependabot alerts dispositioned with evidence (yamux #41 reachable-in-artifact via connect-host; hickory #42/#43 lockfile-only) — deferral accepted, zero lockfile diff. Gate-notes: DR-70 = N (no four-family expressiveness gap observed), mental-field authoring = Y (DF-81), rules UI = Y (DF-82). `wire_contracts_changed: false`. | V1.167 (Aug 2026) |
 | V1.168 — Native host provider series: external protocol clients + dsh-native | **Context:** Nexus owned vendor wire parsers for the two native Harness rails (`claude --print` line stream; `codex exec --json` hand-rolled JSONL) — brittle under weekly CLI drift; no first-party DeepSeek Harness provider. **Decision (grill-me lock):** complete replace, not a second stack — `claude-native` internals become `claude-codes` (stream-json) and `codex-native` becomes `codex-codes` (**app-server** JSON-RPC), keeping `ProviderAdapter`/`HostEvent`/provider ids/discovery; decode-drift contract locked (unknown variant skip vs typed-decode/stream-abort → single terminal `OpFailed`; no capability raises); new `dsh-native` provider driven by crates.io `deepseek-harness-sdk` with PATH/`DSH_RUNTIME_BIN` discovery and an honest `dsh_limited` descriptor (no incremental streaming/cancel on the SDK surface). QC caught and fix-waved real reliability defects (provider-global lock across frame reads, 180 s frame-gap timeout, stale turn terminal poisoning the next turn, env-route scan invisibility). ACP-first rail unchanged. `wire_contracts_changed: false`. | V1.168 (Aug 2026) |
+| PD-11 — Dual-audience, developer-first pivot | **Context:** 2026-08-20 user-locked direction. Developers are the primary audience; the first-party authoring app is the reference creator surface. Research: `.mstar/projects/_default/research/pivot-developer-first/` (`product-direction-report.md`, `technical-feasibility-report.md`, `decision-lock.md`). **Decision:** STRATEGY vision = local-first narrative-orchestration platform; three consumption ends (CLI+Daemon API / Create layout / nexus-runtime+Connect per PD-09); official compute-module SDK + User-layer entrance split (`developer` \| `content-creator`, orthogonal to agent-layer Creator profiles); no new first-party player, no MCP server (DF-49), no user-authored capability ABI before V1.5+ (DR-10); DF-81 deprioritized. First slice = V1.170 A+B. | V1.170 (2026-08-20) |

@@ -53,9 +53,17 @@ fn main() {
             78
         } else if matches!(e, nexus42::errors::CliError::VersionConflict { .. }) {
             76
+        } else if let nexus42::errors::CliError::ComputeExit { code, .. } = e {
+            // V1.170 P0 (AR-9): the compute group owns its exit-code
+            // vocabulary (1 build, 2 validation, 3 sha mismatch, 4 daemon).
+            code
         } else {
             1
         };
+        // M4: flush stdout before exit — compute commands print status/JSON
+        // to stdout, and `std::process::exit` skips the normal stdout
+        // teardown; piped consumers would lose the buffered tail.
+        let _ = std::io::Write::flush(&mut std::io::stdout());
         std::process::exit(code);
     }
 }
@@ -104,6 +112,9 @@ async fn async_main(cli: Cli) -> Result<()> {
             nexus42::commands::creator::run(command, &config).await
         }
         Some(Commands::Acp { command }) => nexus42::commands::acp::run(command, &config).await,
+        Some(Commands::Compute { command }) => {
+            nexus42::commands::compute::run(command, &config, &output_format).await
+        }
         Some(Commands::AcpWorker(args)) => nexus42::commands::acp_worker::run(args).await,
         Some(Commands::DaemonRun(args)) => nexus42::commands::daemon_run::run(args).await,
         Some(Commands::System { command }) => {

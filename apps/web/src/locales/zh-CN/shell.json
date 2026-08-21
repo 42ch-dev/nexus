@@ -34,11 +34,38 @@
     "compute": "计算",
     "modules": "模块",
     "strategies": "Harness",
-    "settings": "设置"
+    "settings": "设置",
+    "develop": "开发",
+    "findings": "发现"
   },
   "theme": {
     "switchToLight": "切换至浅色主题",
     "switchToDark": "切换至深色主题"
+  },
+  "entrance": {
+    "switchLabel": "切换入口",
+    "bounceToast": "此功能仅在「开发」布局中可用 — 切换入口后使用。",
+    "layout": {
+      "content-creator": "创作",
+      "developer": "开发"
+    },
+    "page": {
+      "title": "你如何使用 Nexus？",
+      "subtitle": "这将选择你的工作区布局。它不是你的写作身份 — 创作者档案保持不变。",
+      "optionsLabel": "工作区布局",
+      "option": {
+        "contentCreator": {
+          "title": "内容创作者",
+          "description": "写作与世界构建。智能体为你提供帮助。你无需安装模块或编辑预设。"
+        },
+        "developer": {
+          "title": "开发者",
+          "description": "在 Nexus 上构建。模块、预设、能力、Connect 以及完整的控制室。"
+        }
+      },
+      "continue": "继续",
+      "persistFailed": "无法保存你的选择"
+    }
   },
   "notFound": {
     "title": "页面未找到",
@@ -147,6 +174,36 @@
     }
   },
   "hub": {
+    "develop": {
+      "title": "开发",
+      "description": "你的完整控制室 — 模块、预设、能力、Connect 等。",
+      "presets": {
+        "title": "预设",
+        "description": "查看并管理你的预设与内置预设。",
+        "count_one": "{{count}} 个预设",
+        "count_other": "{{count}} 个预设"
+      },
+      "capabilities": {
+        "title": "能力",
+        "description": "浏览守护进程提供的内置能力模式。"
+      },
+      "modules": {
+        "title": "计算模块",
+        "description": "安装并运行计算模块。"
+      },
+      "strategyCanvas": {
+        "title": "策略画布",
+        "description": "查看预设如何编排你的策略。"
+      },
+      "runStudio": {
+        "title": "运行工作室",
+        "description": "运行、检查并接受或舍弃计算结果。"
+      },
+      "connect": {
+        "title": "Connect",
+        "description": "主机状态与连接令牌。"
+      }
+    },
     "tabs": {
       "world": "世界",
       "work": "作品",

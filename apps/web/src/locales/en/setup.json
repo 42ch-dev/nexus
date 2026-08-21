@@ -1,5 +1,20 @@
 {
   "step": {
+    "entrance": {
+      "title": "How do you use Nexus?",
+      "description": "This chooses your workspace layout. It is not your writing identity — Creator profiles stay as they are.",
+      "optionsLabel": "Workspace layout",
+      "option": {
+        "contentCreator": {
+          "title": "Content creator",
+          "description": "Write and worldbuild. Agents help you. You do not install modules or edit presets."
+        },
+        "developer": {
+          "title": "Developer",
+          "description": "Build on Nexus. Modules, presets, capabilities, Connect, and the full Control Room."
+        }
+      }
+    },
     "agent": {
       "title": "Choose an agent",
       "description": "Nexus uses an agent to run strategies. Select a discovered agent to continue.",
@@ -17,6 +32,7 @@
   },
   "progress": {
     "label": "Setup progress",
+    "entrance": "Entrance",
     "agent": "Agent",
     "workspace": "Workspace",
     "done": "Done"

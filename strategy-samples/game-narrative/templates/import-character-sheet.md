@@ -123,7 +123,7 @@ the lane's final import manifest:
 }
 ```
 
-## SDK-side import pattern (N-C1, @42ch/spoke-connect@0.9.2)
+## SDK-side import pattern (N-C1, @42ch/spoke-connect@0.11.1)
 
 The partner's backend persists these drafts — the preset itself does not write:
 

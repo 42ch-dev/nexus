@@ -23,6 +23,7 @@ import {
 } from '@web-setup/workspace-path-field';
 
 const STEP_TITLES: Record<WizardStep, string> = {
+  entrance: 'How do you use Nexus?',
   agent: 'Choose an agent',
   workspace: 'Choose a workspace',
   done: "You're ready 🎉",
@@ -290,7 +291,7 @@ export function SetupWizardChromeFixtures() {
     <div data-testid="setup-wizard-chrome-fixtures">
       <FixtureFrame
         title="Steps — agent active"
-        description="Portrait card; top Steps: Agent active; Workspace/Done pending. No left rail."
+        description="Portrait card; top Steps: Entrance complete; Agent active; Workspace/Done pending. No left rail."
         testId="wizard-chrome-steps-agent"
       >
         <WizardChromeCard currentStep="agent" />
@@ -298,7 +299,7 @@ export function SetupWizardChromeFixtures() {
 
       <FixtureFrame
         title="Steps — workspace active"
-        description="Portrait card; Agent complete; Workspace active. Normative CTA: Back left / Continue right."
+        description="Portrait card; Entrance/Agent complete; Workspace active. Normative CTA: Back left / Continue right."
         testId="wizard-chrome-steps-workspace"
       >
         <WizardChromeCard currentStep="workspace" />

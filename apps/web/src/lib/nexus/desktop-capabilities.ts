@@ -18,6 +18,7 @@
  * clipboard write, browser + desktop).
  */
 import { errorMessage } from '@/lib/error-message';
+import { isEntranceId, type EntranceId } from '@/components/layout/entrance-registry';
 import type { DaemonHealth } from './types';
 
 /** Structured error thrown by desktop capability methods. Mirrors the Rust
@@ -90,12 +91,21 @@ export interface DesktopCapabilities {
    */
   setWorkspacePath(path: string): Promise<void>;
   /**
-   * Whether the first-launch setup wizard has been completed.
+  /** Whether the first-launch setup wizard has been completed.
    * Browser build defaults to `true`; desktop reads from Tauri config store.
    */
   getSetupCompleted(): Promise<boolean>;
   /** Mark setup as completed (desktop only). */
   setSetupCompleted(value: boolean): Promise<void>;
+  /**
+   * Read the persisted user-layer entrance (AR-16) from `~/.nexus42/config.toml`.
+   * Missing/unparseable values resolve to `content-creator` (the default) —
+   * never a third state. Command errors throw `DesktopCapabilityError` (the
+   * provider fails open to the default).
+   */
+  getEntrance(): Promise<EntranceId>;
+  /** Persist the user-layer entrance (AR-16) — desktop only. */
+  setEntrance(value: EntranceId): Promise<void>;
   /** Persist the agent profile selected during setup (desktop only). */
   setAgentProfile(name: string, launchCommand?: string): Promise<void>;
   /**
@@ -285,6 +295,26 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
   async setSetupCompleted(value: boolean): Promise<void> {
     try {
       await tauriInvoke().core.invoke<void>('set_setup_completed', { value });
+    } catch (err) {
+      throw asDesktopError(err);
+    }
+  }
+
+  async getEntrance(): Promise<EntranceId> {
+    try {
+      const value = await tauriInvoke().core.invoke<string>('get_entrance');
+      // Stored-but-unparseable resolves content-creator (AR-16) — the Rust
+      // command only ever writes valid values, but a hand-edited config.toml
+      // must not produce a third state.
+      return isEntranceId(value) ? value : 'content-creator';
+    } catch (err) {
+      throw asDesktopError(err);
+    }
+  }
+
+  async setEntrance(value: EntranceId): Promise<void> {
+    try {
+      await tauriInvoke().core.invoke<void>('set_entrance', { value });
     } catch (err) {
       throw asDesktopError(err);
     }

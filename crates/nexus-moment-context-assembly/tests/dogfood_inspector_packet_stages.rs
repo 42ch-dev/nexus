@@ -226,6 +226,9 @@ impl StubDirectiveStore {
     }
 }
 
+// `unused_async_trait_impl` (new in clippy 1.98): the stub performs no async
+// I/O; `async` is by `DirectiveStore` trait contract — toolchain-drift debt.
+#[allow(clippy::unused_async_trait_impl)]
 impl DirectiveStore for StubDirectiveStore {
     async fn load_active(
         &self,

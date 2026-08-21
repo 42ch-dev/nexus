@@ -80,7 +80,9 @@ impl DaemonHsm {
     state(derive(Debug)),
     superstate(derive(Debug))
 )]
-#[allow(clippy::unused_async)]
+// clippy 1.98: `unused_async_trait_impl` (renamed from `unused_async`) — statig
+// still requires async here, see the comment above the #[statig::state_machine] attribute.
+#[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
 impl DaemonHsm {
     /// Starting state: subsystems booting.
     ///

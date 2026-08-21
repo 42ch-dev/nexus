@@ -25,6 +25,10 @@ use nexus_orchestration::worker::{
 /// Each spawned worker gets a mock server task that echoes JSON-RPC requests.
 struct MockSpawner;
 
+// `unused_async_trait_impl` (new in clippy 1.98): `spawn` launches a background
+// mock server via `tokio::spawn` but the outer fn itself never awaits; `async`
+// is by `WorkerSpawner` trait contract — toolchain-drift debt.
+#[allow(clippy::unused_async_trait_impl)]
 impl WorkerSpawner for MockSpawner {
     async fn spawn(
         &self,

@@ -1,0 +1,48 @@
+# modules/_template — SDK hello-world demo module (dice tick)
+#
+# This is the scaffold for new compute modules. Copy the whole directory and
+# adapt it (see modules/README.md — "Scaffold a module"):
+#
+#   cp -R modules/_template modules/my-mod
+#
+# This is a STANDALONE crate: it is NOT a member of the nexus workspace, it is
+# NOT embedded into `nexus-wasm-host` (no MODULE_IDS entry in
+# crates/nexus-wasm-host/build.rs), and it is NOT published. Build it from
+# inside this directory with:
+#
+#   cargo build --release --target wasm32-unknown-unknown
+#
+# or via the CLI authoring loop (daemon-free):
+#
+#   nexus42 compute build --manifest manifest.json --release
+[package]
+name = "template-dice"
+version = "0.1.0"
+edition = "2021"
+authors = ["42ch"]
+license = "Apache-2.0"
+description = "SDK hello-world demo module: deterministic dice roll + state tick on a computable state path (template scaffold)."
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde_json = "1"
+# The official module SDK owns every ABI-facing symbol: `nexus_entry!`
+# generates the `alloc`/`init`/`compute` exports and wires the global
+# allocator (dlmalloc, wasm-target-only) — this crate declares zero
+# `#[no_mangle]` code. Path form for in-repo development (published modules
+# use `nexus-module-sdk = "0.1"`).
+nexus-module-sdk = { path = "../nexus-module-sdk" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Standalone workspace root so `cargo build` here does not traverse up into
+# the nexus workspace.
+[workspace]

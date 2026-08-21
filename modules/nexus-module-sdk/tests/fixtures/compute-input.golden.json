@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "world_ref": {
+    "world_id": "w_abc123",
+    "branch_id": "root",
+    "timeline_head_event_id": "evt_xyz789"
+  },
+  "key_blocks": [
+    {
+      "key_block_id": "kb-def",
+      "block_type": "character",
+      "canonical_name": "Defender",
+      "status": "confirmed",
+      "created_at": "2026-01-01T00:00:00Z",
+      "body": {
+        "attributes": { "max_hp": 100, "base_atk": 10, "base_def": 5 },
+        "state": { "character": { "current_hp": 100, "is_alive": true } }
+      }
+    }
+  ],
+  "narrative_state": {
+    "timeline_position": "chapter_3_scene_2",
+    "current_chapter": "ch3"
+  },
+  "invocation": {
+    "attacker_id": "kb-atk",
+    "defender_id": "kb-def"
+  }
+}

@@ -963,6 +963,10 @@ struct PassthroughSummarizer {
 /// Maximum allowed digest size in bytes (256 KiB). R-V133P4-06.
 const MAX_DIGEST_BYTES: usize = 256 * 1024;
 
+// `unused_async_trait_impl` (new in clippy 1.98): `summarize` is a passthrough
+// that performs no async I/O; `async` is by `SessionDigestSummarizer` trait
+// contract — toolchain-drift debt.
+#[allow(clippy::unused_async_trait_impl)]
 impl nexus_creator_memory::review::SessionDigestSummarizer for PassthroughSummarizer {
     async fn summarize(
         &self,

@@ -703,6 +703,10 @@ describe('Surfaces page — setup wizard chrome fixtures', () => {
 
   it('maps step statuses for the workspace-active matrix', () => {
     const card = screen.getByTestId('wizard-chrome-card-workspace');
+    expect(card.querySelector('[data-step-id="entrance"]')).toHaveAttribute(
+      'data-step-status',
+      'complete',
+    );
     expect(card.querySelector('[data-step-id="agent"]')).toHaveAttribute(
       'data-step-status',
       'complete',
@@ -726,13 +730,14 @@ describe('Surfaces page — setup wizard chrome fixtures', () => {
     expect(activeCircle).toHaveClass('text-setup-wizard-step-circle-active-text');
   });
 
-  it('shows numbered step circles (1–3) on the agent fixture', () => {
+  it('shows numbered step circles (1–4) on the agent fixture', () => {
     const card = screen.getByTestId('wizard-chrome-card-agent');
     const circles = card.querySelectorAll('[data-step-id] span.rounded-full');
-    expect(circles).toHaveLength(3);
+    expect(circles).toHaveLength(4);
     expect(circles[0]).toHaveTextContent('1');
     expect(circles[1]).toHaveTextContent('2');
     expect(circles[2]).toHaveTextContent('3');
+    expect(circles[3]).toHaveTextContent('4');
   });
 
   it('uses a single horizontal Back / Continue CTA row on workspace', () => {
@@ -794,7 +799,7 @@ describe('Surfaces page — setup wizard chrome fixtures', () => {
   it('renders horizontal connectors between top steps', () => {
     const card = screen.getByTestId('wizard-chrome-card-agent');
     const connectors = card.querySelectorAll('[data-testid="step-connector"]');
-    expect(connectors.length).toBe(2);
+    expect(connectors.length).toBe(3);
     connectors.forEach((el) => {
       expect(el).toHaveClass('bg-setup-wizard-step-connector', 'h-px');
     });

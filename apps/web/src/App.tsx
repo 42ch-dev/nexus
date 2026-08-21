@@ -7,6 +7,11 @@ import {
   DefaultProfileCoordinator,
 } from '@/lib/active-creator-context';
 import { SetupCompletedProvider } from '@/lib/setup-completed-context';
+import { EntranceProvider } from '@/lib/entrance-context';
+import {
+  EntranceGuard,
+  EntranceIndexRedirect,
+} from '@/components/layout/entrance-guard';
 import { RootLayout } from '@/components/layout/root-layout';
 import { SettingsModalHost } from '@/components/layout/settings-modal-host';
 import {
@@ -27,6 +32,7 @@ import { SessionsPage } from '@/pages/sessions-page';
 import { WorkShellLayout } from '@/components/layout/work-shell-layout';
 import { CreatorHubPage } from '@/pages/creator-hub-page';
 import { SetupWizardPage } from '@/pages/setup-wizard-page';
+import { EntrancePage } from '@/pages/entrance-page';
 import { StrategiesPage } from '@/pages/strategies-page';
 import { LoadingState } from '@/components/ui/states';
 
@@ -81,6 +87,20 @@ const WorldFindingsPage = lazy(() =>
   import('@/pages/world-findings-page').then((m) => ({ default: m.WorldFindingsPage })),
 );
 
+// Route-split: the Develop hub (V1.170 P1 — AR-18) is the developer-entrance
+// land route. Lazy-loaded like the canvas routes so the hub chunk stays out
+// of the bootstrap path (canvases keep React Flow out; the hub is static cards).
+const DeveloperHubPage = lazy(() =>
+  import('@/pages/developer-hub-page').then((m) => ({ default: m.DeveloperHubPage })),
+);
+
+// Route-split: the Capability browser is a Develop-tree-only surface (V1.170
+// P1 — EL-6; Create bounces). Lazy-loaded like the hub so the Create-default
+// bootstrap stays lean (plan QC S-2/F-3 — chunk symmetry with /developer).
+const CapabilitiesPage = lazy(() =>
+  import('@/pages/capabilities-page').then((m) => ({ default: m.CapabilitiesPage })),
+);
+
 /**
  * App routes — Control Room + Setup shell.
  *
@@ -111,8 +131,23 @@ function AppRoutes() {
   return (
     <Routes location={routesLocation}>
       <Route path="setup" element={<SetupWizardPage />} />
-      <Route element={<SetupGate><RootLayout /></SetupGate>}>
-        <Route index element={<Navigate to="/works" replace />} />
+      {/* V1.170 P1 (AR-16/AR-20) — entrance identity page. Standalone (sibling
+          of /setup, outside the gated tree): first-run land for unset browser
+          installs + the footer switch control's destination. Only Continue
+          persists. */}
+      <Route path="entrance" element={<EntrancePage />} />
+      <Route
+        element={
+          <SetupGate>
+            <EntranceGuard>
+              <RootLayout />
+            </EntranceGuard>
+          </SetupGate>
+        }
+      >
+        {/* V1.170 P1 (AR-18) — index redirect is entrance-aware: Create → /works,
+            Develop → /developer. `landRoute` is the single source. */}
+        <Route index element={<EntranceIndexRedirect />} />
         {/* V1.123 P3 Task 1 — global Timeline entry in primary nav.
             Cross-World overview composed client-side; sibling of `/works`
             and `/worlds`. Per-World Timeline stays at
@@ -202,7 +237,19 @@ function AppRoutes() {
         </Route>
         <Route path="sessions" element={<SessionsPage />} />
         <Route path="schedule" element={<SchedulePage />} />
-        <Route path="capabilities" element={<Navigate to="/sessions" replace />} />
+        {/* V1.170 P1 (EL-6) — capability browser restored as a live Develop-tree
+            surface (read-only builtin capability schemas from
+            GET /v1/daemon/orchestration/capabilities). The V1.120 P2 soft-remove
+            redirect is replaced by the entrance guard: Create bounces to
+            `/works`, Develop renders the browser (AR-15/AR-19). */}
+        <Route
+          path="capabilities"
+          element={
+            <Suspense fallback={<LoadingState label="Loading Capability browser…" />}>
+              <CapabilitiesPage />
+            </Suspense>
+          }
+        />
         {/* Compatibility only — Settings modal owns Modules (V1.131 P2). */}
         <Route path="modules" element={<ModulesPage />} />
         <Route path="findings" element={<FindingsPage />} />
@@ -221,6 +268,17 @@ function AppRoutes() {
           path="connect"
           element={<Navigate to="/settings/advanced#connection" replace />}
         />
+        {/* V1.170 P1 (AR-18) — Develop hub v1: developer-entrance land route.
+            Develop-only (guard-bounced on Create); lazy-split with the other
+            route-split pages. */}
+        <Route
+          path="developer"
+          element={
+            <Suspense fallback={<LoadingState label="Loading Develop hub…" />}>
+              <DeveloperHubPage />
+            </Suspense>
+          }
+        />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
@@ -236,8 +294,13 @@ export function App() {
               pre-boot `/v1/daemon/creators*` traffic during dist-load startup. */}
           <DefaultProfileCoordinator />
           <SettingsModalProvider>
-            <AppRoutes />
-            <SettingsModalHost />
+            <EntranceProvider>
+              <AppRoutes />
+              {/* Inside EntranceProvider so the modal rail can filter by the
+                  resolved entrance (W-2). Rendered after AppRoutes — the
+                  Dialog overlays the route tree either way. */}
+              <SettingsModalHost />
+            </EntranceProvider>
           </SettingsModalProvider>
         </DaemonLaunchGate>
       </SetupCompletedProvider>
