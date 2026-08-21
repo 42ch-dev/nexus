@@ -14,5 +14,26 @@
     "preset": "Preset",
     "coreCtx": "Core ctx",
     "updated": "Updated"
+  },
+  "create": {
+    "title": "Create schedule",
+    "description": "Queue a preset run on the daemon.",
+    "trigger": "Create schedule",
+    "presetLabel": "Preset",
+    "presetPlaceholder": "Select a preset",
+    "presetRequired": "Select a preset to schedule.",
+    "genericError": "Could not create the schedule. Check the daemon message above and try again.",
+    "presetLoading": "Loading presets…",
+    "presetEmpty": "No presets available.",
+    "labelLabel": "Label (optional)",
+    "labelPlaceholder": "e.g. Daily digest",
+    "seedLabel": "Seed (optional)",
+    "seedPlaceholder": "Initial context for the preset",
+    "seedHint": "Sent as the preset's initial context.",
+    "submit": "Create",
+    "creating": "Creating…",
+    "toastCreated": "Schedule created",
+    "noCreatorTitle": "No active Creator",
+    "noCreatorDescription": "Select a Creator in the footer to create schedules."
   }
 }

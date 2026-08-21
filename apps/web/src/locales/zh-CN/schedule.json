@@ -14,5 +14,26 @@
     "preset": "预设",
     "coreCtx": "核心上下文",
     "updated": "更新时间"
+  },
+  "create": {
+    "title": "创建日程",
+    "description": "在守护进程中排队运行预设。",
+    "trigger": "创建日程",
+    "presetLabel": "预设",
+    "presetPlaceholder": "选择预设",
+    "presetRequired": "请选择要排队的预设。",
+    "genericError": "无法创建日程。请查看上方守护进程消息后重试。",
+    "presetLoading": "正在加载预设…",
+    "presetEmpty": "没有可用的预设。",
+    "labelLabel": "标签（可选）",
+    "labelPlaceholder": "例如：每日摘要",
+    "seedLabel": "种子（可选）",
+    "seedPlaceholder": "预设的初始上下文",
+    "seedHint": "将作为预设的初始上下文发送。",
+    "submit": "创建",
+    "creating": "正在创建…",
+    "toastCreated": "日程已创建",
+    "noCreatorTitle": "没有活动的创作者",
+    "noCreatorDescription": "请在页脚选择一个创作者以创建日程。"
   }
 }

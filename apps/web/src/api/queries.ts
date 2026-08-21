@@ -503,6 +503,43 @@ export function useCreateWorld() {
   });
 }
 
+export interface CreateScheduleArgs {
+  creatorId: string;
+  presetId: string;
+  label?: string;
+  seed?: string;
+}
+
+/**
+ * Create a schedule (V1.171 P2 — PL-15/PL-16). Wraps the existing
+ * `POST /v1/daemon/orchestration/schedules` endpoint with the honest
+ * `AddScheduleRequest` fields only (preset + optional label/seed — no new
+ * scheduler fields, no firing-cadence promise). Invalidates the schedules
+ * list on success so the new row renders (same pattern as the canvas
+ * `useRunStrategy` precedent).
+ */
+export function useCreateSchedule() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  const { t } = useTranslation('schedule');
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (args: CreateScheduleArgs) =>
+      client.addSchedule({
+        creator_id: args.creatorId,
+        preset_id: args.presetId,
+        ...(args.label ? { label: args.label } : {}),
+        ...(args.seed ? { seed: args.seed } : {}),
+      }),
+    onSuccess: (_data, args) => {
+      toast({ variant: 'success', title: t('create.toastCreated'), description: args.presetId });
+      void qc.invalidateQueries({ queryKey: queryKeys.schedules.all });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotCreateSchedule'),
+  });
+}
+
 export function usePatchWork() {
   const client = useNexusClient();
   const qc = useQueryClient();
