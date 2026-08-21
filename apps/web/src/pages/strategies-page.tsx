@@ -287,7 +287,12 @@ function CatalogRow({
                 <span className="text-copy-12 text-gray-700">{t('catalog.pathConnectDetail')}</span>
               </li>
             )}
-            {lanes.wallClock && <li className="text-copy-13 text-gray-900">{t('catalog.pathDaemon')}</li>}
+            {lanes.wallClock && (
+              <li className="flex flex-col gap-0.5">
+                <span className="text-copy-13 text-gray-900">{t('catalog.pathDaemon')}</span>
+                <span className="text-copy-12 text-gray-700">{t('catalog.pathDaemonDetail')}</span>
+              </li>
+            )}
             {lanes.cron && (
               <li className="flex flex-col gap-0.5">
                 <span className="text-copy-13 text-gray-900">{t('catalog.pathCron')}</span>

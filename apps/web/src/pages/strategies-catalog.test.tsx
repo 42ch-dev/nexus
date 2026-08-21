@@ -121,11 +121,20 @@ describe('StrategyCatalog', () => {
     expect(await within(row).findByTestId('catalog-trigger-game-narrative')).toHaveTextContent('Trigger');
     expect(within(row).getByTestId('catalog-scheduled-game-narrative')).toHaveTextContent('Scheduled');
     // Honest entry paths: Connect-declared → backend owns the loop; daemon
-    // schedule → requires creator daemon. No Work-cron row (cron: false).
+    // schedule → requires creator daemon, explained as a wall-clock poller
+    // (no cron recurrence) whose `scheduled_at` is a schedule field, not a
+    // next-fire clock (PL-11). No Work-cron row (cron: false).
     const paths = await within(row).findByTestId('catalog-paths-game-narrative');
     expect(paths).toHaveTextContent('Your backend owns the loop');
     expect(paths).toHaveTextContent('Requires creator daemon');
+    expect(paths).toHaveTextContent(
+      "Daemon schedule admission on a wall-clock tick — no cron recurrence. The schedule's `scheduled_at` is a schedule field, not a next-fire clock.",
+    );
     expect(paths).not.toHaveTextContent('Work cron roles');
+
+    // PL-12: no fabricated next-run clock anywhere on the row.
+    expect(within(row).queryByText(/next run at/i)).not.toBeInTheDocument();
+    expect(within(row).queryByText(/next fire at/i)).not.toBeInTheDocument();
   });
 
   it('labels Work cron roles distinctly from the wall-clock poller (PL-9 row 3)', async () => {

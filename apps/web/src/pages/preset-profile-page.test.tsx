@@ -6,8 +6,9 @@
  * capability-schema browser — all from the P0 profile fields consumed via
  * NexusClient (AR-27). A missing profile renders a graceful summary (id +
  * list facts), never a hard error implying the preset is gone (PL-13).
- * Declared signals render plainly; the "Declared, not delivered" honesty
- * copy is P1 T3 (PL-10).
+ * Trigger lanes render with the locked vocabulary (PL-11) and declared
+ * signals render "Declared, not delivered" with a lifecycle pointer (PL-10);
+ * no next-run clock is fabricated (PL-12).
  */
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -187,17 +188,67 @@ describe('PresetProfilePage', () => {
     );
   });
 
-  it('renders declared signals plainly — no delivery claim, no honesty block (PL-10 left to T3)', async () => {
+  it('renders declared signals as "Declared, not delivered" with a lifecycle pointer (PL-10)', async () => {
     useHandlers(listHandler(), profileHandler(RICH_PROFILE));
 
     renderProfile('game-narrative');
 
-    const pause = await screen.findByTestId('profile-signal-pause');
+    // Honesty badge — locked vocabulary (AR-25 parity with `preset show`).
+    const badge = await screen.findByTestId('profile-signals-not-delivered');
+    expect(badge).toHaveTextContent('Declared, not delivered');
+
+    // Card copy: declared ≠ delivered; nothing fires them at runtime; not
+    // bindable webhooks; lifecycle runs through the signal actions.
+    const card = screen.getByTestId('profile-signals');
+    expect(card).toHaveTextContent(
+      'declared, not delivered. Nothing fires them at runtime and they are not bindable webhooks',
+    );
+    expect(card).toHaveTextContent(
+      'Lifecycle control runs through the signal actions: start / pause / resume / cancel / advance.',
+    );
+
+    // Declared metadata still renders (name / action / target).
+    const pause = screen.getByTestId('profile-signal-pause');
     expect(pause).toHaveTextContent('pause');
     expect(pause).toHaveTextContent('Action: pause');
     const stop = screen.getByTestId('profile-signal-stop');
     expect(stop).toHaveTextContent('Action: force_transition');
     expect(stop).toHaveTextContent('Target: ending');
+
+    // No delivery/bind UI exists in the card — no buttons or links that
+    // could offer webhook binding / "deliver this signal".
+    expect(within(card).queryByRole('button')).not.toBeInTheDocument();
+    expect(within(card).queryByRole('link')).not.toBeInTheDocument();
+  });
+
+  it('shows the trigger-lane classification with locked vocabulary and no fabricated next-fire (PL-11, PL-12)', async () => {
+    useHandlers(listHandler(), profileHandler(RICH_PROFILE));
+
+    renderProfile('game-narrative');
+
+    const lanesCard = await screen.findByTestId('profile-lanes');
+    expect(lanesCard).toHaveTextContent('Trigger lanes');
+
+    // Classification is read from the profile flags — session/direct
+    // (trigger), wall-clock schedule, Work-role cron — with yes/no presence.
+    expect(screen.getByTestId('profile-lane-cron-no')).toHaveTextContent('No');
+    expect(screen.getByTestId('profile-lane-wallclock-yes')).toHaveTextContent('Yes');
+    expect(screen.getByTestId('profile-lane-session-yes')).toHaveTextContent('Yes');
+    expect(screen.getByTestId('profile-lane-direct-yes')).toHaveTextContent('Yes');
+
+    // Locked vocabulary: cron is per-Work roles (and timezone), not the
+    // wall-clock poller; `scheduled_at` is a schedule field, not a
+    // fabricated next-fire clock.
+    expect(screen.getByTestId('profile-lane-cron')).toHaveTextContent(
+      'Per-Work cron with roles (brainstorm / write / review) and timezone — not the wall-clock poller.',
+    );
+    expect(screen.getByTestId('profile-lane-wallclock')).toHaveTextContent(
+      '`scheduled_at` is a schedule field, not a next-fire clock.',
+    );
+
+    // PL-12: no fabricated next-run clock anywhere on the profile page.
+    expect(screen.queryByText(/next run at/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/next fire at/i)).not.toBeInTheDocument();
   });
 
   it('degrades gracefully when the profile is missing — id + list facts, not a "preset gone" error (PL-13)', async () => {
@@ -261,6 +312,11 @@ describe('PresetProfilePage', () => {
     renderProfile('user/foo');
 
     expect(await screen.findByTestId('profile-id')).toHaveTextContent('user/foo');
+    // No-lane preset: every classification renders honestly as "No".
+    expect(screen.getByTestId('profile-lane-cron-no')).toHaveTextContent('No');
+    expect(screen.getByTestId('profile-lane-wallclock-no')).toHaveTextContent('No');
+    expect(screen.getByTestId('profile-lane-session-no')).toHaveTextContent('No');
+    expect(screen.getByTestId('profile-lane-direct-no')).toHaveTextContent('No');
     expect(screen.getByText('No states declared.')).toBeInTheDocument();
     expect(screen.getByText('Single-agent preset — no roles declared.')).toBeInTheDocument();
     expect(screen.getByText('No required capabilities declared.')).toBeInTheDocument();

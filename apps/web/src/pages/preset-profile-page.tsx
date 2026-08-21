@@ -10,8 +10,11 @@
  *
  * A missing profile renders a graceful summary — preset id + list facts
  * (source) — never a hard error implying the preset is gone when the list
- * already showed it (PL-13). The `signals` field renders plainly here; the
- * "Declared, not delivered" honesty copy is P1 T3 (PL-10).
+ * already showed it (PL-13). The trigger-lane classification renders with
+ * the locked vocabulary (PL-11 — cron vs wall-clock poller vs `scheduled_at`)
+ * and declared `signals` render with the PL-10 honesty copy ("Declared, not
+ * delivered" + lifecycle pointer). No next-run value exists in the profile,
+ * so none is fabricated (PL-12).
  *
  * Route: the canvas stays at `/strategies/:presetId` (PL-14 write-boundary
  * preserved); this view is a sibling at a trailing `/profile` segment
@@ -47,6 +50,44 @@ function exitWhenSummary(exitWhen: PresetProfileExitWhen): string {
     return `timer · ${exitWhen.duration}`;
   }
   return exitWhen.kind;
+}
+
+/**
+ * Trigger-lane classification row (PL-3 locked vocabulary; PL-11/PL-12).
+ *
+ * Renders the lane's presence honestly (Yes/No from the profile flags) with
+ * the locked vocabulary detail. The profile carries no next-fire value, so
+ * no next-run clock is shown or derived.
+ */
+function LaneRow({
+  testId,
+  label,
+  present,
+  detail,
+}: {
+  testId: string;
+  label: string;
+  present: boolean;
+  detail: string;
+}) {
+  const { t } = useTranslation('strategies');
+  return (
+    <li
+      className="flex flex-col gap-1 rounded-card border border-gray-alpha-400 p-3"
+      data-testid={testId}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-copy-13-mono text-gray-1000">{label}</span>
+        <Badge
+          variant={present ? 'running' : 'neutral'}
+          data-testid={`${testId}-${present ? 'yes' : 'no'}`}
+        >
+          {present ? t('profile.laneYes') : t('profile.laneNo')}
+        </Badge>
+      </div>
+      <span className="text-copy-12 text-gray-700">{detail}</span>
+    </li>
+  );
 }
 
 /** Human-readable next-transition summary for a state (never a fabricated
@@ -172,7 +213,7 @@ export function PresetProfilePage() {
     return <EmptyState title={t('profile.unavailableTitle')} />;
   }
 
-  const { states, roles, requiredCapabilities, signals } = data;
+  const { lanes, states, roles, requiredCapabilities, signals } = data;
 
   return (
     <div className="flex flex-col gap-4">
@@ -198,6 +239,41 @@ export function PresetProfilePage() {
           </Badge>
         </div>
       </div>
+
+      <Card className="shadow-card" data-testid="profile-lanes">
+        <CardHeader>
+          <CardTitle>{t('profile.lanesTitle')}</CardTitle>
+          <CardDescription>{t('profile.lanesDescription')}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ul className="flex flex-col gap-2">
+            <LaneRow
+              testId="profile-lane-cron"
+              label={t('profile.laneCron')}
+              present={lanes.cron}
+              detail={t('profile.laneCronDetail')}
+            />
+            <LaneRow
+              testId="profile-lane-wallclock"
+              label={t('profile.laneWallClock')}
+              present={lanes.wallClock}
+              detail={t('profile.laneWallClockDetail')}
+            />
+            <LaneRow
+              testId="profile-lane-session"
+              label={t('profile.laneSession')}
+              present={lanes.session}
+              detail={t('profile.laneSessionDetail')}
+            />
+            <LaneRow
+              testId="profile-lane-direct"
+              label={t('profile.laneDirect')}
+              present={lanes.direct}
+              detail={t('profile.laneDirectDetail')}
+            />
+          </ul>
+        </CardContent>
+      </Card>
 
       <Card className="shadow-card" data-testid="profile-states">
         <CardHeader>
@@ -329,7 +405,14 @@ export function PresetProfilePage() {
 
       <Card className="shadow-card" data-testid="profile-signals">
         <CardHeader>
-          <CardTitle>{t('profile.signalsTitle')}</CardTitle>
+          <div className="flex flex-wrap items-center gap-2">
+            <CardTitle>{t('profile.signalsTitle')}</CardTitle>
+            {signals && signals.length > 0 && (
+              <Badge variant="warning" data-testid="profile-signals-not-delivered">
+                {t('profile.signalsNotDelivered')}
+              </Badge>
+            )}
+          </div>
           <CardDescription>{t('profile.signalsDescription')}</CardDescription>
         </CardHeader>
         <CardContent>
