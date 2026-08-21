@@ -189,6 +189,21 @@ export function SchedulePage() {
               </TableBody>
             </Table>
           )}
+          {/* F-011: Works beyond the first page are reachable — bounded
+              load-more keeps the cron editor discoverable for >20 Works. */}
+          {works.hasNextPage && (
+            <div className="mt-3 flex justify-center">
+              <Button
+                type="button"
+                variant="secondary"
+                size="small"
+                onClick={() => works.fetchNextPage()}
+                disabled={works.isFetchingNextPage}
+              >
+                {works.isFetchingNextPage ? t('workCron.loadingMore') : t('workCron.loadMore')}
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 

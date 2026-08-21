@@ -585,7 +585,9 @@ export function useEditSchedule() {
  * `PUT /v1/daemon/works/{work_id}/cron` with the CAS pre-image
  * (`expected_current_json`) the caller captured from a prior GET. A 409
  * conflict surfaces via the error toast; the caller re-GETs and re-applies.
- * Invalidates the Work's cron query on success.
+ * Invalidates the Work's cron query AND the works tree on success — the PUT
+ * bumps `works.updated_at`, so the schedule page's Works table must refresh
+ * its "Updated" column (F-009).
  */
 export function usePutWorkCron() {
   const client = useNexusClient();
@@ -596,6 +598,9 @@ export function usePutWorkCron() {
       client.putWorkCron(vars.workId, vars.request),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({ queryKey: queryKeys.worksCron.detail(vars.workId) });
+      // F-009: the PUT bumps works.updated_at; refetch the Works lists so the
+      // row timestamp refreshes after a cron save.
+      void qc.invalidateQueries({ queryKey: queryKeys.works.all });
     },
     onError: (error) => errorToast(error, 'error.couldNotUpdateWorkCron'),
   });

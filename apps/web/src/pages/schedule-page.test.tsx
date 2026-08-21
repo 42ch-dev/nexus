@@ -288,6 +288,39 @@ describe('SchedulePage', () => {
     expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
   });
 
+  it('distinguishes a preset fetch failure from an empty catalog with a retry (F-010)', async () => {
+    const user = userEvent.setup();
+    let fail = true;
+    useHandlers(
+      http.get('/v1/daemon/works', () => HttpResponse.json(WORKS_EMPTY)),
+      http.get('/v1/daemon/orchestration/schedules', () => HttpResponse.json(SCHEDULES_EMPTY)),
+      http.get('/v1/daemon/presets', () =>
+        fail
+          ? HttpResponse.json(
+              { success: false, error: { code: 'internal', message: 'daemon down' } },
+              { status: 503 },
+            )
+          : HttpResponse.json(PRESETS),
+      ),
+    );
+
+    renderScheduleWithCreator();
+
+    await screen.findByText('No schedules');
+    await user.click(screen.getByRole('button', { name: 'Create schedule' }));
+    await screen.findByRole('heading', { name: 'Create schedule' });
+
+    // Fetch failure reads as an error — never as "no presets".
+    expect(screen.getByText('Could not load presets.')).toBeInTheDocument();
+    expect(screen.queryByText('No presets available.')).not.toBeInTheDocument();
+
+    // Retry after recovery renders the real catalog.
+    fail = false;
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    await screen.findByRole('option', { name: 'user/foo' });
+    expect(screen.queryByText('Could not load presets.')).not.toBeInTheDocument();
+  });
+
   // ── V1.171 P2 edit journey (PL-16/AR-29) ─────────────────────────────────
 
   const SCHEDULE_ROW = {
@@ -559,6 +592,118 @@ describe('SchedulePage', () => {
     const error = await screen.findByTestId('work-cron-error');
     expect(error).toHaveTextContent('E_CRON_INVALID_EXPR');
     expect(error).toHaveTextContent('invalid cron expression');
+  });
+
+  // ── V1.171 P2 QC fix wave (F-008/F-009) ─────────────────────────────────
+
+  it('shows the error state with a working retry when the initial cron GET fails (F-008)', async () => {
+    const user = userEvent.setup();
+    let fail = true;
+    useHandlers(
+      http.get('/v1/daemon/presets', () => HttpResponse.json(PRESETS)),
+      http.get('/v1/daemon/orchestration/schedules', () => HttpResponse.json(SCHEDULES_EMPTY)),
+      http.get('/v1/daemon/works', () =>
+        HttpResponse.json({ items: [WORK_ROW], pagination: { limit: 20, has_more: false } }),
+      ),
+      http.get('/v1/daemon/works/work-1/cron', () =>
+        fail
+          ? HttpResponse.json(
+              { success: false, error: { code: 'internal', message: 'daemon down' } },
+              { status: 503 },
+            )
+          : HttpResponse.json(CRON_DEFAULTS),
+      ),
+    );
+
+    renderScheduleWithCreator();
+
+    await screen.findByText('My Novel');
+    await user.click(screen.getByRole('button', { name: 'Edit cron for Work work-1' }));
+    await screen.findByRole('heading', { name: 'Edit Work cron' });
+
+    // First failure must reach the error branch — not the infinite spinner.
+    expect(screen.getByText('Could not load the cron config.')).toBeInTheDocument();
+    expect(screen.queryByText('Loading cron config…')).not.toBeInTheDocument();
+
+    // Retry after the daemon recovers lands on the form.
+    fail = false;
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    await screen.findByDisplayValue('0 3,9,15,21 * * *');
+    expect(screen.queryByText('Could not load the cron config.')).not.toBeInTheDocument();
+  });
+
+  it('refetches the Works tree after a cron save so the Updated column refreshes (F-009)', async () => {
+    const user = userEvent.setup();
+    let worksCalls = 0;
+    useHandlers(
+      http.get('/v1/daemon/presets', () => HttpResponse.json(PRESETS)),
+      http.get('/v1/daemon/orchestration/schedules', () => HttpResponse.json(SCHEDULES_EMPTY)),
+      http.get('/v1/daemon/works', () => {
+        worksCalls += 1;
+        return HttpResponse.json({ items: [WORK_ROW], pagination: { limit: 20, has_more: false } });
+      }),
+      http.get('/v1/daemon/works/work-1/cron', () => HttpResponse.json(CRON_DEFAULTS)),
+      http.put('/v1/daemon/works/work-1/cron', () =>
+        HttpResponse.json({ ...CRON_DEFAULTS, is_default: false }),
+      ),
+    );
+
+    renderScheduleWithCreator();
+
+    await screen.findByText('My Novel');
+    const callsBefore = worksCalls;
+    await user.click(screen.getByRole('button', { name: 'Edit cron for Work work-1' }));
+    await screen.findByRole('heading', { name: 'Edit Work cron' });
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    // Save invalidates works.all → the Works list refetches (Updated column
+    // reflects the bumped works.updated_at).
+    await waitFor(() => expect(worksCalls).toBeGreaterThan(callsBefore));
+    await screen.findByText('My Novel');
+  });
+
+  it('offers a bounded load-more affordance for Works beyond the first page (F-011)', async () => {
+    const user = userEvent.setup();
+    const WORK_PAGE_2 = {
+      work_id: 'work-2',
+      title: 'Second Novel',
+      status: 'active',
+      intake_status: 'active',
+      primary_preset_id: 'novel-writing',
+      updated_at: '2026-06-25T00:00:00Z',
+    };
+    useHandlers(
+      http.get('/v1/daemon/presets', () => HttpResponse.json(PRESETS)),
+      http.get('/v1/daemon/orchestration/schedules', () => HttpResponse.json(SCHEDULES_EMPTY)),
+      http.get('/v1/daemon/works', ({ request }) => {
+        const url = new URL(request.url);
+        return HttpResponse.json(
+          url.searchParams.has('cursor')
+            ? { items: [WORK_PAGE_2], pagination: { limit: 20, has_more: false, next_cursor: null } }
+            : {
+                items: [WORK_ROW],
+                pagination: { limit: 20, has_more: true, next_cursor: '20' },
+              },
+        );
+      }),
+    );
+
+    renderScheduleWithCreator();
+
+    // Page 1 renders; page 2's Work is not yet visible.
+    await screen.findByText('My Novel');
+    expect(screen.queryByText('Second Novel')).not.toBeInTheDocument();
+    const loadMore = screen.getByRole('button', { name: 'Load more' });
+    expect(loadMore).toBeInTheDocument();
+
+    // Loading page 2 makes the second Work's cron editor reachable.
+    await user.click(loadMore);
+    await screen.findByText('Second Novel');
+    expect(screen.getByRole('button', { name: 'Edit cron for Work work-2' })).toBeInTheDocument();
+    // Bounded: once no further page exists the affordance disappears.
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument(),
+    );
   });
 
   // ── V1.171 P2 delete journey (PL-15/AR-31) ────────────────────────────────

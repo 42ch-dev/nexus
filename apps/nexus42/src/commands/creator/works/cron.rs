@@ -62,8 +62,11 @@ impl From<nexus_orchestration::schedule::work_schedule::CronValidationError> for
 
 /// Resolve a stored `schedule_json` blob into an effective [`WorkSchedule`].
 ///
-/// Empty/NULL/absent/unparseable → all defaults (spec §2.3). A partial blob is
-/// not merged field-by-field: malformed JSON falls back to defaults so the
+/// Thin CLI-side wrapper over the shared core
+/// [`WorkSchedule::resolve`](nexus_orchestration::schedule::work_schedule::WorkSchedule::resolve)
+/// (F-006: the daemon HTTP surface and the CLI now share one resolver).
+/// Empty/NULL/absent/unparseable → all defaults (spec §2.3). A partial blob
+/// is not merged field-by-field: malformed JSON falls back to defaults so the
 /// daemon never fires from a corrupt schedule.
 ///
 /// # Errors
@@ -71,10 +74,7 @@ impl From<nexus_orchestration::schedule::work_schedule::CronValidationError> for
 /// Does not error — falls back to defaults on any malformation.
 #[must_use]
 pub fn resolve_schedule(stored: Option<&str>) -> WorkSchedule {
-    let Some(json) = stored.filter(|s| !s.is_empty()) else {
-        return WorkSchedule::defaults();
-    };
-    serde_json::from_str::<WorkSchedule>(json).unwrap_or_else(|_| WorkSchedule::defaults())
+    WorkSchedule::resolve(stored).0
 }
 
 // ── CLI set-args application ─────────────────────────────────────────────

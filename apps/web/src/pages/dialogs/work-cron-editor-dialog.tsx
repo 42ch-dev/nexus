@@ -141,7 +141,7 @@ export function WorkCronEditorDialog({
         title={t('workCron.title')}
         description={t('workCron.description', { work: workTitle })}
       >
-        {cron.isLoading || !form ? (
+        {cron.isLoading && !form ? (
           <p className="text-copy-13 text-gray-700">{t('workCron.loading')}</p>
         ) : cron.isError ? (
           <div className="flex flex-col gap-3">
@@ -150,13 +150,22 @@ export function WorkCronEditorDialog({
               type="button"
               variant="secondary"
               size="small"
-              onClick={() => cron.refetch()}
+              onClick={() => {
+                // Retry resets the form on success so the error branch is
+                // reachable on the first failure too (F-008: the initial GET
+                // error previously dead-ended in the loading branch).
+                setConflict(false);
+                setError(null);
+                void cron.refetch().then((res) => {
+                  if (res.data) setForm(formFromResponse(res.data));
+                });
+              }}
               className="self-start"
             >
               {t('workCron.retry')}
             </Button>
           </div>
-        ) : (
+        ) : form ? (
           <div className="flex flex-col gap-4">
             {cron.data?.is_default && (
               <p
@@ -260,6 +269,11 @@ export function WorkCronEditorDialog({
               </Button>
             </div>
           </div>
+        ) : (
+          // Unreachable in practice: form initializes from the first
+          // successful GET (F-008 keeps the error branch reachable), so this
+          // only renders while data is settling without a pending fetch.
+          <p className="text-copy-13 text-gray-700">{t('workCron.loading')}</p>
         )}
       </DialogContent>
     </Dialog>

@@ -44,6 +44,8 @@
     "worksLoading": "正在加载作品…",
     "worksEmptyTitle": "暂无作品",
     "worksEmptyDescription": "创建作品后将显示在此处。",
+    "loadMore": "加载更多",
+    "loadingMore": "正在加载更多…",
     "columns": {
       "work": "作品",
       "status": "状态",
@@ -82,6 +84,7 @@
     "presetRequired": "请选择要排队的预设。",
     "genericError": "无法创建日程。请查看上方守护进程消息后重试。",
     "presetLoading": "正在加载预设…",
+    "presetError": "无法加载预设。",
     "presetEmpty": "没有可用的预设。",
     "labelLabel": "标签（可选）",
     "labelPlaceholder": "例如：每日摘要",

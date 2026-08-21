@@ -44,6 +44,8 @@
     "worksLoading": "Loading Works…",
     "worksEmptyTitle": "No Works",
     "worksEmptyDescription": "Works appear here once a Work exists.",
+    "loadMore": "Load more",
+    "loadingMore": "Loading more…",
     "columns": {
       "work": "Work",
       "status": "Status",
@@ -82,6 +84,7 @@
     "presetRequired": "Select a preset to schedule.",
     "genericError": "Could not create the schedule. Check the daemon message above and try again.",
     "presetLoading": "Loading presets…",
+    "presetError": "Could not load presets.",
     "presetEmpty": "No presets available.",
     "labelLabel": "Label (optional)",
     "labelPlaceholder": "e.g. Daily digest",

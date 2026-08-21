@@ -476,6 +476,11 @@ fn works_routes() -> Router<WorkspaceState> {
         // ── Per-Work cron config routes (V1.171 P2 AR-29) ────────────────
         // Serve / update `works.schedule_json`; validated against the shared
         // cron/TZ validation core (same stable codes as `creator works cron`).
+        // Note: the cron handlers live in `handlers::orchestration::schedules`
+        // (get_work_cron / put_work_cron), NOT `handlers::works` — the work-cron
+        // domain is the schedule model (shared core in nexus-orchestration,
+        // AR-29); other Works sub-resources (chapters, findings, inspiration)
+        // stay under `handlers::works`.
         .route(
             "/v1/daemon/works/:work_id/cron",
             get(handlers::orchestration::schedules::get_work_cron)

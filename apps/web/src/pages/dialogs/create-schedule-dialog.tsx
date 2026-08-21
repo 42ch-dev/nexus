@@ -44,6 +44,9 @@ export function CreateScheduleDialog({
     }
   }, [open]);
 
+  // PL-8: the create catalog offers USER + embedded presets only. The
+  // `system` group is intentionally excluded — system presets are the
+  // operator's boot sessions, not authorable schedule targets (F-012).
   const presetOptions = [
     ...(presets.data?.user ?? []),
     ...(presets.data?.embedded ?? []),
@@ -79,6 +82,21 @@ export function CreateScheduleDialog({
             <Label htmlFor="schedule-preset">{t('create.presetLabel')}</Label>
             {presets.isLoading ? (
               <p className="text-copy-13 text-gray-700">{t('create.presetLoading')}</p>
+            ) : presets.isError ? (
+              // F-010: a failed preset fetch must read as an error (with
+              // retry), not as "no presets available".
+              <div className="flex flex-col gap-2">
+                <p className="text-copy-13 text-red-1000">{t('create.presetError')}</p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="small"
+                  onClick={() => presets.refetch()}
+                  className="self-start"
+                >
+                  {t('common:error.retry')}
+                </Button>
+              </div>
             ) : presetOptions.length === 0 ? (
               <p className="text-copy-13 text-gray-700">{t('create.presetEmpty')}</p>
             ) : (

@@ -25,6 +25,7 @@
 #![allow(clippy::missing_errors_doc)]
 
 use crate::api::errors::NexusApiError;
+use crate::api::handlers::works::read_active_creator_id;
 use crate::api::pagination::{decode_offset_cursor, encode_offset_cursor};
 use crate::api::sort::parse_sort_terms;
 use crate::workspace::WorkspaceState;
@@ -1391,30 +1392,54 @@ pub async fn edit_schedule(
 ///
 /// Returns the stored `works.schedule_json` (or the spec defaults when the
 /// column is unset/empty), plus the `is_default` honesty marker (AR-29).
+///
+/// Creator-scoped (F-001): the Work must belong to the active creator —
+/// foreign or unknown `work_id` → 404, mirroring the Works handler pattern
+/// (`read_active_creator_id` + `works::get_work`).
+///
+/// When the stored blob is non-empty but unparseable, the config is served
+/// honestly as a 400 with the stable `E_CRON_INVALID_STORED` code (F-004):
+/// the editor must not render resolved defaults with `is_default: false` and
+/// then dead-end in a CAS 409 loop — the client should show "stored config
+/// unreadable — repair via CLI".
 pub async fn get_work_cron(
     state: State<WorkspaceState>,
     Path(work_id): Path<String>,
 ) -> Result<Json<WorkCronResponse>, NexusApiError> {
     let pool = state.pool().ok_or(NexusApiError::Uninitialized)?;
 
-    // The work must exist — the cron column is a per-Work sub-resource.
-    let exists: Option<(String,)> = sqlx::query_as("SELECT work_id FROM works WHERE work_id = ?")
-        .bind(&work_id)
-        .fetch_optional(pool)
+    // F-001: creator scoping — foreign or unknown work → 404 (not readable).
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+    if nexus_local_db::works::get_work(pool, &creator_id, &work_id)
         .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: format!("database error: {e}"),
-        })?;
-    if exists.is_none() {
+        .map_err(local_db_error)?
+        .is_none()
+    {
         return Err(NexusApiError::NotFound(format!("work {work_id} not found")));
     }
 
     let stored = nexus_local_db::works::get_schedule_json(pool, &work_id)
         .await
         .map_err(local_db_error)?;
-    let schedule = resolve_work_schedule(stored.as_deref());
-    let is_default = stored.is_none();
+    // F-002: empty string ≡ unset (spec §2.3) — a stored "" surfaces as
+    // defaults with is_default: true, matching set_schedule_json_tx's
+    // COALESCE normalization.
+    if let Some(raw) = stored.as_deref().filter(|s| !s.is_empty()) {
+        // F-004: present-but-unparseable stored blob → honest 400 with a
+        // stable code, never a defaulted response the client would fight
+        // with a CAS pre-image it cannot byte-match.
+        if serde_json::from_str::<WorkSchedule>(raw).is_err() {
+            return Err(NexusApiError::BadRequest {
+                code: "E_CRON_INVALID_STORED".to_string(),
+                message: "[E_CRON_INVALID_STORED] stored schedule_json for this Work is \
+                          unreadable; repair it via `nexus42 creator works cron set` \
+                          (the editor cannot safely replace it while it is malformed)"
+                    .to_string(),
+            });
+        }
+    }
+    let (schedule, is_default) = WorkSchedule::resolve(stored.as_deref());
 
     Ok(Json(work_schedule_to_response(schedule, is_default)))
 }
@@ -1437,16 +1462,15 @@ pub async fn put_work_cron(
 ) -> Result<Json<WorkCronResponse>, NexusApiError> {
     let pool = state.pool().ok_or(NexusApiError::Uninitialized)?;
 
-    // The work must exist — the cron column is a per-Work sub-resource.
-    let exists: Option<(String,)> = sqlx::query_as("SELECT work_id FROM works WHERE work_id = ?")
-        .bind(&work_id)
-        .fetch_optional(pool)
+    // F-001: creator scoping — foreign or unknown work → 404 (not
+    // readable/overwritable), mirroring the Works handler pattern.
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+    if nexus_local_db::works::get_work(pool, &creator_id, &work_id)
         .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: format!("database error: {e}"),
-        })?;
-    if exists.is_none() {
+        .map_err(local_db_error)?
+        .is_none()
+    {
         return Err(NexusApiError::NotFound(format!("work {work_id} not found")));
     }
 
@@ -1479,50 +1503,27 @@ pub async fn put_work_cron(
         message: format!("schedule_json serialization failed: {e}"),
     })?;
 
-    // CAS pre-image resolution. The guard is optional: when the caller passes
-    // `expected_current_json` it must match the stored blob (NULL and "" are
-    // both "unset", spec §2.3); when absent the PUT is an unconditional write
-    // (same semantics as the CLI calling `set_schedule_json_tx` with the
-    // current value — callers that want conflict detection GET first and pass
-    // the blob back, which round-trips byte-for-byte). Re-read the row just
-    // before the write so the pre-check is against the freshest state;
-    // `set_schedule_json_tx` then makes the check-and-write atomic for the
-    // guarded case.
+    // CAS pre-image resolution. F-002: the tx-level CAS in
+    // `set_schedule_json_tx` is the single authority — it normalizes NULL
+    // and "" as equal (COALESCE) and distinguishes missing-work → 404 from
+    // mismatch → 409 by re-reading the row, so no handler-side pre-check is
+    // needed. An absent pre-image is guarded against the fresh pre-read
+    // (TOCTOU protection — R-V150P0-W5), not an unconditional write.
     let stored = nexus_local_db::works::get_schedule_json(pool, &work_id)
         .await
         .map_err(local_db_error)?;
-    match body.expected_current_json.as_deref() {
-        // Concrete (non-empty) pre-image: must byte-match the stored blob.
-        Some(expected) if !expected.trim().is_empty() => {
-            if stored.as_deref().is_none_or(|current| current != expected) {
-                return Err(cron_cas_conflict_err());
-            }
-        }
-        // Empty-string pre-image means "stored must currently be unset"
-        // (spec §2.3: NULL and "" are both defaults).
-        Some(_) if stored.is_some() => return Err(cron_cas_conflict_err()),
-        // Match (or no pre-image → unconditional write; the CAS guard is
-        // optional) — proceed.
-        _ => {}
-    }
-
-    // `updated_at` on `works` is a text column; the CLI writes RFC3339.
-    let now = chrono::Utc::now().to_rfc3339();
-
     let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {
         code: "DATABASE_ERROR".into(),
         message: format!("transaction begin failed: {e}"),
     })?;
-    // The tx-level CAS guard. With a caller pre-image the write is guarded on
-    // that blob; without one the guard is the fresh pre-read itself, so a
-    // concurrent writer between read and write still fails the CAS instead of
-    // silently clobbering (same TOCTOU protection the CLI's read→CAS-write
-    // path gets — R-V150P0-W5).
     let tx_expected: Option<&str> = match body.expected_current_json.as_deref() {
         Some(expected) if expected.trim().is_empty() => None,
         Some(expected) => Some(expected),
+        // Guard the absent-pre-image write against the fresh pre-read so a
+        // concurrent writer still fails the CAS instead of clobbering.
         None => stored.as_deref(),
     };
+    let now = chrono::Utc::now().to_rfc3339();
     let applied =
         nexus_local_db::works::set_schedule_json_tx(&mut tx, &work_id, tx_expected, &blob, &now)
             .await
@@ -1569,15 +1570,6 @@ fn cron_cas_conflict_err() -> NexusApiError {
          latest config (pass its schedule_json as expected_current_json)"
             .to_string(),
     )
-}
-
-/// Resolve a stored `schedule_json` blob into the shared `WorkSchedule`
-/// (unset/empty/malformed → spec defaults).
-fn resolve_work_schedule(stored: Option<&str>) -> WorkSchedule {
-    let Some(json) = stored.filter(|s| !s.is_empty()) else {
-        return WorkSchedule::defaults();
-    };
-    serde_json::from_str::<WorkSchedule>(json).unwrap_or_else(|_| WorkSchedule::defaults())
 }
 
 /// Convert the shared `WorkSchedule` into the wire `WorkCronResponse`.

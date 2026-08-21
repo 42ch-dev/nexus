@@ -138,6 +138,31 @@ impl WorkSchedule {
     pub const fn all_roles_disabled(&self) -> bool {
         !self.roles.brainstorm.enabled && !self.roles.write.enabled && !self.roles.review.enabled
     }
+
+    /// Resolve a stored `schedule_json` blob into the effective schedule.
+    ///
+    /// This is the single "unset/empty/malformed → defaults" resolver shared
+    /// by every surface (CLI `creator works cron`, daemon HTTP
+    /// `GET/PUT /v1/daemon/works/{work_id}/cron`, evaluator consumers):
+    /// - NULL/absent or empty-string stored → spec defaults,
+    ///   `is_default: true` (spec §2.3: empty ≡ unset);
+    /// - unparseable non-empty stored → spec defaults with `is_default:
+    ///   false`. The blob is present but unreadable; surfaces decide how to
+    ///   surface that honestly (the daemon HTTP GET returns a 400 with the
+    ///   stable `E_CRON_INVALID_STORED` code so the UI shows a repair
+    ///   message instead of a CAS 409 loop; the CLI renders defaults).
+    ///
+    /// F-006 (V1.171 P2 QC fix wave): folds the previously duplicated
+    /// `resolve_schedule` (CLI) / `resolve_work_schedule` (daemon) helpers
+    /// into one shared core so no future surface drifts again.
+    #[must_use]
+    pub fn resolve(stored: Option<&str>) -> (Self, bool) {
+        let Some(json) = stored.filter(|s| !s.is_empty()) else {
+            return (Self::defaults(), true);
+        };
+        serde_json::from_str::<Self>(json)
+            .map_or_else(|_| (Self::defaults(), false), |schedule| (schedule, false))
+    }
 }
 
 /// Validate a 5-field cron expression via the `cron` crate.
@@ -257,6 +282,38 @@ mod tests {
         let err = validate_tz("Mars/Olympus").unwrap_err();
         assert_eq!(err.code, ERR_INVALID_TZ);
         assert!(err.message.contains(ERR_INVALID_TZ));
+    }
+
+    #[test]
+    fn resolve_none_returns_defaults_with_marker() {
+        let (s, is_default) = WorkSchedule::resolve(None);
+        assert_eq!(s, WorkSchedule::defaults());
+        assert!(is_default);
+    }
+
+    #[test]
+    fn resolve_empty_returns_defaults_with_marker() {
+        let (s, is_default) = WorkSchedule::resolve(Some(""));
+        assert_eq!(s, WorkSchedule::defaults());
+        assert!(is_default, "empty string ≡ unset (spec §2.3)");
+    }
+
+    #[test]
+    fn resolve_malformed_returns_defaults_without_marker() {
+        let (s, is_default) = WorkSchedule::resolve(Some("{not json"));
+        assert_eq!(s, WorkSchedule::defaults());
+        assert!(!is_default, "present-but-unreadable blob is not 'unset'");
+    }
+
+    #[test]
+    fn resolve_valid_round_trips_without_marker() {
+        let blob = r#"{"tz":"Asia/Shanghai","roles":{"brainstorm":{"cron":"0 9 * * *","enabled":true},"write":{"cron":"0 10 * * *","enabled":false},"review":{"cron":"0,30 * * * *","enabled":true}}}"#;
+        let (s, is_default) = WorkSchedule::resolve(Some(blob));
+        assert_eq!(s.tz, "Asia/Shanghai");
+        assert_eq!(s.roles.brainstorm.cron, "0 9 * * *");
+        assert!(s.roles.brainstorm.enabled);
+        assert!(!s.roles.write.enabled);
+        assert!(!is_default);
     }
 
     #[test]

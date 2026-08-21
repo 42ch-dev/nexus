@@ -284,7 +284,8 @@ export interface WorkCronResponse {
  * complete `WorkSchedule` shape; `expected_current_json` is the optional CAS
  * pre-image — the exact stored `schedule_json` blob that must match for the
  * write to apply. Empty/whitespace means "must currently be unset"; absent
- * means an unconditional write.
+ * means the write is guarded against the current stored value read at write
+ * time (snapshot CAS — never unconditional).
  */
 export interface UpdateWorkCronRequest {
   /** IANA timezone string. Daemon converts to UTC for cron firing. */
