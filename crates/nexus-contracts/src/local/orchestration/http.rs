@@ -159,3 +159,195 @@ pub struct ListPresetsResponse {
     /// Loadable preset IDs.
     pub presets: Vec<String>,
 }
+
+/// Response body for `GET /v1/daemon/orchestration/presets/{id}/profile` (AR-20..23).
+///
+/// A manifest-derived profile for any resolvable preset (embedded, user, or
+/// `_system.` qualified system preset). Every field is a pure read of the
+/// already-loaded preset — no invented defaults; manifest fields the preset
+/// does not carry serialize absent (AR-21).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetProfileResponse {
+    /// Preset identifier from the loaded manifest (`LoadedPreset.id`).
+    pub id: String,
+    /// Preset schema version.
+    pub version: u32,
+    /// blake3 hex hash of the source YAML (identity across restarts).
+    pub source_hash: String,
+    /// Trigger-lane classification derived from the manifest + works-cron
+    /// role membership (AR-21).
+    pub lanes: PresetProfileLanes,
+    /// Ordered outer state-machine states.
+    pub states: Vec<PresetProfileState>,
+    /// Role definitions (empty = single-agent mode).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub roles: Vec<PresetProfileRole>,
+    /// Capabilities this preset requires.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_capabilities: Vec<String>,
+    /// Declared signal bindings (declared, not delivered).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signals: Vec<PresetProfileSignal>,
+}
+
+/// Trigger-lane classification for a preset profile.
+///
+/// `cron` is derived per-preset from works-cron role membership (the
+/// brainstorm / write / review role presets). The remaining lanes are
+/// platform facts: the daemon schedule and session-start APIs accept any
+/// resolvable preset id, so every resolvable preset can fire on the
+/// wall-clock poller, via session start, or via a direct run with an
+/// explicit payload.
+//
+// The four bools are a 1:1 mirror of the locked trigger-lane vocabulary
+// (PL-3: cron / wall-clock / session / direct) — a flat wire DTO, not a
+// state machine. Refactoring into enums would change the JSON shape the
+// CLI `preset show --json` must match verbatim (AR-25).
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetProfileLanes {
+    /// Cron (Work roles): this preset id is one of the works-cron role
+    /// presets (brainstorm / write / review per `RolesSchedule`).
+    pub cron: bool,
+    /// Wall-clock poller: daemon schedule admission on a wall-clock tick.
+    pub wall_clock: bool,
+    /// Session start: `POST /v1/daemon/orchestration/sessions` / run path.
+    pub session: bool,
+    /// Direct run: schedule start with an explicit run payload.
+    pub direct: bool,
+}
+
+/// A single state in the outer state machine.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetProfileState {
+    /// Unique state identifier within this preset.
+    pub id: String,
+    /// Optional human-readable description.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Enter action kinds (`capability` / `inner_graph` / `host_tool`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub enter: Vec<PresetProfileEnterAction>,
+    /// Exit condition kind (`llm_judge` / `rule` / `graph_complete` /
+    /// `manual` / `timer`); absent for terminal states.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_when: Option<PresetProfileExitWhen>,
+    /// Next transition form (`linear` / `goNogo` / `labeled` /
+    /// `conditional` / `branches`); absent for terminal states.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next: Option<PresetProfileNext>,
+    /// Whether this state is terminal (no outgoing transitions).
+    pub terminal: bool,
+}
+
+/// A single enter action on a state.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetProfileEnterAction {
+    /// Action kind: `capability`, `inner_graph`, or `host_tool`.
+    pub kind: String,
+    /// Referenced name: capability name, inner graph name, or tool name.
+    pub name: String,
+}
+
+/// Exit condition for a state.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetProfileExitWhen {
+    /// Exit condition kind: `llm_judge` / `rule` / `graph_complete` /
+    /// `manual` / `timer`.
+    pub kind: String,
+    /// Judge prompt template path (`llm_judge`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template_file: Option<String>,
+    /// Judge capability name (`llm_judge`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judge_capability: Option<String>,
+    /// Minimum interval between re-evaluations (`llm_judge`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_interval: Option<String>,
+    /// ISO-8601 duration to wait (`timer`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration: Option<String>,
+}
+
+/// Next transition form for a state.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetProfileNext {
+    /// Next form: `linear` / `goNogo` / `labeled` / `conditional` /
+    /// `branches`.
+    pub kind: String,
+    /// Linear target state id (`linear`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    /// GO target state id (`goNogo`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub go: Option<String>,
+    /// NOGO target state id (`goNogo`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nogo: Option<String>,
+    /// Labeled edges (`labeled`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labeled: Vec<PresetProfileLabeledNext>,
+    /// Conditional rules (`conditional` legacy form).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<PresetProfileConditionalRule>,
+    /// Expression branches (`branches` form).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub branches: Vec<PresetProfileConditionalRule>,
+    /// Default target state id (`conditional` / `branches`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<String>,
+}
+
+/// A labeled next edge (`labeled` form).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetProfileLabeledNext {
+    /// Label the judge returns to select this edge.
+    pub label: String,
+    /// Target state id.
+    pub target: String,
+}
+
+/// A conditional rule (expression → target edge).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetProfileConditionalRule {
+    /// Expression evaluated against context.
+    pub when: String,
+    /// Target state id if the expression evaluates to true.
+    pub target: String,
+}
+
+/// A role definition for multi-agent presets.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetProfileRole {
+    /// Unique role ID within this preset.
+    pub id: String,
+    /// Human-readable description.
+    pub description: String,
+    /// Path to the system prompt template (relative to the bundle root).
+    pub system_prompt_file: String,
+    /// Recommended skill slugs (ordered; first = primary).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recommended_skills: Vec<String>,
+}
+
+/// A declared signal binding (declared, not delivered).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetProfileSignal {
+    /// Declared signal name.
+    pub name: String,
+    /// Action kind on receive: `pause` / `force_transition`.
+    pub action: String,
+    /// Target state id (`force_transition`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+}
