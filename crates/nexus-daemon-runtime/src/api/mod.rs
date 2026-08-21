@@ -120,7 +120,9 @@ fn orchestration_routes() -> Router<WorkspaceState> {
         .route(
             "/v1/daemon/orchestration/schedules/:schedule_id",
             get(handlers::orchestration::schedules::inspect_schedule)
-                .delete(handlers::orchestration::schedules::delete_schedule),
+                .delete(handlers::orchestration::schedules::delete_schedule)
+                // V1.171 P2 AR-29: edit label/metadata.
+                .patch(handlers::orchestration::schedules::edit_schedule),
         )
         .route(
             "/v1/daemon/orchestration/schedules/:schedule_id/core-context",
@@ -470,6 +472,14 @@ fn works_routes() -> Router<WorkspaceState> {
         .route(
             "/v1/daemon/works/:work_id/reconcile-chapters",
             post(handlers::works::reconcile_chapters),
+        )
+        // ── Per-Work cron config routes (V1.171 P2 AR-29) ────────────────
+        // Serve / update `works.schedule_json`; validated against the shared
+        // cron/TZ validation core (same stable codes as `creator works cron`).
+        .route(
+            "/v1/daemon/works/:work_id/cron",
+            get(handlers::orchestration::schedules::get_work_cron)
+                .put(handlers::orchestration::schedules::put_work_cron),
         )
         // ── Chapter content sub-routes (V1.65 P0) ────────────────────────
         // Nest chapter routes under /v1/daemon/works/:work_id/chapters so the

@@ -43,6 +43,7 @@ use tracing::{debug, info, warn};
 use crate::preset_ids::{
     NOVEL_BRAINSTORM_PRESET_ID, NOVEL_REVIEW_MASTER_PRESET_ID, NOVEL_WRITE_PRESET_ID,
 };
+use crate::schedule::work_schedule::normalize_cron_fields;
 
 /// Canonical role names (spec §2.1).
 const ROLE_BRAINSTORM: &str = "brainstorm";
@@ -90,11 +91,11 @@ impl CronFireSummary {
 
 // ── Per-Work cron config (minimal serde mirror of spec §2.1) ───────────────
 //
-// The full `WorkSchedule` model lives in `nexus42::commands::creator::works::cron`
-// (the CLI surface). The daemon evaluator cannot depend on the CLI crate
-// (circular: nexus42 → nexus-orchestration), so this module defines a minimal
-// mirror that parses the same JSON shape (spec §2.1). `Option` fields make a
-// partial config robust — a missing role simply does not fire.
+// The full `WorkSchedule` model + validation core now lives in the shared
+// [`super::work_schedule`] module (V1.171 P2 AR-29 unification). The daemon
+// evaluator still parses through this minimal mirror: `Option` fields make a
+// partial config robust — a missing role simply does not fire, and the
+// evaluator's parse tolerance is intentionally unchanged.
 
 #[derive(Debug, Deserialize)]
 struct CronConfig {
@@ -638,22 +639,6 @@ fn cron_fires_at_minute_for_work(
             .clone()
     };
     schedule_fires_at_minute(&schedule, tz, now)
-}
-
-/// Normalize a cron expression to the `cron` crate's ≥6-field format.
-///
-/// 5-field input (standard crontab) → prepend `0 ` (seconds=0). 6/7-field input
-/// is returned unchanged. Mirrors the CLI-side normalizer in
-/// `nexus42::commands::creator::works::cron::normalize_cron_fields` so the
-/// daemon and CLI interpret expressions identically (spec §2.1 / §3.1).
-fn normalize_cron_fields(expr: &str) -> String {
-    let trimmed = expr.trim();
-    let field_count = trimmed.split_whitespace().count();
-    if field_count == 5 {
-        format!("0 {trimmed}")
-    } else {
-        trimmed.to_string()
-    }
 }
 
 /// Is there an active (pending/running/paused) schedule for `(work_id, preset_id)`?

@@ -36,8 +36,9 @@ use axum::{
 use nexus_contracts::local::schedule::http::{
     AddScheduleRequest, AddScheduleResponse, CoreContextHistoryEntry, CoreContextHistoryResponse,
     CoreContextResponse, DeleteScheduleResponse, EditCoreContextRequest, EditCoreContextResponse,
-    InspectScheduleResponse, ListSchedulesQuery, ListSchedulesResponse, ScheduleConcurrencyRequest,
-    ScheduleSummary, SignalScheduleRequest, SignalScheduleResponse,
+    EditScheduleRequest, InspectScheduleResponse, ListSchedulesQuery, ListSchedulesResponse,
+    ScheduleConcurrencyRequest, ScheduleSummary, SignalScheduleRequest, SignalScheduleResponse,
+    UpdateWorkCronRequest, WorkCronResponse, WorkCronRoleDto, WorkCronRolesDto,
 };
 use nexus_contracts::local::schedule::{
     CoreContextAuthor, CoreContextVersion, EditOp, Schedule, ScheduleConcurrency, ScheduleId,
@@ -47,6 +48,7 @@ use nexus_contracts::PaginationInfo;
 use nexus_orchestration::preset_gates::{
     GateEvalError, PreviousPresetLookup, PreviousPresetResult,
 };
+use nexus_orchestration::schedule::work_schedule::{validate_cron_expr, validate_tz, WorkSchedule};
 use sqlx::Row;
 use std::sync::Arc;
 
@@ -1283,6 +1285,339 @@ pub async fn delete_schedule(
         StatusCode::OK,
         Json(DeleteScheduleResponse { deleted: true }),
     ))
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /schedules/{schedule_id} — Edit label/metadata (V1.171 P2 AR-29)
+// ---------------------------------------------------------------------------
+
+/// Maximum label length, matching the module's `MAX_REASON_LEN` precedent.
+const MAX_LABEL_LEN: usize = 512;
+
+/// `PATCH /v1/daemon/orchestration/schedules/{schedule_id}` — edit the
+/// schedule's label/metadata (AR-29).
+///
+/// Only label is updateable today. Status / core-context have dedicated
+/// endpoints (AR-31); this endpoint never touches them. Unknown id → 404;
+/// the response is the updated [`ScheduleSummary`].
+pub async fn edit_schedule(
+    state: State<WorkspaceState>,
+    Path(schedule_id): Path<String>,
+    Json(body): Json<EditScheduleRequest>,
+) -> Result<(StatusCode, Json<ScheduleSummary>), NexusApiError> {
+    let pool = state.pool().ok_or(NexusApiError::Uninitialized)?;
+
+    if let Some(label) = &body.label {
+        if label.len() > MAX_LABEL_LEN {
+            return Err(NexusApiError::BadRequest {
+                code: "invalid_label".into(),
+                message: format!(
+                    "label exceeds maximum length ({MAX_LABEL_LEN} chars); got {} chars",
+                    label.len()
+                ),
+            });
+        }
+    }
+
+    // 404 fast-path: the schedule must exist before any write.
+    let exists: Option<(String,)> =
+        sqlx::query_as("SELECT schedule_id FROM creator_schedules WHERE schedule_id = ?")
+            .bind(&schedule_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: format!("database error: {e}"),
+            })?;
+    if exists.is_none() {
+        return Err(NexusApiError::NotFound(format!(
+            "schedule {schedule_id} not found"
+        )));
+    }
+
+    // `label` is only touched when the body provides one — an absent field
+    // preserves the column, `Some("")` clears it to NULL. A PATCH always
+    // bumps `updated_at` (last-edited stamp stays honest).
+    // `label` is only touched when the body provides one — an absent field
+    // preserves the column, `Some("")` clears it to NULL. A PATCH always
+    // bumps `updated_at` (last-edited stamp stays honest).
+    let now = chrono::Utc::now().timestamp();
+    if body.label.is_some() {
+        // `Some("")` → NULL (clear); `Some("…")` → the label.
+        let label_value: Option<&str> = body.label.as_deref().filter(|l| !l.is_empty());
+        sqlx::query("UPDATE creator_schedules SET label = ?, updated_at = ? WHERE schedule_id = ?")
+            .bind(label_value)
+            .bind(now)
+            .bind(&schedule_id)
+            .execute(pool)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: format!("database error: {e}"),
+            })?;
+    } else {
+        sqlx::query("UPDATE creator_schedules SET updated_at = ? WHERE schedule_id = ?")
+            .bind(now)
+            .bind(&schedule_id)
+            .execute(pool)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: format!("database error: {e}"),
+            })?;
+    }
+
+    // Read back the summary with the fresh updated_at.
+    let row = sqlx::query_as::<_, InspectRow>(
+        "SELECT schedule_id, creator_id, preset_id, status, label,
+                current_core_context_version, created_at, updated_at,
+                concurrency_kind, concurrency_whitelist
+         FROM creator_schedules WHERE schedule_id = ?",
+    )
+    .bind(&schedule_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("database error: {e}"),
+    })?;
+
+    Ok((StatusCode::OK, Json(row.into_summary())))
+}
+
+// ---------------------------------------------------------------------------
+// GET/PUT /v1/daemon/works/{work_id}/cron — per-Work cron config (V1.171 P2 AR-29)
+// ---------------------------------------------------------------------------
+
+/// `GET /v1/daemon/works/{work_id}/cron` — serve the effective per-Work cron
+/// configuration.
+///
+/// Returns the stored `works.schedule_json` (or the spec defaults when the
+/// column is unset/empty), plus the `is_default` honesty marker (AR-29).
+pub async fn get_work_cron(
+    state: State<WorkspaceState>,
+    Path(work_id): Path<String>,
+) -> Result<Json<WorkCronResponse>, NexusApiError> {
+    let pool = state.pool().ok_or(NexusApiError::Uninitialized)?;
+
+    // The work must exist — the cron column is a per-Work sub-resource.
+    let exists: Option<(String,)> = sqlx::query_as("SELECT work_id FROM works WHERE work_id = ?")
+        .bind(&work_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("database error: {e}"),
+        })?;
+    if exists.is_none() {
+        return Err(NexusApiError::NotFound(format!("work {work_id} not found")));
+    }
+
+    let stored = nexus_local_db::works::get_schedule_json(pool, &work_id)
+        .await
+        .map_err(local_db_error)?;
+    let schedule = resolve_work_schedule(stored.as_deref());
+    let is_default = stored.is_none();
+
+    Ok(Json(work_schedule_to_response(schedule, is_default)))
+}
+
+/// `PUT /v1/daemon/works/{work_id}/cron` — replace the per-Work cron
+/// configuration (full-body `WorkSchedule` replacement, CAS-guarded).
+///
+/// Validation reuses the shared cron/TZ validators + stable codes
+/// (`E_CRON_INVALID_EXPR` / `E_CRON_INVALID_TZ`), the same core the CLI uses.
+/// The write goes through `nexus_local_db::works::set_schedule_json_tx`
+/// (compare-and-swap on the stored pre-image): a mismatch → 409 conflict with
+/// a retry hint; the work is missing → 404.
+///
+/// The stored blob is the `WorkSchedule` shape only (`tz` + `roles`);
+/// `expected_current_json` is a CAS guard and never lands in the stored JSON.
+pub async fn put_work_cron(
+    state: State<WorkspaceState>,
+    Path(work_id): Path<String>,
+    Json(body): Json<UpdateWorkCronRequest>,
+) -> Result<Json<WorkCronResponse>, NexusApiError> {
+    let pool = state.pool().ok_or(NexusApiError::Uninitialized)?;
+
+    // The work must exist — the cron column is a per-Work sub-resource.
+    let exists: Option<(String,)> = sqlx::query_as("SELECT work_id FROM works WHERE work_id = ?")
+        .bind(&work_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("database error: {e}"),
+        })?;
+    if exists.is_none() {
+        return Err(NexusApiError::NotFound(format!("work {work_id} not found")));
+    }
+
+    // Build the shared model from the wire body and validate against the
+    // shared cron/TZ validation core (stable codes preserved).
+    let schedule = WorkSchedule {
+        tz: body.tz.clone(),
+        roles: nexus_orchestration::schedule::work_schedule::RolesSchedule {
+            brainstorm: nexus_orchestration::schedule::work_schedule::RoleSchedule {
+                cron: body.roles.brainstorm.cron.clone(),
+                enabled: body.roles.brainstorm.enabled,
+            },
+            write: nexus_orchestration::schedule::work_schedule::RoleSchedule {
+                cron: body.roles.write.cron.clone(),
+                enabled: body.roles.write.enabled,
+            },
+            review: nexus_orchestration::schedule::work_schedule::RoleSchedule {
+                cron: body.roles.review.cron.clone(),
+                enabled: body.roles.review.enabled,
+            },
+        },
+    };
+    validate_cron_schedule(&body).map_err(|e| NexusApiError::BadRequest {
+        code: e.code.to_string(),
+        message: e.message,
+    })?;
+
+    let blob = serde_json::to_string(&schedule).map_err(|e| NexusApiError::Internal {
+        code: "INTERNAL_ERROR".into(),
+        message: format!("schedule_json serialization failed: {e}"),
+    })?;
+
+    // CAS pre-image resolution. The guard is optional: when the caller passes
+    // `expected_current_json` it must match the stored blob (NULL and "" are
+    // both "unset", spec §2.3); when absent the PUT is an unconditional write
+    // (same semantics as the CLI calling `set_schedule_json_tx` with the
+    // current value — callers that want conflict detection GET first and pass
+    // the blob back, which round-trips byte-for-byte). Re-read the row just
+    // before the write so the pre-check is against the freshest state;
+    // `set_schedule_json_tx` then makes the check-and-write atomic for the
+    // guarded case.
+    let stored = nexus_local_db::works::get_schedule_json(pool, &work_id)
+        .await
+        .map_err(local_db_error)?;
+    match body.expected_current_json.as_deref() {
+        // Concrete (non-empty) pre-image: must byte-match the stored blob.
+        Some(expected) if !expected.trim().is_empty() => {
+            if stored.as_deref().is_none_or(|current| current != expected) {
+                return Err(cron_cas_conflict_err());
+            }
+        }
+        // Empty-string pre-image means "stored must currently be unset"
+        // (spec §2.3: NULL and "" are both defaults).
+        Some(_) if stored.is_some() => return Err(cron_cas_conflict_err()),
+        // Match (or no pre-image → unconditional write; the CAS guard is
+        // optional) — proceed.
+        _ => {}
+    }
+
+    // `updated_at` on `works` is a text column; the CLI writes RFC3339.
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("transaction begin failed: {e}"),
+    })?;
+    // The tx-level CAS guard. With a caller pre-image the write is guarded on
+    // that blob; without one the guard is the fresh pre-read itself, so a
+    // concurrent writer between read and write still fails the CAS instead of
+    // silently clobbering (same TOCTOU protection the CLI's read→CAS-write
+    // path gets — R-V150P0-W5).
+    let tx_expected: Option<&str> = match body.expected_current_json.as_deref() {
+        Some(expected) if expected.trim().is_empty() => None,
+        Some(expected) => Some(expected),
+        None => stored.as_deref(),
+    };
+    let applied =
+        nexus_local_db::works::set_schedule_json_tx(&mut tx, &work_id, tx_expected, &blob, &now)
+            .await
+            .map_err(|e| match e {
+                nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
+                    NexusApiError::NotFound(format!("work {work_id} not found"))
+                }
+                other => local_db_error(other),
+            })?;
+    if !applied {
+        let _ = tx.rollback().await;
+        return Err(cron_cas_conflict_err());
+    }
+    tx.commit().await.map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("transaction commit failed: {e}"),
+    })?;
+
+    // R-V150P1CRONBW-03 (qc3 W-001): same invalidation contract the CLI
+    // honors after a `schedule_json` write — drop stale memoised parses.
+    nexus_orchestration::schedule::cron_supervisor::invalidate_cron_schedule_cache();
+
+    Ok(Json(work_schedule_to_response(schedule, false)))
+}
+
+/// Validate a full `UpdateWorkCronRequest` body against the shared cron/TZ
+/// validation core (stable codes preserved).
+fn validate_cron_schedule(
+    body: &UpdateWorkCronRequest,
+) -> Result<(), nexus_orchestration::schedule::work_schedule::CronValidationError> {
+    validate_cron_expr(&body.roles.brainstorm.cron)?;
+    validate_cron_expr(&body.roles.write.cron)?;
+    validate_cron_expr(&body.roles.review.cron)?;
+    validate_tz(&body.tz)?;
+    Ok(())
+}
+
+/// Build the honest 409 body for a CAS mismatch: retryable, names the
+/// operation the client should re-run (re-GET the current schedule, then PUT).
+fn cron_cas_conflict_err() -> NexusApiError {
+    NexusApiError::Conflict(
+        "schedule_json changed by another writer between read and write; \
+         re-fetch `GET /v1/daemon/works/{work_id}/cron` and re-apply against the \
+         latest config (pass its schedule_json as expected_current_json)"
+            .to_string(),
+    )
+}
+
+/// Resolve a stored `schedule_json` blob into the shared `WorkSchedule`
+/// (unset/empty/malformed → spec defaults).
+fn resolve_work_schedule(stored: Option<&str>) -> WorkSchedule {
+    let Some(json) = stored.filter(|s| !s.is_empty()) else {
+        return WorkSchedule::defaults();
+    };
+    serde_json::from_str::<WorkSchedule>(json).unwrap_or_else(|_| WorkSchedule::defaults())
+}
+
+/// Convert the shared `WorkSchedule` into the wire `WorkCronResponse`.
+fn work_schedule_to_response(schedule: WorkSchedule, is_default: bool) -> WorkCronResponse {
+    WorkCronResponse {
+        tz: schedule.tz,
+        roles: WorkCronRolesDto {
+            brainstorm: WorkCronRoleDto {
+                cron: schedule.roles.brainstorm.cron,
+                enabled: schedule.roles.brainstorm.enabled,
+            },
+            write: WorkCronRoleDto {
+                cron: schedule.roles.write.cron,
+                enabled: schedule.roles.write.enabled,
+            },
+            review: WorkCronRoleDto {
+                cron: schedule.roles.review.cron,
+                enabled: schedule.roles.review.enabled,
+            },
+        },
+        is_default,
+    }
+}
+
+/// Map `nexus_local_db::LocalDbError` onto the API envelope, with the
+/// `MissingVersionKey` variant (row vanished) surfaced as a 404 rather than a
+/// generic 500.
+fn local_db_error(e: nexus_local_db::LocalDbError) -> NexusApiError {
+    match e {
+        nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
+            NexusApiError::NotFound("resource not found".to_string())
+        }
+        other => NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("database error: {other}"),
+        },
+    }
 }
 
 // ---------------------------------------------------------------------------
