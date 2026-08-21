@@ -1,10 +1,11 @@
 ---
 module: schemas + crates/nexus-contracts + packages/nexus-contracts + crates/nexus-daemon-runtime
 date: 2026-07-18
+last_updated: 2026-08-21
 problem_type: convention
 category: conventions
 severity: medium
-tags: [wire-contracts, verification, codegen, schemas, additive-frontend, regression]
+tags: [wire-contracts, verification, codegen, schemas, additive-frontend, additive-wire, local-tier, regression]
 applies_when:
   - "Verifying that an additive-frontend iteration produced no wire-contract drift"
   - "Running a `wire_contracts_changed: false` gate before marking a plan Done"
@@ -75,6 +76,29 @@ Record the pass/fail status of all 8 checks in the plan's `## Review Gate Summar
 | 7 | no new timeline schema entries | PASS |
 | 8 | CanvasSurfaceKind not in schemas | PASS |
 ```
+
+
+### Additive local-orchestration wire posture (AR-33, V1.171)
+
+The 8-point gate above assumes **additive-frontend-only** iterations
+(`wire_contracts_changed: false`). Iterations that ship **additive
+local-orchestration wire** (hand-coded local-tier DTOs + new daemon routes —
+e.g. V1.171 P0 profile route, P2 AR-29 edit/cron endpoints) must NOT claim
+`wire_contracts_changed: false`. Apply the gate with **expected-diff
+exemptions**:
+
+| # | Check | Exemption |
+|---|-------|-----------|
+| 1 | `schemas/` diff | **EMPTY — binding, no exemption** |
+| 2 | `crates/nexus-contracts/src/generated/**` diff | **EMPTY — binding** (no codegen regen) |
+| 3 | `packages/nexus-contracts/**` diff + npm version | **EMPTY — binding** |
+| 4 | `crates/nexus-daemon-runtime/src/api/` diff | = **only** the sanctioned route registrations/handlers named in the plan's architecture locks (e.g. AR-20/AR-29) |
+| 5 | codegen clean on clean checkout | binding |
+
+New DTOs land in `crates/nexus-contracts/src/local/**` (hand-coded local tier,
+`schemas-boundary.md` §3) — never in `schemas/`. Record the pass table per-plan
+in `## Review Gate Summary` with the exemptions listed. A plan that is
+frontend-only (e.g. V1.171 P1) still runs the full gate unmodified.
 
 ## Why This Matters
 
