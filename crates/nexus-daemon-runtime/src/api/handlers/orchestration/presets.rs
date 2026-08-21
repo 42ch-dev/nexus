@@ -13,9 +13,7 @@ use nexus_contracts::local::orchestration::preset::{
     EnterAction, ExitWhen, NextTarget, PresetRoleDefinition, SignalActionKind, SignalBinding,
     StateDefinition,
 };
-use nexus_orchestration::preset_ids::{
-    NOVEL_BRAINSTORM_PRESET_ID, NOVEL_REVIEW_MASTER_PRESET_ID, NOVEL_WRITE_PRESET_ID,
-};
+use nexus_orchestration::preset_ids::cron_role_preset_ids;
 use nexus_orchestration::system_preset_dir;
 
 /// `GET /v1/daemon/orchestration/presets`
@@ -112,8 +110,18 @@ pub async fn get_preset_profile(
     Path(preset_id): Path<String>,
 ) -> Result<Json<PresetProfileResponse>, NexusApiError> {
     let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
-    let loaded = nexus_orchestration::preset::resolve_preset(&preset_id, state.nexus_home(), &caps)
-        .map_err(|e| NexusApiError::NotFound(format!("preset '{preset_id}' not found: {e}")))?;
+    // F-003: O(1) direct-path lookup first (as `creator run` does); fall
+    // back to the full 3-tier scan for `_system.` ids and miss/load-error
+    // cases (AR-22).
+    let loaded = match nexus_orchestration::preset::lookup_preset_by_id(
+        &preset_id,
+        state.nexus_home(),
+        &caps,
+    ) {
+        Some(loaded) => loaded,
+        None => nexus_orchestration::preset::resolve_preset(&preset_id, state.nexus_home(), &caps)
+            .map_err(|e| NexusApiError::NotFound(format!("preset '{preset_id}' not found: {e}")))?,
+    };
 
     let manifest = &loaded.manifest;
     let states = manifest
@@ -140,7 +148,7 @@ pub async fn get_preset_profile(
         id: loaded.id.clone(),
         version: loaded.version,
         source_hash: hash_hex,
-        lanes: profile_lanes(&loaded.id),
+        lanes: profile_lanes(&preset_id, !is_user_preset(&preset_id, state.nexus_home())),
         states,
         roles,
         required_capabilities: manifest.preset.requires_capabilities.clone(),
@@ -150,24 +158,44 @@ pub async fn get_preset_profile(
 
 /// Trigger-lane classification (AR-21).
 ///
-/// `cron` is derived from works-cron role membership: the brainstorm /
-/// write / review role presets (`RolesSchedule` in
-/// `apps/nexus42/src/commands/creator/works/cron.rs`, role→preset mapping in
-/// `schedule::cron_supervisor::role_preset`). The remaining lanes are
-/// platform facts — the daemon schedule and session-start APIs accept any
-/// resolvable preset id, so every resolvable preset can fire on the
-/// wall-clock poller, via session start, or via a direct run with an
+/// `cron` is derived from the shared works-cron role membership
+/// ([`cron_role_preset_ids`] — the brainstorm / write / review role presets
+/// per `RolesSchedule`; same source as
+/// `schedule::cron_supervisor::role_preset`), never a hand-maintained
+/// per-preset list (W-001/F-004).
+///
+/// `session` is honest per resolvability class (W-003/F-002): the
+/// session-start API (`POST /v1/daemon/orchestration/sessions`) loads
+/// embedded presets only (`load_embedded_preset`), so a **user** preset
+/// reports `session: false` — the lane claim must not overstate what the
+/// runtime can serve. System (`_system.`) and embedded presets report
+/// `session: true`.
+///
+/// `wall_clock` / `direct` are platform facts — the daemon schedule path
+/// resolves any resolvable preset id (`resolve_preset`), so every resolvable
+/// preset can fire on the wall-clock poller or via a direct run with an
 /// explicit payload.
-fn profile_lanes(preset_id: &str) -> PresetProfileLanes {
+fn profile_lanes(preset_id: &str, session: bool) -> PresetProfileLanes {
     PresetProfileLanes {
-        cron: matches!(
-            preset_id,
-            NOVEL_BRAINSTORM_PRESET_ID | NOVEL_WRITE_PRESET_ID | NOVEL_REVIEW_MASTER_PRESET_ID
-        ),
+        cron: cron_role_preset_ids().contains(&preset_id),
         wall_clock: true,
-        session: true,
+        session,
         direct: true,
     }
+}
+
+/// Is `preset_id` a user preset (3-tier resolvability class, AR-22)?
+///
+/// `_system.` qualified ids are system presets; otherwise a user bundle at
+/// `<nexus_home>/presets/<id>/preset.yaml` marks the user class. Used for
+/// the `session` lane honesty check (W-003/F-002).
+fn is_user_preset(preset_id: &str, nexus_home: &std::path::Path) -> bool {
+    !preset_id.starts_with("_system.")
+        && nexus_home
+            .join("presets")
+            .join(preset_id)
+            .join("preset.yaml")
+            .is_file()
 }
 
 /// Map one manifest state to its profile shape.
@@ -526,6 +554,80 @@ states:
         let err = result.expect_err("unknown preset must 404");
         assert_eq!(err.status_code(), StatusCode::NOT_FOUND);
         assert_eq!(err.error_code(), "not_found");
+
+        std::mem::forget(tmp);
+    }
+
+    #[tokio::test]
+    async fn profile_user_preset_reports_session_false() {
+        // W-003/F-002: the session-start API loads embedded presets only, so
+        // a user preset must report `session: false` — never overstate a lane
+        // the runtime cannot serve.
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        seed_user_preset(&nexus_home, "my-strategy");
+        let state =
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let result = get_preset_profile(State(state), Path("my-strategy".to_string())).await;
+        let Json(profile) = result.expect("user preset profile should resolve");
+        assert_eq!(profile.id, "my-strategy");
+        assert!(
+            !profile.lanes.session,
+            "user preset must report session: false (session-start API is embedded-only)"
+        );
+        // Other lanes remain platform facts for any resolvable preset.
+        assert!(profile.lanes.wall_clock);
+        assert!(profile.lanes.direct);
+        assert!(!profile.lanes.cron);
+
+        std::mem::forget(tmp);
+    }
+
+    #[tokio::test]
+    async fn profile_embedded_and_system_presets_report_session_true() {
+        // W-003/F-002: embedded and system presets are loadable by the
+        // session-start API, so they report `session: true`.
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        nexus_orchestration::system_preset_dir::ensure_maintenance_preset(&nexus_home)
+            .expect("ensure maintenance preset");
+        let state =
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let result =
+            get_preset_profile(State(state.clone()), Path("novel-writing".to_string())).await;
+        let Json(embedded) = result.expect("embedded preset profile should resolve");
+        assert!(embedded.lanes.session, "embedded preset session: true");
+
+        let result =
+            get_preset_profile(State(state), Path("_system.maintenance".to_string())).await;
+        let Json(system) = result.expect("system preset profile should resolve");
+        assert!(system.lanes.session, "system preset session: true");
+
+        std::mem::forget(tmp);
+    }
+
+    #[tokio::test]
+    async fn profile_cron_lane_derives_from_cron_role_preset_ids() {
+        // W-001/F-004: `cron` must be derived from the shared
+        // `cron_role_preset_ids()` source, not a hand-maintained list.
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let state =
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        for id in nexus_orchestration::preset_ids::cron_role_preset_ids() {
+            let result = get_preset_profile(State(state.clone()), Path(id.to_string())).await;
+            let Json(profile) = result
+                .unwrap_or_else(|e| panic!("cron-role preset '{id}' profile should resolve: {e}"));
+            assert!(
+                profile.lanes.cron,
+                "cron-role preset '{id}' must report cron: true"
+            );
+        }
+
+        // A non-cron-role preset reports cron: false.
+        let result = get_preset_profile(State(state), Path("novel-writing".to_string())).await;
+        let Json(profile) = result.expect("novel-writing profile should resolve");
+        assert!(!profile.lanes.cron);
 
         std::mem::forget(tmp);
     }

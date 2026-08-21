@@ -128,6 +128,11 @@ const fn default_enabled() -> bool {
 ///
 /// Returns `None` for unknown role names (defensive — the evaluator only
 /// iterates the three canonical roles above).
+///
+/// The preset ids come from the shared [`crate::preset_ids::CRON_ROLE_PRESET_IDS`]
+/// source (AR-21 / W-001): the daemon profile lane classifier consumes the
+/// same membership, so a new cron-role preset added here is reflected in
+/// every profile automatically.
 fn role_preset(role: &str) -> Option<&'static str> {
     match role {
         ROLE_BRAINSTORM => Some(NOVEL_BRAINSTORM_PRESET_ID),

@@ -146,10 +146,12 @@ pub enum Commands {
     /// Canonical developer-facing preset group (PL-5, AR-24). `system preset`
     /// remains a working compatibility alias for one release (PL-6).
     ///
-    /// Hidden from `--help` for the current release: the V1.16 command-surface
-    /// snapshot locks the visible top-level groups to
-    /// `acp|creator|daemon|platform|sync|system`; the `preset` group is
-    /// callable but not yet advertised (same posture as the `sync` alias).
+    /// Hidden from `--help` for the current release: the V1.35 command-surface
+    /// lock (`.mstar/specs/cli-spec.md` §6) fixes the visible top-level groups
+    /// to `creator|daemon|acp|platform|system` — no new parallel top-level
+    /// groups. The `preset` group is a deliberate resolution of AR-24 (new
+    /// canonical group) vs that lock: callable but not yet advertised, same
+    /// posture as the deprecated `sync` alias (S-001).
     #[command(hide = true)]
     Preset {
         #[command(subcommand)]

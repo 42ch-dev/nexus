@@ -193,12 +193,13 @@ pub struct PresetProfileResponse {
 
 /// Trigger-lane classification for a preset profile.
 ///
-/// `cron` is derived per-preset from works-cron role membership (the
-/// brainstorm / write / review role presets). The remaining lanes are
-/// platform facts: the daemon schedule and session-start APIs accept any
+/// `cron` is derived per-preset from the shared works-cron role membership
+/// (the brainstorm / write / review role presets). `session` is honest per
+/// resolvability class: the session-start API loads embedded presets only,
+/// so user presets report `session: false` (W-003/F-002). `wall_clock` /
+/// `direct` are platform facts — the daemon schedule path resolves any
 /// resolvable preset id, so every resolvable preset can fire on the
-/// wall-clock poller, via session start, or via a direct run with an
-/// explicit payload.
+/// wall-clock poller or via a direct run with an explicit payload.
 //
 // The four bools are a 1:1 mirror of the locked trigger-lane vocabulary
 // (PL-3: cron / wall-clock / session / direct) — a flat wire DTO, not a
@@ -214,6 +215,8 @@ pub struct PresetProfileLanes {
     /// Wall-clock poller: daemon schedule admission on a wall-clock tick.
     pub wall_clock: bool,
     /// Session start: `POST /v1/daemon/orchestration/sessions` / run path.
+    /// Embedded and system presets only — user presets report `false`
+    /// (the session-start API loads embedded presets, W-003/F-002).
     pub session: bool,
     /// Direct run: schedule start with an explicit run payload.
     pub direct: bool,

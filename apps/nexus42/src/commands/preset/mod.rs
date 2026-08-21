@@ -113,6 +113,11 @@ pub async fn run(cmd: PresetCommand, config: &CliConfig) -> Result<()> {
 ///
 /// Moved from `system preset list` (V1.153) — the shared listing job, not
 /// re-implemented (AR-24).
+///
+/// The display list is built from the grouped management endpoint
+/// (`GET /v1/daemon/presets` — embedded + system + user groups,
+/// W-002/F-001), so user presets appear and each row is labeled by its real
+/// source. `--intent` filtering runs across all groups.
 async fn list_presets(
     config: &CliConfig,
     intent_filter: Option<&str>,
@@ -120,49 +125,12 @@ async fn list_presets(
 ) -> Result<()> {
     let client = crate::api::DaemonClient::from_config(config);
 
-    let resp: nexus_contracts::local::orchestration::http::ListPresetsResponse =
-        client.get(&format!("{ORCHESTRATION_BASE}/presets")).await?;
+    // Grouped management endpoint: embedded + system + user (W-002/F-001).
+    // A failure here is a real daemon error — surface it instead of silently
+    // degrading the list to no presets (F-001 reliability nit).
+    let mgmt_resp: crate::api::models::ListPresetsGroupedResponse = client.list_presets().await?;
 
-    // Build a display list with run_intents from the preset management endpoint
-    let mgmt_resp: serde_json::Value = client
-        .get::<serde_json::Value>("/v1/daemon/presets")
-        .await
-        .unwrap_or_else(|_| serde_json::json!({}));
-
-    let embedded_intents: std::collections::HashMap<String, Vec<String>> = mgmt_resp
-        .get("embedded")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|p| {
-                    let id = p.get("id")?.as_str()?.to_string();
-                    let intents = p
-                        .get("run_intents")
-                        .and_then(|v| v.as_array())
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(|v| v.as_str().map(String::from))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    Some((id, intents))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let mut presets: Vec<(String, String, Vec<String>)> = Vec::new();
-
-    // Collect embedded presets
-    for id in &resp.presets {
-        let intents = embedded_intents.get(id).cloned().unwrap_or_default();
-        presets.push((id.clone(), "embedded".to_string(), intents));
-    }
-
-    // Filter by intent if specified
-    if let Some(intent) = intent_filter {
-        presets.retain(|(_, _, intents)| intents.iter().any(|i| i == intent));
-    }
+    let presets: Vec<(String, String, Vec<String>)> = build_preset_rows(&mgmt_resp, intent_filter);
 
     if json_output {
         let output: Vec<serde_json::Value> = presets
@@ -195,6 +163,32 @@ async fn list_presets(
     }
 
     Ok(())
+}
+
+/// Flatten the grouped management response into display rows
+/// `(id, source, run_intents)`, optionally filtered by `run_intent`
+/// (W-002/F-001). Pure over the daemon DTO — hermetically testable.
+fn build_preset_rows(
+    resp: &crate::api::models::ListPresetsGroupedResponse,
+    intent_filter: Option<&str>,
+) -> Vec<(String, String, Vec<String>)> {
+    let mut presets: Vec<(String, String, Vec<String>)> = Vec::new();
+
+    for group in [&resp.embedded, &resp.system, &resp.user] {
+        for summary in group {
+            presets.push((
+                summary.id.clone(),
+                summary.source.clone(),
+                summary.run_intents.clone(),
+            ));
+        }
+    }
+
+    if let Some(intent) = intent_filter {
+        presets.retain(|(_, _, intents)| intents.iter().any(|i| i == intent));
+    }
+
+    presets
 }
 
 /// Print the AR-20 profile for a preset (daemon-backed).
@@ -748,6 +742,69 @@ mod tests {
     fn preset_subcommand_required() {
         let result = PresetCli::try_parse_from(["preset"]);
         assert!(result.is_err());
+    }
+
+    // ── W-002/F-001: list rows from the grouped endpoint ─────────────────
+
+    /// Grouped response fixture with all three sources.
+    fn grouped_fixture() -> crate::api::models::ListPresetsGroupedResponse {
+        crate::api::models::ListPresetsGroupedResponse {
+            embedded: vec![crate::api::models::PresetSummary {
+                id: "novel-writing".to_string(),
+                source: "embedded".to_string(),
+                run_intents: vec!["work_init".to_string()],
+            }],
+            system: vec![crate::api::models::PresetSummary {
+                id: "_system.maintenance".to_string(),
+                source: "system".to_string(),
+                run_intents: vec![],
+            }],
+            user: vec![crate::api::models::PresetSummary {
+                id: "my-strategy".to_string(),
+                source: "user".to_string(),
+                run_intents: vec!["work_continue".to_string()],
+            }],
+        }
+    }
+
+    #[test]
+    fn list_rows_include_user_presets_with_real_source_labels() {
+        // W-002/F-001: user presets must appear and each row must carry its
+        // real source (not a blanket "embedded").
+        let rows = build_preset_rows(&grouped_fixture(), None);
+        assert_eq!(rows.len(), 3);
+        assert!(rows.contains(&(
+            "my-strategy".to_string(),
+            "user".to_string(),
+            vec!["work_continue".to_string()]
+        )));
+        assert!(rows.contains(&(
+            "_system.maintenance".to_string(),
+            "system".to_string(),
+            vec![]
+        )));
+        assert!(rows.contains(&(
+            "novel-writing".to_string(),
+            "embedded".to_string(),
+            vec!["work_init".to_string()]
+        )));
+    }
+
+    #[test]
+    fn list_rows_intent_filter_applies_across_groups() {
+        // W-002/F-001: `--intent` filtering must work across all groups.
+        let rows = build_preset_rows(&grouped_fixture(), Some("work_continue"));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, "my-strategy");
+        assert_eq!(rows[0].1, "user");
+
+        let rows = build_preset_rows(&grouped_fixture(), Some("work_init"));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, "novel-writing");
+
+        // No match → empty.
+        let rows = build_preset_rows(&grouped_fixture(), Some("nonexistent-intent"));
+        assert!(rows.is_empty());
     }
 
     /// Minimal profile fixture for the text renderers.
