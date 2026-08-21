@@ -27,9 +27,13 @@ use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
 use std::sync::Arc;
 
 /// Build a minimal valid user preset bundle and return its directory.
+///
+/// `nexus_home` is the `.nexus42` root; the bundle lives at the canonical
+/// `<nexus_home>/presets/<id>/` layout (F-QA-001), which is where the patch
+/// handlers read/write.
 fn seed_test_bundle(nexus_home: &std::path::Path) -> std::path::PathBuf {
     let strategy_id = "test-strategy";
-    let bundle_dir = nexus_home_layout::user_preset_bundle_dir(nexus_home, strategy_id);
+    let bundle_dir = nexus_home.join("presets").join(strategy_id);
     std::fs::create_dir_all(&bundle_dir).expect("create bundle dir");
     let yaml = r#"
 revision: 1
@@ -103,7 +107,10 @@ async fn patch_state_renames_state_and_bumps_revision() {
     assert_eq!(res.new_revision, NonZeroU64::new(2).unwrap());
 
     let yaml = std::fs::read_to_string(
-        nexus_home_layout::user_preset_bundle_dir(&nexus_home, "test-strategy").join("preset.yaml"),
+        nexus_home
+            .join("presets")
+            .join("test-strategy")
+            .join("preset.yaml"),
     )
     .unwrap();
     assert!(yaml.contains("id: begin"));
@@ -180,7 +187,10 @@ states:
     assert_eq!(res.new_revision, NonZeroU64::new(2).unwrap());
 
     let yaml = std::fs::read_to_string(
-        nexus_home_layout::user_preset_bundle_dir(&nexus_home, "test-strategy").join("preset.yaml"),
+        nexus_home
+            .join("presets")
+            .join("test-strategy")
+            .join("preset.yaml"),
     )
     .unwrap();
     assert!(yaml.contains("next: end"));
@@ -237,7 +247,10 @@ states:
     assert_eq!(res.new_revision, NonZeroU64::new(2).unwrap());
 
     let updated = std::fs::read_to_string(
-        nexus_home_layout::user_preset_bundle_dir(&nexus_home, "test-strategy").join("preset.yaml"),
+        nexus_home
+            .join("presets")
+            .join("test-strategy")
+            .join("preset.yaml"),
     )
     .unwrap();
     assert!(updated.contains("to: end"));
@@ -410,7 +423,10 @@ states:
     assert_eq!(res.new_revision, NonZeroU64::new(2).unwrap());
 
     let updated = std::fs::read_to_string(
-        nexus_home_layout::user_preset_bundle_dir(&nexus_home, "test-strategy").join("preset.yaml"),
+        nexus_home
+            .join("presets")
+            .join("test-strategy")
+            .join("preset.yaml"),
     )
     .unwrap();
     assert!(updated.contains("default: alt"));
@@ -459,7 +475,10 @@ states:
     assert_eq!(res.new_revision, NonZeroU64::new(2).unwrap());
 
     let updated = std::fs::read_to_string(
-        nexus_home_layout::user_preset_bundle_dir(&nexus_home, "test-strategy").join("preset.yaml"),
+        nexus_home
+            .join("presets")
+            .join("test-strategy")
+            .join("preset.yaml"),
     )
     .unwrap();
     assert!(updated.contains("kind: conditional"));
@@ -543,7 +562,7 @@ async fn patch_transition_default_op_preserves_update_semantics() {
     };
 
     // Create the alt state so validation passes after rewiring.
-    let bundle_dir = nexus_home_layout::user_preset_bundle_dir(&nexus_home, "test-strategy");
+    let bundle_dir = nexus_home.join("presets").join("test-strategy");
     let yaml = std::fs::read_to_string(bundle_dir.join("preset.yaml")).unwrap();
     let yaml_with_alt = yaml.replace(
         "  - id: end\n    terminal: true",

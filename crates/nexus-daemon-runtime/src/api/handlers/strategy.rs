@@ -10,6 +10,7 @@
 //! return a structured 409 conflict before any file is touched.
 
 use crate::api::errors::NexusApiError;
+use crate::api::handlers::raw_user_home;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, State};
 use axum::Json;
@@ -153,7 +154,12 @@ fn load_user_preset_yaml(
 ) -> Result<(serde_yaml::Value, std::path::PathBuf, u64), NexusApiError> {
     validate_strategy_id(strategy_id)?;
 
-    let bundle_dir = user_preset_bundle_dir(nexus_home, strategy_id);
+    // `nexus-home-layout` user-preset helpers take the RAW user home and join
+    // `.nexus42` internally (conventions/nexus-home-layout-path-helpers.md);
+    // passing the `.nexus42` root would double-nest to
+    // `<home>/.nexus42/.nexus42/presets` (F-QA-001).
+    let raw_home = raw_user_home(nexus_home)?;
+    let bundle_dir = user_preset_bundle_dir(raw_home, strategy_id);
     let yaml_path = bundle_dir.join("preset.yaml");
     if !yaml_path.is_file() {
         // Reject embedded/system presets explicitly so callers get a clear
@@ -164,7 +170,7 @@ fn load_user_preset_yaml(
                 message: format!("embedded preset '{strategy_id}' is read-only"),
             });
         }
-        let system_path = user_preset_base_dir(nexus_home)
+        let system_path = user_preset_base_dir(raw_home)
             .join("_system")
             .join(strategy_id)
             .join("preset.yaml");
@@ -638,7 +644,11 @@ fn patch_state_inner(
     state_id: &str,
     req: &StrategyPatchStateRequest,
 ) -> Result<StrategyPatchResponse, NexusApiError> {
-    let bundle_dir = user_preset_bundle_dir(nexus_home, strategy_id);
+    // `user_preset_bundle_dir` takes the RAW user home and joins `.nexus42`
+    // internally (conventions/nexus-home-layout-path-helpers.md); passing the
+    // `.nexus42` root would double-nest (F-QA-001).
+    let raw_home = raw_user_home(nexus_home)?;
+    let bundle_dir = user_preset_bundle_dir(raw_home, strategy_id);
     let _guard = acquire_strategy_lock(&bundle_dir)?;
 
     // Load the canonical YAML while holding the lock so the revision check is
@@ -1099,7 +1109,11 @@ fn patch_transition_inner(
     // and silently fall through to the update path (Greptile Issue 5).
     validate_transition_op(req.op.as_str())?;
 
-    let bundle_dir = user_preset_bundle_dir(nexus_home, strategy_id);
+    // `user_preset_bundle_dir` takes the RAW user home and joins `.nexus42`
+    // internally (conventions/nexus-home-layout-path-helpers.md); passing the
+    // `.nexus42` root would double-nest (F-QA-001).
+    let raw_home = raw_user_home(nexus_home)?;
+    let bundle_dir = user_preset_bundle_dir(raw_home, strategy_id);
     let _guard = acquire_strategy_lock(&bundle_dir)?;
 
     let (mut yaml_value, bundle_dir, current_revision) =
@@ -1279,7 +1293,11 @@ fn patch_prompt_template_inner_with_writer(
     req: &StrategyPatchPromptTemplateRequest,
     write_yaml: PresetYamlWriter,
 ) -> Result<StrategyPatchResponse, NexusApiError> {
-    let bundle_dir = user_preset_bundle_dir(nexus_home, strategy_id);
+    // `user_preset_bundle_dir` takes the RAW user home and joins `.nexus42`
+    // internally (conventions/nexus-home-layout-path-helpers.md); passing the
+    // `.nexus42` root would double-nest (F-QA-001).
+    let raw_home = raw_user_home(nexus_home)?;
+    let bundle_dir = user_preset_bundle_dir(raw_home, strategy_id);
     let _guard = acquire_strategy_lock(&bundle_dir)?;
 
     let (mut yaml_value, bundle_dir, current_revision) =
@@ -1446,8 +1464,12 @@ states:
     }
 
     /// Build a minimal valid user preset bundle for handler integration tests.
+    ///
+    /// `nexus_home` is the `.nexus42` root; the bundle lives at the canonical
+    /// `<nexus_home>/presets/<id>/` layout (F-QA-001), which is where the
+    /// patch handlers read/write.
     fn seed_test_bundle(nexus_home: &std::path::Path, strategy_id: &str) -> std::path::PathBuf {
-        let bundle_dir = nexus_home_layout::user_preset_bundle_dir(nexus_home, strategy_id);
+        let bundle_dir = nexus_home.join("presets").join(strategy_id);
         std::fs::create_dir_all(&bundle_dir).expect("create bundle dir");
         let yaml = r#"
 revision: 1
@@ -1501,7 +1523,9 @@ states:
         assert!(res.side_effects.iter().any(|s| s.contains("begin")));
 
         let yaml = std::fs::read_to_string(
-            nexus_home_layout::user_preset_bundle_dir(&nexus_home, "test-strategy")
+            nexus_home
+                .join("presets")
+                .join("test-strategy")
                 .join("preset.yaml"),
         )
         .unwrap();
@@ -1636,7 +1660,7 @@ states:
         use axum::Json;
 
         let (_tmp, nexus_home, db_path) = create_test_workspace().await;
-        let bundle_dir = user_preset_bundle_dir(&nexus_home, "test-strategy");
+        let bundle_dir = nexus_home.join("presets").join("test-strategy");
         std::fs::create_dir_all(&bundle_dir).expect("create bundle dir");
 
         // The manifest references a missing asset so validation will fail after
@@ -1763,7 +1787,10 @@ states:
         );
 
         let yaml = std::fs::read_to_string(
-            user_preset_bundle_dir(&nexus_home, "test-strategy").join("preset.yaml"),
+            nexus_home
+                .join("presets")
+                .join("test-strategy")
+                .join("preset.yaml"),
         )
         .unwrap();
         assert!(yaml.contains("revision: 2"));
@@ -1786,7 +1813,7 @@ states:
         }
 
         let (_tmp, nexus_home, db_path) = create_test_workspace().await;
-        let bundle_dir = user_preset_bundle_dir(&nexus_home, "test-strategy");
+        let bundle_dir = nexus_home.join("presets").join("test-strategy");
         std::fs::create_dir_all(&bundle_dir).expect("create bundle dir");
 
         let yaml = r#"
