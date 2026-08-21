@@ -347,6 +347,23 @@ export function usePresets() {
   });
 }
 
+/**
+ * `GET /v1/daemon/orchestration/presets/{id}/profile` (V1.171 P1 — AR-27).
+ *
+ * Manifest-derived profile for any resolvable preset (lanes, states, roles,
+ * capabilities, declared signals). Missing/unknown ids resolve to a query
+ * error (the daemon 404s — PL-2); the strategy catalog renders a graceful
+ * id + list-facts summary instead of treating the preset as gone (PL-13).
+ */
+export function usePresetProfile(presetId: string | undefined) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.presets.profile(presetId ?? ''),
+    queryFn: async () => client.getPresetProfile(presetId ?? ''),
+    enabled: Boolean(presetId),
+  });
+}
+
 // ── Timeline (V1.126 P2; V1.127 P0 T2 infinite pagination) ────────────────────
 
 /**

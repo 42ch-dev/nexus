@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 import { Plus, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { EmptyState, ErrorState, LoadingState, UnavailableState } from '@/components/ui/states';
-import { useDeletePreset, usePresets, useReloadPreset } from '@/api/queries';
+import { useDeletePreset, usePresetProfile, usePresets, useReloadPreset, type PresetGroups } from '@/api/queries';
 import { isOrchestrationEngineUnavailable } from '@/lib/nexus/errors';
 import type { PresetSummary } from '@42ch/nexus-contracts';
 
@@ -99,11 +99,16 @@ export function StrategiesPage() {
         </Card>
       ) : !presets.data ? null : (
         <div className="flex flex-col gap-4">
+          <StrategyCatalog
+            presets={presets.data}
+            onSelect={(id) => navigate(`/strategies/${encodeURIComponent(id)}`)}
+          />
           <PresetGroup
             title={t('userPresets.title')}
             description={t('userPresets.description')}
             presets={presets.data.user}
             canDelete
+            testId="preset-group-user"
             onReload={(id) => reload.mutate(id)}
             onValidate={() => setValidateOpen(true)}
             onDelete={(id) => setDeleteTarget(id)}
@@ -115,6 +120,7 @@ export function StrategiesPage() {
             title={t('systemPresets.title')}
             description={t('systemPresets.description')}
             presets={systemPresets}
+            testId="preset-group-system"
             onReload={(id) => reload.mutate(id)}
             onValidate={() => setValidateOpen(true)}
             onSelect={(id) => navigate(`/strategies/${encodeURIComponent(id)}`)}
@@ -125,6 +131,7 @@ export function StrategiesPage() {
             title={t('embeddedPresets.title')}
             description={t('embeddedPresets.description')}
             presets={presets.data.embedded}
+            testId="preset-group-embedded"
             onReload={(id) => reload.mutate(id)}
             onValidate={() => setValidateOpen(true)}
             onSelect={(id) => navigate(`/strategies/${encodeURIComponent(id)}`)}
@@ -167,11 +174,148 @@ function isAuthorSystemPreset(preset: PresetSummary): boolean {
   return !preset.id.startsWith('_system.');
 }
 
+/**
+ * V1.171 P1 — Develop strategy catalog (PL-8/PL-9, AR-27/AR-28).
+ *
+ * Lists USER + embedded (non-hidden) presets with trigger-lane badges and
+ * honest entry paths, read from each preset's P0 profile through
+ * `NexusClient` (`usePresetProfile`). The preset LIST endpoint returns ids
+ * only — no lane/role/capability data is derived client-side from list
+ * facts (AR-27). A missing profile renders a graceful summary (id + list
+ * facts), never a hard "preset gone" error (PL-13 boundary).
+ *
+ * The catalog attaches to the existing `/strategies` route, already
+ * `develop-only` in `ENTRANCE_ROUTE_RULES` (AR-28) — no new guard
+ * mechanism; the creator entrance bounces via the existing rule table.
+ */
+function StrategyCatalog({
+  presets,
+  onSelect,
+}: {
+  presets: PresetGroups;
+  onSelect: (id: string) => void;
+}) {
+  const { t } = useTranslation('strategies');
+  // USER + embedded non-hidden presets (PL-8). Non-hidden = not a `_system.`
+  // internal (AD-P0-3 filter reuse). The list endpoint returns ids only —
+  // lane data comes from each preset's profile (AR-27).
+  const catalogPresets = useMemo(
+    () => [
+      ...presets.user,
+      ...presets.embedded.filter((preset) => !preset.id.startsWith('_system.')),
+    ],
+    [presets],
+  );
+
+  return (
+    <Card className="shadow-card" data-testid="strategy-catalog">
+      <CardHeader>
+        <CardTitle>{t('catalog.title')}</CardTitle>
+        <CardDescription>{t('catalog.description')}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {catalogPresets.length === 0 ? (
+          <EmptyState title={t('catalog.empty')} />
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {catalogPresets.map((preset) => (
+              <CatalogRow key={preset.id} preset={preset} onSelect={onSelect} />
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function CatalogRow({
+  preset,
+  onSelect,
+}: {
+  preset: PresetSummary;
+  onSelect: (id: string) => void;
+}) {
+  const { t } = useTranslation('strategies');
+  const profile = usePresetProfile(preset.id);
+  const lanes = profile.data?.lanes;
+  // PL-8 vocabulary: trigger lane = the integrator or product fires it
+  // (session start / direct run); scheduled lane = time-driven entry
+  // (daemon schedule and/or Work cron).
+  const triggerLane = lanes ? lanes.session || lanes.direct : false;
+  const scheduledLane = lanes ? lanes.wallClock || lanes.cron : false;
+
+  return (
+    <li
+      className="flex flex-col gap-2 rounded-card border border-gray-alpha-400 p-3"
+      data-testid={`catalog-row-${preset.id}`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => onSelect(preset.id)}
+          className="flex items-center gap-2 text-left"
+          aria-label={t('catalog.openAria', { name: preset.id })}
+        >
+          <Sparkles className="h-4 w-4 text-purple-700" aria-hidden />
+          <span className="text-copy-13-mono text-gray-1000">{preset.id}</span>
+        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {lanes && triggerLane && (
+            <Badge variant="running" data-testid={`catalog-trigger-${preset.id}`}>
+              {t('catalog.triggerBadge')}
+            </Badge>
+          )}
+          {lanes && scheduledLane && (
+            <Badge variant="queued" data-testid={`catalog-scheduled-${preset.id}`}>
+              {t('catalog.scheduledBadge')}
+            </Badge>
+          )}
+          <Badge variant="preset" data-testid={`catalog-source-${preset.id}`}>
+            {preset.source === 'user' ? t('catalog.sourceUser') : t('catalog.sourceEmbedded')}
+          </Badge>
+        </div>
+      </div>
+      {lanes ? (
+        <div className="flex flex-col gap-1" data-testid={`catalog-paths-${preset.id}`}>
+          <span className="text-label-12 text-gray-700">{t('catalog.entryPathsTitle')}</span>
+          <ul className="flex flex-col gap-1">
+            {triggerLane && (
+              <li className="flex flex-col gap-0.5">
+                <span className="text-copy-13 text-gray-900">{t('catalog.pathConnect')}</span>
+                <span className="text-copy-12 text-gray-700">{t('catalog.pathConnectDetail')}</span>
+              </li>
+            )}
+            {lanes.wallClock && <li className="text-copy-13 text-gray-900">{t('catalog.pathDaemon')}</li>}
+            {lanes.cron && (
+              <li className="flex flex-col gap-0.5">
+                <span className="text-copy-13 text-gray-900">{t('catalog.pathCron')}</span>
+                <span className="text-copy-12 text-gray-700">{t('catalog.pathCronDetail')}</span>
+              </li>
+            )}
+          </ul>
+        </div>
+      ) : profile.isLoading ? (
+        <p className="text-copy-12 text-gray-700" data-testid={`catalog-lanes-loading-${preset.id}`}>
+          {t('catalog.lanesLoading')}
+        </p>
+      ) : (
+        <p
+          className="text-copy-12 text-gray-700"
+          data-testid={`catalog-profile-unavailable-${preset.id}`}
+        >
+          {t('catalog.profileUnavailable')}
+        </p>
+      )}
+    </li>
+  );
+}
+
 function PresetGroup({
   title,
   description,
   presets,
   canDelete = false,
+  testId,
   onReload,
   onValidate,
   onDelete,
@@ -183,6 +327,7 @@ function PresetGroup({
   description: string;
   presets: PresetSummary[];
   canDelete?: boolean;
+  testId?: string;
   onReload: (id: string) => void;
   onValidate: () => void;
   onDelete?: (id: string) => void;
@@ -192,7 +337,7 @@ function PresetGroup({
 }) {
   const { t } = useTranslation('strategies');
   return (
-    <Card className="shadow-card">
+    <Card className="shadow-card" data-testid={testId}>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>

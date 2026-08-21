@@ -125,6 +125,8 @@ import type {
   WorldRulesListResponse,
 } from '@42ch/nexus-contracts';
 
+import type { PresetProfileResponse } from './preset-profile';
+
 import { NexusClientError, type TransportErrorKind } from './errors';
 import type {
   ClearRunsQuery,
@@ -314,6 +316,13 @@ export class BrowserClient implements NexusClient {
   // ── Capabilities ───────────────────────────────────────────────────────────
   listCapabilities(query?: ListCapabilitiesQuery): Promise<ListCapabilitiesResponse> {
     return this.get<ListCapabilitiesResponse>('/v1/daemon/orchestration/capabilities', query);
+  }
+
+  // ── Preset profiles (V1.171 P1 — AR-27) ────────────────────────────────────
+  getPresetProfile(presetId: string): Promise<PresetProfileResponse> {
+    return this.get<PresetProfileResponse>(
+      `/v1/daemon/orchestration/presets/${encodeURIComponent(presetId)}/profile`,
+    );
   }
 
   // ── Findings ───────────────────────────────────────────────────────────────

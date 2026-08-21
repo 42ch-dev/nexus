@@ -28,6 +28,18 @@ export type {
   ListRunsQuery,
   NexusClient,
 } from './types';
+export type {
+  PresetProfileConditionalRule,
+  PresetProfileEnterAction,
+  PresetProfileExitWhen,
+  PresetProfileLabeledNext,
+  PresetProfileLanes,
+  PresetProfileNext,
+  PresetProfileResponse,
+  PresetProfileRole,
+  PresetProfileSignal,
+  PresetProfileState,
+} from './preset-profile';
 export {
   createConnectionStorage,
   normalizeEndpointUrl,
