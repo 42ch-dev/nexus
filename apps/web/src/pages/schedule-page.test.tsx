@@ -1,9 +1,10 @@
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { renderInApp } from '@/test/test-providers';
+import { makeQueryClient, renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
+import { queryKeys } from '@/lib/nexus/query-keys';
 import { i18n } from '@/lib/i18n/config';
 import { SchedulePage } from '@/pages/schedule-page';
 import { act, screen, waitFor } from '@testing-library/react';
@@ -520,6 +521,82 @@ describe('SchedulePage', () => {
         expected_current_json: '',
       }),
     );
+  });
+
+  it('freezes the CAS pre-image at the form snapshot across a background refetch (Bugbot Medium)', async () => {
+    const user = userEvent.setup();
+    const qc = makeQueryClient();
+    // Snapshot A — the stored config the form is built from.
+    const CRON_A = { ...CRON_DEFAULTS, tz: 'UTC', is_default: false };
+    // Snapshot B — the blob a background refetch pulls in afterwards.
+    const CRON_B = { ...CRON_DEFAULTS, tz: 'Asia/Tokyo', is_default: false };
+    const preimageA = JSON.stringify({ tz: CRON_A.tz, roles: CRON_A.roles });
+    const preimageB = JSON.stringify({ tz: CRON_B.tz, roles: CRON_B.roles });
+    expect(preimageB).not.toBe(preimageA);
+
+    let cronResponse = CRON_A;
+    let cronGets = 0;
+    const putBodies: Array<Record<string, unknown>> = [];
+    useHandlers(
+      http.get('/v1/daemon/presets', () => HttpResponse.json(PRESETS)),
+      http.get('/v1/daemon/orchestration/schedules', () => HttpResponse.json(SCHEDULES_EMPTY)),
+      http.get('/v1/daemon/works', () =>
+        HttpResponse.json({ items: [WORK_ROW], pagination: { limit: 20, has_more: false } }),
+      ),
+      http.get('/v1/daemon/works/work-1/cron', () => {
+        cronGets += 1;
+        return HttpResponse.json(cronResponse);
+      }),
+      http.put('/v1/daemon/works/work-1/cron', async ({ request }) => {
+        putBodies.push((await request.json()) as Record<string, unknown>);
+        // 409 keeps the dialog open so the explicit Reload path is reachable.
+        return HttpResponse.json(
+          {
+            success: false,
+            error: { code: 'conflict', message: 'schedule_json changed by another writer' },
+          },
+          { status: 409 },
+        );
+      }),
+    );
+
+    renderInApp(<SchedulePage />, { client: client(), activeCreatorId: 'creator-a', queryClient: qc });
+
+    await screen.findByText('My Novel');
+    await user.click(screen.getByRole('button', { name: 'Edit cron for Work work-1' }));
+    await screen.findByRole('heading', { name: 'Edit Work cron' });
+    // (a) Form + pre-image frozen at snapshot A.
+    expect(screen.getByDisplayValue('UTC')).toBeInTheDocument();
+    expect(cronGets).toBe(1);
+
+    // (b) Background refetch advances cron.data to blob B (e.g. window focus
+    // after a CLI write) — the form must stay on A.
+    cronResponse = CRON_B;
+    await act(async () => {
+      await qc.refetchQueries({ queryKey: queryKeys.worksCron.detail('work-1') });
+    });
+    await waitFor(() => expect(cronGets).toBe(2));
+    expect(screen.getByDisplayValue('UTC')).toBeInTheDocument();
+
+    // (c) Editing + saving sends the snapshot-A preimage, NOT B.
+    const brainstorm = screen.getByLabelText('Brainstorm');
+    await user.clear(brainstorm);
+    await user.type(brainstorm, '0 3 * * *');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(putBodies.length).toBe(1));
+    expect(putBodies[0].expected_current_json).toBe(preimageA);
+
+    // The CAS mismatch surfaces; the explicit Reload is the re-baseline path.
+    await screen.findByTestId('work-cron-conflict');
+
+    // (d) Explicit Reload re-baselines BOTH form and pre-image to B.
+    await user.click(screen.getByRole('button', { name: 'Reload latest' }));
+    await screen.findByDisplayValue('Asia/Tokyo');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(putBodies.length).toBe(2));
+    expect(putBodies[1].expected_current_json).toBe(preimageB);
   });
 
   it('surfaces a 409 CAS conflict with a reload prompt', async () => {

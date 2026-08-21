@@ -21,6 +21,11 @@ import type { WorkCronResponse, WorkCronRoles } from '@/lib/nexus';
  * response (dropping the `is_default` marker); when the config is unset the
  * pre-image is the empty string ("must currently be unset").
  *
+ * The pre-image is frozen at the SAME snapshot the form was built from (first
+ * load, or an explicit Reload). A background refetch may advance the live GET
+ * data, but it must never advance the pre-image — otherwise a stale edit could
+ * silently overwrite a concurrent change instead of 409-ing (Bugbot Medium).
+ *
  * A 409 CAS conflict surfaces as a visible alert prompting a reload (re-GET +
  * re-apply). A 400 surfaces the daemon message with its stable code
  * (`E_CRON_INVALID_EXPR` / `E_CRON_INVALID_TZ`) inline.
@@ -76,15 +81,23 @@ export function WorkCronEditorDialog({
   const cron = useWorkCron(workId);
   const put = usePutWorkCron();
   const [form, setForm] = useState<WorkCronForm | null>(null);
+  // The CAS pre-image, frozen at the SAME snapshot the form was built from.
+  // A background refetch may advance `cron.data`, but the pre-image must not
+  // follow: it guards the stored blob the user's frozen edits are based on.
+  // (Bugbot Medium: a refetched pre-image lets a CAS PUT silently overwrite a
+  // concurrent change instead of 409-ing.)
+  const [preimage, setPreimage] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Initialize the form from the first successful load. The explicit Reload
-  // action (below) resets it from the latest data; a background refetch never
-  // clobbers in-progress edits.
+  // Initialize the form + pre-image from the first successful load. The
+  // explicit Reload action (below) re-baselines both from the latest data; a
+  // background refetch never clobbers in-progress edits — and never advances
+  // the pre-image either.
   useEffect(() => {
     if (cron.data && form === null) {
       setForm(formFromResponse(cron.data));
+      setPreimage(workCronPreimage(cron.data));
     }
   }, [cron.data, form]);
 
@@ -103,11 +116,14 @@ export function WorkCronEditorDialog({
     setConflict(false);
     setError(null);
     const res = await cron.refetch();
-    if (res.data) setForm(formFromResponse(res.data));
+    if (res.data) {
+      setForm(formFromResponse(res.data));
+      setPreimage(workCronPreimage(res.data));
+    }
   }
 
   async function handleSave() {
-    if (!form || !cron.data) return;
+    if (!form || preimage === null) return;
     setError(null);
     setConflict(false);
     try {
@@ -116,7 +132,11 @@ export function WorkCronEditorDialog({
         request: {
           tz: form.tz.trim(),
           roles: form.roles,
-          expected_current_json: workCronPreimage(cron.data),
+          // The frozen snapshot pre-image — NOT the live `cron.data`. If a
+          // background refetch advanced the stored blob, the CAS still
+          // compares against the blob this form was built from, so a
+          // concurrent write surfaces as a 409 instead of being overwritten.
+          expected_current_json: preimage,
         },
       });
       onOpenChange(false);
@@ -157,7 +177,10 @@ export function WorkCronEditorDialog({
                 setConflict(false);
                 setError(null);
                 void cron.refetch().then((res) => {
-                  if (res.data) setForm(formFromResponse(res.data));
+                  if (res.data) {
+                    setForm(formFromResponse(res.data));
+                    setPreimage(workCronPreimage(res.data));
+                  }
                 });
               }}
               className="self-start"
