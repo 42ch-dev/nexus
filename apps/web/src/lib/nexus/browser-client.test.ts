@@ -826,3 +826,181 @@ describe('BrowserClient transport classification (V1.129 P0)', () => {
     expect(err.kind).toBeUndefined();
   });
 });
+
+// ── V1.171 P2 AR-29 — schedule label edit + per-Work cron ────────────────────
+
+describe('BrowserClient schedule edit + work cron (V1.171 P2 AR-29)', () => {
+  it('PATCHes the schedule label to the edit endpoint', async () => {
+    let received: { method: string; url: string; body?: unknown } | null = null;
+    useHandlers(
+      http.patch('/v1/daemon/orchestration/schedules/sched-1', async ({ request }) => {
+        received = {
+          method: 'PATCH',
+          url: request.url,
+          body: await request.json(),
+        };
+        return HttpResponse.json({
+          schedule_id: 'sched-1',
+          creator_id: 'creator-a',
+          preset_id: 'preset-a',
+          status: 'active',
+          label: 'Renamed',
+          current_core_context_version: 3,
+          created_at: '2026-06-24T00:00:00Z',
+          updated_at: '2026-06-24T00:00:00Z',
+        });
+      }),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.editSchedule('sched-1', { label: 'Renamed' });
+    expect(received).toEqual({
+      method: 'PATCH',
+      url: 'http://localhost:3000/v1/daemon/orchestration/schedules/sched-1',
+      body: { label: 'Renamed' },
+    });
+    expect(res.label).toBe('Renamed');
+  });
+
+  it('sends an empty label to clear it to NULL', async () => {
+    let body: unknown = null;
+    useHandlers(
+      http.patch('/v1/daemon/orchestration/schedules/sched-1', async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json({});
+      }),
+    );
+
+    const client = new BrowserClient();
+    await client.editSchedule('sched-1', { label: '' });
+    expect(body).toEqual({ label: '' });
+  });
+
+  it('GETs the per-Work cron config with the is_default marker', async () => {
+    useHandlers(
+      http.get('/v1/daemon/works/work-1/cron', () =>
+        HttpResponse.json({
+          tz: 'UTC',
+          roles: {
+            brainstorm: { cron: '0 3,9,15,21 * * *', enabled: true },
+            write: { cron: '0 4,10,16,22 * * *', enabled: true },
+            review: { cron: '0,30 * * * *', enabled: true },
+          },
+          is_default: true,
+        }),
+      ),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.getWorkCron('work-1');
+    expect(res.is_default).toBe(true);
+    expect(res.roles.brainstorm.cron).toBe('0 3,9,15,21 * * *');
+  });
+
+  it('PUTs the full WorkSchedule body with the CAS pre-image', async () => {
+    let received: { method: string; url: string; body?: unknown } | null = null;
+    useHandlers(
+      http.put('/v1/daemon/works/work-1/cron', async ({ request }) => {
+        received = {
+          method: 'PUT',
+          url: request.url,
+          body: await request.json(),
+        };
+        return HttpResponse.json({
+          tz: 'Asia/Shanghai',
+          roles: {
+            brainstorm: { cron: '0 8 * * *', enabled: true },
+            write: { cron: '0 4,10,16,22 * * *', enabled: false },
+            review: { cron: '0,30 * * * *', enabled: true },
+          },
+          is_default: false,
+        });
+      }),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.putWorkCron('work-1', {
+      tz: 'Asia/Shanghai',
+      roles: {
+        brainstorm: { cron: '0 8 * * *', enabled: true },
+        write: { cron: '0 4,10,16,22 * * *', enabled: false },
+        review: { cron: '0,30 * * * *', enabled: true },
+      },
+      expected_current_json: '{"tz":"UTC"}',
+    });
+    expect(received).toEqual({
+      method: 'PUT',
+      url: 'http://localhost:3000/v1/daemon/works/work-1/cron',
+      body: {
+        tz: 'Asia/Shanghai',
+        roles: {
+          brainstorm: { cron: '0 8 * * *', enabled: true },
+          write: { cron: '0 4,10,16,22 * * *', enabled: false },
+          review: { cron: '0,30 * * * *', enabled: true },
+        },
+        expected_current_json: '{"tz":"UTC"}',
+      },
+    });
+    expect(res.is_default).toBe(false);
+  });
+
+  it('surfaces a 409 CAS conflict as a NexusClientError with status 409', async () => {
+    useHandlers(
+      http.put('/v1/daemon/works/work-1/cron', () =>
+        HttpResponse.json(
+          {
+            success: false,
+            error: { code: 'conflict', message: 'schedule_json changed by another writer' },
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+
+    const client = new BrowserClient();
+    const err = await client
+      .putWorkCron('work-1', {
+        tz: 'UTC',
+        roles: {
+          brainstorm: { cron: '0 3,9,15,21 * * *', enabled: true },
+          write: { cron: '0 4,10,16,22 * * *', enabled: true },
+          review: { cron: '0,30 * * * *', enabled: true },
+        },
+        expected_current_json: 'stale',
+      })
+      .catch((e) => e);
+    expect(err.status).toBe(409);
+    expect(err.code).toBe('conflict');
+  });
+
+  it('surfaces an invalid-cron 400 with the stable code', async () => {
+    useHandlers(
+      http.put('/v1/daemon/works/work-1/cron', () =>
+        HttpResponse.json(
+          {
+            success: false,
+            error: {
+              code: 'bad_request',
+              message: "[E_CRON_INVALID_EXPR] invalid cron expression: 'garbage'",
+            },
+          },
+          { status: 400 },
+        ),
+      ),
+    );
+
+    const client = new BrowserClient();
+    const err = await client
+      .putWorkCron('work-1', {
+        tz: 'UTC',
+        roles: {
+          brainstorm: { cron: 'garbage', enabled: true },
+          write: { cron: '0 4,10,16,22 * * *', enabled: true },
+          review: { cron: '0,30 * * * *', enabled: true },
+        },
+      })
+      .catch((e) => e);
+    expect(err.status).toBe(400);
+    expect(err.message).toContain('E_CRON_INVALID_EXPR');
+  });
+});

@@ -78,9 +78,11 @@ import { useDesktopCapabilities, useNexusClient } from '@/lib/client-context';
 import {
   NexusClientError,
   type ClearRunsQuery,
+  type EditScheduleRequest,
   type ListRunsQuery,
   type NexusClient,
   type PresetProfileResponse,
+  type UpdateWorkCronRequest,
 } from '@/lib/nexus';
 import { shortId } from '@/lib/format';
 import { queryKeys } from '@/lib/nexus/query-keys';
@@ -162,6 +164,23 @@ export function useSchedules(query?: ListSchedulesQuery) {
       const res = await client.listSchedules(query);
       return res.items;
     },
+  });
+}
+
+// ── Per-Work cron config (V1.171 P2 AR-29) ───────────────────────────────────
+
+/**
+ * `GET /v1/daemon/works/{work_id}/cron` — the effective per-Work cron
+ * configuration (stored `works.schedule_json` or the spec defaults when
+ * unset, plus the `is_default` honesty marker). Disabled until a work id is
+ * provided.
+ */
+export function useWorkCron(workId: string | undefined) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.worksCron.detail(workId ?? ''),
+    queryFn: () => client.getWorkCron(workId!),
+    enabled: Boolean(workId),
   });
 }
 
@@ -500,6 +519,113 @@ export function useCreateWorld() {
       void qc.invalidateQueries({ queryKey: queryKeys.timeline.all });
     },
     onError: (error) => errorToast(error, 'error.couldNotCreateWorld'),
+  });
+}
+
+export interface CreateScheduleArgs {
+  creatorId: string;
+  presetId: string;
+  label?: string;
+  seed?: string;
+}
+
+/**
+ * Create a schedule (V1.171 P2 — PL-15/PL-16). Wraps the existing
+ * `POST /v1/daemon/orchestration/schedules` endpoint with the honest
+ * `AddScheduleRequest` fields only (preset + optional label/seed — no new
+ * scheduler fields, no firing-cadence promise). Invalidates the schedules
+ * list on success so the new row renders (same pattern as the canvas
+ * `useRunStrategy` precedent).
+ */
+export function useCreateSchedule() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  const { t } = useTranslation('schedule');
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (args: CreateScheduleArgs) =>
+      client.addSchedule({
+        creator_id: args.creatorId,
+        preset_id: args.presetId,
+        ...(args.label ? { label: args.label } : {}),
+        ...(args.seed ? { seed: args.seed } : {}),
+      }),
+    onSuccess: (_data, args) => {
+      toast({ variant: 'success', title: t('create.toastCreated'), description: args.presetId });
+      void qc.invalidateQueries({ queryKey: queryKeys.schedules.all });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotCreateSchedule'),
+  });
+}
+
+/**
+ * Edit a schedule's label (V1.171 P2 — PL-16/AR-29). Wraps
+ * `PATCH /v1/daemon/orchestration/schedules/{schedule_id}`; `label: ""`
+ * clears the label to NULL. Invalidates the schedules list + detail on
+ * success so the edited row renders fresh.
+ */
+export function useEditSchedule() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (vars: { scheduleId: string; request: EditScheduleRequest }) =>
+      client.editSchedule(vars.scheduleId, vars.request),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.schedules.all });
+      void qc.invalidateQueries({ queryKey: queryKeys.schedules.detail(vars.scheduleId) });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotUpdateSchedule'),
+  });
+}
+
+/**
+ * Replace a Work's cron config (V1.171 P2 — PL-16/AR-29). Wraps
+ * `PUT /v1/daemon/works/{work_id}/cron` with the CAS pre-image
+ * (`expected_current_json`) the caller captured from a prior GET. A 409
+ * conflict surfaces via the error toast; the caller re-GETs and re-applies.
+ * Invalidates the Work's cron query AND the works tree on success — the PUT
+ * bumps `works.updated_at`, so the schedule page's Works table must refresh
+ * its "Updated" column (F-009).
+ */
+export function usePutWorkCron() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (vars: { workId: string; request: UpdateWorkCronRequest }) =>
+      client.putWorkCron(vars.workId, vars.request),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.worksCron.detail(vars.workId) });
+      // F-009: the PUT bumps works.updated_at; refetch the Works lists so the
+      // row timestamp refreshes after a cron save.
+      void qc.invalidateQueries({ queryKey: queryKeys.works.all });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotUpdateWorkCron'),
+  });
+}
+
+/**
+ * Delete a schedule (V1.171 P2 — PL-15/AR-31). Wraps
+ * `DELETE /v1/daemon/orchestration/schedules/{schedule_id}` — the daemon
+ * cancels non-terminal schedules before deletion and responds `200` with
+ * `{ deleted: true }`. Unknown ids resolve to 404; any refusal (non-terminal
+ * enforcement) surfaces via the shared error toast — no client-side
+ * pre-filter. Invalidates the whole `['schedules']` key set on success so the
+ * deleted row leaves the list and the by-preset/strategy-cache views refetch
+ * (mirrors `useDeletePreset`).
+ */
+export function useDeleteSchedule() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (scheduleId: string) => client.deleteSchedule(scheduleId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.schedules.all });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotDeleteSchedule'),
   });
 }
 
