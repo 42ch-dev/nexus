@@ -883,3 +883,90 @@ describe('NexusClient compute-run-method parity guard (V1.147 P1)', () => {
     ]);
   });
 });
+
+// ── 9. Schedule-edit + work-cron parity guard (V1.171 P2 AR-29) ──────────────
+
+/**
+ * The V1.171 P2 AR-29 promotion added `editSchedule` / `getWorkCron` /
+ * `putWorkCron` to the `NexusClient` interface. This guard mirrors the
+ * compute-run guard: it fails at compile time (the `satisfies` constraint) if
+ * the interface drops any method, and at runtime if an adapter implementation
+ * is missing it.
+ */
+const SCHEDULE_EDIT_METHODS = [
+  'editSchedule',
+  'getWorkCron',
+  'putWorkCron',
+] as const satisfies readonly (keyof NexusClient)[];
+
+describe('NexusClient schedule-edit + work-cron parity guard (V1.171 P2 AR-29)', () => {
+  it('BrowserClient implements every schedule-edit method on the NexusClient interface', () => {
+    const client = new BrowserClient();
+    for (const method of SCHEDULE_EDIT_METHODS) {
+      expect(typeof client[method], `BrowserClient.${method} must be a function`).toBe('function');
+    }
+  });
+
+  it('TauriClient inherits every schedule-edit method (thin-over-BrowserClient)', () => {
+    const client = new TauriClient({
+      fetchImpl: async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    });
+    for (const method of SCHEDULE_EDIT_METHODS) {
+      expect(typeof client[method], `TauriClient.${method} must be a function`).toBe('function');
+    }
+  });
+
+  it('routes the schedule-edit methods to the right verb + path + body shape', async () => {
+    const seen: { method: string; url: string; body?: unknown }[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      seen.push({
+        method: init?.method ?? 'GET',
+        url: String(input),
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      });
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+
+    const client = new BrowserClient({ fetchImpl });
+    await client.editSchedule('sched-1', { label: 'Renamed' });
+    await client.getWorkCron('work-1');
+    await client.putWorkCron('work-1', {
+      tz: 'UTC',
+      roles: {
+        brainstorm: { cron: '0 3,9,15,21 * * *', enabled: true },
+        write: { cron: '0 4,10,16,22 * * *', enabled: true },
+        review: { cron: '0,30 * * * *', enabled: true },
+      },
+      expected_current_json: '{"tz":"UTC"}',
+    });
+
+    expect(seen).toEqual([
+      {
+        method: 'PATCH',
+        url: '/v1/daemon/orchestration/schedules/sched-1',
+        body: { label: 'Renamed' },
+      },
+      { method: 'GET', url: '/v1/daemon/works/work-1/cron' },
+      {
+        method: 'PUT',
+        url: '/v1/daemon/works/work-1/cron',
+        body: {
+          tz: 'UTC',
+          roles: {
+            brainstorm: { cron: '0 3,9,15,21 * * *', enabled: true },
+            write: { cron: '0 4,10,16,22 * * *', enabled: true },
+            review: { cron: '0,30 * * * *', enabled: true },
+          },
+          expected_current_json: '{"tz":"UTC"}',
+        },
+      },
+    ]);
+  });
+});

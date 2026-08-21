@@ -88,6 +88,7 @@ import type {
   ScaffoldPresetResponse,
   ScanRequest,
   ScanResponse,
+  ScheduleSummary,
   SessionDetailResponse,
   SetActiveCreatorRequest,
   SetActiveCreatorResponse,
@@ -133,9 +134,12 @@ import type {
   ClearRunsResponse,
   DaemonHealth,
   DiscardRunResponse,
+  EditScheduleRequest,
   ListRunsQuery,
   ListTimelineEventsQuery,
   NexusClient,
+  UpdateWorkCronRequest,
+  WorkCronResponse,
 } from './types';
 
 export interface BrowserClientOptions {
@@ -309,6 +313,22 @@ export class BrowserClient implements NexusClient {
   ): Promise<EditCoreContextResponse> {
     return this.patch<EditCoreContextResponse>(
       `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}/core-context`,
+      request,
+    );
+  }
+  // V1.171 P2 AR-29 — schedule label edit + per-Work cron config.
+  editSchedule(scheduleId: string, request: EditScheduleRequest): Promise<ScheduleSummary> {
+    return this.patch<ScheduleSummary>(
+      `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}`,
+      request,
+    );
+  }
+  getWorkCron(workId: string): Promise<WorkCronResponse> {
+    return this.get<WorkCronResponse>(`/v1/daemon/works/${encodeURIComponent(workId)}/cron`);
+  }
+  putWorkCron(workId: string, request: UpdateWorkCronRequest): Promise<WorkCronResponse> {
+    return this.put<WorkCronResponse>(
+      `/v1/daemon/works/${encodeURIComponent(workId)}/cron`,
       request,
     );
   }

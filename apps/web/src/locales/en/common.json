@@ -67,6 +67,8 @@
     "couldNotDeleteWorld": "Could not delete World",
     "couldNotCreateWorld": "Could not create World",
     "couldNotCreateSchedule": "Could not create schedule",
+    "couldNotUpdateSchedule": "Could not update schedule",
+    "couldNotUpdateWorkCron": "Could not update Work cron",
     "couldNotCreateFork": "Could not create branch",
     "couldNotCreateWorldRule": "Could not create rule",
     "couldNotUpdateWorldRule": "Could not update rule",
