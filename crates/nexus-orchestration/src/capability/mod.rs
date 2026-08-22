@@ -3,6 +3,7 @@
 //! Design: `.mstar/specs/orchestration-engine.md` §5.1–5.2.
 
 pub mod builtins;
+pub mod user_capability;
 
 use async_trait::async_trait;
 use serde_json::Value;
