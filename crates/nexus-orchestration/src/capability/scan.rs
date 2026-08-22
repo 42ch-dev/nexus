@@ -45,12 +45,20 @@ pub struct ScanOutcome {
 ///   validates AND the directory name equals the descriptor's `name`.
 /// - Parse/validation/read failures are per-capability skips with a named
 ///   reason — never a top-level error, never a panic.
-/// - Duplicate declared names: first-in-scan-order wins, the rest skipped
+/// - Entries are processed in **sorted directory-name order** for a
+///   deterministic scan (catalog order stable across boots; `read_dir`
+///   order is filesystem-dependent).
+/// - Per-entry `read_dir` errors and non-UTF-8 directory names are logged at
+///   `warn!`; the non-UTF-8 case also gets a skip record (AR-35
+///   all-skips-logged).
+/// - Duplicate declared names: first-in-sorted-order wins, the rest skipped
 ///   (defensive: with the dir-name == descriptor-name rule, two distinct dirs
-///   cannot both pass; retained as the AR-36 collision guard for future
-///   admission changes).
-/// - No admission gates at P0 (collision/hash/clamp are P1, AR-43); the
-///   declared name is stored as-is.
+///   cannot both match — the guard is retained for future admission changes
+///   and is checked before the mismatch guard so its skip reason stays
+///   reachable, M1 QC wave).
+/// - No admission gates at P0 (hash/clamp are P1, AR-43); the declared name
+///   is stored as-is. Builtin-name collisions are rejected at the registry
+///   append path (AR-36 builtin-wins), not here.
 #[must_use]
 pub fn scan_user_capabilities(dir: &Path) -> ScanOutcome {
     let mut outcome = ScanOutcome::default();
@@ -71,10 +79,41 @@ pub fn scan_user_capabilities(dir: &Path) -> ScanOutcome {
         }
     };
 
-    for entry in read.flatten() {
+    // Collect entries first so processing order is deterministic: sort by
+    // directory name (S-003/M2 — `read_dir` order is not guaranteed).
+    let mut entries: Vec<std::fs::DirEntry> = Vec::new();
+    for entry in read {
+        match entry {
+            Ok(e) => entries.push(e),
+            Err(e) => {
+                // Per-entry I/O errors (e.g. an unreadable subdir) are
+                // boot-safe skips — log them (AR-35 all-skips-logged); no
+                // capability name is available for a skip record.
+                tracing::warn!(
+                    error = %e,
+                    dir = %dir.display(),
+                    "cannot read user capabilities directory entry; skipping"
+                );
+            }
+        }
+    }
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+
+    for entry in entries {
         let path = entry.path();
-        let Ok(dir_name) = entry.file_name().into_string() else {
-            continue;
+        let dir_name = match entry.file_name().into_string() {
+            Ok(name) => name,
+            Err(bad) => {
+                // Non-UTF-8 names cannot be capability names (AR-34 charset) —
+                // skip with a warn + record (S-002, AR-35 all-skips-logged).
+                let lossy = bad.to_string_lossy();
+                skip(
+                    &mut outcome,
+                    &lossy,
+                    "directory name is not valid UTF-8".to_string(),
+                );
+                continue;
+            }
         };
         if !path.is_dir() {
             continue;
@@ -93,6 +132,23 @@ pub fn scan_user_capabilities(dir: &Path) -> ScanOutcome {
             }
         };
 
+        // Duplicate declared names (AR-36): first-in-sorted-order wins, the
+        // rest skipped + logged. Checked BEFORE the dir-name mismatch check
+        // (M1 QC wave): the mismatch guard fires on a dir whose descriptor
+        // name differs from its dir name; the duplicate guard must fire when
+        // a later dir declares a name already admitted — otherwise it would
+        // be structurally unreachable and its skip reason never exercised.
+        // `contains` (not `insert`) here: a mismatched entry must not reserve
+        // its declared name for later entries.
+        if admitted_names.contains(&descriptor.name) {
+            skip(
+                &mut outcome,
+                &dir_name,
+                format!("duplicate user capability name '{}'", descriptor.name),
+            );
+            continue;
+        }
+
         if descriptor.name != dir_name {
             skip(
                 &mut outcome,
@@ -105,14 +161,7 @@ pub fn scan_user_capabilities(dir: &Path) -> ScanOutcome {
             continue;
         }
 
-        if !admitted_names.insert(descriptor.name.clone()) {
-            skip(
-                &mut outcome,
-                &dir_name,
-                format!("duplicate user capability name '{}'", descriptor.name),
-            );
-            continue;
-        }
+        admitted_names.insert(descriptor.name.clone());
 
         outcome
             .admitted
@@ -136,7 +185,10 @@ fn read_descriptor(path: &Path) -> Result<UserCapabilityDescriptor, String> {
 
 /// Record a skip and log it at `warn!` (AR-35: all skips are logged; the
 /// daemon never fails boot on a bad user capability).
-fn skip(outcome: &mut ScanOutcome, name: &str, reason: String) {
+///
+/// `pub(crate)`: also used by the registry append path for builtin-name
+/// collisions (AR-36 builtin-wins; F1 QC wave).
+pub(crate) fn skip(outcome: &mut ScanOutcome, name: &str, reason: String) {
     tracing::warn!(
         capability = %name,
         reason = %reason,
@@ -277,6 +329,59 @@ mod tests {
         let outcome = scan_user_capabilities(tmp.path());
         let names: Vec<&str> = outcome.admitted.iter().map(|c| c.name()).collect();
         assert_eq!(names, vec!["visible.cap"]);
+        assert!(outcome.skipped.is_empty());
+    }
+
+    /// M1 (QC wave): two dirs cannot both declare the same descriptor name
+    /// (dir-name == descriptor-name makes this structurally impossible), but
+    /// the duplicate guard must still be exercised: first-in-sorted-order
+    /// wins, the second is skipped with a named reason. `a.dup` sorts before
+    /// `b.dup`, so `a.dup` must win.
+    #[test]
+    fn scan_duplicate_declared_name_first_sorted_wins_second_skipped() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Same declared name in two dirs — `a.dup` sorts before `b.dup`.
+        write_capability_dir(tmp.path(), "a.dup");
+        write_capability_dir(tmp.path(), "b.dup");
+        // Rewrite b.dup's descriptor to declare the same name as a.dup.
+        let b_dir = tmp.path().join("b.dup");
+        std::fs::write(b_dir.join("capability.json"), descriptor_json("a.dup")).unwrap();
+        let outcome = scan_user_capabilities(tmp.path());
+        let names: Vec<&str> = outcome.admitted.iter().map(|c| c.name()).collect();
+        assert_eq!(
+            names,
+            vec!["a.dup"],
+            "first in sorted order wins the duplicate name"
+        );
+        assert_eq!(outcome.skipped.len(), 1, "second duplicate skipped");
+        assert_eq!(outcome.skipped[0].name, "b.dup");
+        assert!(
+            outcome.skipped[0]
+                .reason
+                .contains("duplicate user capability name"),
+            "named reason: {:?}",
+            outcome.skipped[0].reason
+        );
+    }
+
+    // S-003/M2: scan order must be deterministic (sorted by directory name),
+    // not filesystem `read_dir` order. The admitted order equals sorted dir
+    // names regardless of creation order.
+    #[test]
+    fn scan_order_is_sorted_by_directory_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Create out of alphabetical order — the scan must still admit in
+        // sorted order.
+        write_capability_dir(tmp.path(), "zeta.cap");
+        write_capability_dir(tmp.path(), "alpha.cap");
+        write_capability_dir(tmp.path(), "mike.cap");
+        let outcome = scan_user_capabilities(tmp.path());
+        let names: Vec<&str> = outcome.admitted.iter().map(|c| c.name()).collect();
+        assert_eq!(
+            names,
+            vec!["alpha.cap", "mike.cap", "zeta.cap"],
+            "admitted in deterministic sorted order"
+        );
         assert!(outcome.skipped.is_empty());
     }
 }

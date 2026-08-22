@@ -176,12 +176,28 @@ fn log_scan_outcome(outcome: &nexus_orchestration::capability::scan::ScanOutcome
 /// would double-nest to `<home>/.nexus42/.nexus42/capabilities` and miss
 /// user installs (same precedent as the `user_modules_dir` warmup,
 /// boot.rs L293-297).
-fn user_capabilities_scan_dir(state: &WorkspaceState) -> anyhow::Result<PathBuf> {
-    let raw_home = state
-        .nexus_home()
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("nexus_home has no parent directory"))?;
-    Ok(nexus_home_layout::user_capabilities_dir(raw_home))
+///
+/// Never fails boot (S-004 QC wave): a parent-less `nexus_home` (unreachable
+/// in production — `$HOME/.nexus42` always has a parent) is a `warn!` +
+/// scan-nothing fallback, not a propagated error. The fallback points the
+/// scanner at a path that cannot exist, so the scan yields the empty
+/// outcome (missing-dir contract, AR-35).
+fn user_capabilities_scan_dir(state: &WorkspaceState) -> PathBuf {
+    state.nexus_home().parent().map_or_else(
+        || {
+            tracing::warn!(
+                home = %state.nexus_home().display(),
+                "nexus_home has no parent directory; scanning no user capabilities (empty outcome)"
+            );
+            // The fallback points the scanner at a path that cannot exist, so
+            // the scan yields the empty outcome (missing-dir contract, AR-35).
+            state
+                .nexus_home()
+                .join("_no-parent-home")
+                .join("capabilities")
+        },
+        nexus_home_layout::user_capabilities_dir,
+    )
 }
 
 /// Run the daemon runtime to completion.
@@ -381,7 +397,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // `user_modules_dir` warmup above, L293-297) — passing
     // `state.nexus_home()` (already `<home>/.nexus42`) would scan
     // `<home>/.nexus42/.nexus42/capabilities` and miss user installs.
-    let user_caps_dir = user_capabilities_scan_dir(&state)?;
+    let user_caps_dir = user_capabilities_scan_dir(&state);
     let capabilities = Arc::new(if let Some((engine, cache)) = &wasm_singleton {
         // V1.147 P0: store daemon-wide engine+cache on WorkspaceState
         // so the direct compute handler can use them. Clone the Arcs
@@ -1365,7 +1381,7 @@ mod tests {
         std::fs::create_dir_all(&nexus_home).expect("create nexus_home");
         let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
 
-        let resolved = user_capabilities_scan_dir(&state).expect("resolve scan dir");
+        let resolved = user_capabilities_scan_dir(&state);
         assert_eq!(
             resolved,
             nexus_home_layout::user_capabilities_dir(user_home),
