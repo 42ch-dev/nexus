@@ -14,8 +14,13 @@
 //! capability per boot, same lifetime as builtin literal constants.
 
 use crate::capability::{Capability, CapabilityError};
+use nexus_contracts::generated::daemon_api::compute::compute_input::{
+    ComputeInputWorldRef, ComputeInputWorldRefWorldId,
+};
+use nexus_wasm_host::{ComputeInput, ComputeOutput};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::num::NonZeroU64;
 use thiserror::Error;
 
 /// Validation errors for a [`UserCapabilityDescriptor`] (AR-34 vocabulary).
@@ -146,6 +151,99 @@ impl UserCapability {
             input_schema: Box::leak(descriptor.input_schema.clone().into_boxed_str()),
             output_schema: Box::leak(descriptor.output_schema.clone().into_boxed_str()),
         }
+    }
+
+    /// AR-37 envelope mapping: capability input JSON → [`ComputeInput`].
+    ///
+    /// - `schema_version` = 1 (literal; same as `narrative_compute.rs`
+    ///   L249-250).
+    /// - `world_ref` = the input's optional `worldId` string as
+    ///   `{"world_id": <id>}`, else the empty `WorldRef` default (the wire
+    ///   `world_ref` has no required sub-fields).
+    /// - `key_blocks` = the input's optional `keyBlocks` array of opaque JSON
+    ///   objects, else `[]`.
+    /// - `invocation` = the raw input object passthrough (module-declared
+    ///   parameter surface; the module's own `manifest.schemas.invocation`
+    ///   governs runtime validation — AR-37).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CapabilityError::InputInvalid`] when the input is not a JSON
+    /// object, `worldId` violates the wire `WorldId` format (`^wld_…$`), or a
+    /// `keyBlocks` element is not a JSON object. Input mismatch is fail-closed
+    /// per AR-37 (the declared `inputSchema` is discovery-only, not a second
+    /// runtime validator).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `schema_version` literal 1 is not representable as
+    /// `NonZeroU64` (this can never happen — 1 is always non-zero).
+    // The `&self` receiver and owned `Value` are mandated by the locked
+    // interface (T2's executor calls it on the capability instance with the
+    // run() input); the mapping itself is stateless.
+    #[allow(clippy::unused_self, clippy::needless_pass_by_value)]
+    pub fn to_compute_input(&self, input: Value) -> Result<ComputeInput, CapabilityError> {
+        // The raw input object is the invocation passthrough — a non-object
+        // input has no parameter surface to forward.
+        let invocation: serde_json::Map<String, Value> =
+            input.as_object().cloned().ok_or_else(|| {
+                CapabilityError::InputInvalid("capability input must be a JSON object".to_string())
+            })?;
+
+        let world_ref = match input.get("worldId").and_then(Value::as_str) {
+            Some(world_id) => {
+                let world_id_newtype = ComputeInputWorldRefWorldId::try_from(world_id)
+                    .map_err(|e| CapabilityError::InputInvalid(format!("invalid worldId: {e}")))?;
+                ComputeInputWorldRef {
+                    world_id: Some(world_id_newtype),
+                    ..Default::default()
+                }
+            }
+            None => ComputeInputWorldRef::default(),
+        };
+
+        let key_blocks = match input.get("keyBlocks") {
+            None => Vec::new(),
+            Some(Value::Array(items)) => items
+                .iter()
+                .map(|item| {
+                    item.as_object().cloned().ok_or_else(|| {
+                        CapabilityError::InputInvalid(
+                            "keyBlocks elements must be JSON objects".to_string(),
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            Some(_) => {
+                return Err(CapabilityError::InputInvalid(
+                    "keyBlocks must be a JSON array".to_string(),
+                ));
+            }
+        };
+
+        Ok(ComputeInput {
+            schema_version: NonZeroU64::new(1).expect("schema_version literal 1 is non-zero"),
+            world_ref,
+            key_blocks,
+            narrative_state: None,
+            invocation,
+        })
+    }
+
+    /// AR-37 output mapping: [`ComputeOutput`] → capability output JSON.
+    ///
+    /// Serializes the **4-part wire envelope verbatim** (`state_delta`,
+    /// `timeline_events`, `new_key_blocks`, `battle_report`) — the typed
+    /// `ComputeOutput` round-trips losslessly through `serde_json`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CapabilityError::Internal`] if the typed output cannot be
+    /// serialized (a host-side invariant violation — the struct is a plain
+    /// data type).
+    pub fn from_compute_output(output: ComputeOutput) -> Result<Value, CapabilityError> {
+        serde_json::to_value(output)
+            .map_err(|e| CapabilityError::Internal(format!("compute output serialization: {e}")))
     }
 }
 
@@ -607,6 +705,165 @@ mod tests {
         assert!(
             matches!(err, CapabilityError::WorkerUnavailable),
             "expected WorkerUnavailable, got {err:?}"
+        );
+    }
+
+    // ── AR-37 envelope mapping (P1 T1) ───────────────────────────────────
+
+    fn cap() -> UserCapability {
+        UserCapability::new(&parse(&minimal_json()).expect("minimal descriptor must parse"))
+    }
+
+    /// Round-trip: a full input maps `worldId` → `world_ref.world_id`,
+    /// `keyBlocks` → `key_blocks`, and the whole object passes through as the
+    /// raw `invocation` (module-declared parameter surface, AR-37).
+    #[test]
+    fn to_compute_input_round_trips_envelope() {
+        let input = serde_json::json!({
+            "worldId": "wld_w1",
+            "keyBlocks": [
+                {"key_block_id": "kb_a", "body": {"state": {"character": {"current_hp": 80}}}},
+                {"key_block_id": "kb_b", "body": {"state": {"character": {"current_hp": 120}}}}
+            ],
+            "seed": 42,
+        });
+
+        let compute_input = cap()
+            .to_compute_input(input.clone())
+            .expect("valid input maps");
+
+        // schema_version literal 1 (AR-37, narrative_compute.rs L249-250).
+        assert_eq!(compute_input.schema_version.get(), 1);
+        assert_eq!(
+            compute_input
+                .world_ref
+                .world_id
+                .as_deref()
+                .map(String::as_str),
+            Some("wld_w1"),
+            "worldId maps to world_ref.world_id"
+        );
+        // key_blocks items are opaque JSON objects, preserved in order.
+        let expected_blocks = input["keyBlocks"]
+            .as_array()
+            .expect("keyBlocks is an array");
+        assert_eq!(compute_input.key_blocks.len(), expected_blocks.len());
+        for (got, want) in compute_input.key_blocks.iter().zip(expected_blocks) {
+            assert_eq!(serde_json::Value::Object(got.clone()), *want);
+        }
+        // invocation is the raw input object passthrough — verbatim.
+        assert_eq!(
+            serde_json::Value::Object(compute_input.invocation),
+            input,
+            "invocation must carry the full raw input object"
+        );
+    }
+
+    /// Empty input → `world_ref: {}`, `key_blocks: []`, `invocation: {}`.
+    #[test]
+    fn to_compute_input_empty_input_uses_envelope_defaults() {
+        let compute_input = cap()
+            .to_compute_input(serde_json::json!({}))
+            .expect("empty object input maps");
+        assert!(compute_input.world_ref.world_id.is_none());
+        assert!(compute_input.world_ref.branch_id.is_none());
+        assert!(compute_input.world_ref.timeline_head_event_id.is_none());
+        assert!(compute_input.key_blocks.is_empty());
+        assert!(compute_input.invocation.is_empty());
+    }
+
+    /// Missing optional fields default: no `worldId`/`keyBlocks` in a
+    /// non-empty invocation leaves the envelope empty and passes the body
+    /// through untouched.
+    #[test]
+    fn to_compute_input_omits_absent_optional_fields() {
+        let compute_input = cap()
+            .to_compute_input(serde_json::json!({"seed": 7}))
+            .expect("input with only invocation fields maps");
+        assert!(compute_input.world_ref.world_id.is_none());
+        assert!(compute_input.key_blocks.is_empty());
+        assert_eq!(
+            compute_input.invocation.get("seed"),
+            Some(&serde_json::json!(7)),
+            "invocation body preserved without envelope fields"
+        );
+    }
+
+    /// Fail-closed (AR-37): a malformed `worldId` (wire requires `^wld_…$`)
+    /// is an `InputInvalid`, never silently dropped.
+    #[test]
+    fn to_compute_input_rejects_malformed_world_id() {
+        let err = cap()
+            .to_compute_input(serde_json::json!({"worldId": "nope"}))
+            .expect_err("malformed worldId must be rejected");
+        assert!(
+            matches!(err, CapabilityError::InputInvalid(_)),
+            "expected InputInvalid, got {err:?}"
+        );
+    }
+
+    /// `keyBlocks` must be an array of JSON objects — a scalar element is a
+    /// fail-closed `InputInvalid`.
+    #[test]
+    fn to_compute_input_rejects_non_object_key_block() {
+        let err = cap()
+            .to_compute_input(serde_json::json!({"keyBlocks": ["not-an-object"]}))
+            .expect_err("non-object keyBlock must be rejected");
+        assert!(
+            matches!(err, CapabilityError::InputInvalid(_)),
+            "expected InputInvalid, got {err:?}"
+        );
+    }
+
+    /// A non-object capability input has no invocation surface — `InputInvalid`.
+    #[test]
+    fn to_compute_input_rejects_non_object_input() {
+        let err = cap()
+            .to_compute_input(serde_json::json!("naked string"))
+            .expect_err("non-object input must be rejected");
+        assert!(
+            matches!(err, CapabilityError::InputInvalid(_)),
+            "expected InputInvalid, got {err:?}"
+        );
+    }
+
+    /// `from_compute_output` maps the 4-part wire envelope verbatim
+    /// (`state_delta`, `timeline_events`, `new_key_blocks`, `battle_report`).
+    #[test]
+    fn from_compute_output_serializes_four_part_envelope_verbatim() {
+        let output_json = serde_json::json!({
+            "schema_version": 1,
+            "state_delta": [{
+                "op": "sub",
+                "path": "character.current_hp",
+                "target_key_block_id": "kb_def",
+                "value": 15
+            }],
+            "timeline_events": [{
+                "schema_version": 1,
+                "timeline_event_id": "evt_1",
+                "world_id": "wld_w1",
+                "branch_id": "root",
+                "event_type": "state_update",
+                "status": "canon",
+                "sequence_no": 1,
+                "created_at": "2026-01-01T00:00:00Z",
+                "title": "Guardian takes 15 damage",
+                "summary": "Guardian takes 15 damage (kb_def)",
+                "affected_key_block_ids": ["kb_atk", "kb_def"]
+            }],
+            "new_key_blocks": [],
+            "battle_report": {"kind": "combat"}
+        });
+        // The host deserializes module output into the typed struct; our
+        // mapping then re-serializes it — the envelope must round-trip.
+        let output: nexus_wasm_host::ComputeOutput = serde_json::from_value(output_json.clone())
+            .expect("fixture must deserialize into ComputeOutput");
+
+        let mapped = UserCapability::from_compute_output(output).expect("output maps");
+        assert_eq!(
+            mapped, output_json,
+            "from_compute_output must reproduce the 4-part envelope verbatim"
         );
     }
 }
