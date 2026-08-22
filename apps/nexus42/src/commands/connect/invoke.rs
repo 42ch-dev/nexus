@@ -12,9 +12,16 @@
 //! § OCC + error mapping / § World scoping, plus the P2 spec
 //! §2 compute-over-Connect.
 //!
-//! Every other op — `project` / unknown — is refused with
-//! `ErrorEnvelope.code = "op_unsupported"` and zero side effects (the N-C0
-//! refusal contract extends).
+//! V1.173 (DF-84): the user-locked tool set `S`
+//! ([`LOCAL_TOOL_OPS`] — `tools.nexus.list_observed_peers` /
+//! `tools.nexus.list_modules`) joins the served surface through the
+//! `Route::Tool` arm: host-level adapter reads with the spoke tool-invoke
+//! payload shape (spec §2, AR-49), skipping the world-scope gate. Core ops
+//! stay core ops (AR-56).
+//!
+//! Every other op — `project` / unknown / `tools.*` outside `S` — is
+//! refused with `ErrorEnvelope.code = "op_unsupported"` and zero side
+//! effects (the N-C0 refusal contract extends).
 //!
 //! ## Caller identity (session peer — E2, V1.154 P0 T2)
 //!
