@@ -1,11 +1,20 @@
 ---
-module: nexus-home-layout, nexus-spoke-adapter
+module: nexus-home-layout, nexus-spoke-adapter, nexus-daemon-runtime
 date: 2026-08-04
-problem_type: knowledge
+last_updated: 2026-08-22
+problem_type: convention
 category: conventions
 severity: low
-tags: [nexus-home-layout, path-helpers, device-id, raw-home, convention]
-applies_when: writing or calling a path helper under `nexus-home-layout`; adding a new `~/.nexus42/...` artifact path
+tags:
+  - nexus-home-layout
+  - path-helpers
+  - device-id
+  - raw-home
+  - user-capabilities
+applies_when:
+  - "writing or calling a path helper under nexus-home-layout"
+  - "adding a new ~/.nexus42/... artifact path"
+  - "scanning or installing user capabilities / modules / presets"
 ---
 
 # `nexus-home-layout` path helpers take **raw home** — never pre-join `.nexus42`
@@ -26,6 +35,8 @@ V1.148 P4 dogfood caught **F-1 (medium)**: `get_or_create_device_id(home)` joins
   ```
 - The contract belongs in the helper's doc comment (`Callers MUST pass the raw user home; this fn joins .nexus42 internally.`) so the next caller can't get it wrong at the call site.
 - When a helper's parameter is named after the value it expects, name it for the **raw** input (`home`, `user_home`) — not `nexus_home` (that name lies about what to pass and is the exact confusion vector that caused F-1 for the sibling identity/allowlist key paths).
+- **Same-family helpers** (all take raw home, all join `.nexus42` internally): `user_skills_dir`, `user_preset_base_dir`, `user_modules_dir`, `user_capabilities_dir` (`lib.rs` — capabilities is `$HOME/.nexus42/capabilities/<name>/` for the descriptor + manifest + wasm trio). Add a new `~/.nexus42/...` tree as another helper in this family; do not join `.nexus42` at the call site.
+- **Daemon callers** that only have `state.nexus_home()` (`$HOME/.nexus42`) must pass **`state.nexus_home().parent()`**. A parent-less `nexus_home` must not fail boot: warn + scan-nothing (empty outcome), never propagate `?`. V1.172: `user_capabilities_scan_dir` in `crates/nexus-daemon-runtime/src/boot.rs`. CLI callers already have raw home — pass `dirs::home_dir()` (e.g. `nexus42 capability install`).
 
 ## Why this matters
 
@@ -41,5 +52,6 @@ V1.148 P4 dogfood caught **F-1 (medium)**: `get_or_create_device_id(home)` joins
 ## Examples
 
 - V1.148 P4 F-1 fix: `crates/nexus-home-layout/src/device_id.rs` (`device_id_path(home)` joins `.nexus42`; doc contract), `apps/nexus42/src/main.rs`, `crates/nexus-spoke-adapter/src/adapter/host_manifest_port.rs`, `apps/nexus42/src/commands/connect/mod.rs` all pass raw `dirs::home_dir()`.
-- Sibling helpers that already follow the convention: `connect_dir(home)`, `tls_key_path(home)` (canonical `$HOME/.nexus42/...` output).
+- Sibling helpers that already follow the convention: `connect_dir(home)`, `tls_key_path(home)`, `user_modules_dir(home)`, `user_capabilities_dir(home)` (canonical `$HOME/.nexus42/...` output). Layout test: `user_capabilities_dir_layout` pins `/fake/home/.nexus42/capabilities`.
+- V1.172 capability scan/install: daemon `user_capabilities_scan_dir` uses `nexus_home().parent()`; CLI `cmd_install` uses `user_capabilities_dir(&dirs::home_dir()?)`. Passing `state.nexus_home()` would scan `~/.nexus42/.nexus42/capabilities` and miss every install.
 - Pre-1.0 note: a path fix that changes the canonical location is accepted without migration (one-time identity churn); record it in `crates/nexus-home-layout/AGENTS.md` path-history so future readers understand.

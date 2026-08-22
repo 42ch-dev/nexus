@@ -1,15 +1,24 @@
 ---
 module: schemas + crates/nexus-contracts + packages/nexus-contracts + crates/nexus-daemon-runtime
 date: 2026-07-18
-last_updated: 2026-08-21
+last_updated: 2026-08-22
 problem_type: convention
 category: conventions
 severity: medium
-tags: [wire-contracts, verification, codegen, schemas, additive-frontend, additive-wire, local-tier, regression]
+tags:
+  - wire-contracts
+  - verification
+  - codegen
+  - schemas
+  - additive-frontend
+  - additive-wire
+  - local-tier
+  - regression
 applies_when:
   - "Verifying that an additive-frontend iteration produced no wire-contract drift"
   - "Running a `wire_contracts_changed: false` gate before marking a plan Done"
   - "Reviewing a PR that claims no schema/codegen/daemon changes"
+  - "Shipping an intentional additive schema field (sanctioned-diff posture)"
 ---
 
 # Wire Contracts Frozen Verification (8-Point Gate)
@@ -100,6 +109,31 @@ New DTOs land in `crates/nexus-contracts/src/local/**` (hand-coded local tier,
 in `## Review Gate Summary` with the exemptions listed. A plan that is
 frontend-only (e.g. V1.171 P1) still runs the full gate unmodified.
 
+### Sanctioned-diff posture (AR-40, V1.172)
+
+AR-33 covers **local-tier-only** additive wire (new DTOs in
+`crates/nexus-contracts/src/local/**`, `schemas/` stays empty). When an
+iteration **intentionally extends a frozen wire schema** (additive field or
+enum with a default — e.g. V1.172 `capability-info.origin`), do **not** claim
+`wire_contracts_changed: false` and do **not** use AR-33 expected-diff
+exemptions. Apply the 8-point gate with **sanctioned diffs** — those diffs
+are the point of the plan and stay audited:
+
+| # | Check | This posture |
+|---|-------|--------------|
+| 1 | `schemas/` | **only** the named additive field (e.g. `origin` enum `["builtin","user"]` + `"default": "builtin"`). Nothing else. `schema_version` stays. `additionalProperties` stays. |
+| 2 | `crates/nexus-contracts/src/generated/**` | regenerated via `pnpm run codegen` |
+| 3 | `packages/nexus-contracts/**` | regenerated TS + **npm minor bump** |
+| 4 | `crates/nexus-daemon-runtime/src/api/` | no new routes unless named; handler populates the new field from a domain marker |
+| 5 | codegen clean on clean checkout | binding |
+| 6 | `crates/nexus-contracts/src/local/**` | local DTO may add a `String` (serialized camelCase). The domain enum (`CapabilityOrigin`) must **not** cross into `nexus-contracts` (dependency direction); the handler maps. |
+
+**Local camelCase vs generated snake_case.** The daemon serves the **local
+DTO** (`#[serde(rename_all = "camelCase")]` — `inputSchema` / `outputSchema`
+/ `origin`). Schema + codegen produce snake_case TS. Page field access and
+web mocks must match the handler's serialized shape, not the generated
+names, unless the page consumes the generated package.
+
 ## Why This Matters
 
 - **Prevents silent wire-contract drift** — a single accidental schema edit can break the `@42ch/nexus-contracts` npm package for Platform consumers.
@@ -111,6 +145,7 @@ frontend-only (e.g. V1.171 P1) still runs the full gate unmodified.
 - Closing any additive-frontend iteration (no new schemas, no daemon Rust changes, frontend-only).
 - Verifying a PR that claims `wire_contracts_changed: false` before merging.
 - Training new contributors on the verification protocol for additive-frontend work.
+- Closing an iteration that ships a **named** additive schema field (AR-40 sanctioned diffs) — record the sanctioned table, not a false `wire_contracts_changed: false`.
 
 ## Relationship to Schema Boundary Policy
 
