@@ -385,6 +385,14 @@ async fn allowlisted_peer_handshakes_and_reads_nexus_manifest() {
     // get-manifest op). Assert the full N-C0 baseline + N-C1 extension of
     // the field contract (the single shared builder now advertises the
     // delivered N-C2 read-half slice + the enlarged served op set).
+    //
+    // TODO(V1.173 T3): the exact-list pins below still assert the pre-T1
+    // six-core-op / three-capability manifest. T1 grew `capabilities[]`
+    // (baseline 3 ++ `LOCAL_TOOL_OPS`) and `extensions.nexus.served_ops`
+    // (6 core ++ `LOCAL_TOOL_OPS`), so this test is interim-red on those
+    // exact-list assertions only; T3 flips them to the served set `S`
+    // (AR-51 lockstep) alongside the new authorization cases. Do not
+    // half-fix here (T2 scope is dispatch routing).
     let wire = serde_json::to_value(session.remote_manifest()).expect("manifest serializes");
     assert_eq!(wire["host_id"], serde_json::json!(TEST_HOST_ID));
     assert_eq!(wire["schema_version"], serde_json::json!(1));
@@ -1884,6 +1892,7 @@ async fn n_c1_mixed_payload_missing_world_id_denies_whole_payload() {
 /// to the `op_unsupported` refusal and this loop fails — drift the honesty
 /// check alone cannot see, because it only compares manifest ⇔ const.
 #[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::too_many_lines)] // one routing sweep over SERVED_OPS; the per-op payload fixtures stay linear
 async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
     let _guard = network_test_guard().await;
     let temp = tempfile::tempdir().expect("tempdir");
@@ -2038,6 +2047,19 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
                     "defender_id": "kb_loop_pair_2",
                 },
                 "settle": false,
+            }),
+            // V1.173 (DF-84, T2): the user-locked tool set `S` routes
+            // through `Route::Tool` — host-level tools take the spoke
+            // tool-invoke payload shape (`{ "arguments": <object> }`) and
+            // skip the world-scope gate (AR-49), so the empty-object
+            // arguments round-trip through the handler arms
+            // (`{ "result": ... }`). `list_observed_peers` reads the
+            // empty `peer_hosts` store → `{ "peers": [] }`;
+            // `list_modules` reads the hermetic home's module store
+            // (missing dir → `{ "modules": [] }`).
+            "tools.nexus.list_observed_peers" | "tools.nexus.list_modules" => serde_json::json!({
+                "extensions": { "nexus": { "peer_id": peer_claim } },
+                "arguments": {},
             }),
             other => panic!(
                 "SERVED_OPS advertises op {other:?} but the routing-loop test has no \

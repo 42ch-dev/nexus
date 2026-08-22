@@ -6,7 +6,9 @@
 //! each `peer_ids` entry is either a bare `"12D3…"` peer id (N-C0 shape —
 //! no op access) or an object `{ "peer_id": "12D3…", "world_scope":
 //! ["<world-uuid>", …], "op_scope": ["upsert","promote","relate","check",
-//! "assemble"], "module_scope": ["<module-id>", …] }`.
+//! "assemble", "tools.nexus.<tool-id>", …], "module_scope": ["<module-id>", …] }`.
+//! V1.173 (DF-84, AR-49): `op_scope` may list `tools.nexus.*` op strings —
+//! they are exact-membership entries like any other served op.
 //! All scopes are optional and **fail-closed**: an absent/empty scope
 //! denies world access (writes AND the world-scoped read ops), ops, and —
 //! since P2 — every compute module (the `module_scope` architect lock,
@@ -84,7 +86,12 @@ pub struct PeerAccess {
     /// P2 compute op share the same gate.
     pub world_scope: BTreeSet<String>,
     /// Ops this peer may invoke (N-C2 E2 served ops: `upsert` / `promote` /
-    /// `relate` / `check` / `assemble` / `compute`).
+    /// `relate` / `check` / `assemble` / `compute`). V1.173 (DF-84, AR-49):
+    /// may also list `tools.nexus.*` strings (e.g.
+    /// `tools.nexus.list_observed_peers`) — they flow through the same
+    /// exact-membership [`PeerScope::allows_op`] gate as the core ops, so
+    /// an operator must add each served tool id the peer may call, or the
+    /// invoke is denied after the `SERVED_OPS` gate.
     pub op_scope: BTreeSet<String>,
     /// Host-local compute module ids this peer may invoke (P2 — architect
     /// lock, spec §6.1: missing/empty denies ALL compute, fail-closed).
