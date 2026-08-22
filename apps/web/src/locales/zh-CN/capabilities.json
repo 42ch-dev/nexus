@@ -11,5 +11,7 @@
   "emptyDescription": "运行时装载能力后，它们将显示在此处。",
   "inputSchema": "输入 schema",
   "outputSchema": "输出 schema",
+  "userBadge": "本地",
+  "localOnlyCopy": "本地模块 — 无分发或签名",
   "admissionGatesInfo": "调用此能力时，守护进程会强制执行准入门槛。门槛详情未在注册表列表响应中暴露。"
 }

@@ -9,7 +9,13 @@
   "properties": {
     "name": { "type": "string" },
     "input_schema": { "type": "string" },
-    "output_schema": { "type": "string" }
+    "output_schema": { "type": "string" },
+    "origin": {
+      "type": "string",
+      "enum": ["builtin", "user"],
+      "default": "builtin",
+      "description": "Provenance of the capability (AR-40): \"builtin\" ships with the engine, \"user\" is a locally-installed developer capability."
+    }
   },
   "additionalProperties": false
 }

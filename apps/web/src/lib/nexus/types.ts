@@ -31,7 +31,6 @@ import type {
   AddScheduleResponse,
   BatchUpdateFindingsRequest,
   BatchUpdateFindingsResponse,
-  CapabilityInfo,
   CertFingerprintResponse,
   ChapterBody,
   ChapterContentQuery,
@@ -53,7 +52,6 @@ import type {
   GetPresetResponse,
   InspectScheduleResponse,
   ListCapabilitiesQuery,
-  ListCapabilitiesResponse,
   ListChaptersQuery,
   ListChaptersResponse,
   ListCreatorsQuery,
@@ -149,6 +147,7 @@ import type {
 } from '@42ch/nexus-contracts';
 
 import type { PresetProfileResponse } from './preset-profile';
+import type { CapabilityInfo, CapabilityListResponse } from './capability-info';
 
 /** Daemon health probe result (`GET /v1/daemon/runtime/health`). App-side type. */
 export interface DaemonHealth {
@@ -431,8 +430,13 @@ export interface NexusClient {
   deleteSchedule(scheduleId: string): Promise<DeleteScheduleResponse>;
 
   // ── Capabilities ──────────────────────────────────────────────────────────
-  /** `GET /v1/daemon/orchestration/capabilities` — cursor list (F-P3/F-F1; canonical `items` key). */
-  listCapabilities(query?: ListCapabilitiesQuery): Promise<ListCapabilitiesResponse>;
+  /**
+   * `GET /v1/daemon/orchestration/capabilities` — cursor list (F-P3/F-F1;
+   * canonical `items` key). Typed against the app-side camelCase mirror of the
+   * local DTO (`capability-info.ts`): the daemon serves `inputSchema` /
+   * `outputSchema` (AR-40), NOT the generated snake_case schema types.
+   */
+  listCapabilities(query?: ListCapabilitiesQuery): Promise<CapabilityListResponse>;
 
   // ── Findings ───────────────────────────────────────────────────────────────
   /** `GET /v1/daemon/works/{work_id}/findings` — cursor list (F-P2; canonical `items` key). */
