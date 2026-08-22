@@ -38,8 +38,8 @@ describe('CapabilitiesPage', () => {
           items: [
             {
               name: 'nexus.example.greet',
-              input_schema: '{"type":"object"}',
-              output_schema: '{"type":"string"}',
+              inputSchema: '{"type":"object"}',
+              outputSchema: '{"type":"string"}',
             },
           ],
           pagination: { limit: 20, has_more: false },
@@ -52,6 +52,12 @@ describe('CapabilitiesPage', () => {
     expect(await screen.findByText('nexus.example.greet')).toBeInTheDocument();
     expect(screen.getByText('Input schema')).toBeInTheDocument();
     expect(screen.getByText('Output schema')).toBeInTheDocument();
+    // Wire-shape guard (P2 fix wave F2): the daemon serves the local camelCase
+    // DTO (inputSchema/outputSchema — AR-40), so the schema payload must render
+    // through the page's field access. If the page read a snake_case key the
+    // wire never sends, SchemaBlock falls back to '—' and this assertion fails.
+    expect(screen.getByText('{"type":"object"}')).toBeInTheDocument();
+    expect(screen.getByText('{"type":"string"}')).toBeInTheDocument();
     expect(
       screen.getByText(/Admission gates are enforced by the daemon/i),
     ).toBeInTheDocument();
@@ -90,13 +96,13 @@ describe('CapabilitiesPage', () => {
           items: [
             {
               name: 'nexus.world.describe',
-              input_schema: '{"type":"object"}',
-              output_schema: '{"type":"string"}',
+              inputSchema: '{"type":"object"}',
+              outputSchema: '{"type":"string"}',
             },
             {
               name: 'nexus.other.cap',
-              input_schema: '{"type":"object"}',
-              output_schema: '{"type":"string"}',
+              inputSchema: '{"type":"object"}',
+              outputSchema: '{"type":"string"}',
             },
           ],
           pagination: { limit: 20, has_more: false },
@@ -122,8 +128,8 @@ describe('CapabilitiesPage', () => {
           items: [
             {
               name: 'nexus.example.greet',
-              input_schema: '{"type":"object"}',
-              output_schema: '{"type":"string"}',
+              inputSchema: '{"type":"object"}',
+              outputSchema: '{"type":"string"}',
             },
           ],
           pagination: { limit: 20, has_more: false },
@@ -149,8 +155,8 @@ describe('CapabilitiesPage', () => {
           items: [
             {
               name: 'sync.pull',
-              input_schema: '{"type":"object"}',
-              output_schema: '{"type":"string"}',
+              inputSchema: '{"type":"object"}',
+              outputSchema: '{"type":"string"}',
               origin: 'user',
             },
           ],
@@ -175,8 +181,8 @@ describe('CapabilitiesPage', () => {
           items: [
             {
               name: 'nexus.example.greet',
-              input_schema: '{"type":"object"}',
-              output_schema: '{"type":"string"}',
+              inputSchema: '{"type":"object"}',
+              outputSchema: '{"type":"string"}',
               origin: 'builtin',
             },
           ],

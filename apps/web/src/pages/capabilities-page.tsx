@@ -80,8 +80,8 @@ export function CapabilitiesPage() {
                   {c.origin === 'user' && <Badge variant="neutral">{t('userBadge')}</Badge>}
                 </div>
                 <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <SchemaBlock title={t('inputSchema')} value={c.input_schema} />
-                  <SchemaBlock title={t('outputSchema')} value={c.output_schema} />
+                  <SchemaBlock title={t('inputSchema')} value={c.inputSchema} />
+                  <SchemaBlock title={t('outputSchema')} value={c.outputSchema} />
                 </div>
                 {c.origin === 'user' && (
                   <div className="mt-3 flex items-start gap-2 rounded-control bg-background-300 p-3 text-copy-13 text-gray-800">

@@ -45,6 +45,7 @@ export type {
   PresetProfileSignal,
   PresetProfileState,
 } from './preset-profile';
+export type { CapabilityInfo, CapabilityListResponse } from './capability-info';
 export {
   createConnectionStorage,
   normalizeEndpointUrl,
