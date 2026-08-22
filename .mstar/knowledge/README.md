@@ -253,3 +253,9 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | [architecture-patterns/wasm-module-as-capability-executor.md](architecture-patterns/wasm-module-as-capability-executor.md) | WASM module as capability executor (DR-10 minimal) — on-disk descriptor+manifest+wasm trio extends the compile-time Capability registry; admission collision→file→hash→clamp; carry clamped sandbox to run (silent-no-op lesson); re-verify wasm_sha256 on lazy load (TOCTOU); CLI atomic trio + module-id cross-check (V1.172 AR-34..44 distilled; compound V1.172) |
 | [conventions/nexus-home-layout-path-helpers.md](conventions/nexus-home-layout-path-helpers.md) | **Updated** — `user_capabilities_dir` joins the raw-home helper family (mirror `user_modules_dir`); daemon callers pass `state.nexus_home().parent()`; parent-less home must not fail boot (compound V1.172) |
 | [conventions/wire-contracts-frozen-verification.md](conventions/wire-contracts-frozen-verification.md) | **Updated** — AR-40 sanctioned-diff posture: intentional additive schema fields are audited diffs (not `wire_contracts_changed: false`, not AR-33 empty-schemas exemptions); local DTO camelCase vs generated snake_case (compound V1.172) |
+
+### V1.173 additions
+
+| Document | Description |
+| --- | --- |
+| [architecture-patterns/connect-host-tools-serving.md](architecture-patterns/connect-host-tools-serving.md) | Connect Host `tools.*` serving (DF-84) — spoke protocol already supports tools; nexus-host serving: single-source manifest composition (LOCAL_TOOL_OPS ++ CORE_OPS), three exact-string authz layers (negotiation intersection + token AND + op_scope), host-level tools skip world gate, process-boundary reachability (no daemon), payload {arguments}→{result}, advertised-schema strictness (compound V1.173) |
