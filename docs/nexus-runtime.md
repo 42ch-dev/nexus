@@ -79,15 +79,17 @@ The host refuses to boot without a resolvable active workspace (fail-closed).
 
 ## Connect-only surface
 
-The host serves exactly six invoke ops (`invoke::SERVED_OPS`,
-machine-checked against the manifest's advertised `served_ops`):
+The host serves exactly six invoke ops plus the served Connect tools
+(`invoke::SERVED_OPS`, machine-checked against the manifest's advertised
+`served_ops`):
 
 ```text
 upsert  promote  relate  check  assemble  compute
+tools.nexus.list_observed_peers  tools.nexus.list_modules
 ```
 
-- Everything else — `project`, unknown ops — is refused with
-  `op_unsupported`.
+- Everything else — `project`, unknown ops, unadvertised `tools.*` ids —
+  is refused with `op_unsupported`.
 - Caller identity is the authenticated session peer (spoke-connect
   `InvokeHandlerV2`); the payload `extensions.nexus.peer_id` is informational
   only and must match the session peer.
@@ -103,6 +105,41 @@ upsert  promote  relate  check  assemble  compute
 The daemon HTTP router, embedded SPA, Setup/Canvas/Control Room, ACP, and
 schedule/worker supervision never boot in this process (`run_daemon` is
 never called).
+
+## Connect tools (DF-84)
+
+The Connect host also serves a small set of **named tools** over
+`tools.*` — host-served functions a peer can invoke by id, discovered on
+the manifest's `tools[]` member. They are **not** the V1.172 capabilities
+(user-authored WASM modules + descriptors under
+`~/.nexus42/capabilities/`): Connect tools are host-side, peer-invoked
+reads with no authoring surface, and the V1.172 capability registry is
+never scanned by the Connect host. The two served tools are
+`tools.nexus.list_observed_peers` and `tools.nexus.list_modules` — each
+advertised with a description and input/output JSON Schemas, invoked with
+`payload.arguments` matching the input schema, and answered with
+`{ "result": <output> }` matching the output schema (empty store →
+`{ "peers": [] }` / `{ "modules": [] }`, never fabricated).
+
+A peer **must** satisfy both halves or the invoke is refused with zero
+side effects:
+
+1. **Advertise the tool id in its own hello `capabilities[]`** — the
+   session's negotiated capabilities are the intersection of both hello
+   capability lists, so the host advertising the tool alone is not
+   enough. (The `spoke-connect` SDK's own manifest builder does this
+   automatically; an integrator hand-building its hello must include each
+   `tools.nexus.<id>` it wants to call.)
+2. **The operator must allowlist the exact op string in `op_scope`** —
+   each `tools.nexus.<id>` is an exact-membership `op_scope` entry like
+   the six core ops (no umbrella `tools` entry).
+
+A peer that meets both can invoke the tool through the ordinary
+`invoke()` path; a peer that does not is refused `op_unsupported` at the
+spoke gate (capability missing) or by the host scope gate (op not in
+`op_scope`), before any host handler runs. Tools are host-level reads:
+they skip the world-scope gate, and they never require a daemon — the
+`connect start` process serves them alone.
 
 ## Home layout
 
@@ -142,7 +179,10 @@ entry is either a bare peer id (no op access) or a scoped object:
     {
       "peer_id": "12D3KooW…",
       "world_scope": ["<world-uuid>"],
-      "op_scope": ["upsert", "promote", "relate", "check", "assemble", "compute"],
+      "op_scope": [
+        "upsert", "promote", "relate", "check", "assemble", "compute",
+        "tools.nexus.list_observed_peers", "tools.nexus.list_modules"
+      ],
       "module_scope": ["<module-id>"]
     }
   ]

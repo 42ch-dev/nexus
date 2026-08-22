@@ -43,7 +43,7 @@ use libp2p::identity::Keypair;
 use libp2p::PeerId;
 use nexus_home_layout::device_id::get_or_create_device_id;
 use nexus_spoke_adapter::manifest::{
-    build_connect_hello_manifest, build_local_host_manifest, ConnectHelloManifest,
+    build_connect_hello_manifest, build_local_host_manifest, ConnectHelloManifest, LOCAL_TOOL_OPS,
 };
 use nexus_spoke_adapter::{HostManifestPort, NexusAdapter, SpokeResult};
 use spoke_connect::core::{
@@ -4519,4 +4519,249 @@ async fn served_tool_op_scope_miss_denies_with_zero_adapter_io() {
 
     host.shutdown().await.expect("host shuts down");
     peer_node.shutdown().await.expect("peer shuts down");
+}
+
+// ── V1.173 T4: AC-V173-1 two-node interop for every served tool (AR-54) ──
+
+/// AC-V173-1 (AR-54): a two-node loopback suite (mDNS off, fixed seeds,
+/// network lock, handshake timeout ≥ 10 s) completes the integrator
+/// journey for EVERY tool in `S` ([`LOCAL_TOOL_OPS`]) through the real
+/// host boot (`build_host_config` — the `connect start` shape):
+///
+/// 1. **Discover** — the peer reads the host manifest off the signed
+///    hello: `tools[]` carries one descriptor per served tool with
+///    `op == capability_id == <tool id>` and the locked input/output
+///    schemas (spec §2.1 C-1/C-2), and `capabilities[]` includes each id.
+/// 2. **Negotiate** — the advertising peer's own hello `capabilities[]`
+///    contains the id, so the intersection negotiates it.
+/// 3. **Invoke** — `{ "arguments": {} }` round-trips to
+///    `{ "result": <output> }` matching the descriptor output. The empty
+///    store half is asserted FIRST (`{ "peers": [] }` / `{ "modules": [] }`
+///    — never fabricated), then one observed peer / one installed module
+///    is seeded and the non-empty shape round-trips.
+/// 4. **Refuse without the capability** — a second peer whose hello omits
+///    the tool ids is refused `op_unsupported` at the spoke core gate
+///    (host advertisement alone is insufficient; zero handler I/O) and
+///    its session stays usable for a scoped baseline op.
+///
+/// No sleeps: every wait is a bounded `connect()`/`invoke()` future; the
+/// seeds are fixed; the module store is written before the invokes (no
+/// filesystem race).
+#[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::too_many_lines)] // one two-node journey sweep over S; the per-tool steps stay linear
+async fn ac_v173_1_two_node_interop_for_each_served_tool() {
+    const WORLD_A: &str = "wld_t4_interop";
+    let _guard = network_test_guard().await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+
+    // The host identity comes from the persisted-key boot path
+    // (`build_host_config`); only the dialing peers use fixed seeds.
+    let peer_key = fixed_keypair(100);
+    let absent_key = fixed_keypair(101);
+    let peer_peer = peer_key.public().to_peer_id();
+    let absent_peer = absent_key.public().to_peer_id();
+
+    let db_path = temp.path().join("workspace").join("state.db");
+    let pool = crate::db::Schema::init(&db_path)
+        .await
+        .expect("workspace DB initializes");
+    seed_world(&pool, "ctr_test", WORLD_A).await;
+
+    // Both peers are allowlisted with the FULL served-op scope (AR-54
+    // copy: the operator must allowlist each `tools.nexus.*` op, or the
+    // nexus PeerScope gate refuses after the spoke gate passes).
+    let allow_path = nexus_home_layout::connect_allowlist_path(home);
+    std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
+    std::fs::write(
+        &allow_path,
+        serde_json::json!({ "peer_ids": [
+            {
+                "peer_id": peer_peer.to_string(),
+                "world_scope": [WORLD_A],
+                "op_scope": super::invoke::SERVED_OPS,
+            },
+            {
+                "peer_id": absent_peer.to_string(),
+                "world_scope": [WORLD_A],
+                "op_scope": super::invoke::SERVED_OPS,
+            },
+        ] })
+        .to_string(),
+    )
+    .expect("write allowlist");
+
+    let (config, _, _, adapter) = super::build_host_config(
+        home,
+        &[],
+        &["/ip4/127.0.0.1/tcp/0".to_string()],
+        Some(&db_path),
+    )
+    .await
+    .expect("host config builds");
+    let host_peer = config.identity.public().to_peer_id();
+    let host = start(config).await;
+
+    // (1) The advertising peer (standard builder hello) discovers the
+    //     host manifest and negotiates every served tool id.
+    let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
+    let session = peer_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("advertising peer handshake succeeds");
+
+    let wire = serde_json::to_value(session.remote_manifest()).expect("manifest serializes");
+    let tools = wire["tools"]
+        .as_array()
+        .expect("the served manifest carries a wire-present tools member");
+    assert_eq!(
+        tools.len(),
+        LOCAL_TOOL_OPS.len(),
+        "exactly the user-locked set S is advertised"
+    );
+    for tool in LOCAL_TOOL_OPS {
+        assert!(
+            session
+                .negotiated_capabilities()
+                .iter()
+                .any(|cap| cap == tool),
+            "peer negotiates the served tool id {tool}"
+        );
+        let descriptor = tools
+            .iter()
+            .find(|d| d["op"] == serde_json::json!(tool))
+            .unwrap_or_else(|| panic!("manifest advertises tool id {tool}"));
+        assert_eq!(
+            descriptor["capability_id"], descriptor["op"],
+            "capability_id == op (spoke MUST) for {tool}"
+        );
+        assert_eq!(
+            descriptor["input"],
+            serde_json::json!({ "type": "object", "additionalProperties": false }),
+            "locked input schema for {tool}"
+        );
+        assert!(
+            descriptor["output"].is_object(),
+            "locked output schema present for {tool}"
+        );
+    }
+
+    // (2) Empty-store shape first — never fabricated.
+    for tool in LOCAL_TOOL_OPS {
+        let empty = session
+            .invoke(tool, serde_json::json!({ "arguments": {} }))
+            .await
+            .expect("the empty-store tool invoke is served");
+        assert!(
+            empty.payload["result"].is_object(),
+            "{tool} returns the {{ \"result\": ... }} shape"
+        );
+        let expected = if tool == "tools.nexus.list_observed_peers" {
+            serde_json::json!({ "peers": [] })
+        } else {
+            serde_json::json!({ "modules": [] })
+        };
+        assert_eq!(
+            empty.payload["result"], expected,
+            "empty store → the locked empty shape for {tool}"
+        );
+    }
+
+    // (3) Seed one observed peer + one installed module, then the
+    //     non-empty half round-trips the real state.
+    let observed = match build_local_host_manifest("observed-host-uuid-0004") {
+        SpokeResult::Ok(m) => m,
+        SpokeResult::Reject(r) => panic!("observed manifest build rejected: {r:?}"),
+    };
+    match adapter.record_peer_manifest(&observed, None).await {
+        SpokeResult::Ok(()) => {}
+        SpokeResult::Reject(r) => panic!("observed peer seeding failed: {r:?}"),
+    }
+    let module_id = "basic-combat";
+    let modules_dir = nexus_home_layout::user_modules_dir(home).join(module_id);
+    std::fs::create_dir_all(&modules_dir).expect("mkdir module store dir");
+    // The handler only stats the file pair (never bytes) — dummy content
+    // is deterministic and needs no wasm target.
+    std::fs::write(modules_dir.join(format!("{module_id}.wasm")), b"dummy").expect("write wasm");
+    std::fs::write(modules_dir.join("manifest.json"), b"{}").expect("write manifest");
+
+    let peers = session
+        .invoke(
+            "tools.nexus.list_observed_peers",
+            serde_json::json!({ "arguments": {} }),
+        )
+        .await
+        .expect("the non-empty observed-peer read is served");
+    assert_eq!(
+        peers.payload["result"]["peers"][0]["hostId"],
+        serde_json::json!("observed-host-uuid-0004"),
+        "the green C-1 read returns the seeded observation"
+    );
+    assert_eq!(
+        peers.payload["result"]["peers"][0]["roles"],
+        serde_json::json!(observed.roles),
+        "roles flow through the locked descriptor output"
+    );
+    let modules = session
+        .invoke(
+            "tools.nexus.list_modules",
+            serde_json::json!({ "arguments": {} }),
+        )
+        .await
+        .expect("the seeded module read is served");
+    assert_eq!(
+        modules.payload["result"]["modules"],
+        serde_json::json!([{ "id": module_id }]),
+        "the green C-2 read lists the installed module (id only, never bytes)"
+    );
+
+    // (4) Refusal without the capability: a peer whose hello omits the
+    //     tool ids is refused at the spoke core gate with zero handler I/O
+    //     (host advertisement alone is not enough) and the session stays
+    //     usable for a scoped baseline op.
+    let absent_node = start(peer_config_with_manifest(
+        absent_key,
+        vec![host_peer],
+        peer_manifest_without_tool_capabilities(),
+    ))
+    .await;
+    let absent_session = absent_node
+        .connect(host.listen_addrs()[0].clone())
+        .await
+        .expect("allowlisted peer handshake succeeds");
+    for tool in LOCAL_TOOL_OPS {
+        match absent_session
+            .invoke(tool, serde_json::json!({ "arguments": {} }))
+            .await
+        {
+            Err(InvokeError::Wire(envelope)) => {
+                assert_eq!(envelope.code, "op_unsupported");
+                assert!(
+                    envelope
+                        .message
+                        .contains("requires a capability that is not granted"),
+                    "refusal must come from the spoke op-dispatch gate (negotiated \
+                     intersection), got: {}",
+                    envelope.message
+                );
+            }
+            Ok(_) => panic!("a peer that never advertised the tool id {tool} must not be served"),
+            other => panic!("expected the spoke op_unsupported refusal, got {other:?}"),
+        }
+    }
+    let checked = absent_session
+        .invoke(
+            "check",
+            serde_json::json!({ "scope": { "scope_id": WORLD_A }, "rule_refs": [] }),
+        )
+        .await
+        .expect("a served baseline op still round-trips after the tool refusals");
+    assert_eq!(checked.payload["findings"], serde_json::json!([]));
+
+    host.shutdown().await.expect("host shuts down");
+    peer_node.shutdown().await.expect("peer shuts down");
+    absent_node
+        .shutdown()
+        .await
+        .expect("absent peer shuts down");
 }
