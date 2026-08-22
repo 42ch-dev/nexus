@@ -59,8 +59,17 @@ pub struct ScanOutcome {
 /// - No admission gates at P0 (hash/clamp are P1, AR-43); the declared name
 ///   is stored as-is. Builtin-name collisions are rejected at the registry
 ///   append path (AR-36 builtin-wins), not here.
+///
+/// `engine`/`module_cache` are the daemon-wide executor handles (AR-37) —
+/// `Some`/`Some` on the engine boot arm so every admitted capability can run
+/// its module, `None`/`None` on the engine-less arm (AR-44) so `run()` returns
+/// `WorkerUnavailable`.
 #[must_use]
-pub fn scan_user_capabilities(dir: &Path) -> ScanOutcome {
+pub fn scan_user_capabilities(
+    dir: &Path,
+    engine: Option<&std::sync::Arc<nexus_wasm_host::WasmEngine>>,
+    module_cache: Option<&std::sync::Arc<nexus_wasm_host::ModuleCache>>,
+) -> ScanOutcome {
     let mut outcome = ScanOutcome::default();
     let mut admitted_names: HashSet<String> = HashSet::new();
 
@@ -163,9 +172,17 @@ pub fn scan_user_capabilities(dir: &Path) -> ScanOutcome {
 
         admitted_names.insert(descriptor.name.clone());
 
-        outcome
-            .admitted
-            .push(Box::new(UserCapability::new(&descriptor)));
+        // AR-37: the registered capability carries its own dir (source of
+        // manifest.json + <module-id>.wasm) and the daemon-wide engine/cache.
+        // The engine arm passes Some/Some so run() executes the module; the
+        // engine-less arm passes None/None (AR-44) so run() returns
+        // WorkerUnavailable.
+        outcome.admitted.push(Box::new(UserCapability::new(
+            &descriptor,
+            path,
+            engine.cloned(),
+            module_cache.cloned(),
+        )));
     }
 
     outcome
@@ -236,7 +253,7 @@ mod tests {
     fn scan_valid_trio_admits_with_declared_name() {
         let tmp = tempfile::tempdir().unwrap();
         write_capability_dir(tmp.path(), "sync.pull");
-        let outcome = scan_user_capabilities(tmp.path());
+        let outcome = scan_user_capabilities(tmp.path(), None, None);
         assert_eq!(outcome.admitted.len(), 1, "one admitted");
         assert!(
             outcome.skipped.is_empty(),
@@ -252,7 +269,7 @@ mod tests {
     #[test]
     fn scan_empty_dir_returns_empty_outcome() {
         let tmp = tempfile::tempdir().unwrap();
-        let outcome = scan_user_capabilities(tmp.path());
+        let outcome = scan_user_capabilities(tmp.path(), None, None);
         assert!(outcome.admitted.is_empty());
         assert!(outcome.skipped.is_empty());
     }
@@ -261,7 +278,7 @@ mod tests {
     fn scan_missing_dir_returns_empty_outcome_not_panic() {
         let tmp = tempfile::tempdir().unwrap();
         let missing = tmp.path().join("does-not-exist");
-        let outcome = scan_user_capabilities(&missing);
+        let outcome = scan_user_capabilities(&missing, None, None);
         assert!(outcome.admitted.is_empty());
         assert!(outcome.skipped.is_empty());
     }
@@ -272,7 +289,7 @@ mod tests {
         let dir = tmp.path().join("broken.cap");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("capability.json"), "{ not json").unwrap();
-        let outcome = scan_user_capabilities(tmp.path());
+        let outcome = scan_user_capabilities(tmp.path(), None, None);
         assert!(outcome.admitted.is_empty());
         assert_eq!(outcome.skipped.len(), 1);
         assert_eq!(outcome.skipped[0].name, "broken.cap");
@@ -292,7 +309,7 @@ mod tests {
         let dir = tmp.path().join("BadName");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("capability.json"), descriptor_json("BadName")).unwrap();
-        let outcome = scan_user_capabilities(tmp.path());
+        let outcome = scan_user_capabilities(tmp.path(), None, None);
         assert!(outcome.admitted.is_empty());
         assert_eq!(outcome.skipped.len(), 1);
         assert!(
@@ -310,7 +327,7 @@ mod tests {
         let dir = tmp.path().join("declared.name");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("capability.json"), descriptor_json("other.name")).unwrap();
-        let outcome = scan_user_capabilities(tmp.path());
+        let outcome = scan_user_capabilities(tmp.path(), None, None);
         assert!(outcome.admitted.is_empty());
         assert_eq!(outcome.skipped.len(), 1);
         assert!(
@@ -326,7 +343,7 @@ mod tests {
         write_capability_dir(tmp.path(), "_system.cap");
         write_capability_dir(tmp.path(), ".hidden.cap");
         write_capability_dir(tmp.path(), "visible.cap");
-        let outcome = scan_user_capabilities(tmp.path());
+        let outcome = scan_user_capabilities(tmp.path(), None, None);
         let names: Vec<&str> = outcome.admitted.iter().map(|c| c.name()).collect();
         assert_eq!(names, vec!["visible.cap"]);
         assert!(outcome.skipped.is_empty());
@@ -346,7 +363,7 @@ mod tests {
         // Rewrite b.dup's descriptor to declare the same name as a.dup.
         let b_dir = tmp.path().join("b.dup");
         std::fs::write(b_dir.join("capability.json"), descriptor_json("a.dup")).unwrap();
-        let outcome = scan_user_capabilities(tmp.path());
+        let outcome = scan_user_capabilities(tmp.path(), None, None);
         let names: Vec<&str> = outcome.admitted.iter().map(|c| c.name()).collect();
         assert_eq!(
             names,
@@ -375,7 +392,7 @@ mod tests {
         write_capability_dir(tmp.path(), "zeta.cap");
         write_capability_dir(tmp.path(), "alpha.cap");
         write_capability_dir(tmp.path(), "mike.cap");
-        let outcome = scan_user_capabilities(tmp.path());
+        let outcome = scan_user_capabilities(tmp.path(), None, None);
         let names: Vec<&str> = outcome.admitted.iter().map(|c| c.name()).collect();
         assert_eq!(
             names,

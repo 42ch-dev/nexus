@@ -349,8 +349,11 @@ impl CapabilityRegistry {
         module_cache: std::sync::Arc<nexus_wasm_host::ModuleCache>,
         scan_dir: &std::path::Path,
     ) -> (Self, scan::ScanOutcome) {
+        let engine_handle = engine.clone();
+        let module_cache_handle = module_cache.clone();
         let mut reg = Self::with_runtime_deps_and_wasm(deps, engine, module_cache);
-        let outcome = reg.append_user_caps(scan_dir);
+        let outcome =
+            reg.append_user_caps(scan_dir, Some(&engine_handle), Some(&module_cache_handle));
         (reg, outcome)
     }
 
@@ -367,12 +370,18 @@ impl CapabilityRegistry {
         scan_dir: &std::path::Path,
     ) -> (Self, scan::ScanOutcome) {
         let mut reg = Self::with_runtime_deps(deps);
-        let outcome = reg.append_user_caps(scan_dir);
+        let outcome = reg.append_user_caps(scan_dir, None, None);
         (reg, outcome)
     }
 
     /// Append admitted user capabilities after builtins and rebuild the eager
     /// index (AR-36). Shared by the two user-capability constructors.
+    ///
+    /// The engine arm passes the daemon-wide [`WasmEngine`] + [`ModuleCache`]
+    /// (some/some) so each admitted capability's real executor (AR-37) can
+    /// compile/run; the engine-less arm passes `None`/`None` (AR-44) so
+    /// `run()` returns `WorkerUnavailable`. Handles are forwarded into the
+    /// scan so `UserCapability::new` carries them from construction.
     ///
     /// Builtin collision (F1 QC wave): a user capability whose name equals a
     /// builtin is **skipped** here (builtin wins — AR-36). Without this guard
@@ -380,11 +389,14 @@ impl CapabilityRegistry {
     /// builtin on `registry.get(name)` (the existing dispatch path:
     /// `tasks`, `system_preset`, `quality_loop`) and duplicate the catalog
     /// row. Each collision is recorded in `outcome.skipped` with the
-    /// `BuiltinCollision` reason and `warn!`-logged. P1 AR-43 admission keeps
-    /// the fail-closed contract; this P0 guard means P0 no longer regresses
-    /// builtins.
-    fn append_user_caps(&mut self, scan_dir: &std::path::Path) -> scan::ScanOutcome {
-        let mut outcome = scan::scan_user_capabilities(scan_dir);
+    /// `BuiltinCollision` reason and `warn!`-logged.
+    fn append_user_caps(
+        &mut self,
+        scan_dir: &std::path::Path,
+        engine: Option<&std::sync::Arc<nexus_wasm_host::WasmEngine>>,
+        module_cache: Option<&std::sync::Arc<nexus_wasm_host::ModuleCache>>,
+    ) -> scan::ScanOutcome {
+        let mut outcome = scan::scan_user_capabilities(scan_dir, engine, module_cache);
         // F1: drop admitted user caps whose name collides with a builtin
         // before the append; the index stays builtin-first-wins.
         let base_index: std::collections::HashSet<&str> =
@@ -858,7 +870,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn with_runtime_deps_and_wasm_and_user_caps_indexes_and_stub_runs() {
+    async fn with_runtime_deps_and_wasm_and_user_caps_indexes_and_executor_wired() {
         let tmp = tempfile::tempdir().unwrap();
         write_capability_dir(tmp.path(), "demo.pull");
         let deps = CapabilityRuntimeDeps {
@@ -881,10 +893,19 @@ mod tests {
             outcome.skipped
         );
         let cap = reg.get("demo.pull").expect("user cap indexed");
+        // PL-10: the admitted-with-engine path no longer returns the P0
+        // stub's WorkerUnavailable — the real executor (AR-37) runs and the
+        // missing module pair (this test's fixture writes only
+        // capability.json) fails fail-closed as InputInvalid.
         let err = cap.run(serde_json::json!({})).await.unwrap_err();
         assert!(
-            matches!(err, CapabilityError::WorkerUnavailable),
-            "stub run: expected WorkerUnavailable, got {err:?}"
+            matches!(err, CapabilityError::InputInvalid(_)),
+            "expected InputInvalid from the real executor, got {err:?}"
+        );
+        assert!(
+            err.to_string()
+                .contains("not loaded in capability 'demo.pull'"),
+            "named module/capability message, got: {err}"
         );
     }
 }

@@ -17,10 +17,12 @@ use crate::capability::{Capability, CapabilityError};
 use nexus_contracts::generated::daemon_api::compute::compute_input::{
     ComputeInputWorldRef, ComputeInputWorldRefWorldId,
 };
-use nexus_wasm_host::{ComputeInput, ComputeOutput};
+use nexus_wasm_host::{ComputeError, ComputeInput, ComputeOutput, ModuleCache, WasmEngine};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::num::NonZeroU64;
+use std::path::PathBuf;
+use std::sync::Arc;
 use thiserror::Error;
 
 /// Validation errors for a [`UserCapabilityDescriptor`] (AR-34 vocabulary).
@@ -123,33 +125,68 @@ impl UserCapabilityDescriptor {
     }
 }
 
-/// A registered user capability (V1.172 P0, DR-10; AR-34/AR-44).
+/// A registered user capability (V1.172 P1, DR-10; AR-34/AR-37/AR-44).
 ///
-/// P0 is **discoverable, not runnable**: discovery (name + schemas) is fully
-/// functional; `run()` returns [`CapabilityError::WorkerUnavailable`] until the
-/// P1 executor wires the wasm module (`AR-37`). No admission gates at P0
-/// (collision/hash/clamp are P1, AR-43).
+/// Discovery (name + schemas) is fully functional; `run()` executes the
+/// referenced wasm module through the existing compute sandbox (AR-37): the
+/// capability dir's `manifest.json` + `<module-id>.wasm` are read lazily at
+/// first `run()`, compiled once through the shared [`ModuleCache`]
+/// (hash-keyed compile-once), then invoked via [`WasmEngine::compute`].
 ///
 /// **Lifetime**: the descriptor's three `String` fields are leaked once at
 /// construction (`Box::leak`) — one bounded allocation per admitted user
 /// capability per boot, same process-lifetime semantics as the builtins'
 /// literal constants (AR-34/AR-44). Deliberate and documented; do not convert
 /// the `Capability` trait to owned types.
+///
+/// The executor handle trio (`dir`, `engine`, `module_cache`) is `Option`al
+/// so the **engine-absent boot arm** (AR-44) can still register the
+/// capability discoverable; `run()` then returns the existing
+/// [`CapabilityError::WorkerUnavailable`] variant (no new variant — exhaustive
+/// matches like `fork.rs` keep compiling). The admitted-with-engine path never
+/// returns it (PL-10 closed).
 pub struct UserCapability {
     name: &'static str,
     input_schema: &'static str,
     output_schema: &'static str,
+    /// The capability's own directory (`~/.nexus42/capabilities/<name>/`,
+    /// AR-35) — source of `manifest.json` + `<module-id>.wasm`.
+    dir: PathBuf,
+    /// The descriptor's `wasm.moduleId` — the `<module-id>.wasm` filename
+    /// stem. Owned (no trait method needs it `&'static`), unlike the three
+    /// leaked catalog strings.
+    module_id: String,
+    /// The daemon-wide wasm engine (absent on the engine-less boot arm).
+    engine: Option<Arc<WasmEngine>>,
+    /// The daemon-wide compilation cache (absent on the engine-less boot arm).
+    module_cache: Option<Arc<ModuleCache>>,
 }
 
 impl UserCapability {
     /// Construct from a validated descriptor, leaking the three catalog
-    /// strings once (AR-34/AR-44).
+    /// strings once (AR-34/AR-44), and carrying the capability dir + the
+    /// shared engine/cache (AR-37).
+    ///
+    /// `dir` is the capability's own directory (`<scan_root>/<name>/`); the
+    /// executor reads `manifest.json` + `<module-id>.wasm` from it at first
+    /// `run()`. `engine`/`module_cache` are `None` on the engine-less boot
+    /// arm (AR-44): the capability stays discoverable and `run()` returns
+    /// `WorkerUnavailable`.
     #[must_use]
-    pub fn new(descriptor: &UserCapabilityDescriptor) -> Self {
+    pub fn new(
+        descriptor: &UserCapabilityDescriptor,
+        dir: PathBuf,
+        engine: Option<Arc<WasmEngine>>,
+        module_cache: Option<Arc<ModuleCache>>,
+    ) -> Self {
         Self {
             name: Box::leak(descriptor.name.clone().into_boxed_str()),
             input_schema: Box::leak(descriptor.input_schema.clone().into_boxed_str()),
             output_schema: Box::leak(descriptor.output_schema.clone().into_boxed_str()),
+            dir,
+            module_id: descriptor.wasm.module_id.clone(),
+            engine,
+            module_cache,
         }
     }
 
@@ -261,17 +298,94 @@ impl Capability for UserCapability {
         self.output_schema
     }
 
-    async fn run(&self, _input: Value) -> Result<Value, CapabilityError> {
-        // P0 placeholder: discoverable-not-runnable (compass AC-V172-1
-        // invoke half is P1). AR-44 keeps the existing unit
-        // `WorkerUnavailable` variant (no new CapabilityError variant — the
-        // exhaustive matches in fork.rs / quality_loop.rs / tasks must keep
-        // compiling); the named message is emitted at warn! below.
-        tracing::warn!(
-            capability = %self.name,
-            "capability '{}': executor not yet wired (P1)", self.name
-        );
-        Err(CapabilityError::WorkerUnavailable)
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
+        // Engine-absent boot arm (AR-44): still discoverable, not runnable —
+        // the ONLY path that returns the existing WorkerUnavailable variant
+        // (no new CapabilityError; exhaustive matches keep compiling).
+        let (Some(engine), Some(module_cache)) = (&self.engine, &self.module_cache) else {
+            tracing::warn!(
+                capability = %self.name,
+                "capability '{}': executor not wired; daemon booted without WASM engine",
+                self.name
+            );
+            return Err(CapabilityError::WorkerUnavailable);
+        };
+
+        // AR-37 envelope mapping (T1) — fail-closed on malformed input.
+        let compute_input = self.to_compute_input(input)?;
+
+        // Module resolution: read the capability's own manifest + wasm from
+        // its dir (self-contained per-AR-35), compile once through the shared
+        // hash-keyed cache (L211-224), then invoke. A module missing at
+        // run()-time (dir edited after admission) is an InputInvalid.
+        let manifest_path = self.dir.join("manifest.json");
+        let manifest_json = std::fs::read_to_string(&manifest_path).map_err(|e| {
+            CapabilityError::InputInvalid(format!(
+                "module '{}' not loaded in capability '{}': read {}: {e}",
+                self.module_id,
+                self.name,
+                manifest_path.display()
+            ))
+        })?;
+        let wasm_path = self.dir.join(format!("{}.wasm", self.module_id));
+        let wasm_bytes = std::fs::read(&wasm_path).map_err(|e| {
+            CapabilityError::InputInvalid(format!(
+                "module '{}' not loaded in capability '{}': read {}: {e}",
+                self.module_id,
+                self.name,
+                wasm_path.display()
+            ))
+        })?;
+
+        let cached = module_cache
+            .get_or_compile(engine, &self.module_id, &wasm_bytes, &manifest_json)
+            .map_err(|e| map_compute_error(&e))?;
+        let module = cached.module.clone();
+        let manifest = cached.manifest.clone();
+
+        // Invoke the sandboxed module and map the 4-part output envelope.
+        let output = engine
+            .compute(&module, &manifest, &compute_input)
+            .map_err(|e| map_compute_error(&e))?;
+        Self::from_compute_output(output)
+    }
+}
+
+/// Map a [`ComputeError`] to a [`CapabilityError`] per the AR-37 table
+/// (distinct variants; fail-closed):
+///
+/// | ComputeError | CapabilityError |
+/// |---|---|
+/// | `OutOfFuel` / `WallTimeExceeded` / `MemoryCapExceeded` / `Trap` | `Forbidden("sandbox breach: <detail>")` |
+/// | `InputValidationFailed` / `ManifestValidationFailed` / `InvalidOutput` / `OutputSchemaMismatch` | `InputInvalid(...)` |
+/// | `MissingExport` / `ModuleComputeFailed` / `InvalidModule` | `PermanentExternal(...)` |
+/// | `OutputBufferTooSmall` | `TransientExternal(...)` (retryable) |
+/// | `CacheWarmup` / `Wasmtime` / `MemoryAccess` / `Io` / `Json` | `Internal(...)` |
+fn map_compute_error(e: &ComputeError) -> CapabilityError {
+    match e {
+        ComputeError::OutOfFuel
+        | ComputeError::WallTimeExceeded
+        | ComputeError::MemoryCapExceeded
+        | ComputeError::Trap(_) => CapabilityError::Forbidden(format!("sandbox breach: {e}")),
+        ComputeError::InputValidationFailed(_)
+        | ComputeError::ManifestValidationFailed { .. }
+        | ComputeError::InvalidOutput(_)
+        | ComputeError::OutputSchemaMismatch(_) => {
+            CapabilityError::InputInvalid(format!("module rejected input/output: {e}"))
+        }
+        ComputeError::MissingExport(_)
+        | ComputeError::ModuleComputeFailed(_)
+        | ComputeError::InvalidModule(_) => {
+            CapabilityError::PermanentExternal(format!("module fault: {e}"))
+        }
+        ComputeError::OutputBufferTooSmall(_) => {
+            CapabilityError::TransientExternal(format!("module output buffer too small: {e}"))
+        }
+        ComputeError::CacheWarmup(_)
+        | ComputeError::Wasmtime(_)
+        | ComputeError::MemoryAccess(_)
+        | ComputeError::Io(_)
+        | ComputeError::Json(_) => CapabilityError::Internal(format!("compute host error: {e}")),
     }
 }
 
@@ -689,18 +803,21 @@ mod tests {
     #[test]
     fn user_capability_discovery_returns_declared_fields() {
         let descriptor = parse(&minimal_json()).expect("minimal descriptor must parse");
-        let cap = UserCapability::new(&descriptor);
+        let cap = UserCapability::new(&descriptor, PathBuf::new(), None, None);
         assert_eq!(cap.name(), "sync.pull");
         assert_eq!(cap.input_schema(), r#"{"type":"object"}"#);
         assert_eq!(cap.output_schema(), r#"{"type":"object"}"#);
     }
 
-    /// P0 stub `run()` returns the named `WorkerUnavailable` — discoverable,
-    /// not runnable (AR-44: existing unit variant, no new `CapabilityError`).
+    /// AR-44 engine-absent fallback: a capability constructed without a wasm
+    /// engine/cache (engine-less boot arm) stays discoverable; `run()` returns
+    /// the existing `WorkerUnavailable` variant (no new `CapabilityError`).
+    /// This is the ONLY path that returns it — the admitted-with-engine path
+    /// never does (PL-10 closed).
     #[tokio::test]
-    async fn stub_run_returns_worker_unavailable() {
+    async fn engine_absent_run_returns_worker_unavailable() {
         let descriptor = parse(&minimal_json()).expect("minimal descriptor must parse");
-        let cap = UserCapability::new(&descriptor);
+        let cap = UserCapability::new(&descriptor, PathBuf::new(), None, None);
         let err = cap.run(serde_json::json!({})).await.unwrap_err();
         assert!(
             matches!(err, CapabilityError::WorkerUnavailable),
@@ -710,8 +827,15 @@ mod tests {
 
     // ── AR-37 envelope mapping (P1 T1) ───────────────────────────────────
 
+    /// A capability with no dir/engine/cache (envelope-mapping tests only —
+    /// mapping is stateless, T2's executor supplies the handles).
     fn cap() -> UserCapability {
-        UserCapability::new(&parse(&minimal_json()).expect("minimal descriptor must parse"))
+        UserCapability::new(
+            &parse(&minimal_json()).expect("minimal descriptor must parse"),
+            PathBuf::new(),
+            None,
+            None,
+        )
     }
 
     /// Round-trip: a full input maps `worldId` → `world_ref.world_id`,
@@ -864,6 +988,192 @@ mod tests {
         assert_eq!(
             mapped, output_json,
             "from_compute_output must reproduce the 4-part envelope verbatim"
+        );
+    }
+
+    // ── Real executor (P1 T2 / AR-37 / AR-44) ────────────────────────────
+    //
+    // Integration tests stage a real capability dir (the AR-35 trio:
+    // capability.json + manifest.json + <module-id>.wasm) from the EMBEDDED
+    // basic-combat module + the canonical combat-input fixture — zero new
+    // wasm fixtures (brief §Fixture). The expected 4-part output mirrors the
+    // existing `crates/nexus-wasm-host/tests/basic_combat.rs` assertions:
+    // state_delta `-`/`character.current_hp`/15 on `kb_def`, one
+    // `state_update` event, empty `new_key_blocks`, `kind: "combat"`.
+
+    /// True when the embedded module tree was compiled (wasm target
+    /// installed); `nexus_no_wasm_target` (R-V1139P0-005) switches embedded
+    /// lookups to empty stubs.
+    fn embedded_available() -> bool {
+        nexus_wasm_host::embedded_module_bytes("basic-combat").is_some()
+    }
+
+    /// Stage `<tmp>/<name>/` with `capability.json` (real sha of the embedded
+    /// module), `manifest.json` + `<module-id>.wasm` from the embedded tree.
+    fn stage_capability_dir(tmp: &std::path::Path, name: &str) {
+        use sha2::{Digest, Sha256};
+        let dir = tmp.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        let wasm = nexus_wasm_host::embedded_module_bytes("basic-combat").unwrap();
+        let manifest = nexus_wasm_host::embedded_module_manifest("basic-combat").unwrap();
+        let sha: String = {
+            let mut hex = String::with_capacity(64);
+            for b in Sha256::digest(wasm) {
+                use std::fmt::Write as _;
+                let _ = write!(hex, "{b:02x}");
+            }
+            hex
+        };
+        let json = format!(
+            r#"{{
+                "name": "{name}",
+                "inputSchema": "{{\"type\":\"object\"}}",
+                "outputSchema": "{{\"type\":\"object\"}}",
+                "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{sha}" }}
+            }}"#
+        );
+        std::fs::write(dir.join("capability.json"), json).unwrap();
+        std::fs::write(dir.join("manifest.json"), manifest).unwrap();
+        std::fs::write(dir.join("basic-combat.wasm"), wasm).unwrap();
+    }
+
+    /// The canonical combat fixture re-enveloped for the capability input
+    /// surface: `keyBlocks` carries the two combatant blocks, `attacker_id` /
+    /// `defender_id` select them, the rest of the fixture body stays intact.
+    /// `to_compute_input` lifts `keyBlocks` into the envelope and passes the
+    /// whole object through as the raw invocation (AR-37).
+    fn combat_capability_input() -> Value {
+        let raw: Value = serde_json::from_str(include_str!(
+            "../../../../modules/nexus-module-test/fixtures/combat-input.json"
+        ))
+        .expect("canonical fixture parses");
+        let mut input = raw.as_object().cloned().unwrap();
+        input.insert("keyBlocks".to_string(), raw["key_blocks"].clone());
+        input.remove("key_blocks");
+        input.remove("schema_version");
+        input.remove("world_ref");
+        input.remove("narrative_state");
+        // The fixture's world_id lives inside world_ref (wire-valid `wld_…`);
+        // re-express it on the capability input surface so the AR-37 mapping
+        // carries it into the compute envelope's world_ref (the module emits
+        // it on the timeline event, which the wire validates as `^wld_…$`).
+        input.insert("worldId".to_string(), raw["world_ref"]["world_id"].clone());
+        input.insert("attackerId".to_string(), serde_json::json!("kb_atk"));
+        input.insert("defenderId".to_string(), serde_json::json!("kb_def"));
+        Value::Object(input)
+    }
+
+    /// Real executor: `run()` on a staged capability dir executes the embedded
+    /// basic-combat module and returns the expected 4-part output (the
+    /// `basic_combat.rs` assertions). The admitted-with-engine path no longer
+    /// returns the P0 stub's `WorkerUnavailable` (PL-10 closed).
+    #[tokio::test]
+    async fn run_executes_embedded_module_and_returns_four_part_output() {
+        if !embedded_available() {
+            eprintln!("skipping: embedded wasm target not installed (nexus_no_wasm_target)");
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        stage_capability_dir(tmp.path(), "combat.cap");
+        let engine = std::sync::Arc::new(nexus_wasm_host::WasmEngine::new().unwrap());
+        let cache = std::sync::Arc::new(nexus_wasm_host::ModuleCache::new());
+        let descriptor =
+            parse(&std::fs::read_to_string(tmp.path().join("combat.cap/capability.json")).unwrap())
+                .expect("staged descriptor parses");
+        let cap = UserCapability::new(
+            &descriptor,
+            tmp.path().join("combat.cap"),
+            Some(engine),
+            Some(cache),
+        );
+
+        let out = cap
+            .run(combat_capability_input())
+            .await
+            .expect("run() executes the module");
+
+        // 1) battle_report carries the combat discriminator.
+        assert_eq!(out["battle_report"]["kind"], "combat");
+
+        // 2) Combat math: delta `-`/`character.current_hp`/15 on `kb_def`
+        //    (matches basic_combat.rs L79-86).
+        let delta = out["state_delta"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["target_key_block_id"] == "kb_def")
+            .expect("delta targeting defender present");
+        assert_eq!(delta["op"], "sub");
+        assert_eq!(delta["path"], "character.current_hp");
+        assert_eq!(delta["value"], serde_json::json!(15));
+
+        // 3) timeline_events: one state_update event recording the outcome.
+        let events = out["timeline_events"].as_array().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["event_type"], "state_update");
+        assert!(
+            events[0]["summary"]
+                .as_str()
+                .is_some_and(|s| s.contains("15") && s.contains("kb_def")),
+            "event summary should mention damage and defender: {:?}",
+            events[0]["summary"]
+        );
+        assert_eq!(
+            events[0]["affected_key_block_ids"],
+            serde_json::json!(["kb_atk", "kb_def"])
+        );
+
+        // 4) new_key_blocks empty for basic combat.
+        assert_eq!(out["new_key_blocks"], serde_json::json!([]));
+
+        // The full 4-part envelope is present verbatim.
+        for key in [
+            "state_delta",
+            "timeline_events",
+            "new_key_blocks",
+            "battle_report",
+        ] {
+            assert!(out.get(key).is_some(), "missing envelope part '{key}'");
+        }
+    }
+
+    /// AR-37 module-missing at `run()`: a capability whose dir lacks
+    /// `manifest.json`/`<module-id>.wasm` (edited after admission) fails
+    /// fail-closed with `InputInvalid`, never the engine path.
+    #[tokio::test]
+    async fn run_module_missing_after_admission_returns_input_invalid() {
+        if !embedded_available() {
+            eprintln!("skipping: basic wasm target not installed (nexus_no_wasm_target)");
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        stage_capability_dir(tmp.path(), "combat.cap");
+        // Simulate a post-admission edit: remove the module pair.
+        std::fs::remove_file(tmp.path().join("combat.cap/basic-combat.wasm")).unwrap();
+        let engine = std::sync::Arc::new(nexus_wasm_host::WasmEngine::new().unwrap());
+        let cache = std::sync::Arc::new(nexus_wasm_host::ModuleCache::new());
+        let descriptor =
+            parse(&std::fs::read_to_string(tmp.path().join("combat.cap/capability.json")).unwrap())
+                .expect("staged descriptor parses");
+        let cap = UserCapability::new(
+            &descriptor,
+            tmp.path().join("combat.cap"),
+            Some(engine),
+            Some(cache),
+        );
+
+        let err = cap
+            .run(combat_capability_input())
+            .await
+            .expect_err("missing module must fail");
+        assert!(
+            matches!(err, CapabilityError::InputInvalid(_)),
+            "expected InputInvalid, got {err:?}"
+        );
+        assert!(
+            err.to_string()
+                .contains("not loaded in capability 'combat.cap'"),
+            "named module/capability message, got: {err}"
         );
     }
 }
