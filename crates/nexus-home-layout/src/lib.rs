@@ -126,6 +126,22 @@ pub fn user_modules_dir(home: &Path) -> PathBuf {
     nexus_root_from_home(home).join("modules")
 }
 
+/// `$HOME/.nexus42/capabilities/` — base directory for user-authored
+/// capability descriptors (V1.172 P0, DR-10; AR-35).
+///
+/// Each subdirectory `<name>/` is expected to contain the descriptor
+/// `capability.json` + the module's `manifest.json` + `<module-id>.wasm`
+/// trio (same contract as P2 `install`). The daemon scans this directory at
+/// boot (see `nexus-orchestration` capability scan); a missing directory is
+/// treated as empty (user capabilities are optional).
+///
+/// Callers pass the **raw user home** (`state.nexus_home().parent()`, the
+/// boot.rs L293-297 double-nest precedent) — never the nested `nexus_home`.
+#[must_use]
+pub fn user_capabilities_dir(home: &Path) -> PathBuf {
+    nexus_root_from_home(home).join("capabilities")
+}
+
 /// `$HOME/.nexus42/presets/<name>/` — path to a specific user preset bundle.
 #[must_use]
 pub fn user_preset_bundle_dir(home: &Path, name: &str) -> PathBuf {
@@ -677,6 +693,15 @@ mod tests {
         assert_eq!(
             user_skills_dir(&home),
             PathBuf::from("/fake/home/.nexus42/skills")
+        );
+    }
+
+    #[test]
+    fn user_capabilities_dir_layout() {
+        let home = PathBuf::from("/fake/home");
+        assert_eq!(
+            user_capabilities_dir(&home),
+            PathBuf::from("/fake/home/.nexus42/capabilities")
         );
     }
 

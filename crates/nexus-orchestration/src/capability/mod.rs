@@ -3,6 +3,8 @@
 //! Design: `.mstar/specs/orchestration-engine.md` §5.1–5.2.
 
 pub mod builtins;
+pub mod scan;
+pub mod user_capability;
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -329,6 +331,86 @@ impl CapabilityRegistry {
                     )
                 });
         Self::build_with_narrative_compute(deps, narrative_compute)
+    }
+
+    /// Create a registry with runtime dependencies, the daemon-wide singleton
+    /// `WasmEngine` + `ModuleCache`, **and** user capabilities scanned from
+    /// `scan_dir` (V1.172 P0, DR-10; AR-36).
+    ///
+    /// Builds the base via [`with_runtime_deps_and_wasm`], appends the
+    /// admitted user capabilities **after** builtins, then rebuilds the eager
+    /// name index. The scan is fail-safe by contract (AR-35): a missing
+    /// directory or a bad descriptor never fails boot — bad entries land in
+    /// `outcome.skipped` with named reasons (already `warn!`-logged).
+    #[must_use]
+    pub fn with_runtime_deps_and_wasm_and_user_caps(
+        deps: &CapabilityRuntimeDeps,
+        engine: std::sync::Arc<nexus_wasm_host::WasmEngine>,
+        module_cache: std::sync::Arc<nexus_wasm_host::ModuleCache>,
+        scan_dir: &std::path::Path,
+    ) -> (Self, scan::ScanOutcome) {
+        let mut reg = Self::with_runtime_deps_and_wasm(deps, engine, module_cache);
+        let outcome = reg.append_user_caps(scan_dir);
+        (reg, outcome)
+    }
+
+    /// Create a registry with runtime dependencies **and** user capabilities
+    /// scanned from `scan_dir`, on the engine-less boot path (V1.172 P0,
+    /// DR-10; AR-36/AR-44).
+    ///
+    /// Engine-less arm of the AR-36 pair: user capabilities still register
+    /// (discoverable); their stub `run()` returns `WorkerUnavailable` until P1
+    /// wires the executor.
+    #[must_use]
+    pub fn with_runtime_deps_and_user_caps(
+        deps: &CapabilityRuntimeDeps,
+        scan_dir: &std::path::Path,
+    ) -> (Self, scan::ScanOutcome) {
+        let mut reg = Self::with_runtime_deps(deps);
+        let outcome = reg.append_user_caps(scan_dir);
+        (reg, outcome)
+    }
+
+    /// Append admitted user capabilities after builtins and rebuild the eager
+    /// index (AR-36). Shared by the two user-capability constructors.
+    ///
+    /// Builtin collision (F1 QC wave): a user capability whose name equals a
+    /// builtin is **skipped** here (builtin wins — AR-36). Without this guard
+    /// the eager index's last-wins insert would let the user stub shadow the
+    /// builtin on `registry.get(name)` (the existing dispatch path:
+    /// `tasks`, `system_preset`, `quality_loop`) and duplicate the catalog
+    /// row. Each collision is recorded in `outcome.skipped` with the
+    /// `BuiltinCollision` reason and `warn!`-logged. P1 AR-43 admission keeps
+    /// the fail-closed contract; this P0 guard means P0 no longer regresses
+    /// builtins.
+    fn append_user_caps(&mut self, scan_dir: &std::path::Path) -> scan::ScanOutcome {
+        let mut outcome = scan::scan_user_capabilities(scan_dir);
+        // F1: drop admitted user caps whose name collides with a builtin
+        // before the append; the index stays builtin-first-wins.
+        let base_index: std::collections::HashSet<&str> =
+            self.capabilities.iter().map(|c| c.name()).collect();
+        let collided: Vec<&str> = outcome
+            .admitted
+            .iter()
+            .map(|c| c.name())
+            .filter(|name| base_index.contains(name))
+            .collect();
+        for name in &collided {
+            scan::skip(
+                &mut outcome,
+                name,
+                "BuiltinCollision: a user capability cannot shadow a builtin (builtin wins, AR-36)"
+                    .to_string(),
+            );
+        }
+        outcome
+            .admitted
+            .retain(|cap| !base_index.contains(cap.name()));
+        // `Vec::append` moves every element out of `outcome.admitted`,
+        // leaving the vec empty so `outcome` can still be returned.
+        self.capabilities.append(&mut outcome.admitted);
+        self.build_index();
+        outcome
     }
 
     /// Shared body of [`with_runtime_deps`] / [`with_runtime_deps_and_wasm`],
@@ -685,5 +767,124 @@ mod tests {
         assert!(names.contains(&"essay.draft_status.finalize"));
         // V1.67 P2 script.section_status.update.
         assert!(names.contains(&"script.section_status.update"));
+    }
+
+    // ── User capability constructors (T2 / AR-36) ───────────────────────
+
+    const VALID_SHA256: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    /// Write a valid `<name>/capability.json` into `root`.
+    fn write_capability_dir(root: &std::path::Path, name: &str) {
+        let dir = root.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        let json = format!(
+            r#"{{
+                "name": "{name}",
+                "inputSchema": "{{\"type\":\"object\"}}",
+                "outputSchema": "{{\"type\":\"object\"}}",
+                "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{VALID_SHA256}" }}
+            }}"#
+        );
+        std::fs::write(dir.join("capability.json"), json).unwrap();
+    }
+
+    #[test]
+    fn with_runtime_deps_and_user_caps_appends_after_builtins() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_capability_dir(tmp.path(), "demo.pull");
+        let deps = CapabilityRuntimeDeps {
+            pool: None,
+            worker_provider: None,
+            daemon_tool_dispatch: None,
+            cdn_config: None,
+        };
+        // Base builtin count of the runtime-deps constructor (33 — the shared
+        // `build_with_narrative_compute` vec; `essay.draft_status.finalize`
+        // is only in with_builtins/with_builtins_and_pool).
+        let base = CapabilityRegistry::with_runtime_deps(&deps);
+        let base_len = base.len();
+        let (reg, outcome) = CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, tmp.path());
+        assert!(
+            outcome.skipped.is_empty(),
+            "no skips: {:?}",
+            outcome.skipped
+        );
+        assert_eq!(reg.len(), base_len + 1, "base builtins + 1 user capability");
+        // Builtins first, then the appended user capability (AR-36 order).
+        let names: Vec<&str> = reg.iter().map(Capability::name).collect();
+        let base_names: Vec<&str> = base.iter().map(Capability::name).collect();
+        assert_eq!(
+            &names[..base_len],
+            &base_names[..],
+            "prefix must equal the base registry's builtin order (S-005 tightened assertion)"
+        );
+        assert_eq!(names[base_len], "demo.pull");
+        // Eager index rebuilt: lookup works for both.
+        assert!(reg.get("narrative.compute").is_some());
+        assert!(reg.get("demo.pull").is_some());
+        // Registered through the index (not just iterated).
+        let cap = reg.get("demo.pull").expect("user cap indexed");
+        assert_eq!(cap.input_schema(), r#"{"type":"object"}"#);
+    }
+
+    #[test]
+    fn user_cap_colliding_with_builtin_is_skipped_builtin_wins() {
+        // F1 QC wave: a user capability named like a builtin (here
+        // `sync.pull`) must be skipped with a named reason — the builtin
+        // keeps serving `get()` and the catalog lists exactly one row.
+        let tmp = tempfile::tempdir().unwrap();
+        write_capability_dir(tmp.path(), "sync.pull");
+        let deps = CapabilityRuntimeDeps {
+            pool: None,
+            worker_provider: None,
+            daemon_tool_dispatch: None,
+            cdn_config: None,
+        };
+        let (reg, outcome) = CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, tmp.path());
+        assert_eq!(outcome.admitted.len(), 0, "colliding user cap not admitted");
+        assert_eq!(outcome.skipped.len(), 1, "one skip with named reason");
+        assert_eq!(outcome.skipped[0].name, "sync.pull");
+        assert!(
+            outcome.skipped[0].reason.contains("BuiltinCollision"),
+            "named reason, got: {:?}",
+            outcome.skipped[0].reason
+        );
+        // Builtin still serves `get()` through the eager index.
+        let cap = reg.get("sync.pull").expect("builtin still indexed");
+        assert_eq!(cap.input_schema(), builtins::SyncPull.input_schema());
+        // Catalog has exactly one row for the name.
+        let rows = reg.iter().filter(|c| c.name() == "sync.pull").count();
+        assert_eq!(rows, 1, "no duplicate catalog row");
+    }
+
+    #[tokio::test]
+    async fn with_runtime_deps_and_wasm_and_user_caps_indexes_and_stub_runs() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_capability_dir(tmp.path(), "demo.pull");
+        let deps = CapabilityRuntimeDeps {
+            pool: None,
+            worker_provider: None,
+            daemon_tool_dispatch: None,
+            cdn_config: None,
+        };
+        let engine = std::sync::Arc::new(nexus_wasm_host::WasmEngine::new().unwrap());
+        let cache = std::sync::Arc::new(nexus_wasm_host::ModuleCache::new());
+        let (reg, outcome) = CapabilityRegistry::with_runtime_deps_and_wasm_and_user_caps(
+            &deps,
+            engine,
+            cache,
+            tmp.path(),
+        );
+        assert!(
+            outcome.skipped.is_empty(),
+            "no skips: {:?}",
+            outcome.skipped
+        );
+        let cap = reg.get("demo.pull").expect("user cap indexed");
+        let err = cap.run(serde_json::json!({})).await.unwrap_err();
+        assert!(
+            matches!(err, CapabilityError::WorkerUnavailable),
+            "stub run: expected WorkerUnavailable, got {err:?}"
+        );
     }
 }
