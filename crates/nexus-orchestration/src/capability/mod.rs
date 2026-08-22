@@ -3,6 +3,7 @@
 //! Design: `.mstar/specs/orchestration-engine.md` §5.1–5.2.
 
 pub mod builtins;
+pub mod scan;
 pub mod user_capability;
 
 use async_trait::async_trait;
@@ -330,6 +331,55 @@ impl CapabilityRegistry {
                     )
                 });
         Self::build_with_narrative_compute(deps, narrative_compute)
+    }
+
+    /// Create a registry with runtime dependencies, the daemon-wide singleton
+    /// `WasmEngine` + `ModuleCache`, **and** user capabilities scanned from
+    /// `scan_dir` (V1.172 P0, DR-10; AR-36).
+    ///
+    /// Builds the base via [`with_runtime_deps_and_wasm`], appends the
+    /// admitted user capabilities **after** builtins, then rebuilds the eager
+    /// name index. The scan is fail-safe by contract (AR-35): a missing
+    /// directory or a bad descriptor never fails boot — bad entries land in
+    /// `outcome.skipped` with named reasons (already `warn!`-logged).
+    #[must_use]
+    pub fn with_runtime_deps_and_wasm_and_user_caps(
+        deps: &CapabilityRuntimeDeps,
+        engine: std::sync::Arc<nexus_wasm_host::WasmEngine>,
+        module_cache: std::sync::Arc<nexus_wasm_host::ModuleCache>,
+        scan_dir: &std::path::Path,
+    ) -> (Self, scan::ScanOutcome) {
+        let mut reg = Self::with_runtime_deps_and_wasm(deps, engine, module_cache);
+        let outcome = reg.append_user_caps(scan_dir);
+        (reg, outcome)
+    }
+
+    /// Create a registry with runtime dependencies **and** user capabilities
+    /// scanned from `scan_dir`, on the engine-less boot path (V1.172 P0,
+    /// DR-10; AR-36/AR-44).
+    ///
+    /// Engine-less arm of the AR-36 pair: user capabilities still register
+    /// (discoverable); their stub `run()` returns `WorkerUnavailable` until P1
+    /// wires the executor.
+    #[must_use]
+    pub fn with_runtime_deps_and_user_caps(
+        deps: &CapabilityRuntimeDeps,
+        scan_dir: &std::path::Path,
+    ) -> (Self, scan::ScanOutcome) {
+        let mut reg = Self::with_runtime_deps(deps);
+        let outcome = reg.append_user_caps(scan_dir);
+        (reg, outcome)
+    }
+
+    /// Append admitted user capabilities after builtins and rebuild the eager
+    /// index (AR-36). Shared by the two user-capability constructors.
+    fn append_user_caps(&mut self, scan_dir: &std::path::Path) -> scan::ScanOutcome {
+        let mut outcome = scan::scan_user_capabilities(scan_dir);
+        // `Vec::append` moves every element out of `outcome.admitted`,
+        // leaving the vec empty so `outcome` can still be returned.
+        self.capabilities.append(&mut outcome.admitted);
+        self.build_index();
+        outcome
     }
 
     /// Shared body of [`with_runtime_deps`] / [`with_runtime_deps_and_wasm`],
@@ -686,5 +736,89 @@ mod tests {
         assert!(names.contains(&"essay.draft_status.finalize"));
         // V1.67 P2 script.section_status.update.
         assert!(names.contains(&"script.section_status.update"));
+    }
+
+    // ── User capability constructors (T2 / AR-36) ───────────────────────
+
+    const VALID_SHA256: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    /// Write a valid `<name>/capability.json` into `root`.
+    fn write_capability_dir(root: &std::path::Path, name: &str) {
+        let dir = root.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        let json = format!(
+            r#"{{
+                "name": "{name}",
+                "inputSchema": "{{\"type\":\"object\"}}",
+                "outputSchema": "{{\"type\":\"object\"}}",
+                "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{VALID_SHA256}" }}
+            }}"#
+        );
+        std::fs::write(dir.join("capability.json"), json).unwrap();
+    }
+
+    #[test]
+    fn with_runtime_deps_and_user_caps_appends_after_builtins() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_capability_dir(tmp.path(), "demo.pull");
+        let deps = CapabilityRuntimeDeps {
+            pool: None,
+            worker_provider: None,
+            daemon_tool_dispatch: None,
+            cdn_config: None,
+        };
+        // Base builtin count of the runtime-deps constructor (33 — the shared
+        // `build_with_narrative_compute` vec; `essay.draft_status.finalize`
+        // is only in with_builtins/with_builtins_and_pool).
+        let base = CapabilityRegistry::with_runtime_deps(&deps);
+        let base_len = base.len();
+        let (reg, outcome) = CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, tmp.path());
+        assert!(
+            outcome.skipped.is_empty(),
+            "no skips: {:?}",
+            outcome.skipped
+        );
+        assert_eq!(reg.len(), base_len + 1, "base builtins + 1 user capability");
+        // Builtins first, then the appended user capability (AR-36 order).
+        let names: Vec<&str> = reg.iter().map(Capability::name).collect();
+        assert_eq!(names[..base_len], names[..base_len].to_vec());
+        assert_eq!(names[base_len], "demo.pull");
+        // Eager index rebuilt: lookup works for both.
+        assert!(reg.get("narrative.compute").is_some());
+        assert!(reg.get("demo.pull").is_some());
+        // Registered through the index (not just iterated).
+        let cap = reg.get("demo.pull").expect("user cap indexed");
+        assert_eq!(cap.input_schema(), r#"{"type":"object"}"#);
+    }
+
+    #[tokio::test]
+    async fn with_runtime_deps_and_wasm_and_user_caps_indexes_and_stub_runs() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_capability_dir(tmp.path(), "demo.pull");
+        let deps = CapabilityRuntimeDeps {
+            pool: None,
+            worker_provider: None,
+            daemon_tool_dispatch: None,
+            cdn_config: None,
+        };
+        let engine = std::sync::Arc::new(nexus_wasm_host::WasmEngine::new().unwrap());
+        let cache = std::sync::Arc::new(nexus_wasm_host::ModuleCache::new());
+        let (reg, outcome) = CapabilityRegistry::with_runtime_deps_and_wasm_and_user_caps(
+            &deps,
+            engine,
+            cache,
+            tmp.path(),
+        );
+        assert!(
+            outcome.skipped.is_empty(),
+            "no skips: {:?}",
+            outcome.skipped
+        );
+        let cap = reg.get("demo.pull").expect("user cap indexed");
+        let err = cap.run(serde_json::json!({})).await.unwrap_err();
+        assert!(
+            matches!(err, CapabilityError::WorkerUnavailable),
+            "stub run: expected WorkerUnavailable, got {err:?}"
+        );
     }
 }

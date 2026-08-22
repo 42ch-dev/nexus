@@ -13,6 +13,7 @@
 //! once at construction (T2/AR-44) — one bounded allocation per admitted user
 //! capability per boot, same lifetime as builtin literal constants.
 
+use crate::capability::{Capability, CapabilityError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -114,6 +115,65 @@ impl UserCapabilityDescriptor {
         }
         validate_wasm_ref(&self.wasm)?;
         Ok(())
+    }
+}
+
+/// A registered user capability (V1.172 P0, DR-10; AR-34/AR-44).
+///
+/// P0 is **discoverable, not runnable**: discovery (name + schemas) is fully
+/// functional; `run()` returns [`CapabilityError::WorkerUnavailable`] until the
+/// P1 executor wires the wasm module (`AR-37`). No admission gates at P0
+/// (collision/hash/clamp are P1, AR-43).
+///
+/// **Lifetime**: the descriptor's three `String` fields are leaked once at
+/// construction (`Box::leak`) — one bounded allocation per admitted user
+/// capability per boot, same process-lifetime semantics as the builtins'
+/// literal constants (AR-34/AR-44). Deliberate and documented; do not convert
+/// the `Capability` trait to owned types.
+pub struct UserCapability {
+    name: &'static str,
+    input_schema: &'static str,
+    output_schema: &'static str,
+}
+
+impl UserCapability {
+    /// Construct from a validated descriptor, leaking the three catalog
+    /// strings once (AR-34/AR-44).
+    #[must_use]
+    pub fn new(descriptor: &UserCapabilityDescriptor) -> Self {
+        Self {
+            name: Box::leak(descriptor.name.clone().into_boxed_str()),
+            input_schema: Box::leak(descriptor.input_schema.clone().into_boxed_str()),
+            output_schema: Box::leak(descriptor.output_schema.clone().into_boxed_str()),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Capability for UserCapability {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    fn input_schema(&self) -> &'static str {
+        self.input_schema
+    }
+
+    fn output_schema(&self) -> &'static str {
+        self.output_schema
+    }
+
+    async fn run(&self, _input: Value) -> Result<Value, CapabilityError> {
+        // P0 placeholder: discoverable-not-runnable (compass AC-V172-1
+        // invoke half is P1). AR-44 keeps the existing unit
+        // `WorkerUnavailable` variant (no new CapabilityError variant — the
+        // exhaustive matches in fork.rs / quality_loop.rs / tasks must keep
+        // compiling); the named message is emitted at warn! below.
+        tracing::warn!(
+            capability = %self.name,
+            "capability '{}': executor not yet wired (P1)", self.name
+        );
+        Err(CapabilityError::WorkerUnavailable)
     }
 }
 
@@ -523,5 +583,30 @@ mod tests {
             );
             assert_rejected(&json);
         }
+    }
+
+    // ── UserCapability impl (T2 / AR-34 / AR-44) ────────────────────────
+
+    /// Discovery returns the leaked `&'static str` catalog fields.
+    #[test]
+    fn user_capability_discovery_returns_declared_fields() {
+        let descriptor = parse(&minimal_json()).expect("minimal descriptor must parse");
+        let cap = UserCapability::new(&descriptor);
+        assert_eq!(cap.name(), "sync.pull");
+        assert_eq!(cap.input_schema(), r#"{"type":"object"}"#);
+        assert_eq!(cap.output_schema(), r#"{"type":"object"}"#);
+    }
+
+    /// P0 stub `run()` returns the named `WorkerUnavailable` — discoverable,
+    /// not runnable (AR-44: existing unit variant, no new `CapabilityError`).
+    #[tokio::test]
+    async fn stub_run_returns_worker_unavailable() {
+        let descriptor = parse(&minimal_json()).expect("minimal descriptor must parse");
+        let cap = UserCapability::new(&descriptor);
+        let err = cap.run(serde_json::json!({})).await.unwrap_err();
+        assert!(
+            matches!(err, CapabilityError::WorkerUnavailable),
+            "expected WorkerUnavailable, got {err:?}"
+        );
     }
 }
