@@ -146,6 +146,11 @@ pub struct CapabilityInfo {
     pub input_schema: String,
     /// JSON Schema (draft 2020-12) for the output shape.
     pub output_schema: String,
+    /// Provenance (AR-40): `"builtin"` (ships with the engine) or `"user"`
+    /// (locally-installed developer capability). Mirrors the wire enum; the
+    /// orchestration `CapabilityOrigin` enum NEVER crosses the crate boundary
+    /// (dependency direction, AR-40) — the handler maps it to this string.
+    pub origin: String,
 }
 
 // ---------------------------------------------------------------------------
