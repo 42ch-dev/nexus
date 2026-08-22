@@ -71,7 +71,7 @@ nexus-runtime: Connect Host (N-C2 E2) ready
   host_id: <device-id>
   listen: /ip4/127.0.0.1/tcp/4321
   allowlisted peers: 1 (fail-closed; add via allowlist.json or --allow-peer)
-  invokes: upsert/promote/relate/check/assemble/compute served (world+module scoped); project/unknown refused (op_unsupported)
+  invokes: upsert/promote/relate/check/assemble/compute served (world+module scoped) plus tools.nexus.list_observed_peers / tools.nexus.list_modules (host-level reads); project/unknown refused (op_unsupported)
   press Ctrl-C to stop
 ```
 
