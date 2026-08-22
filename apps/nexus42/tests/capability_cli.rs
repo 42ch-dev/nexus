@@ -171,6 +171,40 @@ fn capability_validate_invalid_exits_two_with_json() {
 }
 
 #[test]
+fn capability_validate_rejects_underscore_leading_first_segment_exits_two() {
+    // PR #227 Bugbot fix: a name whose FIRST segment starts with `_` would
+    // install under `~/.nexus42/capabilities/_<name>/`, which the boot
+    // scanner skips (`_`-prefixed dirs, preset-scanner precedent) — a silent
+    // dead install. validate must reject it at exit 2 with the field-level
+    // error carrying the `name` field.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let descriptor = dir.path().join("capability.json");
+    std::fs::write(
+        &descriptor,
+        json!({
+            "name": "_my.cap",
+            "inputSchema": "{\"type\":\"object\"}",
+            "outputSchema": "{\"type\":\"object\"}",
+            "wasm": { "moduleId": "basic-mod", "wasmSha256": sha256_hex(b"x") },
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    nexus42()
+        .env("HOME", dir.path())
+        .args(["capability", "validate", "--json", "--descriptor"])
+        .arg(&descriptor)
+        .assert()
+        .code(2)
+        .stdout(
+            predicates::str::contains("\"valid\": false")
+                .and(predicates::str::contains("\"field\": \"name\""))
+                .and(predicates::str::contains("must not start with '_'")),
+        );
+}
+
+#[test]
 fn capability_validate_pairing_mismatch_exits_three() {
     let dir = tempfile::tempdir().expect("tempdir");
     // Manifest declares the real wasm hash; the descriptor declares a
@@ -309,6 +343,37 @@ fn capability_install_rejects_module_id_mismatch_exits_two_no_dir() {
     assert!(
         !cap_dir.exists(),
         "no install dir on module-id mismatch (verify-first, F1)"
+    );
+}
+
+#[test]
+fn capability_install_rejects_underscore_leading_name_exits_two_no_dir() {
+    // PR #227 Bugbot fix: install must fail closed at exit 2 for a name whose
+    // FIRST segment starts with `_` (the boot scanner skips `_`-prefixed
+    // dirs — a silent dead install) and must NOT create the `<name>/` dir.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let descriptor = write_trio(dir.path(), "_my.cap", "basic-mod", b"wasm module bytes");
+    let module_dir = dir.path().join("module");
+
+    nexus42()
+        .env("HOME", dir.path())
+        .args(["capability", "install", "--descriptor"])
+        .arg(&descriptor)
+        .args(["--wasm"])
+        .arg(module_dir.join("basic-mod.wasm"))
+        .args(["--manifest"])
+        .arg(module_dir.join("manifest.json"))
+        .assert()
+        .code(2);
+
+    let cap_dir = dir
+        .path()
+        .join(".nexus42")
+        .join("capabilities")
+        .join("_my.cap");
+    assert!(
+        !cap_dir.exists(),
+        "no install dir for a _-leading name (verify-first)"
     );
 }
 

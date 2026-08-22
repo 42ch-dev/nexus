@@ -503,6 +503,11 @@ fn map_compute_error(e: &ComputeError) -> CapabilityError {
 /// The per-segment charset inherently rejects `/`, `\`, control chars and
 /// `..`-style traversal — the name becomes a directory name (AR-35), same
 /// path-safety intent as `ModuleManifest::validate` `module_id`.
+///
+/// The first segment must NOT start with `_`: `install` would write it under
+/// `~/.nexus42/capabilities/_<name>/`, which the boot scanner skips
+/// (`_`-prefixed dirs — preset-scanner precedent, `scan.rs`) — a silent dead
+/// install. Underscores INSIDE segments stay valid (`my_cap.pull`).
 fn validate_name(name: &str) -> Result<(), CapabilityDescriptorError> {
     if name.is_empty() {
         return Err(CapabilityDescriptorError::MissingField("name"));
@@ -521,6 +526,17 @@ fn validate_name(name: &str) -> Result<(), CapabilityDescriptorError> {
     }) {
         return Err(CapabilityDescriptorError::InvalidName(format!(
             "name must be dot-separated segments of [a-z0-9_], got: {name:?}"
+        )));
+    }
+    if name
+        .split('.')
+        .next()
+        .is_some_and(|first| first.starts_with('_'))
+    {
+        return Err(CapabilityDescriptorError::InvalidName(format!(
+            "name first segment must not start with '_' (the boot scanner skips \
+             '_'-prefixed dirs, so such a name would install dead; underscores \
+             inside segments are fine, e.g. 'my_cap.pull'), got: {name:?}"
         )));
     }
     Ok(())
@@ -740,6 +756,37 @@ mod tests {
                      "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{VALID_SHA256}" }} }}"#
             );
             assert_rejected(&json);
+        }
+    }
+
+    #[test]
+    fn reject_underscore_leading_first_segment() {
+        // The boot scanner skips `_`-prefixed dirs (preset-scanner precedent),
+        // so a `_`-leading first segment would install dead — rejected at the
+        // authoring boundary (PR #227 Bugbot fix).
+        for name in ["_my.cap", "_private.pull", "_", "_foo"] {
+            let json = format!(
+                r#"{{ "name": "{name}", "inputSchema": "{{}}", "outputSchema": "{{}}",
+                     "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{VALID_SHA256}" }} }}"#
+            );
+            assert_rejected(&json);
+        }
+    }
+
+    #[test]
+    fn accept_underscores_inside_segments() {
+        // Underscores INSIDE segments remain valid — only a `_`-leading FIRST
+        // segment is rejected (`my_cap.pull` installs to `my_cap.pull/`, which
+        // the scanner reads).
+        for name in ["my_cap.pull", "normal.cap", "foo._bar", "a.b_c"] {
+            let json = format!(
+                r#"{{ "name": "{name}", "inputSchema": "{{}}", "outputSchema": "{{}}",
+                     "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{VALID_SHA256}" }} }}"#
+            );
+            parse(&json)
+                .unwrap_or_else(|e| panic!("{name} must parse: {e}"))
+                .validate()
+                .unwrap_or_else(|e| panic!("{name} must validate: {e}"));
         }
     }
 
