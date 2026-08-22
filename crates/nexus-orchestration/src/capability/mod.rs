@@ -2,6 +2,7 @@
 //!
 //! Design: `.mstar/specs/orchestration-engine.md` §5.1–5.2.
 
+pub mod admission;
 pub mod builtins;
 pub mod scan;
 pub mod user_capability;
