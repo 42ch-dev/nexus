@@ -36,7 +36,6 @@ import type {
   GetPresetResponse,
   InspectScheduleResponse,
   ListCapabilitiesQuery,
-  ListCapabilitiesResponse,
   ListChaptersQuery,
   ListChaptersResponse,
   ListCreatorsQuery,
@@ -128,6 +127,7 @@ import type {
 } from '@42ch/nexus-contracts';
 
 import type { PresetProfileResponse } from './preset-profile';
+import type { CapabilityListResponse } from './capability-info';
 
 import { NexusClientError, type TransportErrorKind } from './errors';
 import type {
@@ -341,8 +341,8 @@ export class BrowserClient implements NexusClient {
   }
 
   // ── Capabilities ───────────────────────────────────────────────────────────
-  listCapabilities(query?: ListCapabilitiesQuery): Promise<ListCapabilitiesResponse> {
-    return this.get<ListCapabilitiesResponse>('/v1/daemon/orchestration/capabilities', query);
+  listCapabilities(query?: ListCapabilitiesQuery): Promise<CapabilityListResponse> {
+    return this.get<CapabilityListResponse>('/v1/daemon/orchestration/capabilities', query);
   }
 
   // ── Preset profiles (V1.171 P1 — AR-27) ────────────────────────────────────

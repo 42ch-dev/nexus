@@ -235,6 +235,44 @@ pub struct ReloadPresetResponse {
     pub reloaded: bool,
 }
 
+// ─── Capability models (V1.172 P2, AR-41) ───────────────────────────────
+
+/// Response body for `GET /v1/daemon/orchestration/capabilities`.
+///
+/// Only `items` is modeled: the catalog fits one page (~34 builtins + user
+/// caps at the default 100 limit), and the CLI has no cursor surface. The
+/// daemon's `pagination` envelope is left unmodeled (serde ignores it).
+#[derive(Debug, Clone, Deserialize)]
+pub struct CapabilityListResponse {
+    /// Registered capabilities (name + I/O schemas + provenance).
+    pub items: Vec<CapabilityRow>,
+}
+
+/// A single capability row on the wire.
+///
+/// Mirrors the local orchestration DTO's camelCase serialization
+/// (`inputSchema`/`outputSchema` — local tier, hand-coded, AR-40), which is
+/// what the daemon actually emits (the generated `snake_case` types are
+/// schema-facing, not the served shape). `origin` is always populated by the
+/// server (AR-40); the `builtin` default tolerates a pre-AR-40 daemon.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilityRow {
+    /// Dot-separated capability name, e.g. `"sync.pull"`.
+    pub name: String,
+    /// JSON Schema (draft 2020-12) for valid inputs.
+    pub input_schema: String,
+    /// JSON Schema (draft 2020-12) for the output shape.
+    pub output_schema: String,
+    /// Provenance (AR-40): `"builtin"` or `"user"`.
+    #[serde(default = "default_capability_origin")]
+    pub origin: String,
+}
+
+fn default_capability_origin() -> String {
+    "builtin".to_string()
+}
+
 // ─── KB models (V1.20 Batch 5) ────────────────────────────────────────────
 
 /// A single KB entry summary.

@@ -102,6 +102,21 @@ pub struct CapabilityRuntimeDeps {
 // Capability trait
 // ---------------------------------------------------------------------------
 
+/// Provenance of a capability (AR-40).
+///
+/// Marker-only: `Builtin` is the default (zero edits to the ~34 builtin
+/// impls); `User` marks a locally-installed user capability. The enum stays
+/// in `nexus-orchestration` and NEVER crosses into `nexus-contracts`
+/// (dependency direction, AR-40) — the wire layer maps it to the
+/// `"builtin"` / `"user"` string enum itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapabilityOrigin {
+    /// Shipped with the engine (default).
+    Builtin,
+    /// Installed by a developer at `~/.nexus42/capabilities/<name>/`.
+    User,
+}
+
 /// A capability that can be invoked as a graph-flow Task node.
 ///
 /// Per the design spec, every capability ships its own input/output JSON Schema
@@ -116,6 +131,12 @@ pub trait Capability: Send + Sync {
 
     /// JSON Schema (draft 2020-12) describing the output shape.
     fn output_schema(&self) -> &'static str;
+
+    /// Provenance marker (AR-40). Defaults to [`CapabilityOrigin::Builtin`] —
+    /// only user-installed capabilities override it.
+    fn origin(&self) -> CapabilityOrigin {
+        CapabilityOrigin::Builtin
+    }
 
     /// Execute the capability with the given input.
     ///
@@ -733,6 +754,17 @@ mod tests {
     fn registry_lookup_missing_returns_none() {
         let reg = CapabilityRegistry::with_builtins();
         assert!(reg.get("nonexistent").is_none());
+    }
+
+    #[test]
+    fn builtin_capability_origin_defaults_to_builtin() {
+        // AR-40: the default `origin()` is `Builtin` — zero edits to the ~34
+        // builtin impls; a builtin capability must report `Builtin`.
+        let reg = CapabilityRegistry::with_builtins();
+        let cap = reg
+            .get("sync.pull")
+            .expect("sync.pull builtin must be registered");
+        assert!(matches!(cap.origin(), super::CapabilityOrigin::Builtin));
     }
 
     #[tokio::test]

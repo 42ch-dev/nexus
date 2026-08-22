@@ -11,4 +11,8 @@ export interface CapabilityInfo {
   name: string;
   input_schema: string;
   output_schema: string;
+  /**
+   * Provenance of the capability (AR-40): "builtin" ships with the engine, "user" is a locally-installed developer capability.
+   */
+  origin?: "builtin" | "user";
 }

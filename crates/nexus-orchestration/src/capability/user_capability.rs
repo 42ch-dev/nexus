@@ -13,7 +13,7 @@
 //! once at construction (T2/AR-44) — one bounded allocation per admitted user
 //! capability per boot, same lifetime as builtin literal constants.
 
-use crate::capability::{Capability, CapabilityError};
+use crate::capability::{Capability, CapabilityError, CapabilityOrigin};
 use nexus_contracts::generated::daemon_api::compute::compute_input::{
     ComputeInputWorldRef, ComputeInputWorldRefWorldId,
 };
@@ -338,6 +338,10 @@ impl Capability for UserCapability {
 
     fn output_schema(&self) -> &'static str {
         self.output_schema
+    }
+
+    fn origin(&self) -> CapabilityOrigin {
+        CapabilityOrigin::User
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
@@ -1398,5 +1402,13 @@ mod tests {
             err.to_string().contains("module fault"),
             "message names the module fault, got: {err}"
         );
+    }
+
+    /// AR-40: the user capability overrides `origin()` → `User`.
+    #[test]
+    fn user_capability_origin_is_user() {
+        let descriptor = parse(&minimal_json()).expect("minimal descriptor must parse");
+        let cap = UserCapability::new(&descriptor, PathBuf::new(), None, None);
+        assert!(matches!(cap.origin(), CapabilityOrigin::User));
     }
 }

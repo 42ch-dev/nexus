@@ -7,10 +7,10 @@
 #[cfg(feature = "connect-host")]
 use crate::commands::connect::ConnectCommand;
 use crate::commands::{
-    acp::AcpCommand, acp_worker::AcpWorkerArgs, compute::ComputeCommand, creator::CreatorCommand,
-    daemon::DaemonCommand, daemon_run::DaemonRunArgs, desktop::DesktopCommand,
-    host_call::HostCallArgs, platform::PlatformCommand, preset::PresetCommand, sync::SyncCommand,
-    system::SystemCommand,
+    acp::AcpCommand, acp_worker::AcpWorkerArgs, capability::CapabilityCommand,
+    compute::ComputeCommand, creator::CreatorCommand, daemon::DaemonCommand,
+    daemon_run::DaemonRunArgs, desktop::DesktopCommand, host_call::HostCallArgs,
+    platform::PlatformCommand, preset::PresetCommand, sync::SyncCommand, system::SystemCommand,
 };
 use clap::{Parser, Subcommand};
 
@@ -121,6 +121,25 @@ pub enum Commands {
     Compute {
         #[command(subcommand)]
         command: ComputeCommand,
+    },
+
+    /// Capability authoring surface (validate, list, install) — V1.172 P2
+    /// (AR-41): `validate` and `install` are daemon-free (descriptor +
+    /// manifest + wasm pairing via `nexus-module-manifest`, AR-39); `list`
+    /// is a thin HTTP client over
+    /// `GET /v1/daemon/orchestration/capabilities` (AR-40 provenance).
+    /// No `run`, no `scaffold` (PL-7 — invocation is P1 dispatch; module
+    /// scaffolding stays `nexus42 compute` + `modules/_template`). The
+    /// group carries no `connect-host` feature dependency.
+    ///
+    /// Hidden from `--help` for the current release: the V1.35 command-
+    /// surface lock (`.mstar/specs/cli-spec.md` §6) fixes the visible
+    /// top-level groups to `creator|daemon|acp|platform|system` — same
+    /// posture as `preset` (V1.35 lock resolution, AR-41).
+    #[command(hide = true)]
+    Capability {
+        #[command(subcommand)]
+        command: CapabilityCommand,
     },
 
     /// Manage the Tauri desktop shell (build, sign, diagnostics)
