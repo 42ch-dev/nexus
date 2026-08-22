@@ -384,41 +384,22 @@ impl CapabilityRegistry {
     /// `run()` returns `WorkerUnavailable`. Handles are forwarded into the
     /// scan so `UserCapability::new` carries them from construction.
     ///
-    /// Builtin collision (F1 QC wave): a user capability whose name equals a
-    /// builtin is **skipped** here (builtin wins — AR-36). Without this guard
-    /// the eager index's last-wins insert would let the user stub shadow the
-    /// builtin on `registry.get(name)` (the existing dispatch path:
-    /// `tasks`, `system_preset`, `quality_loop`) and duplicate the catalog
-    /// row. Each collision is recorded in `outcome.skipped` with the
-    /// `BuiltinCollision` reason and `warn!`-logged.
+    /// Builtin collision (AR-43 gate 1): the scan admits against the
+    /// registry's builtin name set (`self.capabilities` — the builtins built
+    /// by the constructor), so a user capability whose name equals a builtin
+    /// is **skipped inside the scan** (builtin wins — AR-36/AR-43). Each
+    /// collision lands in `outcome.skipped` with the named `NameCollision`
+    /// reason and is `warn!`-logged before the append.
     fn append_user_caps(
         &mut self,
         scan_dir: &std::path::Path,
         engine: Option<&std::sync::Arc<nexus_wasm_host::WasmEngine>>,
         module_cache: Option<&std::sync::Arc<nexus_wasm_host::ModuleCache>>,
     ) -> scan::ScanOutcome {
-        let mut outcome = scan::scan_user_capabilities(scan_dir, engine, module_cache);
-        // F1: drop admitted user caps whose name collides with a builtin
-        // before the append; the index stays builtin-first-wins.
-        let base_index: std::collections::HashSet<&str> =
+        let builtin_names: std::collections::HashSet<&str> =
             self.capabilities.iter().map(|c| c.name()).collect();
-        let collided: Vec<&str> = outcome
-            .admitted
-            .iter()
-            .map(|c| c.name())
-            .filter(|name| base_index.contains(name))
-            .collect();
-        for name in &collided {
-            scan::skip(
-                &mut outcome,
-                name,
-                "BuiltinCollision: a user capability cannot shadow a builtin (builtin wins, AR-36)"
-                    .to_string(),
-            );
-        }
-        outcome
-            .admitted
-            .retain(|cap| !base_index.contains(cap.name()));
+        let mut outcome =
+            scan::scan_user_capabilities(scan_dir, &builtin_names, engine, module_cache);
         // `Vec::append` moves every element out of `outcome.admitted`,
         // leaving the vec empty so `outcome` can still be returned.
         self.capabilities.append(&mut outcome.admitted);
@@ -784,21 +765,45 @@ mod tests {
 
     // ── User capability constructors (T2 / AR-36) ───────────────────────
 
-    const VALID_SHA256: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
-    /// Write a valid `<name>/capability.json` into `root`.
+    /// Write an admitted `<name>/capability.json` trio into `root` (AR-35
+    /// layout): a hash-consistent `manifest.json` + `<module-id>.wasm` pair
+    /// so the AR-43 admission gates (P1 T4) pass inside the scan.
     fn write_capability_dir(root: &std::path::Path, name: &str) {
+        use sha2::{Digest, Sha256};
+        use std::fmt::Write as _;
         let dir = root.join(name);
         std::fs::create_dir_all(&dir).unwrap();
+        let wasm = b"fake module bytes";
+        let sha: String = {
+            let mut hex = String::with_capacity(64);
+            for b in Sha256::digest(wasm) {
+                let _ = write!(hex, "{b:02x}");
+            }
+            hex
+        };
         let json = format!(
             r#"{{
                 "name": "{name}",
                 "inputSchema": "{{\"type\":\"object\"}}",
                 "outputSchema": "{{\"type\":\"object\"}}",
-                "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{VALID_SHA256}" }}
+                "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{sha}" }}
             }}"#
         );
         std::fs::write(dir.join("capability.json"), json).unwrap();
+        let manifest = format!(
+            r#"{{
+                "module_id": "basic-combat",
+                "name": "Basic Combat",
+                "version": "1.0.0",
+                "nexus_abi_version": 1,
+                "required_key_block_types": [],
+                "compute_export": "compute",
+                "init_export": "",
+                "wasm_sha256": "{sha}"
+            }}"#
+        );
+        std::fs::write(dir.join("manifest.json"), manifest).unwrap();
+        std::fs::write(dir.join("basic-combat.wasm"), wasm).unwrap();
     }
 
     #[test]
@@ -842,9 +847,10 @@ mod tests {
 
     #[test]
     fn user_cap_colliding_with_builtin_is_skipped_builtin_wins() {
-        // F1 QC wave: a user capability named like a builtin (here
-        // `sync.pull`) must be skipped with a named reason — the builtin
-        // keeps serving `get()` and the catalog lists exactly one row.
+        // P1 T4 (AR-43 gate 1): a user capability named like a builtin
+        // (here `sync.pull`) is skipped inside the scan with a named
+        // `NameCollision` reason — the builtin keeps serving `get()` and the
+        // catalog lists exactly one row (builtin wins, AR-36/AR-43).
         let tmp = tempfile::tempdir().unwrap();
         write_capability_dir(tmp.path(), "sync.pull");
         let deps = CapabilityRuntimeDeps {
@@ -858,8 +864,11 @@ mod tests {
         assert_eq!(outcome.skipped.len(), 1, "one skip with named reason");
         assert_eq!(outcome.skipped[0].name, "sync.pull");
         assert!(
-            outcome.skipped[0].reason.contains("BuiltinCollision"),
-            "named reason, got: {:?}",
+            outcome.skipped[0].reason.contains("NameCollision")
+                || outcome.skipped[0]
+                    .reason
+                    .contains("collides with a builtin"),
+            "named NameCollision reason, got: {:?}",
             outcome.skipped[0].reason
         );
         // Builtin still serves `get()` through the eager index.
@@ -895,18 +904,19 @@ mod tests {
         );
         let cap = reg.get("demo.pull").expect("user cap indexed");
         // PL-10: the admitted-with-engine path no longer returns the P0
-        // stub's WorkerUnavailable — the real executor (AR-37) runs and the
-        // missing module pair (this test's fixture writes only
-        // capability.json) fails fail-closed as InputInvalid.
+        // stub's WorkerUnavailable — the real executor (AR-37) runs. The
+        // fixture's module pair is hash-consistent (admitted) but its wasm
+        // bytes are not valid wasm, so the first `run()` fails fail-closed
+        // at module load as PermanentExternal (AR-37 table: InvalidModule →
+        // PermanentExternal).
         let err = cap.run(serde_json::json!({})).await.unwrap_err();
         assert!(
-            matches!(err, CapabilityError::InputInvalid(_)),
-            "expected InputInvalid from the real executor, got {err:?}"
+            matches!(err, CapabilityError::PermanentExternal(_)),
+            "expected PermanentExternal from the real executor, got {err:?}"
         );
         assert!(
-            err.to_string()
-                .contains("not loaded in capability 'demo.pull'"),
-            "named module/capability message, got: {err}"
+            err.to_string().contains("module fault"),
+            "named module message, got: {err}"
         );
     }
 }
