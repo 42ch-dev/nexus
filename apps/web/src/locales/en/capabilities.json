@@ -11,5 +11,7 @@
   "emptyDescription": "Capabilities will appear here once the runtime registers them.",
   "inputSchema": "Input schema",
   "outputSchema": "Output schema",
+  "userBadge": "Local",
+  "localOnlyCopy": "Local module — no distribution or signing",
   "admissionGatesInfo": "Admission gates are enforced by the daemon when this capability is invoked. Gate details are not exposed in the registry list response."
 }
