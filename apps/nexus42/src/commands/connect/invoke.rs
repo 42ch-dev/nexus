@@ -764,9 +764,29 @@ async fn route_tool(
             "\"arguments\" must be an object matching the tool descriptor input",
         ));
     }
+    // Both locked tool descriptors advertise `{ "type": "object",
+    // "additionalProperties": false }` (spec §2.1 C-1/C-2) — the only
+    // legal argument is an EMPTY object, so a non-empty object is a
+    // schema violation and fails `invalid_input` before any adapter read
+    // (the served behavior matches the advertised input contract).
+    if !arguments
+        .as_object()
+        .expect("is_object checked above")
+        .is_empty()
+    {
+        return Err(tool_invalid_input(
+            op,
+            "\"arguments\" must be an empty object (the descriptor input schema is \
+             { \"type\": \"object\", \"additionalProperties\": false })",
+        ));
+    }
     match op {
         "tools.nexus.list_observed_peers" => tool_list_observed_peers(adapter).await,
         "tools.nexus.list_modules" => tool_list_modules(adapter).await,
+        // A `bridge_fault` here means `S` drifted from the match arms
+        // (and from `Route::Tool` above) — the routing sweep
+        // `n_c1_every_served_op_advertised_by_the_const_actually_routes`
+        // is the loud guard that catches it.
         other => Err(bridge_fault(&format!(
             "served tool op {other:?} has no handler arm (dispatch/tool route drift)"
         ))),
@@ -2421,5 +2441,63 @@ mod tests {
             served["knowledge_entries"][0]["entry_id"],
             "kb_after_tools_refusal"
         );
+    }
+
+    /// V1.173 QC fix wave F-001 (AR-49 payload-shape pin): a served tool
+    /// invoked with a malformed payload — missing `arguments`
+    /// (`{ "extensions": {} }`), a non-object `arguments`
+    /// (`{ "arguments": "string" }`), or a non-empty object
+    /// (`{ "arguments": { "unexpected": 1 } }` — the locked descriptors
+    /// advertise `additionalProperties: false`, so the only legal
+    /// argument is an empty object) — fails with the `invalid_input`
+    /// envelope BEFORE any adapter I/O. The store pool is closed after
+    /// handler construction: a path that reached
+    /// `tool_list_observed_peers` would hit the closed pool and surface
+    /// `internal_error`, so `invalid_input` proves the argument gate ran
+    /// and zero `list_observed_peer_hosts` calls happened.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn served_tool_malformed_arguments_fail_invalid_input_before_adapter_io() {
+        let (temp, pool) = test_pool().await;
+        let peer = fixed_keypair(7).public().to_peer_id();
+        let scope = scoped_scope_for(peer, &["tools.nexus.list_observed_peers"]);
+        let adapter = Arc::new(NexusAdapter::new(pool.clone()));
+        let (handler, _lane, _serializer) =
+            build_handler_with_limits(scope, adapter, BridgeLimits::default());
+        // Close the store: any code path that reaches the adapter would
+        // fail as `internal_error` (closed-pool query) — the
+        // `invalid_input` assertions below pin the error to the argument
+        // gate and prove zero adapter I/O.
+        pool.close().await;
+        for (label, payload) in [
+            ("missing arguments", serde_json::json!({ "extensions": {} })),
+            (
+                "non-object arguments",
+                serde_json::json!({ "arguments": "string" }),
+            ),
+            (
+                "non-empty object arguments",
+                serde_json::json!({ "arguments": { "unexpected": 1 } }),
+            ),
+        ] {
+            match handler(&peer, "tools.nexus.list_observed_peers", payload) {
+                Err(envelope) => {
+                    assert_eq!(
+                        envelope.code, "invalid_input",
+                        "{label}: a malformed tool payload must fail with invalid_input"
+                    );
+                    assert!(
+                        envelope
+                            .message
+                            .starts_with("invalid tools.nexus.list_observed_peers payload:"),
+                        "{label}: the message must come from the tool argument gate: {}",
+                        envelope.message
+                    );
+                }
+                Ok(_) => panic!(
+                    "{label}: a malformed tool payload must be rejected, got a served response"
+                ),
+            }
+        }
+        drop(temp);
     }
 }

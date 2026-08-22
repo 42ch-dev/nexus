@@ -167,19 +167,38 @@ pub fn local_tool_descriptors() -> Vec<ToolDescriptor> {
     .collect()
 }
 
+/// The three baseline capabilities (N-C0 → N-C2, unchanged) — the head
+/// of [`LOCAL_CAPABILITIES`].
+///
+/// Each maps to a production adapter port (the honesty test asserts the
+/// compile-time proof). Tool ids are NOT baselines (AR-46): they join
+/// only through the [`LOCAL_TOOL_OPS`] composition below.
+pub const BASELINE_CAPABILITIES: [&str; 3] = ["spoke-baseline", "l2-computable", "l5-fork"];
+
 /// Capabilities advertised by the local host: the baseline 3 **then** each
 /// user-locked tool id ([`LOCAL_TOOL_OPS`] order, AR-48).
 ///
 /// The tool ids let a calling peer negotiate the served tools (spoke
 /// intersection semantics); each baseline capability maps to a production
 /// adapter port (see the honesty test below for the compile-time proof).
-pub const LOCAL_CAPABILITIES: [&str; 5] = [
-    "spoke-baseline",
-    "l2-computable",
-    "l5-fork",
-    "tools.nexus.list_observed_peers",
-    "tools.nexus.list_modules",
-];
+/// Composed at const time from [`BASELINE_CAPABILITIES`] ++
+/// [`LOCAL_TOOL_OPS`] (mirror of the dispatch `SERVED_OPS` const-block
+/// pattern) — adding a tool to `S` is a one-place edit in
+/// [`LOCAL_TOOL_OPS`], never a second literal here.
+pub const LOCAL_CAPABILITIES: [&str; BASELINE_CAPABILITIES.len() + LOCAL_TOOL_OPS.len()] = {
+    let mut caps = [""; BASELINE_CAPABILITIES.len() + LOCAL_TOOL_OPS.len()];
+    let mut i = 0;
+    while i < BASELINE_CAPABILITIES.len() {
+        caps[i] = BASELINE_CAPABILITIES[i];
+        i += 1;
+    }
+    let mut j = 0;
+    while j < LOCAL_TOOL_OPS.len() {
+        caps[BASELINE_CAPABILITIES.len() + j] = LOCAL_TOOL_OPS[j];
+        j += 1;
+    }
+    caps
+};
 
 /// Namespaces owned by the local host.
 pub const LOCAL_NAMESPACES: [&str; 1] = ["nexus"];
@@ -197,16 +216,23 @@ pub const CORE_OPS: [&str; 6] = [
 /// (`apps/nexus42` `commands::connect::invoke::SERVED_OPS`); the honesty
 /// tests machine-check both directions (advertised ⇄ served) so the two
 /// cannot drift unnoticed (see [`build_local_host_manifest`] docs).
-pub const LOCAL_SERVED_OPS: [&str; 8] = [
-    "upsert",
-    "promote",
-    "relate",
-    "check",
-    "assemble",
-    "compute",
-    "tools.nexus.list_observed_peers",
-    "tools.nexus.list_modules",
-];
+/// Composed at const time (mirror of the dispatch `SERVED_OPS` const-block
+/// pattern) — adding a tool to `S` is a one-place edit in
+/// [`LOCAL_TOOL_OPS`], never a second literal here.
+pub const LOCAL_SERVED_OPS: [&str; CORE_OPS.len() + LOCAL_TOOL_OPS.len()] = {
+    let mut ops = [""; CORE_OPS.len() + LOCAL_TOOL_OPS.len()];
+    let mut i = 0;
+    while i < CORE_OPS.len() {
+        ops[i] = CORE_OPS[i];
+        i += 1;
+    }
+    let mut j = 0;
+    while j < LOCAL_TOOL_OPS.len() {
+        ops[CORE_OPS.len() + j] = LOCAL_TOOL_OPS[j];
+        j += 1;
+    }
+    ops
+};
 
 /// Build the N-C0 `HostCapabilityManifest` from the given `host_id`.
 ///
