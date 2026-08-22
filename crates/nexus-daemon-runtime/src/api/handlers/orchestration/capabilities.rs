@@ -15,6 +15,14 @@ use nexus_contracts::PaginationInfo;
 
 /// `GET /v1/daemon/orchestration/capabilities`
 ///
+/// Provenance mapping (AR-40): each row's `origin` is produced by the
+/// closure in the `registry.iter().map(...)` below — `CapabilityOrigin`
+/// (the trait marker, `capability/mod.rs`) → wire string, with
+/// `Builtin → "builtin"`, `User → "user"`. This is the single handler-side
+/// mapping fn for the provenance layer (marker → handler → wire); the CLI
+/// and web layers consume the wire string, never the enum (dependency
+/// direction, AR-40/AR-42).
+///
 /// # Errors
 /// Returns `NexusApiError::BadRequest` if `sort` contains an unsupported key
 /// or invalid syntax.
