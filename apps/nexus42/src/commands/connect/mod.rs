@@ -298,7 +298,8 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
         "  allowlisted peers: {allowlist_len} (fail-closed; add via allowlist.json or --allow-peer)"
     );
     eprintln!(
-        "  invokes: upsert/promote/relate/check/assemble/compute served (world+module scoped); \
+        "  invokes: upsert/promote/relate/check/assemble/compute served (world+module scoped) \
+         plus tools.nexus.list_observed_peers / tools.nexus.list_modules (host-level reads); \
          project/unknown refused (op_unsupported)"
     );
     eprintln!("  press Ctrl-C to stop");

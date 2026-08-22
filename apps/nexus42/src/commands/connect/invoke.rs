@@ -12,9 +12,16 @@
 //! § OCC + error mapping / § World scoping, plus the P2 spec
 //! §2 compute-over-Connect.
 //!
-//! Every other op — `project` / unknown — is refused with
-//! `ErrorEnvelope.code = "op_unsupported"` and zero side effects (the N-C0
-//! refusal contract extends).
+//! V1.173 (DF-84): the user-locked tool set `S`
+//! ([`LOCAL_TOOL_OPS`] — `tools.nexus.list_observed_peers` /
+//! `tools.nexus.list_modules`) joins the served surface through the
+//! `Route::Tool` arm: host-level adapter reads with the spoke tool-invoke
+//! payload shape (spec §2, AR-49), skipping the world-scope gate. Core ops
+//! stay core ops (AR-56).
+//!
+//! Every other op — `project` / unknown / `tools.*` outside `S` — is
+//! refused with `ErrorEnvelope.code = "op_unsupported"` and zero side
+//! effects (the N-C0 refusal contract extends).
 //!
 //! ## Caller identity (session peer — E2, V1.154 P0 T2)
 //!
@@ -151,6 +158,7 @@
 use super::allowlist::PeerScope;
 use libp2p::PeerId;
 use nexus_spoke_adapter::extensions::get_world_id;
+use nexus_spoke_adapter::manifest::{CORE_OPS, LOCAL_TOOL_OPS};
 use nexus_spoke_adapter::{
     is_module_identity_missing_reject, is_safe_module_id, is_world_conflict_reject,
     orchestrate_assemble, orchestrate_check_world_scoped, orchestrate_compute, orchestrate_promote,
@@ -169,7 +177,8 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-/// The ops this host serves (N-C1 writes → N-C2 read half → P2 compute).
+/// The ops this host serves (N-C1 writes → N-C2 read half → P2 compute →
+/// V1.173 tools).
 ///
 /// This const is load-bearing, not declaration-only: [`dispatch`] gates on
 /// it before routing, so the host can never serve an op it does not list.
@@ -179,9 +188,26 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 /// advertised `extensions.nexus.served_ops` (`nexus_spoke_adapter`'s
 /// `LOCAL_SERVED_OPS`) in both directions — so the manifest ⇔ actual
 /// dispatch routing lockstep holds by construction.
-pub const SERVED_OPS: [&str; 6] = [
-    "upsert", "promote", "relate", "check", "assemble", "compute",
-];
+///
+/// V1.173 (DF-84, T2): the user-locked tool set `S` joins the table —
+/// [`LOCAL_TOOL_OPS`] from the adapter manifest is the **single source**
+/// (no second literal; the manifest's `LOCAL_SERVED_OPS` is
+/// `CORE_OPS ++ LOCAL_TOOL_OPS` and this const mirrors that composition
+/// so the honesty check cannot drift). Core ops stay core ops (AR-56).
+pub const SERVED_OPS: [&str; 6 + LOCAL_TOOL_OPS.len()] = {
+    let mut ops = [""; 6 + LOCAL_TOOL_OPS.len()];
+    let mut i = 0;
+    while i < CORE_OPS.len() {
+        ops[i] = CORE_OPS[i];
+        i += 1;
+    }
+    let mut j = 0;
+    while j < LOCAL_TOOL_OPS.len() {
+        ops[6 + j] = LOCAL_TOOL_OPS[j];
+        j += 1;
+    }
+    ops
+};
 
 /// Architect-locked bounded-bridge limits (spec §5.4).
 ///
@@ -300,6 +326,10 @@ enum Route {
     Check,
     Assemble,
     Compute,
+    /// Host-level `tools.nexus.*` route (V1.173, DF-84 — the user-locked
+    /// set `S` from the adapter manifest's [`LOCAL_TOOL_OPS`]). Tools are
+    /// host-local adapter reads, never core ops (AR-56).
+    Tool,
 }
 
 /// The full dispatch pipeline. Every gate is fail-closed and runs before
@@ -331,7 +361,8 @@ fn dispatch(
     if !SERVED_OPS.contains(&op) {
         return Err(unsupported(
             op,
-            "this host serves only upsert / promote / relate / check / assemble / compute",
+            "this host serves the core connect ops (upsert / promote / relate / \
+             check / assemble / compute) plus the tools.nexus.* tools it advertises",
         ));
     }
 
@@ -346,10 +377,15 @@ fn dispatch(
         "check" => Route::Check,
         "assemble" => Route::Assemble,
         "compute" => Route::Compute,
+        // V1.173 (DF-84, T2): the user-locked tool set `S`. Only the exact
+        // `tools.nexus.*` ids in `LOCAL_TOOL_OPS` reach this arm — the
+        // step-1 gate refused every other `tools.*` string.
+        "tools.nexus.list_observed_peers" | "tools.nexus.list_modules" => Route::Tool,
         _ => {
             return Err(unsupported(
                 op,
-                "this host serves only upsert / promote / relate / check / assemble / compute",
+                "this host serves the core connect ops (upsert / promote / relate / \
+                 check / assemble / compute) plus the tools.nexus.* tools it advertises",
             ));
         }
     };
@@ -396,11 +432,14 @@ fn dispatch(
     //    (no filter-and-continue; that shape let a mixed payload pass the
     //    gate and fail later as a partial write).
     //
-    //    `compute` is the exception (P2, spec §2.2): the ComputeRequest
-    //    wire has no world carrier — the world is the **stored entry's**
-    //    `extensions.nexus.world_id`, resolved inside the lane by
-    //    [`verify_compute_gates`] with the same fail-closed rule.
-    if route != Route::Compute {
+    //    Host-level tools are the V1.173 exception (DF-84, AR-49): the
+    //    locked `S` tools (`tools.nexus.list_observed_peers` /
+    //    `tools.nexus.list_modules`) are host-local adapter reads with an
+    //    empty input object — no world carrier exists and none is
+    //    required, so they skip the world gate entirely (a host-level
+    //    tool must never die as `op_unsupported`/`denied` for a missing
+    //    world id; AC-V173-1).
+    if route != Route::Compute && route != Route::Tool {
         let Some(worlds) = payload_world_ids(route, &payload) else {
             return Err(denied(
                 "invoke payload carries no verifiable world scope \
@@ -471,6 +510,7 @@ fn dispatch(
         adapter,
         compute_serializer,
         peer,
+        op,
         payload,
         permit,
         deadline,
@@ -508,6 +548,7 @@ fn run_in_lane(
     adapter: Arc<NexusAdapter<'static>>,
     compute_serializer: &Arc<Semaphore>,
     peer: &PeerId,
+    op: &str,
     payload: Value,
     permit: OwnedSemaphorePermit,
     deadline: std::time::Instant,
@@ -518,6 +559,7 @@ fn run_in_lane(
     let serializer_for_lane = Arc::clone(compute_serializer);
     let deadline_for_lane = deadline;
     let peer_id = *peer;
+    let op_for_lane = op.to_string();
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
         let adapter_for_lane = adapter;
@@ -533,6 +575,7 @@ fn run_in_lane(
                 &adapter_for_lane,
                 &serializer_for_lane,
                 deadline_for_lane,
+                &op_for_lane,
                 payload,
             )
             .await
@@ -573,6 +616,7 @@ async fn route_orchestrator(
     adapter: &NexusAdapter<'static>,
     compute_serializer: &Arc<Semaphore>,
     deadline: std::time::Instant,
+    op: &str,
     payload: Value,
 ) -> Result<Value, ErrorEnvelope> {
     match route {
@@ -677,7 +721,152 @@ async fn route_orchestrator(
                 SpokeResult::Reject(reject) => Err(map_reject(&reject)),
             }
         }
+        // V1.173 (DF-84, AR-49): the user-locked `tools.nexus.*` set `S`
+        // (host-level, world-gate-skipped). The payload shape is the spoke
+        // tool-invoke convention: `{ "arguments": <object> }` → success
+        // `{ "result": <object> }`. A missing / non-object `arguments`
+        // member is `invalid_input` BEFORE any adapter I/O (zero side
+        // effects). Handlers are adapter reads only — no daemon HTTP, no
+        // `ToolInvokePort`, no second lane.
+        Route::Tool => route_tool(adapter, op, payload).await,
     }
+}
+/// V1.173 (DF-84, AR-49) — dispatch one served host-level tool.
+///
+/// The `op` string is a `tools.nexus.*` id from the user-locked set `S`
+/// ([`LOCAL_TOOL_OPS`]); the step-1 gate refused every other `tools.*`
+/// string before this point, so the per-id match below is exhaustive for
+/// `S` and the `other` tail is unreachable defense (mirroring the route
+/// map's defensive fallthrough).
+///
+/// Payload shape (spec §2, AR-49): request `payload` =
+/// `{ "arguments": <object> }`; success returns `{ "result": <object> }`
+/// matching the descriptor.output schema. A missing / non-object
+/// `arguments` member is `invalid_input` BEFORE any adapter read — the
+/// input schemas for both locked tools are `{ "type": "object",
+/// "additionalProperties": false }`, so the only legal argument is an
+/// object.
+#[allow(clippy::result_large_err)] // ErrorEnvelope is the locked wire error type; matches the rest of dispatch
+async fn route_tool(
+    adapter: &NexusAdapter<'static>,
+    op: &str,
+    payload: Value,
+) -> Result<Value, ErrorEnvelope> {
+    let Some(arguments) = payload.get("arguments") else {
+        return Err(tool_invalid_input(
+            op,
+            "missing \"arguments\" member (payload shape is { \"arguments\": <object> })",
+        ));
+    };
+    if !arguments.is_object() {
+        return Err(tool_invalid_input(
+            op,
+            "\"arguments\" must be an object matching the tool descriptor input",
+        ));
+    }
+    // Both locked tool descriptors advertise `{ "type": "object",
+    // "additionalProperties": false }` (spec §2.1 C-1/C-2) — the only
+    // legal argument is an EMPTY object, so a non-empty object is a
+    // schema violation and fails `invalid_input` before any adapter read
+    // (the served behavior matches the advertised input contract).
+    if !arguments
+        .as_object()
+        .expect("is_object checked above")
+        .is_empty()
+    {
+        return Err(tool_invalid_input(
+            op,
+            "\"arguments\" must be an empty object (the descriptor input schema is \
+             { \"type\": \"object\", \"additionalProperties\": false })",
+        ));
+    }
+    match op {
+        "tools.nexus.list_observed_peers" => tool_list_observed_peers(adapter).await,
+        "tools.nexus.list_modules" => tool_list_modules(adapter).await,
+        // A `bridge_fault` here means `S` drifted from the match arms
+        // (and from `Route::Tool` above) — the routing sweep
+        // `n_c1_every_served_op_advertised_by_the_const_actually_routes`
+        // is the loud guard that catches it.
+        other => Err(bridge_fault(&format!(
+            "served tool op {other:?} has no handler arm (dispatch/tool route drift)"
+        ))),
+    }
+}
+
+/// V1.173 Tool denial — `invalid_input` for a malformed tool payload
+/// (spec §2, AR-49: missing / non-object `arguments` fails before adapter
+/// I/O, retry-safe for peers that fix their payload).
+fn tool_invalid_input(op: &str, reason: &str) -> ErrorEnvelope {
+    ErrorEnvelope {
+        code: "invalid_input".to_string(),
+        message: format!("invalid {op} payload: {reason}"),
+        details: Map::new(),
+        extensions: HashMap::default(),
+    }
+}
+
+/// V1.173 `tools.nexus.list_observed_peers` handler (spec §2.1 C-1): list
+/// the Connect peers this host has observed (outbound `connect()`
+/// recordings, newest `last_seen` first — the storage ordering contract).
+/// Each entry carries `hostId` / `lastSeen` / `roles` / `capabilities`
+/// per the locked descriptor.output; `last_peer_id` is OMITTED (the
+/// spoof/collision diagnostic is not an integrator contract, spec §2.1
+/// C-1 risks). An empty store → `{ "peers": [] }` (never fabricated).
+/// Adapter read only.
+#[allow(clippy::result_large_err)] // ErrorEnvelope is the locked wire error type
+async fn tool_list_observed_peers(adapter: &NexusAdapter<'static>) -> Result<Value, ErrorEnvelope> {
+    match adapter.list_observed_peer_hosts().await {
+        SpokeResult::Ok(observed) => {
+            let peers = observed
+                .into_iter()
+                .map(|peer| {
+                    serde_json::json!({
+                        "hostId": peer.manifest.host_id.as_str(),
+                        "lastSeen": peer.last_seen,
+                        "roles": peer.manifest.roles,
+                        "capabilities": peer.manifest.capabilities,
+                    })
+                })
+                .collect::<Vec<_>>();
+            Ok(serde_json::json!({ "result": { "peers": peers } }))
+        }
+        SpokeResult::Reject(reject) => Err(map_reject(&reject)),
+    }
+}
+
+/// V1.173 `tools.nexus.list_modules` handler (C-2): list the compute
+/// module ids installed in the host-local store (`~/.nexus42/modules/`)
+/// using the same id-safety + file-pair logic as [`module_installed`] — a
+/// module counts only when `<id>/<id>.wasm` AND `<id>/manifest.json`
+/// exist. Dirs prefixed with `_` / `.` and unsafe ids are skipped. NEVER
+/// returns bytes, absolute paths, or file contents (spec §2.1 C-2 risks).
+/// A missing store dir → `{ "modules": [] }`. Does NOT list V1.172
+/// `~/.nexus42/capabilities/`.
+#[allow(clippy::unused_async, clippy::result_large_err)] // awaited through route_tool; ErrorEnvelope is the locked wire error type
+async fn tool_list_modules(adapter: &NexusAdapter<'static>) -> Result<Value, ErrorEnvelope> {
+    let Some(modules_dir) = adapter.user_modules_dir() else {
+        return Ok(serde_json::json!({ "result": { "modules": [] } }));
+    };
+    let mut modules = Vec::new();
+    let Ok(entries) = std::fs::read_dir(modules_dir) else {
+        return Ok(serde_json::json!({ "result": { "modules": [] } }));
+    };
+    for entry in entries.flatten() {
+        let id = entry.file_name();
+        let Some(id) = id.to_str() else {
+            continue;
+        };
+        // Skip `_` / `.`-prefixed entries and unsafe ids (the shared
+        // `is_safe_module_id` guard — same single source as the compute
+        // store gate and the adapter loader).
+        if id.starts_with('_') || id.starts_with('.') || !is_safe_module_id(id) {
+            continue;
+        }
+        if module_installed(modules_dir, id) {
+            modules.push(serde_json::json!({ "id": id }));
+        }
+    }
+    Ok(serde_json::json!({ "result": { "modules": modules } }))
 }
 
 /// Read the canonical world-id carrier from a wire object
@@ -727,7 +916,10 @@ fn payload_world_ids(route: Route, payload: &Value) -> Option<Vec<String>> {
         // the lane by verify_compute_gates. Dispatch skips the raw world
         // gate for this route; this arm is unreachable and exists only for
         // match exhaustiveness.
-        Route::Compute => None,
+        // Host-level tools (V1.173, AR-49): no world carrier exists (empty
+        // input object) and dispatch skips the world gate for this route;
+        // this arm is unreachable and exists only for match exhaustiveness.
+        Route::Compute | Route::Tool => None,
     }
 }
 
@@ -795,6 +987,11 @@ fn payload_collection_entries(route: Route, payload: &Value) -> usize {
             .get("computable")
             .and_then(Value::as_object)
             .map_or(0, Map::len),
+        // Host-level tools (V1.173): the request carries a single
+        // `arguments` object (payload shape `{ "arguments": <object> }`),
+        // so the logical batch surface is one — the byte cap still bounds
+        // oversized argument objects.
+        Route::Tool => usize::from(payload.get("arguments").is_some()),
     }
 }
 
@@ -913,7 +1110,9 @@ async fn verify_stored_worlds(
         // gate verified `scope.scope_id` at step 5), and `compute` runs its
         // own gate set ([`verify_compute_gates`] — stored-world + module
         // gates, spec §2).
-        Route::Check | Route::Assemble | Route::Compute => {}
+        // Host-level tools (V1.173) are adapter reads that target no
+        // stored row by id.
+        Route::Check | Route::Assemble | Route::Compute | Route::Tool => {}
     }
     Ok(())
 }
@@ -2242,5 +2441,63 @@ mod tests {
             served["knowledge_entries"][0]["entry_id"],
             "kb_after_tools_refusal"
         );
+    }
+
+    /// V1.173 QC fix wave F-001 (AR-49 payload-shape pin): a served tool
+    /// invoked with a malformed payload — missing `arguments`
+    /// (`{ "extensions": {} }`), a non-object `arguments`
+    /// (`{ "arguments": "string" }`), or a non-empty object
+    /// (`{ "arguments": { "unexpected": 1 } }` — the locked descriptors
+    /// advertise `additionalProperties: false`, so the only legal
+    /// argument is an empty object) — fails with the `invalid_input`
+    /// envelope BEFORE any adapter I/O. The store pool is closed after
+    /// handler construction: a path that reached
+    /// `tool_list_observed_peers` would hit the closed pool and surface
+    /// `internal_error`, so `invalid_input` proves the argument gate ran
+    /// and zero `list_observed_peer_hosts` calls happened.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn served_tool_malformed_arguments_fail_invalid_input_before_adapter_io() {
+        let (temp, pool) = test_pool().await;
+        let peer = fixed_keypair(7).public().to_peer_id();
+        let scope = scoped_scope_for(peer, &["tools.nexus.list_observed_peers"]);
+        let adapter = Arc::new(NexusAdapter::new(pool.clone()));
+        let (handler, _lane, _serializer) =
+            build_handler_with_limits(scope, adapter, BridgeLimits::default());
+        // Close the store: any code path that reaches the adapter would
+        // fail as `internal_error` (closed-pool query) — the
+        // `invalid_input` assertions below pin the error to the argument
+        // gate and prove zero adapter I/O.
+        pool.close().await;
+        for (label, payload) in [
+            ("missing arguments", serde_json::json!({ "extensions": {} })),
+            (
+                "non-object arguments",
+                serde_json::json!({ "arguments": "string" }),
+            ),
+            (
+                "non-empty object arguments",
+                serde_json::json!({ "arguments": { "unexpected": 1 } }),
+            ),
+        ] {
+            match handler(&peer, "tools.nexus.list_observed_peers", payload) {
+                Err(envelope) => {
+                    assert_eq!(
+                        envelope.code, "invalid_input",
+                        "{label}: a malformed tool payload must fail with invalid_input"
+                    );
+                    assert!(
+                        envelope
+                            .message
+                            .starts_with("invalid tools.nexus.list_observed_peers payload:"),
+                        "{label}: the message must come from the tool argument gate: {}",
+                        envelope.message
+                    );
+                }
+                Ok(_) => panic!(
+                    "{label}: a malformed tool payload must be rejected, got a served response"
+                ),
+            }
+        }
+        drop(temp);
     }
 }

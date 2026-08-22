@@ -14,8 +14,16 @@
 //! | `capabilities` | `["spoke-baseline", "l2-computable", "l5-fork"]` | unchanged | unchanged | unchanged |
 //! | `namespaces` | `["nexus"]` | unchanged | unchanged | unchanged |
 //! | `authority` | `None` | unchanged | unchanged | unchanged |
-//! | `tools` | `[]` | unchanged | unchanged | `[]` (wire-omitted; V1.169 — no tool ABI declared) |
+//! | `tools` | `[]` | unchanged | unchanged | `S` = 2 descriptors (V1.173, wire-present) |
 //! | `extensions.nexus` | `{ "connect_host_slice": "n-c0", "daemon_http_coexists": true }` | `{ "connect_host_slice": "n-c1", "served_ops": ["upsert", "promote", "relate"], "daemon_http_coexists": true }` | `connect_host_slice` → `"n-c2"`; `served_ops` → `["upsert", "promote", "relate", "check", "assemble"]` | `served_ops` → `+ "compute"` |
+//! V1.173 (DF-84, T1): the user-locked tool set `S` is served. `tools` =
+//! 2 descriptors (`tools.nexus.list_observed_peers`, `tools.nexus.list_modules`,
+//! spec §2.1 C-1/C-2 — `capability_id == op`, `schema_version: 1`,
+//! `idempotent` omitted) and is **wire-present** (non-empty `tools` serializes;
+//! the V1.169 omit-empty rule holds only for the empty-`S` counterfactual,
+//! which this iteration does not ship). AR-48 lockstep: `capabilities` =
+//! baseline 3 `++` S and `extensions.nexus.served_ops` = 6 core ops `++` S
+//! (same order as dispatch); `connect_host_slice` stays `"n-c2"`.
 //!
 //! Honesty rules: `l5-fork` is included because `ForkTimelineQueryPort` is
 //! production (V1.146); `"reasoning-complete"` MUST NOT appear anywhere
@@ -34,6 +42,12 @@
 
 use crate::{HostCapabilityManifest, SpokeReject, SpokeRejectCode, SpokeResult};
 use serde_json::{json, Map, Value};
+// The manifest-carried `ToolDescriptor`: typify emits the schema twice
+// (standalone `spoke_schemas::ToolDescriptor` + an inline copy inside
+// `host_capability_manifest`), and `HostCapabilityManifest.tools` uses the
+// latter — import it from `spoke_operations` to avoid the duplicate-name
+// trap (upstream note, spoke-operations lib.rs).
+use spoke_operations::ToolDescriptor;
 use std::collections::HashMap;
 use std::num::NonZeroU64;
 
@@ -62,24 +76,163 @@ pub const MANIFEST_SCHEMA_VERSION: NonZeroU64 = NonZeroU64::MIN;
 /// host-capability-manifest schema, verified not invented).
 pub const LOCAL_ROLES: [&str; 4] = ["data-store", "checker", "assembler", "computable-engine"];
 
-/// Capabilities advertised by the local host — each maps to a production
+/// User-locked tool ops this host serves over Connect (V1.173 T0 lock —
+/// spec §2.1 C-1/C-2; the T0 gate rejects any other `tools.*` name).
+///
+/// Every entry is `tools.nexus.<tool_id>` (AR-47 grammar, namespace `nexus`
+/// already owned by [`LOCAL_NAMESPACES`]) and `capability_id == op` (spoke
+/// MUST). Declaration order = `tools[]` order = the `capabilities[]` /
+/// `served_ops` tail order.
+pub const LOCAL_TOOL_OPS: [&str; 2] = [
+    "tools.nexus.list_observed_peers",
+    "tools.nexus.list_modules",
+];
+
+/// The locked `ToolDescriptor` set ([`LOCAL_TOOL_OPS`] in declaration
+/// order) — the `tools[]` member of the local manifest.
+///
+/// Deserialized from the spec §2.1 C-1/C-2 locked JSON (same
+/// `serde_json::from_value` fixture style as the repository's
+/// peer-manifest tests — AR-48: do NOT hand-build the generated newtypes
+/// field by field). `schema_version` is `1`, `idempotent` is omitted
+/// (generated default `false`), input is `{ "type": "object",
+/// "additionalProperties": false }`, and output is the locked schema per
+/// tool. `spoke_operations::validate_manifest_tools` (asserted in the
+/// honesty tests) guarantees `op == capability_id`, `capabilities[]`
+/// membership, owned namespace, and uniqueness.
+///
+/// # Panics
+/// Never in practice: each descriptor is the locked spec JSON, so the
+/// `serde_json::from_value` parse into the generated newtypes cannot fail;
+/// the `expect` exists because parsing runs at runtime.
+#[must_use]
+pub fn local_tool_descriptors() -> Vec<ToolDescriptor> {
+    [
+        json!({
+            "schema_version": 1,
+            "capability_id": "tools.nexus.list_observed_peers",
+            "op": "tools.nexus.list_observed_peers",
+            "description": "List Connect peers this host has observed (outbound connect() recordings), newest last_seen first.",
+            "input": { "type": "object", "additionalProperties": false },
+            "output": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["peers"],
+                "properties": {
+                    "peers": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": ["hostId", "lastSeen", "roles", "capabilities"],
+                            "properties": {
+                                "hostId": { "type": "string", "minLength": 1 },
+                                "lastSeen": { "type": "string", "minLength": 1 },
+                                "roles": { "type": "array", "items": { "type": "string" } },
+                                "capabilities": { "type": "array", "items": { "type": "string" } }
+                            }
+                        }
+                    }
+                }
+            },
+        }),
+        json!({
+            "schema_version": 1,
+            "capability_id": "tools.nexus.list_modules",
+            "op": "tools.nexus.list_modules",
+            "description": "List compute module ids installed in the host-local store (~/.nexus42/modules/).",
+            "input": { "type": "object", "additionalProperties": false },
+            "output": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["modules"],
+                "properties": {
+                    "modules": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": ["id"],
+                            "properties": {
+                                "id": { "type": "string", "minLength": 1 }
+                            }
+                        }
+                    }
+                }
+            },
+        }),
+    ]
+    .into_iter()
+    .map(|value| serde_json::from_value(value).expect("locked tool descriptor is schema-valid"))
+    .collect()
+}
+
+/// The three baseline capabilities (N-C0 → N-C2, unchanged) — the head
+/// of [`LOCAL_CAPABILITIES`].
+///
+/// Each maps to a production adapter port (the honesty test asserts the
+/// compile-time proof). Tool ids are NOT baselines (AR-46): they join
+/// only through the [`LOCAL_TOOL_OPS`] composition below.
+pub const BASELINE_CAPABILITIES: [&str; 3] = ["spoke-baseline", "l2-computable", "l5-fork"];
+
+/// Capabilities advertised by the local host: the baseline 3 **then** each
+/// user-locked tool id ([`LOCAL_TOOL_OPS`] order, AR-48).
+///
+/// The tool ids let a calling peer negotiate the served tools (spoke
+/// intersection semantics); each baseline capability maps to a production
 /// adapter port (see the honesty test below for the compile-time proof).
-pub const LOCAL_CAPABILITIES: [&str; 3] = ["spoke-baseline", "l2-computable", "l5-fork"];
+/// Composed at const time from [`BASELINE_CAPABILITIES`] ++
+/// [`LOCAL_TOOL_OPS`] (mirror of the dispatch `SERVED_OPS` const-block
+/// pattern) — adding a tool to `S` is a one-place edit in
+/// [`LOCAL_TOOL_OPS`], never a second literal here.
+pub const LOCAL_CAPABILITIES: [&str; BASELINE_CAPABILITIES.len() + LOCAL_TOOL_OPS.len()] = {
+    let mut caps = [""; BASELINE_CAPABILITIES.len() + LOCAL_TOOL_OPS.len()];
+    let mut i = 0;
+    while i < BASELINE_CAPABILITIES.len() {
+        caps[i] = BASELINE_CAPABILITIES[i];
+        i += 1;
+    }
+    let mut j = 0;
+    while j < LOCAL_TOOL_OPS.len() {
+        caps[BASELINE_CAPABILITIES.len() + j] = LOCAL_TOOL_OPS[j];
+        j += 1;
+    }
+    caps
+};
 
 /// Namespaces owned by the local host.
 pub const LOCAL_NAMESPACES: [&str; 1] = ["nexus"];
 
-/// Ops the Nexus host serves over Connect (N-C1 writes → N-C2 read half →
-/// P2 compute: `check` / `assemble` / `compute`) — the manifest's
-/// advertised op set (`extensions.nexus.served_ops`).
+/// The six core Connect ops (N-C1 writes → N-C2 read half → P2 compute).
+/// Core ops are NOT tools (AR-56): they never gain `tools.nexus.*` aliases.
+pub const CORE_OPS: [&str; 6] = [
+    "upsert", "promote", "relate", "check", "assemble", "compute",
+];
+
+/// The manifest's advertised op set (`extensions.nexus.served_ops`):
+/// [`CORE_OPS`] then [`LOCAL_TOOL_OPS`] (declaration order).
 ///
 /// The connect-host dispatch gate owns the same set as its served-op table
 /// (`apps/nexus42` `commands::connect::invoke::SERVED_OPS`); the honesty
-/// tests machine-check both directions (advertised ⇔ served, see
-/// [`build_local_host_manifest`] docs) so the two cannot drift unnoticed.
-pub const LOCAL_SERVED_OPS: [&str; 6] = [
-    "upsert", "promote", "relate", "check", "assemble", "compute",
-];
+/// tests machine-check both directions (advertised ⇄ served) so the two
+/// cannot drift unnoticed (see [`build_local_host_manifest`] docs).
+/// Composed at const time (mirror of the dispatch `SERVED_OPS` const-block
+/// pattern) — adding a tool to `S` is a one-place edit in
+/// [`LOCAL_TOOL_OPS`], never a second literal here.
+pub const LOCAL_SERVED_OPS: [&str; CORE_OPS.len() + LOCAL_TOOL_OPS.len()] = {
+    let mut ops = [""; CORE_OPS.len() + LOCAL_TOOL_OPS.len()];
+    let mut i = 0;
+    while i < CORE_OPS.len() {
+        ops[i] = CORE_OPS[i];
+        i += 1;
+    }
+    let mut j = 0;
+    while j < LOCAL_TOOL_OPS.len() {
+        ops[CORE_OPS.len() + j] = LOCAL_TOOL_OPS[j];
+        j += 1;
+    }
+    ops
+};
 
 /// Build the N-C0 `HostCapabilityManifest` from the given `host_id`.
 ///
@@ -131,11 +284,11 @@ pub fn build_local_host_manifest(host_id: &str) -> SpokeResult<HostCapabilityMan
         capabilities: LOCAL_CAPABILITIES.iter().map(ToString::to_string).collect(),
         namespaces,
         authority: None,
-        // V1.169 (0.11.1): honest empty tools declaration — no tool ABI is
-        // served; the serde rule (`skip_serializing_if = Vec::is_empty`)
-        // omits the member on the wire, and an absent member deserializes
-        // back to `Vec::new()` (locks AR-1/AR-2).
-        tools: Vec::new(),
+        // V1.173 (DF-84, T1): the user-locked tool set `S` is served — the
+        // non-empty `tools` member is now serialized on the wire (the
+        // generated serde `skip_serializing_if = Vec::is_empty` rule still
+        // omits an empty `tools`, which this iteration does not ship).
+        tools: local_tool_descriptors(),
         extensions,
     })
 }
@@ -298,6 +451,22 @@ mod tests {
                     drop(crate::orchestrate_compute(adapter, request));
                 };
             }
+            // V1.173 tool ops — no spoke orchestrator (host-level reads the
+            // Task 2 handlers serve directly through the adapter): the
+            // typecheck-only closures prove the adapter reach exists.
+            "tools.nexus.list_observed_peers" => {
+                let _ = || {
+                    drop(adapter.list_observed_peer_hosts());
+                };
+            }
+            "tools.nexus.list_modules" => {
+                let _ = || {
+                    // Typecheck-only: `user_modules_dir` is a Copy accessor —
+                    // binding it (not dropping it) is the compile-time proof
+                    // the Task 2 handler's module-store scan is reachable.
+                    let _ = adapter.user_modules_dir();
+                };
+            }
             other => panic!("advertised op {other:?} is not backed by a production orchestrator"),
         }
     }
@@ -327,6 +496,17 @@ mod tests {
                 let _: &dyn crate::ForkPorts = adapter;
                 let _: &dyn crate::ForkTimelineQueryPort = adapter;
             }
+            // V1.173 tool capabilities — backed by the adapter reads the
+            // Task 2 tool handlers serve (no new port types): observed
+            // peers via HostManifestPort (the production N-C3 read) and
+            // the host-local module store via the adapter accessor.
+            "tools.nexus.list_observed_peers" => {
+                let _: &dyn crate::HostManifestPort = adapter;
+                let _: &dyn crate::BaselinePorts = adapter;
+            }
+            "tools.nexus.list_modules" => {
+                let _: &dyn crate::BaselinePorts = adapter;
+            }
             other => panic!("advertised capability {other:?} is not backed by a production port"),
         }
     }
@@ -337,6 +517,7 @@ mod tests {
     /// (roles + served ops) while keeping the full N-C0 baseline
     /// (capabilities / namespaces / no `"reasoning-complete"`).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[allow(clippy::too_many_lines)] // one machine-checked honesty sweep; keep the steps linear
     async fn n_c1_manifest_is_honest() {
         // The builder is host_id-injectable so the test is hermetic (no
         // writes to the real `~/.nexus42`).
@@ -347,6 +528,10 @@ mod tests {
 
         // 1. Every capability is in the locked allowlist AND maps to a
         //    production adapter port (compile-time proof, §4.3 items 2).
+        //    V1.173: the lockstep is additionally machine-checked on the
+        //    manifest — `spoke_operations::validate_manifest_tools`
+        //    (AR-48 §3.1.8) — so a tool id missing from `capabilities[]`
+        //    (or a descriptor with `op != capability_id`) fails here.
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
@@ -358,7 +543,14 @@ mod tests {
         assert_eq!(
             manifest.capabilities,
             LOCAL_CAPABILITIES.map(ToString::to_string).to_vec(),
-            "capabilities must be exactly the locked N-C0 list"
+            "capabilities must be exactly the locked list (baseline 3 ++ LOCAL_TOOL_OPS)"
+        );
+        assert!(
+            matches!(
+                spoke_operations::validate_manifest_tools(&manifest),
+                SpokeResult::Ok(())
+            ),
+            "validate_manifest_tools must pass on the served manifest (AR-48)"
         );
 
         // 3. roles == the locked list exactly — data-store (storage) +
@@ -454,7 +646,7 @@ mod tests {
                 .map(|op| op.as_str().expect("served op is a string"))
                 .collect::<Vec<_>>(),
             LOCAL_SERVED_OPS,
-            "advertised served_ops must be exactly the N-C1 → N-C2 served-op set"
+            "advertised served_ops must be exactly the served-op set (6 core ++ S)"
         );
         for op in served_ops
             .iter()
@@ -467,6 +659,61 @@ mod tests {
         // connect-host interop suite (apps/nexus42
         // `n_c1_manifest_served_ops_match_dispatch_both_directions`), where
         // both the manifest builder and the dispatch gate are visible.
+
+        // 11. V1.173 tools lockstep (AR-48/AR-51, machine-checked):
+        //     `tools[]` ⇔ `LOCAL_TOOL_OPS` in order, `op == capability_id`
+        //     per descriptor, every tool id in `capabilities[]` and in the
+        //     advertised `served_ops`, and no `tools.` string beyond
+        //     `LOCAL_TOOL_OPS` anywhere (core ops stay core ops — AR-56).
+        assert_eq!(
+            manifest.tools.len(),
+            LOCAL_TOOL_OPS.len(),
+            "tools[] must carry exactly the user-locked S set"
+        );
+        for (descriptor, op) in manifest.tools.iter().zip(LOCAL_TOOL_OPS) {
+            assert_eq!(
+                descriptor.capability_id.as_str(),
+                op,
+                "descriptor capability_id == op (spoke MUST, AR-47)"
+            );
+            assert_eq!(descriptor.op.as_str(), op, "descriptor op == capability_id");
+            assert_eq!(
+                descriptor.schema_version.get(),
+                1,
+                "schema_version is 1 (AR-49)"
+            );
+            assert!(
+                manifest.capabilities.iter().any(|cap| cap == op),
+                "every tool id must be advertised in capabilities[] (validate_manifest_tools)"
+            );
+            assert!(
+                served_ops.iter().any(|served| served.as_str() == Some(op)),
+                "every tool id must be in extensions.nexus.served_ops (AR-51)"
+            );
+        }
+        // The wire carries `tools` (non-empty member is serialized — the
+        // V1.169 omit-empty pin flipped for S).
+        assert!(
+            manifest_json.get("tools").is_some(),
+            "the served manifest must serialize a non-empty tools member"
+        );
+        // No tools.-prefixed CORE-op entries and no tool ids beyond S.
+        for op in served_ops
+            .iter()
+            .map(|op| op.as_str().expect("served op is a string"))
+        {
+            if op.starts_with("tools.") {
+                assert!(
+                    LOCAL_TOOL_OPS.contains(&op),
+                    "served_ops carries an unknown tools.* op {op:?}"
+                );
+            } else {
+                assert!(
+                    CORE_OPS.contains(&op),
+                    "core-served op {op:?} is not in the six core ops"
+                );
+            }
+        }
     }
 
     #[test]
@@ -561,19 +808,19 @@ mod tests {
         assert_eq!(back.roles, data.roles);
     }
 
-    /// V1.169 P0 (locks AR-1 + AR-4): the honest-empty `tools` declaration
-    /// is `Vec::new()` in memory and the member **omitted** on the wire —
-    /// the generated serde rule (`skip_serializing_if = Vec::is_empty`)
-    /// never serializes an empty `tools: []` array, and an absent member
-    /// deserializes back to `Vec::new()`. Pinned for BOTH generated types
-    /// (data + `connect_hello`) so a future schema desync between them
-    /// fails loudly (AR-3 hello shape). Plus the no-tools-capability
-    /// lockstep: neither the advertised capabilities nor the served-op
-    /// table may carry a `tools.`-prefixed string — nexus never negotiates
-    /// a tool capability, so the spoke-connect dispatch gate refuses
-    /// `tools.*` before the nexus handler (AR-4 layer 1).
+    /// V1.173 T1 (flips the V1.169 AR-1/AR-4 pins for the user-locked set S
+    /// — AR-51/AR-55): the served manifest now CARRIES the two `S` tool
+    /// descriptors on the wire (non-empty `tools` serializes; the
+    /// omit-empty serde rule is preserved and pinned for the CORE-only
+    /// counterfactual). Both generated types (data + `connect_hello`) must
+    /// agree — a future schema desync fails loudly (AR-3 hello shape). The
+    /// no-`tools.*`-beyond-`S` lockstep: `LOCAL_CAPABILITIES` and
+    /// `LOCAL_SERVED_OPS` carry exactly `LOCAL_TOOL_OPS` as their only
+    /// `tools.`-prefixed strings, so `tools.math.add`-class ids stay
+    /// forbidden and the spoke dispatch gate still refuses them (AR-4
+    /// layer 1 for every name not in `S`).
     #[test]
-    fn manifest_tools_omitted_on_the_wire_and_no_tools_capability() {
+    fn manifest_tools_served_on_the_wire_for_s_and_no_tools_beyond_s() {
         let data = match build_local_host_manifest("test-device-uuid-0000") {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => panic!("builder rejected: {r:?}"),
@@ -583,55 +830,72 @@ mod tests {
             SpokeResult::Reject(r) => panic!("connect hello builder rejected: {r:?}"),
         };
 
-        // Honest-empty in memory on both generated types.
-        assert!(
-            data.tools.is_empty(),
-            "the local manifest must declare tools empty (no tool ABI served)"
-        );
-        assert!(
-            hello.tools.is_empty(),
-            "the connect_hello manifest must declare tools empty (single-builder SSOT)"
-        );
+        // Served in memory on both generated types, in LOCAL_TOOL_OPS order.
+        assert_eq!(data.tools.len(), LOCAL_TOOL_OPS.len());
+        assert_eq!(hello.tools.len(), LOCAL_TOOL_OPS.len());
+        for (descriptor, op) in data.tools.iter().zip(LOCAL_TOOL_OPS) {
+            assert_eq!(descriptor.capability_id.as_str(), op);
+            assert_eq!(descriptor.op.as_str(), op);
+            assert_eq!(descriptor.schema_version.get(), 1);
+        }
 
-        // Wire form: the `tools` member is OMITTED (skip_serializing_if),
-        // never an empty array — for the data type AND the connect_hello
-        // wire type (AR-1 + AR-3 hello shape).
+        // Wire form: the `tools` member is PRESENT (non-empty) on both the
+        // data type and the connect_hello wire type.
         let data_json = serde_json::to_value(&data).expect("data manifest serializes");
         let hello_json = serde_json::to_value(&hello).expect("hello manifest serializes");
         for (label, json) in [
             ("data manifest", &data_json),
             ("connect_hello manifest", &hello_json),
         ] {
-            assert!(
-                !json
-                    .as_object()
+            assert_eq!(
+                json.as_object()
                     .expect("manifest is a JSON object")
-                    .contains_key("tools"),
-                "{label} must omit the tools member on the wire (empty tools is never serialized)"
+                    .get("tools")
+                    .expect("served manifest must carry a tools member on the wire (AR-51)"),
+                &serde_json::json!(local_tool_descriptors()),
+                "{label} tools member must be exactly the locked S descriptors"
             );
         }
 
-        // Round-trip: the wire form (member omitted) deserializes back to
-        // `Vec::new()` — the absent member defaults.
+        // Round-trip: the wire form deserializes back with tools intact.
         let round_tripped: HostCapabilityManifest =
             serde_json::from_value(data_json).expect("wire form deserializes");
-        assert!(
-            round_tripped.tools.is_empty(),
-            "an absent tools member must deserialize back to Vec::new()"
+        assert_eq!(
+            serde_json::to_value(&round_tripped.tools).expect("serializes"),
+            serde_json::to_value(&data.tools).expect("serializes"),
+            "wire round-trip must keep the tools descriptors"
         );
 
-        // No-tools-capability lockstep (AR-4): neither the advertised
-        // capabilities nor the served-op table carries a `tools.`-prefixed
-        // string, so the manifest can never negotiate a tool capability and
-        // the spoke dispatch gate refuses `tools.*` before the handler
-        // (layer 1).
+        // validate_manifest_tools passes on the served manifest (the
+        // machine-checked lockstep — AR-48).
         assert!(
-            !LOCAL_CAPABILITIES.iter().any(|c| c.starts_with("tools.")),
-            "LOCAL_CAPABILITIES must contain no tools.-prefixed capability"
+            matches!(
+                spoke_operations::validate_manifest_tools(&data),
+                SpokeResult::Ok(())
+            ),
+            "validate_manifest_tools must pass (op == capability_id, ids in capabilities[], \
+             nexus namespace owned, unique)"
         );
-        assert!(
-            !LOCAL_SERVED_OPS.iter().any(|op| op.starts_with("tools.")),
-            "LOCAL_SERVED_OPS must contain no tools.-prefixed op"
+
+        // Narrowed AR-4 pin: every `tools.` string in capabilities /
+        // served_ops is exactly LOCAL_TOOL_OPS — nothing else.
+        let tools_caps = LOCAL_CAPABILITIES
+            .iter()
+            .copied()
+            .filter(|c| c.starts_with("tools."))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tools_caps, LOCAL_TOOL_OPS,
+            "LOCAL_CAPABILITIES may carry only the S tool ids as tools.-prefixed capabilities"
+        );
+        let tools_ops = LOCAL_SERVED_OPS
+            .iter()
+            .copied()
+            .filter(|op| op.starts_with("tools."))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tools_ops, LOCAL_TOOL_OPS,
+            "LOCAL_SERVED_OPS may carry only the S tool ids as tools.-prefixed ops"
         );
     }
 }

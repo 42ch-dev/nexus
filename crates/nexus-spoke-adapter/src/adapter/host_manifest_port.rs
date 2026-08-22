@@ -312,13 +312,15 @@ mod tests {
                 "computable-engine".to_string()
             ]
         );
+        // V1.173 T1: the shared builder now serves the user-locked tool set
+        // S — capabilities = baseline 3 ++ LOCAL_TOOL_OPS (the serving
+        // host negotiates the tool ids; AR-48).
         assert_eq!(
             manifest.capabilities,
-            vec![
-                "spoke-baseline".to_string(),
-                "l2-computable".to_string(),
-                "l5-fork".to_string()
-            ]
+            crate::manifest::LOCAL_CAPABILITIES
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
         );
         assert_eq!(
             manifest
