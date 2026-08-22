@@ -13,7 +13,7 @@
 //! host maxima, never silently raised.
 
 use crate::capability::user_capability::{
-    CapabilityDescriptorError, SandboxOverrides, UserCapabilityDescriptor,
+    clamp_sandbox, CapabilityDescriptorError, UserCapabilityDescriptor,
 };
 use std::collections::HashSet;
 use std::path::Path;
@@ -146,7 +146,8 @@ pub fn admit(
     }
 
     // AR-43 gate 4: clamp sandbox overrides to the host maxima — never
-    // rejects (AR-38).
+    // rejects (AR-38). `clamp_sandbox` lives beside `SandboxOverrides` in
+    // `user_capability.rs` (also re-applied at `UserCapability::new`, F1).
     let mut admitted_descriptor = descriptor.clone();
     if let Some(overrides) = &admitted_descriptor.sandbox {
         admitted_descriptor.sandbox = Some(clamp_sandbox(overrides));
@@ -154,26 +155,6 @@ pub fn admit(
     Ok(AdmittedCapability {
         descriptor: admitted_descriptor,
     })
-}
-
-/// Tighten sandbox overrides to the host maxima via `min(override, default)`
-/// — the same semantics as `WasmEngine::resolve_sandbox` (compute.rs L71-80).
-///
-/// The maxima are read from [`nexus_wasm_host::SandboxConfig::default()`]
-/// (AR-38: read, never duplicate). Absent fields stay absent (host defaults).
-#[must_use]
-fn clamp_sandbox(overrides: &SandboxOverrides) -> SandboxOverrides {
-    let defaults = nexus_wasm_host::SandboxConfig::default();
-    let max_wall_time_ms = u64::try_from(defaults.wall_time.as_millis()).unwrap_or(u64::MAX);
-    SandboxOverrides {
-        fuel: overrides.fuel.map(|fuel| fuel.min(defaults.fuel)),
-        memory_mib: overrides
-            .memory_mib
-            .map(|memory_mib| memory_mib.min(defaults.memory_mib())),
-        wall_time_ms: overrides
-            .wall_time_ms
-            .map(|wall_time_ms| wall_time_ms.min(max_wall_time_ms)),
-    }
 }
 
 #[cfg(test)]

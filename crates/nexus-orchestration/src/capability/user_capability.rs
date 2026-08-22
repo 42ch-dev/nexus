@@ -69,6 +69,29 @@ pub struct SandboxOverrides {
     pub wall_time_ms: Option<u64>,
 }
 
+/// Tighten sandbox overrides to the host maxima via `min(override, default)`
+/// — the same semantics as `WasmEngine::resolve_sandbox` (compute.rs L71-80).
+///
+/// The maxima are read from [`nexus_wasm_host::SandboxConfig::default()`]
+/// (AR-38: read, never duplicate). Absent fields stay absent (host defaults).
+/// `pub(crate)` because both the admission gate 4 (`admission.rs`) and
+/// `UserCapability::new` (F1 — re-clamp so a directly-constructed capability
+/// carries clamped bounds) apply it.
+#[must_use]
+pub(crate) fn clamp_sandbox(overrides: &SandboxOverrides) -> SandboxOverrides {
+    let defaults = nexus_wasm_host::SandboxConfig::default();
+    let max_wall_time_ms = u64::try_from(defaults.wall_time.as_millis()).unwrap_or(u64::MAX);
+    SandboxOverrides {
+        fuel: overrides.fuel.map(|fuel| fuel.min(defaults.fuel)),
+        memory_mib: overrides
+            .memory_mib
+            .map(|memory_mib| memory_mib.min(defaults.memory_mib())),
+        wall_time_ms: overrides
+            .wall_time_ms
+            .map(|wall_time_ms| wall_time_ms.min(max_wall_time_ms)),
+    }
+}
+
 /// Reference to the compute module backing a user capability (AR-34).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -139,9 +162,10 @@ impl UserCapabilityDescriptor {
 /// literal constants (AR-34/AR-44). Deliberate and documented; do not convert
 /// the `Capability` trait to owned types.
 ///
-/// The executor handle trio (`dir`, `engine`, `module_cache`) is `Option`al
-/// so the **engine-absent boot arm** (AR-44) can still register the
-/// capability discoverable; `run()` then returns the existing
+/// The executor handle quartet (`dir`, `module_id`/`wasm_sha256`, `engine`,
+/// `module_cache`) is `Option`al where the handle needs a runtime so the
+/// **engine-absent boot arm** (AR-44) can still register the capability
+/// discoverable; `run()` then returns the existing
 /// [`CapabilityError::WorkerUnavailable`] variant (no new variant — exhaustive
 /// matches like `fork.rs` keep compiling). The admitted-with-engine path never
 /// returns it (PL-10 closed).
@@ -153,9 +177,21 @@ pub struct UserCapability {
     /// AR-35) — source of `manifest.json` + `<module-id>.wasm`.
     dir: PathBuf,
     /// The descriptor's `wasm.moduleId` — the `<module-id>.wasm` filename
-    /// stem. Owned (no trait method needs it `&'static`), unlike the three
-    /// leaked catalog strings.
+    /// stem. Owned (no trait-owned method needs it `&'static`), unlike the
+    /// three leaked catalog strings.
     module_id: String,
+    /// The descriptor's `wasm.wasmSha256` — the admitted module's expected
+    /// content hash. Every lazy load re-verifies the on-disk bytes against it
+    /// (F2, AR-39 single hash path) so a capability dir edited after
+    /// admission can never execute unverified bytes.
+    wasm_sha256: String,
+    /// The **clamped** sandbox overrides from admission (gate 4, AR-38),
+    /// carried so `run()` can apply them to the invocation (F1 — the
+    /// descriptor's bounds must reach the sandbox, not just be validated).
+    /// `None` → host defaults / manifest values. Clamping is re-applied at
+    /// `new()` so a directly-constructed (un-admitted) capability stays
+    /// fail-closed.
+    sandbox: Option<SandboxOverrides>,
     /// The daemon-wide wasm engine (absent on the engine-less boot arm).
     engine: Option<Arc<WasmEngine>>,
     /// The daemon-wide compilation cache (absent on the engine-less boot arm).
@@ -165,12 +201,16 @@ pub struct UserCapability {
 impl UserCapability {
     /// Construct from a validated descriptor, leaking the three catalog
     /// strings once (AR-34/AR-44), and carrying the capability dir + the
-    /// shared engine/cache (AR-37).
+    /// descriptor's wasm hash + sandbox overrides + the shared engine/cache
+    /// (AR-37/AR-38/AR-39).
     ///
     /// `dir` is the capability's own directory (`<scan_root>/<name>/`); the
     /// executor reads `manifest.json` + `<module-id>.wasm` from it at first
-    /// `run()`. `engine`/`module_cache` are `None` on the engine-less boot
-    /// arm (AR-44): the capability stays discoverable and `run()` returns
+    /// `run()`. The sandbox overrides are **re-clamped here** (F1/AR-38) so a
+    /// capability constructed without going through `admit()` (unit tests,
+    /// future direct registration) can never carry un-clamped bounds.
+    /// `engine`/`module_cache` are `None` on the engine-less boot arm
+    /// (AR-44): the capability stays discoverable and `run()` returns
     /// `WorkerUnavailable`.
     #[must_use]
     pub fn new(
@@ -185,6 +225,8 @@ impl UserCapability {
             output_schema: Box::leak(descriptor.output_schema.clone().into_boxed_str()),
             dir,
             module_id: descriptor.wasm.module_id.clone(),
+            wasm_sha256: descriptor.wasm.wasm_sha256.clone(),
+            sandbox: descriptor.sandbox.as_ref().map(clamp_sandbox),
             engine,
             module_cache,
         }
@@ -337,11 +379,69 @@ impl Capability for UserCapability {
             ))
         })?;
 
+        // F2 / AR-39 single hash path: every lazy load re-verifies the
+        // on-disk module bytes before `get_or_compile`. Admission (gate 3)
+        // guaranteed manifest `wasm_sha256` == descriptor `wasmSha256` == the
+        // bytes' digest; this closes the TOCTOU gap where a capability dir is
+        // edited AFTER admission — the cache is keyed by bytes-hash and would
+        // otherwise compile unverified bytes. `verify_wasm_sha256` is the one
+        // content-hash implementation (`nexus-module-manifest`); a mismatch —
+        // or a manifest whose declared hash no longer equals the descriptor's
+        // admitted hash — fails closed as `InputInvalid`.
+        let manifest: nexus_wasm_host::ModuleManifest = serde_json::from_str(&manifest_json)
+            .map_err(|e| {
+                CapabilityError::InputInvalid(format!(
+                    "module '{}' not loaded in capability '{}': parse {}: {e}",
+                    self.module_id,
+                    self.name,
+                    manifest_path.display()
+                ))
+            })?;
+        manifest.verify_wasm_sha256(&wasm_bytes).map_err(|e| {
+            CapabilityError::InputInvalid(format!(
+                "module '{}' hash changed for capability '{}': {e}",
+                self.module_id, self.name
+            ))
+        })?;
+        if manifest.wasm_sha256.as_deref() != Some(self.wasm_sha256.as_str()) {
+            return Err(CapabilityError::InputInvalid(format!(
+                "module '{}' hash changed for capability '{}'",
+                self.module_id, self.name
+            )));
+        }
+
         let cached = module_cache
             .get_or_compile(engine, &self.module_id, &wasm_bytes, &manifest_json)
             .map_err(|e| map_compute_error(&e))?;
         let module = cached.module.clone();
-        let manifest = cached.manifest.clone();
+        let mut manifest = cached.manifest.clone();
+
+        // F1/AR-38: apply the clamped descriptor sandbox overrides onto the
+        // manifest before `compute` — the invocation sandbox is resolved as
+        // `min(manifest_override, host_default)` in `WasmEngine::resolve_sandbox`
+        // (compute.rs L71-80), so folding each present descriptor bound in
+        // via `min(existing, descriptor)` tightens the effective sandbox to
+        // the capability's ceiling. Absent descriptor fields leave the
+        // manifest/host value untouched. No `sandbox.rs` change (AR-38).
+        if let Some(sandbox) = &self.sandbox {
+            if let Some(fuel) = sandbox.fuel {
+                manifest.max_fuel = Some(manifest.max_fuel.map_or(fuel, |m| m.min(fuel)));
+            }
+            if let Some(memory_mib) = sandbox.memory_mib {
+                manifest.max_memory_mib = Some(
+                    manifest
+                        .max_memory_mib
+                        .map_or(memory_mib, |m| m.min(memory_mib)),
+                );
+            }
+            if let Some(wall_time_ms) = sandbox.wall_time_ms {
+                manifest.max_wall_time_ms = Some(
+                    manifest
+                        .max_wall_time_ms
+                        .map_or(wall_time_ms, |m| m.min(wall_time_ms)),
+                );
+            }
+        }
 
         // Invoke the sandboxed module and map the 4-part output envelope.
         let output = engine
@@ -354,13 +454,17 @@ impl Capability for UserCapability {
 /// Map a [`ComputeError`] to a [`CapabilityError`] per the AR-37 table
 /// (distinct variants; fail-closed):
 ///
-/// | ComputeError | CapabilityError |
+/// | `ComputeError` | `CapabilityError` |
 /// |---|---|
 /// | `OutOfFuel` / `WallTimeExceeded` / `MemoryCapExceeded` / `Trap` | `Forbidden("sandbox breach: <detail>")` |
-/// | `InputValidationFailed` / `ManifestValidationFailed` / `InvalidOutput` / `OutputSchemaMismatch` | `InputInvalid(...)` |
-/// | `MissingExport` / `ModuleComputeFailed` / `InvalidModule` | `PermanentExternal(...)` |
+/// | `InputValidationFailed` / `ManifestValidationFailed` / `InvalidOutput` | `InputInvalid(...)` |
+/// | `MissingExport` / `ModuleComputeFailed` / `InvalidModule` / `OutputSchemaMismatch` | `PermanentExternal(...)` |
 /// | `OutputBufferTooSmall` | `TransientExternal(...)` (retryable) |
 /// | `CacheWarmup` / `Wasmtime` / `MemoryAccess` / `Io` / `Json` | `Internal(...)` |
+///
+/// S-1a: `OutputSchemaMismatch` sits in the `PermanentExternal` bucket — the
+/// module emitted a malformed 4-part envelope (a module fault, not a caller
+/// input problem); retrying with the same input cannot fix it.
 fn map_compute_error(e: &ComputeError) -> CapabilityError {
     match e {
         ComputeError::OutOfFuel
@@ -369,13 +473,13 @@ fn map_compute_error(e: &ComputeError) -> CapabilityError {
         | ComputeError::Trap(_) => CapabilityError::Forbidden(format!("sandbox breach: {e}")),
         ComputeError::InputValidationFailed(_)
         | ComputeError::ManifestValidationFailed { .. }
-        | ComputeError::InvalidOutput(_)
-        | ComputeError::OutputSchemaMismatch(_) => {
+        | ComputeError::InvalidOutput(_) => {
             CapabilityError::InputInvalid(format!("module rejected input/output: {e}"))
         }
         ComputeError::MissingExport(_)
         | ComputeError::ModuleComputeFailed(_)
-        | ComputeError::InvalidModule(_) => {
+        | ComputeError::InvalidModule(_)
+        | ComputeError::OutputSchemaMismatch(_) => {
             CapabilityError::PermanentExternal(format!("module fault: {e}"))
         }
         ComputeError::OutputBufferTooSmall(_) => {
@@ -1010,7 +1114,8 @@ mod tests {
 
     /// Stage `<tmp>/<name>/` with `capability.json` (real sha of the embedded
     /// module), `manifest.json` + `<module-id>.wasm` from the embedded tree.
-    fn stage_capability_dir(tmp: &std::path::Path, name: &str) {
+    /// `sandbox` (when given) is embedded verbatim into the descriptor.
+    fn stage_capability_dir(tmp: &std::path::Path, name: &str, sandbox: Option<&str>) {
         use sha2::{Digest, Sha256};
         let dir = tmp.join(name);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1024,11 +1129,13 @@ mod tests {
             }
             hex
         };
+        let sandbox_json = sandbox.map_or_else(String::new, |s| format!("\"sandbox\": {s},"));
         let json = format!(
             r#"{{
                 "name": "{name}",
                 "inputSchema": "{{\"type\":\"object\"}}",
                 "outputSchema": "{{\"type\":\"object\"}}",
+                {sandbox_json}
                 "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{sha}" }}
             }}"#
         );
@@ -1039,9 +1146,11 @@ mod tests {
 
     /// The canonical combat fixture re-enveloped for the capability input
     /// surface: `keyBlocks` carries the two combatant blocks, `attacker_id` /
-    /// `defender_id` select them, the rest of the fixture body stays intact.
-    /// `to_compute_input` lifts `keyBlocks` into the envelope and passes the
-    /// whole object through as the raw invocation (AR-37).
+    /// `defender_id` select them (`snake_case` — the exact keys basic-combat's
+    /// `select_combatants` reads from `invocation`, S-2 fix wave), the rest of
+    /// the fixture body stays intact. `to_compute_input` lifts `keyBlocks`
+    /// into the envelope and passes the whole object through as the raw
+    /// invocation (AR-37).
     fn combat_capability_input() -> Value {
         let raw: Value = serde_json::from_str(include_str!(
             "../../../../modules/nexus-module-test/fixtures/combat-input.json"
@@ -1058,8 +1167,13 @@ mod tests {
         // carries it into the compute envelope's world_ref (the module emits
         // it on the timeline event, which the wire validates as `^wld_…$`).
         input.insert("worldId".to_string(), raw["world_ref"]["world_id"].clone());
-        input.insert("attackerId".to_string(), serde_json::json!("kb_atk"));
-        input.insert("defenderId".to_string(), serde_json::json!("kb_def"));
+        // The fixture's invocation carries `attacker_id` / `defender_id`
+        // (snake_case) — the keys basic-combat's `select_combatants` reads
+        // (manifest `schemas.invocation`). Lifted to the capability input
+        // surface so the real selector branch is exercised (S-2: the previous
+        // inert camelCase `attackerId`/`defenderId` only hit the fallback).
+        input.insert("attacker_id".to_string(), serde_json::json!("kb_atk"));
+        input.insert("defender_id".to_string(), serde_json::json!("kb_def"));
         Value::Object(input)
     }
 
@@ -1074,7 +1188,7 @@ mod tests {
             return;
         }
         let tmp = tempfile::tempdir().unwrap();
-        stage_capability_dir(tmp.path(), "combat.cap");
+        stage_capability_dir(tmp.path(), "combat.cap", None);
         let engine = std::sync::Arc::new(nexus_wasm_host::WasmEngine::new().unwrap());
         let cache = std::sync::Arc::new(nexus_wasm_host::ModuleCache::new());
         let descriptor =
@@ -1147,7 +1261,7 @@ mod tests {
             return;
         }
         let tmp = tempfile::tempdir().unwrap();
-        stage_capability_dir(tmp.path(), "combat.cap");
+        stage_capability_dir(tmp.path(), "combat.cap", None);
         // Simulate a post-admission edit: remove the module pair.
         std::fs::remove_file(tmp.path().join("combat.cap/basic-combat.wasm")).unwrap();
         let engine = std::sync::Arc::new(nexus_wasm_host::WasmEngine::new().unwrap());
@@ -1174,6 +1288,115 @@ mod tests {
             err.to_string()
                 .contains("not loaded in capability 'combat.cap'"),
             "named module/capability message, got: {err}"
+        );
+    }
+
+    /// F1 / AR-38 runtime enforcement: a descriptor `sandbox.fuel` below the
+    /// module/host budget must reach the invocation. basic-combat with the
+    /// default budget runs to completion (the test above); a fuel budget of
+    /// `100_000` (still > 0, so it admits) lets the module instantiate but
+    /// traps inside `compute` -> `OutOfFuel` -> `CapabilityError::Forbidden`
+    /// ("sandbox breach: ...") — proving the clamped descriptor override is
+    /// applied at `run()`, not just validated. (A fuel sweep showed budgets
+    /// below `~50_000` are consumed during instantiation and surface as
+    /// `Internal`; `100_000` is the smallest round budget on the
+    /// `compute`-trap side.)
+    #[tokio::test]
+    async fn descriptor_fuel_override_is_enforced_at_run() {
+        if !embedded_available() {
+            eprintln!("skipping: basic wasm target not installed (nexus_no_wasm_target)");
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        stage_capability_dir(tmp.path(), "combat.cap", Some(r#"{"fuel": 100000}"#));
+        let engine = std::sync::Arc::new(nexus_wasm_host::WasmEngine::new().unwrap());
+        let cache = std::sync::Arc::new(nexus_wasm_host::ModuleCache::new());
+        let descriptor =
+            parse(&std::fs::read_to_string(tmp.path().join("combat.cap/capability.json")).unwrap())
+                .expect("staged descriptor parses");
+        let cap = UserCapability::new(
+            &descriptor,
+            tmp.path().join("combat.cap"),
+            Some(engine),
+            Some(cache),
+        );
+
+        let err = cap
+            .run(combat_capability_input())
+            .await
+            .expect_err("fuel-capped invocation must trap");
+        assert!(
+            matches!(err, CapabilityError::Forbidden(_)),
+            "expected Forbidden (sandbox breach), got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("sandbox breach"),
+            "message names the sandbox breach, got: {err}"
+        );
+    }
+
+    /// F2 / AR-39 TOCTOU: a capability dir edited after admission — the
+    /// `.wasm` bytes swapped while `manifest.json` and `capability.json` keep
+    /// the admitted hash — must fail closed at `run()` with `InputInvalid`
+    /// before any compile/cache path executes unverified bytes.
+    #[tokio::test]
+    async fn run_rejects_module_bytes_changed_after_admission() {
+        if !embedded_available() {
+            eprintln!("skipping: embedded wasm target was not installed (nexus_no_wasm_target)");
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        stage_capability_dir(tmp.path(), "combat.cap", None);
+        // Post-admission edit: swap the wasm bytes (manifest + descriptor
+        // still declare the ORIGINAL admitted hash — the admission-time
+        // pairing no longer matches the on-disk pair).
+        std::fs::write(
+            tmp.path().join("combat.cap/basic-combat.wasm"),
+            b"tampered module bytes",
+        )
+        .unwrap();
+        let engine = std::sync::Arc::new(nexus_wasm_host::WasmEngine::new().unwrap());
+        let cache = std::sync::Arc::new(nexus_wasm_host::ModuleCache::new());
+        let descriptor =
+            parse(&std::fs::read_to_string(tmp.path().join("combat.cap/capability.json")).unwrap())
+                .expect("staged descriptor parses");
+        let cap = UserCapability::new(
+            &descriptor,
+            tmp.path().join("combat.cap"),
+            Some(engine),
+            Some(cache),
+        );
+
+        let err = cap
+            .run(combat_capability_input())
+            .await
+            .expect_err("swapped bytes must fail closed");
+        assert!(
+            matches!(err, CapabilityError::InputInvalid(_)),
+            "expected InputInvalid, got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("hash changed for capability"),
+            "message names the hash change, got: {err}"
+        );
+    }
+
+    /// S-1a: `OutputSchemaMismatch` is an output-side module fault (the
+    /// module emitted a malformed 4-part envelope) — mapped to
+    /// `PermanentExternal`, never `InputInvalid` (retrying the same input
+    /// cannot fix a module fault).
+    #[test]
+    fn maps_output_schema_mismatch_to_permanent_external() {
+        let err = map_compute_error(&ComputeError::OutputSchemaMismatch(
+            "battle_report missing".to_string(),
+        ));
+        assert!(
+            matches!(err, CapabilityError::PermanentExternal(_)),
+            "expected PermanentExternal, got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("module fault"),
+            "message names the module fault, got: {err}"
         );
     }
 }
