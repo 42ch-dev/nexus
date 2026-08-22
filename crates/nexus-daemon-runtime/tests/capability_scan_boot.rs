@@ -28,30 +28,46 @@ use nexus_orchestration::{CapabilityError, CapabilityRegistry, CapabilityRuntime
 use serde_json::Value;
 use std::path::Path;
 
-const VALID_SHA256: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
-/// Write a valid `<name>/capability.json` trio at
-/// `<root>/capabilities/<name>/` (AR-35 layout). `manifest.json` +
-/// `<module-id>.wasm` are not scanned at P0 (AR-35) but are written to mirror
-/// the real install layout.
+/// Write an admitted `<name>/capability.json` trio at
+/// `<root>/capabilities/<name>/` (AR-35 layout): a hash-consistent
+/// `manifest.json` + `<module-id>.wasm` pair so the AR-43 admission gates
+/// (P1 T4) pass inside the scan.
 fn write_capability_dir(root: &Path, name: &str) {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
     let dir = root.join("capabilities").join(name);
     std::fs::create_dir_all(&dir).unwrap();
+    let wasm = b"fake module bytes";
+    let sha: String = {
+        let mut hex = String::with_capacity(64);
+        for b in Sha256::digest(wasm) {
+            let _ = write!(hex, "{b:02x}");
+        }
+        hex
+    };
     let descriptor = format!(
         r#"{{
             "name": "{name}",
             "inputSchema": "{{\"type\":\"object\"}}",
             "outputSchema": "{{\"type\":\"object\"}}",
-            "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{VALID_SHA256}" }}
+            "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{sha}" }}
         }}"#
     );
     std::fs::write(dir.join("capability.json"), descriptor).unwrap();
-    std::fs::write(
-        dir.join("manifest.json"),
-        r#"{ "module_id": "basic-combat" }"#,
-    )
-    .unwrap();
-    std::fs::write(dir.join("basic-combat.wasm"), b"\0asm").unwrap();
+    let manifest = format!(
+        r#"{{
+            "module_id": "basic-combat",
+            "name": "Basic Combat",
+            "version": "1.0.0",
+            "nexus_abi_version": 1,
+            "required_key_block_types": [],
+            "compute_export": "compute",
+            "init_export": "",
+            "wasm_sha256": "{sha}"
+        }}"#
+    );
+    std::fs::write(dir.join("manifest.json"), manifest).unwrap();
+    std::fs::write(dir.join("basic-combat.wasm"), wasm).unwrap();
 }
 
 /// Build a daemon router whose capability registry is constructed with the

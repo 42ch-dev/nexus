@@ -7,6 +7,7 @@
 //! a bad descriptor is a per-entry skip — never a top-level error, never a
 //! panic, never a boot failure (AC-V172-2).
 
+use crate::capability::admission::admit;
 use crate::capability::user_capability::{UserCapability, UserCapabilityDescriptor};
 use crate::capability::Capability;
 use std::collections::HashSet;
@@ -56,11 +57,27 @@ pub struct ScanOutcome {
 ///   cannot both match — the guard is retained for future admission changes
 ///   and is checked before the mismatch guard so its skip reason stays
 ///   reachable, M1 QC wave).
-/// - No admission gates at P0 (hash/clamp are P1, AR-43); the declared name
-///   is stored as-is. Builtin-name collisions are rejected at the registry
-///   append path (AR-36 builtin-wins), not here.
+/// - Admission (P1 T4, AR-43) runs per candidate **before** it is emitted:
+///   `builtin_names` (the registry's builtin name set) drives gate 1
+///   (collision → skip, builtin wins — AR-36/AR-43); gates 2–3 (module file
+///   presence + `wasm_sha256` pairing, AR-38/AR-39) fail closed per
+///   candidate; gate 4 clamps sandbox overrides and never rejects. A
+///   rejected candidate is `ScanOutcome.skipped` with its named
+///   `AdmissionError` reason — never a panic, never a boot failure, never a
+///   half-registered entry (AC-V172-2).
+///
+/// `engine`/`module_cache` are the daemon-wide executor handles (AR-37) —
+/// `Some`/`Some` on the engine boot arm so every admitted capability can run
+/// its module, `None`/`None` on the engine-less arm (AR-44) so `run()` returns
+/// `WorkerUnavailable`.
 #[must_use]
-pub fn scan_user_capabilities(dir: &Path) -> ScanOutcome {
+#[allow(clippy::implicit_hasher)] // same builder-agnostic set contract as `admit`
+pub fn scan_user_capabilities(
+    dir: &Path,
+    builtin_names: &HashSet<&str>,
+    engine: Option<&std::sync::Arc<nexus_wasm_host::WasmEngine>>,
+    module_cache: Option<&std::sync::Arc<nexus_wasm_host::ModuleCache>>,
+) -> ScanOutcome {
     let mut outcome = ScanOutcome::default();
     let mut admitted_names: HashSet<String> = HashSet::new();
 
@@ -161,11 +178,34 @@ pub fn scan_user_capabilities(dir: &Path) -> ScanOutcome {
             continue;
         }
 
+        // AR-43 (P1 T4): admission gates run before the capability is
+        // emitted — collision (builtin wins, gate 1), module-file presence
+        // (gate 2), `wasm_sha256` pairing (gate 3, AR-39) — fail-closed per
+        // candidate; a rejected candidate is a named skip (never a panic,
+        // never a boot failure, never half-registered — AC-V172-2). The
+        // admitted descriptor carries the clamped sandbox (gate 4, AR-38).
+        // The name is reserved only on admission — a rejected candidate must
+        // not reserve its declared name for later entries.
+        let descriptor = match admit(&descriptor, &path, builtin_names) {
+            Ok(admitted) => admitted.descriptor,
+            Err(e) => {
+                skip(&mut outcome, &dir_name, format!("admission failed: {e}"));
+                continue;
+            }
+        };
         admitted_names.insert(descriptor.name.clone());
 
-        outcome
-            .admitted
-            .push(Box::new(UserCapability::new(&descriptor)));
+        // AR-37: the registered capability carries its own dir (source of
+        // manifest.json + <module-id>.wasm) and the daemon-wide engine/cache.
+        // The engine arm passes Some/Some so run() executes the module; the
+        // engine-less arm passes None/None (AR-44) so run() returns
+        // WorkerUnavailable.
+        outcome.admitted.push(Box::new(UserCapability::new(
+            &descriptor,
+            path,
+            engine.cloned(),
+            module_cache.cloned(),
+        )));
     }
 
     outcome
@@ -186,8 +226,9 @@ fn read_descriptor(path: &Path) -> Result<UserCapabilityDescriptor, String> {
 /// Record a skip and log it at `warn!` (AR-35: all skips are logged; the
 /// daemon never fails boot on a bad user capability).
 ///
-/// `pub(crate)`: also used by the registry append path for builtin-name
-/// collisions (AR-36 builtin-wins; F1 QC wave).
+/// `pub(crate)`: reachable to sibling modules (the registry append path);
+/// builtin collisions are recorded through this helper via the scan's
+/// admission gate 1 (AR-43) since P1 T4.
 pub(crate) fn skip(outcome: &mut ScanOutcome, name: &str, reason: String) {
     tracing::warn!(
         capability = %name,
@@ -203,40 +244,77 @@ pub(crate) fn skip(outcome: &mut ScanOutcome, name: &str, reason: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha2::Digest;
+    use std::fmt::Write as _;
 
-    const VALID_SHA256: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    fn sha256_hex(bytes: &[u8]) -> String {
+        let digest = sha2::Sha256::digest(bytes);
+        let mut hex = String::with_capacity(64);
+        for b in digest {
+            let _ = write!(hex, "{b:02x}");
+        }
+        hex
+    }
 
-    fn descriptor_json(name: &str) -> String {
+    /// The builtin-name set the registry passes into the scan (a small,
+    /// realistic subset used by scan tests; `sync.pull` collides).
+    fn builtins() -> HashSet<&'static str> {
+        HashSet::from(["sync.pull", "narrative.compute"])
+    }
+
+    /// 64 lowercase hex chars (valid per AR-34 format rules) for descriptors
+    /// whose skip fires BEFORE admission (validation / mismatch / duplicate
+    /// guards) — the module pair's real hash is never consulted.
+    const FAKE_SHA: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    /// Write `<dir>/manifest.json` + `<dir>/basic-combat.wasm` with a **real**
+    /// matching sha (the AR-39 pairing admission verifies). Returns the sha.
+    fn write_module_pair(dir: &Path) -> String {
+        let wasm = b"fake module bytes";
+        let sha = sha256_hex(wasm);
+        std::fs::write(dir.join("basic-combat.wasm"), wasm).unwrap();
+        let manifest = format!(
+            r#"{{
+                "module_id": "basic-combat",
+                "name": "Basic Combat",
+                "version": "1.0.0",
+                "nexus_abi_version": 1,
+                "required_key_block_types": [],
+                "compute_export": "compute",
+                "init_export": "",
+                "wasm_sha256": "{sha}"
+            }}"#
+        );
+        std::fs::write(dir.join("manifest.json"), manifest).unwrap();
+        sha
+    }
+
+    fn descriptor_json(name: &str, sha: &str) -> String {
         format!(
             r#"{{
                 "name": "{name}",
                 "inputSchema": "{{\"type\":\"object\"}}",
                 "outputSchema": "{{\"type\":\"object\"}}",
-                "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{VALID_SHA256}" }}
+                "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{sha}" }}
             }}"#
         )
     }
 
-    /// Write a valid `<name>/capability.json` trio. `manifest.json` +
-    /// `<module-id>.wasm` are not scanned at P0 (AR-35) but are written to
-    /// mirror the real install layout.
+    /// Write an admitted `<name>/capability.json` trio (AR-35 layout): a
+    /// hash-consistent `manifest.json` + `<module-id>.wasm` pair so the
+    /// AR-43 admission gates pass (P1 T4 wires admission into the scan).
     fn write_capability_dir(root: &Path, name: &str) {
         let dir = root.join(name);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("capability.json"), descriptor_json(name)).unwrap();
-        std::fs::write(
-            dir.join("manifest.json"),
-            r#"{ "module_id": "basic-combat" }"#,
-        )
-        .unwrap();
-        std::fs::write(dir.join("basic-combat.wasm"), b"\0asm").unwrap();
+        let sha = write_module_pair(&dir);
+        std::fs::write(dir.join("capability.json"), descriptor_json(name, &sha)).unwrap();
     }
 
     #[test]
     fn scan_valid_trio_admits_with_declared_name() {
         let tmp = tempfile::tempdir().unwrap();
-        write_capability_dir(tmp.path(), "sync.pull");
-        let outcome = scan_user_capabilities(tmp.path());
+        write_capability_dir(tmp.path(), "demo.pull");
+        let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
         assert_eq!(outcome.admitted.len(), 1, "one admitted");
         assert!(
             outcome.skipped.is_empty(),
@@ -244,7 +322,7 @@ mod tests {
             outcome.skipped
         );
         let cap = outcome.admitted[0].as_ref();
-        assert_eq!(cap.name(), "sync.pull");
+        assert_eq!(cap.name(), "demo.pull");
         assert_eq!(cap.input_schema(), r#"{"type":"object"}"#);
         assert_eq!(cap.output_schema(), r#"{"type":"object"}"#);
     }
@@ -252,7 +330,7 @@ mod tests {
     #[test]
     fn scan_empty_dir_returns_empty_outcome() {
         let tmp = tempfile::tempdir().unwrap();
-        let outcome = scan_user_capabilities(tmp.path());
+        let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
         assert!(outcome.admitted.is_empty());
         assert!(outcome.skipped.is_empty());
     }
@@ -261,7 +339,7 @@ mod tests {
     fn scan_missing_dir_returns_empty_outcome_not_panic() {
         let tmp = tempfile::tempdir().unwrap();
         let missing = tmp.path().join("does-not-exist");
-        let outcome = scan_user_capabilities(&missing);
+        let outcome = scan_user_capabilities(&missing, &builtins(), None, None);
         assert!(outcome.admitted.is_empty());
         assert!(outcome.skipped.is_empty());
     }
@@ -272,7 +350,7 @@ mod tests {
         let dir = tmp.path().join("broken.cap");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("capability.json"), "{ not json").unwrap();
-        let outcome = scan_user_capabilities(tmp.path());
+        let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
         assert!(outcome.admitted.is_empty());
         assert_eq!(outcome.skipped.len(), 1);
         assert_eq!(outcome.skipped[0].name, "broken.cap");
@@ -291,8 +369,12 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("BadName");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("capability.json"), descriptor_json("BadName")).unwrap();
-        let outcome = scan_user_capabilities(tmp.path());
+        std::fs::write(
+            dir.join("capability.json"),
+            descriptor_json("BadName", FAKE_SHA),
+        )
+        .unwrap();
+        let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
         assert!(outcome.admitted.is_empty());
         assert_eq!(outcome.skipped.len(), 1);
         assert!(
@@ -309,13 +391,45 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("declared.name");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("capability.json"), descriptor_json("other.name")).unwrap();
-        let outcome = scan_user_capabilities(tmp.path());
+        std::fs::write(
+            dir.join("capability.json"),
+            descriptor_json("other.name", FAKE_SHA),
+        )
+        .unwrap();
+        let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
         assert!(outcome.admitted.is_empty());
         assert_eq!(outcome.skipped.len(), 1);
         assert!(
             outcome.skipped[0].reason.contains("does not match"),
             "named reason: {:?}",
+            outcome.skipped[0].reason
+        );
+    }
+
+    /// AR-43 (P1 T4): a scan dir with a valid descriptor AND a colliding
+    /// (builtin-named) descriptor — the valid one registers, the colliding
+    /// one is skipped with a named `NameCollision` reason, the catalog lacks
+    /// the colliding name, and nothing panics (AC-V172-2 skip-and-log).
+    #[test]
+    fn scan_mixed_dir_admits_valid_and_skips_colliding() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_capability_dir(tmp.path(), "sync.pull"); // builtin name (gate 1)
+        write_capability_dir(tmp.path(), "demo.pull"); // valid, admitted
+        let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
+        let names: Vec<&str> = outcome.admitted.iter().map(|c| c.name()).collect();
+        assert_eq!(
+            names,
+            vec!["demo.pull"],
+            "valid descriptor registers; colliding name absent"
+        );
+        assert_eq!(outcome.skipped.len(), 1, "one named skip");
+        assert_eq!(outcome.skipped[0].name, "sync.pull");
+        assert!(
+            outcome.skipped[0].reason.contains("NameCollision")
+                || outcome.skipped[0]
+                    .reason
+                    .contains("collides with a builtin"),
+            "named NameCollision reason, got: {:?}",
             outcome.skipped[0].reason
         );
     }
@@ -326,7 +440,7 @@ mod tests {
         write_capability_dir(tmp.path(), "_system.cap");
         write_capability_dir(tmp.path(), ".hidden.cap");
         write_capability_dir(tmp.path(), "visible.cap");
-        let outcome = scan_user_capabilities(tmp.path());
+        let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
         let names: Vec<&str> = outcome.admitted.iter().map(|c| c.name()).collect();
         assert_eq!(names, vec!["visible.cap"]);
         assert!(outcome.skipped.is_empty());
@@ -345,8 +459,12 @@ mod tests {
         write_capability_dir(tmp.path(), "b.dup");
         // Rewrite b.dup's descriptor to declare the same name as a.dup.
         let b_dir = tmp.path().join("b.dup");
-        std::fs::write(b_dir.join("capability.json"), descriptor_json("a.dup")).unwrap();
-        let outcome = scan_user_capabilities(tmp.path());
+        std::fs::write(
+            b_dir.join("capability.json"),
+            descriptor_json("a.dup", FAKE_SHA),
+        )
+        .unwrap();
+        let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
         let names: Vec<&str> = outcome.admitted.iter().map(|c| c.name()).collect();
         assert_eq!(
             names,
@@ -375,7 +493,7 @@ mod tests {
         write_capability_dir(tmp.path(), "zeta.cap");
         write_capability_dir(tmp.path(), "alpha.cap");
         write_capability_dir(tmp.path(), "mike.cap");
-        let outcome = scan_user_capabilities(tmp.path());
+        let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
         let names: Vec<&str> = outcome.admitted.iter().map(|c| c.name()).collect();
         assert_eq!(
             names,
