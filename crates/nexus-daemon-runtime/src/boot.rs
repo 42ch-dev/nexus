@@ -4,7 +4,7 @@
 //! the `nexus42 daemon-run` hidden command and the
 //! `nexus42 daemon start --foreground` path.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -138,6 +138,50 @@ impl DaemonConfig {
 #[must_use]
 const fn shutdown_grace_duration(config: &DaemonConfig) -> Duration {
     Duration::from_millis(config.shutdown_grace_ms)
+}
+
+/// Log a user-capability scan outcome at the daemon boot site (AR-35/36).
+///
+/// Admitted count is logged at `info!`; the skip aggregate is logged at
+/// `warn!` (the scanner already logs each skip individually with its named
+/// reason — this is the boot-site aggregate). The daemon NEVER fails boot on
+/// scan issues (skip-and-log contract, AC-V172-2): this function has no error
+/// path.
+fn log_scan_outcome(outcome: &nexus_orchestration::capability::scan::ScanOutcome, scan_dir: &Path) {
+    if !outcome.skipped.is_empty() {
+        let names: Vec<&str> = outcome.skipped.iter().map(|s| s.name.as_str()).collect();
+        tracing::warn!(
+            dir = %scan_dir.display(),
+            count = outcome.skipped.len(),
+            names = ?names,
+            "skipped {} user capability(ies) during boot scan (individual reasons logged by scanner)",
+            outcome.skipped.len()
+        );
+    }
+    if !outcome.admitted.is_empty() {
+        tracing::info!(
+            dir = %scan_dir.display(),
+            admitted = outcome.admitted.len(),
+            "registered {} user capability(ies) after builtins",
+            outcome.admitted.len()
+        );
+    }
+}
+
+/// Resolve the user-capabilities scan directory from the daemon's workspace
+/// state (V1.172 P0, AR-35).
+///
+/// nexus-home-layout helpers take the RAW user home and join `.nexus42`
+/// internally — passing `state.nexus_home()` (already `<home>/.nexus42`)
+/// would double-nest to `<home>/.nexus42/.nexus42/capabilities` and miss
+/// user installs (same precedent as the `user_modules_dir` warmup,
+/// boot.rs L293-297).
+fn user_capabilities_scan_dir(state: &WorkspaceState) -> anyhow::Result<PathBuf> {
+    let raw_home = state
+        .nexus_home()
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("nexus_home has no parent directory"))?;
+    Ok(nexus_home_layout::user_capabilities_dir(raw_home))
 }
 
 /// Run the daemon runtime to completion.
@@ -331,20 +375,34 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         daemon_tool_dispatch: None,
         cdn_config,
     };
-    let capabilities = Arc::new(match &wasm_singleton {
-        Some((engine, cache)) => {
-            // V1.147 P0: store daemon-wide engine+cache on WorkspaceState
-            // so the direct compute handler can use them. Clone the Arcs
-            // before they are moved into the capability registry.
-            state.set_wasm_engine(Arc::clone(engine));
-            state.set_module_cache(Arc::clone(cache));
-            CapabilityRegistry::with_runtime_deps_and_wasm(
-                &runtime_deps,
-                Arc::clone(engine),
-                Arc::clone(cache),
-            )
-        }
-        None => CapabilityRegistry::with_runtime_deps(&runtime_deps),
+    // V1.172 P0 T3 (AR-35): user capabilities live under
+    // `~/.nexus42/capabilities/`. nexus-home-layout helpers take the RAW user
+    // home and join `.nexus42` internally (same double-nest precedent as the
+    // `user_modules_dir` warmup above, L293-297) — passing
+    // `state.nexus_home()` (already `<home>/.nexus42`) would scan
+    // `<home>/.nexus42/.nexus42/capabilities` and miss user installs.
+    let user_caps_dir = user_capabilities_scan_dir(&state)?;
+    let capabilities = Arc::new(if let Some((engine, cache)) = &wasm_singleton {
+        // V1.147 P0: store daemon-wide engine+cache on WorkspaceState
+        // so the direct compute handler can use them. Clone the Arcs
+        // before they are moved into the capability registry.
+        state.set_wasm_engine(Arc::clone(engine));
+        state.set_module_cache(Arc::clone(cache));
+        let (registry, outcome) = CapabilityRegistry::with_runtime_deps_and_wasm_and_user_caps(
+            &runtime_deps,
+            Arc::clone(engine),
+            Arc::clone(cache),
+            &user_caps_dir,
+        );
+        log_scan_outcome(&outcome, &user_caps_dir);
+        registry
+    } else {
+        // AR-44: engine-absent boot still registers user capabilities
+        // (discoverable); their stub `run()` returns WorkerUnavailable.
+        let (registry, outcome) =
+            CapabilityRegistry::with_runtime_deps_and_user_caps(&runtime_deps, &user_caps_dir);
+        log_scan_outcome(&outcome, &user_caps_dir);
+        registry
     });
     tracing::info!(
         "Capability registry built (production wiring + WASM singleton where available)"
@@ -1289,6 +1347,39 @@ mod tests {
         assert_eq!(
             shutdown_grace_duration(&config),
             Duration::from_millis(1234)
+        );
+    }
+
+    /// `user_capabilities_scan_dir` resolves the RAW-home capabilities dir
+    /// (AR-35): `~/.nexus42/capabilities`, NOT the double-nested
+    /// `<home>/.nexus42/.nexus42/capabilities` that would result from passing
+    /// the already-nested `nexus_home` directly.
+    #[tokio::test]
+    async fn user_capabilities_scan_dir_uses_raw_home() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let user_home = tmp.path();
+        let nexus_home = user_home.join(".nexus42");
+        let db_path = nexus_home.join("state.db");
+        // `new_for_testing` opens a SQLite pool — the parent directory must
+        // exist first.
+        std::fs::create_dir_all(&nexus_home).expect("create nexus_home");
+        let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+
+        let resolved = user_capabilities_scan_dir(&state).expect("resolve scan dir");
+        assert_eq!(
+            resolved,
+            nexus_home_layout::user_capabilities_dir(user_home),
+            "scan dir must derive from the raw user home (parent of nexus_home)"
+        );
+        assert_eq!(
+            resolved,
+            user_home.join(".nexus42").join("capabilities"),
+            "exact AR-35 layout"
+        );
+        assert_ne!(
+            resolved,
+            nexus_home.join(".nexus42").join("capabilities"),
+            "must NOT double-nest into <home>/.nexus42/.nexus42"
         );
     }
 }
