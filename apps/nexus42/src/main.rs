@@ -115,6 +115,9 @@ async fn async_main(cli: Cli) -> Result<()> {
         Some(Commands::Compute { command }) => {
             nexus42::commands::compute::run(command, &config, &output_format).await
         }
+        Some(Commands::Capability { command }) => {
+            nexus42::commands::capability::run(command, &config, &output_format).await
+        }
         Some(Commands::AcpWorker(args)) => nexus42::commands::acp_worker::run(args).await,
         Some(Commands::DaemonRun(args)) => nexus42::commands::daemon_run::run(args).await,
         Some(Commands::System { command }) => {
