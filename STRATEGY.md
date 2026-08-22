@@ -42,7 +42,7 @@ Shared: local-first privacy; harness the user's own ACP/native agents; structure
 - **A competing IDE or editor** — we integrate with the user's tools and agents, not replace them
 - **A new first-party player app for third-party users** (PD-09) — partners ship their UI; we ship runtime + Connect
 - **An MCP server** (DF-49 cancelled) — CLI is an ACP **client**, not a server
-- **User-authored capability plugin ABI before V1.5+** (DR-10) — configure builtins + modules + presets; browsing the registry ≠ a plugin ABI
+- **Full user-authored capability plugin ABI before V1.5+** (DR-10 remainder) — shell/process executors, arbitrary host imports, DF-03 signing/publish, ABI V2. A **minimal** capability extension (DR-10 minimal, V1.172: WASM compute module + descriptor as the capability executor over the existing compute sandbox) is unlocked by decision-lock D6; browsing the registry still ≠ a full plugin ABI
 
 ## Guiding Principles
 
