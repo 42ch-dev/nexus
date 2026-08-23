@@ -62,8 +62,8 @@ Root [`package.json`](../package.json) exposes shortcuts for common tasks. Run f
 
 | Task | Command |
 |------|---------|
-| Design Studio dev | `pnpm run dev:design-studio` → [http://localhost:5174](http://localhost:5174) (no daemon) |
-| Web UI dev | `nexus42 daemon start` then `pnpm run dev:web` → [http://localhost:5173](http://localhost:5173) |
+| CLI + web dev (one command) | `pnpm run dev` → builds `nexus42`, ensures the daemon on 127.0.0.1:8420, then Vite dev server in the foreground (`scripts/dev-cli-web.sh`) |
+| Desktop dev | `pnpm run dev:desktop` (starts web via Tauri `beforeDevCommand`) |
 | Desktop dev | `pnpm run dev:desktop` (starts web via Tauri `beforeDevCommand`) |
 | TS workspaces build | `pnpm run build` (all workspaces **except** desktop — avoids accidental Tauri bundle) |
 | Web / Studio build | `pnpm run build:web`, `pnpm run build:design-studio` |

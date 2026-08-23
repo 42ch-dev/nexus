@@ -40,8 +40,8 @@ Prerequisites and the full pre-PR checklist: [`docs/CONTRIBUTING.md`](docs/CONTR
 
 | Command | What it does |
 |---------|----------------|
-| `pnpm run dev:design-studio` | Design Studio gallery — [http://localhost:5174](http://localhost:5174); no daemon required |
-| `pnpm run dev:web` | Web UI — [http://localhost:5173](http://localhost:5173); start the daemon first (`nexus42 daemon start`) |
+| `pnpm run dev` | CLI + web local dev — builds `nexus42`, ensures daemon on 127.0.0.1:8420 (starts detached if not), then Vite dev server in the foreground (desktop excluded; `scripts/dev-cli-web.sh`) |
+| `pnpm run dev:desktop` | Tauri desktop dev — starts web dev automatically via `tauri.conf.json` |
 | `pnpm run dev:desktop` | Tauri desktop dev — starts web dev automatically via `tauri.conf.json` |
 
 ### Build
