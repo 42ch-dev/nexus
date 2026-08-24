@@ -6,6 +6,8 @@
 
 #[cfg(feature = "connect-host")]
 use crate::commands::connect::ConnectCommand;
+#[cfg(feature = "connect-client")]
+use crate::commands::mcp::McpCommand;
 use crate::commands::{
     acp::AcpCommand, acp_worker::AcpWorkerArgs, capability::CapabilityCommand,
     compute::ComputeCommand, creator::CreatorCommand, daemon::DaemonCommand,
@@ -72,6 +74,27 @@ impl Cli {
     #[must_use]
     pub fn into_command(self) -> Option<Commands> {
         self.command
+    }
+    /// Whether the invocation is the MCP stdio bridge (`mcp serve`).
+    ///
+    /// The child's stdout is the JSON-RPC transport: any tracing output on
+    /// stdout corrupts the protocol, so the caller must route logging to
+    /// stderr before initializing the subscriber (V1.174 P0 T5, AR-72).
+    #[must_use]
+    pub const fn is_mcp_serve(&self) -> bool {
+        #[cfg(feature = "connect-client")]
+        {
+            matches!(
+                &self.command,
+                Some(Commands::Mcp {
+                    command: McpCommand::Serve,
+                })
+            )
+        }
+        #[cfg(not(feature = "connect-client"))]
+        {
+            false
+        }
     }
 }
 
@@ -192,6 +215,19 @@ pub enum Commands {
     /// Hidden: Internal daemon-run entry point (self-spawned by daemon start)
     #[command(hide = true)]
     DaemonRun(DaemonRunArgs),
+    /// MCP server bridge (V1.174 P0 T5, AR-70/71/72) — tools-only stdio
+    /// server; a client spawns `nexus42 mcp serve` as its own stateless
+    /// child (Model A). Compiled only with the `connect-client` feature.
+    ///
+    /// Hidden from `--help`: the V1.35 command-surface lock fixes the
+    /// visible top-level groups to `creator|daemon|acp|platform|system`;
+    /// this is a machine-invoked child entry point like `acp-worker`.
+    #[cfg(feature = "connect-client")]
+    #[command(hide = true)]
+    Mcp {
+        #[command(subcommand)]
+        command: McpCommand,
+    },
 
     /// Debug-only: invoke a host tool through the daemon registry
     ///

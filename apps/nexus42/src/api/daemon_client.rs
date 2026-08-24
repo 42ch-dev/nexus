@@ -207,6 +207,42 @@ impl DaemonClient {
         let data: serde_json::Value = resp.json().await?;
         Ok(data)
     }
+    /// Execute a tool through the daemon spine, preserving the wire outcome
+    /// (V1.174 P0 T5, AR-70 #4).
+    ///
+    /// Unlike [`Self::post_raw`], this does NOT fold non-2xx statuses into
+    /// `CliError::Api` — the spine's structured error body
+    /// (`{ success: false, error: { code, message, details } }`) is what the
+    /// MCP bridge maps (unroutable vs executed-but-failed vs
+    /// auth-rejected). Network failures (connect/timeout) still surface as
+    /// errors, bounded by the client's connect/request timeouts.
+    ///
+    /// # Errors
+    ///
+    /// Returns a network (or other non-`Api`) error when the request cannot
+    /// be delivered; spine error responses are returned as
+    /// [`SpineToolExecution`], never as errors.
+    #[allow(clippy::future_not_send)]
+    pub async fn post_execution_raw(
+        &self,
+        tool_name: &str,
+        parameters: serde_json::Value,
+    ) -> Result<crate::api::models::SpineToolExecution> {
+        let path = "/v1/daemon/agent-host/internal/tool-executions";
+        let url = format!("{}{}", self.base_url, path);
+        let body = serde_json::json!({
+            "tool_name": tool_name,
+            "parameters": parameters,
+        });
+        let resp = self
+            .send_authenticated(self.http.post(&url).json(&body), path)
+            .await?;
+        let status = resp.status().as_u16();
+        let text = resp.text().await.unwrap_or_default();
+        let body: serde_json::Value =
+            serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+        Ok(crate::api::models::SpineToolExecution { status, body })
+    }
 
     /// Send a PATCH request with JSON body.
     ///

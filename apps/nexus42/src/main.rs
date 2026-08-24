@@ -27,7 +27,10 @@ fn main() {
     }
 
     let cli = Cli::parse();
-    init_logging(cli.verbose());
+    // The MCP stdio child's stdout is the JSON-RPC transport — logging must
+    // go to stderr there (AR-72), so the writer decision happens before
+    // the subscriber is initialized.
+    init_logging(cli.verbose(), cli.is_mcp_serve());
 
     // V1.101 Class B: enrich PATH *before* Tokio starts. GUI-launched desktop
     // sidecars inherit a minimal macOS PATH; `setenv` must not race concurrent
@@ -120,6 +123,8 @@ async fn async_main(cli: Cli) -> Result<()> {
         }
         Some(Commands::AcpWorker(args)) => nexus42::commands::acp_worker::run(args).await,
         Some(Commands::DaemonRun(args)) => nexus42::commands::daemon_run::run(args).await,
+        #[cfg(feature = "connect-client")]
+        Some(Commands::Mcp { command }) => nexus42::commands::mcp::run(command, &config).await,
         Some(Commands::System { command }) => {
             nexus42::commands::system::run(command, &config).await
         }
@@ -138,17 +143,25 @@ async fn async_main(cli: Cli) -> Result<()> {
     }
 }
 
-/// Initialize tracing subscriber
-fn init_logging(verbose: bool) {
+/// Initialize the tracing subscriber.
+///
+/// `stderr_only` routes all tracing to stderr — REQUIRED for the MCP stdio
+/// bridge child (`nexus42 mcp serve`), whose stdout is the JSON-RPC
+/// transport (V1.174 P0 T5, AR-72: stdout must stay clean).
+fn init_logging(verbose: bool, stderr_only: bool) {
     let filter = if verbose {
         tracing_subscriber::EnvFilter::new("debug")
     } else {
         tracing_subscriber::EnvFilter::new("warn")
     };
 
-    tracing_subscriber::fmt()
+    let builder = tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(false)
-        .without_time()
-        .init();
+        .without_time();
+    if stderr_only {
+        builder.with_writer(std::io::stderr).init();
+    } else {
+        builder.init();
+    }
 }

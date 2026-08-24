@@ -104,6 +104,15 @@ spoke-schemas = { workspace = true, optional = true }
 # 0.56 pin as spoke-connect's transport; optional + feature-gated with
 # `connect-host` so the default graph stays libp2p-free.
 libp2p = { workspace = true, optional = true }
+# V1.174 P0 T5 (AR-70): MCP server via rmcp 1.8.0 — `nexus42 mcp serve`
+# is a stateless stdio bridge child (AR-71 Model A). Pinned exactly
+# `=1.8.0` with `default-features = false` and ONLY `server` +
+# `transport-io` (no client / streamable-HTTP / child-process features in
+# the shipped graph). The crate hosting the rmcp server module is a direct
+# optional dep behind `connect-client` (the shipped graph already carries
+# rmcp 1.8.0 via agent-client-protocol =0.11.1 → prior art; the pin keeps
+# exactly one version).
+rmcp = { version = "=1.8.0", default-features = false, features = ["server", "transport-io"], optional = true }
 clap = { workspace = true }
 clap_complete = { workspace = true }
 tokio = { workspace = true }
@@ -177,7 +186,7 @@ connect-host = ["dep:spoke-connect", "dep:spoke-schemas", "dep:libp2p"]
 # nexus-daemon-runtime. OFF by default — the default nexus42 graph stays
 # libp2p-free; `--features connect-client` links the peer-tools transport +
 # session subsystem into the daemon build.
-connect-client = ["nexus-daemon-runtime/connect-client"]
+connect-client = ["nexus-daemon-runtime/connect-client", "dep:rmcp"]
 # V1.153 P2 (DF-73): forwarded gate for the embedded Web UI — ON by default
 # (the `nexus42` bin is unchanged); OFF for the `nexus-runtime` artifact via
 # `--no-default-features --features connect-host` (compile-time exclusion of

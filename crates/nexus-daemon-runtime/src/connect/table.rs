@@ -105,6 +105,55 @@ pub enum ToolRefusal {
     DuplicatePeer,
 }
 
+/// Named MCP-catalog refusal (AR-70 §3) — a separate projection layer over
+/// the registration table.
+///
+/// The MCP tools surface only carries JSON-Schema object tools; a peer row
+/// whose `input` is not a root `type: "object"` is refused from the catalog
+/// but its registration lane is untouched: the tool stays in
+/// [`PeerToolTable`] and remains dispatchable through the spine
+/// (lockstep-pinned per AR-74).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum McpCatalogRefusal {
+    /// `descriptor.input` does not declare a root `type: "object"`.
+    InputSchemaNotRootObject,
+}
+
+/// MCP catalog admission gate (AR-70 §3): the peer tool's `input` schema
+/// must declare a root `type: "object"` to be listed on the MCP tools
+/// surface.
+///
+/// This is a CATALOG-layer filter only — it never touches the registration
+/// lane (`admit_and_register` admission chain).
+///
+/// # Errors
+///
+/// Returns [`McpCatalogRefusal::InputSchemaNotRootObject`] when the input
+/// schema does not declare a root `type: "object"`.
+pub fn mcp_catalog_admission(descriptor: &ToolDescriptor) -> Result<(), McpCatalogRefusal> {
+    let root_object = descriptor
+        .input
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        == Some("object");
+    if root_object {
+        Ok(())
+    } else {
+        Err(McpCatalogRefusal::InputSchemaNotRootObject)
+    }
+}
+
+/// Whether the peer descriptor's `output` schema may be carried on the MCP
+/// tools surface (inclusion rule, AR-70 §3: present AND root-object).
+#[must_use]
+pub fn mcp_catalog_output_root_object(descriptor: &ToolDescriptor) -> bool {
+    descriptor
+        .output
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        == Some("object")
+}
+
 impl PeerToolTable {
     /// Create an empty table.
     #[must_use]

@@ -76,19 +76,37 @@ pub async fn list_tools(
     // PeerToolTable entries (AR-68 #7; compiled under connect-client).
     #[cfg(feature = "connect-client")]
     for entry in crate::connect::peer_tool_table().entries() {
+        // MCP catalog projection gate (AR-70 §3, lockstep-pinned per
+        // AR-74): the MCP tools surface only carries JSON-Schema object
+        // tools. A peer row whose `input` is not a root `type: "object"`
+        // is refused from the CATALOG with a named refusal — its
+        // registration lane (`PeerToolTable`) is untouched and the tool
+        // stays dispatchable through the spine.
+        if let Err(refusal) = crate::connect::mcp_catalog_admission(&entry.descriptor) {
+            tracing::warn!(
+                tool_id = %entry.descriptor.capability_id.as_str(),
+                peer_id = %entry.peer_id,
+                refusal = ?refusal,
+                "peer tool refused from MCP catalog (input_schema not root-object)"
+            );
+            continue;
+        }
         let id = String::from(entry.descriptor.capability_id.clone());
+        // Output schema carried iff present AND root-object (AR-70 §3
+        // inclusion rule; non-object outputs are omitted, never emitted).
+        let output_schema =
+            crate::connect::mcp_catalog_output_root_object(&entry.descriptor).then(|| {
+                serde_json::to_string(&entry.descriptor.output).unwrap_or_else(|_| "{}".to_owned())
+            });
         items.push(CatalogTool {
             id,
             description: String::from(entry.descriptor.description.clone()),
             input_schema: serde_json::to_string(&entry.descriptor.input)
                 .unwrap_or_else(|_| "{}".to_owned()),
-            output_schema: Some(
-                serde_json::to_string(&entry.descriptor.output).unwrap_or_else(|_| "{}".to_owned()),
-            ),
+            output_schema,
             origin: "peer".to_owned(),
         });
     }
-
     items.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(Json(serde_json::json!({ "items": items })))
 }

@@ -24,6 +24,7 @@ pub use config::{load_peer_keys, PeerToolsConfig, DEFAULT_CONNECT_PORT};
 pub use identity::load_or_create_identity;
 pub use session::{PeerSessionManager, SessionRecord, DEFAULT_MAX_SESSIONS};
 pub use table::{
-    peer_tool_table, AdmissionOutcome, PeerSessionTools, PeerToolEntry, PeerToolTable, ToolRefusal,
+    mcp_catalog_admission, mcp_catalog_output_root_object, peer_tool_table, AdmissionOutcome,
+    McpCatalogRefusal, PeerSessionTools, PeerToolEntry, PeerToolTable, ToolRefusal,
 };
 pub use ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
