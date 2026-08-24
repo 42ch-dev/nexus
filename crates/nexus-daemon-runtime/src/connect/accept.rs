@@ -22,8 +22,9 @@
 //!   missing key is rejected by the responder's fail-closed handshake; the
 //!   session manager never sees it.
 //!
-//! The daemon hello manifest is an input parameter (T4 owns the
-//! AR-69 allowlist-derived hello; boot builds the baseline).
+//! The daemon hello manifest is an input parameter (AR-69: boot derives it
+//! from the operator allowlist — baseline ∪ allowlist exact ids; tests pass
+//! tool ids directly).
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -126,6 +127,12 @@ impl Transport for ObservedTransport {
 /// Daemon hello manifest: baseline capabilities (+ any tool ids the test /
 /// T4 wiring chooses to advertise). `host_id` is the installation device id.
 ///
+/// AR-69 derivation lock: the tool `capabilities[]` derive ONLY from the
+/// operator allowlist (the `tool_ids` argument — boot passes the validated
+/// config allowlist; tests pass ids directly). No runtime discovery ever
+/// feeds this manifest. `namespaces[]` is derived from the tool ids
+/// (`tools.<ns>.<id>` ⇒ `ns`), deduplicated and order-stable.
+///
 /// # Panics
 /// Panics if the static JSON shape fails to deserialize (programmer error —
 /// the shape is fixed at authoring time).
@@ -133,11 +140,16 @@ impl Transport for ObservedTransport {
 pub fn daemon_manifest(host_id: &str, tool_ids: &[String]) -> HostCapabilityManifest {
     let mut capabilities = vec!["spoke-baseline".to_owned()];
     capabilities.extend(tool_ids.iter().cloned());
-    let namespaces: Vec<String> = tool_ids
+    // Tool grammar is exactly `tools.<ns>.<id>` (3 segments), so `nth(1)`
+    // is the namespace. Dedup keeps the hello stable when the allowlist
+    // names several tools in one namespace (T2 review M-1/M-2).
+    let mut namespaces: Vec<String> = tool_ids
         .iter()
         .filter_map(|id| id.split('.').nth(1))
         .map(ToOwned::to_owned)
         .collect();
+    namespaces.sort();
+    namespaces.dedup();
     serde_json::from_value(serde_json::json!({
         "schema_version": 1,
         "host_id": host_id,
@@ -149,7 +161,6 @@ pub fn daemon_manifest(host_id: &str, tool_ids: &[String]) -> HostCapabilityMani
     }))
     .expect("static daemon manifest is valid")
 }
-
 /// Per-connection responder options (identity + hello + trust material).
 #[derive(Clone)]
 pub struct PeerResponderOptions {
@@ -353,11 +364,20 @@ async fn wait_until_established(responder: &Arc<ConnectResponder>) -> Option<Str
 }
 
 /// Boot helper: load config + persistent identity from `home`, build the
-/// baseline daemon manifest, bind the listener, spawn the accept loop.
+/// allowlist-derived daemon manifest, bind the listener, spawn the accept
+/// loop.
 ///
-/// The peer allowlist / peer keys are T4's outbound-authz config surface
-/// (AR-69); boot starts the lane fail-closed (empty allowlist ⇒ every dial
-/// is rejected at the handshake) until that config lands.
+/// AR-69 outbound authz (all fail-closed):
+/// - Layer 0 (dialer identity): `config.peer_ids` (handshake allowlist) +
+///   `peer_keys.json` (preconfigured Ed25519 keys). Missing/empty ⇒ every
+///   dial is rejected at the handshake.
+/// - Layer 1 (negotiation): the daemon hello `capabilities[]` = baseline ∪
+///   operator-allowlisted tool ids (derived from config, validated at load
+///   — never from runtime discovery).
+///
+/// The whole surface is a boot-time snapshot: allowlist / peer / key edits
+/// apply on daemon restart (AR-69 restart-scoped, documented in
+/// `config.rs`).
 ///
 /// # Errors
 /// Config load, identity persistence, or listener bind failures are
@@ -376,15 +396,19 @@ pub async fn start_peer_tools_lane(
             path: home.display().to_string(),
             source: std::io::Error::other(format!("device id resolution failed: {e}")),
         })?;
-    let manifest = Arc::new(daemon_manifest(&device_id, &[]));
+    // AR-69 derivation lock: the hello tool capabilities derive ONLY from
+    // the operator allowlist (validated at config load). The boot-time
+    // snapshot is restart-scoped.
+    let manifest = Arc::new(daemon_manifest(&device_id, &config.tool_allowlist));
+    let peer_keys = crate::connect::config::load_peer_keys(home)?;
     let listener = TcpListener::bind((config.host.as_str(), config.port)).await?;
     let addr = listener.local_addr()?;
     let sessions = Arc::new(PeerSessionManager::new());
     let options = PeerResponderOptions {
         identity_seed,
         manifest,
-        allowlist: Vec::new(),
-        peer_keys: HashMap::new(),
+        allowlist: config.peer_ids.clone(),
+        peer_keys,
         reserved_tool_ids,
     };
     let task = spawn_accept_loop(
@@ -397,8 +421,11 @@ pub async fn start_peer_tools_lane(
     tracing::info!(
         %addr,
         max_sessions = config.max_sessions,
-        "peer-tools Connect accept loop listening (fail-closed: peer allowlist not yet configured)"
+        allowlisted_tools = config.tool_allowlist.len(),
+        allowlisted_peers = config.peer_ids.len(),
+        "peer-tools Connect accept loop listening (AR-69: allowlist-derived hello, fail-closed)"
     );
+
     Ok(PeerToolsLaneHandle {
         addr,
         sessions,

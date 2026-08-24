@@ -20,7 +20,7 @@ pub use accept::{
     PeerResponderOptions, PeerToolsLaneHandle, daemon_manifest, spawn_accept_loop,
     start_peer_tools_lane,
 };
-pub use config::{PeerToolsConfig, DEFAULT_CONNECT_PORT};
+pub use config::{PeerToolsConfig, load_peer_keys, DEFAULT_CONNECT_PORT};
 pub use identity::load_or_create_identity;
 pub use session::{PeerSessionManager, SessionRecord, DEFAULT_MAX_SESSIONS};
 pub use table::{peer_tool_table, AdmissionOutcome, PeerToolEntry, PeerToolTable, PeerSessionTools, ToolRefusal};

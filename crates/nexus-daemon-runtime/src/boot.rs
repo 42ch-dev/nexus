@@ -1020,11 +1020,13 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // --- Section 8.5: Peer-tools Connect accept loop (V1.174 P0, AR-67) ---
     // Feature-gated: the daemon-side listening face for spoke dialers (own
     // TcpListener, WS upgrade per connection, one connect_responder per
-    // conn, PeerSessionManager registration). The lane starts fail-closed —
-    // no peer allowlist is configured yet (T4 owns the outbound-authz
-    // config), so every dial is rejected at the handshake. A lane failure
-    // (config load / identity / bind) is non-fatal: the daemon core keeps
-    // running without peer tools, and nothing is admitted.
+    // conn, PeerSessionManager registration). AR-69 outbound authz: the
+    // daemon hello derives from the operator tool allowlist (baseline ∪
+    // allowlist exact ids, validated at config load), the dialer handshake
+    // allowlist comes from `peer_ids` + `peer_keys.json` — all fail-closed
+    // (empty allowlist ⇒ every dial rejected). A lane failure (config load
+    // / identity / bind) is non-fatal: the daemon core keeps running
+    // without peer tools, and nothing is admitted.
     #[cfg(feature = "connect-client")]
     {
         let raw_home = state
