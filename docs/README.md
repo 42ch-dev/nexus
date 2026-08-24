@@ -12,6 +12,7 @@ compute, fork + validate).
 | [nexus-runtime.md](nexus-runtime.md) | Integrators | Install/run the headless `nexus-runtime` binary, Connect-only invoke surface (core ops + Connect `tools.*`), home layout, coexistence with the creator app, allowlist + `module_scope` setup. |
 | [strategy-authoring.md](strategy-authoring.md) | Integrators | External strategy format (`preset.yaml` + `templates/`), trigger/scheduled lanes, prompt templates, validator, fork flow. |
 | [module-authoring.md](module-authoring.md) | Integrators | WASM module ABI, marshalling, `manifest.json` (incl. `wasm_sha256`), `module_scope` allowlist, operator install, read-only compute. |
+| [mcp-server.md](mcp-server.md) | Operators | `nexus42 mcp serve` tools-only MCP bridge: prerequisites, Claude Code / Codex config JSON, documented-only native face (PL-10), wired ACP path. |
 
 ## Maintainer docs
 
