@@ -198,7 +198,7 @@ connect-host = ["dep:spoke-connect", "dep:spoke-schemas", "dep:libp2p"]
 # nexus-daemon-runtime. OFF by default — the default nexus42 graph stays
 # libp2p-free; `--features connect-client` links the peer-tools transport +
 # session subsystem into the daemon build.
-connect-client = ["nexus-daemon-runtime/connect-client", "dep:rmcp"]
+connect-client = ["nexus-daemon-runtime/connect-client", "nexus-acp-host/connect-client", "dep:rmcp"]
 # V1.153 P2 (DF-73): forwarded gate for the embedded Web UI — ON by default
 # (the `nexus42` bin is unchanged); OFF for the `nexus-runtime` artifact via
 # `--no-default-features --features connect-host` (compile-time exclusion of

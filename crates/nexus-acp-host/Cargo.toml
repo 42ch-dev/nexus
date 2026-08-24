@@ -32,6 +32,14 @@ which = "7"
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.28", features = ["signal", "process"] }
 
+# V1.174 P1 T1 (AR-75 C-1): marker feature gating the first-class nexus
+# MCP stdio wiring (`src/mcp.rs`). No extra dependencies — the surface
+# only builds SDK `McpServer::Stdio` from `agent-client-protocol`, which
+# the shipped graph already carries. The `nexus42` crate forwards its own
+# `connect-client` feature onto this one.
+[features]
+connect-client = []
+
 [dev-dependencies]
 tokio = { workspace = true }
 wiremock = "0.6"
