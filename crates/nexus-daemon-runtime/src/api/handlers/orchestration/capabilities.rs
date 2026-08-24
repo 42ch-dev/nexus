@@ -57,6 +57,21 @@ pub async fn list_capabilities(
         })
         .collect();
 
+    // AR-68 #5: merge PeerToolTable rows as `origin: "peer"` (schemas
+    // verbatim) behind connect-client. The orchestration `CapabilityOrigin`
+    // enum stays `Builtin|User`; the wire string is produced here.
+    #[cfg(feature = "connect-client")]
+    for entry in crate::connect::peer_tool_table().entries() {
+        capabilities.push(CapabilityInfo {
+            name: String::from(entry.descriptor.capability_id.clone()),
+            input_schema: serde_json::to_string(&entry.descriptor.input)
+                .unwrap_or_else(|_| "{}".to_owned()),
+            output_schema: serde_json::to_string(&entry.descriptor.output)
+                .unwrap_or_else(|_| "{}".to_owned()),
+            origin: "peer".to_owned(),
+        });
+    }
+
     capabilities.sort_by(|a, b| {
         compare_by_terms(a, b, &sort_terms, |key, a, b| match key {
             "name" => Some(a.name.cmp(&b.name)),

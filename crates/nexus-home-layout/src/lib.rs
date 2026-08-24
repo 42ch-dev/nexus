@@ -278,6 +278,26 @@ pub fn connect_issuer_key_path(home: &Path) -> PathBuf {
 pub fn connect_config_path(home: &Path) -> PathBuf {
     connect_dir(home).join("config.json")
 }
+/// `$HOME/.nexus42/connect/daemon.json` — peer-tools accept-loop config.
+///
+/// (V1.174 P0, AR-67): listen host/port, `max_sessions`, invoke timeout,
+/// envelope cap. DISTINCT from `config.json` (the connect-host
+/// capability-token file) — the daemon-side lane never touches token
+/// policy. Absent file ⇒ defaults (loopback + the daemon-side defaults).
+#[must_use]
+pub fn connect_daemon_config_path(home: &Path) -> PathBuf {
+    connect_dir(home).join("daemon.json")
+}
+
+/// `$HOME/.nexus42/connect/peer_keys.json` — preconfigured dialer keys.
+///
+/// Ed25519 public keys (`{ "peer_keys": { "<peer-id>": "<64-hex-chars>" }
+/// }`); missing file ⇒ empty map ⇒ fail-closed (no dialer passes the
+/// responder handshake without a preconfigured key).
+#[must_use]
+pub fn connect_peer_keys_path(home: &Path) -> PathBuf {
+    connect_dir(home).join("peer_keys.json")
+}
 
 /// `$HOME/.nexus42/creators/<creator_id>/SOUL.md` (`ADR-014`, `ADR-016` D1).
 ///

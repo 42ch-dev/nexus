@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/tools/catalog-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CatalogResponse",
+  "description": "Response for GET /v1/daemon/tools — the dispatchable spine catalog (AR-68 #7).",
+  "type": "object",
+  "required": ["items"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": { "$ref": "https://nexus42.invalid/schemas/daemon-api/tools/catalog-tool.schema.json" }
+    }
+  },
+  "additionalProperties": false
+}

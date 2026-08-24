@@ -181,10 +181,16 @@ spoke-operations = "=0.11.1"
 spoke-connect = "=0.11.1"
 # V1.148 P3 N-C0: libp2p 0.56 — identity/PeerId/Multiaddr types for the
 # `nexus42 connect` CLI (ed25519 keypair + protobuf key serialization only).
+libp2p = { version = "=0.56.0", features = ["ed25519"] }
 # Pinned exactly to spoke-connect's transport so the feature-on graph shares
 # ONE libp2p build. Consumed behind feature `connect-host` on `apps/nexus42`;
 # the DEFAULT daemon graph stays libp2p-free.
-libp2p = { version = "=0.56.0", features = ["ed25519"] }
+# V1.174 P0 T1 (AR-57/AR-61): WebSocket transport for the peer-tools
+# Connect face. Optional dep of `nexus-daemon-runtime` behind the
+# `connect-client` feature — the DEFAULT daemon graph stays tungstenite-free
+# (only the feature-on build links it). 0.30 = the tokio-tungstenite line
+# current at lock time; the lockfile pins the exact patch.
+tokio-tungstenite = "0.30"
 # V1.168 P1 (native claude/codex replace): typed Rust SDKs for the Claude Code
 # CLI stream-json protocol and the Codex app-server JSON-RPC protocol (PD-2).
 # Exact pins: the T1 mapper tests lock the decode contract against these exact
