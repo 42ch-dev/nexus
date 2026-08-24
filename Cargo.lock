@@ -3808,6 +3808,7 @@ dependencies = [
  "dirs",
  "ed25519-dalek",
  "futures-util",
+ "getrandom 0.2.17",
  "graph-flow",
  "http-body-util",
  "hyper",

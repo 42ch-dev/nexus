@@ -88,6 +88,15 @@ which = { workspace = true }
 # must resolve to exactly one 0.56.x entry).
 spoke-connect = { workspace = true, features = ["remote-adapter"], optional = true }
 tokio-tungstenite = { workspace = true, optional = true }
+# V1.174 P0 T2 (AR-67): spoke manifest types for the daemon's Connect hello
+# (`spoke_schemas::HostCapabilityManifest`) — already in the DEFAULT graph
+# via nexus-spoke-adapter (prior art, AR-73); optional keeps the feature-off
+# graph unchanged.
+spoke-schemas = { workspace = true, optional = true }
+# V1.174 P0 T2 (AR-67): persistent Ed25519 identity seed generation.
+# getrandom 0.2 is the already-locked default-graph CSPRNG stack (uuid et
+# al.); optional keeps the feature-off graph unchanged.
+getrandom = { version = "0.2", optional = true }
 
 [dev-dependencies]
 axum-test = "15"
@@ -107,7 +116,6 @@ parking_lot = "0.12"
 # `SpokeResult`/`spoke_ok` in the tool handler). Both crates are already in
 # the default graph via nexus-spoke-adapter — no graph change.
 spoke-operations = { workspace = true }
-spoke-schemas = { workspace = true }
 
 [[bench]]
 name = "dispatch_latency"
@@ -120,7 +128,12 @@ test-support = []
 # authz (T4), honesty lockstep tests (T5). Everything behind it compiles
 # away without the feature; the default daemon graph stays libp2p-free and
 # tungstenite-free.
-connect-client = ["dep:spoke-connect", "dep:tokio-tungstenite"]
+connect-client = [
+    "dep:spoke-connect",
+    "dep:tokio-tungstenite",
+    "dep:spoke-schemas",
+    "dep:getrandom",
+]
 # V1.153 P2 (DF-73): embedded Web UI (rust-embed SPA bytes) — default ON so
 # the creator-facing daemon is unchanged; OFF (`--no-default-features`)
 # compiles the SPA serving stack out of the `nexus-runtime` artifact.

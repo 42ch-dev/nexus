@@ -19,7 +19,7 @@ use crate::workspace::WorkspaceState;
 /// Accepts explicit IP addresses (`127.0.0.1`, `::1`) and the common
 /// `localhost` alias. Hostnames that cannot be parsed as IPs are treated as
 /// non-loopback, which is the conservative choice for a local-only daemon.
-fn is_loopback_host(host: &str) -> bool {
+pub(crate) fn is_loopback_host(host: &str) -> bool {
     if host.eq_ignore_ascii_case("localhost") {
         return true;
     }
@@ -32,7 +32,7 @@ fn is_loopback_host(host: &str) -> bool {
 /// A non-loopback bind is only permitted when both `NEXUS42_DAEMON_API_KEY`
 /// and `NEXUS_DAEMON_REMOTE_BIND=1` are present. Loopback binds and Unix
 /// sockets are unaffected.
-fn ensure_remote_bind_allowed(host: &str) -> anyhow::Result<()> {
+pub(crate) fn ensure_remote_bind_allowed(host: &str) -> anyhow::Result<()> {
     if is_loopback_host(host) {
         return Ok(());
     }
@@ -1015,6 +1015,35 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 
             tracing::info!("engine + worker shutdown complete");
         });
+    }
+
+    // --- Section 8.5: Peer-tools Connect accept loop (V1.174 P0, AR-67) ---
+    // Feature-gated: the daemon-side listening face for spoke dialers (own
+    // TcpListener, WS upgrade per connection, one connect_responder per
+    // conn, PeerSessionManager registration). The lane starts fail-closed —
+    // no peer allowlist is configured yet (T4 owns the outbound-authz
+    // config), so every dial is rejected at the handshake. A lane failure
+    // (config load / identity / bind) is non-fatal: the daemon core keeps
+    // running without peer tools, and nothing is admitted.
+    #[cfg(feature = "connect-client")]
+    {
+        let raw_home = state
+            .nexus_home()
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("nexus_home has no parent directory"))?;
+        let peer_shutdown = state.shutdown_notify();
+        match crate::connect::start_peer_tools_lane(raw_home, peer_shutdown).await {
+            Ok(handle) => {
+                tracing::info!(addr = %handle.addr, "peer-tools Connect accept loop started");
+                drop(handle.task);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "peer-tools Connect accept loop failed to start; continuing without peer tools"
+                );
+            }
+        }
     }
 
     // --- Section 9: HTTP/Unix server + lifecycle start ---
