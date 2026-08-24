@@ -178,6 +178,12 @@ nexus-wasm-host = { path = "../../crates/nexus-wasm-host" }
 # `transport-io` via the optional `connect-client` dep); the `--edges
 # normal` graph pins in tooling/check-graph-pins.sh never count dev-deps.
 rmcp = { version = "=1.8.0", default-features = false, features = ["client", "transport-async-rw"] }
+# V1.174 P1 T0 (AR-75 C-1): scripted in-process ACP agent probe
+# (`tests/mcp_acp_probe.rs`) — the SDK's Agent/Client roles + Channel
+# duplex run the full newSession.mcp_servers round trip without a live
+# LLM. Same =0.11.1 pin already in the shipped graph via nexus-acp-host;
+# dev-only, tests-only (graph pins use --edges normal, dev-deps excluded).
+agent-client-protocol = "=0.11.1"
 
 # V1.148 P3 N-C0 (DF-72): opt-in Connect Host surface. Feature OFF by default
 # — the default daemon graph stays libp2p-free (`cargo tree -p nexus42 -i
