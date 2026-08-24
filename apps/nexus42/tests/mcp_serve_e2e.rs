@@ -355,26 +355,33 @@ async fn call_tool_unroutable_is_method_not_found() {
 
 #[tokio::test]
 async fn call_tool_daemon_down_is_bounded_internal_error() {
-    // Point the child at a daemon that CANNOT exist: an out-of-range port
-    // (99999 > 65535) makes reqwest reject the URL at request-build time —
-    // a genuine transport-layer error with NO socket involved, which the
-    // bridge maps to INTERNAL_ERROR, bounded by the daemon client's
-    // connect/request timeouts (never hangs). (This environment proxies
-    // all outbound HTTP — even loopback and the reserved `.invalid` TLD —
-    // and answers empty 200s, so only a build-time URL failure is
-    // deterministic here.)
+    // Point the child at a VALID-format but unreachable daemon address: a
+    // closed loopback port (127.0.0.1, port 1 — nothing listens there).
+    // This pins the REAL bounded-timeout path (QC3 W-3): reqwest's connect
+    // to a dead-end socket fails through the daemon client's
+    // connect/request timeouts and the bridge maps it to INTERNAL_ERROR.
+    // The previous pin used an out-of-range port (99999 > 65535), which
+    // reqwest rejects at request-BUILD time — no socket involved — so a
+    // timeout regression would have passed silently.
+    //
+    // NO_PROXY is set on the child because reqwest's system-proxy lookup
+    // (macOS system-configuration) would otherwise route loopback through
+    // the machine's HTTP proxy, which answers empty 200s and defeats the
+    // dead-end-socket pin. With NO_PROXY=127.0.0.1 the connect is direct
+    // and deterministic (immediate connect-refused; no proxy interception).
     let home = tempfile::tempdir().expect("temp home");
     let nexus_dir = home.path().join(".nexus42");
     std::fs::create_dir_all(&nexus_dir).expect("nexus dir");
     std::fs::write(
         nexus_dir.join("config.toml"),
-        "daemon_url = \"http://127.0.0.1:99999\"\n",
+        "daemon_url = \"http://127.0.0.1:1\"\n",
     )
     .expect("config.toml");
     let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_nexus42"))
         .args(["mcp", "serve"])
         .env("HOME", home.path())
         .env("RUST_LOG", "off")
+        .env("NO_PROXY", "127.0.0.1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

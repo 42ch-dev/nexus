@@ -14,7 +14,7 @@
 //!   - `peer_tool::catalog_ids_equal_dispatchable_set_both_directions`
 //!   - [`catalog_spine_listing_set_equality_with_user_and_peer_origins`] (new)
 //! - tools/list ⇄ catalog (MCP bridge is a live read of `GET /v1/daemon/tools`):
-//!   - `apps/nexus42/tests/mcp_serve_e2e.rs::tools_list_mirrors_catalog_both_directions`
+//!   - `apps/nexus42/tests/mcp_serve_e2e.rs::initialize_handshake_and_tools_list_mirror_catalog`
 //! - listing ⇄ table (`/orchestration/capabilities` peer rows == PeerToolTable):
 //!   - [`catalog_spine_listing_set_equality_with_user_and_peer_origins`] (new)
 //! - hello ⇄ allowlist (daemon hello `capabilities[]` derives ONLY from the
@@ -41,7 +41,9 @@
 //!
 //! All tests use `#[serial]` — the process-global `PeerToolTable` is shared
 //! with `peer_tool.rs` (distinct seeds `[0x60+n; 32]` / `tools.t6.*` ids so
-//! the fixtures never collide).
+//! the fixtures never collide). `peer_session.rs` likewise uses `#[serial]`
+//! and explicit `evict_peer` teardown for every test that admits table rows
+//! (QC-fix W-B — the earlier claim was incomplete without it).
 
 #![cfg(feature = "connect-client")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]

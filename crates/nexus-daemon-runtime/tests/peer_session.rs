@@ -25,10 +25,12 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
+use nexus_daemon_runtime::connect::peer_tool_table;
 use nexus_daemon_runtime::connect::{
     daemon_manifest, spawn_accept_loop, ws_config, PeerResponderOptions, PeerSessionManager,
     PeerToolsConfig, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES,
 };
+use serial_test::serial;
 
 /// Fixed seeds (daemon + dialers).
 const fn seed_host() -> [u8; 32] {
@@ -180,6 +182,7 @@ fn parked_handler(park: Arc<Notify>) -> ToolHandler {
 // ── DoD ①: two-connection replace ─────────────────────────────────────────
 
 #[tokio::test]
+#[serial]
 async fn second_session_same_peer_replaces_first() {
     let peer_a = peer_id_of(seed_peer(0));
     let mut keys = HashMap::new();
@@ -226,18 +229,18 @@ async fn second_session_same_peer_replaces_first() {
     );
 
     // Exactly one live session for the peer; the old session's responder was
-    // closed and its reverse-index entries evicted; the fresh session's
-    // entries were admitted.
+    // closed and its table entries evicted; the fresh session's entries were
+    // admitted. The process-global PeerToolTable is the single authority for
+    // "which peer owns a tool id" (QC-fix S-c — the session-scoped reverse
+    // index was removed).
     assert_eq!(server.sessions.session_count(), 1);
-    assert_eq!(
-        server.sessions.tool_owner("tools.t2.old"),
-        None,
-        "old entries must be evicted"
+    assert!(
+        peer_tool_table().get("tools.t2.old").is_none(),
+        "old entries must be evicted from the table"
     );
-    assert_eq!(
-        server.sessions.tool_owner("tools.t2.new"),
-        Some(peer_a.clone()),
-        "fresh admission must be indexed"
+    assert!(
+        peer_tool_table().get("tools.t2.new").is_some(),
+        "fresh admission must be in the table"
     );
     assert_eq!(adapter_b.state(), RemoteAdapterState::Established);
     assert!(
@@ -252,6 +255,9 @@ async fn second_session_same_peer_replaces_first() {
     adapter_a.close();
     adapter_b.close();
     server.task.abort();
+    // QC-fix W-B: explicit teardown — the process-global PeerToolTable is
+    // shared across test binaries; leave no rows behind.
+    peer_tool_table().evict_peer(&peer_a, None);
 }
 
 // ── DoD ②: handshake failure ⇒ immediate close, zero session state ────────
@@ -299,6 +305,7 @@ async fn allowlisted_peer_without_key_is_rejected_at_handshake() {
 // ── DoD ③: close observation → eviction + bounded in-flight invoke ────────
 
 #[tokio::test]
+#[serial]
 async fn transport_drop_evicts_session_and_resolves_in_flight_invoke() {
     let peer_a = peer_id_of(seed_peer(0));
     let mut keys = HashMap::new();
@@ -350,11 +357,14 @@ async fn transport_drop_evicts_session_and_resolves_in_flight_invoke() {
         "transport drop must evict the session (same tick as observed close)"
     );
     server.task.abort();
+    // QC-fix W-B: explicit teardown — the global table row must be gone.
+    peer_tool_table().evict_peer(&peer_a, None);
 }
 
 // ── DoD ④: accept-loop independence (load) ────────────────────────────────
 
 #[tokio::test]
+#[serial]
 async fn accept_loop_stays_responsive_under_session_load() {
     // 3 concurrent established sessions + a refused excess dial: the accept
     // loop never awaits session work, so all dials settle within the bound.
@@ -422,11 +432,16 @@ async fn accept_loop_stays_responsive_under_session_load() {
         a.close();
     }
     server.task.abort();
+    // QC-fix W-B: explicit teardown for every peer admitted to the table.
+    for i in 0..5 {
+        peer_tool_table().evict_peer(&peer_id_of(seed_peer(i)), None);
+    }
 }
 
 // ── DoD ⑤: session limit — 9th concurrent session refused at accept ───────
 
 #[tokio::test]
+#[serial]
 async fn ninth_concurrent_session_is_refused_at_accept() {
     let mut allowlist = Vec::new();
     let mut keys = HashMap::new();
@@ -470,5 +485,62 @@ async fn ninth_concurrent_session_is_refused_at_accept() {
     for a in &adapters {
         a.close();
     }
+    server.task.abort();
+    // QC-fix W-B: explicit teardown for every peer admitted to the table.
+    for i in 0..8 {
+        peer_tool_table().evict_peer(&peer_id_of(seed_peer(i)), None);
+    }
+}
+
+// ── QC-fix W-A: in-flight dial flood — never-hello connections cannot
+// exceed the cap ───────────────────────────────────────────────────────────
+
+#[tokio::test]
+#[serial]
+async fn dial_flood_of_incomplete_handshakes_cannot_exceed_session_cap() {
+    // Raw TCP connections that never send a WS upgrade: each holds an
+    // accept slot (in-flight) but never registers. The cap must bound
+    // in-flight + registered TOGETHER (QC2 F-001 / QC3 W-1) — the old
+    // registered-only gate left this window unbounded.
+    let server = start_server(2, Vec::new(), HashMap::new(), &[]).await;
+
+    let mut sockets = Vec::new();
+    for _ in 0..6 {
+        sockets.push(TcpStream::connect(server.addr).await.expect("connect"));
+    }
+    assert_eq!(
+        sockets.len(),
+        6,
+        "all six raw dials must be open before the gate is asserted"
+    );
+    assert!(
+        wait_until(
+            || server.sessions.connection_count() == 2,
+            Duration::from_secs(5)
+        )
+        .await,
+        "accept loop must reserve exactly max_sessions in-flight slots"
+    );
+    assert_eq!(
+        server.sessions.connection_count(),
+        2,
+        "registered + in-flight stays at the cap while 6 dials are open"
+    );
+    assert_eq!(
+        server.sessions.session_count(),
+        0,
+        "no dial completes the handshake"
+    );
+
+    // Dropping every dial releases its reservation (no counter leak).
+    sockets.clear();
+    assert!(
+        wait_until(
+            || server.sessions.connection_count() == 0,
+            Duration::from_secs(5)
+        )
+        .await,
+        "dropping the dials must release all in-flight reservations"
+    );
     server.task.abort();
 }

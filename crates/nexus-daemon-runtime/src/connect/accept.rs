@@ -11,8 +11,9 @@
 //!   — every connection is handed to a spawned task. The loop body is only
 //!   `accept()` + the session-limit gate + `spawn`.
 //! - **Session limit**: excess connections are refused at accept with a
-//!   logged refusal (the gate counts registered sessions; a 9th concurrent
-//!   session is closed before any session work).
+//!   logged refusal. The gate counts registered sessions PLUS in-flight
+//!   (in-handshake) connections (QC-fix W-A): a dial flood of incomplete
+//!   handshakes cannot exceed the cap or spawn unbounded handshake tasks.
 //! - **Close observation** (AR-67 #4, no spoke API changes): the
 //!   nexus-owned [`ObservedTransport`] wrapper sets a flag + fires a
 //!   `Notify` on the first transport error/close; the monitor awaits it and
@@ -203,12 +204,15 @@ pub fn spawn_accept_loop(
                     continue;
                 }
             };
-            // Session limit gate at accept (AR-67 #4): excess closed at
-            // accept with a logged refusal — the dialer fails fast.
-            if sessions.session_count() >= config.max_sessions {
+            // Session limit gate at accept (AR-67 #4, QC-fix W-A): excess
+            // closed at accept with a logged refusal — the dialer fails
+            // fast. The reservation is taken BEFORE the spawn so
+            // in-handshake connections count against the cap (the old
+            // registered-only count left a dial flood unbounded).
+            if !sessions.reserve_in_flight(config.max_sessions) {
                 tracing::warn!(
                     limit = config.max_sessions,
-                    "peer session refused at accept: session limit reached"
+                    "peer session limit reached (registered + in-flight)"
                 );
                 drop(stream);
                 continue;
@@ -241,6 +245,9 @@ async fn handle_connection(
         Ok(ws) => ws,
         Err(e) => {
             tracing::debug!(error = %e, "peer-tools WS upgrade failed");
+            // QC-fix W-A: the accept reservation is released — the
+            // connection never reaches the handshake.
+            sessions.release_in_flight();
             return;
         }
     };
@@ -283,8 +290,10 @@ async fn monitor_session(
     let Some(peer_id) = established else {
         // Handshake failed (rejection → responder closed itself) or timed
         // out: close the responder so the dialer fails fast. Zero session
-        // state — the manager never saw this peer.
+        // state — the manager never saw this peer. The accept reservation
+        // (QC-fix W-A) is released here.
         responder.close();
+        sessions.release_in_flight();
         return;
     };
 

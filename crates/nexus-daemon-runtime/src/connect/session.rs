@@ -8,18 +8,28 @@
 //!   (T2 granularity: the authenticated manifest's `tools[]`; the T3
 //!   admission filter chain narrows this set), and the establishment
 //!   timestamp.
-//! - `reverse`: `tool_id → peer_id` — the per-session id index used for
-//!   eviction. T3 replaces this surface with the process-global
-//!   `PeerToolTable` (AR-68); this manager stays the session-record owner.
+//! - `in_flight`: an atomic count of connections accepted but not yet
+//!   registered (in-handshake) or torn down. The accept loop gates on
+//!   `in_flight + sessions.len() >= max_sessions` so a dial flood of
+//!   incomplete handshakes cannot exceed the cap (QC-fix W-A; the
+//!   registered count alone left in-handshake connections uncounted).
 //!
 //! Lifecycle:
+//! - `reserve_in_flight` is called at accept, BEFORE the WS upgrade +
+//!   handshake (which run inside the spawned connection task). It fails
+//!   closed when the budget is exhausted — a refused connection never
+//!   reserves a slot.
 //! - `register` is the deterministic last-wins replacement point: a second
 //!   session with the same peer id replaces the first (old responder
-//!   closed, old reverse entries evicted, fresh admission) — no two live
-//!   sessions per peer id (AR-67 #4).
+//!   closed, fresh admission) — no two live sessions per peer id
+//!   (AR-67 #4). It also converts the connection's in-flight reservation
+//!   into the registered session (releases the in-flight slot).
 //! - `evict` (with the expected-responder guard) is the close-observation
 //!   teardown: the session's monitor calls it when the transport drops; the
 //!   guard prevents a stale monitor from evicting a replacement session.
+//! - `release_in_flight` is the failure/close fallback: a connection task
+//!   that ends without registering (handshake rejection, timeout, WS
+//!   upgrade failure) releases its reservation.
 //!
 //! The manager is lock-light: `std::sync::Mutex` critical sections are
 //! synchronous (no `.await` under a guard) — `ConnectResponder::close` is
@@ -28,6 +38,7 @@
 //! policy), so public methods never panic.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use chrono::{DateTime, Utc};
@@ -53,9 +64,10 @@ pub struct SessionRecord {
 /// Process-scoped session registry (one per accept loop).
 pub struct PeerSessionManager {
     sessions: Mutex<HashMap<String, SessionRecord>>,
-    /// `tool_id → peer_id` reverse index (session-scoped; T3 replaces this
-    /// surface with the `PeerToolTable`).
-    reverse: Mutex<HashMap<String, String>>,
+    /// In-handshake / pre-registration connection count (accepted but not
+    /// yet registered). Together with the sessions map it bounds the total
+    /// accepted connections at the accept gate (QC-fix W-A).
+    in_flight: AtomicUsize,
 }
 
 impl Default for PeerSessionManager {
@@ -70,7 +82,7 @@ impl PeerSessionManager {
     pub fn new() -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
-            reverse: Mutex::new(HashMap::new()),
+            in_flight: AtomicUsize::new(0),
         }
     }
 
@@ -81,6 +93,51 @@ impl PeerSessionManager {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .len()
+    }
+
+    /// Total connection budget used: registered sessions + in-flight
+    /// (in-handshake) connections.
+    #[must_use]
+    pub fn connection_count(&self) -> usize {
+        self.session_count() + self.in_flight.load(Ordering::Relaxed)
+    }
+
+    /// Reserve one in-flight slot for an accepted connection.
+    ///
+    /// Called by the accept loop BEFORE spawning the connection task (the
+    /// WS upgrade + handshake run inside that task). Returns `false` when
+    /// the budget is exhausted — the caller refuses the connection. The
+    /// slot is released via [`PeerSessionManager::release_in_flight`] when
+    /// the connection task finishes without registering (handshake failure
+    /// or timeout) and converted to a registered session by `register`.
+    #[must_use]
+    pub fn reserve_in_flight(&self, max_sessions: usize) -> bool {
+        let mut in_flight = self.in_flight.load(Ordering::Relaxed);
+        loop {
+            if self.session_count() + in_flight >= max_sessions {
+                return false;
+            }
+            match self.in_flight.compare_exchange_weak(
+                in_flight,
+                in_flight + 1,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return true,
+                Err(observed) => in_flight = observed,
+            }
+        }
+    }
+
+    /// Release an in-flight reservation (handshake failed / timed out, or
+    /// the connection task ended without registering). Saturating — a
+    /// defensive double-release can never underflow the counter.
+    pub fn release_in_flight(&self) {
+        let _ = self
+            .in_flight
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+                Some(v.saturating_sub(1))
+            });
     }
 
     /// Read-only clone of one session record.
@@ -97,27 +154,6 @@ impl PeerSessionManager {
     #[must_use]
     pub fn peer_ids(&self) -> Vec<String> {
         self.sessions
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .keys()
-            .cloned()
-            .collect()
-    }
-
-    /// Reverse-index lookup: which live peer owns `tool_id`?
-    #[must_use]
-    pub fn tool_owner(&self, tool_id: &str) -> Option<String> {
-        self.reverse
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(tool_id)
-            .cloned()
-    }
-
-    /// All tool ids currently indexed by live sessions.
-    #[must_use]
-    pub fn indexed_tool_ids(&self) -> Vec<String> {
-        self.reverse
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .keys()
@@ -151,19 +187,18 @@ impl PeerSessionManager {
             };
             sessions.insert(peer_id.to_owned(), record)
         };
-        // Rebuild the reverse index for this peer (evict old entries, admit
-        // the fresh set).
-        let mut reverse = self.reverse.lock().unwrap_or_else(PoisonError::into_inner);
-        reverse.retain(|_tool_id, owner| owner != peer_id);
-        for tool_id in admitted_ids {
-            reverse.insert(tool_id.clone(), peer_id.to_owned());
-        }
-        drop(reverse);
+        // QC-fix W-A: the accept reservation converts into a registered
+        // session here. Release the in-flight slot AFTER the map insert —
+        // releasing first would open a transient window where a concurrent
+        // accept sees a freed slot and over-admits past the cap. A call
+        // without a prior reservation (defensive; e.g. direct unit usage)
+        // is a saturating no-op.
+        self.release_in_flight();
         if let Some(old) = replaced_record {
-            // Deterministic last-wins: the replaced session is closed (old
-            // entries evicted above; the old responder is torn down outside
-            // the lock — `close()` is synchronous and spawns the transport
-            // teardown, so no lock is held across a scheduling point).
+            // Deterministic last-wins: the replaced session is closed (the
+            // old responder is torn down outside the lock — `close()` is
+            // synchronous and spawns the transport teardown, so no lock is
+            // held across a scheduling point).
             old.responder.close();
             tracing::info!(%peer_id, "peer session replaced (same peer id)");
             true
@@ -188,9 +223,6 @@ impl PeerSessionManager {
             }
         };
         if let Some(record) = removed {
-            let mut reverse = self.reverse.lock().unwrap_or_else(PoisonError::into_inner);
-            reverse.retain(|_tool_id, owner| owner != peer_id);
-            drop(reverse);
             record.responder.close();
         }
         true

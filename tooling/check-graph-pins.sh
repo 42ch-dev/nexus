@@ -41,18 +41,35 @@ fail() {
   exit 1
 }
 
-# assert_empty <crate> <features...> <package>
+# assert_empty <spec> <features> <package>
 assert_empty() {
   local crate="$1"; shift
   local feats="$1"; shift
   local pkg="$1"
-  local out
-  out=$(cargo tree -p "$crate" $feats --edges normal -i "$pkg" 2>&1 || true)
+  # QC-fix S-a: capture the cargo-tree exit status. A FAILING `cargo tree`
+  # (typo'd package/feature, crate not in the workspace) yields empty output
+  # and a zero count — with `|| true` that false-greened the "absent" pin.
+  local out status=0
+  # `|| status=$?` (not a bare capture) so a failing cargo tree does NOT
+  # trip `set -e` before we can inspect its status (QC-fix S-a); `status`
+  # defaults to 0 so `set -u` stays satisfied on success.
+  out=$(cargo tree -p "$crate" $feats --edges normal -i "$pkg" 2>&1) || status=$?
   local count
-  # Only `<pkg> v<ver>` rows count (an empty `-i` report prints a bare
+  # Only count `<pkg> v<ver>` rows (an empty `-i` report prints a bare
   # "package not found" line; tree output also carries parent crate rows
   # like `nexus-spoke-adapter v0.1.0` that must not be counted).
   count=$(grep -c "^$pkg v[0-9]" <<<"$out" || true)
+  if [[ "$status" -ne 0 ]]; then
+    # `cargo tree -i <absent>` exits 101 with "did not match any packages" —
+    # that IS the normal absence signal. Any OTHER nonzero outcome (feature
+    # typo, invalid invocation, crate not in workspace) is a real tool
+    # failure and must fail the pin instead of false-greening the count.
+    if [[ "$out" == *"error: package ID specification \`$pkg\` did not match any packages"* ]]; then
+      : # legitimate absence — the zero-count check below confirms it
+    else
+      fail "cargo tree for $crate $feats (probe $pkg) failed (exit $status): $out"
+    fi
+  fi
   if [[ "$count" -ne 0 ]]; then
     fail "$pkg must be MISSING from $crate$feats graph, found $count entry/entries: $out"
   fi
@@ -65,12 +82,19 @@ assert_exactly_one() {
   local feats="$1"; shift
   local pkg="$1"
   local want="$2"
-  local out
-  out=$(cargo tree -p "$crate" $feats --edges normal -i "$pkg" 2>&1 || true)
+  # QC-fix S-a: propagate the cargo-tree exit status (a failed invocation
+  # must fail the pin loudly, not just yield an empty/one-line result).
+  local out status=0
+  # `|| status=$?` so a failing cargo tree does NOT trip `set -e` before
+  # the status check (QC-fix S-a); `status` defaults to 0 for success.
+  out=$(cargo tree -p "$crate" $feats --edges normal -i "$pkg" 2>&1) || status=$?
   local versions
   versions=$(grep "^$pkg v[0-9]" <<<"$out" | sed -E 's/.* v([^ ]+).*/\1/' | sort -u || true)
   local count
   count=$(wc -l <<<"$versions" | tr -d ' ')
+  if [[ "$status" -ne 0 ]]; then
+    fail "cargo tree for $crate $feats (probe $pkg) failed (status $status): $out"
+  fi
   if [[ "$count" -ne 1 ]]; then
     fail "$pkg for $crate $feats: expected exactly one version, got $count ($versions)"
   fi

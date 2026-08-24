@@ -26,6 +26,7 @@ use crate::api::handlers::host_tool_executor::ToolExecuteRequest;
 use crate::workspace::WorkspaceState;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use spoke_operations::{parse_tool_capability_id, SpokeResult};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -404,7 +405,11 @@ pub(crate) fn user_cap_catalog_admission(
     if name.starts_with("nexus.") {
         return Err(UserCapCatalogRefusal::ReservedNamespace);
     }
-    if matches_tools_grammar(name) {
+    // QC-fix S-d: the spoke-operations helper IS the grammar (single source
+    // of truth with the peer arm — the local `matches_tools_grammar` mirror
+    // was removed; spoke grammar is `tools.<ns>.<tool_id>` with ns
+    // `^[a-z][a-z0-9_-]*$` and tool_id `^[a-z0-9][a-z0-9_-]*$`).
+    if matches!(parse_tool_capability_id(name), SpokeResult::Ok(_)) {
         return Err(UserCapCatalogRefusal::ReservedNamespace);
     }
     if serde_json::from_str::<Value>(cap.input_schema())
@@ -443,35 +448,6 @@ pub enum UserCapCatalogRefusal {
     ReservedNamespace,
     /// `input_schema()` does not parse as a JSON object.
     InputSchemaNotObject,
-}
-
-/// Local mirror of the spoke tool grammar `^tools\.[a-z][a-z0-9_-]*\.[a-z0-9][a-z0-9_-]*$`
-/// (byte-identical to `spoke-operations`' `TOOL_CAPABILITY_PATTERN`).
-fn matches_tools_grammar(name: &str) -> bool {
-    let mut parts = name.split('.');
-    let Some(ns) = parts.next() else { return false };
-    if ns != "tools" {
-        return false;
-    }
-    let Some(seg1) = parts.next() else {
-        return false;
-    };
-    let Some(seg2) = parts.next() else {
-        return false;
-    };
-    if parts.next().is_some() {
-        return false;
-    }
-    let seg_ok = |s: &str, first: bool| {
-        !s.is_empty()
-            && s.bytes().enumerate().all(|(i, b)| {
-                b.is_ascii_lowercase()
-                    || b.is_ascii_digit()
-                    || (b == b'_' || b == b'-') && (i > 0 || !first)
-            })
-            && (first || s.as_bytes()[0].is_ascii_digit() || s.as_bytes()[0].is_ascii_lowercase())
-    };
-    seg_ok(seg1, true) && seg_ok(seg2, false)
 }
 
 // ─── Registry constructor ──────────────────────────────────────────────────

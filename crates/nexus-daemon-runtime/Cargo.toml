@@ -99,10 +99,12 @@ spoke-schemas = { workspace = true, optional = true }
 getrandom = { version = "0.2", optional = true }
 # V1.174 P0 T3 (AR-68): pure tool manifest/ABI helpers for the PeerToolTable
 # admission chain (`validate_manifest_tools`, `parse_tool_capability_id`,
-# `validate_tool_arguments`). Already in the default graph via
-# nexus-spoke-adapter (prior art, AR-73); optional keeps the feature-off
-# graph unchanged.
-spoke-operations = { workspace = true, optional = true }
+# `validate_tool_arguments`) AND for the user-capability catalog grammar
+# check (QC-fix S-d — the local `matches_tools_grammar` mirror was removed
+# in favor of the spoke helper). Already in the default graph via
+# nexus-spoke-adapter (prior art, AR-73) — non-optional changes nothing in
+# the shipped graph, verified by `tooling/check-graph-pins.sh`.
+spoke-operations = { workspace = true }
 
 [dev-dependencies]
 axum-test = "15"
@@ -139,7 +141,6 @@ connect-client = [
     "dep:tokio-tungstenite",
     "dep:spoke-schemas",
     "dep:getrandom",
-    "dep:spoke-operations",
 ]
 # V1.153 P2 (DF-73): embedded Web UI (rust-embed SPA bytes) — default ON so
 # the creator-facing daemon is unchanged; OFF (`--no-default-features`)

@@ -27,6 +27,7 @@
 //! handler overrides exist beyond the tools family + server info.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, Content, ErrorCode, Implementation, ListToolsResult,
@@ -39,6 +40,22 @@ use rmcp::{serve_server, ErrorData as McpError, RoleServer, ServerHandler};
 use crate::api::daemon_client::DaemonClient;
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
+/// MCP child per-request timeout, strictly above the user-capability
+/// sandbox wall so the sandbox wall-clock limit fires first.
+///
+/// `nexus-wasm-host`'s `DEFAULT_WALL_TIME` is 30 s; keeping this deadline at
+/// 45 s makes the timeout ordering deterministic (QC-fix S-b): a user
+/// capability that consumes its full wall budget is cut off by the
+/// daemon-side sandbox, and the child's HTTP request then completes with the
+/// daemon's honest timeout error well before this deadline.
+///
+/// Side-effect-after-timeout semantics: when the sandbox wall fires, the
+/// module's `run()` is aborted mid-execution — the caller observes a bounded
+/// failure while PARTIAL side effects of that run may already have landed
+/// (state-change ambiguity is inherent to wall-clock aborts, AR-70 #4).
+/// Keeping this deadline above the sandbox wall guarantees the child is
+/// never the party that cuts off a running user capability first.
+pub const MCP_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
 
 /// `nexus42 mcp` subcommands (hidden group; V1.35 CLI surface lock).
 #[derive(Debug, clap::Subcommand)]
@@ -70,7 +87,15 @@ pub async fn run(command: McpCommand, config: &CliConfig) -> Result<()> {
 /// Returns a server-init error when the rmcp handshake cannot complete, or
 /// a join error if the service loop panics.
 async fn serve(config: &CliConfig) -> Result<()> {
-    let client = DaemonClient::from_config(config);
+    // QC-fix S-b: use the MCP-specific request timeout (strictly above the
+    // user-cap sandbox wall) instead of the default 30 s request timeout,
+    // which RACED the sandbox wall (both could fire at ~30 s, making the
+    // timeout ordering nondeterministic).
+    let client = DaemonClient::with_timeouts(
+        &config.daemon_url,
+        crate::api::daemon_client::DEFAULT_CONNECT_TIMEOUT,
+        MCP_REQUEST_TIMEOUT,
+    )?;
     let handler = McpBridgeHandler { client };
 
     let service = serve_server(handler, stdio())
@@ -386,5 +411,18 @@ mod tests {
         let scalar = success_result(serde_json::json!("hello"));
         assert!(scalar.structured_content.is_none());
         assert_eq!(scalar.content.len(), 1);
+    }
+    #[test]
+    fn mcp_request_timeout_strictly_exceeds_user_cap_sandbox_wall() {
+        // QC-fix S-b: the child's request timeout must NEVER fire before
+        // the user-capability sandbox wall — the wall aborts the module
+        // first, so the timeout ordering is deterministic and a running
+        // user capability is never cut off by the child's HTTP client.
+        let sandbox_wall = nexus_wasm_host::SandboxConfig::default().wall_time;
+        assert!(
+            MCP_REQUEST_TIMEOUT > sandbox_wall,
+            "MCP child request timeout ({MCP_REQUEST_TIMEOUT:?}) must strictly exceed \
+             the user-cap sandbox wall ({sandbox_wall:?})"
+        );
     }
 }
