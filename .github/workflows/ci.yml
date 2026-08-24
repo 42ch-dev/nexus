@@ -245,8 +245,12 @@ jobs:
         run: bash tooling/check-schema-drift.sh
       - name: Check wire schema drift
         run: bash tooling/check-wire-drift.sh
-      - name: Check module SDK drift
-        run: bash tooling/check-module-sdk-drift.sh
+      # V1.174 P0 T6 (AR-74): dependency graph pins — default graph stays
+      # free of spoke-connect/libp2p; feature-on graphs resolve exactly one
+      # 0.11.1 spoke-operations / 0.56.x libp2p / 1.8.0 rmcp. `cargo tree`
+      # needs a Rust toolchain; setup-monorepo above provides it.
+      - name: Check graph pins
+        run: bash tooling/check-graph-pins.sh
 
   # Compute module DX — SDK + modules (V1.170 P0, AR-12). Runs only when
   # module-affecting paths change (or on manual workflow_dispatch). The leg is

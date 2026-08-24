@@ -172,6 +172,12 @@ tempfile = "3"
 # already in the default graph via nexus-spoke-adapter; the dev-dep makes
 # its embedded-module registry callable from the tests.
 nexus-wasm-host = { path = "../../crates/nexus-wasm-host" }
+# V1.174 P0 T6 (AR-74): E2E MCP harness (`tests/mcp_serve_e2e.rs`) — rmcp
+# CLIENT (dev-only, tests-only) + the async-rw transport for the stdio
+# tuple. The shipped graph keeps exactly one rmcp 1.8.0 (`server` +
+# `transport-io` via the optional `connect-client` dep); the `--edges
+# normal` graph pins in tooling/check-graph-pins.sh never count dev-deps.
+rmcp = { version = "=1.8.0", default-features = false, features = ["client", "transport-async-rw"] }
 
 # V1.148 P3 N-C0 (DF-72): opt-in Connect Host surface. Feature OFF by default
 # — the default daemon graph stays libp2p-free (`cargo tree -p nexus42 -i
