@@ -12,7 +12,7 @@
 //! Honesty contract (AR-68 #7 + AR-70 §3): every listed id is dispatchable
 //! through the spine, and the spine only contains ids that passed admission
 //! (AR-68 #2/#6). Builtin rows emit the documented permissive
-//! `{"type":"object"}` input placeholder and no output schema (AcpWire refs
+//! `{"type":"object"}` input placeholder and no output schema (`AcpWire` refs
 //! are pseudo-schemas, not draft-2020-12).
 
 use crate::api::errors::NexusApiError;
@@ -83,8 +83,7 @@ pub async fn list_tools(
             input_schema: serde_json::to_string(&entry.descriptor.input)
                 .unwrap_or_else(|_| "{}".to_owned()),
             output_schema: Some(
-                serde_json::to_string(&entry.descriptor.output)
-                    .unwrap_or_else(|_| "{}".to_owned()),
+                serde_json::to_string(&entry.descriptor.output).unwrap_or_else(|_| "{}".to_owned()),
             ),
             origin: "peer".to_owned(),
         });

@@ -43,7 +43,8 @@ fn origin_peer_roundtrips() {
     // AR-68 #5: the wire origin enum gains "peer" (additive; the
     // orchestration CapabilityOrigin enum stays Builtin|User — the wire
     // string is produced by the handler).
-    let json = r#"{"name":"tools.t3.echo","input_schema":"{}","output_schema":"{}","origin":"peer"}"#;
+    let json =
+        r#"{"name":"tools.t3.echo","input_schema":"{}","output_schema":"{}","origin":"peer"}"#;
     let info: CapabilityInfo = serde_json::from_str(json).expect("deserialize CapabilityInfo");
     assert_eq!(info.origin, CapabilityInfoOrigin::Peer);
     let out = serde_json::to_value(&info).expect("serialize CapabilityInfo");

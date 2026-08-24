@@ -4,15 +4,15 @@
 //! with real spoke dialers, plus the boot path (`start_peer_tools_lane`)
 //! with on-disk `daemon.json` / `peer_keys.json` config.
 //!
-//! DoD coverage:
+//! `DoD` coverage:
 //! - derivation pin: hello tool capabilities == allowlist-derived exact ids
 //!   (set equality, machine-checked);
 //! - negotiation journey: integrator-side negotiated set = both-hello
 //!   intersection; non-advertised id ⇒ integrator adapter denies
 //!   (`op_unsupported`, `wire_code` preserved) — against a spoke dialer;
 //! - boot wiring: `start_peer_tools_lane` derives the hello from the
-//!   config allowlist (admission proves negotiation), Layer 0 peer_ids +
-//!   peer_keys.json gate the handshake, default-deny (empty allowlist ⇒
+//!   config allowlist (admission proves negotiation), Layer 0 `peer_ids` +
+//!   `peer_keys.json` gate the handshake, default-deny (empty allowlist ⇒
 //!   zero admitted);
 //! - config-load negatives (umbrella / malformed / reserved-ns ⇒ named
 //!   `InvalidAllowlist` error) live in `connect::config` unit tests.
@@ -62,10 +62,15 @@ fn peer_id_of(seed: [u8; 32]) -> String {
     derive_peer_id_from_ed25519_pubkey(&pubkey(seed))
 }
 
-/// 64-hex-char encoding of a 32-byte Ed25519 public key (peer_keys.json
+/// 64-hex-char encoding of a 32-byte Ed25519 public key (`peer_keys.json`
 /// format).
 fn hex32(bytes: [u8; 32]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(64);
+    for b in bytes {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
 }
 
 /// Dialer hello manifest advertising the given tools.
@@ -162,9 +167,9 @@ async fn dial_with_daemon_key(
     daemon_pubkey: [u8; 32],
 ) -> Result<Arc<RemoteAdapter>, RemoteAdapterError> {
     let url = format!("ws://{addr}/connect");
-    let stream = TcpStream::connect(addr).await.map_err(|e| {
-        RemoteAdapterError::Handshake(format!("tcp connect failed: {e}"))
-    })?;
+    let stream = TcpStream::connect(addr)
+        .await
+        .map_err(|e| RemoteAdapterError::Handshake(format!("tcp connect failed: {e}")))?;
     let (ws, _) = tokio_tungstenite::client_async_with_config(
         url,
         stream,
@@ -210,7 +215,8 @@ async fn wait_until(mut cond: impl FnMut() -> bool, timeout: Duration) -> bool {
 /// An echo tool handler: answers with the arguments echoed back.
 fn echo_handler() -> ToolHandler {
     Arc::new(|args: Value| {
-        Box::pin(async move { spoke_ok(json!({ "echo": args })) }) as BoxFuture<'static, SpokeResult<Value>>
+        Box::pin(async move { spoke_ok(json!({ "echo": args })) })
+            as BoxFuture<'static, SpokeResult<Value>>
     })
 }
 
@@ -277,7 +283,11 @@ async fn negotiation_journey_intersection_and_non_advertised_denied() {
         .expect("dial succeeds");
     adapter.register_tool_handler("tools.t4.echo", echo_handler());
     assert!(
-        wait_until(|| peer_tool_table().get("tools.t4.echo").is_some(), Duration::from_secs(5)).await,
+        wait_until(
+            || peer_tool_table().get("tools.t4.echo").is_some(),
+            Duration::from_secs(5)
+        )
+        .await,
         "echo admitted (negotiated)"
     );
     assert!(
@@ -336,7 +346,7 @@ async fn negotiation_journey_intersection_and_non_advertised_denied() {
 
 /// Write a `daemon.json` + `peer_keys.json` + fixed daemon identity under
 /// `home` (the RAW user home; `.nexus42` is joined internally).
-async fn write_boot_config(
+fn write_boot_config(
     home: &std::path::Path,
     tool_allowlist: &[&str],
     peer_ids: &[&str],
@@ -382,18 +392,26 @@ async fn boot_derives_hello_from_config_allowlist() {
             r#"{{"peer_keys":{{"{peer_id}":"{}"}}}}"#,
             hex32(pubkey(seed_peer(1)))
         )),
-    )
-    .await;
+    );
     let shutdown = Arc::new(Notify::new());
-    let handle = start_peer_tools_lane(tmp.path(), Arc::clone(&shutdown), HashSet::new())
+    let handle = start_peer_tools_lane(tmp.path(), Arc::clone(&shutdown), &[])
         .await
         .expect("lane starts");
-    let adapter = dial_with_daemon_key(handle.addr, seed_peer(1), &["tools.t4.echo"], pubkey(seed_host()))
-        .await
-        .expect("dial succeeds (peer allowlisted + key preconfigured)");
+    let adapter = dial_with_daemon_key(
+        handle.addr,
+        seed_peer(1),
+        &["tools.t4.echo"],
+        pubkey(seed_host()),
+    )
+    .await
+    .expect("dial succeeds (peer allowlisted + key preconfigured)");
     adapter.register_tool_handler("tools.t4.echo", echo_handler());
     assert!(
-        wait_until(|| peer_tool_table().get("tools.t4.echo").is_some(), Duration::from_secs(5)).await,
+        wait_until(
+            || peer_tool_table().get("tools.t4.echo").is_some(),
+            Duration::from_secs(5)
+        )
+        .await,
         "tool admitted ⇒ the boot hello advertised it (derived from the config allowlist)"
     );
     peer_tool_table().evict_peer(&peer_id, None);
@@ -417,15 +435,19 @@ async fn boot_default_deny_empty_allowlist_zero_admitted() {
             r#"{{"peer_keys":{{"{peer_id}":"{}"}}}}"#,
             hex32(pubkey(seed_peer(2)))
         )),
-    )
-    .await;
+    );
     let shutdown = Arc::new(Notify::new());
-    let handle = start_peer_tools_lane(tmp.path(), Arc::clone(&shutdown), HashSet::new())
+    let handle = start_peer_tools_lane(tmp.path(), Arc::clone(&shutdown), &[])
         .await
         .expect("lane starts");
-    let adapter = dial_with_daemon_key(handle.addr, seed_peer(2), &["tools.t4.echo"], pubkey(seed_host()))
-        .await
-        .expect("dial succeeds (peer allowlisted)");
+    let adapter = dial_with_daemon_key(
+        handle.addr,
+        seed_peer(2),
+        &["tools.t4.echo"],
+        pubkey(seed_host()),
+    )
+    .await
+    .expect("dial succeeds (peer allowlisted)");
     adapter.register_tool_handler("tools.t4.echo", echo_handler());
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(
@@ -454,14 +476,18 @@ async fn boot_rejects_peer_not_in_peer_ids() {
             hex32(pubkey(seed_peer(3))),
             hex32(pubkey(seed_peer(4)))
         )),
-    )
-    .await;
+    );
     let shutdown = Arc::new(Notify::new());
-    let handle = start_peer_tools_lane(tmp.path(), Arc::clone(&shutdown), HashSet::new())
+    let handle = start_peer_tools_lane(tmp.path(), Arc::clone(&shutdown), &[])
         .await
         .expect("lane starts");
-    let result = dial_with_daemon_key(handle.addr, seed_peer(4), &["tools.t4.echo"], pubkey(seed_host()))
-        .await;
+    let result = dial_with_daemon_key(
+        handle.addr,
+        seed_peer(4),
+        &["tools.t4.echo"],
+        pubkey(seed_host()),
+    )
+    .await;
     assert!(
         result.is_err(),
         "intruder dial must fail at the handshake (peer not in peer_ids)"

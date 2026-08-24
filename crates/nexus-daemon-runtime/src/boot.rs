@@ -1036,15 +1036,16 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         let peer_shutdown = state.shutdown_notify();
         // AR-68 #2(iii) reserved namespaces: builtin host-tool ids + user
         // capability names can never be admitted as peer tools.
-        let mut reserved_tool_ids: std::collections::HashSet<String> =
-            crate::capability_registry::host_tool_registry()
-                .ids()
-                .map(ToOwned::to_owned)
-                .collect();
+        let mut reserved_tool_ids: Vec<String> = crate::capability_registry::host_tool_registry()
+            .ids()
+            .map(ToOwned::to_owned)
+            .collect();
         if let Some(reg) = state.capability_registry() {
             reserved_tool_ids.extend(reg.iter().map(|cap| cap.name().to_owned()));
         }
-        match crate::connect::start_peer_tools_lane(raw_home, peer_shutdown, reserved_tool_ids).await {
+        match crate::connect::start_peer_tools_lane(raw_home, peer_shutdown, &reserved_tool_ids)
+            .await
+        {
             Ok(handle) => {
                 tracing::info!(addr = %handle.addr, "peer-tools Connect accept loop started");
                 drop(handle.task);

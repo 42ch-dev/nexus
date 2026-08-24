@@ -1,11 +1,11 @@
-//! V1.174 P0 T3 (AR-68) — PeerToolTable + spine extension + catalog route.
+//! V1.174 P0 T3 (AR-68) — `PeerToolTable` + spine extension + catalog route.
 //!
 //! Drives the real accept loop over a real `TcpListener` on `127.0.0.1:0`
 //! with real spoke dialers, then exercises the single dispatch spine
 //! (worker `HostToolExecutor` + HTTP `POST …/tool-executions` + catalog
 //! `GET /v1/daemon/tools`) against admitted peer tools and user caps.
 //!
-//! DoD coverage:
+//! `DoD` coverage:
 //! - admission matrix (grammar / reserved-ns / non-negotiated /
 //!   not-allowlisted / whole-manifest-invalid each refused with its named
 //!   refusal; valid manifest admits exact-id set with schemas verbatim);
@@ -111,7 +111,6 @@ fn dialer_manifest(host_id: &str, tool_ids: &[&str]) -> HostCapabilityManifest {
 /// router whose capability registry scans `scan_dir` (user caps).
 struct PeerTestServer {
     addr: std::net::SocketAddr,
-    sessions: Arc<PeerSessionManager>,
     task: JoinHandle<()>,
     shutdown: Arc<Notify>,
     http: axum_test::TestServer,
@@ -181,7 +180,6 @@ async fn start_server(
 
     PeerTestServer {
         addr,
-        sessions,
         task,
         shutdown,
         http,
@@ -196,9 +194,9 @@ async fn dial(
     tool_ids: &[&str],
 ) -> Result<Arc<RemoteAdapter>, RemoteAdapterError> {
     let url = format!("ws://{addr}/connect");
-    let stream = TcpStream::connect(addr).await.map_err(|e| {
-        RemoteAdapterError::Handshake(format!("tcp connect failed: {e}"))
-    })?;
+    let stream = TcpStream::connect(addr)
+        .await
+        .map_err(|e| RemoteAdapterError::Handshake(format!("tcp connect failed: {e}")))?;
     let (ws, _) = tokio_tungstenite::client_async_with_config(
         url,
         stream,
@@ -236,7 +234,8 @@ async fn wait_until(mut cond: impl FnMut() -> bool, timeout: Duration) -> bool {
 /// An echo tool handler: answers with the arguments echoed back.
 fn echo_handler() -> ToolHandler {
     Arc::new(|args: Value| {
-        Box::pin(async move { spoke_ok(json!({ "echo": args })) }) as BoxFuture<'static, SpokeResult<Value>>
+        Box::pin(async move { spoke_ok(json!({ "echo": args })) })
+            as BoxFuture<'static, SpokeResult<Value>>
     })
 }
 
@@ -273,7 +272,13 @@ fn write_capability_dir(root: &std::path::Path, name: &str) {
 }
 
 /// POST a tool execution through the HTTP spine.
-async fn post_tool_execution(server: &PeerTestServer, tool_name: &str, args: Value) -> (StatusCode, Value) {
+// axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
+#[allow(clippy::future_not_send)]
+async fn post_tool_execution(
+    server: &PeerTestServer,
+    tool_name: &str,
+    args: Value,
+) -> (StatusCode, Value) {
     let resp = server
         .http
         .post("/v1/daemon/agent-host/internal/tool-executions")
@@ -306,15 +311,31 @@ async fn valid_manifest_admits_exact_id_set_with_schemas_verbatim() {
     adapter.register_tool_handler("tools.t3.echo", echo_handler());
 
     assert!(
-        wait_until(|| peer_tool_table().get("tools.t3.echo").is_some(), Duration::from_secs(5)).await,
+        wait_until(
+            || peer_tool_table().get("tools.t3.echo").is_some(),
+            Duration::from_secs(5)
+        )
+        .await,
         "peer tool admitted"
     );
     let entry = peer_tool_table().get("tools.t3.echo").expect("entry");
     assert_eq!(entry.peer_id, peer_id);
-    assert_eq!(String::from(entry.descriptor.capability_id.clone()), "tools.t3.echo");
-    assert_eq!(entry.descriptor.input, json!({"type": "object"}).as_object().cloned().unwrap());
-    assert_eq!(entry.descriptor.output, json!({"type": "object"}).as_object().cloned().unwrap());
-    assert_eq!(peer_tool_table().peer_tool_ids(&peer_id), vec!["tools.t3.echo".to_owned()]);
+    assert_eq!(
+        String::from(entry.descriptor.capability_id.clone()),
+        "tools.t3.echo"
+    );
+    assert_eq!(
+        entry.descriptor.input,
+        json!({"type": "object"}).as_object().cloned().unwrap()
+    );
+    assert_eq!(
+        entry.descriptor.output,
+        json!({"type": "object"}).as_object().cloned().unwrap()
+    );
+    assert_eq!(
+        peer_tool_table().peer_tool_ids(&peer_id),
+        vec!["tools.t3.echo".to_owned()]
+    );
 
     // Cleanup: evict so the global table stays clean for other tests.
     peer_tool_table().evict_peer(&peer_id, None);
@@ -342,10 +363,17 @@ async fn grammar_reserved_negotiated_allowlist_refusals_are_named() {
         .expect("dial succeeds");
     adapter.register_tool_handler("tools.t3.other", echo_handler());
     assert!(
-        wait_until(|| peer_tool_table().get("tools.t3.other").is_none(), Duration::from_secs(5)).await,
+        wait_until(
+            || peer_tool_table().get("tools.t3.other").is_none(),
+            Duration::from_secs(5)
+        )
+        .await,
         "non-allowlisted tool refused"
     );
-    assert!(peer_tool_table().get("tools.t3.echo").is_none(), "no accidental admission");
+    assert!(
+        peer_tool_table().get("tools.t3.echo").is_none(),
+        "no accidental admission"
+    );
 
     // Reserved namespace: tools.nexus.* refused even when allowlisted.
     let peer_id2 = peer_id_of(seed_peer(3));
@@ -361,7 +389,11 @@ async fn grammar_reserved_negotiated_allowlist_refusals_are_named() {
         .expect("dial succeeds");
     adapter2.register_tool_handler("tools.nexus.evil", echo_handler());
     assert!(
-        wait_until(|| peer_tool_table().get("tools.nexus.evil").is_none(), Duration::from_secs(5)).await,
+        wait_until(
+            || peer_tool_table().get("tools.nexus.evil").is_none(),
+            Duration::from_secs(5)
+        )
+        .await,
         "reserved-ns tool refused"
     );
 
@@ -426,14 +458,21 @@ async fn unknown_peer_id_is_not_supported_identically_to_unknown_builtin() {
         .expect("dial succeeds");
     adapter.register_tool_handler("tools.t3.echo", echo_handler());
     assert!(
-        wait_until(|| peer_tool_table().get("tools.t3.echo").is_some(), Duration::from_secs(5)).await,
+        wait_until(
+            || peer_tool_table().get("tools.t3.echo").is_some(),
+            Duration::from_secs(5)
+        )
+        .await,
         "admitted"
     );
 
     // Worker spine: unknown peer id → not_supported (same as unknown builtin).
     let (status, body) = post_tool_execution(&server, "tools.t3.ghost", json!({})).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(body["error"]["code"], "not_supported", "worker spine: {body}");
+    assert_eq!(
+        body["error"]["code"], "not_supported",
+        "worker spine: {body}"
+    );
 
     // HTTP tool-executions: same.
     let (status2, body2) = post_tool_execution(&server, "tools.t3.ghost", json!({})).await;
@@ -442,7 +481,10 @@ async fn unknown_peer_id_is_not_supported_identically_to_unknown_builtin() {
 
     // Catalog: absent.
     let resp = server.http.get("/v1/daemon/tools").await;
-    let items = resp.json::<Value>()["items"].as_array().expect("items").clone();
+    let items = resp.json::<Value>()["items"]
+        .as_array()
+        .expect("items")
+        .clone();
     assert!(
         items.iter().all(|t| t["id"] != "tools.t3.ghost"),
         "ghost absent from catalog"
@@ -479,12 +521,19 @@ async fn user_cap_dispatchable_and_builtin_caps_absent_from_catalog() {
     // User cap dispatchable via HTTP tool-executions with run() result.
     let (status, body) = post_tool_execution(&server, "demo.pull", json!({})).await;
     // Engine-less boot arm: run() returns WorkerUnavailable → 503.
-    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "user cap run: {body}");
+    assert_eq!(
+        status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "user cap run: {body}"
+    );
 
     // User cap appears in catalog with origin user.
     let resp = server.http.get("/v1/daemon/tools").await;
     resp.assert_status(StatusCode::OK);
-    let items = resp.json::<Value>()["items"].as_array().expect("items").clone();
+    let items = resp.json::<Value>()["items"]
+        .as_array()
+        .expect("items")
+        .clone();
     let user = items
         .iter()
         .find(|t| t["id"] == "demo.pull")
@@ -525,7 +574,10 @@ async fn nexus_named_and_tools_grammar_user_caps_refused_at_catalog_admission() 
     .await;
 
     let resp = server.http.get("/v1/daemon/tools").await;
-    let items = resp.json::<Value>()["items"].as_array().expect("items").clone();
+    let items = resp.json::<Value>()["items"]
+        .as_array()
+        .expect("items")
+        .clone();
     assert!(
         items.iter().all(|t| t["id"] != "nexus.evil"),
         "nexus.* user cap refused from catalog"
@@ -559,14 +611,19 @@ async fn catalog_ids_equal_dispatchable_set_both_directions() {
         None,
     )
     .await;
-    let adapter = dial(server.addr, seed_peer(8), &["tools.t3.echo", "tools.t3.ping"])
-        .await
-        .expect("dial succeeds");
+    let adapter = dial(
+        server.addr,
+        seed_peer(8),
+        &["tools.t3.echo", "tools.t3.ping"],
+    )
+    .await
+    .expect("dial succeeds");
     adapter.register_tool_handler("tools.t3.echo", echo_handler());
     adapter.register_tool_handler("tools.t3.ping", echo_handler());
     assert!(
         wait_until(
-            || peer_tool_table().get("tools.t3.echo").is_some() && peer_tool_table().get("tools.t3.ping").is_some(),
+            || peer_tool_table().get("tools.t3.echo").is_some()
+                && peer_tool_table().get("tools.t3.ping").is_some(),
             Duration::from_secs(5)
         )
         .await,
@@ -575,7 +632,10 @@ async fn catalog_ids_equal_dispatchable_set_both_directions() {
 
     // Catalog ids == dispatchable set (both directions).
     let resp = server.http.get("/v1/daemon/tools").await;
-    let items = resp.json::<Value>()["items"].as_array().expect("items").clone();
+    let items = resp.json::<Value>()["items"]
+        .as_array()
+        .expect("items")
+        .clone();
     let catalog_ids: HashSet<&str> = items.iter().filter_map(|t| t["id"].as_str()).collect();
     for id in ["tools.t3.echo", "tools.t3.ping"] {
         assert!(catalog_ids.contains(id), "catalog contains {id}: {items:?}");
@@ -614,21 +674,32 @@ async fn disconnect_evicts_rows_table_and_catalog_same_tick() {
         .expect("dial succeeds");
     adapter.register_tool_handler("tools.t3.echo", echo_handler());
     assert!(
-        wait_until(|| peer_tool_table().get("tools.t3.echo").is_some(), Duration::from_secs(5)).await,
+        wait_until(
+            || peer_tool_table().get("tools.t3.echo").is_some(),
+            Duration::from_secs(5)
+        )
+        .await,
         "admitted"
     );
 
     // Drop the transport → close observation → eviction.
     adapter.close();
     assert!(
-        wait_until(|| peer_tool_table().get("tools.t3.echo").is_none(), Duration::from_secs(5)).await,
+        wait_until(
+            || peer_tool_table().get("tools.t3.echo").is_none(),
+            Duration::from_secs(5)
+        )
+        .await,
         "table row evicted same tick"
     );
     assert!(peer_tool_table().is_empty(), "zero rows after eviction");
 
     // Catalog shows no peer rows.
     let resp = server.http.get("/v1/daemon/tools").await;
-    let items = resp.json::<Value>()["items"].as_array().expect("items").clone();
+    let items = resp.json::<Value>()["items"]
+        .as_array()
+        .expect("items")
+        .clone();
     assert!(
         items.iter().all(|t| t["origin"] != "peer"),
         "no peer rows in catalog after eviction: {items:?}"
@@ -660,7 +731,11 @@ async fn duplicate_id_two_peer_collision_later_refused_first_stays() {
         .expect("dial a");
     adapter_a.register_tool_handler("tools.t3.echo", echo_handler());
     assert!(
-        wait_until(|| peer_tool_table().get("tools.t3.echo").is_some(), Duration::from_secs(5)).await,
+        wait_until(
+            || peer_tool_table().get("tools.t3.echo").is_some(),
+            Duration::from_secs(5)
+        )
+        .await,
         "first admitted"
     );
 
@@ -673,7 +748,10 @@ async fn duplicate_id_two_peer_collision_later_refused_first_stays() {
     // First stays bound to peer_a; peer_b's duplicate refused.
     let entry = peer_tool_table().get("tools.t3.echo").expect("first stays");
     assert_eq!(entry.peer_id, peer_a, "first peer keeps the id");
-    assert!(peer_tool_table().peer_tool_ids(&peer_b).is_empty(), "peer_b admitted nothing");
+    assert!(
+        peer_tool_table().peer_tool_ids(&peer_b).is_empty(),
+        "peer_b admitted nothing"
+    );
 
     peer_tool_table().evict_peer(&peer_a, None);
     peer_tool_table().evict_peer(&peer_b, None);

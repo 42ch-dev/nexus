@@ -132,7 +132,7 @@ impl PeerToolTable {
         &self,
         peer_id: &str,
         manifest: &HostCapabilityManifest,
-        responder: Arc<ConnectResponder>,
+        responder: &Arc<ConnectResponder>,
         daemon_capabilities: &HashSet<String>,
         tool_allowlist: &HashSet<String>,
         reserved_tool_ids: &HashSet<String>,
@@ -150,11 +150,7 @@ impl PeerToolTable {
         // Same-peer reconnect: evict prior rows first (AR-68 #3).
         if let Some(prior) = inner.sessions.remove(peer_id) {
             for id in &prior.tool_ids {
-                if inner
-                    .tools
-                    .get(id)
-                    .is_some_and(|e| e.peer_id == peer_id)
-                {
+                if inner.tools.get(id).is_some_and(|e| e.peer_id == peer_id) {
                     inner.tools.remove(id);
                 }
             }
@@ -164,7 +160,13 @@ impl PeerToolTable {
         for tool in &manifest.tools {
             let id = String::from(tool.capability_id.clone());
             // (iii) named exact-id filters.
-            if let Some(refusal) = refuse_tool(&id, daemon_capabilities, tool_allowlist, reserved_tool_ids, &inner.tools) {
+            if let Some(refusal) = refuse_tool(
+                &id,
+                daemon_capabilities,
+                tool_allowlist,
+                reserved_tool_ids,
+                &inner.tools,
+            ) {
                 tracing::warn!(%peer_id, tool_id = %id, refusal = ?refusal, "peer tool refused at admission");
                 continue;
             }
@@ -173,7 +175,7 @@ impl PeerToolTable {
                 PeerToolEntry {
                     peer_id: peer_id.to_owned(),
                     descriptor: tool.clone(),
-                    responder: Arc::clone(&responder),
+                    responder: Arc::clone(responder),
                 },
             );
             admitted.push(id);
@@ -182,7 +184,7 @@ impl PeerToolTable {
         inner.sessions.insert(
             peer_id.to_owned(),
             PeerSessionTools {
-                responder: Arc::clone(&responder),
+                responder: Arc::clone(responder),
                 tool_ids: admitted.clone(),
             },
         );
@@ -394,7 +396,7 @@ mod tests {
         let outcome = table.admit_and_register(
             "peer-a",
             &manifest,
-            responder(),
+            &responder(),
             &caps(&["tools.t3.echo"]),
             &caps(&["tools.t3.echo"]),
             &HashSet::new(),
@@ -407,9 +409,24 @@ mod tests {
         );
         let entry = table.get("tools.t3.echo").expect("entry present");
         assert_eq!(entry.peer_id, "peer-a");
-        assert_eq!(String::from(entry.descriptor.capability_id.clone()), "tools.t3.echo");
-        assert_eq!(entry.descriptor.input, serde_json::json!({"type": "object"}).as_object().cloned().unwrap());
-        assert_eq!(entry.descriptor.output, serde_json::json!({"type": "object"}).as_object().cloned().unwrap());
+        assert_eq!(
+            String::from(entry.descriptor.capability_id.clone()),
+            "tools.t3.echo"
+        );
+        assert_eq!(
+            entry.descriptor.input,
+            serde_json::json!({"type": "object"})
+                .as_object()
+                .cloned()
+                .unwrap()
+        );
+        assert_eq!(
+            entry.descriptor.output,
+            serde_json::json!({"type": "object"})
+                .as_object()
+                .cloned()
+                .unwrap()
+        );
     }
 
     #[test]
@@ -419,7 +436,7 @@ mod tests {
         let outcome = table.admit_and_register(
             "peer-a",
             &manifest,
-            responder(),
+            &responder(),
             &caps(&["tools.t3.echo"]),
             &HashSet::new(),
             &HashSet::new(),
@@ -459,7 +476,7 @@ mod tests {
         let outcome = table.admit_and_register(
             "peer-a",
             &manifest,
-            responder(),
+            &responder(),
             &caps(&["tools.t3.echo"]),
             &caps(&["tools.t3.echo"]),
             &HashSet::new(),
@@ -478,7 +495,7 @@ mod tests {
         let outcome = table.admit_and_register(
             "peer-a",
             &manifest,
-            responder(),
+            &responder(),
             &caps(&["tools.nexus.evil"]),
             &caps(&["tools.nexus.evil"]),
             &HashSet::new(),
@@ -499,7 +516,7 @@ mod tests {
         let outcome = table.admit_and_register(
             "peer-a",
             &manifest,
-            responder(),
+            &responder(),
             &caps(&["tools.t3.other"]),
             &caps(&["tools.t3.echo"]),
             &HashSet::new(),
@@ -522,7 +539,7 @@ mod tests {
         let first = table.admit_and_register(
             "peer-a",
             &manifest,
-            responder(),
+            &responder(),
             &caps(&["tools.t3.echo"]),
             &caps(&["tools.t3.echo"]),
             &HashSet::new(),
@@ -536,7 +553,7 @@ mod tests {
         let second = table.admit_and_register(
             "peer-b",
             &manifest,
-            responder(),
+            &responder(),
             &caps(&["tools.t3.echo"]),
             &caps(&["tools.t3.echo"]),
             &HashSet::new(),
@@ -547,7 +564,10 @@ mod tests {
                 tool_ids: Vec::new()
             }
         );
-        assert_eq!(table.get("tools.t3.echo").expect("first stays").peer_id, "peer-a");
+        assert_eq!(
+            table.get("tools.t3.echo").expect("first stays").peer_id,
+            "peer-a"
+        );
     }
 
     #[test]
@@ -557,7 +577,7 @@ mod tests {
         let _ = table.admit_and_register(
             "peer-a",
             &manifest,
-            responder(),
+            &responder(),
             &caps(&["tools.t3.echo"]),
             &caps(&["tools.t3.echo"]),
             &HashSet::new(),
@@ -565,13 +585,16 @@ mod tests {
         let _ = table.admit_and_register(
             "peer-a",
             &manifest,
-            responder(),
+            &responder(),
             &caps(&["tools.t3.echo"]),
             &caps(&["tools.t3.echo"]),
             &HashSet::new(),
         );
         assert_eq!(table.len(), 1);
-        assert_eq!(table.get("tools.t3.echo").expect("readmitted").peer_id, "peer-a");
+        assert_eq!(
+            table.get("tools.t3.echo").expect("readmitted").peer_id,
+            "peer-a"
+        );
     }
 
     #[test]
@@ -581,7 +604,7 @@ mod tests {
         let _ = table.admit_and_register(
             "peer-a",
             &manifest,
-            responder(),
+            &responder(),
             &caps(&["tools.t3.echo", "tools.t3.ping"]),
             &caps(&["tools.t3.echo", "tools.t3.ping"]),
             &HashSet::new(),

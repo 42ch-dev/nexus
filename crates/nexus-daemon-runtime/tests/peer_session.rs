@@ -48,7 +48,11 @@ fn peer_id_of(seed: [u8; 32]) -> String {
 
 /// Dialer hello manifest advertising one tool.
 fn dialer_manifest(host_id: &str, tool_id: &str) -> HostCapabilityManifest {
-    let namespace = tool_id.split('.').nth(1).expect("tools.<ns>.<id>").to_owned();
+    let namespace = tool_id
+        .split('.')
+        .nth(1)
+        .expect("tools.<ns>.<id>")
+        .to_owned();
     serde_json::from_value(serde_json::json!({
         "schema_version": 1,
         "host_id": host_id,
@@ -125,9 +129,9 @@ async fn dial(
     tool_id: &str,
 ) -> Result<Arc<RemoteAdapter>, RemoteAdapterError> {
     let url = format!("ws://{addr}/connect");
-    let stream = TcpStream::connect(addr).await.map_err(|e| {
-        RemoteAdapterError::Handshake(format!("tcp connect failed: {e}"))
-    })?;
+    let stream = TcpStream::connect(addr)
+        .await
+        .map_err(|e| RemoteAdapterError::Handshake(format!("tcp connect failed: {e}")))?;
     let (ws, _) = tokio_tungstenite::client_async_with_config(
         url,
         stream,
@@ -180,10 +184,18 @@ async fn second_session_same_peer_replaces_first() {
     let peer_a = peer_id_of(seed_peer(0));
     let mut keys = HashMap::new();
     keys.insert(peer_a.clone(), pubkey(seed_peer(0)));
-    let server = start_server(8, vec![peer_a.clone()], keys, &["tools.t2.old", "tools.t2.new"]).await;
+    let server = start_server(
+        8,
+        vec![peer_a.clone()],
+        keys,
+        &["tools.t2.old", "tools.t2.new"],
+    )
+    .await;
 
     // First dial: same peer id, manifest tool A.
-    let adapter_a = dial(server.addr, seed_peer(0), "tools.t2.old").await.unwrap();
+    let adapter_a = dial(server.addr, seed_peer(0), "tools.t2.old")
+        .await
+        .unwrap();
     assert!(
         wait_until(
             || server.sessions.get(&peer_a).is_some(),
@@ -197,7 +209,9 @@ async fn second_session_same_peer_replaces_first() {
 
     // Second dial: SAME peer id, different manifest — deterministic
     // last-wins replace.
-    let adapter_b = dial(server.addr, seed_peer(0), "tools.t2.new").await.unwrap();
+    let adapter_b = dial(server.addr, seed_peer(0), "tools.t2.new")
+        .await
+        .unwrap();
     assert!(
         wait_until(
             || {
@@ -291,7 +305,9 @@ async fn transport_drop_evicts_session_and_resolves_in_flight_invoke() {
     keys.insert(peer_a.clone(), pubkey(seed_peer(0)));
     let server = start_server(8, vec![peer_a.clone()], keys, &["tools.t2.slow"]).await;
 
-    let adapter = dial(server.addr, seed_peer(0), "tools.t2.slow").await.unwrap();
+    let adapter = dial(server.addr, seed_peer(0), "tools.t2.slow")
+        .await
+        .unwrap();
     assert!(
         wait_until(
             || server.sessions.get(&peer_a).is_some(),
@@ -307,7 +323,11 @@ async fn transport_drop_evicts_session_and_resolves_in_flight_invoke() {
     let responder = server.sessions.get(&peer_a).expect("session").responder;
     let invoke = tokio::spawn({
         let responder = Arc::clone(&responder);
-        async move { responder.invoke_tool("tools.t2.slow", serde_json::json!({})).await }
+        async move {
+            responder
+                .invoke_tool("tools.t2.slow", serde_json::json!({}))
+                .await
+        }
     });
 
     // Drop the peer's transport: the wrapper observes the close and the
@@ -322,7 +342,11 @@ async fn transport_drop_evicts_session_and_resolves_in_flight_invoke() {
         "dropped-transport invoke must fail with a rejection, got {result:?}"
     );
     assert!(
-        wait_until(|| server.sessions.session_count() == 0, Duration::from_secs(5)).await,
+        wait_until(
+            || server.sessions.session_count() == 0,
+            Duration::from_secs(5)
+        )
+        .await,
         "transport drop must evict the session (same tick as observed close)"
     );
     server.task.abort();
@@ -348,7 +372,11 @@ async fn accept_loop_stays_responsive_under_session_load() {
 
     let mut adapters = Vec::new();
     for i in 0..3 {
-        adapters.push(dial(server.addr, seed_peer(i), "tools.t2.other").await.unwrap());
+        adapters.push(
+            dial(server.addr, seed_peer(i), "tools.t2.other")
+                .await
+                .unwrap(),
+        );
     }
     assert!(
         wait_until(
@@ -379,7 +407,9 @@ async fn accept_loop_stays_responsive_under_session_load() {
         )
         .await
     );
-    let readmitted = dial(server.addr, seed_peer(4), "tools.t2.rejoin").await.unwrap();
+    let readmitted = dial(server.addr, seed_peer(4), "tools.t2.rejoin")
+        .await
+        .unwrap();
     assert!(
         wait_until(
             || server.sessions.session_count() == 3,
@@ -409,7 +439,11 @@ async fn ninth_concurrent_session_is_refused_at_accept() {
 
     let mut adapters = Vec::new();
     for i in 0..8 {
-        adapters.push(dial(server.addr, seed_peer(i), "tools.t2.other").await.unwrap());
+        adapters.push(
+            dial(server.addr, seed_peer(i), "tools.t2.other")
+                .await
+                .unwrap(),
+        );
     }
     assert!(
         wait_until(
@@ -423,7 +457,10 @@ async fn ninth_concurrent_session_is_refused_at_accept() {
     // the dialer fails fast and the count stays at 8.
     let started = Instant::now();
     let ninth = dial(server.addr, seed_peer(8), "tools.t2.ninth").await;
-    assert!(ninth.is_err(), "9th concurrent session must be refused at accept");
+    assert!(
+        ninth.is_err(),
+        "9th concurrent session must be refused at accept"
+    );
     assert!(
         started.elapsed() < Duration::from_secs(5),
         "refusal must be immediate (no park)"

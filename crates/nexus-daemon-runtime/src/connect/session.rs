@@ -135,7 +135,12 @@ impl PeerSessionManager {
     /// The old responder is closed OUTSIDE the mutex guard (synchronous
     /// `ConnectResponder::close` spawns the transport teardown) so no lock is
     /// held across a scheduling point.
-    pub fn register(&self, peer_id: &str, responder: Arc<ConnectResponder>, admitted_ids: &[String]) -> bool {
+    pub fn register(
+        &self,
+        peer_id: &str,
+        responder: Arc<ConnectResponder>,
+        admitted_ids: &[String],
+    ) -> bool {
         let replaced_record = {
             let mut sessions = self.sessions.lock().unwrap_or_else(PoisonError::into_inner);
             let record = SessionRecord {

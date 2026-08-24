@@ -247,7 +247,9 @@ async fn handle_connection(
     let observed = ObservedTransport::new(Arc::new(WsTransport::new(ws)));
     let responder = connect_responder(ConnectResponderOptions {
         transport: Arc::clone(&observed) as Arc<dyn Transport>,
-        identity: RemoteIdentity { seed: options.identity_seed },
+        identity: RemoteIdentity {
+            seed: options.identity_seed,
+        },
         manifest: (*options.manifest).clone(),
         allowlist: options.allowlist.clone(),
         peer_keys: options.peer_keys.clone(),
@@ -305,7 +307,7 @@ async fn monitor_session(
             match crate::connect::peer_tool_table().admit_and_register(
                 &peer_id,
                 &manifest,
-                Arc::clone(&responder),
+                &responder,
                 &daemon_caps,
                 &allowlist,
                 &options.reserved_tool_ids,
@@ -386,16 +388,17 @@ async fn wait_until_established(responder: &Arc<ConnectResponder>) -> Option<Str
 pub async fn start_peer_tools_lane(
     home: &Path,
     shutdown: Arc<Notify>,
-    reserved_tool_ids: std::collections::HashSet<String>,
+    reserved_tool_ids: &[String],
 ) -> anyhow::Result<PeerToolsLaneHandle> {
     let config = Arc::new(PeerToolsConfig::load(home)?);
     crate::boot::ensure_remote_bind_allowed(&config.host)?;
     let identity_seed = identity::load_or_create_identity(home)?;
-    let device_id = nexus_home_layout::device_id::get_or_create_device_id(home)
-        .map_err(|e| IdentityError::Io {
+    let device_id = nexus_home_layout::device_id::get_or_create_device_id(home).map_err(|e| {
+        IdentityError::Io {
             path: home.display().to_string(),
             source: std::io::Error::other(format!("device id resolution failed: {e}")),
-        })?;
+        }
+    })?;
     // AR-69 derivation lock: the hello tool capabilities derive ONLY from
     // the operator allowlist (validated at config load). The boot-time
     // snapshot is restart-scoped.
@@ -409,7 +412,7 @@ pub async fn start_peer_tools_lane(
         manifest,
         allowlist: config.peer_ids.clone(),
         peer_keys,
-        reserved_tool_ids,
+        reserved_tool_ids: reserved_tool_ids.iter().cloned().collect(),
     };
     let task = spawn_accept_loop(
         listener,

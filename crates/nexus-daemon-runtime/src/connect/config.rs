@@ -110,10 +110,7 @@ impl PeerToolsConfig {
         match std::fs::read_to_string(&path) {
             Ok(raw) => {
                 let parsed: Self = serde_json::from_str(&raw).map_err(|e| {
-                    ConnectConfigError::Malformed(format!(
-                        "invalid {}: {e}",
-                        path.display()
-                    ))
+                    ConnectConfigError::Malformed(format!("invalid {}: {e}", path.display()))
                 })?;
                 if parsed.max_sessions == 0 {
                     return Err(ConnectConfigError::Invalid(
@@ -188,10 +185,7 @@ pub fn load_peer_keys(home: &Path) -> Result<HashMap<String, [u8; 32]>, ConnectC
     match std::fs::read_to_string(&path) {
         Ok(raw) => {
             let parsed: PeerKeysFile = serde_json::from_str(&raw).map_err(|e| {
-                ConnectConfigError::InvalidPeerKeys(format!(
-                    "invalid {}: {e}",
-                    path.display()
-                ))
+                ConnectConfigError::InvalidPeerKeys(format!("invalid {}: {e}", path.display()))
             })?;
             let mut keys = HashMap::with_capacity(parsed.peer_keys.len());
             for (peer_id, hex_key) in parsed.peer_keys {
@@ -357,9 +351,9 @@ mod tests {
                         "umbrella reason for {entry:?}: {reason}"
                     );
                 }
-                other => panic!(
-                    "umbrella {entry:?} must fail load with InvalidAllowlist, got {other:?}"
-                ),
+                other => {
+                    panic!("umbrella {entry:?} must fail load with InvalidAllowlist, got {other:?}")
+                }
             }
         }
     }

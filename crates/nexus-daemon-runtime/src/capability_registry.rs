@@ -211,29 +211,8 @@ impl CapabilityRegistry {
         self.rows.is_empty()
     }
 
-    /// Dispatch a tool request through the registry.
+    /// Whether `id` resolves anywhere in the dispatch spine.
     ///
-    /// Looks up the capability by `tool_name`, iterates the declared
-    /// `AdmissionGate` slice as a centralized accountability checkpoint,
-    /// then invokes the registered handler.
-    ///
-    /// **Gate enforcement split** (W-001 fix):
-    /// - Gates 1-4 (`Allowlist`, `ActiveCreator`, `WorkspaceBounds`,
-    ///   `PermissionPolicy`) are enforced by `admission_pipeline` before
-    ///   `dispatch` is called.
-    /// - `RequireWorldOwnership` is enforced by per-handler checks
-    ///   (e.g. `ensure_world_accessible_for_creator`).
-    /// - `AuditLog` is enforced by the caller (`audit_tool_execution`
-    ///   in `registry_dispatch`).
-    ///
-    /// The invariant test `registry_all_admission_gates_have_enforcement`
-    /// proves every gate in every row has a corresponding runtime check.
-    ///
-    /// # Errors
-    ///
-    /// Returns `NexusApiError::BadRequest` with code `not_supported`
-    /// if the tool is not registered. Individual handlers may return
-    /// other error variants (e.g. `Forbidden`, `InvalidInput`).
     /// Single-table spine resolution (AR-68 #4/#6): static rows →
     /// `PeerToolTable` (behind `connect-client`) → orchestration user
     /// capabilities (`origin() == User` only). An id is dispatchable iff it
@@ -253,6 +232,35 @@ impl CapabilityRegistry {
             .is_some_and(|reg| user_cap_catalog_admission(reg.get(id)).is_ok())
     }
 
+    /// Dispatch a tool request through the registry.
+    ///
+    /// Looks up the capability by `tool_name`, iterates the declared
+    /// `AdmissionGate` slice as a centralized accountability checkpoint,
+    /// then invokes the registered handler.
+    ///
+    /// **Gate enforcement split** (W-001 fix):
+    /// - Gates 1-4 (`Allowlist`, `ActiveCreator`, `WorkspaceBounds`,
+    ///   `PermissionPolicy`) are enforced by `admission_pipeline` before
+    ///   `dispatch` is called.
+    /// - `RequireWorldOwnership` is enforced by per-handler checks
+    ///   (e.g. `ensure_world_accessible_for_creator`).
+    /// - `AuditLog` is enforced by the caller (`audit_tool_execution`
+    ///   in `registry_dispatch`).
+    ///
+    /// The invariant test `registry_all_admission_gates_have_enforcement`
+    /// proves every gate in every row has a corresponding runtime check.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: the `expect` after the early-return lookup is
+    /// unreachable because registry rows are insert-only and the
+    /// not-found arm returns above.
+    ///
+    /// # Errors
+    ///
+    /// Returns `NexusApiError::BadRequest` with code `not_supported`
+    /// if the tool is not registered. Individual handlers may return
+    /// other error variants (e.g. `Forbidden`, `InvalidInput`).
     pub async fn dispatch(
         &self,
         req: &ToolExecuteRequest,
@@ -321,8 +329,7 @@ async fn dispatch_peer_tool(
     req: &ToolExecuteRequest,
 ) -> Result<Value, NexusApiError> {
     use spoke_operations::{validate_tool_arguments, SpokeResult};
-    if let SpokeResult::Reject(reject) =
-        validate_tool_arguments(&entry.descriptor, &req.parameters)
+    if let SpokeResult::Reject(reject) = validate_tool_arguments(&entry.descriptor, &req.parameters)
     {
         return Err(NexusApiError::BadRequest {
             code: "invalid_input".to_string(),
@@ -415,8 +422,12 @@ fn matches_tools_grammar(name: &str) -> bool {
     if ns != "tools" {
         return false;
     }
-    let Some(seg1) = parts.next() else { return false };
-    let Some(seg2) = parts.next() else { return false };
+    let Some(seg1) = parts.next() else {
+        return false;
+    };
+    let Some(seg2) = parts.next() else {
+        return false;
+    };
     if parts.next().is_some() {
         return false;
     }
