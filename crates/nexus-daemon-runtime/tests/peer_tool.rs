@@ -49,7 +49,7 @@ use spoke_connect::remote::{
     connect_remote_adapter, RemoteAdapter, RemoteAdapterError, RemoteAdapterOptions,
     RemoteIdentity, ToolHandler, Transport,
 };
-use spoke_operations::{spoke_ok, SpokeResult};
+use spoke_operations::{spoke_ok, spoke_reject, SpokeRejectCode, SpokeResult};
 use spoke_schemas::HostCapabilityManifest;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
@@ -271,6 +271,38 @@ fn write_capability_dir(root: &std::path::Path, name: &str) {
     std::fs::write(dir.join("basic-combat.wasm"), wasm).unwrap();
 }
 
+/// Like [`write_capability_dir`] but with a non-object output schema
+/// (`{"type":"string"}`) — exercises the AR-70 §3 inclusion rule for user
+/// capabilities (`output_schema` omitted from the catalog, never wrapped).
+fn write_capability_dir_string_output(root: &std::path::Path, name: &str) {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
+    let wasm = nexus_wasm_host::embedded_module_bytes("basic-combat")
+        .expect("embedded basic-combat available");
+    let manifest_json = nexus_wasm_host::embedded_module_manifest("basic-combat")
+        .expect("embedded manifest available");
+    let sha: String = {
+        let mut hex = String::with_capacity(64);
+        for b in Sha256::digest(wasm) {
+            let _ = write!(hex, "{b:02x}");
+        }
+        hex
+    };
+    let dir = root.join("capabilities").join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    let descriptor = format!(
+        r#"{{
+            "name": "{name}",
+            "inputSchema": "{{\"type\":\"object\"}}",
+            "outputSchema": "{{\"type\":\"string\"}}",
+            "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{sha}" }}
+        }}"#
+    );
+    std::fs::write(dir.join("capability.json"), descriptor).unwrap();
+    std::fs::write(dir.join("manifest.json"), manifest_json).unwrap();
+    std::fs::write(dir.join("basic-combat.wasm"), wasm).unwrap();
+}
+
 /// POST a tool execution through the HTTP spine.
 // axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
 #[allow(clippy::future_not_send)]
@@ -440,7 +472,70 @@ async fn empty_allowlist_yields_zero_rows_table_and_catalog() {
     let _ = server.task.await;
 }
 
+/// A peer tool handler that rejects with a typed spoke reject carrying the
+/// lowercase wire code `op_unsupported` in `details.wire_code` — the exact
+/// shape the integrator adapter emits for a non-advertised id (AR-70 #4).
+fn rejecting_handler() -> ToolHandler {
+    Arc::new(|_args: Value| {
+        let mut details = serde_json::Map::new();
+        details.insert(
+            "wire_code".to_string(),
+            Value::String("op_unsupported".to_string()),
+        );
+        Box::pin(async move {
+            spoke_reject(
+                SpokeRejectCode::CapabilityPortMissing,
+                "tool is not supported by this peer",
+                Some(details),
+            )
+        }) as BoxFuture<'static, SpokeResult<Value>>
+    })
+}
+
 // ── DoD: single-table proof ────────────────────────────────────────────────
+
+#[tokio::test]
+#[serial]
+async fn peer_deny_wire_code_survives_to_http_error_details_verbatim() {
+    let peer_id = peer_id_of(seed_peer(9));
+    let server = start_server(
+        vec![peer_id.clone()],
+        HashMap::from([(peer_id.clone(), pubkey(seed_peer(9)))]),
+        &["tools.t3.reject"],
+        None,
+    )
+    .await;
+    let adapter = dial(server.addr, seed_peer(9), &["tools.t3.reject"])
+        .await
+        .expect("dial succeeds");
+    adapter.register_tool_handler("tools.t3.reject", rejecting_handler());
+    assert!(
+        wait_until(
+            || peer_tool_table().get("tools.t3.reject").is_some(),
+            Duration::from_secs(5)
+        )
+        .await,
+        "reject tool admitted"
+    );
+
+    // AR-70 #4: the spine threads the ORIGINAL lowercase spoke wire code in
+    // `details.wire_code` — never uppercased, never re-parsed from text.
+    let (status, body) = post_tool_execution(&server, "tools.t3.reject", json!({})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"]["code"], "not_supported");
+    assert_eq!(
+        body["error"]["details"]["wire_code"], "op_unsupported",
+        "lowercase wire code preserved verbatim: {body}"
+    );
+    assert_eq!(
+        body["error"]["message"], "tool is not supported by this peer",
+        "message carries no uppercase prefix: {body}"
+    );
+
+    peer_tool_table().evict_peer(&peer_id, None);
+    server.shutdown.notify_one();
+    let _ = server.task.await;
+}
 
 #[tokio::test]
 #[serial]
@@ -548,6 +643,47 @@ async fn user_cap_dispatchable_and_builtin_caps_absent_from_catalog() {
             "builtin {builtin} absent from catalog"
         );
     }
+
+    peer_tool_table().evict_peer(&peer_id, None);
+    server.shutdown.notify_one();
+    let _ = server.task.await;
+}
+
+#[tokio::test]
+#[serial]
+async fn user_cap_non_object_output_omitted_from_catalog() {
+    let tmp_root = tempfile::TempDir::new().unwrap();
+    // A user cap whose output schema is NOT a root object (`{"type":"string"}`).
+    write_capability_dir_string_output(tmp_root.path(), "demo.stringout");
+    let scan_dir = tmp_root.path().join("capabilities");
+
+    let peer_id = peer_id_of(seed_peer(10));
+    let server = start_server(
+        vec![peer_id.clone()],
+        HashMap::from([(peer_id.clone(), pubkey(seed_peer(10)))]),
+        &["tools.t3.echo"],
+        Some(&scan_dir),
+    )
+    .await;
+
+    // AR-70 §3: the user output schema is carried iff it declares a root
+    // `type: "object"` — a string output is omitted, never wrapped.
+    let resp = server.http.get("/v1/daemon/tools").await;
+    resp.assert_status(StatusCode::OK);
+    let items = resp.json::<Value>()["items"]
+        .as_array()
+        .expect("items")
+        .clone();
+    let user = items
+        .iter()
+        .find(|t| t["id"] == "demo.stringout")
+        .unwrap_or_else(|| panic!("demo.stringout in catalog: {items:?}"));
+    assert_eq!(user["origin"], "user");
+    assert_eq!(user["input_schema"], "{\"type\":\"object\"}");
+    assert!(
+        user.get("output_schema").is_none(),
+        "non-object user output omitted from catalog: {user:?}"
+    );
 
     peer_tool_table().evict_peer(&peer_id, None);
     server.shutdown.notify_one();

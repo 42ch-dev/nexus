@@ -342,10 +342,24 @@ async fn dispatch_peer_tool(
         .await
     {
         SpokeResult::Ok(value) => Ok(value),
-        SpokeResult::Reject(reject) => Err(NexusApiError::BadRequest {
-            code: "not_supported".to_string(),
-            message: format!("{}: {}", reject.code.as_str(), reject.message),
-        }),
+        SpokeResult::Reject(reject) => {
+            // AR-70 #4: thread the spoke reject through a typed error so the
+            // original lowercase wire code (e.g. `op_unsupported`,
+            // `capability_missing`) survives verbatim in `details.wire_code`
+            // — never uppercased, never re-parsed from message text. The
+            // `code` channel stays the canonical spine `not_supported`.
+            let wire_code = reject
+                .details
+                .as_ref()
+                .and_then(|d| d.get("wire_code"))
+                .and_then(serde_json::Value::as_str)
+                .map_or_else(|| reject.code.as_str().to_string(), ToOwned::to_owned);
+            Err(NexusApiError::PeerToolDenied {
+                code: "not_supported".to_string(),
+                message: reject.message,
+                wire_code,
+            })
+        }
     }
 }
 
@@ -401,6 +415,23 @@ pub(crate) fn user_cap_catalog_admission(
         return Err(UserCapCatalogRefusal::InputSchemaNotObject);
     }
     Ok(cap)
+}
+
+/// AR-70 §3 inclusion rule: a JSON-Schema string is carried as an MCP
+/// `output_schema` only when it parses and declares a root `type: "object"`
+/// (MCP requires an object root; non-object outputs are omitted, never
+/// invented, never wrapped). Shared by the peer merge (connect-client) and
+/// the user-cap branch of the catalog.
+pub(crate) fn json_schema_has_object_root(raw: &str) -> bool {
+    serde_json::from_str::<Value>(raw)
+        .ok()
+        .and_then(|v| {
+            v.get("type")
+                .and_then(serde_json::Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .as_deref()
+        == Some("object")
 }
 
 /// Named catalog refusal for a user capability (AR-68 #6).

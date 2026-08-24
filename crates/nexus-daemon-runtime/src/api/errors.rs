@@ -144,6 +144,19 @@ pub enum NexusApiError {
     #[error("Bad request: {message}")]
     BadRequest { code: String, message: String },
 
+    /// Peer tool denial (AR-70 #4): the spoke rejected the invocation with
+    /// a lowercase wire code (`details.wire_code`, e.g. `op_unsupported`).
+    /// The typed code is threaded through the HTTP DTO's `details.wire_code`
+    /// so consumers never re-derive it from the message text. The Display
+    /// is the bare message (no prefix) — the wire `message` must stay
+    /// verbatim for the MCP child.
+    #[error("{message}")]
+    PeerToolDenied {
+        code: String,
+        message: String,
+        wire_code: String,
+    },
+
     /// Service unavailable (e.g., supervisor/engine not configured).
     #[error("Service unavailable: {message}")]
     ServiceUnavailable { message: String },
@@ -239,7 +252,9 @@ impl NexusApiError {
             | Self::OutlineConflict { .. }
             | Self::WorldKbConflict { .. } => StatusCode::CONFLICT,
             Self::Locked { .. } => StatusCode::LOCKED,
-            Self::InvalidInput { .. } | Self::InvalidApiKeyFormat => StatusCode::BAD_REQUEST,
+            Self::InvalidInput { .. } | Self::InvalidApiKeyFormat | Self::PeerToolDenied { .. } => {
+                StatusCode::BAD_REQUEST
+            }
             Self::ServiceUnavailable { .. } => StatusCode::SERVICE_UNAVAILABLE,
             Self::PresetGatesFailed { .. }
             | Self::StrategyValidationFailed { .. }
@@ -333,6 +348,7 @@ impl NexusApiError {
                     _ => "bad_request",
                 }
             }
+            Self::PeerToolDenied { code, .. } => code.as_str(),
             Self::StrategyConflict { .. } => "strategy_conflict",
             Self::StrategyValidationFailed { .. } => "strategy_validation_failed",
             Self::OutlineConflict { .. } => "outline_conflict",
@@ -395,6 +411,12 @@ impl NexusApiError {
                 "entity_id": entity_id,
                 "conflicting_path": conflicting_path,
                 "recovery_hint": recovery_hint,
+            })),
+            // AR-70 #4: the spoke wire code (lowercase, e.g. `op_unsupported`)
+            // is carried verbatim in `details.wire_code` — never re-derived
+            // from message text.
+            Self::PeerToolDenied { wire_code, .. } => Some(serde_json::json!({
+                "wire_code": wire_code,
             })),
             _ => None,
         }

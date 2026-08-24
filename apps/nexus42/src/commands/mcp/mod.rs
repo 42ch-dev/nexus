@@ -111,7 +111,11 @@ enum ToolCallOutcome {
     Success(serde_json::Value),
     /// Executed-but-failed: spine code preserved (`invalid_input`,
     /// `not_supported` + peer wire code, `service_unavailable`, ...).
-    ExecutedError { code: String, message: String },
+    ExecutedError {
+        code: String,
+        message: String,
+        wire_code: Option<String>,
+    },
     /// Unroutable: never-admitted / evicted / allowlist-missing id.
     Unroutable { code: String, message: String },
     /// The daemon refuses the caller itself (auth rejected) — an opaque
@@ -152,13 +156,18 @@ impl ServerHandler for McpBridgeHandler {
 
         match outcome {
             ToolCallOutcome::Success(result) => Ok(success_result(result)),
-            ToolCallOutcome::ExecutedError { code, message } => {
-                // Peer denies arrive as `{WIRE_CODE}: {message}` — preserve
-                // the wire code in the caller-visible content (AR-70 #4).
-                let code = wire_code(&message).unwrap_or(code);
-                Ok(CallToolResult::error(vec![Content::text(format!(
-                    "{code}: {message}"
-                ))]))
+            ToolCallOutcome::ExecutedError {
+                code,
+                message,
+                wire_code,
+            } => {
+                // AR-70 #4: the daemon threads the peer wire code verbatim in
+                // `details.wire_code` (lowercase, e.g. `op_unsupported`);
+                // surface it exactly once, ahead of the message. Other
+                // executed-but-failed outcomes name the spine `code`.
+                Ok(CallToolResult::error(vec![Content::text(
+                    executed_error_text(&code, &message, wire_code.as_deref()),
+                )]))
             }
             ToolCallOutcome::Unroutable { code, message } => Err(McpError::new(
                 ErrorCode::METHOD_NOT_FOUND,
@@ -177,7 +186,8 @@ impl McpBridgeHandler {
     /// Call the daemon spine, mapping the wire outcome into the MCP result
     /// vocabulary. The daemon distinguishes:
     /// - unroutable: `not_supported` + `"unsupported tool: {id}"`;
-    /// - peer deny: `not_supported` + `"{WIRE_CODE}: {message}"`;
+    /// - peer deny: `not_supported` + `details.wire_code` (lowercase,
+    ///   e.g. `op_unsupported`) + message;
     /// - executed failure: `invalid_input` / `forbidden` /
     ///   `policy_blocked` / `service_unavailable` / `internal`;
     /// - auth rejected: `auth_required`.
@@ -205,6 +215,14 @@ impl McpBridgeHandler {
             .and_then(serde_json::Value::as_str)
             .unwrap_or("unknown tool execution error")
             .to_owned();
+        // AR-70 #4: the daemon carries the spoke wire code (lowercase,
+        // e.g. `op_unsupported`) in `error.details.wire_code` — read it
+        // typed, never re-parse it from the message.
+        let wire_code = error
+            .get("details")
+            .and_then(|d| d.get("wire_code"))
+            .and_then(serde_json::Value::as_str)
+            .map(ToOwned::to_owned);
 
         if wire.status == 200
             && wire
@@ -229,8 +247,14 @@ impl McpBridgeHandler {
             // Auth rejected → the daemon refuses the caller (INTERNAL_ERROR
             // bounded per AR-70 #4; the message never reaches the client).
             "auth_required" => Ok(ToolCallOutcome::DaemonRefused { message }),
-            // Everything else is an executed-but-failed spine outcome.
-            _ => Ok(ToolCallOutcome::ExecutedError { code, message }),
+            // Everything else is an executed-but-failed spine outcome;
+            // the typed peer wire code rides along when the daemon
+            // supplied one.
+            _ => Ok(ToolCallOutcome::ExecutedError {
+                code,
+                message,
+                wire_code,
+            }),
         }
     }
 }
@@ -274,36 +298,17 @@ fn success_result(value: serde_json::Value) -> CallToolResult {
     }
 }
 
-/// Extract the peer wire code from a `"{WIRE_CODE}: {message}"` spine error
-/// message (`SCREAMING_SNAKE` token before the first `:`), when present.
-fn wire_code(message: &str) -> Option<String> {
-    let (head, _) = message.split_once(':')?;
-    if !head.is_empty() && head.chars().all(|c| c.is_ascii_uppercase() || c == '_') {
-        Some(head.to_owned())
-    } else {
-        None
-    }
+/// Format the executed-but-failed content (AR-70 #4): the typed peer wire
+/// code (`details.wire_code`, lowercase e.g. `op_unsupported`) takes
+/// precedence when present; otherwise the spine `code` names the failure.
+fn executed_error_text(code: &str, message: &str, wire_code: Option<&str>) -> String {
+    let effective = wire_code.unwrap_or(code);
+    format!("{effective}: {message}")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn wire_code_extracts_screaming_snake_prefix() {
-        assert_eq!(
-            wire_code("OP_UNSUPPORTED: peer refused"),
-            Some("OP_UNSUPPORTED".to_owned())
-        );
-        assert_eq!(
-            wire_code("CAPABILITY_MISSING: no such capability"),
-            Some("CAPABILITY_MISSING".to_owned())
-        );
-        // Not a peer wire code: lowercase spine codes pass through unchanged.
-        assert_eq!(wire_code("invalid_input: missing arg"), None);
-        assert_eq!(wire_code("unsupported tool: nexus.nope"), None);
-        assert_eq!(wire_code("no colon"), None);
-    }
 
     #[test]
     fn row_into_tool_carries_schemas_verbatim() {
@@ -340,6 +345,34 @@ mod tests {
             Some(&serde_json::Value::String("object".into()))
         );
         assert!(tool.output_schema.is_none());
+    }
+
+    #[test]
+    fn executed_error_text_surfaces_typed_wire_code_exactly_once() {
+        // AR-70 #4 fidelity: the daemon threads the ORIGINAL lowercase spoke
+        // wire code (`details.wire_code`, e.g. `op_unsupported`) — it must
+        // appear exactly once in the caller-visible content, and the message
+        // must not duplicate any uppercase re-derivation.
+        let text = executed_error_text(
+            "not_supported",
+            "tool tools.t4.ghost is not supported by this peer",
+            Some("op_unsupported"),
+        );
+        assert_eq!(
+            text,
+            "op_unsupported: tool tools.t4.ghost is not supported by this peer"
+        );
+        assert_eq!(text.matches("op_unsupported").count(), 1);
+        assert!(
+            !text.contains("OP_UNSUPPORTED"),
+            "uppercase re-derivation must be gone: {text}"
+        );
+    }
+
+    #[test]
+    fn executed_error_text_falls_back_to_spine_code_without_wire_code() {
+        let text = executed_error_text("invalid_input", "missing required argument", None);
+        assert_eq!(text, "invalid_input: missing required argument");
     }
 
     #[test]

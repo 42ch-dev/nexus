@@ -69,27 +69,38 @@ impl DaemonClient {
         Self::new(&config.daemon_url)
     }
 
-    /// Create a new daemon client with a custom base URL and default timeouts
+    /// Create a new daemon client with a custom base URL and default timeouts.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the reqwest client cannot be constructed — a broken HTTP
+    /// stack is unrecoverable for the CLI (M-2: the previous unbounded
+    /// `Client::new()` fallback silently dropped the configured timeouts).
     #[must_use]
     pub fn new(base_url: &str) -> Self {
         Self::with_timeouts(base_url, DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT)
+            .expect("failed to build daemon HTTP client with default timeouts")
     }
 
-    /// Create a new daemon client with custom timeouts
-    #[must_use]
+    /// Create a new daemon client with custom timeouts.
+    ///
+    /// # Errors
+    ///
+    /// Returns the reqwest builder error on construction failure instead of
+    /// falling back to an unbounded `reqwest::Client` (M-2) — a silent
+    /// fallback would drop both the connect and request timeouts.
     pub fn with_timeouts(
         base_url: &str,
         connect_timeout: Duration,
         request_timeout: Duration,
-    ) -> Self {
+    ) -> Result<Self> {
+        // `From<reqwest::Error> for CliError` maps connect/timeout errors to
+        // `DaemonNotRunning`; construction failures here are builder-level
+        // (invalid TLS/configuration), surfaced as `CliError::Network`.
         let http = reqwest::Client::builder()
             .connect_timeout(connect_timeout)
             .timeout(request_timeout)
-            .build()
-            .unwrap_or_else(|e| {
-                tracing::error!(error = %e, "Failed to build reqwest Client, using default");
-                reqwest::Client::new()
-            });
+            .build()?;
 
         // Read API key from environment (trimmed; empty becomes None)
         let api_key = std::env::var(DAEMON_API_KEY_ENV)
@@ -97,11 +108,11 @@ impl DaemonClient {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
 
-        Self {
+        Ok(Self {
             base_url: base_url.to_string(),
             http,
             api_key,
-        }
+        })
     }
 
     /// Get the base URL for this daemon client.
@@ -756,7 +767,8 @@ mod tests {
             "http://127.0.0.1:9999",
             Duration::from_secs(5),
             Duration::from_secs(15),
-        );
+        )
+        .expect("M-2: test client builds");
         assert_eq!(client.base_url, "http://127.0.0.1:9999");
     }
 
@@ -783,7 +795,8 @@ mod tests {
             "http://127.0.0.1:19998",
             Duration::from_secs(1),
             Duration::from_secs(2),
-        );
+        )
+        .expect("M-2: health check client builds");
         let result = client.health_check().await;
         assert!(
             result.is_ok(),
@@ -803,7 +816,8 @@ mod tests {
             "http://198.51.100.1:1",
             Duration::from_millis(100),
             Duration::from_millis(200),
-        );
+        )
+        .expect("M-2: timeout test client builds");
 
         let start = std::time::Instant::now();
         let result = client.health_check().await;

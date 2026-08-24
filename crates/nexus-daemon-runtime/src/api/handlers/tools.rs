@@ -16,7 +16,9 @@
 //! are pseudo-schemas, not draft-2020-12).
 
 use crate::api::errors::NexusApiError;
-use crate::capability_registry::{host_tool_registry, user_cap_catalog_admission};
+use crate::capability_registry::{
+    host_tool_registry, json_schema_has_object_root, user_cap_catalog_admission,
+};
 use crate::workspace::WorkspaceState;
 use axum::extract::State;
 use axum::Json;
@@ -50,7 +52,14 @@ pub async fn list_tools(
         if let Some(row) = host_tool_registry().lookup(id) {
             items.push(CatalogTool {
                 id: id.to_owned(),
-                description: row.handler_test_vector.description.to_owned(),
+                // AR-70 §3: the description carries the tool summary PLUS the
+                // parameter pointer (`AcpWire.request_schema_ref`) so callers
+                // can see the real request shape the placeholder stands in
+                // for. AcpWire refs are pseudo-schemas, not draft-2020-12.
+                description: format!(
+                    "{} (parameters: {})",
+                    row.handler_test_vector.description, row.acp_wire.request_schema_ref
+                ),
                 input_schema: "{\"type\":\"object\"}".to_owned(),
                 output_schema: None,
                 origin: "builtin".to_owned(),
@@ -62,11 +71,18 @@ pub async fn list_tools(
     if let Some(reg) = state.capability_registry() {
         for cap in reg.iter() {
             if let Ok(cap) = user_cap_catalog_admission(Some(cap)) {
+                // AR-70 §3 inclusion rule (same as peers): the MCP tools
+                // surface only carries JSON-Schema object tools, so the
+                // user output schema is carried iff it parses and declares
+                // a root `type: "object"`; non-object outputs are omitted,
+                // never invented, never wrapped.
+                let output_schema = json_schema_has_object_root(cap.output_schema())
+                    .then(|| cap.output_schema().to_owned());
                 items.push(CatalogTool {
                     id: cap.name().to_owned(),
                     description: cap.name().to_owned(),
                     input_schema: cap.input_schema().to_owned(),
-                    output_schema: Some(cap.output_schema().to_owned()),
+                    output_schema,
                     origin: "user".to_owned(),
                 });
             }
