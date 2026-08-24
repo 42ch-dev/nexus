@@ -206,7 +206,19 @@ impl HostToolExecutor {
             },
             Err(e) => {
                 let code = e.error_code().to_string();
-                let message = e.to_string();
+                // AR-76 #4: peer denies surface the original lowercase spoke
+                // wire code (`details.wire_code`) verbatim. The worker
+                // `WorkerToolResult` wire is unchanged (code + message
+                // only), so the wire code rides the message for this path —
+                // the HTTP lane keeps the typed `details.wire_code` DTO.
+                let message = match &e {
+                    NexusApiError::PeerToolDenied {
+                        message, wire_code, ..
+                    } => {
+                        format!("{message} (wire_code: {wire_code})")
+                    }
+                    _ => e.to_string(),
+                };
                 WorkerToolResult {
                     request_id: request_id.to_string(),
                     grant: false,

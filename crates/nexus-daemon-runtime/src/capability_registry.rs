@@ -329,7 +329,7 @@ async fn dispatch_peer_tool(
     entry: &crate::connect::PeerToolEntry,
     req: &ToolExecuteRequest,
 ) -> Result<Value, NexusApiError> {
-    use spoke_operations::{validate_tool_arguments, SpokeResult};
+    use spoke_operations::{validate_tool_arguments, SpokeRejectCode, SpokeResult};
     if let SpokeResult::Reject(reject) = validate_tool_arguments(&entry.descriptor, &req.parameters)
     {
         return Err(NexusApiError::BadRequest {
@@ -344,6 +344,39 @@ async fn dispatch_peer_tool(
     {
         SpokeResult::Ok(value) => Ok(value),
         SpokeResult::Reject(reject) => {
+            // AR-76 #4 honest-refusal matrix for the transport-failure
+            // classes (spoke frozen contract §8.2 `details.kind`): a
+            // reverse invoke that times out is an `internal` error named
+            // `timeout`; a session torn down mid-invoke (`session_closed` /
+            // `transport`) is an `internal` error named for the disconnect.
+            // Both are fail-fast refusals — never a hang, never mislabeled
+            // as a peer deny. All other rejects keep the deny mapping below.
+            let kind = reject
+                .details
+                .as_ref()
+                .and_then(|d| d.get("kind"))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if reject.code == SpokeRejectCode::InternalError {
+                match kind {
+                    "timeout" => {
+                        return Err(NexusApiError::Internal {
+                            code: "PEER_TOOL_TIMEOUT".to_string(),
+                            message: format!("peer tool invoke timed out: {}", reject.message),
+                        });
+                    }
+                    "session_closed" | "transport" => {
+                        return Err(NexusApiError::Internal {
+                            code: "PEER_TOOL_DISCONNECTED".to_string(),
+                            message: format!(
+                                "peer session disconnected mid-invoke: {}",
+                                reject.message
+                            ),
+                        });
+                    }
+                    _ => {}
+                }
+            }
             // AR-70 #4: thread the spoke reject through a typed error so the
             // original lowercase wire code (e.g. `op_unsupported`,
             // `capability_missing`) survives verbatim in `details.wire_code`
