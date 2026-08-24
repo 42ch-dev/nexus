@@ -17,6 +17,11 @@ pub mod boot;
 pub mod capability_registry;
 pub mod check;
 pub mod config;
+// V1.174 P0 T1 (AR-57/AR-61): peer-tools Connect client stack — WS
+// `Transport` + conformance suite. Compiles only with the `connect-client`
+// feature (the default daemon graph stays libp2p-free and tungstenite-free).
+#[cfg(feature = "connect-client")]
+pub mod connect;
 pub mod cron_supervisor;
 pub mod db;
 pub mod directive_store;
