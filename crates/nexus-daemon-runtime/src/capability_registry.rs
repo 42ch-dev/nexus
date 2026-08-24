@@ -25,6 +25,7 @@ use crate::api::errors::NexusApiError;
 use crate::api::handlers::host_tool_executor::ToolExecuteRequest;
 use crate::workspace::WorkspaceState;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -233,18 +234,50 @@ impl CapabilityRegistry {
     /// Returns `NexusApiError::BadRequest` with code `not_supported`
     /// if the tool is not registered. Individual handlers may return
     /// other error variants (e.g. `Forbidden`, `InvalidInput`).
+    /// Single-table spine resolution (AR-68 #4/#6): static rows →
+    /// `PeerToolTable` (behind `connect-client`) → orchestration user
+    /// capabilities (`origin() == User` only). An id is dispatchable iff it
+    /// resolves here; unknown ids yield `not_supported` exactly like an
+    /// unknown builtin.
+    #[must_use]
+    pub fn spine_resolves(&self, state: &WorkspaceState, id: &str) -> bool {
+        if self.lookup(id).is_some() {
+            return true;
+        }
+        #[cfg(feature = "connect-client")]
+        if crate::connect::peer_tool_table().get(id).is_some() {
+            return true;
+        }
+        state
+            .capability_registry()
+            .is_some_and(|reg| user_cap_catalog_admission(reg.get(id)).is_ok())
+    }
+
     pub async fn dispatch(
         &self,
         req: &ToolExecuteRequest,
         state: &WorkspaceState,
         creator_id: &str,
     ) -> Result<serde_json::Value, NexusApiError> {
-        let row = self
-            .lookup(&req.tool_name)
-            .ok_or_else(|| NexusApiError::BadRequest {
+        let row = self.lookup(&req.tool_name);
+        if row.is_none() {
+            // Peer arm (AR-68 #4): reverse-invoke the owning responder.
+            #[cfg(feature = "connect-client")]
+            if let Some(entry) = crate::connect::peer_tool_table().get(&req.tool_name) {
+                return dispatch_peer_tool(&entry, req).await;
+            }
+            // User-capability arm (AR-68 #6): `Capability::run(arguments)`.
+            if let Some(reg) = state.capability_registry() {
+                if let Ok(cap) = user_cap_catalog_admission(reg.get(&req.tool_name)) {
+                    return dispatch_user_cap(cap, req).await;
+                }
+            }
+            return Err(NexusApiError::BadRequest {
                 code: "not_supported".to_string(),
                 message: format!("unsupported tool: {}", req.tool_name),
-            })?;
+            });
+        }
+        let row = row.expect("row present");
 
         // Centralized admission-gate accountability checkpoint.
         // Each gate type MUST have a corresponding enforcement path (pipeline,
@@ -275,6 +308,128 @@ impl Default for CapabilityRegistry {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ─── Spine peer + user-capability arms (AR-68 #4/#6) ──────────────────────
+
+/// Peer dispatch arm: structural argument gate via
+/// `validate_tool_arguments`, then reverse-invoke the owning responder.
+/// Spoke rejects map to `NexusApiError` with the wire code preserved.
+#[cfg(feature = "connect-client")]
+async fn dispatch_peer_tool(
+    entry: &crate::connect::PeerToolEntry,
+    req: &ToolExecuteRequest,
+) -> Result<Value, NexusApiError> {
+    use spoke_operations::{validate_tool_arguments, SpokeResult};
+    if let SpokeResult::Reject(reject) =
+        validate_tool_arguments(&entry.descriptor, &req.parameters)
+    {
+        return Err(NexusApiError::BadRequest {
+            code: "invalid_input".to_string(),
+            message: reject.message,
+        });
+    }
+    match entry
+        .responder
+        .invoke_tool(&req.tool_name, req.parameters.clone())
+        .await
+    {
+        SpokeResult::Ok(value) => Ok(value),
+        SpokeResult::Reject(reject) => Err(NexusApiError::BadRequest {
+            code: "not_supported".to_string(),
+            message: format!("{}: {}", reject.code.as_str(), reject.message),
+        }),
+    }
+}
+
+/// User-capability dispatch arm (AR-68 #6): `Capability::run(arguments)`.
+/// `CapabilityError` maps to the closest `NexusApiError` variant.
+async fn dispatch_user_cap(
+    cap: &dyn nexus_orchestration::capability::Capability,
+    req: &ToolExecuteRequest,
+) -> Result<Value, NexusApiError> {
+    use nexus_orchestration::capability::CapabilityError;
+    cap.run(req.parameters.clone()).await.map_err(|e| match e {
+        CapabilityError::InputInvalid(msg) => NexusApiError::BadRequest {
+            code: "invalid_input".to_string(),
+            message: msg,
+        },
+        CapabilityError::Forbidden(msg) => NexusApiError::Forbidden {
+            resource: "tool_execution".to_string(),
+            reason: msg,
+        },
+        CapabilityError::WorkerUnavailable => NexusApiError::ServiceUnavailable {
+            message: format!("capability '{}' has no executor wired", cap.name()),
+        },
+        other => NexusApiError::Internal {
+            code: "CAPABILITY_RUN_FAILED".to_string(),
+            message: format!("capability '{}' failed: {other}", cap.name()),
+        },
+    })
+}
+
+/// Catalog admission for a user capability (AR-68 #6): name must not start
+/// with `nexus.` and must not match the peer grammar `^tools\.…`; the
+/// declared `input_schema()` must parse as a JSON object. Fail-closed —
+/// a non-admitted capability is neither dispatchable nor listed.
+pub(crate) fn user_cap_catalog_admission(
+    cap: Option<&dyn nexus_orchestration::capability::Capability>,
+) -> Result<&dyn nexus_orchestration::capability::Capability, UserCapCatalogRefusal> {
+    let cap = cap.ok_or(UserCapCatalogRefusal::NotUserCapability)?;
+    if cap.origin() != nexus_orchestration::capability::CapabilityOrigin::User {
+        return Err(UserCapCatalogRefusal::NotUserCapability);
+    }
+    let name = cap.name();
+    if name.starts_with("nexus.") {
+        return Err(UserCapCatalogRefusal::ReservedNamespace);
+    }
+    if matches_tools_grammar(name) {
+        return Err(UserCapCatalogRefusal::ReservedNamespace);
+    }
+    if serde_json::from_str::<Value>(cap.input_schema())
+        .ok()
+        .and_then(|v| v.as_object().map(|_| ()))
+        .is_none()
+    {
+        return Err(UserCapCatalogRefusal::InputSchemaNotObject);
+    }
+    Ok(cap)
+}
+
+/// Named catalog refusal for a user capability (AR-68 #6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UserCapCatalogRefusal {
+    /// Not a user capability (builtin or absent).
+    NotUserCapability,
+    /// Name starts with `nexus.` or matches the peer grammar.
+    ReservedNamespace,
+    /// `input_schema()` does not parse as a JSON object.
+    InputSchemaNotObject,
+}
+
+/// Local mirror of the spoke tool grammar `^tools\.[a-z][a-z0-9_-]*\.[a-z0-9][a-z0-9_-]*$`
+/// (byte-identical to `spoke-operations`' `TOOL_CAPABILITY_PATTERN`).
+fn matches_tools_grammar(name: &str) -> bool {
+    let mut parts = name.split('.');
+    let Some(ns) = parts.next() else { return false };
+    if ns != "tools" {
+        return false;
+    }
+    let Some(seg1) = parts.next() else { return false };
+    let Some(seg2) = parts.next() else { return false };
+    if parts.next().is_some() {
+        return false;
+    }
+    let seg_ok = |s: &str, first: bool| {
+        !s.is_empty()
+            && s.bytes().enumerate().all(|(i, b)| {
+                b.is_ascii_lowercase()
+                    || b.is_ascii_digit()
+                    || (b == b'_' || b == b'-') && (i > 0 || !first)
+            })
+            && (first || s.as_bytes()[0].is_ascii_digit() || s.as_bytes()[0].is_ascii_lowercase())
+    };
+    seg_ok(seg1, true) && seg_ok(seg2, false)
 }
 
 // ─── Registry constructor ──────────────────────────────────────────────────

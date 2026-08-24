@@ -55,6 +55,11 @@ pub struct PeerToolsConfig {
     pub invoke_timeout_ms: u64,
     /// Maximum inbound WS envelope size (bytes).
     pub max_envelope_bytes: usize,
+    /// Operator tool allowlist (AR-68 #2(iii)): exact tool ids a dialer
+    /// manifest may admit. Missing/empty = default deny (zero admitted).
+    /// Serde default keeps existing `daemon.json` files valid.
+    #[serde(default)]
+    pub tool_allowlist: Vec<String>,
 }
 
 impl Default for PeerToolsConfig {
@@ -65,6 +70,7 @@ impl Default for PeerToolsConfig {
             max_sessions: DEFAULT_MAX_SESSIONS,
             invoke_timeout_ms: DEFAULT_INVOKE_TIMEOUT_MS,
             max_envelope_bytes: DEFAULT_MAX_ENVELOPE_BYTES,
+            tool_allowlist: Vec::new(),
         }
     }
 }

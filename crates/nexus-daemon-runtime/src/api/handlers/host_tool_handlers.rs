@@ -38,18 +38,27 @@ pub(crate) async fn admission_pipeline(
     req: &ToolExecuteRequest,
     state: &WorkspaceState,
 ) -> Result<(String, String), NexusApiError> {
-    // Gate 1: tool id allowlist — derived dynamically from CapabilityRegistry (V1.57 P3).
-    // Previously used the static TOOL_ALLOWLIST const; now the registry is the SSOT.
-    // Unknown IDs return NOT_SUPPORTED.
+    // Gate 1: tool id allowlist — derived dynamically from the single
+    // dispatch spine (V1.57 P3 + AR-68 #4/#6). The spine resolves static
+    // rows → PeerToolTable → user capabilities; unknown IDs return
+    // NOT_SUPPORTED exactly like an unknown builtin.
     let reg = host_tool_registry();
-    if reg.lookup(&req.tool_name).is_none() {
+    if !reg.spine_resolves(state, &req.tool_name) {
         return Err(NexusApiError::BadRequest {
             code: "not_supported".to_string(),
             message: format!("unsupported tool: {}", req.tool_name),
         });
     }
 
+    // Peer tools (`tools.*`) and user capabilities are dispatched without
+    // the nexus.*/fs/* workspace gates — their admission is bound at
+    // ingestion (AR-68 #2/#6), not per-call. The spine already proved the
+    // id resolves (static | peer | user-cap), so anything that is not a
+    // `nexus.*` static row is a peer/user tool.
     let is_nexus_tool = req.tool_name.starts_with("nexus.");
+    if !is_nexus_tool && !req.tool_name.starts_with("fs/") {
+        return Ok((String::new(), String::new()));
+    }
     let creator_id = read_active_creator_id(state.nexus_home());
 
     // Gate 2: active creator (for nexus.* tools)

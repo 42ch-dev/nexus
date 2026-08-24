@@ -188,6 +188,8 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("ListTimelineEventsResponse", 1),
     ("TimelineEventInfo", 1),
     ("TimelineOverviewResponse", 1),
+    ("CatalogResponse", 1),
+    ("CatalogTool", 1),
     ("AppendInspirationRequest", 1),
     ("AppendInspirationResponse", 1),
     ("ChapterBody", 1),

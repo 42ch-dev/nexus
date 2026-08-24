@@ -87,6 +87,9 @@ async fn start_server(
         max_sessions,
         invoke_timeout_ms: 2000,
         max_envelope_bytes: DEFAULT_MAX_ENVELOPE_BYTES,
+        // T3 (AR-68): the operator tool allowlist — tests admit exactly the
+        // tool ids they advertise (empty = default deny).
+        tool_allowlist: tool_ids.iter().map(|s| (*s).to_owned()).collect(),
     });
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -101,6 +104,7 @@ async fn start_server(
         manifest,
         allowlist,
         peer_keys,
+        reserved_tool_ids: std::collections::HashSet::new(),
     };
     let task = spawn_accept_loop(listener, config, Arc::clone(&sessions), options, shutdown);
     TestServer {

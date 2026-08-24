@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/tools/catalog-tool.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CatalogTool",
+  "description": "One dispatchable tool row in the spine catalog (AR-68 #7): static nexus.* rows, admitted user capabilities, and PeerToolTable entries.",
+  "type": "object",
+  "required": ["id", "description", "input_schema", "origin"],
+  "properties": {
+    "id": { "type": "string" },
+    "description": { "type": "string" },
+    "input_schema": { "type": "string" },
+    "output_schema": { "type": "string" },
+    "origin": {
+      "type": "string",
+      "enum": ["builtin", "user", "peer"],
+      "description": "Provenance of the tool: \"builtin\" (static nexus.* row), \"user\" (locally-installed capability), \"peer\" (admitted dialer tool)."
+    }
+  },
+  "additionalProperties": false
+}

@@ -13,6 +13,7 @@ pub mod accept;
 pub mod config;
 pub mod identity;
 pub mod session;
+pub mod table;
 pub mod ws_transport;
 
 pub use accept::{
@@ -22,4 +23,5 @@ pub use accept::{
 pub use config::{PeerToolsConfig, DEFAULT_CONNECT_PORT};
 pub use identity::load_or_create_identity;
 pub use session::{PeerSessionManager, SessionRecord, DEFAULT_MAX_SESSIONS};
+pub use table::{peer_tool_table, AdmissionOutcome, PeerToolEntry, PeerToolTable, PeerSessionTools, ToolRefusal};
 pub use ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};

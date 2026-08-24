@@ -161,6 +161,9 @@ pub struct PeerResponderOptions {
     pub allowlist: Vec<String>,
     /// Preconfigured dialer Ed25519 public keys by peer id (fail-closed).
     pub peer_keys: HashMap<String, [u8; 32]>,
+    /// Tool ids that can never be admitted (builtin ids + user-cap names,
+    /// AR-68 #2(iii) reserved namespaces).
+    pub reserved_tool_ids: std::collections::HashSet<String>,
 }
 
 /// Spawn the peer-tools accept loop over an already-bound listener.
@@ -241,7 +244,7 @@ async fn handle_connection(
         invoke_timeout_ms: Some(config.invoke_timeout_ms),
     })
     .await;
-    monitor_session(responder, observed, sessions, config.invoke_timeout_ms).await;
+    monitor_session(responder, observed, sessions, config, options).await;
 }
 
 /// Establish / register / observe-close for one session.
@@ -253,12 +256,13 @@ async fn monitor_session(
     responder: Arc<ConnectResponder>,
     observed: Arc<ObservedTransport>,
     sessions: Arc<PeerSessionManager>,
-    invoke_timeout_ms: u64,
+    config: Arc<PeerToolsConfig>,
+    options: PeerResponderOptions,
 ) {
     // Phase 1: bounded handshake outcome (a dialer that never sends its
     // hello is closed by us after the bound — the responder's own recv would
     // otherwise park forever).
-    let handshake_timeout = Duration::from_millis(invoke_timeout_ms.max(1000));
+    let handshake_timeout = Duration::from_millis(config.invoke_timeout_ms.max(1000));
     let established = tokio::time::timeout(handshake_timeout, wait_until_established(&responder))
         .await
         .ok()
@@ -271,16 +275,36 @@ async fn monitor_session(
         return;
     };
 
-    // Phase 2: admit. The admitted ids are the authenticated manifest's tool
-    // ids (T2 granularity; T3's admission filter chain narrows this set).
+    // Phase 2: admit. T3 (AR-68): the authenticated manifest's tool ids run
+    // the full admission chain inside the process-global PeerToolTable
+    // (whole-manifest validation → grammar → reserved-ns → negotiated →
+    // allowlist → duplicate-peer). The session manager records the
+    // admitted subset (T2 granularity preserved for eviction bookkeeping).
     let admitted_ids: Vec<String> = responder
         .remote_manifest()
         .map(|manifest| {
-            manifest
-                .tools
-                .iter()
-                .map(|tool| String::from(tool.capability_id.clone()))
-                .collect()
+            // Negotiation (AR-69 #1): the daemon hello `capabilities[]` is
+            // the negotiated-membership set (baseline ∪ operator-allowlisted
+            // tool ids; T4 owns the allowlist-derived hello — boot builds
+            // the baseline, tests pass tool ids directly).
+            let daemon_caps: std::collections::HashSet<String> =
+                options.manifest.capabilities.iter().cloned().collect();
+            let allowlist: std::collections::HashSet<String> =
+                config.tool_allowlist.iter().cloned().collect();
+            match crate::connect::peer_tool_table().admit_and_register(
+                &peer_id,
+                &manifest,
+                Arc::clone(&responder),
+                &daemon_caps,
+                &allowlist,
+                &options.reserved_tool_ids,
+            ) {
+                crate::connect::AdmissionOutcome::Admitted { tool_ids } => tool_ids,
+                crate::connect::AdmissionOutcome::ManifestInvalid { message } => {
+                    tracing::warn!(%peer_id, error = %message, "peer manifest rejected (zero ingestion)");
+                    Vec::new()
+                }
+            }
         })
         .unwrap_or_default();
     let replaced = sessions.register(&peer_id, Arc::clone(&responder), &admitted_ids);
@@ -307,6 +331,9 @@ async fn monitor_session(
     }
     let evicted = sessions.evict(&peer_id, Some(&responder));
     if evicted {
+        // AR-68 #8: same tick as close observation — the PeerToolTable rows
+        // for this peer disappear from the spine + catalog.
+        crate::connect::peer_tool_table().evict_peer(&peer_id, Some(&responder));
         tracing::info!(%peer_id, "peer session evicted after close observation");
     }
 }
@@ -339,6 +366,7 @@ async fn wait_until_established(responder: &Arc<ConnectResponder>) -> Option<Str
 pub async fn start_peer_tools_lane(
     home: &Path,
     shutdown: Arc<Notify>,
+    reserved_tool_ids: std::collections::HashSet<String>,
 ) -> anyhow::Result<PeerToolsLaneHandle> {
     let config = Arc::new(PeerToolsConfig::load(home)?);
     crate::boot::ensure_remote_bind_allowed(&config.host)?;
@@ -357,6 +385,7 @@ pub async fn start_peer_tools_lane(
         manifest,
         allowlist: Vec::new(),
         peer_keys: HashMap::new(),
+        reserved_tool_ids,
     };
     let task = spawn_accept_loop(
         listener,

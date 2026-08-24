@@ -97,6 +97,12 @@ spoke-schemas = { workspace = true, optional = true }
 # getrandom 0.2 is the already-locked default-graph CSPRNG stack (uuid et
 # al.); optional keeps the feature-off graph unchanged.
 getrandom = { version = "0.2", optional = true }
+# V1.174 P0 T3 (AR-68): pure tool manifest/ABI helpers for the PeerToolTable
+# admission chain (`validate_manifest_tools`, `parse_tool_capability_id`,
+# `validate_tool_arguments`). Already in the default graph via
+# nexus-spoke-adapter (prior art, AR-73); optional keeps the feature-off
+# graph unchanged.
+spoke-operations = { workspace = true, optional = true }
 
 [dev-dependencies]
 axum-test = "15"
@@ -133,6 +139,7 @@ connect-client = [
     "dep:tokio-tungstenite",
     "dep:spoke-schemas",
     "dep:getrandom",
+    "dep:spoke-operations",
 ]
 # V1.153 P2 (DF-73): embedded Web UI (rust-embed SPA bytes) — default ON so
 # the creator-facing daemon is unchanged; OFF (`--no-default-features`)

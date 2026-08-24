@@ -720,6 +720,7 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
             "/v1/daemon/agent-host/internal/tool-executions",
             post(handlers::acp::tool_execute),
         )
+        .route("/v1/daemon/tools", get(handlers::tools::list_tools))
         .merge(agent_host_tier1_routes());
 
     let protected_routes = Router::new()

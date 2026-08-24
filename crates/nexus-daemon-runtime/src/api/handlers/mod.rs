@@ -70,6 +70,7 @@ pub mod soul_narrative_synthesizer;
 pub mod strategy;
 pub mod timeline;
 pub mod timeline_events;
+pub mod tools;
 pub mod works;
 pub mod workspace;
 pub mod workspaces;
