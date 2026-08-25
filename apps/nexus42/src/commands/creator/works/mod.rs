@@ -361,8 +361,12 @@ pub enum FindingsCommand {
 pub enum FindingStatusArg {
     Open,
     Triaged,
+    /// In review.
+    #[value(name = "in_review")]
     InReview,
     Resolved,
+    /// Won't fix.
+    #[value(name = "wont_fix")]
     WontFix,
     Duplicate,
 }

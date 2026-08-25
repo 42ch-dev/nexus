@@ -176,8 +176,10 @@ async fn set_status_invalid_transition_surfaces_422() {
     assert!(!out.status.success(), "terminal-state move should fail");
     let err = stderr(&out);
     assert!(err.contains("invalid_transition"), "code missing: {err}");
-    assert!(err.contains("resolved"), "from missing: {err}");
-    assert!(err.contains("open"), "to missing: {err}");
+    assert!(
+        err.contains("'resolved' → 'open'"),
+        "from → to arrow unit missing: {err}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -203,6 +205,10 @@ async fn set_status_self_loop_rejected() {
     assert!(!out.status.success(), "self-loop should fail");
     let err = stderr(&out);
     assert!(err.contains("invalid_transition"), "code missing: {err}");
+    assert!(
+        err.contains("'open' → 'open'"),
+        "self-loop from → to unit missing: {err}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -230,6 +236,7 @@ async fn world_findings_list_empty_world() {
             "creator",
             "world",
             "findings",
+            "list",
             "--world-id",
             "wld_test_world",
         ])
@@ -251,6 +258,7 @@ async fn world_findings_list_json_emits_dto_verbatim() {
             "creator",
             "world",
             "findings",
+            "list",
             "--world-id",
             "wld_test_world",
             "--json",

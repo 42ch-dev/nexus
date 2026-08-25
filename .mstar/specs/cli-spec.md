@@ -765,7 +765,7 @@ daemon error envelopes surfaced via `DaemonClient::parse_error_response`
 | `nexus42 creator memory pending-dismiss <id> [--json]` | Dismiss a pending review entry (`DELETE /v1/daemon/memory/pending-review/:id`). |
 | `nexus42 creator works findings list <work_ref> [--status <s>] [--severity <s>] [--json]` | List findings for a Work (`GET /v1/daemon/works/:work_id/findings`). `--status` accepts a single status or a comma-separated list (e.g. `open,triaged`). |
 | `nexus42 creator works findings set-status <finding_id> --work <work_ref> --status <s> [--target-executor <exec>] [--json]` | Set a finding's status through the work-findings PATCH (`PATCH /v1/daemon/works/:work_id/findings/:finding_id`, body `{status?, target_executor?}`). One generic verb over one route (AR-87 #3 — no `triage|resolve` sugar). |
-| `nexus42 creator world findings --world-id <id> [--json]` | List world-attached check findings (`GET /v1/daemon/worlds/:world_id/findings`, V1.165). **GET-only by design** — there is NO world-findings write route; triage writes ride the work-findings PATCH above. |
+| `nexus42 creator world findings list --world-id <id> [--json]` | List world-attached check findings (`GET /v1/daemon/worlds/:world_id/findings`, V1.165). **GET-only by design** — there is NO world-findings write route; triage writes ride the work-findings PATCH above. |
 
 Rules:
 

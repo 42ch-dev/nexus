@@ -8,6 +8,7 @@ use crate::config;
 use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
+use nexus_contracts::daemon_api::memory::ReviewResponse;
 use nexus_creator_memory::long_term_memory::LongTermMemory;
 use nexus_creator_memory::memory_io;
 use std::io::Write;
@@ -299,37 +300,90 @@ fn delete(_config: &CliConfig, creator_id: &str, slug: &str, force: bool) -> Res
 /// web drain contract's bounded loop; the server processes ≤50 rows per call).
 const REVIEW_DRAIN_MAX_CALLS: u32 = 100;
 
-/// `creator memory review [--json]` — drain the pending-review queue.
+/// Cumulative drain outcome of [`drain_review_queue`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DrainOutcome {
+    promoted: i64,
+    fragmented: i64,
+    dropped: i64,
+    processed: i64,
+    has_more: bool,
+    /// True when the loop stopped on a zero-progress call (server inspected
+    /// no rows but still reported `has_more`) rather than finishing the
+    /// queue or exhausting the call cap.
+    stopped_zero_progress: bool,
+    /// True when the loop exhausted [`REVIEW_DRAIN_MAX_CALLS`] with
+    /// `has_more` still true (cap exhaustion, not zero progress).
+    cap_exhausted: bool,
+}
+
+/// Fold one review response into the cumulative drain outcome.
 ///
-/// Loops `POST /v1/daemon/memory/review` while the response reports
-/// `has_more == true`, accumulating a cumulative `promoted/fragmented/dropped`
-/// report (AR-86 / F-16 — matches the web `useReviewMemory` drain contract).
-/// Bounded by [`REVIEW_DRAIN_MAX_CALLS`]; a zero-progress call (server
-/// inspected no rows but still reports `has_more`) breaks the loop so an
-/// unprocessable head row cannot spin forever.
-async fn review(config: &CliConfig, creator_id: &str, json: bool) -> Result<()> {
-    let client = DaemonClient::from_config(config);
-    let mut promoted = 0i64;
-    let mut fragmented = 0i64;
-    let mut dropped = 0i64;
-    let mut processed = 0i64;
-    let mut has_more = false;
-    for _call in 0..REVIEW_DRAIN_MAX_CALLS {
+/// Returns `true` when the loop should keep draining (`has_more` still true,
+/// the call made progress, and the call cap is not exhausted); `false` when
+/// the loop must stop (queue drained, zero-progress guard fired, or cap hit).
+fn fold_review_response(outcome: &mut DrainOutcome, result: &ReviewResponse, call: u32) -> bool {
+    outcome.promoted += result.promoted;
+    outcome.fragmented += result.fragmented;
+    outcome.dropped += result.dropped;
+    outcome.processed += result.processed.unwrap_or(0);
+    outcome.has_more = result.has_more.unwrap_or(false);
+    if !outcome.has_more {
+        return false;
+    }
+    // Zero-progress guard: a call that inspected no rows but still reports
+    // has_more would loop forever on an unprocessable head row.
+    if result.processed.unwrap_or(0) == 0 {
+        outcome.stopped_zero_progress = true;
+        return false;
+    }
+    call + 1 < REVIEW_DRAIN_MAX_CALLS
+}
+
+/// Drain the pending-review queue.
+///
+/// Loops `fetch` while the daemon reports `has_more == true`, accumulating a
+/// cumulative `promoted/fragmented/dropped` report (AR-86 / F-16 — matches
+/// the web `useReviewMemory` drain contract). Bounded by
+/// [`REVIEW_DRAIN_MAX_CALLS`]; a zero-progress call (server inspected no
+/// rows but still reports `has_more`) breaks the loop so an unprocessable
+/// head row cannot spin forever.
+async fn drain_review_queue(client: &DaemonClient, creator_id: &str) -> Result<DrainOutcome> {
+    let mut outcome = DrainOutcome {
+        promoted: 0,
+        fragmented: 0,
+        dropped: 0,
+        processed: 0,
+        has_more: false,
+        stopped_zero_progress: false,
+        cap_exhausted: false,
+    };
+    for call in 0..REVIEW_DRAIN_MAX_CALLS {
         let result = client.review_pending_memories(creator_id).await?;
-        promoted += result.promoted;
-        fragmented += result.fragmented;
-        dropped += result.dropped;
-        processed += result.processed.unwrap_or(0);
-        has_more = result.has_more.unwrap_or(false);
-        if !has_more {
-            break;
-        }
-        // Zero-progress guard: a call that inspected no rows but still
-        // reports has_more would loop forever on an unprocessable head row.
-        if result.processed.unwrap_or(0) == 0 {
+        if !fold_review_response(&mut outcome, &result, call) {
             break;
         }
     }
+    outcome.cap_exhausted = outcome.has_more && !outcome.stopped_zero_progress;
+    Ok(outcome)
+}
+
+/// `creator memory review [--json]` — drain the pending-review queue.
+///
+/// See [`drain_review_queue`] for the drain contract.
+async fn review(config: &CliConfig, creator_id: &str, json: bool) -> Result<()> {
+    let client = DaemonClient::from_config(config);
+    let outcome = drain_review_queue(&client, creator_id).await?;
+    let DrainOutcome {
+        promoted,
+        fragmented,
+        dropped,
+        processed,
+        has_more,
+        stopped_zero_progress,
+        cap_exhausted,
+    } = outcome;
+    let _ = cap_exhausted;
     if json {
         println!(
             "{}",
@@ -349,7 +403,13 @@ async fn review(config: &CliConfig, creator_id: &str, json: bool) -> Result<()> 
         println!(
             "Review completed: promoted={promoted}, fragmented={fragmented}, dropped={dropped}"
         );
-        if has_more {
+        if stopped_zero_progress {
+            println!(
+                "Note: a review call made zero progress but the daemon still reported \
+                 `has_more`; the queue may contain an unprocessable head row. Re-run \
+                 `creator memory review` to retry."
+            );
+        } else if has_more {
             println!(
                 "Note: the queue was not fully drained within {REVIEW_DRAIN_MAX_CALLS} calls; \
                  re-run `creator memory review` to continue."
@@ -361,12 +421,14 @@ async fn review(config: &CliConfig, creator_id: &str, json: bool) -> Result<()> 
 
 async fn fragments(config: &CliConfig, creator_id: &str, json: bool) -> Result<()> {
     let client = DaemonClient::from_config(config);
-    let rows = client.list_memory_fragments(creator_id).await?;
+    let result = client.list_memory_fragments(creator_id).await?;
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&rows)?);
+        println!("{}", serde_json::to_string_pretty(&result)?);
         return Ok(());
     }
+
+    let rows = &result.fragments;
 
     if rows.is_empty() {
         println!("No memory fragments found.");
@@ -377,7 +439,7 @@ async fn fragments(config: &CliConfig, creator_id: &str, json: bool) -> Result<(
     println!("{:<30} {:<20} SUMMARY", "FRAGMENT_ID", "");
     println!("{}", "-".repeat(80));
 
-    for f in &rows {
+    for f in rows {
         println!("{:<30} {}", f.fragment_id, f.summary);
     }
 
@@ -583,9 +645,104 @@ mod tests {
             pending_id: "pending_test".to_string(),
             json: false,
         };
-        let _ = MemoryCommand::PendingDismiss {
-            pending_id: "pending_test".to_string(),
-            json: false,
+    }
+
+    // ── review drain loop (AR-86) ───────────────────────────────────────
+
+    fn review_response(promoted: i64, processed: i64, has_more: bool) -> ReviewResponse {
+        ReviewResponse {
+            promoted,
+            fragmented: 0,
+            dropped: 0,
+            has_more: Some(has_more),
+            processed: Some(processed),
+        }
+    }
+
+    #[test]
+    fn fold_stops_on_zero_progress_with_has_more() {
+        // A call that inspects no rows but still reports `has_more` must
+        // stop the loop (an unprocessable head row cannot spin forever)
+        // and be reported as a zero-progress stop, not cap exhaustion.
+        let mut outcome = DrainOutcome {
+            promoted: 0,
+            fragmented: 0,
+            dropped: 0,
+            processed: 0,
+            has_more: false,
+            stopped_zero_progress: false,
+            cap_exhausted: false,
         };
+        assert!(!fold_review_response(
+            &mut outcome,
+            &review_response(0, 0, true),
+            0
+        ));
+        assert!(outcome.stopped_zero_progress);
+        assert!(!outcome.cap_exhausted);
+        assert_eq!(outcome.processed, 0);
+        assert!(outcome.has_more);
+    }
+
+    #[test]
+    fn fold_continues_while_progress_and_has_more() {
+        // A productive call with `has_more` keeps the loop going; the
+        // cumulative counters accumulate across folds.
+        let mut outcome = DrainOutcome {
+            promoted: 0,
+            fragmented: 0,
+            dropped: 0,
+            processed: 0,
+            has_more: false,
+            stopped_zero_progress: false,
+            cap_exhausted: false,
+        };
+        assert!(fold_review_response(
+            &mut outcome,
+            &review_response(1, 1, true),
+            0
+        ));
+        assert_eq!(outcome.promoted, 1);
+        assert_eq!(outcome.processed, 1);
+        assert!(!outcome.stopped_zero_progress);
+        assert!(outcome.has_more);
+
+        // `has_more = false` closes the drain.
+        assert!(!fold_review_response(
+            &mut outcome,
+            &review_response(0, 0, false),
+            1
+        ));
+        assert!(!outcome.has_more);
+        assert_eq!(outcome.promoted, 1);
+        assert_eq!(outcome.processed, 1);
+    }
+
+    #[test]
+    fn fold_stops_at_call_cap() {
+        // The cap check is inside the fold: the final call under the cap
+        // must not ask for another iteration (call 99 is the last allowed
+        // call — `call + 1 < 100` is false on the 100th call index 99).
+        let mut outcome = DrainOutcome {
+            promoted: 0,
+            fragmented: 0,
+            dropped: 0,
+            processed: 0,
+            has_more: false,
+            stopped_zero_progress: false,
+            cap_exhausted: false,
+        };
+        assert!(fold_review_response(
+            &mut outcome,
+            &review_response(1, 1, true),
+            98
+        ));
+        assert!(!fold_review_response(
+            &mut outcome,
+            &review_response(1, 1, true),
+            99
+        ));
+        assert!(outcome.has_more);
+        assert!(!outcome.stopped_zero_progress);
     }
 }

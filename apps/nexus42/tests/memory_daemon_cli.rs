@@ -174,3 +174,31 @@ async fn pending_list_json_emits_dto_verbatim() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["pending_id"], "pending_test_0");
 }
+
+// ── fragments --json (AR-83 #3: wire DTO verbatim) ───────────────────────
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fragments_json_emits_wrapper_dto() {
+    let d = LiveDaemon::start().await;
+    seed_memory_creator(&d).await;
+    sqlx::query(
+        "INSERT INTO memory_fragments \
+         (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl) \
+         VALUES ('frag_test_1', 'sess_test_1', 'ctr_testcreator', '[]', \
+                 'A test fragment summary', datetime('now'), NULL)",
+    )
+    .execute(&d.pool)
+    .await
+    .expect("seed memory fragment");
+
+    let out = d.cli(&["creator", "memory", "fragments", "--json"]).await;
+    assert!(out.status.success(), "fragments failed: {}", stderr(&out));
+    let parsed: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("valid JSON");
+    // The wire shape is `{ "fragments": [ … ] }` — the wrapper, not a bare array.
+    let fragments = parsed["fragments"]
+        .as_array()
+        .expect("fragments wrapper array");
+    assert_eq!(fragments.len(), 1);
+    assert_eq!(fragments[0]["fragment_id"], "frag_test_1");
+    assert_eq!(fragments[0]["summary"], "A test fragment summary");
+}

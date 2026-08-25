@@ -604,9 +604,6 @@ impl DaemonClient {
                     // the current revision, the conflicting node, the
                     // conflicting path, and the recovery hint (AR-83 #5 /
                     // PL-5 — never swallowed).
-                    // NOTE: world-kb 409s (`WorldKbConflict`) serialize
-                    // `current_version` + `entity_id` instead — this renderer
-                    // does NOT cover them.
                     if let Some(rev) = details
                         .get("current_revision")
                         .and_then(serde_json::Value::as_u64)
@@ -722,10 +719,9 @@ impl DaemonClient {
         Ok(data)
     }
 
-    /// List memory fragments from the daemon.
-    ///
     /// Retrieves stored memory fragments for the given creator, returning
-    /// their IDs and summaries.
+    /// the full `ListMemoryFragmentsResponse` wrapper (`{ "fragments": […] }`)
+    /// so `--json` can emit the wire DTO verbatim (AR-83 #3).
     ///
     /// # Errors
     ///
@@ -734,7 +730,7 @@ impl DaemonClient {
     pub async fn list_memory_fragments(
         &self,
         creator_id: &str,
-    ) -> Result<Vec<nexus_contracts::daemon_api::memory::NexusMemoryFragmentInfo>> {
+    ) -> Result<ListMemoryFragmentsResponse> {
         let path = "/v1/daemon/memory/fragments";
 
         let url = format!("{}{}?creator_id={}", self.base_url, path, creator_id);
@@ -755,7 +751,7 @@ impl DaemonClient {
         }
 
         let wrapper: ListMemoryFragmentsResponse = resp.json().await?;
-        Ok(wrapper.fragments)
+        Ok(wrapper)
     }
 
     // ─── Pending review methods ──────────────────────────────────────────

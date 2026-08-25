@@ -115,6 +115,22 @@ pub enum WorldCommand {
     /// world-findings write route. Triage writes ride the work-findings
     /// PATCH (`creator works findings set-status`).
     Findings {
+        #[command(subcommand)]
+        command: FindingsCommand,
+    },
+}
+
+/// `creator world findings` subcommands (V1.175 P1 group 8, AR-87).
+///
+/// Read surface only — world findings are **GET-only by design** (V1.165):
+/// there is NO world-findings write route; triage writes ride the
+/// work-findings PATCH (`creator works findings set-status`).
+#[derive(Debug, Subcommand)]
+pub enum FindingsCommand {
+    /// List world-attached check findings
+    /// (`GET /v1/daemon/worlds/:world_id/findings`, V1.165 read surface —
+    /// GET-only by design, AR-87 #1).
+    List {
         /// World ID (wld_...).
         #[arg(long, value_name = "WORLD_ID")]
         world_id: String,
@@ -178,9 +194,11 @@ pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
         WorldCommand::Fork { command } => fork::run(command, config).await,
         WorldCommand::Kb { command } => kb::run(command, config).await,
         WorldCommand::Rule { command } => rule::run(command, config).await,
-        WorldCommand::Findings { world_id, json } => {
-            world_findings_list(&world_id, json, config).await
-        }
+        WorldCommand::Findings { command } => match command {
+            FindingsCommand::List { world_id, json } => {
+                world_findings_list(&world_id, json, config).await
+            }
+        },
     }
 }
 

@@ -123,14 +123,20 @@ pub enum BlockTypeArg {
     Organization,
     Item,
     Conflict,
+    /// Info point.
+    #[value(name = "info_point")]
     InfoPoint,
     Event,
     Species,
     Faction,
+    /// Magic system.
+    #[value(name = "magic_system")]
     MagicSystem,
     Technology,
     Deity,
     Level,
+    /// Economy tier.
+    #[value(name = "economy_tier")]
     EconomyTier,
     Dialogue,
     Beat,
