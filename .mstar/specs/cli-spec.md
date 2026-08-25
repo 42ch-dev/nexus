@@ -656,6 +656,41 @@ Rules:
   under `--json` — the daemon returns 204 No Content, so there is no DTO to
   emit (AR-83 #3: `--json` emits the daemon DTO verbatim; a 204 has none).
 
+### 6.2G.4 V1.175 P1 amendment — strategy patch leaves (RN-1 §5 group 1)
+
+Thin daemon-HTTP leaves over the **existing** strategy canvas write routes
+(AR-83 #1 / AR-84 group 1, F-9; no daemon route changes, no DTO redesign).
+All leaves: human-readable default output, `--json` emits the daemon
+`StrategyPatchResponse` DTO verbatim (AR-83 #3), typed long flags, daemon
+error envelopes surfaced via `DaemonClient::parse_error_response` (named
+`[code]`, non-zero exit — PL-5).
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 preset patch state <strategy_id> <state_id> --base-revision <N> [--label <id>] [--description <text>] [--json]` | Patch a state node (`POST /v1/daemon/strategies/:strategy_id/states/:state_id/patch`). `--label` renames the state and rewrites all references (next targets, `preset.initial`, branches); `--description` updates the description. At least one of `--label`/`--description` is required. |
+| `nexus42 preset patch transition <strategy_id> --base-revision <N> --source-state <id> [--op create\|update] [--old-target <id>] [--new-target <id>] [--condition <expr>] [--transition-kind next\|branch\|default] [--json]` | Rewire a transition (`POST /v1/daemon/strategies/:strategy_id/transitions/patch`). `--op create` requires `--new-target`; `--op update` (default) requires `--old-target`. `--transition-kind` selects the create form: `next` (linear scalar), `branch` (conditional rule), `default` (conditional default target). |
+| `nexus42 preset patch prompt <strategy_id> <state_id> --base-revision <N> --template-ref <path> --file <path>\|'-' [--json]` | Patch a state's prompt template (`POST /v1/daemon/strategies/:strategy_id/states/:state_id/prompt/patch`). `--file` is a template body file path, or `-` to read stdin. |
+
+Rules:
+
+- **CAS-guarded writes (PL-5).** Every leaf takes `--base-revision` — the
+  revision observed on the last canonical read (e.g. `preset show`). A stale
+  revision returns **409 `strategy_conflict`**; the CLI error renders all
+  three structured fields — `current_revision`, `conflicting_path`, and
+  `recovery_hint` — and `--help` documents the retry guidance: re-read the
+  Strategy and reapply with the new revision. Flock contention between
+  concurrent writers rides the same 409 family.
+- **Named error surface.** 400 `strategy_invalid`, 404 (unknown strategy /
+  state), 422 `strategy_validation_failed`, and the transition field errors
+  (`strategy_transition_missing_old_target`, `strategy_transition_not_found`,
+  `strategy_transition_duplicate`, `strategy_self_loop`, …) surface via the
+  standard `[code]` envelope with non-zero exit — never a generic "request
+  failed".
+- **Write bodies are typed long flags** (AR-83 #4); prompt bodies come from
+  `--file` or stdin (`-`), matching the `creator soul` stdin convention.
+- **User presets only.** The daemon rejects embedded/system presets with
+  `strategy_update_forbidden` (read-only) — surfaced named.
+
 ### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
 
 Normative: [novel-writing/multi-work-lifecycle.md](./novel-writing/multi-work-lifecycle.md), [novel-writing/work-pool.md](./novel-writing/work-pool.md).

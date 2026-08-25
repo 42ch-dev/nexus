@@ -591,14 +591,30 @@ impl DaemonClient {
                 let mut message = format!("[{}] {}", detail.code, detail.message);
 
                 // Append field details for validation errors if available
-                if let Some(ref details) = detail.details {
+                if let Some(details) = &detail.details {
                     if let Some(field) = details.get("field").and_then(|v| v.as_str()) {
                         write!(message, " (field: {field})").expect("infallible");
+                    }
+                    // CAS/OCC conflict family (strategy/outline/world-kb 409s):
+                    // render the structured conflict fields so the CLI error
+                    // names the current revision, the conflicting path, and
+                    // the recovery hint (AR-83 #5 / PL-5 — never swallowed).
+                    if let Some(rev) = details
+                        .get("current_revision")
+                        .and_then(serde_json::Value::as_u64)
+                    {
+                        write!(message, " (current_revision: {rev})").expect("infallible");
+                    }
+                    if let Some(path) = details.get("conflicting_path").and_then(|v| v.as_str()) {
+                        write!(message, " (conflicting_path: {path})").expect("infallible");
+                    }
+                    if let Some(hint) = details.get("recovery_hint").and_then(|v| v.as_str()) {
+                        write!(message, " (recovery_hint: {hint})").expect("infallible");
                     }
                 }
 
                 // Append request ID if available for support correlation
-                if let Some(ref req_id) = detail.request_id {
+                if let Some(req_id) = &detail.request_id {
                     write!(message, " (request_id: {req_id})").expect("infallible");
                 }
 
