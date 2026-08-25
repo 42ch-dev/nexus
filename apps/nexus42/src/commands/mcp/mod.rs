@@ -208,9 +208,18 @@ impl ServerHandler for McpBridgeHandler {
 }
 
 impl McpBridgeHandler {
+    /// Typed unroutable discrimination (T4 review M-1): `not_supported`
+    /// without `details.wire_code` is unroutable (never-admitted /
+    /// evicted / allowlist-missing — the daemon `BadRequest` path never
+    /// supplies a wire code); `not_supported` WITH a wire code is always
+    /// a peer deny (executed-but-failed). Pure so it can be unit-pinned.
+    fn is_unroutable(code: &str, wire_code: Option<&str>) -> bool {
+        code == "not_supported" && wire_code.is_none()
+    }
+
     /// Call the daemon spine, mapping the wire outcome into the MCP result
     /// vocabulary. The daemon distinguishes:
-    /// - unroutable: `not_supported` + `"unsupported tool: {id}"`;
+    /// - unroutable: `not_supported` + no `details.wire_code`;
     /// - peer deny: `not_supported` + `details.wire_code` (lowercase,
     ///   e.g. `op_unsupported`) + message;
     /// - executed failure: `invalid_input` / `forbidden` /
@@ -265,8 +274,16 @@ impl McpBridgeHandler {
         }
 
         match code.as_str() {
-            // Unroutable: the spine cannot resolve the id at all.
-            "not_supported" if message.starts_with("unsupported tool:") => {
+            // Unroutable: the spine cannot resolve the id at all. Typed
+            // discriminator (T4 review M-1, 2026-08-24): an unroutable id
+            // arrives as `not_supported` with NO `details.wire_code`
+            // (the daemon's BadRequest path never supplies one), while a
+            // peer-deny `not_supported` ALWAYS carries the spoke wire
+            // code (lowercase, e.g. `op_unsupported`) via the T5 typed
+            // path. Classify on the presence of the typed field — never
+            // on message text (a future spoke reject message containing
+            // a matching substring must not misclassify).
+            _ if Self::is_unroutable(&code, wire_code.as_deref()) => {
                 Ok(ToolCallOutcome::Unroutable { code, message })
             }
             // Auth rejected → the daemon refuses the caller (INTERNAL_ERROR
@@ -392,6 +409,27 @@ mod tests {
             !text.contains("OP_UNSUPPORTED"),
             "uppercase re-derivation must be gone: {text}"
         );
+    }
+
+    #[test]
+    fn unroutable_classification_is_typed_not_textual() {
+        // Unroutable: not_supported + NO wire code.
+        assert!(super::McpBridgeHandler::is_unroutable(
+            "not_supported",
+            None
+        ));
+        // Peer deny: not_supported + typed wire code — executed failure,
+        // even when the message text contains the unroutable substring.
+        assert!(!super::McpBridgeHandler::is_unroutable(
+            "not_supported",
+            Some("op_unsupported")
+        ));
+        // Other codes never classify unroutable regardless of wire code.
+        assert!(!super::McpBridgeHandler::is_unroutable(
+            "invalid_input",
+            None
+        ));
+        assert!(!super::McpBridgeHandler::is_unroutable("internal", None));
     }
 
     #[test]

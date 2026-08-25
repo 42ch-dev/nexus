@@ -329,7 +329,7 @@ async fn dispatch_peer_tool(
     entry: &crate::connect::PeerToolEntry,
     req: &ToolExecuteRequest,
 ) -> Result<Value, NexusApiError> {
-    use spoke_operations::{validate_tool_arguments, SpokeResult};
+    use spoke_operations::{validate_tool_arguments, SpokeRejectCode, SpokeResult};
     if let SpokeResult::Reject(reject) = validate_tool_arguments(&entry.descriptor, &req.parameters)
     {
         return Err(NexusApiError::BadRequest {
@@ -344,6 +344,39 @@ async fn dispatch_peer_tool(
     {
         SpokeResult::Ok(value) => Ok(value),
         SpokeResult::Reject(reject) => {
+            // AR-76 #4 honest-refusal matrix for the transport-failure
+            // classes (spoke frozen contract §8.2 `details.kind`): a
+            // reverse invoke that times out is an `internal` error named
+            // `timeout`; a session torn down mid-invoke (`session_closed` /
+            // `transport`) is an `internal` error named for the disconnect.
+            // Both are fail-fast refusals — never a hang, never mislabeled
+            // as a peer deny. All other rejects keep the deny mapping below.
+            let kind = reject
+                .details
+                .as_ref()
+                .and_then(|d| d.get("kind"))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if reject.code == SpokeRejectCode::InternalError {
+                match kind {
+                    "timeout" => {
+                        return Err(NexusApiError::Internal {
+                            code: "PEER_TOOL_TIMEOUT".to_string(),
+                            message: format!("peer tool invoke timed out: {}", reject.message),
+                        });
+                    }
+                    "session_closed" | "transport" => {
+                        return Err(NexusApiError::Internal {
+                            code: "PEER_TOOL_DISCONNECTED".to_string(),
+                            message: format!(
+                                "peer session disconnected mid-invoke: {}",
+                                reject.message
+                            ),
+                        });
+                    }
+                    _ => {}
+                }
+            }
             // AR-70 #4: thread the spoke reject through a typed error so the
             // original lowercase wire code (e.g. `op_unsupported`,
             // `capability_missing`) survives verbatim in `details.wire_code`
@@ -364,13 +397,62 @@ async fn dispatch_peer_tool(
     }
 }
 
-/// User-capability dispatch arm (AR-68 #6): `Capability::run(arguments)`.
-/// `CapabilityError` maps to the closest `NexusApiError` variant.
+/// Structural argument gate for the user-cap arm (AR-76 #2/#4, W-A):
+/// the SAME spoke-granularity semantics as the peer arm's
+/// `spoke_operations::validate_tool_arguments` — arguments must be a JSON
+/// object and every declared top-level `required` key must be present;
+/// otherwise `invalid_input` BEFORE any adapter I/O (WASM module load and
+/// execution count as adapter I/O). No deeper JSON-Schema checking (V1.172
+/// AR-37 posture). The peer arm keeps its grammar-typed spoke helper; this
+/// helper implements the same refusal vocabulary against the capability's
+/// declared `input_schema()` string.
+fn validate_user_cap_arguments(schema_json: &str, arguments: &Value) -> Result<(), String> {
+    let Some(object) = arguments.as_object() else {
+        return Err("Tool arguments must be a JSON object".to_string());
+    };
+    let Ok(schema) = serde_json::from_str::<Value>(schema_json) else {
+        // The catalog admission gate already proved the schema parses as a
+        // JSON object; a parse failure here means the descriptor changed
+        // after admission — fail closed as invalid_input rather than
+        // dispatching unvalidated.
+        return Err("capability input schema is not a JSON object".to_string());
+    };
+    if schema.get("type") != Some(&Value::String("object".to_string())) {
+        return Ok(());
+    }
+    let Some(Value::Array(required)) = schema.get("required") else {
+        return Ok(());
+    };
+    let missing: Vec<&str> = required
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|key| !object.contains_key(*key))
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "Missing required tool arguments: {}",
+        missing.join(", ")
+    ))
+}
+
+/// User-capability dispatch arm (AR-68 #6): structural gate, then
+/// `Capability::run(arguments)`. `CapabilityError` maps to the closest
+/// `NexusApiError` variant.
 async fn dispatch_user_cap(
     cap: &dyn nexus_orchestration::capability::Capability,
     req: &ToolExecuteRequest,
 ) -> Result<Value, NexusApiError> {
     use nexus_orchestration::capability::CapabilityError;
+    // AR-76 #2/#4 (W-A): the structural gate fires before any adapter I/O —
+    // same refusal vocabulary as the peer arm.
+    if let Err(message) = validate_user_cap_arguments(cap.input_schema(), &req.parameters) {
+        return Err(NexusApiError::BadRequest {
+            code: "invalid_input".to_string(),
+            message,
+        });
+    }
     cap.run(req.parameters.clone()).await.map_err(|e| match e {
         CapabilityError::InputInvalid(msg) => NexusApiError::BadRequest {
             code: "invalid_input".to_string(),

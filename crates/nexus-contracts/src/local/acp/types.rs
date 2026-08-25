@@ -263,6 +263,9 @@ pub struct NexusMcpServerStdio {
     pub name: String,
     /// Command to execute.
     pub command: PathBuf,
+    /// Arguments passed to the command (e.g. `["mcp", "serve"]`).
+    #[serde(default)]
+    pub args: Vec<String>,
 }
 
 // ── Request DTOs ────────────────────────────────────────────────────
@@ -819,6 +822,7 @@ mod tests {
             NexusMcpServer::Stdio(NexusMcpServerStdio {
                 name: "local-server".to_string(),
                 command: PathBuf::from("/usr/bin/mcp-server"),
+                args: Vec::new(),
             }),
         ];
 
