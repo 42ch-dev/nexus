@@ -36,6 +36,9 @@
 //! feature CI never compiles it.
 
 #![cfg(feature = "connect-client")]
+// Justification (repo convention, cf. tests/works_api.rs): integration-test
+// assertions operate on fixed local fixtures where a panic IS the failure
+// signal; `.unwrap()`/`.expect()` keep the tests linear and readable.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::HashMap;

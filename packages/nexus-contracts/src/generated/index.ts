@@ -24,6 +24,7 @@ export * from './daemon-api/reading';
 export * from './daemon-api/runtime';
 export * from './daemon-api/schedule';
 export * from './daemon-api/timeline';
+export * from './daemon-api/tools';
 export * from './daemon-api/works';
 export * from './daemon-api/works/chapters';
 export * from './daemon-api/workspace';
@@ -178,6 +179,8 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   ListTimelineEventsResponse: 1,
   TimelineEventInfo: 1,
   TimelineOverviewResponse: 1,
+  CatalogResponse: 1,
+  CatalogTool: 1,
   AppendInspirationRequest: 1,
   AppendInspirationResponse: 1,
   ChapterBody: 1,

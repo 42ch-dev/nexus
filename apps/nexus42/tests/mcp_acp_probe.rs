@@ -20,6 +20,9 @@
 //! Gated: `--features connect-client` (same gate as `mcp_serve_e2e.rs`).
 
 #![cfg(feature = "connect-client")]
+// Justification (repo convention, cf. tests/works_api.rs): integration-test
+// assertions operate on fixed local fixtures where a panic IS the failure
+// signal; `.unwrap()`/`.expect()` keep the tests linear and readable.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::PathBuf;

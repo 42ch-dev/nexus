@@ -64,7 +64,7 @@ assert_empty() {
     # that IS the normal absence signal. Any OTHER nonzero outcome (feature
     # typo, invalid invocation, crate not in workspace) is a real tool
     # failure and must fail the pin instead of false-greening the count.
-    if [[ "$out" == *"error: package ID specification \`$pkg\` did not match any packages"* ]]; then
+    if grep -qF "package ID specification \`$pkg\` did not match any packages" <<<"$out"; then
       : # legitimate absence — the zero-count check below confirms it
     else
       fail "cargo tree for $crate $feats (probe $pkg) failed (exit $status): $out"
@@ -93,6 +93,14 @@ assert_exactly_one() {
   local count
   count=$(wc -l <<<"$versions" | tr -d ' ')
   if [[ "$status" -ne 0 ]]; then
+    # Same absence tolerance as assert_empty: a package legitimately absent
+    # from the resolved graph (feature off) exits 101 with the canonical
+    # message. Exact-one pins only ever hit this when the feature gate that
+    # pulls the package is off — treat as absent-passthrough only if the
+    # message confirms it; anything else is a real failure.
+    if grep -qF "package ID specification \`$pkg\` did not match any packages" <<<"$out"; then
+      fail "$pkg expected in $crate$feats graph, but absent (feature gate off?)"
+    fi
     fail "cargo tree for $crate $feats (probe $pkg) failed (status $status): $out"
   fi
   if [[ "$count" -ne 1 ]]; then
