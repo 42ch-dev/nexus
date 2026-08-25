@@ -13,10 +13,12 @@
 //! - **Maintenance**: `demo-seed`, `logout`
 
 pub mod bootstrap;
+pub mod inspector;
 pub mod kb;
 pub mod knowledge;
 pub mod memory;
 pub mod moment_directive;
+pub mod reading;
 pub mod reference;
 pub mod rules_runtime;
 pub mod run;
@@ -576,11 +578,32 @@ pub enum CreatorCommand {
         #[command(subcommand)]
         command: reference::ReferenceCommand,
     },
-
     /// Narrative world management (create worlds, add events, list timelines)
     World {
         #[command(subcommand)]
         command: world::WorldCommand,
+    },
+
+    /// Reading-depth data CRUD (V1.175 P1, group 3) — progress + annotations.
+    ///
+    /// Data CRUD only: export, reset, and write reading progress and
+    /// annotations from scripts/agents. Not a manuscript reader; the V1.79
+    /// reading surface stays web.
+    Reading {
+        #[command(subcommand)]
+        command: reading::ReadingCommand,
+    },
+
+    /// Moment assembly inspector (V1.151 observe-only packet).
+    ///
+    /// Hidden debug group (PL-6): the packet is a daemon contract — a
+    /// headless developer debugging assembly must reach it, but it is
+    /// deliberately absent from root `--help`. Documented in
+    /// `.mstar/specs/cli-spec.md` and `creator inspector --help`.
+    #[command(hide = true)]
+    Inspector {
+        #[command(subcommand)]
+        command: inspector::InspectorCommand,
     },
 
     // ── Platform bridge tier (optional; requires User login) ────────
@@ -731,6 +754,8 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::Reference { command } => reference::run(command, config).await,
         CreatorCommand::Kb { command } => kb::run(command, config).await,
         CreatorCommand::World { command } => world::run(command, config).await,
+        CreatorCommand::Reading { command } => reading::run(command, config).await,
+        CreatorCommand::Inspector { command } => inspector::run(command, config).await,
         CreatorCommand::Knowledge { command } => knowledge::run(command, config).await,
         CreatorCommand::MomentDirective { command } => moment_directive::run(command, config).await,
         CreatorCommand::Run { command } => run::handle_run(command, config).await,

@@ -11,6 +11,7 @@
 //! Structured-rule author surface (`creator world rule add|list|deactivate`)
 //! lives in the [`rule`] submodule (V1.166 PD-1 / AR-2 / AR-3, DR-64).
 
+pub mod fork;
 pub mod kb;
 pub mod rule;
 
@@ -91,7 +92,6 @@ pub enum WorldCommand {
         #[command(subcommand)]
         command: kb::WorldKbCommand,
     },
-
     /// Structured-rule author surface (add/list/deactivate) — V1.166 PD-1.
     ///
     /// The CLI is the only write path for `spoke_rules` rows and the
@@ -99,6 +99,13 @@ pub enum WorldCommand {
     Rule {
         #[command(subcommand)]
         command: rule::RuleCommand,
+    },
+
+    /// Timeline fork surface — `create` (daemon POST route) + `list`
+    /// (pure projection of the timeline-events read) — V1.175 P1 group 5.
+    Fork {
+        #[command(subcommand)]
+        command: fork::ForkCommand,
     },
 }
 
@@ -152,6 +159,7 @@ pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
         }
         WorldCommand::List => run_list(config).await,
         WorldCommand::Show { world_id } => run_show(config, &world_id).await,
+        WorldCommand::Fork { command } => fork::run(command, config).await,
         WorldCommand::Kb { command } => kb::run(command, config).await,
         WorldCommand::Rule { command } => rule::run(command, config).await,
     }

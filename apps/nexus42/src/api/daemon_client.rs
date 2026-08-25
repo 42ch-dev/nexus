@@ -303,6 +303,29 @@ impl DaemonClient {
     }
 
     /// Send a PUT request with JSON body.
+    /// Send a DELETE request expecting a success status with no meaningful
+    /// body (the daemon's 204 No Content deletes — reading progress /
+    /// annotations). Unlike [`Self::delete`], the response body is never
+    /// parsed: a 204 response is empty and would fail JSON deserialization.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` if the daemon returns a non-success HTTP
+    /// status, or a network error if the request fails.
+    #[allow(clippy::future_not_send)]
+    pub async fn delete_no_content(&self, path: &str) -> Result<()> {
+        let url = format!("{}{}", self.base_url, path);
+        let resp = self
+            .send_authenticated(self.http.delete(&url), path)
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            return Err(Self::parse_error_response(&url, status, resp).await);
+        }
+
+        Ok(())
+    }
     ///
     /// # Errors
     ///

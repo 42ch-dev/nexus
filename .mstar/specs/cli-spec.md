@@ -614,7 +614,44 @@ Rules:
 - `search` and `add` (World scope) do not have canonical equivalents; they continue to operate inline but emit the deprecation warning.
 - `remove` with World scope now gates on **world ownership** (the legacy path did not enforce auth; forwarding through `kb_delete` adds the `WORLD_KB_FORBIDDEN` gate, which is the correct behavior per entity-scope-model §5.5).
 - The `--scope world` flag on `creator kb` variants is preserved for backward compatibility; it will be removed in V1.53.
-- Work-scope operations (`creator kb --scope work`, the default) are **unaffected** by this consolidation.
+### 6.2G.3 V1.175 P1 amendment — reading, fork, and inspector leaves (RN-1 §5 groups 3, 5, 6)
+
+Thin daemon-HTTP leaves over **existing** routes (AR-83 #1; no daemon route
+changes, no DTO redesign). All leaves: human-readable default output,
+`--json` emits the daemon DTO / projection verbatim (AR-83 #3), typed long
+flags, daemon error envelopes surfaced via `DaemonClient::parse_error_response`
+(named `[code]`, non-zero exit — PL-5).
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 creator reading progress get <work_id> --chapter <n> [--json]` | Read persisted scroll progress (V1.89 `GET /v1/daemon/reading/progress`). |
+| `nexus42 creator reading progress set <work_id> --chapter <n> --scroll <0..10000> [--json]` | Upsert scroll progress (`PUT`). `--scroll` is thousandths (0–10000), CLI-validated. |
+| `nexus42 creator reading progress clear <work_id> --chapter <n> [--json]` | Delete scroll progress (`DELETE`, 204). |
+| `nexus42 creator reading annotation list <work_id> --chapter <n> [--json]` | List annotations (`GET /v1/daemon/reading/annotations`). |
+| `nexus42 creator reading annotation add <work_id> --chapter <n> --start <o> --end <o> --selected-text <text> --color <yellow\|blue\|green\|pink> [--note <text>] [--json]` | Create an annotation (`POST`). `--end` must be strictly greater than `--start`. |
+| `nexus42 creator reading annotation patch <annotation_id> [--color <c>] [--note <text>] [--json]` | Edit an annotation's color / note (`PATCH`). Empty `--note` clears the note. |
+| `nexus42 creator reading annotation remove <annotation_id> [--json]` | Delete an annotation (`DELETE`, 204). |
+| `nexus42 creator world fork create <world_id> --fork-point <event_id> [--label <text>] [--parent-branch <branch_id>] [--json]` | Create a timeline fork (`POST /v1/daemon/worlds/:world_id/forks`, V1.162 P1 T2). The parent branch is derived from the fork-point event's branch via the existing timeline-events read unless `--parent-branch` is given. 403 foreign world / 422 bad fork-point surface named. |
+| `nexus42 creator world fork list <world_id> [--branch <branch_id>] [--json]` | **Pure projection** of the existing `GET /v1/daemon/worlds/:world_id/timeline/events?event_type=fork_created&status=canon` read (+ optional `branch_id` per F-14): canon `fork_created` markers → `{branch_id, parent_branch_id, forked_from_event_id, label}` from `extensions.fork_lineage`. **No new read route.** Lineage is branch-scoped (V1.162 carrier B): the World's current (root) branch carries no marker — pass `--branch` (the id printed by `fork create`) to read a fork branch's marker. |
+| `nexus42 creator inspector moment <world_id> [--work <work_id>] [--stage <stage>] [--json]` | **Hidden debug group** (clap `hide`, PL-6 — absent from root `--help`, documented here + `creator inspector --help`). Prints the observe-only V1.151 inspector packet (`POST /v1/daemon/inspector/moment`); `--json` emits the `MomentInspectResponse` DTO verbatim. `--stage` ∈ `intake\|research\|produce\|review\|persist\|work_maintenance\|system_maintenance\|unspecified`. `moment-directive` is NOT covered (not §5 remainder). |
+
+Rules:
+
+- **Data CRUD only (PL-7).** Reading leaves are not a manuscript reader /
+  TUI pager; the V1.79 reading surface stays web.
+- **`<work_id>` is the daemon's canonical work reference** (`wrk_...`) —
+  the reading routes key on `work_id` (same convention as `creator works`).
+- **Error honesty (PL-5).** CLI-side validation (chapter ≥ 1, scroll range,
+  color enum, `--end > --start`, stage enum) fails fast with named messages;
+  daemon-side errors (404 unknown work/annotation, 403 foreign world, 422
+  bad fork-point) surface via the standard `[code]` envelope with non-zero
+  exit.
+- **Fork lineage is branch-scoped** (V1.162 carrier B, "point-lookup lineage
+  per branch, not list-all-forks"): a fork branch carries exactly one canon
+  `fork_created` marker; the root branch carries none. `fork list` reads one
+  branch (current by default, `--branch` to target a fork branch).
+
+### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
 
 ### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
 
