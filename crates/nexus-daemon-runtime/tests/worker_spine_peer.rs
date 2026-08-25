@@ -311,6 +311,8 @@ fn rejecting_handler() -> ToolHandler {
 /// Write an admitted `<name>/capability.json` trio at
 /// `<root>/capabilities/<name>/` (AR-35 layout) using the embedded
 /// basic-combat module (real hash pairing so the scan admits it).
+/// The descriptor's `inputSchema` declares `{"type":"object"}` (no
+/// required keys) — matching the engine-less-arm fixtures below.
 fn write_capability_dir(root: &std::path::Path, name: &str) {
     use sha2::{Digest, Sha256};
     use std::fmt::Write as _;
@@ -331,6 +333,37 @@ fn write_capability_dir(root: &std::path::Path, name: &str) {
         r#"{{
             "name": "{name}",
             "inputSchema": "{{\"type\":\"object\"}}",
+            "outputSchema": "{{\"type\":\"object\"}}",
+            "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{sha}" }}
+        }}"#
+    );
+    std::fs::write(dir.join("capability.json"), descriptor).unwrap();
+    std::fs::write(dir.join("manifest.json"), manifest_json).unwrap();
+    std::fs::write(dir.join("basic-combat.wasm"), wasm).unwrap();
+}
+
+/// Write an admitted user capability whose declared `inputSchema` requires
+/// one top-level key (`topic`) — the structural-refusal fixtures (W-A).
+fn write_capability_dir_required(root: &std::path::Path, name: &str) {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
+    let wasm = nexus_wasm_host::embedded_module_bytes("basic-combat")
+        .expect("embedded basic-combat available");
+    let manifest_json = nexus_wasm_host::embedded_module_manifest("basic-combat")
+        .expect("embedded manifest available");
+    let sha: String = {
+        let mut hex = String::with_capacity(64);
+        for b in Sha256::digest(wasm) {
+            let _ = write!(hex, "{b:02x}");
+        }
+        hex
+    };
+    let dir = root.join("capabilities").join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    let descriptor = format!(
+        r#"{{
+            "name": "{name}",
+            "inputSchema": "{{\"type\":\"object\",\"properties\":{{\"topic\":{{\"type\":\"string\"}}}},\"required\":[\"topic\"]}}",
             "outputSchema": "{{\"type\":\"object\"}}",
             "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{sha}" }}
         }}"#
@@ -718,13 +751,27 @@ async fn worker_spine_peer_timeout_is_internal_timeout_named() {
 
     let (_tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    let result = HostToolExecutor::dispatch_from_worker(
-        "tools.t3w.slow",
-        &json!({}),
-        "req-ws-timeout",
-        &state,
+    // W-B (QC3 W-1): outer bound so a daemon-side timeout regression fails
+    // loudly instead of hanging or passing via the adapter's 5 s backstop.
+    // The daemon bound is 300 ms; assert the resolved elapsed is well under
+    // the 5 s adapter bound so the daemon path — not the backstop — fired.
+    let started = Instant::now();
+    let result = tokio::time::timeout(
+        Duration::from_secs(2),
+        HostToolExecutor::dispatch_from_worker(
+            "tools.t3w.slow",
+            &json!({}),
+            "req-ws-timeout",
+            &state,
+        ),
     )
-    .await;
+    .await
+    .expect("timeout dispatch is bounded (no hang)");
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "daemon 300 ms bound fired, not the 5 s adapter backstop: {elapsed:?}"
+    );
     let err = result.error.expect("timeout must error");
     assert_eq!(
         err.code, "internal",
@@ -782,6 +829,160 @@ async fn worker_spine_peer_user_cap_run_error_is_honest_failure() {
     assert!(
         err.message.contains("no executor wired"),
         "honest message: {err:?}"
+    );
+
+    teardown(server, &[peer_id]).await;
+}
+
+// ── User-cap structural gate (AR-76 #2/#4, W-A) ───────────────────────────
+
+#[tokio::test]
+#[serial(worker_spine_peer)]
+async fn worker_spine_peer_user_cap_structural_gate_rejects_non_object_pre_io() {
+    let tmp_root = tempfile::TempDir::new().unwrap();
+    write_capability_dir(tmp_root.path(), "ws.demo.cap");
+    let scan_dir = tmp_root.path().join("capabilities");
+
+    let peer_id = peer_id_of(seed_peer(9));
+    let server = start_server(
+        vec![peer_id.clone()],
+        HashMap::from([(peer_id.clone(), pubkey(seed_peer(9)))]),
+        &["tools.t3w.echo"],
+        Some(&scan_dir),
+        2000,
+    )
+    .await;
+
+    let (_tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let deps = CapabilityRuntimeDeps {
+        pool: None,
+        worker_provider: None,
+        daemon_tool_dispatch: None,
+        cdn_config: None,
+    };
+    let (registry, outcome) = CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &scan_dir);
+    assert!(outcome.skipped.is_empty(), "skips: {:?}", outcome.skipped);
+    state.set_capability_registry(Arc::new(registry));
+
+    // Non-object arguments: the structural gate must refuse BEFORE
+    // `run()` (which would load + execute the WASM module — adapter I/O).
+    let result = HostToolExecutor::dispatch_from_worker(
+        "ws.demo.cap",
+        &json!([1, 2, 3]),
+        "req-ws-ucap-struct-arr",
+        &state,
+    )
+    .await;
+    let err = result.error.expect("structural reject must set error");
+    assert_eq!(
+        err.code, "invalid_input",
+        "user-cap structural refusal is invalid_input: {err:?}"
+    );
+    assert!(
+        err.message.contains("must be a JSON object"),
+        "message: {err:?}"
+    );
+
+    teardown(server, &[peer_id]).await;
+}
+
+#[tokio::test]
+#[serial(worker_spine_peer)]
+async fn worker_spine_peer_user_cap_structural_gate_rejects_missing_required_pre_io() {
+    let tmp_root = tempfile::TempDir::new().unwrap();
+    write_capability_dir_required(tmp_root.path(), "ws.demo.capreq");
+    let scan_dir = tmp_root.path().join("capabilities");
+
+    let peer_id = peer_id_of(seed_peer(10));
+    let server = start_server(
+        vec![peer_id.clone()],
+        HashMap::from([(peer_id.clone(), pubkey(seed_peer(10)))]),
+        &["tools.t3w.echo"],
+        Some(&scan_dir),
+        2000,
+    )
+    .await;
+
+    let (_tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let deps = CapabilityRuntimeDeps {
+        pool: None,
+        worker_provider: None,
+        daemon_tool_dispatch: None,
+        cdn_config: None,
+    };
+    let (registry, outcome) = CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &scan_dir);
+    assert!(outcome.skipped.is_empty(), "skips: {:?}", outcome.skipped);
+    state.set_capability_registry(Arc::new(registry));
+
+    // Object but missing the declared top-level required key `topic`.
+    let result = HostToolExecutor::dispatch_from_worker(
+        "ws.demo.capreq",
+        &json!({ "other": 1 }),
+        "req-ws-ucap-struct-miss",
+        &state,
+    )
+    .await;
+    let err = result.error.expect("structural reject must set error");
+    assert_eq!(err.code, "invalid_input");
+    assert!(
+        err.message.contains("Missing required tool arguments"),
+        "message: {err:?}"
+    );
+
+    teardown(server, &[peer_id]).await;
+}
+
+#[tokio::test]
+#[serial(worker_spine_peer)]
+async fn worker_spine_peer_user_cap_structural_gate_rejects_http_lane_pre_io() {
+    // HTTP-lane entry (the handler behind /v1/daemon/agent-host/internal/
+    // tool-executions just wraps HostToolExecutor::execute): same structural
+    // refusal, same pre-I/O guarantee.
+    let tmp_root = tempfile::TempDir::new().unwrap();
+    write_capability_dir_required(tmp_root.path(), "ws.demo.capreq");
+    let scan_dir = tmp_root.path().join("capabilities");
+
+    let peer_id = peer_id_of(seed_peer(11));
+    let server = start_server(
+        vec![peer_id.clone()],
+        HashMap::from([(peer_id.clone(), pubkey(seed_peer(11)))]),
+        &["tools.t3w.echo"],
+        Some(&scan_dir),
+        2000,
+    )
+    .await;
+
+    let (_tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let deps = CapabilityRuntimeDeps {
+        pool: None,
+        worker_provider: None,
+        daemon_tool_dispatch: None,
+        cdn_config: None,
+    };
+    let (registry, outcome) = CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &scan_dir);
+    assert!(outcome.skipped.is_empty(), "skips: {:?}", outcome.skipped);
+    state.set_capability_registry(Arc::new(registry));
+
+    let req = nexus_daemon_runtime::api::handlers::host_tool_executor::ToolExecuteRequest {
+        tool_name: "ws.demo.capreq".to_string(),
+        parameters: json!({ "other": 1 }),
+        session_id: None,
+        request_id: Some("req-http-ucap-struct".to_string()),
+        caller_kind: None,
+    };
+    let result = HostToolExecutor::execute(&req, &state).await;
+    let err = result.expect_err("structural reject must error on the HTTP lane");
+    assert_eq!(
+        err.error_code().to_string(),
+        "invalid_input",
+        "HTTP-lane user-cap structural refusal: {err:?}"
+    );
+    assert!(
+        err.to_string().contains("Missing required tool arguments"),
+        "message: {err:?}"
     );
 
     teardown(server, &[peer_id]).await;

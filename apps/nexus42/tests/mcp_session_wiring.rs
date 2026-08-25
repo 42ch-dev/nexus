@@ -153,6 +153,9 @@ async fn run_scripted_agent(
                     .args(&stdio.args)
                     .env("HOME", home.path())
                     .env("RUST_LOG", "off")
+                    // S-d (QC3 S-3): NO_PROXY aligned with the e2e child —
+                    // keeps the child's loopback daemon connection direct.
+                    .env("NO_PROXY", "127.0.0.1")
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
                     .stderr(Stdio::null());

@@ -27,9 +27,10 @@
 //! absent from `tools/list` and refused, bounded; (iv) daemon stopped ⇒
 //! bounded `INTERNAL_ERROR`, no hang.
 //!
-//! Determinism: fixed Ed25519 seeds, `127.0.0.1:0`, readiness events
-//! (admission/eviction handshakes polled with a deadline — no
-//! sleep-based sync), per-suite serialization via `#[serial]`.
+//! Determinism: fixed Ed25519 seeds, `127.0.0.1:0`, deadline-polling
+//! readiness waits (admission/eviction handshakes polled every 20 ms with
+//! a deadline — S-e/QC3 S-1: bounded polling, not a true event), per-suite
+//! serialization via `#[serial]`.
 //!
 //! Placement: behind `connect-client` (`required-features`); default
 //! feature CI never compiles it.
@@ -301,8 +302,8 @@ fn clear_peer_table() {
     }
 }
 
-/// Await a condition until it holds or the deadline elapses (readiness
-/// event, no sleep-sync).
+/// Await a condition until it holds or the deadline elapses
+/// (deadline-polling: 20 ms poll interval, S-e — not a readiness event).
 async fn wait_until(mut cond: impl FnMut() -> bool, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
@@ -409,13 +410,19 @@ impl Drop for McpChild {
 
 type McpClient = RunningService<rmcp::RoleClient, ClientInfo>;
 
-/// Spawn the child and complete the MCP initialize handshake.
+/// Spawn the child and complete the MCP initialize handshake (bounded —
+/// S-c/QC3 S-2: a stalled child must fail this test, never hang the whole
+/// `#[serial(e2e_peer_mcp)]` group).
 async fn mcp_client(daemon_url: &str) -> (McpClient, McpChild) {
     let mut child = McpChild::spawn(daemon_url);
     let transport = child.take_transport();
-    let running = serve_client(ClientInfo::default(), transport)
-        .await
-        .expect("initialize handshake completes");
+    let running = tokio::time::timeout(
+        Duration::from_secs(15),
+        serve_client(ClientInfo::default(), transport),
+    )
+    .await
+    .expect("initialize handshake is bounded (no hang)")
+    .expect("initialize handshake completes");
     (running, child)
 }
 
@@ -869,7 +876,7 @@ async fn journey_b_disconnect_evicts_zero_stale_rows() {
     // Disconnect the integrator.
     adapter.close();
 
-    // Eviction readiness event (not a sleep): the id leaves the table.
+    // Eviction readiness wait (deadline-polled): the id leaves the table.
     assert!(
         wait_until(
             || peer_tool_table().get(TOOL_ID).is_none(),
@@ -987,5 +994,58 @@ async fn journey_b_daemon_stopped_is_bounded_internal_error() {
 
     drop(running2);
     child2.kill();
+    teardown(server, &[peer_id]);
+}
+
+// ── Journey B (v): child exits mid-session ⇒ bounded failure (S-f) ───────
+
+#[tokio::test]
+#[serial(e2e_peer_mcp)]
+async fn journey_b_child_exit_mid_session_is_bounded_failure() {
+    clear_peer_table();
+    let peer_id = peer_id_of(seed_peer(8));
+    let server = E2eDaemon::start(
+        vec![TOOL_ID.to_owned()],
+        vec![peer_id.clone()],
+        HashMap::from([(peer_id.clone(), pubkey(seed_peer(8)))]),
+        true,
+    )
+    .await;
+
+    let adapter = dial(server.ws_addr, seed_peer(8), TOOL_ID)
+        .await
+        .expect("dial succeeds");
+    adapter.register_tool_handler(TOOL_ID, echo_handler());
+    assert!(
+        wait_until(
+            || peer_tool_table().get(TOOL_ID).is_some(),
+            Duration::from_secs(5)
+        )
+        .await,
+        "admitted"
+    );
+
+    let (running, mut child) = mcp_client(&server.http_url).await;
+    // Prove the session is live before the child exits.
+    let ok = call_peer(&running, TOOL_ID, json!({ "msg": "before-exit" })).await;
+    assert_eq!(ok, json!({ "echo": { "msg": "before-exit" } }));
+
+    // Kill the child mid-session; the next tools/call must fail BOUNDED
+    // (never hang the serialized group). The failure mode is SDK-owned
+    // (AR-71 Model A — the child is the client's stdio process); this pins
+    // the observable contract: a dead child ⇒ prompt, bounded error.
+    child.kill();
+    let result = tokio::time::timeout(
+        Duration::from_secs(15),
+        running.call_tool(CallToolRequestParams::new(TOOL_ID.to_owned())),
+    )
+    .await
+    .expect("child-exit failure is bounded (no hang)");
+    assert!(
+        result.is_err(),
+        "tools/call after child exit must fail: {result:?}"
+    );
+
+    drop(running);
     teardown(server, &[peer_id]);
 }

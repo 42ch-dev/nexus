@@ -63,15 +63,18 @@ AC-V174-1 miss: AC-V174-1 closes on the **wired ACP path** below, not on
 native CLI configuration (PL-10). No `structured_tool_calls` descriptor
 flips were made on this surface.
 
-## Wired consumption path: hosted ACP agents
+## Wired consumption path for hosted ACP agents
 
-For nexus-hosted ACP agent sessions the MCP server is wired first-class
-(AR-75 C-1, P1 T1): `nexus-acp-host::mcp::nexus_mcp_stdio_server()` produces
+The shipped construction path for the ACP stdio surface is the T1 helper
+`nexus-acp-host::mcp::nexus_mcp_stdio_server()`, which produces
 `McpServer::Stdio { name: "nexus", command: "<nexus42>", args: ["mcp", "serve"] }`
 carried on `NewSessionRequest.mcp_servers` when the `connect-client`
-feature is enabled. This is the AC-closing journey — a scripted ACP agent
-spawns the real `nexus42 mcp serve` child and calls an integrator-registered
-peer tool through its own MCP client.
+feature is enabled (S-b / QC1 S-2: no hosted-session caller constructs the
+option directly yet — the helper is the single safe constructor, and the
+Nexus→SDK mapping now carries `args` for hand-built Stdio descriptors as
+well). This is the AC-closing journey — a scripted ACP agent spawns the
+real `nexus42 mcp serve` child and calls an integrator-registered peer
+tool through its own MCP client.
 
 ## Integrator & operator duties (V1.174 P1, AC-V174-4)
 
