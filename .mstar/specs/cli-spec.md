@@ -688,8 +688,8 @@ Rules:
     `current_revision` + `conflicting_path` + `recovery_hint`),
   - 404 `not_found` (unknown strategy / state),
   - 422 `strategy_validation_failed`,
-  - 400 `strategy_self_loop` / `strategy_transition_duplicate` (passthrough
-    allowlist), and
+  - 422 `strategy_self_loop` / `strategy_transition_duplicate` (passthrough
+    allowlist; HTTP 422 per `status_code()`), and
   - 400 `bad_request` for all other 400s (the daemon remaps internal codes
     such as `strategy_invalid`, `strategy_update_forbidden`,
     `strategy_transition_missing_old_target`, `strategy_transition_not_found`
