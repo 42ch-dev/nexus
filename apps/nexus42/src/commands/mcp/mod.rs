@@ -33,7 +33,7 @@ use rmcp::model::{
     CallToolRequestParams, CallToolResult, Content, ErrorCode, Implementation, ListToolsResult,
     PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
 };
-use rmcp::service::RequestContext;
+use rmcp::service::{Peer, RequestContext};
 use rmcp::transport::stdio;
 use rmcp::{serve_server, ErrorData as McpError, RoleServer, ServerHandler};
 
@@ -56,6 +56,11 @@ use crate::errors::{CliError, Result};
 /// Keeping this deadline above the sandbox wall guarantees the child is
 /// never the party that cuts off a running user capability first.
 pub const MCP_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
+/// Catalog watch interval (AR-79, DF-90): the child polls
+/// `GET /v1/daemon/tools` every 2 s and sends `notifications/tools/list_changed`
+/// when the digest changes. A const, not configurable this iteration
+/// (AR-79 #1); the delivery bound is interval + one request timeout.
+pub const MCP_CATALOG_WATCH_INTERVAL: Duration = Duration::from_secs(2);
 
 /// `nexus42 mcp` subcommands (hidden group; V1.35 CLI surface lock).
 #[derive(Debug, clap::Subcommand)]
@@ -101,10 +106,24 @@ async fn serve(config: &CliConfig) -> Result<()> {
     let service = serve_server(handler, stdio())
         .await
         .map_err(|e| CliError::Other(format!("mcp server init failed: {e}")))?;
+    // AR-79 (DF-90): spawn the catalog watcher AFTER the initialize
+    // handshake completes, so notifications are only ever sent inside an
+    // initialized session (protocol-correct). The peer handle is cloned
+    // from the RunningService (F-8) before `waiting()` consumes it; the
+    // watcher aborts when the transport ends (task dropped on process
+    // exit / join path).
+    let watcher_peer = service.peer().clone();
+    let watcher_client = DaemonClient::with_timeouts(
+        &config.daemon_url,
+        crate::api::daemon_client::DEFAULT_CONNECT_TIMEOUT,
+        MCP_REQUEST_TIMEOUT,
+    )?;
+    let watcher = tokio::spawn(catalog_watch_loop(watcher_client, watcher_peer));
     service
         .waiting()
         .await
         .map_err(|e| CliError::Other(format!("mcp server failed: {e}")))?;
+    watcher.abort();
     Ok(())
 }
 
@@ -150,8 +169,16 @@ enum ToolCallOutcome {
 
 impl ServerHandler for McpBridgeHandler {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new("nexus42", env!("CARGO_PKG_VERSION")))
+        // AR-79 #4 (F-6): order matters — `enable_tools()` must precede
+        // `enable_tool_list_changed()` (the builder only touches an
+        // existing `tools` capability).
+        ServerInfo::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_tool_list_changed()
+                .build(),
+        )
+        .with_server_info(Implementation::new("nexus42", env!("CARGO_PKG_VERSION")))
     }
 
     async fn list_tools(
@@ -299,6 +326,58 @@ impl McpBridgeHandler {
             }),
         }
     }
+}
+
+/// AR-79 (DF-90) catalog watch loop: poll `GET /v1/daemon/tools` every
+/// [`MCP_CATALOG_WATCH_INTERVAL`], digest the deterministic (id-sorted)
+/// body, and send `notifications/tools/list_changed` via the cloned peer
+/// handle when the digest changes between successful polls.
+///
+/// Baseline semantics (AR-79 #3): the first successful poll establishes
+/// the baseline digest WITHOUT notifying (no spurious `listChanged` at
+/// session start); notify fires only on a change between successful
+/// polls. Poll errors (daemon down / auth) keep the last digest, log to
+/// stderr, and never notify — a daemon that comes back with a changed
+/// catalog then notifies once, correctly.
+///
+/// Model A preserved (AR-79 #5): the child holds a digest + interval —
+/// not a registry, not an allowlist, not policy, not a read cache. Every
+/// `tools/list` remains a live daemon round trip.
+async fn catalog_watch_loop(client: DaemonClient, peer: Peer<RoleServer>) {
+    let mut last_digest: Option<serde_json::Value> = None;
+    loop {
+        tokio::time::sleep(MCP_CATALOG_WATCH_INTERVAL).await;
+        let digest = match fetch_catalog_digest(&client).await {
+            Ok(digest) => digest,
+            Err(e) => {
+                // Keep the last digest; never notify on a poll error.
+                eprintln!("mcp catalog watch: poll failed: {e}");
+                continue;
+            }
+        };
+        if last_digest.as_ref() == Some(&digest) {
+            continue;
+        }
+        if last_digest.is_some() {
+            // A change between successful polls — notify. The first
+            // successful poll only establishes the baseline.
+            if let Err(e) = peer.notify_tool_list_changed().await {
+                eprintln!("mcp catalog watch: notify_tool_list_changed failed: {e}");
+            }
+        }
+        last_digest = Some(digest);
+    }
+}
+
+/// Fetch the catalog body and compute a digest over the deterministic
+/// (id-sorted) response. The route already sorts rows by id (tools.rs
+/// L126), so the raw body is stable for an unchanged catalog; the digest
+/// is the raw `serde_json::Value` (order-insensitive comparison).
+async fn fetch_catalog_digest(
+    client: &DaemonClient,
+) -> std::result::Result<serde_json::Value, CliError> {
+    let body: serde_json::Value = client.get("/v1/daemon/tools").await?;
+    Ok(body)
 }
 
 /// Map one daemon catalog row to an rmcp `Tool` (AR-70 §3 schema mapping):
@@ -461,6 +540,36 @@ mod tests {
             MCP_REQUEST_TIMEOUT > sandbox_wall,
             "MCP child request timeout ({MCP_REQUEST_TIMEOUT:?}) must strictly exceed \
              the user-cap sandbox wall ({sandbox_wall:?})"
+        );
+    }
+    #[test]
+    fn get_info_advertises_tools_list_changed() {
+        // AR-79 #4 (F-6): the advertisement must carry
+        // `tools.listChanged: true` — the wire shape a long-lived MCP
+        // client checks before relying on `notifications/tools/list_changed`.
+        // The builder order pin (`enable_tools()` before
+        // `enable_tool_list_changed()`) is exercised by the real
+        // `get_info` path.
+        let handler = McpBridgeHandler {
+            client: DaemonClient::new("http://127.0.0.1:1"),
+        };
+        let info = handler.get_info();
+        let tools = info
+            .capabilities
+            .tools
+            .as_ref()
+            .expect("tools capability advertised");
+        assert_eq!(
+            tools.list_changed,
+            Some(true),
+            "tools.listChanged must be advertised (AR-79 #4)"
+        );
+        // The serialized initialize result carries the camelCase wire key.
+        let wire = serde_json::to_value(&info).expect("ServerInfo serializes");
+        assert_eq!(
+            wire["capabilities"]["tools"]["listChanged"],
+            serde_json::json!(true),
+            "wire shape: capabilities.tools.listChanged == true"
         );
     }
 }

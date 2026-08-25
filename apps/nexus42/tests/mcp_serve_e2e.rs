@@ -25,7 +25,9 @@
 // signal; `.unwrap()`/`.expect()` keep the tests linear and readable.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use std::future::Future;
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use nexus_daemon_runtime::capability_registry::host_tool_registry;
@@ -501,6 +503,243 @@ async fn prompts_and_resources_are_empty_lists_not_errors() {
     assert!(
         resources.resources.is_empty(),
         "resources list empty (SDK default)"
+    );
+
+    drop(running);
+    child.kill();
+}
+// ── listChanged: advertisement + live-session delivery (AR-79, DF-90) ────
+
+/// Counts `notifications/tools/list_changed` received by the client.
+#[derive(Clone, Default)]
+struct ListChangedCounter {
+    count: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl ListChangedCounter {
+    fn count(&self) -> usize {
+        self.count.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl rmcp::ClientHandler for ListChangedCounter {
+    fn on_tool_list_changed(
+        &self,
+        _context: rmcp::service::NotificationContext<rmcp::RoleClient>,
+    ) -> impl Future<Output = ()> + rmcp::service::MaybeSendFuture + '_ {
+        self.count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        std::future::ready(())
+    }
+}
+
+/// A catalog stub whose body can be mutated mid-session. The responder
+/// closure reads the current body on every request, so the watcher's next
+/// poll observes the mutation.
+#[derive(Clone)]
+struct MutableCatalog {
+    body: Arc<Mutex<Value>>,
+}
+
+impl MutableCatalog {
+    fn new(body: Value) -> Self {
+        Self {
+            body: Arc::new(Mutex::new(body)),
+        }
+    }
+
+    fn set(&self, body: Value) {
+        *self.body.lock().expect("catalog lock") = body;
+    }
+
+    fn current(&self) -> Value {
+        self.body.lock().expect("catalog lock").clone()
+    }
+}
+
+/// Mount a mutable catalog stub; returns the catalog handle.
+async fn mount_mutable_catalog(mock: &MockServer) -> MutableCatalog {
+    let catalog = MutableCatalog::new(catalog_body());
+    let responder = catalog.clone();
+    Mock::given(method("GET"))
+        .and(path("/v1/daemon/tools"))
+        .respond_with(move |_req: &wiremock::Request| {
+            ResponseTemplate::new(200).set_body_json(responder.current())
+        })
+        .mount(mock)
+        .await;
+    catalog
+}
+
+/// Wait until the watcher has completed its first (baseline) poll: the
+/// test's own `tools/list` plus the watcher's first poll make ≥ 2 GETs.
+async fn wait_for_baseline_poll(mock: &MockServer) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+    loop {
+        let n = mock
+            .received_requests()
+            .await
+            .expect("recording enabled")
+            .iter()
+            .filter(|r| r.method == "GET" && r.url.path() == "/v1/daemon/tools")
+            .count();
+        if n >= 2 {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for the watcher's baseline poll"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Await the next `tools/list_changed` notification (count > `before`),
+/// bounded by 2 × interval + margin (AR-79 #7).
+async fn await_list_changed(counter: &ListChangedCounter, before: usize, what: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+    loop {
+        if counter.count() > before {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for tools/list_changed after {what}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Sorted `tools/list` ids from the client.
+async fn list_ids(
+    running: &rmcp::service::RunningService<rmcp::RoleClient, ListChangedCounter>,
+) -> Vec<String> {
+    let list = running.list_tools(None).await.expect("tools/list succeeds");
+    let mut ids: Vec<String> = list.tools.iter().map(|t| t.name.to_string()).collect();
+    ids.sort();
+    ids
+}
+
+#[tokio::test]
+async fn list_changed_advertised_and_delivered() {
+    let mock = MockServer::start().await;
+    let catalog = mount_mutable_catalog(&mock).await;
+    let mut child = McpChild::spawn(&mock);
+    let transport = child.take_transport();
+    let counter = ListChangedCounter::default();
+    let running = serve_client(counter.clone(), transport)
+        .await
+        .expect("initialize handshake completes");
+
+    // Advertisement pin (AR-79 #4): initialize capabilities include
+    // `tools.listChanged`.
+    let info = running.peer_info().expect("server info from initialize");
+    let tools = info.capabilities.tools.as_ref().expect("tools capability");
+    assert_eq!(
+        tools.list_changed,
+        Some(true),
+        "initialize advertises tools.listChanged"
+    );
+
+    // Baseline tools/list.
+    let baseline = list_ids(&running).await;
+    assert_eq!(baseline.len(), 3, "baseline catalog has 3 rows");
+
+    // Wait for the watcher's baseline poll so the first digest is set
+    // (a mutation before that would be absorbed into the baseline).
+    wait_for_baseline_poll(&mock).await;
+
+    // ── Leg 1: peer admission ──
+    let mut body = catalog.current();
+    body["items"]
+        .as_array_mut()
+        .expect("items array")
+        .push(json!({
+            "id": "tools.t6.admitted",
+            "description": "tools.t6.admitted test tool",
+            "input_schema": "{\"type\":\"object\"}",
+            "output_schema": "{\"type\":\"object\"}",
+            "origin": "peer"
+        }));
+    catalog.set(body);
+    let before = counter.count();
+    await_list_changed(&counter, before, "peer admission").await;
+    assert_eq!(counter.count(), before + 1, "exactly one notification");
+    let after_admission = list_ids(&running).await;
+    assert!(
+        after_admission.contains(&"tools.t6.admitted".to_string()),
+        "refreshed tools/list includes the admitted peer tool"
+    );
+    assert_eq!(after_admission.len(), 4, "one row added");
+
+    // ── Leg 2: peer eviction ──
+    let mut body = catalog.current();
+    body["items"]
+        .as_array_mut()
+        .expect("items array")
+        .retain(|item| item["id"] != "tools.t6.admitted");
+    catalog.set(body);
+    let before = counter.count();
+    await_list_changed(&counter, before, "peer eviction").await;
+    assert_eq!(counter.count(), before + 1, "exactly one notification");
+    let after_eviction = list_ids(&running).await;
+    assert!(
+        !after_eviction.contains(&"tools.t6.admitted".to_string()),
+        "refreshed tools/list drops the evicted peer tool"
+    );
+    assert_eq!(after_eviction.len(), 3, "back to 3 rows");
+
+    // ── Leg 3: user-cap leg via mock-catalog change (a runtime user-cap
+    // add is restart-scoped pre-RN-2, AR-79 #6) ──
+    let mut body = catalog.current();
+    for item in body["items"].as_array_mut().expect("items array") {
+        if item["id"] == "t6.wcap" {
+            item["description"] = json!("t6.wcap (updated)");
+        }
+    }
+    catalog.set(body);
+    let before = counter.count();
+    await_list_changed(&counter, before, "user-cap catalog change").await;
+    assert_eq!(counter.count(), before + 1, "exactly one notification");
+    let after_user_cap = list_ids(&running).await;
+    assert_eq!(
+        after_user_cap, baseline,
+        "ids unchanged for a content-only change"
+    );
+    let list = running.list_tools(None).await.expect("tools/list succeeds");
+    let wcap = list
+        .tools
+        .iter()
+        .find(|t| t.name == "t6.wcap")
+        .expect("wcap row present");
+    assert_eq!(
+        wcap.description.as_deref(),
+        Some("t6.wcap (updated)"),
+        "refreshed tools/list carries the new description"
+    );
+
+    drop(running);
+    child.kill();
+}
+
+#[tokio::test]
+async fn no_list_changed_when_catalog_unchanged() {
+    let mock = MockServer::start().await;
+    mount_mutable_catalog(&mock).await;
+    let mut child = McpChild::spawn(&mock);
+    let transport = child.take_transport();
+    let counter = ListChangedCounter::default();
+    let running = serve_client(counter.clone(), transport)
+        .await
+        .expect("initialize handshake completes");
+
+    // Baseline poll + ≥ 2 further intervals with an unchanged catalog.
+    wait_for_baseline_poll(&mock).await;
+    tokio::time::sleep(Duration::from_secs(5)).await; // > 2 × 2 s interval
+
+    assert_eq!(
+        counter.count(),
+        0,
+        "zero notifications when the catalog is unchanged"
     );
 
     drop(running);
