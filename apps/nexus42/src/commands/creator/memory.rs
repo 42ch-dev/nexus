@@ -368,35 +368,42 @@ async fn drain_review_queue(client: &DaemonClient, creator_id: &str) -> Result<D
     Ok(outcome)
 }
 
+/// Project the cumulative drain outcome onto the `--json` envelope.
+///
+/// The stop-reason flags (`stopped_zero_progress` / `cap_exhausted`) let a
+/// scripted drain retry tell an unprocessable head row from call-cap
+/// exhaustion — the two states must serialize differently (qc2 W-1).
+#[must_use]
+fn review_json(outcome: DrainOutcome) -> serde_json::Value {
+    serde_json::json!({
+        "promoted": outcome.promoted,
+        "fragmented": outcome.fragmented,
+        "dropped": outcome.dropped,
+        "processed": outcome.processed,
+        "has_more": outcome.has_more,
+        "stopped_zero_progress": outcome.stopped_zero_progress,
+        "cap_exhausted": outcome.cap_exhausted,
+    })
+}
+
 /// `creator memory review [--json]` — drain the pending-review queue.
 ///
 /// See [`drain_review_queue`] for the drain contract.
 async fn review(config: &CliConfig, creator_id: &str, json: bool) -> Result<()> {
     let client = DaemonClient::from_config(config);
     let outcome = drain_review_queue(&client, creator_id).await?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&review_json(outcome))?);
+        return Ok(());
+    }
     let DrainOutcome {
         promoted,
         fragmented,
         dropped,
-        processed,
         has_more,
         stopped_zero_progress,
-        cap_exhausted,
+        ..
     } = outcome;
-    let _ = cap_exhausted;
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "promoted": promoted,
-                "fragmented": fragmented,
-                "dropped": dropped,
-                "processed": processed,
-                "has_more": has_more,
-            }))?
-        );
-        return Ok(());
-    }
     if promoted + fragmented + dropped == 0 {
         println!("No pending memories to review.");
     } else {
@@ -744,5 +751,53 @@ mod tests {
         ));
         assert!(outcome.has_more);
         assert!(!outcome.stopped_zero_progress);
+    }
+
+    #[test]
+    fn review_json_serializes_stop_reasons_differently() {
+        // qc2 W-1: a scripted `--json` drain retry must be able to tell an
+        // unprocessable head row (zero-progress stop) from call-cap
+        // exhaustion — the two terminal causes serialize to distinct
+        // envelopes.
+        let mut zero_progress = DrainOutcome {
+            promoted: 0,
+            fragmented: 0,
+            dropped: 0,
+            processed: 0,
+            has_more: true,
+            stopped_zero_progress: true,
+            cap_exhausted: false,
+        };
+        assert!(!fold_review_response(
+            &mut zero_progress,
+            &review_response(0, 0, true),
+            0
+        ));
+
+        let mut cap_hit = DrainOutcome {
+            promoted: 0,
+            fragmented: 0,
+            dropped: 0,
+            processed: 0,
+            has_more: false,
+            stopped_zero_progress: false,
+            cap_exhausted: false,
+        };
+        assert!(!fold_review_response(
+            &mut cap_hit,
+            &review_response(1, 1, false),
+            0
+        ));
+        cap_hit.has_more = true;
+        cap_hit.cap_exhausted = cap_hit.has_more && !cap_hit.stopped_zero_progress;
+
+        let zero_json = review_json(zero_progress);
+        let cap_json = review_json(cap_hit);
+
+        assert_eq!(zero_json["stopped_zero_progress"], true);
+        assert_eq!(zero_json["cap_exhausted"], false);
+        assert_eq!(cap_json["stopped_zero_progress"], false);
+        assert_eq!(cap_json["cap_exhausted"], true);
+        assert_ne!(zero_json, cap_json);
     }
 }

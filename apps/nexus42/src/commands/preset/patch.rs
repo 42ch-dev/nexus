@@ -21,6 +21,7 @@
 //! from `--file <path>` or `-` for stdin.
 
 use crate::api::DaemonClient;
+use crate::commands::creator::work_utils::read_file_bounded;
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
@@ -30,6 +31,12 @@ use nexus_contracts::daemon_api::canvas::strategy::{
     StrategyPatchTransitionRequest, StrategyPatchTransitionRequestOp,
     StrategyPatchTransitionRequestTransitionKind,
 };
+
+/// Client-side cap for `--file` prompt reads (qc3 S-002). Mirrors the
+/// daemon's preset YAML size cap (`PRESET_MAX_YAML_SIZE`, 1 MiB in
+/// `api/handlers/strategy.rs`) so an accidentally oversized template file is
+/// rejected before the unbounded read.
+const PROMPT_FILE_MAX_BYTES: usize = 1024 * 1024;
 
 /// `preset patch` subcommands.
 #[derive(Debug, Subcommand)]
@@ -382,8 +389,7 @@ async fn patch_prompt(
         std::io::stdin().read_to_string(&mut buf)?;
         buf
     } else {
-        std::fs::read_to_string(file)
-            .map_err(|e| CliError::Other(format!("cannot read --file '{file}': {e}")))?
+        read_file_bounded(file, PROMPT_FILE_MAX_BYTES, "--file")?
     };
     let req = StrategyPatchPromptTemplateRequest {
         strategy_id: strategy_id.to_string(),

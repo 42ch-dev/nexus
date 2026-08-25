@@ -28,6 +28,7 @@
 //! `--content-file <path>`.
 
 use crate::api::DaemonClient;
+use crate::commands::creator::work_utils::read_file_bounded;
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
@@ -38,6 +39,12 @@ use nexus_contracts::daemon_api::canvas::outline::{
     TimelinePatchEventRequestOperation, WorkOutline,
 };
 use std::num::NonZeroU64;
+
+/// Client-side cap for `--content-file` reads (qc3 S-002). Mirrors the
+/// daemon's `OUTLINE_FILE_MAX_BYTES` (`api/handlers/outline.rs`) so an
+/// accidentally oversized file is rejected before the full read instead of
+/// being materialized and then refused server-side.
+const CONTENT_FILE_MAX_BYTES: usize = 10 * 1024 * 1024;
 
 /// `creator works outline` verbs (V1.72 canvas read + structure patch).
 #[derive(Debug, Subcommand)]
@@ -567,8 +574,7 @@ async fn chapter_patch(
     let content = if let Some(text) = content {
         Some(text.to_string())
     } else if let Some(path) = content_file {
-        let text = std::fs::read_to_string(path)
-            .map_err(|e| CliError::Other(format!("cannot read --content-file '{path}': {e}")))?;
+        let text = read_file_bounded(path, CONTENT_FILE_MAX_BYTES, "--content-file")?;
         Some(text)
     } else {
         None

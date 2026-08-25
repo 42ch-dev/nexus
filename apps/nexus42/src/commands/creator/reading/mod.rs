@@ -17,6 +17,7 @@
 //! `DaemonClient::parse_error_response` (named `[code]`, non-zero exit).
 
 use crate::api::DaemonClient;
+use crate::commands::creator::work_utils::query_path;
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
@@ -135,12 +136,14 @@ pub enum AnnotationCommand {
     Patch {
         /// Annotation ID (ann_...).
         annotation_id: String,
-        /// New highlight color: yellow | blue | green | pink.
-        #[arg(long)]
+        /// New highlight color: yellow | blue | green | pink. At least one
+        /// of --color / --note is required.
+        #[arg(long, required_unless_present = "note")]
         color: Option<String>,
         /// New note. An empty string clears the note; omitting the flag
-        /// leaves the note unchanged.
-        #[arg(long)]
+        /// leaves the note unchanged. At least one of --color / --note is
+        /// required.
+        #[arg(long, required_unless_present = "color")]
         note: Option<String>,
         /// Emit machine-readable JSON instead of human text.
         #[arg(long, default_value_t = false)]
@@ -308,18 +311,6 @@ fn parse_patch_color(color: &str) -> Result<ReadingAnnotationPatchRequestColor> 
             VALID_ANNOTATION_COLORS.join(", ")
         ))),
     }
-}
-
-/// Build a daemon path with URL-encoded query pairs (house pattern:
-/// `works/mod.rs::handle_list`).
-fn query_path(base: &str, pairs: &[(&str, &str)]) -> String {
-    let mut url = url::Url::parse("http://localhost").expect("valid base");
-    url.set_path(base);
-    for (key, value) in pairs {
-        url.query_pairs_mut().append_pair(key, value);
-    }
-    let q = url.query().unwrap_or("");
-    format!("{base}?{q}")
 }
 
 /// Render a progress DTO row for human output.

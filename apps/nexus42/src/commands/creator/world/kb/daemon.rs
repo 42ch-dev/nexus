@@ -40,6 +40,12 @@ use nexus_contracts::{
 };
 use std::collections::HashMap;
 
+/// Relationship projection cap enforced by the daemon graph endpoint
+/// (`GRAPH_RELATIONSHIP_CAP` in `world_kb.rs`). The wire DTO carries no
+/// `truncated` flag, so the CLI mirrors the constant to surface a possibly
+/// truncated listing honestly on the human path (qc3 W-002).
+const GRAPH_RELATIONSHIP_CAP: usize = 1000;
+
 /// `creator world kb entity` verbs (daemon OCC surface).
 #[derive(Debug, Subcommand)]
 pub enum KbEntityCommand {
@@ -99,7 +105,10 @@ pub enum KbDaemonCommand {
     ///
     /// Prints the `WorldKbGraphResponse` DTO: entities (with per-row
     /// `version` — the `--expected-version` for `entity patch`),
-    /// relationships, and source anchors. `--json` emits the DTO verbatim.
+    /// relationships, and source anchors. The daemon caps the projection
+    /// at 500 entities / 1000 stored relationships (no wire `truncated`
+    /// flag exists yet); when the cap is hit the human output says so.
+    /// `--json` emits the DTO verbatim.
     Graph {
         /// World ID (wld_...).
         #[arg(long, value_name = "WORLD_ID")]
@@ -378,6 +387,12 @@ async fn kb_graph(
     }
     if !resp.source_anchors.is_empty() {
         println!("{} source anchors", resp.source_anchors.len());
+    }
+    if resp.relationships.len() >= GRAPH_RELATIONSHIP_CAP {
+        println!(
+            "\nNote: the daemon projects at most {GRAPH_RELATIONSHIP_CAP} relationships (no wire \
+             `truncated` flag exists yet); the graph may be truncated."
+        );
     }
     Ok(())
 }

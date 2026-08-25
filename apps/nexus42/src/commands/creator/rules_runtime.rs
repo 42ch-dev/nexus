@@ -25,9 +25,10 @@ use std::io::IsTerminal;
 use serde::Deserialize;
 
 use crate::api::DaemonClient;
-use crate::commands::creator::work_utils::resolve_active_work_id;
+use crate::commands::creator::work_utils::{query_path, resolve_active_work_id};
 use crate::commands::creator::works::{FindingsCommand, RulesCommand};
 use crate::errors::{CliError, Result};
+use nexus_contracts::daemon_api::findings::UpdateFindingRequest;
 
 /// Subset of the daemon `GET /v1/daemon/works/{work_id}` payload that this
 /// module needs. Deserializing via `serde_json::Value` keeps the CLI
@@ -292,7 +293,6 @@ async fn handle_findings_list(
     json: bool,
 ) -> Result<()> {
     let resolved_id = resolve_active_work_id(client, work_id).await?;
-    let mut path = format!("/v1/daemon/works/{resolved_id}/findings");
     let mut pairs: Vec<(&str, &str)> = Vec::new();
     if let Some(s) = &status {
         pairs.push(("status", s));
@@ -300,15 +300,7 @@ async fn handle_findings_list(
     if let Some(s) = &severity {
         pairs.push(("severity", s));
     }
-    if !pairs.is_empty() {
-        let mut url = url::Url::parse("http://localhost").expect("valid base");
-        url.set_path(&path);
-        for (k, v) in &pairs {
-            url.query_pairs_mut().append_pair(k, v);
-        }
-        let q = url.query().unwrap_or("");
-        path = format!("{path}?{q}");
-    }
+    let path = query_path(&format!("/v1/daemon/works/{resolved_id}/findings"), &pairs);
     let resp: nexus_contracts::daemon_api::findings::ListFindingsResponse =
         client.get(&path).await?;
     if json {
@@ -329,6 +321,11 @@ async fn handle_findings_list(
         println!(
             "{:<36} {:<10} {:<10} {:<12} {}",
             f.finding_id, f.status, f.severity, f.target_executor, f.title
+        );
+    }
+    if resp.pagination.has_more {
+        println!(
+            "\n(truncated — more findings exist; refine with --status/--severity or use --json for the complete DTO)"
         );
     }
     println!("\n{} finding(s)", resp.items.len());
@@ -358,10 +355,11 @@ async fn handle_findings_set_status(
     target_executor: Option<&str>,
     json: bool,
 ) -> Result<()> {
-    let mut body = serde_json::json!({ "status": status });
-    if let Some(te) = target_executor {
-        body["target_executor"] = serde_json::Value::String(te.to_string());
-    }
+    let body = UpdateFindingRequest {
+        status: Some(status.to_string()),
+        target_executor: target_executor.map(str::to_string),
+        ..UpdateFindingRequest::default()
+    };
     let path = format!("/v1/daemon/works/{work_ref}/findings/{finding_id}");
     let resp: nexus_contracts::daemon_api::findings::FindingDetailResponse =
         client.patch(&path, &body).await?;

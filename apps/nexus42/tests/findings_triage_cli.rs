@@ -108,6 +108,26 @@ async fn findings_list_json_emits_dto_verbatim() {
     assert_eq!(items[0]["status"], "open");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn findings_list_notes_has_more_when_paginated() {
+    // qc3 W-002: the human default must never look complete when it is not.
+    // The daemon's default page is 100 findings (max 500); with 101 rows the
+    // DTO's `pagination.has_more` is true and the human output must say so.
+    let d = LiveDaemon::start().await;
+    let work_id = seed_work(&d).await;
+    for _ in 0..101 {
+        seed_finding(&d, &work_id).await;
+    }
+
+    let out = d
+        .cli(&["creator", "works", "findings", "list", &work_id])
+        .await;
+    assert!(out.status.success(), "list failed: {}", stderr(&out));
+    let text = stdout(&out);
+    assert!(text.contains("truncated"), "has_more note missing: {text}");
+    assert!(text.contains("use --json"), "{text}");
+}
+
 // ── works findings set-status ──────────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

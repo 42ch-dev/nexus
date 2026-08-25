@@ -32,6 +32,7 @@
 //! exit, PL-5).
 
 use crate::api::DaemonClient;
+use crate::commands::creator::work_utils::query_path;
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
@@ -121,18 +122,6 @@ pub async fn run(cmd: ForkCommand, config: &CliConfig) -> Result<()> {
             json,
         } => fork_list(&client, &world_id, branch.as_deref(), json).await,
     }
-}
-
-/// Build a daemon path with URL-encoded query pairs (house pattern:
-/// `works/mod.rs::handle_list`).
-fn query_path(base: &str, pairs: &[(&str, &str)]) -> String {
-    let mut url = url::Url::parse("http://localhost").expect("valid base");
-    url.set_path(base);
-    for (key, value) in pairs {
-        url.query_pairs_mut().append_pair(key, value);
-    }
-    let q = url.query().unwrap_or("");
-    format!("{base}?{q}")
 }
 
 /// Resolve the parent branch for a fork-point event.

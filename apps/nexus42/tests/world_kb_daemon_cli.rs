@@ -251,3 +251,53 @@ async fn kb_graph_json_emits_dto_verbatim() {
     assert_eq!(entities[0]["key_block_id"], entity_id);
     assert_eq!(entities[0]["version"], 0);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn kb_graph_notes_relationship_cap_when_hit() {
+    // qc3 W-002: the daemon caps the graph projection at 1000 stored
+    // relationships with no wire `truncated` flag; when the count hits the
+    // cap the human output must state plainly that the graph may be
+    // truncated (the note itself is honest about the missing flag).
+    let d = LiveDaemon::start().await;
+    let entity_id = seed_entity(&d).await;
+    let now = chrono::Utc::now().to_rfc3339();
+    for i in 0..1000 {
+        sqlx::query(
+            "INSERT INTO kb_relationships \
+             (relationship_id, world_id, source_entity_id, target_entity_id, \
+              relation_type, symmetric, created_at, updated_at, revision, \
+              needs_review, source) \
+             VALUES (?, 'wld_test_world', ?, ?, 'mentions', 0, ?, ?, 0, 0, 'manual')",
+        )
+        .bind(format!("rel_seed_{i}"))
+        .bind(&entity_id)
+        .bind(&entity_id)
+        .bind(&now)
+        .bind(&now)
+        .execute(&d.pool)
+        .await
+        .expect("seed relationship");
+    }
+
+    let out = d
+        .cli(&[
+            "creator",
+            "world",
+            "kb",
+            "graph",
+            "--world-id",
+            "wld_test_world",
+        ])
+        .await;
+    assert!(out.status.success(), "graph failed: {}", stderr(&out));
+    let text = stdout(&out);
+    assert!(
+        text.contains("1000 relationships"),
+        "relationship count missing: {text}"
+    );
+    assert!(
+        text.contains("may be truncated"),
+        "cap note missing: {text}"
+    );
+    assert!(text.contains("no wire `truncated` flag"), "{text}");
+}
