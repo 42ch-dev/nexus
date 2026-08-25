@@ -47,25 +47,66 @@ pub enum MemoryCommand {
         force: bool,
     },
 
-    /// Trigger review of pending queue
-    Review,
+    /// Trigger review of pending queue (drains while `has_more`; cap 100 calls)
+    Review {
+        /// Emit machine-readable JSON (cumulative drain report) instead of
+        /// human text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 
     /// List memory fragments (requires daemon)
-    Fragments,
+    Fragments {
+        /// Emit machine-readable JSON (the `ListMemoryFragmentsResponse`
+        /// DTO verbatim) instead of human text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 
     /// List pending review entries for current creator (requires daemon)
-    PendingList,
+    PendingList {
+        /// Emit machine-readable JSON (the `ListPendingReviewsResponse`
+        /// DTO verbatim) instead of human text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+
+    /// Pending-review queue operations (requires daemon)
+    Pending {
+        #[command(subcommand)]
+        command: PendingCommand,
+    },
 
     /// Show details of a pending review entry (requires daemon)
     PendingShow {
         /// Pending review ID to show
         pending_id: String,
+        /// Emit machine-readable JSON (the `PendingReviewInfo` DTO
+        /// verbatim) instead of human text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
 
     /// Dismiss a pending review entry without promoting (requires daemon)
     PendingDismiss {
         /// Pending review ID to dismiss
         pending_id: String,
+        /// Emit machine-readable JSON (the `DeletePendingReviewResponse`
+        /// DTO verbatim) instead of human text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+}
+
+/// `creator memory pending` subcommands (AR-86).
+#[derive(Debug, Subcommand)]
+pub enum PendingCommand {
+    /// Count pending review entries for current creator (requires daemon)
+    Count {
+        /// Emit machine-readable JSON (the `CountPendingReviewsResponse`
+        /// DTO verbatim) instead of human text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
 }
 
@@ -94,14 +135,17 @@ pub async fn run(command: MemoryCommand, config: &CliConfig) -> Result<()> {
         MemoryCommand::Show { slug } => show(config, creator_id, &slug),
         MemoryCommand::Edit { slug } => edit(config, creator_id, &slug),
         MemoryCommand::Delete { slug, force } => delete(config, creator_id, &slug, force),
-        MemoryCommand::Review => review(config, creator_id).await,
-        MemoryCommand::Fragments => fragments(config, creator_id).await,
-        MemoryCommand::PendingList => pending_list(config, creator_id).await,
-        MemoryCommand::PendingShow { pending_id } => {
-            pending_show(config, creator_id, &pending_id).await
+        MemoryCommand::Review { json } => review(config, creator_id, json).await,
+        MemoryCommand::Fragments { json } => fragments(config, creator_id, json).await,
+        MemoryCommand::PendingList { json } => pending_list(config, creator_id, json).await,
+        MemoryCommand::Pending { command } => match command {
+            PendingCommand::Count { json } => pending_count(config, creator_id, json).await,
+        },
+        MemoryCommand::PendingShow { pending_id, json } => {
+            pending_show(config, creator_id, &pending_id, json).await
         }
-        MemoryCommand::PendingDismiss { pending_id } => {
-            pending_dismiss(config, creator_id, &pending_id).await
+        MemoryCommand::PendingDismiss { pending_id, json } => {
+            pending_dismiss(config, creator_id, &pending_id, json).await
         }
     }
 }
@@ -251,23 +295,78 @@ fn delete(_config: &CliConfig, creator_id: &str, slug: &str, force: bool) -> Res
     Ok(())
 }
 
-async fn review(config: &CliConfig, creator_id: &str) -> Result<()> {
+/// Hard cap on `POST /memory/review` drain iterations (AR-86 — matches the
+/// web drain contract's bounded loop; the server processes ≤50 rows per call).
+const REVIEW_DRAIN_MAX_CALLS: u32 = 100;
+
+/// `creator memory review [--json]` — drain the pending-review queue.
+///
+/// Loops `POST /v1/daemon/memory/review` while the response reports
+/// `has_more == true`, accumulating a cumulative `promoted/fragmented/dropped`
+/// report (AR-86 / F-16 — matches the web `useReviewMemory` drain contract).
+/// Bounded by [`REVIEW_DRAIN_MAX_CALLS`]; a zero-progress call (server
+/// inspected no rows but still reports `has_more`) breaks the loop so an
+/// unprocessable head row cannot spin forever.
+async fn review(config: &CliConfig, creator_id: &str, json: bool) -> Result<()> {
     let client = DaemonClient::from_config(config);
-    let result = client.review_pending_memories(creator_id).await?;
-    if result.promoted + result.fragmented + result.dropped == 0 {
+    let mut promoted = 0i64;
+    let mut fragmented = 0i64;
+    let mut dropped = 0i64;
+    let mut processed = 0i64;
+    let mut has_more = false;
+    for _call in 0..REVIEW_DRAIN_MAX_CALLS {
+        let result = client.review_pending_memories(creator_id).await?;
+        promoted += result.promoted;
+        fragmented += result.fragmented;
+        dropped += result.dropped;
+        processed += result.processed.unwrap_or(0);
+        has_more = result.has_more.unwrap_or(false);
+        if !has_more {
+            break;
+        }
+        // Zero-progress guard: a call that inspected no rows but still
+        // reports has_more would loop forever on an unprocessable head row.
+        if result.processed.unwrap_or(0) == 0 {
+            break;
+        }
+    }
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "promoted": promoted,
+                "fragmented": fragmented,
+                "dropped": dropped,
+                "processed": processed,
+                "has_more": has_more,
+            }))?
+        );
+        return Ok(());
+    }
+    if promoted + fragmented + dropped == 0 {
         println!("No pending memories to review.");
     } else {
         println!(
-            "Review completed: promoted={}, fragmented={}, dropped={}",
-            result.promoted, result.fragmented, result.dropped
+            "Review completed: promoted={promoted}, fragmented={fragmented}, dropped={dropped}"
         );
+        if has_more {
+            println!(
+                "Note: the queue was not fully drained within {REVIEW_DRAIN_MAX_CALLS} calls; \
+                 re-run `creator memory review` to continue."
+            );
+        }
     }
     Ok(())
 }
 
-async fn fragments(config: &CliConfig, creator_id: &str) -> Result<()> {
+async fn fragments(config: &CliConfig, creator_id: &str, json: bool) -> Result<()> {
     let client = DaemonClient::from_config(config);
     let rows = client.list_memory_fragments(creator_id).await?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&rows)?);
+        return Ok(());
+    }
 
     if rows.is_empty() {
         println!("No memory fragments found.");
@@ -286,9 +385,14 @@ async fn fragments(config: &CliConfig, creator_id: &str) -> Result<()> {
     Ok(())
 }
 
-async fn pending_list(config: &CliConfig, creator_id: &str) -> Result<()> {
+async fn pending_list(config: &CliConfig, creator_id: &str, json: bool) -> Result<()> {
     let client = DaemonClient::from_config(config);
     let result = client.list_pending_reviews(creator_id).await?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+        return Ok(());
+    }
 
     if result.items.is_empty() {
         println!("No pending reviews for creator '{creator_id}'.");
@@ -324,7 +428,28 @@ async fn pending_list(config: &CliConfig, creator_id: &str) -> Result<()> {
     Ok(())
 }
 
-async fn pending_show(config: &CliConfig, creator_id: &str, pending_id: &str) -> Result<()> {
+/// `creator memory pending count [--json]` — count pending review entries
+/// (`GET /v1/daemon/memory/pending-review/count`, AR-86).
+async fn pending_count(config: &CliConfig, creator_id: &str, json: bool) -> Result<()> {
+    let client = DaemonClient::from_config(config);
+    let result = client.count_pending_reviews(creator_id).await?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    } else {
+        println!(
+            "{} pending review(s) for creator '{creator_id}'.",
+            result.count
+        );
+    }
+    Ok(())
+}
+
+async fn pending_show(
+    config: &CliConfig,
+    creator_id: &str,
+    pending_id: &str,
+    json: bool,
+) -> Result<()> {
     let client = DaemonClient::from_config(config);
     let result = client.list_pending_reviews(creator_id).await?;
 
@@ -338,10 +463,15 @@ async fn pending_show(config: &CliConfig, creator_id: &str, pending_id: &str) ->
             ))
         })?;
 
+    if json {
+        println!("{}", serde_json::to_string_pretty(&entry)?);
+        return Ok(());
+    }
+
     println!("pending_id: {}", entry.pending_id);
     println!("session_id: {}", entry.session_id);
     println!("creator_id: {}", entry.creator_id);
-    if let Some(ref wid) = entry.world_id {
+    if let Some(wid) = &entry.world_id {
         println!("world_id: {wid}");
     }
     println!("task_kind: {}", entry.task_kind);
@@ -352,11 +482,21 @@ async fn pending_show(config: &CliConfig, creator_id: &str, pending_id: &str) ->
     Ok(())
 }
 
-async fn pending_dismiss(config: &CliConfig, creator_id: &str, pending_id: &str) -> Result<()> {
+async fn pending_dismiss(
+    config: &CliConfig,
+    creator_id: &str,
+    pending_id: &str,
+    json: bool,
+) -> Result<()> {
     let client = DaemonClient::from_config(config);
     let result = client
         .dismiss_pending_review(pending_id, creator_id)
         .await?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+        return Ok(());
+    }
 
     if result.success {
         println!("Pending review '{pending_id}' dismissed.");
@@ -433,14 +573,19 @@ mod tests {
             slug: "test".to_string(),
             force: false,
         };
-        let _ = MemoryCommand::Review;
-        let _ = MemoryCommand::Fragments;
-        let _ = MemoryCommand::PendingList;
+        let _ = MemoryCommand::Review { json: false };
+        let _ = MemoryCommand::Fragments { json: false };
+        let _ = MemoryCommand::PendingList { json: false };
+        let _ = MemoryCommand::Pending {
+            command: PendingCommand::Count { json: false },
+        };
         let _ = MemoryCommand::PendingShow {
             pending_id: "pending_test".to_string(),
+            json: false,
         };
         let _ = MemoryCommand::PendingDismiss {
             pending_id: "pending_test".to_string(),
+            json: false,
         };
     }
 }

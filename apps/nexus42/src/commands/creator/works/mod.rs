@@ -302,6 +302,84 @@ pub enum FindingsCommand {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
+
+    // ── V1.175 P1 Task 4: findings triage leaves (group 8, AR-87) ──────
+    /// List findings for a Work (`GET /v1/daemon/works/:work_id/findings`).
+    ///
+    /// Optional `--status` / `--severity` filters. `--json` emits the
+    /// `ListFindingsResponse` DTO verbatim.
+    List {
+        /// Work reference (wrk_...). Omit to use pool active Work.
+        work_id: Option<String>,
+        /// Filter by status (single value or comma-separated list, e.g.
+        /// `open,triaged`).
+        #[arg(long)]
+        status: Option<String>,
+        /// Filter by severity (`info`, `minor`, `major`, `blocker`).
+        #[arg(long)]
+        severity: Option<String>,
+        /// Emit machine-readable JSON (the `ListFindingsResponse` DTO
+        /// verbatim) instead of human text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Set a finding's status through the work-findings PATCH route
+    /// (`PATCH /v1/daemon/works/:work_id/findings/:finding_id`).
+    ///
+    /// One generic verb over one route (AR-87 #3 — no `triage|resolve`
+    /// sugar). `--status` accepts exactly the closed lifecycle vocabulary:
+    /// `open`, `triaged`, `in_review`, `resolved`, `wont_fix`, `duplicate`.
+    /// Legal transitions:
+    ///   `open` → `triaged` | `in_review` | `resolved` | `wont_fix` | `duplicate`
+    ///   `triaged` → `in_review` | `resolved` | `wont_fix` | `duplicate`
+    ///   `in_review` → `resolved` | `wont_fix` | `duplicate`
+    ///   `resolved` / `wont_fix` / `duplicate` are terminal
+    /// `from == to` is rejected. An illegal transition returns 422
+    /// `invalid_transition` naming `from → to`.
+    SetStatus {
+        /// Finding ID (fnd_...) to update.
+        finding_id: String,
+        /// Work reference (wrk_...) the finding belongs to.
+        #[arg(long, value_name = "WORK_REF")]
+        work: String,
+        /// New status (closed lifecycle vocabulary above).
+        #[arg(long, value_enum)]
+        status: FindingStatusArg,
+        /// New routing hint (`write`, `brainstorm`, `none`, `master`).
+        #[arg(long)]
+        target_executor: Option<String>,
+        /// Emit machine-readable JSON (the `FindingDetailResponse` DTO
+        /// verbatim) instead of human text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+}
+
+/// `--status` value for `creator works findings set-status` (V1.49 F6
+/// closed lifecycle vocabulary, AR-87).
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum FindingStatusArg {
+    Open,
+    Triaged,
+    InReview,
+    Resolved,
+    WontFix,
+    Duplicate,
+}
+
+impl FindingStatusArg {
+    /// Wire token (`snake_case`) for the PATCH body.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Triaged => "triaged",
+            Self::InReview => "in_review",
+            Self::Resolved => "resolved",
+            Self::WontFix => "wont_fix",
+            Self::Duplicate => "duplicate",
+        }
+    }
 }
 
 /// Layer 2 rules subcommands (V1.48 P2).

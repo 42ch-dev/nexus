@@ -745,6 +745,64 @@ Rules:
 - **No TUI / no second editor.** Leaves are single-shot commands
   (stdin/file/flags only); the web canvas stays the human authoring surface.
 
+### 6.2G.6 V1.175 P1 amendment — KB entity patch + memory closure + findings triage (RN-1 §5 groups 4, 7, 8)
+
+Thin daemon-HTTP leaves over **existing** routes (AR-83 #1 / AR-85..87; no
+daemon route changes, no DTO redesign). All leaves: human-readable default
+output, `--json` emits the daemon DTO verbatim (AR-83 #3), typed long flags,
+daemon error envelopes surfaced via `DaemonClient::parse_error_response`
+(named `[code]`, non-zero exit — PL-5).
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 creator world kb entity patch --world-id <id> --entity-id <id> --expected-version <N> [--title <text>] [--body <json>] [--aliases a,b] [--block-type <t>] [--modules <json>] [--json]` | Patch a World KB entity through the daemon OCC route (`POST /v1/daemon/worlds/:world_id/kb/patch-entity`; entity id + `expected_version` ride in the **body** — there is no `entities/:id/patch` path route, F-12). Per-row OCC on `kb_key_blocks.revision`. At least one patch field is required. |
+| `nexus42 creator world kb graph --world-id <id> [--include-suggested] [--json]` | Show the World KB entity graph (`GET /v1/daemon/worlds/:world_id/kb/graph`). The printed per-entity `version` is the `--expected-version` for `entity patch`. |
+| `nexus42 creator memory pending count [--json]` | Count pending review entries (`GET /v1/daemon/memory/pending-review/count`). |
+| `nexus42 creator memory review [--json]` | Drain the pending-review queue: loops `POST /v1/daemon/memory/review` while `has_more == true` (cap 100 calls, zero-progress guard), reporting cumulative `promoted/fragmented/dropped` — matches the web `useReviewMemory` drain contract (F-16). |
+| `nexus42 creator memory fragments [--json]` | List memory fragments (`GET /v1/daemon/memory/fragments`). |
+| `nexus42 creator memory pending-list [--json]` | List pending review entries (`GET /v1/daemon/memory/pending-review`). |
+| `nexus42 creator memory pending-show <id> [--json]` | Show a pending review entry (reads from the list). |
+| `nexus42 creator memory pending-dismiss <id> [--json]` | Dismiss a pending review entry (`DELETE /v1/daemon/memory/pending-review/:id`). |
+| `nexus42 creator works findings list <work_ref> [--status <s>] [--severity <s>] [--json]` | List findings for a Work (`GET /v1/daemon/works/:work_id/findings`). `--status` accepts a single status or a comma-separated list (e.g. `open,triaged`). |
+| `nexus42 creator works findings set-status <finding_id> --work <work_ref> --status <s> [--target-executor <exec>] [--json]` | Set a finding's status through the work-findings PATCH (`PATCH /v1/daemon/works/:work_id/findings/:finding_id`, body `{status?, target_executor?}`). One generic verb over one route (AR-87 #3 — no `triage|resolve` sugar). |
+| `nexus42 creator world findings --world-id <id> [--json]` | List world-attached check findings (`GET /v1/daemon/worlds/:world_id/findings`, V1.165). **GET-only by design** — there is NO world-findings write route; triage writes ride the work-findings PATCH above. |
+
+Rules:
+
+- **Dual-write guard (AR-85 #3).** `kb entity patch` writes through the
+  **daemon** OCC route (per-row version CAS on `kb_key_blocks.revision`);
+  `creator world kb edit` writes the **local DB** directly (SQLite, no OCC,
+  different code path). Two write paths exist by product decision; only the
+  daemon path is OCC-guarded. `kb entity patch` is a NEW verb — never an
+  overload of `edit` (no `edit --daemon`).
+- **OCC error surface (PL-5).** A stale `--expected-version` returns **409
+  `world_kb_conflict`** echoing the stale version as `current_version` +
+  `entity_id` (rendered by the CLI error envelope); `--help` documents the
+  retry guidance: refetch the graph (`creator world kb graph`) and reapply
+  with the new version. 422 `world_kb_validation_failed` (domain rules) and
+  400 `bad_request` (other 400s) surface named, non-zero exit.
+- **Memory closure (AR-86).** `review` drains while `has_more == true`
+  (server batch ≤ 50 rows/call; CLI cap 100 calls + zero-progress guard —
+  matches the web drain contract). `--json` on all daemon-backed memory
+  verbs (`review`, `fragments`, `pending-list`, `pending-show`,
+  `pending-dismiss`, `pending count`). Local-file verbs
+  (`list/create/show/edit/delete`) are untouched. No leaf for
+  `POST /memory/pending-review` (ingestion) or `POST /memory/soul/reflect`
+  (SOUL surface) — not §5 remainder.
+- **Findings transition table (AR-87).** `set-status --status` accepts
+  exactly the closed lifecycle vocabulary: `open`, `triaged`, `in_review`,
+  `resolved`, `wont_fix`, `duplicate`. Legal transitions:
+  `open → triaged | in_review | resolved | wont_fix | duplicate`;
+  `triaged → in_review | resolved | wont_fix | duplicate`;
+  `in_review → resolved | wont_fix | duplicate`;
+  `resolved` / `wont_fix` / `duplicate` are terminal. `from == to` is
+  rejected. An illegal transition returns **422 `invalid_transition`**
+  naming `from → to`; `--help` documents the table verbatim. Existing
+  `findings accept` + `findings prune` leaves are untouched (different
+  journeys: rule-suggestion adoption; retention).
+- **World findings are read-only (AR-87 #1).** `creator world findings`
+  is a GET-only read; any world-findings write route is a P1 non-goal.
+
 ### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
 
 Normative: [novel-writing/multi-work-lifecycle.md](./novel-writing/multi-work-lifecycle.md), [novel-writing/work-pool.md](./novel-writing/work-pool.md).

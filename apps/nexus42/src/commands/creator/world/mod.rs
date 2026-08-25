@@ -107,6 +107,22 @@ pub enum WorldCommand {
         #[command(subcommand)]
         command: fork::ForkCommand,
     },
+
+    /// World-attached check findings read surface (V1.175 P1 group 8, AR-87).
+    ///
+    /// **GET-only by design** (V1.165): world findings are advisory
+    /// (`GET /v1/daemon/worlds/:world_id/findings`); there is NO
+    /// world-findings write route. Triage writes ride the work-findings
+    /// PATCH (`creator works findings set-status`).
+    Findings {
+        /// World ID (wld_...).
+        #[arg(long, value_name = "WORLD_ID")]
+        world_id: String,
+        /// Emit machine-readable JSON (the `WorldFindingsListResponse`
+        /// DTO verbatim) instead of human text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 }
 
 /// Run a world subcommand.
@@ -162,6 +178,9 @@ pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
         WorldCommand::Fork { command } => fork::run(command, config).await,
         WorldCommand::Kb { command } => kb::run(command, config).await,
         WorldCommand::Rule { command } => rule::run(command, config).await,
+        WorldCommand::Findings { world_id, json } => {
+            world_findings_list(&world_id, json, config).await
+        }
     }
 }
 
@@ -402,6 +421,46 @@ async fn run_show(config: &CliConfig, world_id: &str) -> Result<()> {
         println!("Time pointer: {tp}");
     }
     println!("Created:      {}", world.created_at);
+    Ok(())
+}
+
+/// `creator world findings list --world-id <id> [--json]` — list
+/// world-attached check findings (`GET /v1/daemon/worlds/:world_id/findings`,
+/// V1.165 read surface — GET-only by design, AR-87 #1).
+///
+/// # Errors
+///
+/// Returns `CliError` for daemon / network failures (404 `not_found` for an
+/// unknown world, 403 foreign world).
+async fn world_findings_list(world_id: &str, json: bool, config: &CliConfig) -> Result<()> {
+    let client = crate::api::DaemonClient::from_config(config);
+    let path = format!("/v1/daemon/worlds/{world_id}/findings");
+    let resp: nexus_contracts::daemon_api::worlds::WorldFindingsListResponse =
+        client.get(&path).await?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+        return Ok(());
+    }
+    if resp.findings.is_empty() {
+        println!("No world findings for world '{world_id}'.");
+        return Ok(());
+    }
+    println!("World findings for world '{world_id}':\n");
+    println!(
+        "{:<36} {:<10} {:<10} TITLE",
+        "FINDING_ID", "STATUS", "SEVERITY"
+    );
+    println!("{}", "-".repeat(90));
+    for f in &resp.findings {
+        println!(
+            "{:<36} {:<10} {:<10} {}",
+            f.finding_id, f.status, f.severity, f.title
+        );
+    }
+    if resp.truncated {
+        println!("\n(truncated — more findings exist beyond the server cap)");
+    }
+    println!("\n{} finding(s)", resp.findings.len());
     Ok(())
 }
 

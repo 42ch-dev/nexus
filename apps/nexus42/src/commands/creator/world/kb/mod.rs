@@ -25,6 +25,7 @@
 //!
 //! Read paths (`list`/`show`) are local-first and do not perform an owner gate.
 
+pub mod daemon;
 pub mod pack;
 
 use crate::config::CliConfig;
@@ -141,6 +142,32 @@ pub enum WorldKbCommand {
         #[command(subcommand)]
         command: pack::PackCommand,
     },
+
+    /// Daemon OCC entity patch + graph read (V1.175 P1, group 4).
+    ///
+    /// `entity patch` writes through the daemon OCC route
+    /// (`POST /v1/daemon/worlds/:world_id/kb/patch-entity`) with
+    /// `--expected-version` CAS — distinct from the local-DB `edit` (direct
+    /// SQLite, no OCC). `graph` reads the entity graph projection
+    /// (`GET /v1/daemon/worlds/:world_id/kb/graph`).
+    Entity {
+        #[command(subcommand)]
+        command: daemon::KbEntityCommand,
+    },
+
+    /// Show the World KB entity graph (daemon read, V1.175 P1 group 4).
+    Graph {
+        /// World ID (wld_...).
+        #[arg(long, value_name = "WORLD_ID")]
+        world_id: String,
+        /// Include `needs_review = 1` (extraction-suggested) relationships.
+        #[arg(long, default_value_t = false)]
+        include_suggested: bool,
+        /// Emit machine-readable JSON (the `WorldKbGraphResponse` DTO
+        /// verbatim) instead of human text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 }
 
 /// Run a `creator world kb` subcommand.
@@ -218,6 +245,24 @@ pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
             kb_reject(&pool, &creator_id, &extract_job_id, ws_root.as_deref()).await
         }
         WorldKbCommand::Pack { command } => pack::run(command, config, &pool).await,
+        WorldKbCommand::Entity { command } => {
+            daemon::run(daemon::KbDaemonCommand::Entity { command }, config).await
+        }
+        WorldKbCommand::Graph {
+            world_id,
+            include_suggested,
+            json,
+        } => {
+            daemon::run(
+                daemon::KbDaemonCommand::Graph {
+                    world_id,
+                    include_suggested,
+                    json,
+                },
+                config,
+            )
+            .await
+        }
     }
 }
 
