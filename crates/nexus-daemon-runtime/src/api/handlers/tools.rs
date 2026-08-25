@@ -11,13 +11,15 @@
 //!
 //! Honesty contract (AR-68 #7 + AR-70 §3): every listed id is dispatchable
 //! through the spine, and the spine only contains ids that passed admission
-//! (AR-68 #2/#6). Builtin rows emit the documented permissive
-//! `{"type":"object"}` input placeholder and no output schema (`AcpWire` refs
-//! are pseudo-schemas, not draft-2020-12).
+//! (AR-68 #2/#6). Builtin rows emit their authored `CatalogDescriptor`
+//! schemas (AR-78, DF-89): real draft-2020-12 input schema when authored,
+//! the named placeholder (`NAMED_PLACEHOLDER_INPUT`) for ledgered rows, and
+//! the authored output schema when pinned.
 
 use crate::api::errors::NexusApiError;
 use crate::capability_registry::{
     host_tool_registry, json_schema_has_object_root, user_cap_catalog_admission,
+    NAMED_PLACEHOLDER_INPUT,
 };
 use crate::workspace::WorkspaceState;
 use axum::extract::State;
@@ -45,23 +47,21 @@ pub async fn list_tools(
 ) -> Result<Json<serde_json::Value>, NexusApiError> {
     let mut items: Vec<CatalogTool> = Vec::new();
 
-    // Static `nexus.*` rows: permissive input placeholder, no output schema
-    // (AR-70 §3 — AcpWire refs are pseudo-schemas; the placeholder is
-    // uniform and documented, never per-tool guessing).
+    // Static `nexus.*` rows (AR-78, DF-89): authored `CatalogDescriptor`
+    // schemas flow registry → catalog verbatim; a ledgered row (input
+    // schema not yet authored) emits the named placeholder — never the
+    // silent `{"type":"object"}` of V1.174.
     for id in host_tool_registry().ids() {
         if let Some(row) = host_tool_registry().lookup(id) {
             items.push(CatalogTool {
                 id: id.to_owned(),
-                // AR-70 §3: the description carries the tool summary PLUS the
-                // parameter pointer (`AcpWire.request_schema_ref`) so callers
-                // can see the real request shape the placeholder stands in
-                // for. AcpWire refs are pseudo-schemas, not draft-2020-12.
-                description: format!(
-                    "{} (parameters: {})",
-                    row.handler_test_vector.description, row.acp_wire.request_schema_ref
-                ),
-                input_schema: "{\"type\":\"object\"}".to_owned(),
-                output_schema: None,
+                description: row.catalog.description.to_owned(),
+                input_schema: row
+                    .catalog
+                    .input_schema
+                    .unwrap_or(NAMED_PLACEHOLDER_INPUT)
+                    .to_owned(),
+                output_schema: row.catalog.output_schema.map(ToOwned::to_owned),
                 origin: "builtin".to_owned(),
             });
         }

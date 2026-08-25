@@ -141,13 +141,24 @@ struct AcpWire {
 }
 ```
 
-For V1.53, all entries use human-readable inline shape descriptions
-(e.g. `r#"{"work_id":"string"}"#`). Full JSON Schema drafts are
-deferred to a future plan that introduces schema-aware codegen —
-**durable roadmap:** DR-24 (ACP wire full JSON Schema drafts).
+For V1.53, all entries used human-readable inline shape descriptions
+(e.g. `r#"{"work_id":"string"}"#`). Full ACP-facing JSON Schema drafts
+remain **durable roadmap** DR-24.
+
+**V1.175 (DF-89):** `AcpWire` is **removed**. Catalog emission now reads
+`CatalogDescriptor { description, input_schema: Option<&'static str>,
+output_schema: Option<&'static str> }` on each `CapabilityRow`. Builtin
+`input_schema` values are real draft-2020-12 object schemas (or the
+named remainder placeholder
+`{"type":"object","$comment":"nexus42:schema-pending"}`). The catalog
+route (`GET /v1/daemon/tools`) carries those strings verbatim. Schemas
+are descriptive — the builtin dispatch path gains no schema-validation
+gate this iteration. See
+[v1.175 lock spec AR-78](../iterations/v1.175/specs/v1.175-catalog-and-cli-lock.md).
 
 **Cross-reference**: `acp-capability-set.md` is the logical catalog
-(one-liner per ID). This field provides the wire contract detail.
+(one-liner per ID). The daemon catalog is the runtime emission of
+`CatalogDescriptor`.
 
 ### 2.6 `failure mode`
 
