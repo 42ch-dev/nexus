@@ -55,13 +55,16 @@ struct McpProbeEvidence {
 
 /// Spawn the stub daemon (wiremock) serving the P0 catalog shape.
 async fn mount_catalog(mock: &MockServer) {
+    let builtin = nexus_daemon_runtime::capability_registry::host_tool_registry()
+        .lookup("nexus.workspace.info")
+        .expect("builtin row exists");
     let body = json!({
         "items": [
             {
                 "id": "nexus.workspace.info",
-                "description": "Return workspace details: creator id, slug, path, runtime mode, and initialization state.",
-                "input_schema": "{\"type\":\"object\",\"properties\":{}}",
-                "output_schema": "{\"type\":\"object\",\"properties\":{\"creator_id\":{\"type\":\"string\"},\"workspace_slug\":{\"type\":\"string\"},\"workspace_path\":{\"type\":\"string\"},\"runtime_mode\":{\"type\":\"string\"},\"initialized\":{\"type\":\"boolean\"}},\"required\":[\"creator_id\",\"workspace_slug\",\"workspace_path\",\"runtime_mode\",\"initialized\"]}",
+                "description": builtin.catalog.description,
+                "input_schema": builtin.catalog.input_schema.expect("authored input"),
+                "output_schema": builtin.catalog.output_schema,
                 "origin": "builtin"
             },
             {

@@ -28,6 +28,7 @@
 use std::process::Stdio;
 use std::time::Duration;
 
+use nexus_daemon_runtime::capability_registry::host_tool_registry;
 use rmcp::model::{CallToolRequestParams, ClientInfo, ErrorCode};
 use rmcp::serve_client;
 use rmcp::ServiceError;
@@ -88,14 +89,24 @@ impl Drop for McpChild {
 
 /// The catalog fixture served by the stub daemon (wire shape mirrors the
 /// daemon's `GET /v1/daemon/tools`: `input_schema` is a JSON STRING).
+///
+/// The builtin row is derived from the REAL registry
+/// (`host_tool_registry().lookup("nexus.workspace.info")`) so the fixture
+/// can never drift from the authored `CatalogDescriptor` — the AR-80 #1
+/// schema-equality pin below compares the child's parsed `tools/list`
+/// schemas against the same registry source. Peer/user rows stay on the
+/// V1.174 placeholder shape (AR-80 #3: those lanes are untouched).
 fn catalog_body() -> Value {
+    let builtin = host_tool_registry()
+        .lookup("nexus.workspace.info")
+        .expect("builtin row exists");
     json!({
         "items": [
             {
                 "id": "nexus.workspace.info",
-                "description": "Return workspace details: creator id, slug, path, runtime mode, and initialization state.",
-                "input_schema": "{\"type\":\"object\",\"properties\":{}}",
-                "output_schema": "{\"type\":\"object\",\"properties\":{\"creator_id\":{\"type\":\"string\"},\"workspace_slug\":{\"type\":\"string\"},\"workspace_path\":{\"type\":\"string\"},\"runtime_mode\":{\"type\":\"string\"},\"initialized\":{\"type\":\"boolean\"}},\"required\":[\"creator_id\",\"workspace_slug\",\"workspace_path\",\"runtime_mode\",\"initialized\"]}",
+                "description": builtin.catalog.description,
+                "input_schema": builtin.catalog.input_schema.expect("authored input"),
+                "output_schema": builtin.catalog.output_schema,
                 "origin": "builtin"
             },
             {
@@ -214,6 +225,44 @@ async fn initialize_handshake_and_tools_list_mirror_catalog() {
     assert_eq!(
         peer.output_schema.as_ref().map(|s| s.get("type")),
         Some(Some(&json!("object")))
+    );
+
+    // AR-80 #1 (schema-equality, catalog ⇄ tools/list): the child parses
+    // the catalog's `input_schema`/`output_schema` strings and carries them
+    // on the `Tool` — the parsed `tools/list` schemas must equal the
+    // registry `CatalogDescriptor` text parsed (both directions). The
+    // registry ⇄ catalog route leg is pinned in
+    // `honesty_lockstep::builtin_catalog_schema_equality_registry_to_route`.
+    let registry_row = host_tool_registry()
+        .lookup("nexus.workspace.info")
+        .expect("builtin row exists");
+    let registry_input: Value = serde_json::from_str(
+        registry_row
+            .catalog
+            .input_schema
+            .expect("authored input schema"),
+    )
+    .expect("registry input parses");
+    assert_eq!(
+        builtin.input_schema.as_ref(),
+        registry_input
+            .as_object()
+            .expect("registry input is an object"),
+        "tools/list input schema == registry descriptor (parsed)"
+    );
+    let registry_output: Value = serde_json::from_str(
+        registry_row
+            .catalog
+            .output_schema
+            .expect("authored output schema"),
+    )
+    .expect("registry output parses");
+    assert_eq!(
+        builtin_out.as_ref(),
+        registry_output
+            .as_object()
+            .expect("registry output is an object"),
+        "tools/list output schema == registry descriptor (parsed)"
     );
 
     drop(running);

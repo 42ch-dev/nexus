@@ -383,6 +383,32 @@ async fn catalog_ids(server: &PeerTestServer) -> Vec<String> {
     ids
 }
 
+/// `GET /v1/daemon/tools` → `{ id → (input_schema, output_schema) }` for
+/// builtin-origin rows (AR-80 #1 schema-equality pin).
+#[allow(clippy::future_not_send)]
+async fn catalog_builtin_schemas(
+    server: &PeerTestServer,
+) -> std::collections::HashMap<String, (String, Option<String>)> {
+    let resp = server.http.get("/v1/daemon/tools").await;
+    assert_eq!(resp.status_code(), StatusCode::OK);
+    let body: Value = resp.json();
+    body["items"]
+        .as_array()
+        .expect("items array")
+        .iter()
+        .filter(|item| item["origin"].as_str() == Some("builtin"))
+        .map(|item| {
+            let id = item["id"].as_str().expect("id string").to_owned();
+            let input = item["input_schema"]
+                .as_str()
+                .expect("input string")
+                .to_owned();
+            let output = item["output_schema"].as_str().map(ToOwned::to_owned);
+            (id, (input, output))
+        })
+        .collect()
+}
+
 /// `GET /v1/daemon/orchestration/capabilities` → sorted peer-origin names.
 #[allow(clippy::future_not_send)]
 async fn listing_peer_names(server: &PeerTestServer) -> Vec<String> {
@@ -403,7 +429,74 @@ async fn listing_peer_names(server: &PeerTestServer) -> Vec<String> {
     names
 }
 
-// ── catalog ⇄ spine ⇄ listing set equality ────────────────────────────────
+/// AR-80 #1 (schema-equality, registry ⇄ catalog route, both directions):
+/// every builtin row's `CatalogDescriptor` input/output schema text is
+/// emitted VERBATIM by `GET /v1/daemon/tools` — the route never rewrites,
+/// re-serializes, or substitutes a placeholder for an authored schema, and
+/// every emitted builtin row traces back to a registry row with the same
+/// schema text. The MCP `tools/list` leg of the lockstep family is pinned
+/// in `apps/nexus42/tests/mcp_serve_e2e.rs` (same registry-derived
+/// fixture, per-row equality).
+#[tokio::test]
+#[serial]
+async fn builtin_catalog_schema_equality_registry_to_route() {
+    let server = start_server(Vec::new(), HashMap::new(), &[], None).await;
+
+    let route = catalog_builtin_schemas(&server).await;
+    let registry = host_tool_registry();
+
+    // Registry → route: every builtin row's authored schema text appears
+    // verbatim on the route (input always; output when pinned).
+    for id in registry.ids() {
+        let row = registry.lookup(id).expect("row must exist");
+        let (route_input, route_output) = route
+            .get(id)
+            .unwrap_or_else(|| panic!("builtin row '{id}' must be emitted by the catalog route"));
+        let emitted_input = row
+            .catalog
+            .input_schema
+            .unwrap_or(nexus_daemon_runtime::capability_registry::NAMED_PLACEHOLDER_INPUT);
+        assert_eq!(
+            route_input, emitted_input,
+            "route input schema for '{id}' must equal the registry descriptor verbatim"
+        );
+        assert_eq!(
+            route_output.as_deref(),
+            row.catalog.output_schema,
+            "route output schema for '{id}' must equal the registry descriptor verbatim"
+        );
+    }
+
+    // Route → registry: every builtin-origin route row names a registered
+    // row (no invented ids) and carries the same schema text (both
+    // directions complete).
+    assert_eq!(
+        route.len(),
+        registry.ids().count(),
+        "catalog builtin rows == registry rows (both directions)"
+    );
+    for (id, (route_input, route_output)) in &route {
+        let row = registry
+            .lookup(id)
+            .unwrap_or_else(|| panic!("route row '{id}' must name a registered builtin row"));
+        let emitted_input = row
+            .catalog
+            .input_schema
+            .unwrap_or(nexus_daemon_runtime::capability_registry::NAMED_PLACEHOLDER_INPUT);
+        assert_eq!(
+            route_input, &emitted_input,
+            "registry input schema for '{id}' must equal the route emission verbatim"
+        );
+        assert_eq!(
+            route_output.as_deref(),
+            row.catalog.output_schema,
+            "registry output schema for '{id}' must equal the route emission verbatim"
+        );
+    }
+
+    server.shutdown.notify_one();
+    let _ = server.task.await;
+}
 
 /// Every admitted row (peer table + user registry + static builtin) is
 /// listed on the MCP catalog EXACTLY once, and every catalog row is present

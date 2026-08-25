@@ -1,6 +1,6 @@
 //! Capability Registry — runtime SSOT for `nexus.*` host tool dispatch.
 //!
-//! V1.53 P0: Introduces a unified registry with 8-field row shape
+//! V1.53 P0: Introduces a unified registry with 7-field row shape
 //! (id → access → admission → handler → catalog descriptor → failure mode → test vector).
 //! Migrated from `HostToolExecutor`'s `dispatch_tool()` match table via an
 //! adapter-first approach: introduce → cutover → cleanup.
@@ -142,7 +142,7 @@ pub struct TestVector {
 
 /// A single row in the capability registry.
 ///
-/// Bundles all 8 fields: id, access, admission gates,
+/// Bundles all 7 fields: id, access, admission gates,
 /// handler binding, catalog descriptor, failure mode contract,
 /// and test vector.
 #[derive(Clone)]
@@ -177,26 +177,12 @@ pub const NAMED_PLACEHOLDER_INPUT: &str =
 
 /// Registry-source ledger of builtin ids whose input schema is not yet
 /// authored. Lockstep pin: `row.catalog.input_schema.is_none() ⇔ id ∈ LEDGER`
-/// (unit-tested both directions). Task 1 leaves the write-tool remainder
-/// ledgered; Task 2 converts the rest (target: empty ledger).
-///
-/// Consumed only by the `placeholder_ledger_lockstep` test pin (the catalog
-/// route reads `NAMED_PLACEHOLDER_INPUT`, never this ledger), so non-test
-/// builds see it as dead code.
-#[allow(dead_code)]
-pub(crate) const SCHEMA_REMAINDER_LEDGER: &[&str] = &[
-    "nexus.work.patch",
-    "nexus.kb_snapshot.write",
-    "nexus.manuscript.chapter.update",
-    "nexus.world.configure",
-    "nexus.work.schedule.set",
-    "nexus.finding.resolve",
-    "nexus.pool.entry.manage",
-    "nexus.registry.refresh",
-    "nexus.reference.refresh",
-    "nexus.manuscript.write",
-    "nexus.manuscript.phase.set",
-];
+/// (unit-tested both directions). Task 2 converted all 30 static rows, so
+/// the ledger is empty — the pin stays as the guard against future rows
+/// being added without a schema. Test-only: the catalog route reads
+/// `NAMED_PLACEHOLDER_INPUT`, never this ledger.
+#[cfg(test)]
+pub(crate) const SCHEMA_REMAINDER_LEDGER: &[&str] = &[];
 
 // ─── Registry ──────────────────────────────────────────────────────────────
 
@@ -731,8 +717,12 @@ pub fn build_registry() -> CapabilityRegistry {
         handler: hte::registry_work_patch,
         catalog: CatalogDescriptor {
             description: "Patch a work's title, inspiration log, or stage metadata (stage field itself is rejected).",
-            input_schema: None,
-            output_schema: None,
+            input_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"},"title":{"type":"string"},"inspiration_log":{"type":"array","items":{"type":"object","properties":{"text":{"type":"string"},"note":{"type":"string"},"source":{"type":"string"}},"anyOf":[{"required":["text"]},{"required":["note"]}]}},"stage_metadata":{"type":"object","properties":{"agent_notes":{"type":"string"},"research_summary_ref":{"type":"string"},"draft_outline_ref":{"type":"string"},"review_summary_ref":{"type":"string"},"last_agent_tool_request_id":{"type":"string"}}}},"required":["work_id"]}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"},"status":{"type":"string"},"title":{"type":"string"},"current_stage":{"type":"string"},"stage_status":{"type":"string"}},"required":["work_id","status","title","current_stage","stage_status"]}"#,
+            ),
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -904,8 +894,12 @@ pub fn build_registry() -> CapabilityRegistry {
         handler: hte::registry_kb_snapshot_write,
         catalog: CatalogDescriptor {
             description: "Upsert knowledge-base key blocks for an owned world.",
-            input_schema: None,
-            output_schema: None,
+            input_schema: Some(
+                r#"{"type":"object","properties":{"world_id":{"type":"string"},"blocks":{"type":"array","items":{"type":"object","properties":{"schema_version":{"type":"integer"},"entry_id":{"type":"string"},"world_id":{"type":"string"},"block_type":{"type":"string","enum":["character","ability","scene","organization","item","conflict","info_point","event","species","faction","magic_system","technology","deity","level","economy_tier","dialogue","beat","act","era"]},"canonical_name":{"type":"string"},"status":{"type":"string"},"revision":{"type":"integer"},"body":{"type":"object"},"source_anchor":{"type":"object"},"created_from_command_id":{"type":"string"},"created_at":{"type":"string"},"updated_at":{"type":"string"},"source_work_id":{"type":"string"},"source_chapter":{"type":"integer"},"source_provenance_kind":{"type":"string"},"extensions_nexus_extras":{"type":"object"},"modules":{"type":"object"}},"required":["schema_version","entry_id","world_id","block_type","canonical_name","status","created_at"]}}},"required":["world_id","blocks"]}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"written":{"type":"integer"},"world_id":{"type":"string"}},"required":["written","world_id"]}"#,
+            ),
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -922,8 +916,12 @@ pub fn build_registry() -> CapabilityRegistry {
         handler: hte::registry_manuscript_chapter_update,
         catalog: CatalogDescriptor {
             description: "Update a manuscript chapter's content and block overrides for a work.",
-            input_schema: None,
-            output_schema: None,
+            input_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer","minimum":1},"volume":{"type":"integer","minimum":1},"content":{"type":"string"}},"required":["work_id","chapter"]}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer"},"volume":{"type":"integer"},"slug":{"type":"string"},"planned_word_count":{"type":"integer"},"actual_word_count":{"type":"integer"},"status":{"type":"string"},"outline_path":{"type":"string"},"body_path":{"type":"string"},"created_at":{"type":"string"},"updated_at":{"type":"string"}},"required":["work_id","chapter","planned_word_count","status","created_at","updated_at"]}"#,
+            ),
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -940,8 +938,12 @@ pub fn build_registry() -> CapabilityRegistry {
         handler: hte::registry_world_configure,
         catalog: CatalogDescriptor {
             description: "Update metadata (title, visibility, time policy) for an owned world.",
-            input_schema: None,
-            output_schema: None,
+            input_schema: Some(
+                r#"{"type":"object","properties":{"world_id":{"type":"string"},"title":{"type":"string"},"visibility":{"type":"string","enum":["public","private","invited"]},"time_policy":{"type":"string","enum":["manual","auto_advance"]}},"required":["world_id"]}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"world_id":{"type":"string"},"updated":{"type":"boolean"}},"required":["world_id","updated"]}"#,
+            ),
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -958,8 +960,12 @@ pub fn build_registry() -> CapabilityRegistry {
         handler: hte::registry_work_schedule_set,
         catalog: CatalogDescriptor {
             description: "Link schedule ids to a work.",
-            input_schema: None,
-            output_schema: None,
+            input_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"},"schedule_ids":{"type":"array","items":{"type":"string"}}},"required":["work_id","schedule_ids"]}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"},"schedule_ids":{"type":"array","items":{"type":"string"}}},"required":["work_id","schedule_ids"]}"#,
+            ),
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -976,8 +982,12 @@ pub fn build_registry() -> CapabilityRegistry {
         handler: hte::registry_finding_resolve,
         catalog: CatalogDescriptor {
             description: "Mark a finding as resolved, optionally with a resolution note.",
-            input_schema: None,
-            output_schema: None,
+            input_schema: Some(
+                r#"{"type":"object","properties":{"finding_id":{"type":"string"},"resolution":{"type":"string"}},"required":["finding_id"]}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"finding_id":{"type":"string"},"resolved":{"type":"boolean"}},"required":["finding_id","resolved"]}"#,
+            ),
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -994,8 +1004,12 @@ pub fn build_registry() -> CapabilityRegistry {
         handler: hte::registry_pool_entry_manage,
         catalog: CatalogDescriptor {
             description: "Add or remove a work entry in the selection pool.",
-            input_schema: None,
-            output_schema: None,
+            input_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"},"action":{"type":"string","enum":["add","remove","promote","archive"]}},"required":["work_id","action"]}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"},"action":{"type":"string"},"success":{"type":"boolean"}},"required":["work_id","action","success"]}"#,
+            ),
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -1013,8 +1027,12 @@ pub fn build_registry() -> CapabilityRegistry {
         handler: hte::registry_registry_refresh,
         catalog: CatalogDescriptor {
             description: "Return the capability registry snapshot (synthetic or CDN-backed).",
-            input_schema: None,
-            output_schema: None,
+            input_schema: Some(
+                r#"{"type":"object","properties":{},"required":[],"additionalProperties":false}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"cacheAgeMs":{"type":"integer","minimum":0},"capabilityCount":{"type":"integer","minimum":0},"source":{"type":"string","enum":["synthetic","cdn","synthetic_fallback"]},"snapshotVersion":{"type":"string"},"generatedAt":{"type":"string","format":"date-time"},"fetchTimeoutMs":{"type":"integer","minimum":0},"maxRetries":{"type":"integer","minimum":0},"retryCount":{"type":"integer","minimum":0},"fallbackReason":{"type":"string"}},"required":["cacheAgeMs","capabilityCount","source","snapshotVersion","generatedAt"],"additionalProperties":false}"#,
+            ),
         },
         failure_mode: FailureMode::NotSupported,
         handler_test_vector: TestVector {
@@ -1032,8 +1050,12 @@ pub fn build_registry() -> CapabilityRegistry {
         handler: hte::registry_reference_refresh,
         catalog: CatalogDescriptor {
             description: "Refresh a reference source's body content and update its content hash.",
-            input_schema: None,
-            output_schema: None,
+            input_schema: Some(
+                r#"{"type":"object","properties":{"reference_source_id":{"type":"string","description":"Registry ID of the reference source to refresh"},"url":{"type":"string","description":"Optional override URL for ad-hoc refresh"}},"required":["reference_source_id"],"additionalProperties":false}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"reference_source_id":{"type":"string"},"refreshed":{"type":"boolean"},"content_changed":{"type":"boolean"},"new_content_hash":{"type":"string"},"refreshed_at":{"type":"string","format":"date-time"},"status":{"type":"string","enum":["fresh","stale","not_modified","policy_blocked","error"]},"bytes_fetched":{"type":"integer","minimum":0}},"required":["reference_source_id","refreshed","content_changed","status"],"additionalProperties":false}"#,
+            ),
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -1095,8 +1117,12 @@ pub fn build_registry() -> CapabilityRegistry {
         handler: hte::registry_manuscript_write,
         catalog: CatalogDescriptor {
             description: "Write manuscript body content for a chapter within the size quota.",
-            input_schema: None,
-            output_schema: None,
+            input_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer","minimum":1},"volume":{"type":"integer","minimum":1},"content":{"type":"string"}},"required":["work_id","chapter","content"]}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"written":{"type":"boolean"},"work_id":{"type":"string"},"chapter":{"type":"integer"},"volume":{"type":"integer"},"word_count":{"type":"integer"},"bytes_written":{"type":"integer"}},"required":["written","work_id","chapter","volume","word_count","bytes_written"]}"#,
+            ),
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -1135,8 +1161,12 @@ pub fn build_registry() -> CapabilityRegistry {
         handler: hte::registry_manuscript_phase_set,
         catalog: CatalogDescriptor {
             description: "Move a work forward to the next manuscript phase.",
-            input_schema: None,
-            output_schema: None,
+            input_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"},"phase":{"type":"string","enum":["brainstorm","draft","review","finalize"]},"force":{"type":"boolean"}},"required":["work_id","phase"]}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"},"previous_phase":{"type":"string"},"current_phase":{"type":"string"},"stage_status":{"type":"string"},"transitioned":{"type":"boolean"}},"required":["work_id","previous_phase","current_phase","stage_status","transitioned"]}"#,
+            ),
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -1341,11 +1371,11 @@ mod tests {
     }
 
     #[test]
-    fn registry_all_rows_have_eight_fields() {
+    fn registry_all_rows_have_seven_fields() {
         let reg = host_tool_registry();
         for id in reg.ids() {
             let row = reg.lookup(id).expect("row must exist");
-            // Verify all 8 fields are populated (AR-78: catalog descriptor
+            // Verify all 7 fields are populated (AR-78: catalog descriptor
             // replaces the removed AcpWire).
             assert!(!row.id.is_empty(), "id must not be empty for {id}");
             assert!(
