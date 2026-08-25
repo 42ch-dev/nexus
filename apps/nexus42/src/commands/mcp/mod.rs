@@ -265,8 +265,13 @@ impl McpBridgeHandler {
         }
 
         match code.as_str() {
-            // Unroutable: the spine cannot resolve the id at all.
-            "not_supported" if message.starts_with("unsupported tool:") => {
+            // Unroutable: the spine cannot resolve the id at all. The
+            // daemon's `BadRequest` Display wraps the message as
+            // `"Bad request: unsupported tool: {id}"` (AR-70 #4/AR-74
+            // lockstep), so the discriminator is a CONTAINS match — a
+            // `starts_with` would misclassify the real wire shape as an
+            // executed-but-failed outcome instead of METHOD_NOT_FOUND.
+            "not_supported" if message.contains("unsupported tool:") => {
                 Ok(ToolCallOutcome::Unroutable { code, message })
             }
             // Auth rejected → the daemon refuses the caller (INTERNAL_ERROR
