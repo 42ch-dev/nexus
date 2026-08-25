@@ -694,7 +694,7 @@ pub fn build_registry() -> CapabilityRegistry {
         admission: ADMISSION_READ_WORKSPACE,
         handler: hte::registry_work_get,
         catalog: CatalogDescriptor {
-            description: "Return the full Work record (including stage fields) for the active creator's work.",
+            description: "Return the Work record fields exposed by the catalog: status, title, current stage, and stage status.",
             input_schema: Some(
                 r#"{"type":"object","properties":{"work_id":{"type":"string"}},"required":["work_id"]}"#,
             ),
@@ -718,7 +718,7 @@ pub fn build_registry() -> CapabilityRegistry {
         catalog: CatalogDescriptor {
             description: "Patch a work's title, inspiration log, or stage metadata (stage field itself is rejected).",
             input_schema: Some(
-                r#"{"type":"object","properties":{"work_id":{"type":"string"},"title":{"type":"string"},"inspiration_log":{"type":"array","items":{"type":"object","properties":{"text":{"type":"string"},"note":{"type":"string"},"source":{"type":"string"}},"anyOf":[{"required":["text"]},{"required":["note"]}]}},"stage_metadata":{"type":"object","properties":{"agent_notes":{"type":"string"},"research_summary_ref":{"type":"string"},"draft_outline_ref":{"type":"string"},"review_summary_ref":{"type":"string"},"last_agent_tool_request_id":{"type":"string"}}}},"required":["work_id"]}"#,
+                r#"{"type":"object","properties":{"work_id":{"type":"string"},"title":{"type":"string"},"inspiration_log":{"type":"array","items":{"type":"object","properties":{"text":{"type":"string"},"note":{"type":"string"},"source":{"type":"string"}},"anyOf":[{"required":["text"]},{"required":["note"]}]}},"stage_metadata":{"type":"object","properties":{"agent_notes":{"type":"string"},"research_summary_ref":{"type":"string"},"draft_outline_ref":{"type":"string"},"review_summary_ref":{"type":"string"},"last_agent_tool_request_id":{"type":"string"}},"additionalProperties":false}},"required":["work_id"],"additionalProperties":false}"#,
             ),
             output_schema: Some(
                 r#"{"type":"object","properties":{"work_id":{"type":"string"},"status":{"type":"string"},"title":{"type":"string"},"current_stage":{"type":"string"},"stage_status":{"type":"string"}},"required":["work_id","status","title","current_stage","stage_status"]}"#,
@@ -783,7 +783,7 @@ pub fn build_registry() -> CapabilityRegistry {
         admission: ADMISSION_READ_WORLD,
         handler: hte::registry_world_snapshot_get,
         catalog: CatalogDescriptor {
-            description: "Return the structured world snapshot (state, timeline position, fork lineage) for an owned world.",
+            description: "Return the world snapshot fields exposed by the catalog: title, slug, status, fork flag, and creation time.",
             input_schema: Some(
                 r#"{"type":"object","properties":{"world_id":{"type":"string"}},"required":["world_id"]}"#,
             ),
@@ -849,7 +849,7 @@ pub fn build_registry() -> CapabilityRegistry {
         admission: ADMISSION_READ_WORKSPACE,
         handler: hte::registry_manuscript_chapter_get,
         catalog: CatalogDescriptor {
-            description: "Return a single manuscript chapter record (metadata + paths) for a work.",
+            description: "Return the manuscript chapter fields exposed by the catalog: status and planned word count.",
             input_schema: Some(
                 r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer","minimum":1},"volume":{"type":"integer","minimum":1}},"required":["work_id","chapter"]}"#,
             ),
@@ -915,7 +915,7 @@ pub fn build_registry() -> CapabilityRegistry {
         admission: ADMISSION_WRITE_WORKSPACE,
         handler: hte::registry_manuscript_chapter_update,
         catalog: CatalogDescriptor {
-            description: "Update a manuscript chapter's content and block overrides for a work.",
+            description: "Update a manuscript chapter's content for a work.",
             input_schema: Some(
                 r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer","minimum":1},"volume":{"type":"integer","minimum":1},"content":{"type":"string"}},"required":["work_id","chapter"]}"#,
             ),
@@ -1003,7 +1003,7 @@ pub fn build_registry() -> CapabilityRegistry {
         admission: ADMISSION_POOL_WRITE,
         handler: hte::registry_pool_entry_manage,
         catalog: CatalogDescriptor {
-            description: "Add or remove a work entry in the selection pool.",
+            description: "Add, remove, promote, or archive a work entry in the selection pool.",
             input_schema: Some(
                 r#"{"type":"object","properties":{"work_id":{"type":"string"},"action":{"type":"string","enum":["add","remove","promote","archive"]}},"required":["work_id","action"]}"#,
             ),
@@ -1319,6 +1319,121 @@ mod tests {
     fn registry_has_thirty_host_tools() {
         let reg = host_tool_registry();
         assert_eq!(reg.len(), 30);
+    }
+    /// F-2 (qc1 W-001 ∩ qc2 S-002 ∩ qc3 S-002/S-004): the four touched
+    /// rows' description / schema / handler triple must stay coherent —
+    /// description claims ⊆ schema ⊆ handler reads, machine-checked where
+    /// the schema carries the vocabulary (enum / allowlist / property
+    /// names). This pins the fix so a future authoring pass cannot
+    /// silently re-introduce description drift on these rows.
+    #[test]
+    fn touched_rows_description_schema_handler_coherence() {
+        let reg = host_tool_registry();
+
+        // nexus.manuscript.chapter.update: description must NOT promise
+        // "block overrides" — the handler reads only work_id/chapter/
+        // volume/content and the schema carries exactly those properties.
+        let row = reg.lookup("nexus.manuscript.chapter.update").expect("row");
+        assert!(
+            !row.catalog.description.contains("block override"),
+            "description must not promise block overrides (handler does not accept them)"
+        );
+        let input: serde_json::Value =
+            serde_json::from_str(row.catalog.input_schema.expect("authored input"))
+                .expect("input parses");
+        let props = input["properties"].as_object().expect("properties");
+        assert_eq!(
+            props
+                .keys()
+                .map(String::as_str)
+                .collect::<std::collections::BTreeSet<_>>(),
+            ["work_id", "chapter", "volume", "content"]
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>(),
+            "chapter.update schema properties match the handler reads"
+        );
+
+        // nexus.pool.entry.manage: description must enumerate all four
+        // actions the schema enum and the handler match arm support.
+        let row = reg.lookup("nexus.pool.entry.manage").expect("row");
+        let description_lower = row.catalog.description.to_ascii_lowercase();
+        for action in ["add", "remove", "promote", "archive"] {
+            assert!(
+                description_lower.contains(action),
+                "pool.entry.manage description must enumerate '{action}'"
+            );
+        }
+        let input: serde_json::Value =
+            serde_json::from_str(row.catalog.input_schema.expect("authored input"))
+                .expect("input parses");
+        assert_eq!(
+            input["properties"]["action"]["enum"],
+            serde_json::json!(["add", "remove", "promote", "archive"]),
+            "pool.entry.manage action enum matches the handler match arm"
+        );
+
+        // nexus.work.patch: closed world — root and stage_metadata both
+        // reject unknown keys, matching the handler allowlists.
+        let row = reg.lookup("nexus.work.patch").expect("row");
+        let input: serde_json::Value =
+            serde_json::from_str(row.catalog.input_schema.expect("authored input"))
+                .expect("input parses");
+        assert_eq!(
+            input["additionalProperties"],
+            serde_json::json!(false),
+            "work.patch root must be closed-world (handler rejects unknown keys)"
+        );
+        assert_eq!(
+            input["properties"]["stage_metadata"]["additionalProperties"],
+            serde_json::json!(false),
+            "work.patch stage_metadata must be closed-world (handler allowlists sub-keys)"
+        );
+        let stage_props = input["properties"]["stage_metadata"]["properties"]
+            .as_object()
+            .expect("stage_metadata properties");
+        assert_eq!(
+            stage_props
+                .keys()
+                .map(String::as_str)
+                .collect::<std::collections::BTreeSet<_>>(),
+            [
+                "agent_notes",
+                "research_summary_ref",
+                "draft_outline_ref",
+                "review_summary_ref",
+                "last_agent_tool_request_id",
+            ]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>(),
+            "stage_metadata schema properties match STAGE_METADATA_ALLOWED_KEYS"
+        );
+
+        // Read-tool descriptions must not promise fields absent from the
+        // pinned output schema (AR-78 #5 honest subsets).
+        for (id, promised) in [
+            (
+                "nexus.world.snapshot.get",
+                &["state", "timeline", "fork lineage"][..],
+            ),
+            ("nexus.work.get", &["full Work record"][..]),
+            ("nexus.manuscript.chapter.get", &["paths"][..]),
+        ] {
+            let row = reg.lookup(id).expect("row");
+            for word in promised {
+                assert!(
+                    !row.catalog.description.contains(word),
+                    "'{id}' description must not promise '{word}' (absent from the output schema)"
+                );
+            }
+            let output: serde_json::Value =
+                serde_json::from_str(row.catalog.output_schema.expect("pinned output"))
+                    .expect("output parses");
+            let out_props = output["properties"].as_object().expect("properties");
+            assert!(
+                !out_props.is_empty(),
+                "'{id}' output schema must stay a pinned honest subset"
+            );
+        }
     }
 
     #[test]

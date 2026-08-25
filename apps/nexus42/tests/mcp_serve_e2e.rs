@@ -89,44 +89,43 @@ impl Drop for McpChild {
     }
 }
 
-/// The catalog fixture served by the stub daemon (wire shape mirrors the
-/// daemon's `GET /v1/daemon/tools`: `input_schema` is a JSON STRING).
-///
-/// The builtin row is derived from the REAL registry
-/// (`host_tool_registry().lookup("nexus.workspace.info")`) so the fixture
-/// can never drift from the authored `CatalogDescriptor` — the AR-80 #1
-/// schema-equality pin below compares the child's parsed `tools/list`
-/// schemas against the same registry source. Peer/user rows stay on the
-/// V1.174 placeholder shape (AR-80 #3: those lanes are untouched).
+/// The builtin rows are derived from the REAL registry
+/// (`host_tool_registry()`) so the fixture can never drift from the
+/// authored `CatalogDescriptor` — the AR-80 #1 schema-equality pin below
+/// compares the child's parsed `tools/list` schemas against the same
+/// registry source for ALL 30 builtin ids (F-4, qc1 W-002). Peer/user
+/// rows stay on the V1.174 placeholder shape (AR-80 #3: those lanes are
+/// untouched).
 fn catalog_body() -> Value {
-    let builtin = host_tool_registry()
-        .lookup("nexus.workspace.info")
-        .expect("builtin row exists");
-    json!({
-        "items": [
-            {
-                "id": "nexus.workspace.info",
-                "description": builtin.catalog.description,
-                "input_schema": builtin.catalog.input_schema.expect("authored input"),
-                "output_schema": builtin.catalog.output_schema,
+    let registry = host_tool_registry();
+    let mut items: Vec<Value> = registry
+        .ids()
+        .map(|id| {
+            let row = registry.lookup(id).expect("builtin row exists");
+            json!({
+                "id": id,
+                "description": row.catalog.description,
+                "input_schema": row.catalog.input_schema.expect("authored input"),
+                "output_schema": row.catalog.output_schema,
                 "origin": "builtin"
-            },
-            {
-                "id": "t6.wcap",
-                "description": "t6.wcap",
-                "input_schema": "{\"type\":\"object\"}",
-                "output_schema": "{\"type\":\"object\"}",
-                "origin": "user"
-            },
-            {
-                "id": "tools.t6.echo",
-                "description": "tools.t6.echo test tool",
-                "input_schema": "{\"type\":\"object\"}",
-                "output_schema": "{\"type\":\"object\"}",
-                "origin": "peer"
-            }
-        ]
-    })
+            })
+        })
+        .collect();
+    items.push(json!({
+        "id": "t6.wcap",
+        "description": "t6.wcap",
+        "input_schema": "{\"type\":\"object\"}",
+        "output_schema": "{\"type\":\"object\"}",
+        "origin": "user"
+    }));
+    items.push(json!({
+        "id": "tools.t6.echo",
+        "description": "tools.t6.echo test tool",
+        "input_schema": "{\"type\":\"object\"}",
+        "output_schema": "{\"type\":\"object\"}",
+        "origin": "peer"
+    }));
+    json!({ "items": items })
 }
 
 /// Mount the catalog mock; returns the sorted catalog id set.
@@ -201,71 +200,55 @@ async fn initialize_handshake_and_tools_list_mirror_catalog() {
         .iter()
         .map(|t| (t.name.to_string(), t))
         .collect();
-    let builtin = by_name.get("nexus.workspace.info").expect("builtin row");
-    assert_eq!(builtin.input_schema.get("type"), Some(&json!("object")));
-    assert_eq!(
-        builtin.input_schema.get("properties"),
-        Some(&json!({})),
-        "builtin input schema carries authored properties"
-    );
-    let builtin_out = builtin
-        .output_schema
-        .as_ref()
-        .expect("builtin output schema carried");
-    assert_eq!(builtin_out.get("type"), Some(&json!("object")));
-    assert_eq!(
-        builtin_out.get("required"),
-        Some(&json!([
-            "creator_id",
-            "workspace_slug",
-            "workspace_path",
-            "runtime_mode",
-            "initialized"
-        ]))
-    );
     let peer = by_name.get("tools.t6.echo").expect("peer row");
     assert_eq!(
         peer.output_schema.as_ref().map(|s| s.get("type")),
         Some(Some(&json!("object")))
     );
 
-    // AR-80 #1 (schema-equality, catalog ⇄ tools/list): the child parses
-    // the catalog's `input_schema`/`output_schema` strings and carries them
-    // on the `Tool` — the parsed `tools/list` schemas must equal the
-    // registry `CatalogDescriptor` text parsed (both directions). The
+    // AR-80 #1 (schema-equality, catalog ⇄ tools/list, ALL 30 builtin
+    // rows — F-4, qc1 W-002): the child parses the catalog's
+    // `input_schema`/`output_schema` strings and carries them on the
+    // `Tool` — the parsed `tools/list` schemas must equal the registry
+    // `CatalogDescriptor` text parsed, per row, both directions. The
     // registry ⇄ catalog route leg is pinned in
-    // `honesty_lockstep::builtin_catalog_schema_equality_registry_to_route`.
-    let registry_row = host_tool_registry()
-        .lookup("nexus.workspace.info")
-        .expect("builtin row exists");
-    let registry_input: Value = serde_json::from_str(
-        registry_row
-            .catalog
-            .input_schema
-            .expect("authored input schema"),
-    )
-    .expect("registry input parses");
-    assert_eq!(
-        builtin.input_schema.as_ref(),
-        registry_input
-            .as_object()
-            .expect("registry input is an object"),
-        "tools/list input schema == registry descriptor (parsed)"
-    );
-    let registry_output: Value = serde_json::from_str(
-        registry_row
-            .catalog
-            .output_schema
-            .expect("authored output schema"),
-    )
-    .expect("registry output parses");
-    assert_eq!(
-        builtin_out.as_ref(),
-        registry_output
-            .as_object()
-            .expect("registry output is an object"),
-        "tools/list output schema == registry descriptor (parsed)"
-    );
+    // `honesty_lockstep::builtin_catalog_schema_equality_registry_to_route`;
+    // this leg closes the route ⇄ `tools/list` hop for every builtin id.
+    let registry = host_tool_registry();
+    for id in registry.ids() {
+        let row = registry.lookup(id).expect("builtin row exists");
+        let tool = by_name
+            .get(id)
+            .unwrap_or_else(|| panic!("builtin row '{id}' must be listed by tools/list"));
+        let registry_input: Value =
+            serde_json::from_str(row.catalog.input_schema.expect("authored input schema"))
+                .expect("registry input parses");
+        assert_eq!(
+            tool.input_schema.as_ref(),
+            registry_input
+                .as_object()
+                .expect("registry input is an object"),
+            "tools/list input schema for '{id}' == registry descriptor (parsed)"
+        );
+        match (tool.output_schema.as_ref(), row.catalog.output_schema) {
+            (Some(listed), Some(authored)) => {
+                let registry_output: Value =
+                    serde_json::from_str(authored).expect("registry output parses");
+                assert_eq!(
+                    listed.as_ref(),
+                    registry_output
+                        .as_object()
+                        .expect("registry output is an object"),
+                    "tools/list output schema for '{id}' == registry descriptor (parsed)"
+                );
+            }
+            (None, None) => {}
+            (Some(_), None) => {
+                panic!("'{id}': tools/list carries an output schema the registry does not pin")
+            }
+            (None, Some(_)) => panic!("'{id}': registry pins an output schema tools/list dropped"),
+        }
+    }
 
     drop(running);
     child.kill();
@@ -642,7 +625,11 @@ async fn list_changed_advertised_and_delivered() {
 
     // Baseline tools/list.
     let baseline = list_ids(&running).await;
-    assert_eq!(baseline.len(), 3, "baseline catalog has 3 rows");
+    assert_eq!(
+        baseline.len(),
+        32,
+        "baseline catalog has 30 builtin + 2 overlay rows"
+    );
 
     // Wait for the watcher's baseline poll so the first digest is set
     // (a mutation before that would be absorbed into the baseline).
@@ -669,7 +656,7 @@ async fn list_changed_advertised_and_delivered() {
         after_admission.contains(&"tools.t6.admitted".to_string()),
         "refreshed tools/list includes the admitted peer tool"
     );
-    assert_eq!(after_admission.len(), 4, "one row added");
+    assert_eq!(after_admission.len(), 33, "one row added");
 
     // ── Leg 2: peer eviction ──
     let mut body = catalog.current();
@@ -686,7 +673,7 @@ async fn list_changed_advertised_and_delivered() {
         !after_eviction.contains(&"tools.t6.admitted".to_string()),
         "refreshed tools/list drops the evicted peer tool"
     );
-    assert_eq!(after_eviction.len(), 3, "back to 3 rows");
+    assert_eq!(after_eviction.len(), 32, "back to 32 rows");
 
     // ── Leg 3: user-cap leg via mock-catalog change (a runtime user-cap
     // add is restart-scoped pre-RN-2, AR-79 #6) ──

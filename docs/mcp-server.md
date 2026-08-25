@@ -147,7 +147,11 @@ not configurable this iteration), digests the response body, and sends
 `notifications/tools/list_changed` when the digest changes between
 successful polls. The first successful poll is a **baseline** (no
 notification at session start). Poll errors keep the last digest, log to
-stderr, and never notify.
+stderr (once per error-state transition, never every 2 s during an
+outage), and never notify. A failed `notify_tool_list_changed` also keeps
+the previous digest, so the next successful poll **retries** the
+notification — `listChanged` is idempotent (the client re-lists), so
+duplicates are safe, loss is not.
 
 This is a **child-side watch** (AR-79): the child holds a digest +
 interval only — no registry, allowlist, policy, or read cache. There is
