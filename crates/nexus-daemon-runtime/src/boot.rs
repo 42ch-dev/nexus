@@ -19,7 +19,7 @@ use crate::workspace::WorkspaceState;
 /// Accepts explicit IP addresses (`127.0.0.1`, `::1`) and the common
 /// `localhost` alias. Hostnames that cannot be parsed as IPs are treated as
 /// non-loopback, which is the conservative choice for a local-only daemon.
-fn is_loopback_host(host: &str) -> bool {
+pub(crate) fn is_loopback_host(host: &str) -> bool {
     if host.eq_ignore_ascii_case("localhost") {
         return true;
     }
@@ -32,7 +32,7 @@ fn is_loopback_host(host: &str) -> bool {
 /// A non-loopback bind is only permitted when both `NEXUS42_DAEMON_API_KEY`
 /// and `NEXUS_DAEMON_REMOTE_BIND=1` are present. Loopback binds and Unix
 /// sockets are unaffected.
-fn ensure_remote_bind_allowed(host: &str) -> anyhow::Result<()> {
+pub(crate) fn ensure_remote_bind_allowed(host: &str) -> anyhow::Result<()> {
     if is_loopback_host(host) {
         return Ok(());
     }
@@ -1015,6 +1015,58 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 
             tracing::info!("engine + worker shutdown complete");
         });
+    }
+
+    // --- Section 8.5: Peer-tools Connect accept loop (V1.174 P0, AR-67) ---
+    // Feature-gated: the daemon-side listening face for spoke dialers (own
+    // TcpListener, WS upgrade per connection, one connect_responder per
+    // conn, PeerSessionManager registration). AR-69 outbound authz: the
+    // daemon hello derives from the operator tool allowlist (baseline ∪
+    // allowlist exact ids, validated at config load), the dialer handshake
+    // allowlist comes from `peer_ids` + `peer_keys.json` — all fail-closed
+    // (empty allowlist ⇒ every dial rejected). A lane failure (config load
+    // / identity / bind) is non-fatal: the daemon core keeps running
+    // without peer tools, and nothing is admitted.
+    #[cfg(feature = "connect-client")]
+    {
+        // PR #229 F-1 (Bugbot): the peer-tools lane must be warn-and-skip,
+        // never a boot abort. A parent-less `nexus_home` (unreachable in
+        // production — `$HOME/.nexus42` always has a parent) skips the lane
+        // with a warning, mirroring the `user_capabilities_scan_dir`
+        // precedent (S-004 QC wave): the daemon core keeps running without
+        // peer tools, and nothing is admitted.
+        if let Some(raw_home) = state.nexus_home().parent() {
+            let peer_shutdown = state.shutdown_notify();
+            // AR-68 #2(ii) reserved namespaces: builtin host-tool ids + user
+            // capability names can never be admitted as peer tools.
+            let mut reserved_tool_ids: Vec<String> =
+                crate::capability_registry::host_tool_registry()
+                    .ids()
+                    .map(ToOwned::to_owned)
+                    .collect();
+            if let Some(reg) = state.capability_registry() {
+                reserved_tool_ids.extend(reg.iter().map(|cap| cap.name().to_owned()));
+            }
+            match crate::connect::start_peer_tools_lane(raw_home, peer_shutdown, &reserved_tool_ids)
+                .await
+            {
+                Ok(handle) => {
+                    tracing::info!(addr = %handle.addr, "peer-tools Connect accept loop started");
+                    drop(handle.task);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "peer-tools Connect accept loop failed to start; continuing without peer tools"
+                    );
+                }
+            }
+        } else {
+            tracing::warn!(
+                home = %state.nexus_home().display(),
+                "peer-tools lane skipped: nexus_home has no parent directory"
+            );
+        }
     }
 
     // --- Section 9: HTTP/Unix server + lifecycle start ---

@@ -195,6 +195,11 @@ impl SessionCapture {
     /// If `pending_id` is provided, it is used as-is; otherwise a new one is
     /// generated internally. This allows callers to guarantee the same ID is
     /// used for both daemon submission and local fallback.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the short-timeout daemon client cannot be constructed
+    /// (M-2: builder failure is surfaced instead of an unbounded fallback).
     pub async fn submit_to_daemon(
         &self,
         daemon_client: &DaemonClient,
@@ -235,7 +240,8 @@ impl SessionCapture {
             daemon_client.base_url(),
             Duration::from_secs(2),
             Duration::from_secs(5),
-        );
+        )
+        .expect("M-2: failed to build session-capture daemon client");
 
         let result: Result<CreatePendingReviewResponse, crate::errors::CliError> = timeout_client
             .post("/v1/daemon/memory/pending-review", &request)
@@ -495,7 +501,8 @@ mod tests {
             "http://127.0.0.1:19999",
             Duration::from_millis(100),
             Duration::from_millis(200),
-        );
+        )
+        .expect("M-2: failed to build test daemon client");
 
         let (success, _pending_id) = capture
             .submit_to_daemon(&daemon_client, &digest, None)

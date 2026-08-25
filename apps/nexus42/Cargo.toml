@@ -54,6 +54,15 @@ name = "trpg_raw_bridge"
 path = "examples/trpg_raw_bridge.rs"
 required-features = ["connect-host"]
 
+# V1.174 P1 T4 (AR-77): three-process E2E harness (`tests/e2e_peer_mcp.rs`) —
+# real WS socket pair (spoke RemoteAdapter → daemon accept loop) + real axum
+# HTTP daemon + real spawned `nexus42 mcp serve` child. Feature-gated so the
+# default-feature CI never compiles it.
+[[test]]
+name = "e2e_peer_mcp"
+path = "tests/e2e_peer_mcp.rs"
+required-features = ["connect-client"]
+
 # Creates one world in the standalone probe's disposable workspace through
 # Nexus' own schema and narrative-write API before the runtime starts.
 [[example]]
@@ -104,6 +113,15 @@ spoke-schemas = { workspace = true, optional = true }
 # 0.56 pin as spoke-connect's transport; optional + feature-gated with
 # `connect-host` so the default graph stays libp2p-free.
 libp2p = { workspace = true, optional = true }
+# V1.174 P0 T5 (AR-70): MCP server via rmcp 1.8.0 — `nexus42 mcp serve`
+# is a stateless stdio bridge child (AR-71 Model A). Pinned exactly
+# `=1.8.0` with `default-features = false` and ONLY `server` +
+# `transport-io` (no client / streamable-HTTP / child-process features in
+# the shipped graph). The crate hosting the rmcp server module is a direct
+# optional dep behind `connect-client` (the shipped graph already carries
+# rmcp 1.8.0 via agent-client-protocol =0.11.1 → prior art; the pin keeps
+# exactly one version).
+rmcp = { version = "=1.8.0", default-features = false, features = ["server", "transport-io"], optional = true }
 clap = { workspace = true }
 clap_complete = { workspace = true }
 tokio = { workspace = true }
@@ -163,6 +181,32 @@ tempfile = "3"
 # already in the default graph via nexus-spoke-adapter; the dev-dep makes
 # its embedded-module registry callable from the tests.
 nexus-wasm-host = { path = "../../crates/nexus-wasm-host" }
+# V1.174 P0 T6 (AR-74): E2E MCP harness (`tests/mcp_serve_e2e.rs`) — rmcp
+# CLIENT (dev-only, tests-only) + the async-rw transport for the stdio
+# tuple. The shipped graph keeps exactly one rmcp 1.8.0 (`server` +
+# `transport-io` via the optional `connect-client` dep); the `--edges
+# normal` graph pins in tooling/check-graph-pins.sh never count dev-deps.
+rmcp = { version = "=1.8.0", default-features = false, features = ["client", "transport-async-rw"] }
+# V1.174 P1 T0 (AR-75 C-1): scripted in-process ACP agent probe
+# (`tests/mcp_acp_probe.rs`) — the SDK's Agent/Client roles + Channel
+# duplex run the full newSession.mcp_servers round trip without a live
+# LLM. Same =0.11.1 pin already in the shipped graph via nexus-acp-host;
+# dev-only, tests-only (graph pins use --edges normal, dev-deps excluded).
+agent-client-protocol = "=0.11.1"
+# V1.174 P1 T4 (AR-77): three-process E2E harness (`tests/e2e_peer_mcp.rs`) —
+# the integrator leg (spoke `RemoteAdapter` over a REAL tokio-tungstenite WS
+# pair), the daemon leg (in-process accept loop + real axum HTTP listener),
+# and the spawned `nexus42 mcp serve` child. Every crate is already in the
+# lockfile via nexus-daemon-runtime's `connect-client` feature; dev-deps are
+# tests-only and the `--edges normal` graph pins in
+# tooling/check-graph-pins.sh never count them.
+axum = { workspace = true }
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+futures-util = { workspace = true }
+spoke-connect = { workspace = true, features = ["remote-adapter"] }
+spoke-operations = { workspace = true }
+spoke-schemas = { workspace = true }
+tokio-tungstenite = { workspace = true }
 
 # V1.148 P3 N-C0 (DF-72): opt-in Connect Host surface. Feature OFF by default
 # — the default daemon graph stays libp2p-free (`cargo tree -p nexus42 -i
@@ -173,6 +217,11 @@ nexus-wasm-host = { path = "../../crates/nexus-wasm-host" }
 # deps, never compiled.
 [features]
 connect-host = ["dep:spoke-connect", "dep:spoke-schemas", "dep:libp2p"]
+# V1.174 P0 (AR-61 #1): forwarded gate for the peer-tools client stack on
+# nexus-daemon-runtime. OFF by default — the default nexus42 graph stays
+# libp2p-free; `--features connect-client` links the peer-tools transport +
+# session subsystem into the daemon build.
+connect-client = ["nexus-daemon-runtime/connect-client", "nexus-acp-host/connect-client", "dep:rmcp"]
 # V1.153 P2 (DF-73): forwarded gate for the embedded Web UI — ON by default
 # (the `nexus42` bin is unchanged); OFF for the `nexus-runtime` artifact via
 # `--no-default-features --features connect-host` (compile-time exclusion of

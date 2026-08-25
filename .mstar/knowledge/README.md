@@ -259,3 +259,22 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | Document | Description |
 | --- | --- |
 | [architecture-patterns/connect-host-tools-serving.md](architecture-patterns/connect-host-tools-serving.md) | Connect Host `tools.*` serving (DF-84) — spoke protocol already supports tools; nexus-host serving: single-source manifest composition (LOCAL_TOOL_OPS ++ CORE_OPS), three exact-string authz layers (negotiation intersection + token AND + op_scope), host-level tools skip world gate, process-boundary reachability (no daemon), payload {arguments}→{result}, advertised-schema strictness (compound V1.173) |
+
+### Indexed (compound V1.174)
+
+| Document | Description |
+| --- | --- |
+| [architecture-patterns/compute-pillar-invoke-and-runs-history.md](architecture-patterns/compute-pillar-invoke-and-runs-history.md) | Compute pillar — daemon invoke route + Runs history semantics: canon-only projection, retain-by-default + manual Clear, sandbox honesty (V1.147 shipped; indexed compound V1.174) |
+| [architecture-patterns/local-environment-scan-safety-boundary.md](architecture-patterns/local-environment-scan-safety-boundary.md) | Local-environment scan safety boundary — five normative constraints for scanning PATH for installed tools: registry-known names, bounded concurrency, short timeout, no shell expansion, no user-supplied commands (V1.147; indexed compound V1.174) |
+| [AGENTS.md](AGENTS.md) | Knowledge-store rules: supersession discipline (remove entirely, fix tracked links, update README index only) (indexed compound V1.174) |
+
+### V1.174 additions
+
+| Document | Description |
+| --- | --- |
+| [architecture-patterns/peer-tool-registration-exposure-lanes.md](architecture-patterns/peer-tool-registration-exposure-lanes.md) | Peer-tool two-lane capability architecture (DF-85 consumer) — WS registration lane → `PeerToolTable` + MCP exposure lane over ONE dispatch spine (static rows → table → user-cap arm); fail-closed exact-id admission, four-layer outbound authz (MCP never a second domain), session lifecycle (reserve-at-accept, last-wins replace, eviction same-tick), typed refusal discriminator (compound V1.174) |
+| [architecture-patterns/stateless-mcp-bridge-child.md](architecture-patterns/stateless-mcp-bridge-child.md) | Stateless MCP bridge child (Model A) — client-spawned `nexus42 mcp serve` stdio proxy: no registry/policy/cache, live daemon round trips, lockstep by construction; rmcp 1.8.0 realities (runtime-dynamic `ServerHandler`, prompts/resources default = empty lists not errors, two-class error mapping), schema mapping, alternatives → DF-87/88 (compound V1.174) |
+| [conventions/graph-pin-honesty-discipline.md](conventions/graph-pin-honesty-discipline.md) | Graph-pin honesty discipline — cargo-tree `-i` semantics (prior art legitimately present, dev-deps in `-p` output), `--edges normal` shipped-graph pins, honest obligations (no-new-default-package, exactly-one lockstep, feature matrix), assert-empty false-green trap (propagate exit status); V1.174 spoke-operations/rmcp corrections (compound V1.174) |
+| [conventions/nexus-home-layout-path-helpers.md](conventions/nexus-home-layout-path-helpers.md) | **Updated** — V1.174 `~/.nexus42/connect/` family (`connect_daemon_config_path`, `connect_peer_keys_path` fail-closed, `daemon_identity_key_path`); distinct-file rule: raw Ed25519 seed vs libp2p protobuf `identity.key` formats are disjoint — never share the file (compound V1.174) |
+| [conventions/wire-contracts-frozen-verification.md](conventions/wire-contracts-frozen-verification.md) | **Updated** — V1.174 sanctioned-diff instance: `origin` enum `+= "peer"` + one new route `GET /v1/daemon/tools` (declared wire scope, regen'd); `tools/call` reuses existing spine route; graph claims → separate gate (compound V1.174) |
+| [architecture-patterns/connect-host-tools-serving.md](architecture-patterns/connect-host-tools-serving.md) | **Updated** — DF-85 consumer side landed (V1.174 daemon lane); serving face frozen; cross-link to peer-tool two-lane doc (compound V1.174) |

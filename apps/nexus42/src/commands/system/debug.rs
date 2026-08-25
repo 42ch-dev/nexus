@@ -90,7 +90,8 @@ async fn dump_workspace(config: &CliConfig, format: &str) -> Result<()> {
         &config.daemon_url,
         std::time::Duration::from_secs(2),
         std::time::Duration::from_secs(5),
-    );
+    )
+    .expect("M-2: failed to build debug daemon client");
     match client.health_check().await {
         Ok(true) => {
             match client

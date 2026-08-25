@@ -78,6 +78,33 @@ rustls-pemfile = "2"
 x509-parser = "0.17"
 # V1.127 P1 greploop: probe native CLI presence at boot before register_provider.
 which = { workspace = true }
+# V1.174 P0 T1 (AR-57/AR-61): peer-tools WS transport + conformance suite.
+# ALL optional and wired to the `connect-client` feature — the default
+# daemon graph must stay libp2p-free AND tungstenite-free. spoke-connect is
+# pulled with `remote-adapter` (⇒ spoke-operations 0.11.1); its base deps
+# always include libp2p =0.56.0 (non-optional upstream), so the feature-on
+# graph gains libp2p exactly once via this crate (single-version lockstep,
+# AR-61 #2 — `cargo tree --features connect-client,connect-host -i libp2p`
+# must resolve to exactly one 0.56.x entry).
+spoke-connect = { workspace = true, features = ["remote-adapter"], optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
+# V1.174 P0 T2 (AR-67): spoke manifest types for the daemon's Connect hello
+# (`spoke_schemas::HostCapabilityManifest`) — already in the DEFAULT graph
+# via nexus-spoke-adapter (prior art, AR-73); optional keeps the feature-off
+# graph unchanged.
+spoke-schemas = { workspace = true, optional = true }
+# V1.174 P0 T2 (AR-67): persistent Ed25519 identity seed generation.
+# getrandom 0.2 is the already-locked default-graph CSPRNG stack (uuid et
+# al.); optional keeps the feature-off graph unchanged.
+getrandom = { version = "0.2", optional = true }
+# V1.174 P0 T3 (AR-68): pure tool manifest/ABI helpers for the PeerToolTable
+# admission chain (`validate_manifest_tools`, `parse_tool_capability_id`,
+# `validate_tool_arguments`) AND for the user-capability catalog grammar
+# check (QC-fix S-d — the local `matches_tools_grammar` mirror was removed
+# in favor of the spoke helper). Already in the default graph via
+# nexus-spoke-adapter (prior art, AR-73) — non-optional changes nothing in
+# the shipped graph, verified by `tooling/check-graph-pins.sh`.
+spoke-operations = { workspace = true }
 
 [dev-dependencies]
 axum-test = "15"
@@ -89,6 +116,14 @@ tokio-rustls = "0.26"
 # `wat` compiles WebAssembly text → binary for integration tests that exercise
 # sandbox-limit paths (mirrors nexus-wasm-host's own test convention).
 wat = "1"
+# V1.174 P0 T1: fixed-seed Ed25519 keypairs for the conformance + golden-path
+# fixtures (same derivation path spoke-connect's core uses).
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+parking_lot = "0.12"
+# V1.174 P0 T1: spoke types for the golden-path fixtures (manifest building,
+# `SpokeResult`/`spoke_ok` in the tool handler). Both crates are already in
+# the default graph via nexus-spoke-adapter — no graph change.
+spoke-operations = { workspace = true }
 
 [[bench]]
 name = "dispatch_latency"
@@ -96,6 +131,17 @@ harness = false
 
 [features]
 test-support = []
+# V1.174 P0 (AR-61): peer-tools client stack — WS `Transport` (T1),
+# accept loop + session manager (T2), manifest ingestion (T3), outbound
+# authz (T4), honesty lockstep tests (T5). Everything behind it compiles
+# away without the feature; the default daemon graph stays libp2p-free and
+# tungstenite-free.
+connect-client = [
+    "dep:spoke-connect",
+    "dep:tokio-tungstenite",
+    "dep:spoke-schemas",
+    "dep:getrandom",
+]
 # V1.153 P2 (DF-73): embedded Web UI (rust-embed SPA bytes) — default ON so
 # the creator-facing daemon is unchanged; OFF (`--no-default-features`)
 # compiles the SPA serving stack out of the `nexus-runtime` artifact.

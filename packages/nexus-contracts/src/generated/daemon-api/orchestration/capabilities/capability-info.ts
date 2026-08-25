@@ -12,7 +12,7 @@ export interface CapabilityInfo {
   input_schema: string;
   output_schema: string;
   /**
-   * Provenance of the capability (AR-40): "builtin" ships with the engine, "user" is a locally-installed developer capability.
+   * Provenance of the capability (AR-40/AR-68): "builtin" ships with the engine, "user" is a locally-installed developer capability, "peer" is an admitted dialer tool.
    */
-  origin?: "builtin" | "user";
+  origin?: "builtin" | "user" | "peer";
 }

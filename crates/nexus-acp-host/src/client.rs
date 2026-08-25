@@ -213,7 +213,13 @@ fn nexus_mcp_server_to_sdk(server: NexusMcpServer) -> McpServer {
     match server {
         NexusMcpServer::Http(h) => McpServer::Http(McpServerHttp::new(h.name, h.url)),
         NexusMcpServer::Sse(s) => McpServer::Sse(McpServerSse::new(s.name, s.url)),
-        NexusMcpServer::Stdio(s) => McpServer::Stdio(McpServerStdio::new(s.name, s.command)),
+        NexusMcpServer::Stdio(s) => {
+            // W-C (QC2 W-1): carry `args` through the mapping so a hand-built
+            // `NexusMcpServer::Stdio { command: nexus42, args: [mcp, serve] }`
+            // spawns the correct subcommand. Mirrors the T1 helper
+            // `nexus_mcp_stdio_server()`'s safe shape.
+            McpServer::Stdio(McpServerStdio::new(s.name, s.command).args(s.args))
+        }
     }
 }
 
@@ -1824,6 +1830,7 @@ mod tests {
             NexusMcpServer::Stdio(nexus_contracts::local::acp::NexusMcpServerStdio {
                 name: "local-server".to_string(),
                 command: std::path::PathBuf::from("/usr/bin/mcp-server"),
+                args: vec!["serve".to_string()],
             }),
         ]);
 
@@ -1849,11 +1856,12 @@ mod tests {
             _ => panic!("Expected Sse variant"),
         }
 
-        // Verify Stdio server
+        // Verify Stdio server (args carried through — W-C)
         match &sdk_req.mcp_servers[2] {
             McpServer::Stdio(s) => {
                 assert_eq!(s.name, "local-server");
                 assert_eq!(s.command, std::path::PathBuf::from("/usr/bin/mcp-server"));
+                assert_eq!(s.args, vec!["serve".to_string()]);
             }
             _ => panic!("Expected Stdio variant"),
         }

@@ -1466,7 +1466,8 @@ async fn fetch_open_findings(client: &DaemonClient, work_id: &str) -> FindingsRe
         client.base_url(),
         crate::api::daemon_client::DEFAULT_CONNECT_TIMEOUT,
         FINDINGS_FETCH_TIMEOUT,
-    );
+    )
+    .expect("failed to build findings daemon client");
     let path =
         format!("/v1/daemon/works/{work_id}/findings?status=open&limit={FINDINGS_FETCH_LIMIT}");
     // R-V146P0-QC3-S2: observe the silent degradation path — a failed/timeout
@@ -1503,7 +1504,8 @@ async fn fetch_stale_findings(client: &DaemonClient) -> Option<serde_json::Value
         client.base_url(),
         crate::api::daemon_client::DEFAULT_CONNECT_TIMEOUT,
         STALE_FETCH_TIMEOUT,
-    );
+    )
+    .expect("M-2: failed to build stale-findings daemon client");
     stale_client
         .get::<serde_json::Value>("/v1/daemon/findings/stale")
         .await

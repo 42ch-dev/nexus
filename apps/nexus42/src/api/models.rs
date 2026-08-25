@@ -329,6 +329,19 @@ pub struct DeleteKbEntryResponse {
     pub entry_id: String,
     pub deleted: bool,
 }
+/// Raw spine tool-execution wire outcome (V1.174 P0 T5, AR-70 #4).
+///
+/// The MCP bridge needs the structured daemon error body
+/// (`{ success: false, error: { code, message, details } }`) instead of the
+/// CLI's folded `CliError::Api`, so it can tell "unroutable" from
+/// "executed-but-failed" and preserve the peer wire code.
+#[derive(Debug, Clone)]
+pub struct SpineToolExecution {
+    /// HTTP status of the spine response.
+    pub status: u16,
+    /// Parsed response body (success or error shape).
+    pub body: serde_json::Value,
+}
 
 #[cfg(test)]
 mod tests {

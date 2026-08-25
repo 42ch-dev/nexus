@@ -1,7 +1,7 @@
 ---
 module: schemas + crates/nexus-contracts + packages/nexus-contracts + crates/nexus-daemon-runtime
 date: 2026-07-18
-last_updated: 2026-08-22
+last_updated: 2026-08-25
 problem_type: convention
 category: conventions
 severity: medium
@@ -133,6 +133,23 @@ DTO** (`#[serde(rename_all = "camelCase")]` — `inputSchema` / `outputSchema`
 / `origin`). Schema + codegen produce snake_case TS. Page field access and
 web mocks must match the handler's serialized shape, not the generated
 names, unless the page consumes the generated package.
+
+### Sanctioned-diff instances (V1.174 peer-tools)
+
+V1.174 extended a frozen wire contract and added one route under the
+sanctioned-diff posture: `capability-info.schema.json` `origin` enum gains
+the additive value `"peer"` (`["builtin","user","peer"]`), **plus** one new
+daemon route `GET /v1/daemon/tools` (its own wire contract — the spine
+catalog face, rows `{ id, description, input_schema, output_schema?,
+origin }`). Both are codegen-regen'd and the plan declares
+`wire_contracts_changed: true` scoped to exactly these two items —
+`tools/call` deliberately reuses the existing
+`POST /v1/daemon/agent-host/internal/tool-executions` route (no new dispatch
+route). The orchestration `CapabilityOrigin` domain enum stays
+`Builtin|User` and never crosses into `nexus-contracts`; the handler maps
+(dependency direction preserved). Dependency-graph claims for the same
+iteration follow a separate gate — see
+`conventions/graph-pin-honesty-discipline.md`.
 
 ## Why This Matters
 
