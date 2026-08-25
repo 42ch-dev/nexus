@@ -766,10 +766,15 @@ impl DaemonClient {
     pub async fn list_pending_reviews(
         &self,
         creator_id: &str,
+        cursor: Option<&str>,
     ) -> Result<ListPendingReviewsResponse> {
         let path = "/v1/daemon/memory/pending-review";
 
-        let url = format!("{}{}?creator_id={}", self.base_url, path, creator_id);
+        let mut url = format!("{}{}?creator_id={}", self.base_url, path, creator_id);
+        if let Some(cursor) = cursor {
+            url.push_str("&cursor=");
+            url.push_str(cursor);
+        }
         let resp = match self.send_authenticated(self.http.get(&url), path).await {
             Ok(resp) => resp,
             Err(e) => {

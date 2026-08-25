@@ -1,11 +1,5 @@
-//! Hermetic CLI integration tests — `creator memory pending count` + `review`
-//! drain + `--json` on daemon-backed memory verbs (V1.175 P1 Task 4, group 7):
-//! end-to-end against a live daemon fixture with hermetic `HOME` (AR-83 #6 /
-//! AR-86).
-//!
-//! Each test seeds pending-review rows directly into the fixture pool, then
-//! drives the REAL `nexus42` binary. The review drain loop is exercised with
-//! a small queue (single call, `has_more = false`); the count leaf reads the
+//! seeded queue depth. `pending-show` walks list pagination (PR #230 Greptile
+//! P1) so an ID past the first 50-row page is still found.
 //! seeded queue depth.
 
 mod common;
@@ -70,6 +64,31 @@ async fn seed_pending(d: &LiveDaemon, n: usize) {
                  informational content that classifies as FragmentOnly for research tasks."
             ),
             created_at: chrono::Utc::now().to_rfc3339(),
+        };
+        create_pending_review(&d.pool, &record)
+            .await
+            .expect("seed pending review");
+    }
+}
+
+/// Seed `n` pending-review rows with strictly-decreasing `created_at` so the
+/// daemon's `created_at DESC` page order is deterministic (row `0` newest).
+async fn seed_pending_desc(d: &LiveDaemon, n: usize) {
+    let base = chrono::Utc::now();
+    for i in 0..n {
+        // `i` is bounded by the test's seed count (60), far below `i64::MAX`.
+        let minutes_back = i64::try_from(i).expect("seed count fits in i64");
+        let record = PendingReviewRecord {
+            pending_id: format!("pending_test_{i}"),
+            session_id: format!("sess_test_{i}"),
+            creator_id: MEMORY_CREATOR.to_string(),
+            world_id: Some("wld_test_world".to_string()),
+            task_kind: "research".to_string(),
+            raw_digest: format!(
+                "Research digest for pending review {i}: a sufficiently long body of \
+                 informational content that counts as FragmentOnly for research tasks."
+            ),
+            created_at: (base - chrono::Duration::minutes(minutes_back)).to_rfc3339(),
         };
         create_pending_review(&d.pool, &record)
             .await
@@ -201,4 +220,54 @@ async fn fragments_json_emits_wrapper_dto() {
     assert_eq!(fragments.len(), 1);
     assert_eq!(fragments[0]["fragment_id"], "frag_test_1");
     assert_eq!(fragments[0]["summary"], "A test fragment summary");
+}
+
+// ── pending-show pagination walk (PR #230 Greptile P1) ────────────────────
+
+/// `pending-show` must find an ID past the first page (50-row default list
+/// limit): the leaf walks `pagination.next_cursor` until the ID is found or
+/// the pages are exhausted instead of reporting not-found from page 1.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pending_show_finds_id_beyond_first_page() {
+    let d = LiveDaemon::start().await;
+    seed_memory_creator(&d).await;
+    // Row `pending_test_0` is newest → it lands on page 1; row 55 lands on
+    // page 2 (newest-first DESC order, 50 rows/page).
+    seed_pending_desc(&d, 60).await;
+
+    let out = d
+        .cli(&["creator", "memory", "pending-show", "pending_test_55"])
+        .await;
+    assert!(
+        out.status.success(),
+        "pending-show failed: {}",
+        stderr(&out)
+    );
+    let text = stdout(&out);
+    assert!(text.contains("pending_id: pending_test_55"), "{text}");
+    assert!(text.contains("sess_test_55"), "{text}");
+}
+
+/// The pagination walk must terminate with the not-found error when the ID
+/// does not exist anywhere (bounded loop — no infinite page following).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pending_show_missing_id_past_first_page_fails_closed() {
+    let d = LiveDaemon::start().await;
+    seed_memory_creator(&d).await;
+    seed_pending_desc(&d, 60).await;
+
+    let out = d
+        .cli(&[
+            "creator",
+            "memory",
+            "pending-show",
+            "pending_does_not_exist",
+        ])
+        .await;
+    assert!(!out.status.success(), "missing pending-show must fail");
+    let err = stderr(&out);
+    assert!(
+        err.contains("not found"),
+        "stderr should surface not-found: {err}"
+    );
 }

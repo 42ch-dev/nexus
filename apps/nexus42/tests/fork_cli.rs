@@ -203,15 +203,16 @@ async fn fork_create_foreign_world_rejected_403() {
     let (_owner_world, _, owner_fork_point) = seed_world_with_fork_point(&d).await;
 
     // A foreign World owned by another creator (ownership-gate fixture).
-    // SAFETY: test-only seed against the known creators/narrative_worlds schema.
-    sqlx::query(
+    // Compile-time SQL — validated against the `.sqlx` offline metadata
+    // (nexus-daemon-runtime AGENTS.md mandatory macros).
+    sqlx::query!(
         "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
          VALUES ('other_creator', 'Other', 'active', datetime('now'), '{}')",
     )
     .execute(&d.pool)
     .await
     .expect("seed other creator");
-    sqlx::query(
+    sqlx::query!(
         "INSERT OR IGNORE INTO narrative_worlds \
             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
              time_policy, metadata_json, created_at) \

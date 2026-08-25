@@ -386,6 +386,36 @@ fn review_json(outcome: DrainOutcome) -> serde_json::Value {
     })
 }
 
+/// Project the drain outcome onto the human-output lines.
+///
+/// The empty-queue message is only printed when the queue is genuinely empty
+/// (`processed == 0 && !has_more`); a zero-progress stop with `has_more`
+/// must still surface the stuck-queue note + retry guidance (Bugbot Medium —
+/// the prior `promoted + fragmented + dropped == 0` gate hid that signal).
+fn review_human_lines(outcome: &DrainOutcome) -> Vec<String> {
+    if outcome.processed == 0 && !outcome.has_more {
+        return vec!["No pending memories to review.".to_string()];
+    }
+    let mut lines = vec![format!(
+        "Review completed: promoted={}, fragmented={}, dropped={}",
+        outcome.promoted, outcome.fragmented, outcome.dropped
+    )];
+    if outcome.stopped_zero_progress {
+        lines.push(
+            "Note: a review call made zero progress but the daemon still reported \
+             `has_more`; the queue may contain an unprocessable head row. Re-run \
+             `creator memory review` to retry."
+                .to_string(),
+        );
+    } else if outcome.has_more {
+        lines.push(format!(
+            "Note: the queue was not fully drained within {REVIEW_DRAIN_MAX_CALLS} calls; \
+             re-run `creator memory review` to continue."
+        ));
+    }
+    lines
+}
+
 /// `creator memory review [--json]` — drain the pending-review queue.
 ///
 /// See [`drain_review_queue`] for the drain contract.
@@ -396,32 +426,8 @@ async fn review(config: &CliConfig, creator_id: &str, json: bool) -> Result<()> 
         println!("{}", serde_json::to_string_pretty(&review_json(outcome))?);
         return Ok(());
     }
-    let DrainOutcome {
-        promoted,
-        fragmented,
-        dropped,
-        has_more,
-        stopped_zero_progress,
-        ..
-    } = outcome;
-    if promoted + fragmented + dropped == 0 {
-        println!("No pending memories to review.");
-    } else {
-        println!(
-            "Review completed: promoted={promoted}, fragmented={fragmented}, dropped={dropped}"
-        );
-        if stopped_zero_progress {
-            println!(
-                "Note: a review call made zero progress but the daemon still reported \
-                 `has_more`; the queue may contain an unprocessable head row. Re-run \
-                 `creator memory review` to retry."
-            );
-        } else if has_more {
-            println!(
-                "Note: the queue was not fully drained within {REVIEW_DRAIN_MAX_CALLS} calls; \
-                 re-run `creator memory review` to continue."
-            );
-        }
+    for line in review_human_lines(&outcome) {
+        println!("{line}");
     }
     Ok(())
 }
@@ -456,7 +462,7 @@ async fn fragments(config: &CliConfig, creator_id: &str, json: bool) -> Result<(
 
 async fn pending_list(config: &CliConfig, creator_id: &str, json: bool) -> Result<()> {
     let client = DaemonClient::from_config(config);
-    let result = client.list_pending_reviews(creator_id).await?;
+    let result = client.list_pending_reviews(creator_id, None).await?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&result)?);
@@ -520,17 +526,33 @@ async fn pending_show(
     json: bool,
 ) -> Result<()> {
     let client = DaemonClient::from_config(config);
-    let result = client.list_pending_reviews(creator_id).await?;
-
-    let entry = result
-        .items
-        .into_iter()
-        .find(|r| r.pending_id == pending_id)
-        .ok_or_else(|| {
-            crate::errors::CliError::Other(format!(
-                "Pending review '{pending_id}' not found for creator '{creator_id}'."
-            ))
-        })?;
+    // The list endpoint is cursor-paginated at 50 rows/page; a creator with
+    // more pending reviews can bury the requested ID past page 1. Walk
+    // `pagination.next_cursor` until the ID is found or the pages are
+    // exhausted (bounded loop — same cap convention as the review drain).
+    let mut cursor: Option<String> = None;
+    let entry = loop {
+        let result = client
+            .list_pending_reviews(creator_id, cursor.as_deref())
+            .await?;
+        if let Some(entry) = result
+            .items
+            .into_iter()
+            .find(|r| r.pending_id == pending_id)
+        {
+            break entry;
+        }
+        match result.pagination.next_cursor {
+            Some(next) if cursor.as_deref() != Some(next.as_str()) => cursor = Some(next),
+            // No next page, or a cursor that no longer advances — the ID is
+            // not on any page.
+            _ => {
+                return Err(crate::errors::CliError::Other(format!(
+                    "Pending review '{pending_id}' not found for creator '{creator_id}'."
+                )));
+            }
+        }
+    };
 
     if json {
         println!("{}", serde_json::to_string_pretty(&entry)?);
@@ -799,5 +821,49 @@ mod tests {
         assert_eq!(cap_json["stopped_zero_progress"], false);
         assert_eq!(cap_json["cap_exhausted"], true);
         assert_ne!(zero_json, cap_json);
+    }
+
+    fn drain_outcome(
+        promoted: i64,
+        processed: i64,
+        has_more: bool,
+        stopped_zero_progress: bool,
+    ) -> DrainOutcome {
+        DrainOutcome {
+            promoted,
+            fragmented: 0,
+            dropped: 0,
+            processed,
+            has_more,
+            stopped_zero_progress,
+            cap_exhausted: has_more && !stopped_zero_progress,
+        }
+    }
+
+    #[test]
+    fn review_human_lines_empty_message_only_when_queue_genuinely_empty() {
+        // Bugbot Medium: `promoted + fragmented + dropped == 0` is not the
+        // empty-queue signal — a zero-progress stop must still surface the
+        // stuck-queue note + retry guidance instead of "No pending memories".
+        let lines = review_human_lines(&drain_outcome(0, 0, false, false));
+        assert_eq!(lines, ["No pending memories to review."]);
+
+        let lines = review_human_lines(&drain_outcome(0, 0, true, true));
+        assert_eq!(
+            lines.len(),
+            2,
+            "stuck-queue note must not be hidden: {lines:?}"
+        );
+        assert!(!lines[0].contains("No pending memories"), "{lines:?}");
+        assert!(
+            lines[1].contains("zero progress") && lines[1].contains("retry"),
+            "stuck-queue note missing: {lines:?}"
+        );
+
+        // Progress with `has_more` (cap-exhaustion stop) keeps the drain
+        // summary + continue note.
+        let lines = review_human_lines(&drain_outcome(3, 50, true, false));
+        assert!(lines[0].contains("promoted=3"), "{lines:?}");
+        assert!(lines[1].contains("not fully drained"), "{lines:?}");
     }
 }

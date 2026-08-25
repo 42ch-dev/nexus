@@ -262,18 +262,25 @@ async fn kb_graph_notes_relationship_cap_when_hit() {
     let entity_id = seed_entity(&d).await;
     let now = chrono::Utc::now().to_rfc3339();
     for i in 0..1000 {
-        sqlx::query(
+        // Compile-time SQL — validated against the `.sqlx` offline metadata
+        // (nexus-daemon-runtime AGENTS.md mandatory macros).
+        let rel_id = format!("rel_seed_{i}");
+        let rel_src = entity_id.clone();
+        let rel_tgt = entity_id.clone();
+        let rel_created = now.clone();
+        let rel_updated = now.clone();
+        sqlx::query!(
             "INSERT INTO kb_relationships \
              (relationship_id, world_id, source_entity_id, target_entity_id, \
               relation_type, symmetric, created_at, updated_at, revision, \
               needs_review, source) \
              VALUES (?, 'wld_test_world', ?, ?, 'mentions', 0, ?, ?, 0, 0, 'manual')",
+            rel_id,
+            rel_src,
+            rel_tgt,
+            rel_created,
+            rel_updated,
         )
-        .bind(format!("rel_seed_{i}"))
-        .bind(&entity_id)
-        .bind(&entity_id)
-        .bind(&now)
-        .bind(&now)
         .execute(&d.pool)
         .await
         .expect("seed relationship");
