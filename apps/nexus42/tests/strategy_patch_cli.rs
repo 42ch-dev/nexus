@@ -7,7 +7,7 @@
 //! (the canonical layout the strategy patch handlers read/write), then
 //! drives the REAL `nexus42` binary. Failure paths: one conflict path per
 //! leaf (stale `--base-revision` → 409 `strategy_conflict` rendering
-//! current revision + conflicting path + recovery hint), plus 404
+//! current revision + node + conflicting path + recovery hint), plus 404
 //! `not_found` and 400 `bad_request` (the daemon's public code for other
 //! 400s) surfaces.
 
@@ -144,9 +144,10 @@ async fn patch_state_stale_revision_surfaces_conflict() {
     let err = stderr(&out);
     assert!(err.contains("strategy_conflict"), "stderr: {err}");
     assert!(err.contains("409"), "stderr should carry HTTP 409: {err}");
-    // All three conflict fields render: current revision, conflicting path,
-    // recovery hint.
+    // All four conflict fields render: current revision, conflicting node,
+    // conflicting path, recovery hint.
     assert!(err.contains("current_revision"), "stderr: {err}");
+    assert!(err.contains("node_id"), "stderr: {err}");
     assert!(err.contains("conflicting_path"), "stderr: {err}");
     assert!(err.contains("recovery_hint"), "stderr: {err}");
     assert!(err.contains("states"), "stderr should name the path: {err}");
@@ -345,6 +346,7 @@ async fn patch_transition_stale_revision_surfaces_conflict() {
     let err = stderr(&out);
     assert!(err.contains("strategy_conflict"), "stderr: {err}");
     assert!(err.contains("current_revision"), "stderr: {err}");
+    assert!(err.contains("node_id"), "stderr: {err}");
     assert!(err.contains("conflicting_path"), "stderr: {err}");
     assert!(err.contains("recovery_hint"), "stderr: {err}");
     assert!(
@@ -454,6 +456,7 @@ async fn patch_prompt_stale_revision_surfaces_conflict() {
     let err = stderr(&out);
     assert!(err.contains("strategy_conflict"), "stderr: {err}");
     assert!(err.contains("current_revision"), "stderr: {err}");
+    assert!(err.contains("node_id"), "stderr: {err}");
     assert!(err.contains("conflicting_path"), "stderr: {err}");
     assert!(err.contains("recovery_hint"), "stderr: {err}");
     assert!(

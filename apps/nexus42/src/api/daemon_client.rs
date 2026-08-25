@@ -597,8 +597,9 @@ impl DaemonClient {
                     }
                     // CAS/OCC conflict family (strategy/outline 409s): render
                     // the structured conflict fields so the CLI error names
-                    // the current revision, the conflicting path, and the
-                    // recovery hint (AR-83 #5 / PL-5 — never swallowed).
+                    // the current revision, the conflicting node, the
+                    // conflicting path, and the recovery hint (AR-83 #5 /
+                    // PL-5 — never swallowed).
                     // NOTE: world-kb 409s (`WorldKbConflict`) serialize
                     // `current_version` + `entity_id` instead — this renderer
                     // does NOT cover them.
@@ -607,6 +608,9 @@ impl DaemonClient {
                         .and_then(serde_json::Value::as_u64)
                     {
                         write!(message, " (current_revision: {rev})").expect("infallible");
+                    }
+                    if let Some(node) = details.get("node_id").and_then(|v| v.as_str()) {
+                        write!(message, " (node_id: {node})").expect("infallible");
                     }
                     if let Some(path) = details.get("conflicting_path").and_then(|v| v.as_str()) {
                         write!(message, " (conflicting_path: {path})").expect("infallible");

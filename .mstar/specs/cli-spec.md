@@ -676,16 +676,16 @@ Rules:
 - **CAS-guarded writes (PL-5).** Every leaf takes `--base-revision` — the
   revision observed on the last canonical read (e.g. `preset show`). A stale
   revision returns **409 `strategy_conflict`**; the CLI error renders all
-  three structured fields — `current_revision`, `conflicting_path`, and
-  `recovery_hint` — and `--help` documents the retry guidance: re-read the
-  Strategy and reapply with the new revision. Flock contention between
-  concurrent writers rides the same 409 family.
+  four structured fields — `current_revision`, `node_id`,
+  `conflicting_path`, and `recovery_hint` — and `--help` documents the
+  retry guidance: re-read the Strategy and reapply with the new revision.
+  Flock contention between concurrent writers rides the same 409 family.
 - **Named error surface.** The daemon's public `error_code()` allowlist
   passthroughs only a closed set of strategy codes; the CLI surfaces exactly
   those wire codes via the standard `[code]` envelope with non-zero exit —
   never a generic "request failed":
   - 409 `strategy_conflict` (stale `--base-revision`; renders
-    `current_revision` + `conflicting_path` + `recovery_hint`),
+    `current_revision` + `node_id` + `conflicting_path` + `recovery_hint`),
   - 404 `not_found` (unknown strategy / state),
   - 422 `strategy_validation_failed`,
   - 422 `strategy_self_loop` / `strategy_transition_duplicate` (passthrough
@@ -696,6 +696,9 @@ Rules:
     to the coarse public `bad_request`).
 - **Write bodies are typed long flags** (AR-83 #4); prompt bodies come from
   `--file` or stdin (`-`), matching the `creator soul` stdin convention.
+- **User presets only.** The daemon rejects embedded/system presets
+  (read-only); the CLI surfaces the resulting 400 as `bad_request`.
+
 ### 6.2G.5 V1.175 P1 amendment — outline/chapter/timeline patch leaves (RN-1 §5 group 2)
 
 Thin daemon-HTTP leaves over the **existing** V1.72 canvas outline+timeline
@@ -728,7 +731,7 @@ Rules:
   surfaces the outline family verbatim via the standard `[code]` envelope
   with non-zero exit — never a generic "request failed":
   - 409 `outline_conflict` (stale `--base-revision`; renders
-    `current_revision` + `conflicting_path` + `recovery_hint`),
+    `current_revision` + `node_id` + `conflicting_path` + `recovery_hint`),
   - 404 `not_found` (unknown work / chapter / event),
   - 422 `outline_validation_failed` (domain rules — slug format/uniqueness,
     volume existence, foreshadow temporal order, published-chapter guard;

@@ -16,10 +16,11 @@
 //!
 //! All writes are CAS-guarded: every request carries `--base-revision` (the
 //! `outline_revision` observed on the last canonical read, e.g. `outline
-//! show`). A stale revision returns 409 `outline_conflict` with the current
-//! revision, the conflicting node, the conflicting path, and a recovery hint
-//! — rendered by `DaemonClient::parse_error_response` (PL-5). `--help`
-//! documents the re-read retry guidance.
+//! show`). A stale revision returns 409 `outline_conflict`; the CLI error
+//! renders all four structured fields — `current_revision`, `node_id`,
+//! `conflicting_path`, and `recovery_hint` — via
+//! `DaemonClient::parse_error_response` (PL-5). `--help` documents the
+//! re-read retry guidance.
 //!
 //! Conventions: human-readable default output, `--json` emits the daemon
 //! DTO verbatim (generated contract types only — AR-83 #2/#3); write bodies
@@ -561,20 +562,16 @@ async fn chapter_patch(
     json: bool,
 ) -> Result<()> {
     let chapter = parse_positive(n, "--n")?;
-    let content = match (content, content_file) {
-        (Some(text), None) => Some(text.to_string()),
-        (None, Some(path)) => {
-            let text = std::fs::read_to_string(path).map_err(|e| {
-                CliError::Other(format!("cannot read --content-file '{path}': {e}"))
-            })?;
-            Some(text)
-        }
-        (None, None) => None,
-        (Some(_), Some(_)) => {
-            return Err(CliError::Other(
-                "--content and --content-file are mutually exclusive".to_string(),
-            ));
-        }
+    // `--content` / `--content-file` are `conflicts_with` each other at clap
+    // parse time, so at most one is set here.
+    let content = if let Some(text) = content {
+        Some(text.to_string())
+    } else if let Some(path) = content_file {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| CliError::Other(format!("cannot read --content-file '{path}': {e}")))?;
+        Some(text)
+    } else {
+        None
     };
     let set = NexusOutlinePatchChapterSet {
         title: title.map(str::to_string),

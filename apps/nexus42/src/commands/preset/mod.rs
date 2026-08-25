@@ -92,8 +92,8 @@ pub enum PresetCommand {
     /// CAS-guarded writes over the existing strategy patch routes
     /// (V1.175 P1 Task 2, group 1). Every leaf takes `--base-revision`;
     /// a stale revision returns 409 `strategy_conflict` (current revision,
-    /// conflicting path, recovery hint). Re-read the Strategy and reapply
-    /// with the new revision.
+    /// node, conflicting path, recovery hint). Re-read the Strategy and
+    /// reapply with the new revision.
     ///
     /// Retry guidance: on `strategy_conflict`, re-read the Strategy
     /// (e.g. `preset show`) and reapply with the new revision.

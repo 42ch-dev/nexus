@@ -7,9 +7,9 @@
 //! path is deterministic) + a chapter row, then drives the REAL `nexus42`
 //! binary. Failure paths: one conflict path per leaf (stale
 //! `--base-revision` → 409 `outline_conflict` rendering current revision +
-//! conflicting path + recovery hint), the invalid-field path (bad slug →
-//! 422 `outline_validation_failed`), and 404 `not_found` for an unknown
-//! work.
+//! node + conflicting path + recovery hint), the invalid-field path (bad
+//! slug → 422 `outline_validation_failed`), and 404 `not_found` for an
+//! unknown work.
 
 mod common;
 
@@ -191,6 +191,41 @@ async fn outline_patch_move_chapter_bumps_revision() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn outline_patch_json_emits_dto_verbatim() {
+    let d = LiveDaemon::start_with_workspace().await;
+    let work_id = seed_work(&d).await;
+    write_outline_file(&d);
+
+    let out = d
+        .cli(&[
+            "creator",
+            "works",
+            "outline",
+            "patch",
+            &work_id,
+            "--base-revision",
+            "0",
+            "--op",
+            "move_chapter",
+            "--chapter",
+            "1",
+            "--volume",
+            "2",
+            "--json",
+        ])
+        .await;
+    assert!(
+        out.status.success(),
+        "outline patch --json failed: {}",
+        stderr(&out)
+    );
+    let json: Value = serde_json::from_str(&stdout(&out)).expect("json output");
+    assert_eq!(json["new_revision"], 1);
+    assert!(json["validation_summary"]["errors"].is_array());
+    assert!(json["validation_summary"]["warnings"].is_array());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn outline_patch_stale_revision_surfaces_conflict() {
     let d = LiveDaemon::start_with_workspace().await;
     let work_id = seed_work(&d).await;
@@ -218,9 +253,10 @@ async fn outline_patch_stale_revision_surfaces_conflict() {
     let err = stderr(&out);
     assert!(err.contains("outline_conflict"), "stderr: {err}");
     assert!(err.contains("409"), "stderr should carry HTTP 409: {err}");
-    // All three conflict fields render: current revision, conflicting path,
-    // recovery hint.
+    // All four conflict fields render: current revision, conflicting node,
+    // conflicting path, recovery hint.
     assert!(err.contains("current_revision"), "stderr: {err}");
+    assert!(err.contains("node_id"), "stderr: {err}");
     assert!(err.contains("conflicting_path"), "stderr: {err}");
     assert!(err.contains("recovery_hint"), "stderr: {err}");
 }
@@ -361,6 +397,7 @@ async fn chapter_patch_stale_revision_surfaces_conflict() {
     assert!(err.contains("outline_conflict"), "stderr: {err}");
     assert!(err.contains("409"), "stderr should carry HTTP 409: {err}");
     assert!(err.contains("current_revision"), "stderr: {err}");
+    assert!(err.contains("node_id"), "stderr: {err}");
     assert!(err.contains("conflicting_path"), "stderr: {err}");
     assert!(err.contains("recovery_hint"), "stderr: {err}");
 }
@@ -520,6 +557,39 @@ async fn timeline_patch_add_event_bumps_revision() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn timeline_patch_json_emits_dto_verbatim() {
+    let d = LiveDaemon::start_with_workspace().await;
+    let work_id = seed_work(&d).await;
+    write_outline_file(&d);
+
+    let out = d
+        .cli(&[
+            "creator",
+            "works",
+            "timeline",
+            "patch",
+            &work_id,
+            "--base-revision",
+            "0",
+            "--op",
+            "add_event",
+            "--title",
+            "The storm",
+            "--json",
+        ])
+        .await;
+    assert!(
+        out.status.success(),
+        "timeline patch --json failed: {}",
+        stderr(&out)
+    );
+    let json: Value = serde_json::from_str(&stdout(&out)).expect("json output");
+    assert_eq!(json["new_revision"], 1);
+    assert!(json["validation_summary"]["errors"].is_array());
+    assert!(json["validation_summary"]["warnings"].is_array());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn timeline_patch_stale_revision_surfaces_conflict() {
     let d = LiveDaemon::start_with_workspace().await;
     let work_id = seed_work(&d).await;
@@ -546,6 +616,7 @@ async fn timeline_patch_stale_revision_surfaces_conflict() {
     assert!(err.contains("outline_conflict"), "stderr: {err}");
     assert!(err.contains("409"), "stderr should carry HTTP 409: {err}");
     assert!(err.contains("current_revision"), "stderr: {err}");
+    assert!(err.contains("node_id"), "stderr: {err}");
     assert!(err.contains("conflicting_path"), "stderr: {err}");
     assert!(err.contains("recovery_hint"), "stderr: {err}");
 }
@@ -613,6 +684,7 @@ async fn chapter_help_pins_outline_node_route_distinction() {
     // The route-family guard: the leaf names the outline node route and the
     // V1.65 chapter-content PATCH distinction (AR-84).
     assert!(text.contains("chapters/:n/patch"), "{text}");
+    assert!(text.contains("V1.65"), "{text}");
     assert!(text.contains("outline"), "{text}");
     assert!(text.contains("outline_conflict"), "{text}");
     assert!(text.contains("reapply"), "{text}");

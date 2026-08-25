@@ -9,11 +9,11 @@
 //!
 //! All writes are CAS-guarded: every request carries `--base-revision`
 //! (the revision observed on the last canonical read). A stale revision
-//! returns 409 `strategy_conflict` with the current revision, the
-//! conflicting path, and a recovery hint — rendered by
-//! `DaemonClient::parse_error_response` (all three fields, PL-5). Flock
-//! contention between writers rides the same 409 family. `--help`
-//! documents the re-read retry guidance.
+//! returns 409 `strategy_conflict`; the CLI error renders all four
+//! structured fields — `current_revision`, `node_id`, `conflicting_path`,
+//! and `recovery_hint` — via `DaemonClient::parse_error_response`
+//! (PL-5). Flock contention between writers rides the same 409 family.
+//! `--help` documents the re-read retry guidance.
 //!
 //! Conventions: human-readable default output, `--json` emits the daemon
 //! `StrategyPatchResponse` DTO verbatim (generated contract types only —
