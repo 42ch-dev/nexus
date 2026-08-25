@@ -1029,33 +1029,43 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // without peer tools, and nothing is admitted.
     #[cfg(feature = "connect-client")]
     {
-        let raw_home = state
-            .nexus_home()
-            .parent()
-            .ok_or_else(|| anyhow::anyhow!("nexus_home has no parent directory"))?;
-        let peer_shutdown = state.shutdown_notify();
-        // AR-68 #2(iii) reserved namespaces: builtin host-tool ids + user
-        // capability names can never be admitted as peer tools.
-        let mut reserved_tool_ids: Vec<String> = crate::capability_registry::host_tool_registry()
-            .ids()
-            .map(ToOwned::to_owned)
-            .collect();
-        if let Some(reg) = state.capability_registry() {
-            reserved_tool_ids.extend(reg.iter().map(|cap| cap.name().to_owned()));
-        }
-        match crate::connect::start_peer_tools_lane(raw_home, peer_shutdown, &reserved_tool_ids)
-            .await
-        {
-            Ok(handle) => {
-                tracing::info!(addr = %handle.addr, "peer-tools Connect accept loop started");
-                drop(handle.task);
+        // PR #229 F-1 (Bugbot): the peer-tools lane must be warn-and-skip,
+        // never a boot abort. A parent-less `nexus_home` (unreachable in
+        // production — `$HOME/.nexus42` always has a parent) skips the lane
+        // with a warning, mirroring the `user_capabilities_scan_dir`
+        // precedent (S-004 QC wave): the daemon core keeps running without
+        // peer tools, and nothing is admitted.
+        if let Some(raw_home) = state.nexus_home().parent() {
+            let peer_shutdown = state.shutdown_notify();
+            // AR-68 #2(ii) reserved namespaces: builtin host-tool ids + user
+            // capability names can never be admitted as peer tools.
+            let mut reserved_tool_ids: Vec<String> =
+                crate::capability_registry::host_tool_registry()
+                    .ids()
+                    .map(ToOwned::to_owned)
+                    .collect();
+            if let Some(reg) = state.capability_registry() {
+                reserved_tool_ids.extend(reg.iter().map(|cap| cap.name().to_owned()));
             }
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    "peer-tools Connect accept loop failed to start; continuing without peer tools"
-                );
+            match crate::connect::start_peer_tools_lane(raw_home, peer_shutdown, &reserved_tool_ids)
+                .await
+            {
+                Ok(handle) => {
+                    tracing::info!(addr = %handle.addr, "peer-tools Connect accept loop started");
+                    drop(handle.task);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "peer-tools Connect accept loop failed to start; continuing without peer tools"
+                    );
+                }
             }
+        } else {
+            tracing::warn!(
+                home = %state.nexus_home().display(),
+                "peer-tools lane skipped: nexus_home has no parent directory"
+            );
         }
     }
 

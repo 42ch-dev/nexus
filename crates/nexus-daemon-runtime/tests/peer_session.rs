@@ -547,3 +547,73 @@ async fn dial_flood_of_incomplete_handshakes_cannot_exceed_session_cap() {
     );
     server.task.abort();
 }
+
+// ── PR #229 F-3: concurrent accept burst never over-admits ────────────────
+
+#[tokio::test]
+#[serial]
+async fn concurrent_dial_burst_never_exceeds_session_cap() {
+    // Fresh daemon with max_sessions=4 and 7 simultaneous dials (cap+3).
+    // PR #229 F-3 regression: `reserve_in_flight` reads the registered
+    // count under the `sessions` lock and `register` converts the
+    // in-flight reservation into the session inside that SAME lock — one
+    // synchronization domain — so a slot is never counted twice nor
+    // missed (previously a non-atomic snapshot could over-admit past
+    // max). Exactly max_sessions dials must be admitted; the rest are
+    // refused at accept.
+    let mut allowlist = Vec::new();
+    let mut keys = HashMap::new();
+    for i in 0..8 {
+        let pid = peer_id_of(seed_peer(i));
+        allowlist.push(pid.clone());
+        keys.insert(pid, pubkey(seed_peer(i)));
+    }
+    let server = start_server(4, allowlist, keys, &["tools.t2.other"]).await;
+
+    let mut dials = Vec::new();
+    for i in 0..8 {
+        dials.push(tokio::spawn(dial(
+            server.addr,
+            seed_peer(i),
+            "tools.t2.other",
+        )));
+    }
+    let mut adapters = Vec::new();
+    let mut refused = 0usize;
+    for dial_task in dials {
+        match dial_task.await.expect("dial task") {
+            Ok(adapter) => adapters.push(adapter),
+            Err(_) => refused += 1,
+        }
+    }
+    assert!(
+        wait_until(
+            || server.sessions.session_count() == 4,
+            Duration::from_secs(5)
+        )
+        .await,
+        "all admitted dials must complete registration"
+    );
+    assert_eq!(adapters.len(), 4, "exactly max_sessions dials admitted");
+    assert_eq!(refused, 4, "the remaining dials refused at accept");
+    assert_eq!(
+        server.sessions.session_count(),
+        4,
+        "registered sessions must stay at the cap"
+    );
+    assert_eq!(
+        server.sessions.connection_count(),
+        4,
+        "no in-flight residue after settlement (slot counted exactly once)"
+    );
+
+    let admitted: Vec<String> = server.sessions.peer_ids();
+    for a in &adapters {
+        a.close();
+    }
+    server.task.abort();
+    // QC-fix W-B: explicit teardown for every peer admitted to the table.
+    for pid in admitted {
+        peer_tool_table().evict_peer(&pid, None);
+    }
+}

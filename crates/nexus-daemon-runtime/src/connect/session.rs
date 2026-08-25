@@ -110,11 +110,29 @@ impl PeerSessionManager {
     /// slot is released via [`PeerSessionManager::release_in_flight`] when
     /// the connection task finishes without registering (handshake failure
     /// or timeout) and converted to a registered session by `register`.
+    ///
+    /// Ordering invariant (PR #229 F-3): the registered-session count is
+    /// read while HOLDING the `sessions` lock, and `register` performs its
+    /// map insert + in-flight release under that SAME lock. A reserve can
+    /// therefore never observe a session that `register` is mid-flight on
+    /// in a way that double-counts or misses it: either the insert is
+    /// visible (count includes the session) or the in-flight slot is still
+    /// held (count includes the reservation) — never neither.
     #[must_use]
     pub fn reserve_in_flight(&self, max_sessions: usize) -> bool {
         let mut in_flight = self.in_flight.load(Ordering::Relaxed);
         loop {
-            if self.session_count() + in_flight >= max_sessions {
+            // PR #229 F-3: read the registered count under the sessions
+            // lock so the check shares one synchronization domain with
+            // `register`'s insert + in-flight release (previously a
+            // non-atomic snapshot could observe sessions pre-insert and
+            // in_flight post-decrement → over-admit past max).
+            let session_count = self
+                .sessions
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .len();
+            if session_count + in_flight >= max_sessions {
                 return false;
             }
             match self.in_flight.compare_exchange_weak(
@@ -168,9 +186,14 @@ impl PeerSessionManager {
     /// new session is admitted. Returns `true` when a previous session was
     /// replaced.
     ///
-    /// The old responder is closed OUTSIDE the mutex guard (synchronous
-    /// `ConnectResponder::close` spawns the transport teardown) so no lock is
-    /// held across a scheduling point.
+    /// Ordering invariant (PR #229 F-3): the map insert AND the in-flight
+    /// release happen INSIDE the same `sessions` lock scope, and
+    /// `reserve_in_flight` reads the session count under that same lock —
+    /// one synchronization domain. A concurrent reserve can never observe
+    /// the post-insert map with the pre-release in-flight count (or the
+    /// pre-insert map with the post-release count): the slot either exists
+    /// as a registered session or as an in-flight reservation, so a dial
+    /// flood can never over-admit past `max_sessions`.
     pub fn register(
         &self,
         peer_id: &str,
@@ -185,15 +208,23 @@ impl PeerSessionManager {
                 responder,
                 admitted_ids: admitted_ids.to_vec(),
             };
-            sessions.insert(peer_id.to_owned(), record)
+            let replaced = sessions.insert(peer_id.to_owned(), record);
+            // QC-fix W-A + PR #229 F-3: the accept reservation converts
+            // into a registered session here. The in-flight release happens
+            // INSIDE this same lock scope as the map insert, so a
+            // concurrent `reserve_in_flight` (which reads the session count
+            // under the same lock) sees the post-insert map and the
+            // post-release in-flight count together — the slot can never be
+            // counted twice nor missed. A call without a prior reservation
+            // (defensive; e.g. direct unit usage) is a saturating no-op.
+            self.release_in_flight();
+            // Explicitly drop the guard HERE — after the release — so the
+            // insert + in-flight decrement stay in one lock scope (the
+            // F-3 ordering invariant). An implicit drop would let clippy
+            // tighten it to right after the insert and reopen the race.
+            drop(sessions);
+            replaced
         };
-        // QC-fix W-A: the accept reservation converts into a registered
-        // session here. Release the in-flight slot AFTER the map insert —
-        // releasing first would open a transient window where a concurrent
-        // accept sees a freed slot and over-admits past the cap. A call
-        // without a prior reservation (defensive; e.g. direct unit usage)
-        // is a saturating no-op.
-        self.release_in_flight();
         if let Some(old) = replaced_record {
             // Deterministic last-wins: the replaced session is closed (the
             // old responder is torn down outside the lock — `close()` is

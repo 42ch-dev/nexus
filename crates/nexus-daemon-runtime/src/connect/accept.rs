@@ -400,6 +400,23 @@ pub async fn start_peer_tools_lane(
     reserved_tool_ids: &[String],
 ) -> anyhow::Result<PeerToolsLaneHandle> {
     let config = Arc::new(PeerToolsConfig::load(home)?);
+    // PR #229 F-2 (Cursor Security HIGH): the peer lane binds PLAINTEXT
+    // (no WSS — `accept_async_with_config`), so a non-loopback bind must
+    // FAIL CLOSED — mirroring the V1.92 daemon HTTP API posture
+    // (`boot.rs` requires TLS for non-loopback binds). No TLS support is
+    // added to this lane; the operator must keep the default loopback
+    // host (`127.0.0.1`, `DEFAULT_CONNECT_HOST`) or the lane refuses to
+    // start (warn-and-skip at boot — nothing is admitted). This check
+    // runs BEFORE the remote-bind env gate so the lane always fails
+    // closed for non-loopback binds, even when the gate is opened.
+    if !crate::boot::is_loopback_host(&config.host) {
+        anyhow::bail!(
+            "peer-tools lane refuses non-loopback bind {host}: the lane has no TLS support \
+             (plaintext only); set connect daemon.json host back to the loopback default \
+             127.0.0.1",
+            host = config.host,
+        );
+    }
     crate::boot::ensure_remote_bind_allowed(&config.host)?;
     let identity_seed = identity::load_or_create_identity(home)?;
     let device_id = nexus_home_layout::device_id::get_or_create_device_id(home).map_err(|e| {
@@ -489,5 +506,32 @@ mod tests {
         assert!(manifest.capabilities.contains(&"spoke-baseline".to_owned()));
         assert!(manifest.tools.is_empty());
         assert_eq!(manifest.host_id.as_str(), "device-1");
+    }
+
+    /// PR #229 F-2: a non-loopback `daemon.json` host must fail closed —
+    /// the lane has no TLS support (plaintext only), so `start_peer_tools_lane`
+    /// refuses to start with the TLS-required message instead of binding
+    /// cleartext off-loopback (V1.92 HTTP API posture). The check runs before
+    /// the remote-bind env gate, so the refusal is unconditional.
+    #[tokio::test]
+    async fn non_loopback_bind_fails_closed_without_tls() {
+        let home = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
+        std::fs::write(
+            nexus_home_layout::connect_daemon_config_path(home.path()),
+            r#"{"host":"0.0.0.0","port":0}"#,
+        )
+        .expect("write daemon.json");
+        let shutdown = Arc::new(Notify::new());
+        let Err(err) = start_peer_tools_lane(home.path(), shutdown, &[]).await else {
+            panic!("non-loopback bind must fail closed without TLS")
+        };
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("non-loopback bind")
+                && msg.contains("no TLS support")
+                && msg.contains("127.0.0.1"),
+            "error must name the TLS refusal and the loopback default: {msg}"
+        );
     }
 }
