@@ -58,8 +58,9 @@ async fn mount_catalog(mock: &MockServer) {
         "items": [
             {
                 "id": "nexus.workspace.info",
-                "description": "nexus.workspace.info (parameters: work.get.request)",
-                "input_schema": "{\"type\":\"object\"}",
+                "description": "Return workspace details: creator id, slug, path, runtime mode, and initialization state.",
+                "input_schema": "{\"type\":\"object\",\"properties\":{}}",
+                "output_schema": "{\"type\":\"object\",\"properties\":{\"creator_id\":{\"type\":\"string\"},\"workspace_slug\":{\"type\":\"string\"},\"workspace_path\":{\"type\":\"string\"},\"runtime_mode\":{\"type\":\"string\"},\"initialized\":{\"type\":\"boolean\"}},\"required\":[\"creator_id\",\"workspace_slug\",\"workspace_path\",\"runtime_mode\",\"initialized\"]}",
                 "origin": "builtin"
             },
             {

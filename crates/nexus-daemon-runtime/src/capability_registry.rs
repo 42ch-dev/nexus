@@ -1,7 +1,7 @@
 //! Capability Registry — runtime SSOT for `nexus.*` host tool dispatch.
 //!
-//! V1.53 P0: Introduces a unified registry with 7-field row shape
-//! (id → access → admission → handler → ACP wire → failure mode → test vector).
+//! V1.53 P0: Introduces a unified registry with 8-field row shape
+//! (id → access → admission → handler → catalog descriptor → failure mode → test vector).
 //! Migrated from `HostToolExecutor`'s `dispatch_tool()` match table via an
 //! adapter-first approach: introduce → cutover → cleanup.
 //!
@@ -83,18 +83,27 @@ pub enum AdmissionGate {
     AuditLog,
 }
 
-/// ACP wire contract reference for a capability.
+/// Catalog descriptor for a capability (AR-78, DF-89).
 ///
-/// Points to the request, response, and error schema shapes
-/// that the capability exposes to ACP-facing callers.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AcpWire {
-    /// JSON Schema reference (or inline) for the request shape.
-    pub request_schema_ref: &'static str,
-    /// JSON Schema reference (or inline) for the success response shape.
-    pub response_schema_ref: &'static str,
-    /// JSON Schema reference (or inline) for the error response shape.
-    pub error_schema_ref: &'static str,
+/// Carries the authored tool summary plus real draft-2020-12 JSON-Schema
+/// text for the input (and, where pinned, output) shape. `&'static str`
+/// literals fit the `LazyLock` static-row design exactly — no parse at
+/// registry build, no new dependency. The schema text is the single source
+/// of truth: it flows registry → catalog route → MCP child parse.
+#[derive(Debug, Clone)]
+pub struct CatalogDescriptor {
+    /// Authored tool summary for LLM/script consumers (replaces the
+    /// `TestVector.description` reuse that ended with AR-78 #4).
+    pub description: &'static str,
+    /// Real draft-2020-12 JSON-Schema text (root `"type":"object"`), or
+    /// `None` when the input schema is not yet authored — the catalog then
+    /// emits the named placeholder (`NAMED_PLACEHOLDER_INPUT`) and the id
+    /// MUST appear in `SCHEMA_REMAINDER_LEDGER` (lockstep-pinned).
+    pub input_schema: Option<&'static str>,
+    /// Real draft-2020-12 JSON-Schema text for the success shape when the
+    /// handler's output is a stable object worth pinning; `None` otherwise
+    /// (omission is honest and rule-based — no ledger entry for outputs).
+    pub output_schema: Option<&'static str>,
 }
 
 /// Stable failure mode contract for a capability.
@@ -133,8 +142,8 @@ pub struct TestVector {
 
 /// A single row in the capability registry.
 ///
-/// Bundles all 7 fields: id, access, admission gates,
-/// handler binding, ACP wire contract, failure mode contract,
+/// Bundles all 8 fields: id, access, admission gates,
+/// handler binding, catalog descriptor, failure mode contract,
 /// and test vector.
 #[derive(Clone)]
 pub struct CapabilityRow {
@@ -146,13 +155,48 @@ pub struct CapabilityRow {
     pub admission: &'static [AdmissionGate],
     /// Handler function binding.
     pub handler: RegistryHandlerFn,
-    /// ACP wire schema references.
-    pub acp_wire: AcpWire,
+    /// Catalog descriptor (authored description + real draft-2020-12
+    /// schemas; AR-78 — replaces the removed `AcpWire`).
+    pub catalog: CatalogDescriptor,
     /// Expected failure mode when denied.
     pub failure_mode: FailureMode,
     /// Test vector descriptor.
     pub handler_test_vector: TestVector,
 }
+
+// ─── Schema remainder ledger (AR-78 #6) ────────────────────────────────────
+
+/// Named input-schema placeholder emitted by the catalog for a builtin row
+/// whose input schema is not yet authored (`input_schema: None`).
+///
+/// Draft-2020-12-valid (`$comment` is ignorable by validators) and
+/// machine-distinguishable from a real schema — never the silent
+/// `{"type":"object"}` placeholder of V1.174.
+pub const NAMED_PLACEHOLDER_INPUT: &str =
+    r#"{"type":"object","$comment":"nexus42:schema-pending"}"#;
+
+/// Registry-source ledger of builtin ids whose input schema is not yet
+/// authored. Lockstep pin: `row.catalog.input_schema.is_none() ⇔ id ∈ LEDGER`
+/// (unit-tested both directions). Task 1 leaves the write-tool remainder
+/// ledgered; Task 2 converts the rest (target: empty ledger).
+///
+/// Consumed only by the `placeholder_ledger_lockstep` test pin (the catalog
+/// route reads `NAMED_PLACEHOLDER_INPUT`, never this ledger), so non-test
+/// builds see it as dead code.
+#[allow(dead_code)]
+pub(crate) const SCHEMA_REMAINDER_LEDGER: &[&str] = &[
+    "nexus.work.patch",
+    "nexus.kb_snapshot.write",
+    "nexus.manuscript.chapter.update",
+    "nexus.world.configure",
+    "nexus.work.schedule.set",
+    "nexus.finding.resolve",
+    "nexus.pool.entry.manage",
+    "nexus.registry.refresh",
+    "nexus.reference.refresh",
+    "nexus.manuscript.write",
+    "nexus.manuscript.phase.set",
+];
 
 // ─── Registry ──────────────────────────────────────────────────────────────
 
@@ -597,7 +641,8 @@ const ADMISSION_POOL_WRITE: &[AdmissionGate] = &[
     AdmissionGate::AuditLog,
 ];
 
-/// Create a registry pre-populated with all 19 host tools (V1.34 + V1.53 P1 + V1.54 P0).
+/// Create a registry pre-populated with all 30 host tools (28 `nexus.*` + 2
+/// `fs/*`; V1.34 + V1.53 P1 + V1.54 P0 + V1.56 P1 + V1.58 P3 + V1.59 P0).
 ///
 /// V1.54 P0 T5: Converted to `LazyLock` singleton to eliminate per-dispatch
 /// allocation. All admission gates are `&'static [AdmissionGate]` references.
@@ -622,10 +667,12 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Read,
         admission: ADMISSION_READ_CONTEXT,
         handler: hte::registry_context_whoami,
-        acp_wire: AcpWire {
-            request_schema_ref: "{}",
-            response_schema_ref: r#"{"creator_id":"string","workspace_slug":"string"}"#,
-            error_schema_ref: r#"{"code":"forbidden|policy_blocked|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Return the active creator id and workspace slug for the current session.",
+            input_schema: Some(r#"{"type":"object","properties":{}}"#),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"creator_id":{"type":"string"},"workspace_slug":{"type":"string"}},"required":["creator_id","workspace_slug"]}"#,
+            ),
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -640,10 +687,12 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Read,
         admission: ADMISSION_READ_CONTEXT,
         handler: hte::registry_workspace_info,
-        acp_wire: AcpWire {
-            request_schema_ref: "{}",
-            response_schema_ref: r#"{"creator_id":"string","workspace_slug":"string","workspace_path":"string","runtime_mode":"string","initialized":"bool"}"#,
-            error_schema_ref: r#"{"code":"forbidden|policy_blocked|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Return workspace details: creator id, slug, path, runtime mode, and initialization state.",
+            input_schema: Some(r#"{"type":"object","properties":{}}"#),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"creator_id":{"type":"string"},"workspace_slug":{"type":"string"},"workspace_path":{"type":"string"},"runtime_mode":{"type":"string"},"initialized":{"type":"boolean"}},"required":["creator_id","workspace_slug","workspace_path","runtime_mode","initialized"]}"#,
+            ),
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -658,10 +707,14 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Read,
         admission: ADMISSION_READ_WORKSPACE,
         handler: hte::registry_work_get,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"work_id":"string"}"#,
-            response_schema_ref: "WorkApiDto",
-            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Return the full Work record (including stage fields) for the active creator's work.",
+            input_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"}},"required":["work_id"]}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"},"status":{"type":"string"},"title":{"type":"string"},"current_stage":{"type":"string"},"stage_status":{"type":"string"}},"required":["work_id","status","title","current_stage","stage_status"]}"#,
+            ),
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -676,10 +729,10 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Write,
         admission: ADMISSION_WRITE_WORKSPACE,
         handler: hte::registry_work_patch,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"work_id":"string","title?":"string","inspiration_log?":"array","stage_metadata?":"object"}"#,
-            response_schema_ref: "WorkApiDto",
-            error_schema_ref: r#"{"code":"forbidden|invalid_input|policy_blocked|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Patch a work's title, inspiration log, or stage metadata (stage field itself is rejected).",
+            input_schema: None,
+            output_schema: None,
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -694,10 +747,14 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Read,
         admission: ADMISSION_READ_WORKSPACE,
         handler: hte::registry_schedule_status,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"work_id":"string"}"#,
-            response_schema_ref: r#"{"work_id":"string","schedule_ids":"array","count":"int"}"#,
-            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Return the schedule ids linked to a work and their count.",
+            input_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"}},"required":["work_id"]}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"},"schedule_ids":{"type":"array","items":{"type":"string"}},"count":{"type":"integer"}},"required":["work_id","schedule_ids","count"]}"#,
+            ),
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -712,10 +769,14 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Read,
         admission: ADMISSION_READ_CONTEXT,
         handler: hte::registry_context_assemble,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"work_id?":"string","requires_platform?":"bool"}"#,
-            response_schema_ref: r#"{"mode":"string","creator_id":"string","assembled_at":"string"}"#,
-            error_schema_ref: r#"{"code":"policy_blocked|forbidden|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Assemble the current context moment; requires_platform requests platform-integrated assembly.",
+            input_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"},"requires_platform":{"type":"boolean"}}}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"mode":{"type":"string"},"creator_id":{"type":"string"},"assembled_at":{"type":"string"}},"required":["mode","creator_id","assembled_at"]}"#,
+            ),
         },
         failure_mode: FailureMode::PolicyBlocked,
         handler_test_vector: TestVector {
@@ -731,10 +792,14 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Read,
         admission: ADMISSION_READ_WORLD,
         handler: hte::registry_world_snapshot_get,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"world_id":"string"}"#,
-            response_schema_ref: "WorldState",
-            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_found|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Return the structured world snapshot (state, timeline position, fork lineage) for an owned world.",
+            input_schema: Some(
+                r#"{"type":"object","properties":{"world_id":{"type":"string"}},"required":["world_id"]}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"world_id":{"type":"string"},"title":{"type":"string"},"slug":{"type":"string"},"status":{"type":"string"},"is_fork":{"type":"boolean"},"created_at":{"type":"string"}},"required":["world_id","title","slug","status","is_fork","created_at"]}"#,
+            ),
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -749,10 +814,14 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Read,
         admission: ADMISSION_READ_WORLD,
         handler: hte::registry_timeline_recent_get,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"world_id":"string","limit?":"int"}"#,
-            response_schema_ref: "[TimelineEvent]",
-            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Return the most recent timeline events for a world (default 100, clamped to 500).",
+            input_schema: Some(
+                r#"{"type":"object","properties":{"world_id":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":500}},"required":["world_id"]}"#,
+            ),
+            // Output is an event array, not a stable object — omitted per
+            // AR-78 #5 (output schema pinned only for stable object shapes).
+            output_schema: None,
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -767,10 +836,14 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Read,
         admission: ADMISSION_READ_WORLD,
         handler: hte::registry_kb_snapshot_read,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"world_id":"string"}"#,
-            response_schema_ref: "[WorldKbEntry]",
-            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Return the knowledge-base key blocks for an owned world.",
+            input_schema: Some(
+                r#"{"type":"object","properties":{"world_id":{"type":"string"}},"required":["world_id"]}"#,
+            ),
+            // Output is a key-block array, not a stable object — omitted per
+            // AR-78 #5 (output schema pinned only for stable object shapes).
+            output_schema: None,
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -785,10 +858,14 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Read,
         admission: ADMISSION_READ_WORKSPACE,
         handler: hte::registry_manuscript_chapter_get,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"work_id":"string","chapter":"int","volume?":"int"}"#,
-            response_schema_ref: "WorkChapterRecord",
-            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_found|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Return a single manuscript chapter record (metadata + paths) for a work.",
+            input_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer","minimum":1},"volume":{"type":"integer","minimum":1}},"required":["work_id","chapter"]}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer"},"volume":{"type":"integer"},"status":{"type":"string"},"planned_word_count":{"type":"integer"}},"required":["work_id","chapter","status","planned_word_count"]}"#,
+            ),
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -804,10 +881,12 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Read,
         admission: ADMISSION_READ_CONTEXT,
         handler: hte::registry_daemon_health,
-        acp_wire: AcpWire {
-            request_schema_ref: "{}",
-            response_schema_ref: r#"{"uptime_seconds":"int","started_at":"string","runtime_mode":"string","lifecycle_state":"string","registry_size":"int","registry_ids":"[string]","pool_healthy":"bool"}"#,
-            error_schema_ref: r#"{"code":"forbidden|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Return daemon runtime health: uptime, lifecycle state, registry size and ids, pool health.",
+            input_schema: Some(r#"{"type":"object","properties":{}}"#),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"uptime_seconds":{"type":"integer"},"started_at":{"type":"string"},"runtime_mode":{"type":"string"},"lifecycle_state":{"type":"string"},"registry_size":{"type":"integer"},"registry_ids":{"type":"array","items":{"type":"string"}},"pool_healthy":{"type":"boolean"}},"required":["uptime_seconds","started_at","runtime_mode","lifecycle_state","registry_size","registry_ids","pool_healthy"]}"#,
+            ),
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -823,10 +902,10 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Write,
         admission: ADMISSION_WRITE_WORLD,
         handler: hte::registry_kb_snapshot_write,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"world_id":"string","blocks":"[WorldKbEntry]"}"#,
-            response_schema_ref: r#"{"written":"int","world_id":"string"}"#,
-            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_found|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Upsert knowledge-base key blocks for an owned world.",
+            input_schema: None,
+            output_schema: None,
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -841,10 +920,10 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Write,
         admission: ADMISSION_WRITE_WORKSPACE,
         handler: hte::registry_manuscript_chapter_update,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"work_id":"string","chapter":"int","volume?":"int","content?":"string","block_overrides?":"object"}"#,
-            response_schema_ref: "WorkChapterRecord",
-            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_found|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Update a manuscript chapter's content and block overrides for a work.",
+            input_schema: None,
+            output_schema: None,
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -859,10 +938,10 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Write,
         admission: ADMISSION_WRITE_WORLD,
         handler: hte::registry_world_configure,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"world_id":"string","title?":"string","visibility?":"string","time_policy?":"string"}"#,
-            response_schema_ref: r#"{"world_id":"string","updated":"bool"}"#,
-            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_found|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Update metadata (title, visibility, time policy) for an owned world.",
+            input_schema: None,
+            output_schema: None,
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -877,10 +956,10 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Write,
         admission: ADMISSION_WRITE_WORKSPACE,
         handler: hte::registry_work_schedule_set,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"work_id":"string","schedule_ids":"[string]"}"#,
-            response_schema_ref: r#"{"work_id":"string","schedule_ids":"[string]"}"#,
-            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Link schedule ids to a work.",
+            input_schema: None,
+            output_schema: None,
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -895,10 +974,10 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Write,
         admission: ADMISSION_WRITE_WORKSPACE,
         handler: hte::registry_finding_resolve,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"finding_id":"string","resolution?":"string"}"#,
-            response_schema_ref: r#"{"finding_id":"string","resolved":"bool"}"#,
-            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_found|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Mark a finding as resolved, optionally with a resolution note.",
+            input_schema: None,
+            output_schema: None,
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -913,10 +992,10 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Write,
         admission: ADMISSION_POOL_WRITE,
         handler: hte::registry_pool_entry_manage,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"work_id":"string","action":"string","priority?":"int"}"#,
-            response_schema_ref: r#"{"work_id":"string","action":"string","success":"bool"}"#,
-            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_found|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Add or remove a work entry in the selection pool.",
+            input_schema: None,
+            output_schema: None,
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -932,10 +1011,10 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Read,
         admission: ADMISSION_READ_CONTEXT,
         handler: hte::registry_registry_refresh,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"force?":"bool"}"#,
-            response_schema_ref: r#"{"cacheAgeMs":"int","capabilityCount":"int","source":"string","snapshotVersion":"string","generatedAt":"string","fetchTimeoutMs":"int","maxRetries":"int","retryCount":"int","fallbackReason":"string"}"#,
-            error_schema_ref: r#"{"code":"not_supported|internal"}"#,
+        catalog: CatalogDescriptor {
+            description: "Return the capability registry snapshot (synthetic or CDN-backed).",
+            input_schema: None,
+            output_schema: None,
         },
         failure_mode: FailureMode::NotSupported,
         handler_test_vector: TestVector {
@@ -951,14 +1030,15 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Write,
         admission: ADMISSION_READ_WORKSPACE,
         handler: hte::registry_reference_refresh,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"reference_source_id":"string","url?":"string"}"#,
-            response_schema_ref: r#"{"reference_source_id":"string","refreshed":"bool","content_changed":"bool","status":"string"}"#,
-            error_schema_ref: r#"{"code":"not_supported|invalid_input|internal"}"#,
+        catalog: CatalogDescriptor {
+            description: "Refresh a reference source's body content and update its content hash.",
+            input_schema: None,
+            output_schema: None,
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
-            description: "reference refresh updates content hash and writes body.md for owned source",
+            description:
+                "reference refresh updates content hash and writes body.md for owned source",
             expected_outcome: "success",
             test_fn_name: "reference_refresh_happy_path",
         },
@@ -971,10 +1051,12 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Read,
         admission: ADMISSION_READ_WORKSPACE,
         handler: hte::registry_manuscript_list,
-        acp_wire: AcpWire {
-            request_schema_ref: "{}",
-            response_schema_ref: r#"{"manuscripts":"[{work_id,title,work_ref,work_profile,current_stage,stage_status,total_planned_chapters,current_chapter}]","count":"int"}"#,
-            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "List all manuscripts (works) for the active creator.",
+            input_schema: Some(r#"{"type":"object","properties":{}}"#),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"manuscripts":{"type":"array","items":{"type":"object"}},"count":{"type":"integer"}},"required":["manuscripts","count"]}"#,
+            ),
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -989,10 +1071,14 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Read,
         admission: ADMISSION_READ_WORKSPACE,
         handler: hte::registry_manuscript_read_range,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"work_id":"string","chapter":"int","volume?":"int","start_line?":"int","end_line?":"int"}"#,
-            response_schema_ref: r#"{"work_id":"string","chapter":"int","volume":"int","content":"string","range":{"start_line":"int","end_line":"int"},"total_lines":"int","truncated":"bool"}"#,
-            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_found|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Read a bounded line range from a manuscript chapter body.",
+            input_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer","minimum":1},"volume":{"type":"integer","minimum":1},"start_line":{"type":"integer","minimum":1},"end_line":{"type":"integer","minimum":1}},"required":["work_id","chapter"]}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"},"chapter":{"type":"integer"},"volume":{"type":"integer"},"content":{"type":"string"},"range":{"type":"object","properties":{"start_line":{"type":"integer"},"end_line":{"type":"integer"}}},"total_lines":{"type":"integer"},"truncated":{"type":"boolean"}},"required":["work_id","chapter","volume","content","range","total_lines","truncated"]}"#,
+            ),
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -1007,10 +1093,10 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Write,
         admission: ADMISSION_WRITE_WORKSPACE,
         handler: hte::registry_manuscript_write,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"work_id":"string","chapter":"int","volume?":"int","content":"string"}"#,
-            response_schema_ref: r#"{"written":"bool","work_id":"string","chapter":"int","volume":"int","word_count":"int","bytes_written":"int"}"#,
-            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_found|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Write manuscript body content for a chapter within the size quota.",
+            input_schema: None,
+            output_schema: None,
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -1025,10 +1111,14 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Read,
         admission: ADMISSION_READ_WORKSPACE,
         handler: hte::registry_manuscript_phase_get,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"work_id":"string"}"#,
-            response_schema_ref: r#"{"work_id":"string","phase":"string","stage_status":"string"}"#,
-            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Return the current manuscript phase and stage status for a work.",
+            input_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"}},"required":["work_id"]}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"work_id":{"type":"string"},"phase":{"type":"string"},"stage_status":{"type":"string"}},"required":["work_id","phase","stage_status"]}"#,
+            ),
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -1043,10 +1133,10 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Write,
         admission: ADMISSION_WRITE_WORKSPACE,
         handler: hte::registry_manuscript_phase_set,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"work_id":"string","phase":"string","force?":"bool"}"#,
-            response_schema_ref: r#"{"work_id":"string","previous_phase":"string","current_phase":"string","stage_status":"string","transitioned":"bool"}"#,
-            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Move a work forward to the next manuscript phase.",
+            input_schema: None,
+            output_schema: None,
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -1061,10 +1151,12 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Read,
         admission: ADMISSION_READ_CONTEXT,
         handler: hte::registry_workspace_paths,
-        acp_wire: AcpWire {
-            request_schema_ref: "{}",
-            response_schema_ref: r#"{"workspace_root":"string","allowed_roots":"[string]","preset_id":"string"}"#,
-            error_schema_ref: r#"{"code":"invalid_input|forbidden|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Return the workspace root and the allowed roots (Works, Worlds, References, .nexus42).",
+            input_schema: Some(r#"{"type":"object","properties":{}}"#),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"workspace_root":{"type":"string"},"allowed_roots":{"type":"array","items":{"type":"string"}},"preset_id":{"type":"string"}},"required":["workspace_root","allowed_roots","preset_id"]}"#,
+            ),
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -1079,10 +1171,14 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Read,
         admission: ADMISSION_READ_WORKSPACE,
         handler: hte::registry_research_query,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"reference_source_id?":"string","tags?":"string","limit?":"int"}"#,
-            response_schema_ref: r#"{"results":"[{reference_source_id,title,uri,source_type,tags,scan_status}]","count":"int"}"#,
-            error_schema_ref: r#"{"code":"invalid_input|not_found|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Query the local reference-source index by id, tag, or a bounded limit.",
+            input_schema: Some(
+                r#"{"type":"object","properties":{"reference_source_id":{"type":"string"},"tags":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":1000}}}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"results":{"type":"array","items":{"type":"object"}},"count":{"type":"integer"}},"required":["results","count"]}"#,
+            ),
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -1097,10 +1193,12 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Read,
         admission: ADMISSION_READ_CONTEXT,
         handler: hte::registry_runtime_health,
-        acp_wire: AcpWire {
-            request_schema_ref: "{}",
-            response_schema_ref: r#"{"runtime_mode":"string","registry_reachable":"bool","registry_size":"int","sync_state":"string","cloud_enabled":"bool","pool_healthy":"bool"}"#,
-            error_schema_ref: r#"{"code":"forbidden|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Return agent-visible runtime health: mode, registry reachability, sync state, cloud flag.",
+            input_schema: Some(r#"{"type":"object","properties":{}}"#),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"runtime_mode":{"type":"string"},"registry_reachable":{"type":"boolean"},"registry_size":{"type":"integer"},"sync_state":{"type":"string"},"cloud_enabled":{"type":"boolean"},"pool_healthy":{"type":"boolean"}},"required":["runtime_mode","registry_reachable","registry_size","sync_state","cloud_enabled","pool_healthy"]}"#,
+            ),
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -1115,10 +1213,14 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Read,
         admission: ADMISSION_READ_CONTEXT,
         handler: hte::registry_trace_correlation,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"correlation_id?":"string","session_id?":"string"}"#,
-            response_schema_ref: r#"{"correlation_id":"string","session_id?":"string","parent_request_id?":"string","trace_timestamp":"string","propagated":"bool"}"#,
-            error_schema_ref: r#"{"code":"forbidden|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Propagate a correlation id (and optional session id) across tool calls.",
+            input_schema: Some(
+                r#"{"type":"object","properties":{"correlation_id":{"type":"string"},"session_id":{"type":"string"}}}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"correlation_id":{"type":"string"},"session_id":{"type":"string"},"parent_request_id":{"type":"string"},"trace_timestamp":{"type":"string"},"propagated":{"type":"boolean"}},"required":["correlation_id","trace_timestamp","propagated"]}"#,
+            ),
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -1134,10 +1236,14 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Read,
         admission: ADMISSION_FS_READ,
         handler: hte::registry_read_file,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"path":"string"}"#,
-            response_schema_ref: r#"{"content":"string"}"#,
-            error_schema_ref: r#"{"code":"invalid_input|forbidden|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Read a text file within the workspace root and return its content.",
+            input_schema: Some(
+                r#"{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}"#,
+            ),
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -1152,10 +1258,14 @@ pub fn build_registry() -> CapabilityRegistry {
         access: Access::Write,
         admission: ADMISSION_FS_WRITE,
         handler: hte::registry_write_file,
-        acp_wire: AcpWire {
-            request_schema_ref: r#"{"path":"string","content":"string"}"#,
-            response_schema_ref: r#"{"written":"bool"}"#,
-            error_schema_ref: r#"{"code":"invalid_input|forbidden|not_supported"}"#,
+        catalog: CatalogDescriptor {
+            description: "Write text content to a file within the workspace root.",
+            input_schema: Some(
+                r#"{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}"#,
+            ),
+            output_schema: Some(
+                r#"{"type":"object","properties":{"written":{"type":"boolean"}},"required":["written"]}"#,
+            ),
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -1231,15 +1341,20 @@ mod tests {
     }
 
     #[test]
-    fn registry_all_rows_have_seven_fields() {
+    fn registry_all_rows_have_eight_fields() {
         let reg = host_tool_registry();
         for id in reg.ids() {
             let row = reg.lookup(id).expect("row must exist");
-            // Verify all 7 fields are populated
+            // Verify all 8 fields are populated (AR-78: catalog descriptor
+            // replaces the removed AcpWire).
             assert!(!row.id.is_empty(), "id must not be empty for {id}");
             assert!(
                 !row.admission.is_empty(),
                 "admission must not be empty for {id}"
+            );
+            assert!(
+                !row.catalog.description.is_empty(),
+                "catalog description must not be empty for {id}"
             );
             assert!(
                 !row.handler_test_vector.description.is_empty(),
@@ -1250,6 +1365,106 @@ mod tests {
                 "test fn name must not be empty for {id}"
             );
         }
+    }
+
+    /// AR-78 #9 / AR-80 #2 (`builtin_input_schemas_parse_as_root_object`):
+    /// every builtin row's emitted input string — real schema or named
+    /// placeholder — parses as a JSON object with root `type: "object"`
+    /// (the MCP requirement). A current daemon never hits the child's
+    /// `default_object_schema` fallback for a builtin row.
+    #[test]
+    fn builtin_input_schemas_parse_as_root_object() {
+        let reg = host_tool_registry();
+        for id in reg.ids() {
+            let row = reg.lookup(id).expect("row must exist");
+            let emitted = row.catalog.input_schema.unwrap_or(NAMED_PLACEHOLDER_INPUT);
+            let parsed: serde_json::Value = serde_json::from_str(emitted)
+                .unwrap_or_else(|e| panic!("input schema for '{id}' must parse: {e}"));
+            assert!(
+                parsed.is_object(),
+                "input schema for '{id}' must be a JSON object"
+            );
+            assert_eq!(
+                parsed["type"],
+                serde_json::Value::String("object".into()),
+                "input schema for '{id}' must declare root type object"
+            );
+        }
+    }
+
+    /// AR-78 #6 / AR-80 #2 (`placeholder_ledger_lockstep`), both directions:
+    /// `row.catalog.input_schema.is_none() ⇔ id ∈ SCHEMA_REMAINDER_LEDGER`.
+    #[test]
+    fn placeholder_ledger_lockstep() {
+        let reg = host_tool_registry();
+        for id in reg.ids() {
+            let row = reg.lookup(id).expect("row must exist");
+            let ledgered = SCHEMA_REMAINDER_LEDGER.contains(&id);
+            assert_eq!(
+                row.catalog.input_schema.is_none(),
+                ledgered,
+                "input_schema None ⇔ ledgered must hold for '{id}'"
+            );
+        }
+        // Every ledger entry must name a real registry row (no dead entries).
+        for id in SCHEMA_REMAINDER_LEDGER {
+            assert!(
+                reg.lookup(id).is_some(),
+                "ledger entry '{id}' must name a registered row"
+            );
+        }
+    }
+
+    /// AR-80 #2 (`silent_placeholder_gone`): the exact silent string
+    /// `{"type":"object"}` appears in NO builtin catalog row — only the
+    /// `$comment`-marked named placeholder may, and only for ledgered ids.
+    #[test]
+    fn silent_placeholder_gone() {
+        let reg = host_tool_registry();
+        for id in reg.ids() {
+            let row = reg.lookup(id).expect("row must exist");
+            let emitted = row.catalog.input_schema.unwrap_or(NAMED_PLACEHOLDER_INPUT);
+            assert_ne!(
+                emitted, "{\"type\":\"object\"}",
+                "builtin row '{id}' must not emit the silent placeholder"
+            );
+        }
+    }
+
+    /// AR-78 #6 `DoD`: a synthetic ledgered row (input schema not authored)
+    /// serializes the named placeholder ONLY — never the silent
+    /// `{"type":"object"}` and never a guessed schema.
+    #[test]
+    fn synthetic_ledgered_row_serializes_named_placeholder_only() {
+        let row = CapabilityRow {
+            id: "nexus.synthetic.ledgered",
+            access: Access::Read,
+            admission: ADMISSION_READ_CONTEXT,
+            handler: crate::api::handlers::host_tool_executor::registry_context_whoami,
+            catalog: CatalogDescriptor {
+                description: "synthetic ledgered row",
+                input_schema: None,
+                output_schema: None,
+            },
+            failure_mode: FailureMode::Forbidden,
+            handler_test_vector: TestVector {
+                description: "synthetic",
+                expected_outcome: "success",
+                test_fn_name: "whoami_returns_active_creator",
+            },
+        };
+        let emitted = row.catalog.input_schema.unwrap_or(NAMED_PLACEHOLDER_INPUT);
+        assert_eq!(emitted, NAMED_PLACEHOLDER_INPUT);
+        assert_ne!(emitted, "{\"type\":\"object\"}");
+        // The named placeholder is draft-2020-12-valid and machine-
+        // distinguishable from a real schema.
+        let parsed: serde_json::Value =
+            serde_json::from_str(emitted).expect("named placeholder parses");
+        assert_eq!(parsed["type"], serde_json::Value::String("object".into()));
+        assert_eq!(
+            parsed["$comment"],
+            serde_json::Value::String("nexus42:schema-pending".into())
+        );
     }
 
     /// **R-V153P0QC1-002 enforcement**: static accepted set of test function names.

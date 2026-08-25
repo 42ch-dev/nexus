@@ -93,8 +93,9 @@ fn catalog_body() -> Value {
         "items": [
             {
                 "id": "nexus.workspace.info",
-                "description": "nexus.workspace.info (parameters: work.get.request)",
-                "input_schema": "{\"type\":\"object\"}",
+                "description": "Return workspace details: creator id, slug, path, runtime mode, and initialization state.",
+                "input_schema": "{\"type\":\"object\",\"properties\":{}}",
+                "output_schema": "{\"type\":\"object\",\"properties\":{\"creator_id\":{\"type\":\"string\"},\"workspace_slug\":{\"type\":\"string\"},\"workspace_path\":{\"type\":\"string\"},\"runtime_mode\":{\"type\":\"string\"},\"initialized\":{\"type\":\"boolean\"}},\"required\":[\"creator_id\",\"workspace_slug\",\"workspace_path\",\"runtime_mode\",\"initialized\"]}",
                 "origin": "builtin"
             },
             {
@@ -179,8 +180,8 @@ async fn initialize_handshake_and_tools_list_mirror_catalog() {
         "tools/list == catalog ids (both directions)"
     );
 
-    // Schema mapping pin (AR-70 §3): builtin rows carry the permissive
-    // `{"type":"object"}` placeholder and NO output schema; peer rows carry
+    // Schema mapping pin (AR-70 §3 + AR-80 #3): builtin rows carry their
+    // authored real schema (input + output when pinned); peer rows carry
     // output_schema when the catalog emitted one.
     let by_name: std::collections::HashMap<_, _> = result
         .tools
@@ -189,9 +190,25 @@ async fn initialize_handshake_and_tools_list_mirror_catalog() {
         .collect();
     let builtin = by_name.get("nexus.workspace.info").expect("builtin row");
     assert_eq!(builtin.input_schema.get("type"), Some(&json!("object")));
-    assert!(
-        builtin.output_schema.is_none(),
-        "builtin output schema omitted"
+    assert_eq!(
+        builtin.input_schema.get("properties"),
+        Some(&json!({})),
+        "builtin input schema carries authored properties"
+    );
+    let builtin_out = builtin
+        .output_schema
+        .as_ref()
+        .expect("builtin output schema carried");
+    assert_eq!(builtin_out.get("type"), Some(&json!("object")));
+    assert_eq!(
+        builtin_out.get("required"),
+        Some(&json!([
+            "creator_id",
+            "workspace_slug",
+            "workspace_path",
+            "runtime_mode",
+            "initialized"
+        ]))
     );
     let peer = by_name.get("tools.t6.echo").expect("peer row");
     assert_eq!(
