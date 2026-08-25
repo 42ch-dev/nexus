@@ -125,6 +125,40 @@ operator configuring peer tools should expect the builtin rows to be
 present **even when no peer is connected**; this is by design (one catalog,
 PL-5), not leakage.
 
+### Builtin schemas are real draft-2020-12 (V1.175 / DF-89)
+
+Each catalog row's `input_schema` is a **real draft-2020-12 JSON Schema
+string** (root `"type":"object"`) authored on the registry
+`CatalogDescriptor`. The V1.174 permissive builtin placeholder
+`{"type":"object"}` is gone. A row that cannot yet carry a real input
+schema (none remain after V1.175 P0) would emit the **named** placeholder
+`{"type":"object","$comment":"nexus42:schema-pending"}` and be listed on
+`SCHEMA_REMAINDER_LEDGER` — never a silent generic object. `output_schema`
+is present when the success shape is a stable object; omitted otherwise.
+Peer schemas stay verbatim; user-cap schema behavior is unchanged.
+Schemas are **descriptive**: the spine does not start rejecting
+`tools/call` arguments based on these strings.
+
+### Long-lived sessions see catalog changes (V1.175 / DF-90)
+
+`nexus42 mcp serve` advertises `tools.listChanged`. A background watcher
+polls `GET /v1/daemon/tools` every **2 s** (`MCP_CATALOG_WATCH_INTERVAL`,
+not configurable this iteration), digests the response body, and sends
+`notifications/tools/list_changed` when the digest changes between
+successful polls. The first successful poll is a **baseline** (no
+notification at session start). Poll errors keep the last digest, log to
+stderr, and never notify.
+
+This is a **child-side watch** (AR-79): the child holds a digest +
+interval only — no registry, allowlist, policy, or read cache. There is
+**no daemon→child push channel** and no new daemon route. Session-visible
+change sources: peer admission, peer eviction, and any other catalog
+content change the next successful poll observes (user-cap set changes
+are restart-scoped today; RN-2). Notification latency ≤ 2 s + one HTTP
+request timeout (never unbounded). A subsequent `tools/list` is still a
+live daemon round trip.
+
+
 ### Tools-only vocabulary boundary (PL-7/PL-9)
 
 `nexus42 mcp serve` is a **tools-only** MCP surface: it implements only
