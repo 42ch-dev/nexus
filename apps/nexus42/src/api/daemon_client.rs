@@ -614,6 +614,23 @@ impl DaemonClient {
                     if let Some(hint) = details.get("recovery_hint").and_then(|v| v.as_str()) {
                         write!(message, " (recovery_hint: {hint})").expect("infallible");
                     }
+                    // Domain validation summaries (strategy/outline/world-kb
+                    // 422s): the daemon's top-level message is generic
+                    // ("Outline validation failed"); the actionable rule
+                    // text lives in `details.validation_summary.errors`.
+                    // Render each error so the CLI surfaces the real
+                    // violation (PL-5 — never swallowed).
+                    if let Some(errors) = details
+                        .get("validation_summary")
+                        .and_then(|v| v.get("errors"))
+                        .and_then(serde_json::Value::as_array)
+                    {
+                        for error in errors {
+                            if let Some(text) = error.as_str() {
+                                write!(message, " (validation: {text})").expect("infallible");
+                            }
+                        }
+                    }
                 }
 
                 // Append request ID if available for support correlation

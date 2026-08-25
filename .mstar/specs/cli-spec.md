@@ -696,8 +696,51 @@ Rules:
     to the coarse public `bad_request`).
 - **Write bodies are typed long flags** (AR-83 #4); prompt bodies come from
   `--file` or stdin (`-`), matching the `creator soul` stdin convention.
-- **User presets only.** The daemon rejects embedded/system presets
-  (read-only); the CLI surfaces the resulting 400 as `bad_request`.
+### 6.2G.5 V1.175 P1 amendment — outline/chapter/timeline patch leaves (RN-1 §5 group 2)
+
+Thin daemon-HTTP leaves over the **existing** V1.72 canvas outline+timeline
+routes (AR-83 #1 / AR-84 group 2, F-10; no daemon route changes, no DTO
+redesign). All leaves: human-readable default output, `--json` emits the
+daemon DTO verbatim (AR-83 #3), typed long flags, daemon error envelopes
+surfaced via `DaemonClient::parse_error_response` (named `[code]`, non-zero
+exit — PL-5).
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 creator works outline show <work_ref> [--json]` | Read the canonical work outline + timeline (`GET /v1/daemon/works/:work_id/outline`). The printed `outline_revision` is the `--base-revision` for the patch leaves. |
+| `nexus42 creator works outline patch <work_ref> --base-revision <N> --op <move_chapter\|link_event\|attach_to_volume> [--chapter <n>] [--volume <n>] [--event <id>] [--target-chapter <n>] [--json]` | Patch the outline structure (`POST /v1/daemon/works/:work_id/outline/patch`). `move_chapter`/`attach_to_volume` require `--chapter` + `--volume`; `link_event` requires `--event` + `--target-chapter`. |
+| `nexus42 creator works chapter patch <work_ref> --n <n> --base-revision <N> [--title <text>] [--slug <slug>] [--planned-word-count <n>] [--actual-word-count <n>] [--volume <n>] [--status <not_started\|outlined\|draft\|finalized\|published>] [--content <text>\|--content-file <path>] [--json]` | Patch a chapter's **outline-node** metadata (`POST /v1/daemon/works/:work_id/chapters/:n/patch`). At least one set field is required. `--content`/`--content-file` write chapter outline prose to the chapter's `outline_path` markdown file under the same `outline_revision` CAS (never `body_path`). |
+| `nexus42 creator works timeline patch <work_ref> --base-revision <N> --op <add_event\|remove_event\|attach_event_to_chapter\|link_foreshadow\|unlink_foreshadow> [--event <id>] [--title <text>] [--description <text>] [--realizes-chapter <n>] [--target-chapter <n>] [--foreshadows-event <id>] [--json]` | Patch the work timeline (`POST /v1/daemon/works/:work_id/timeline/patch`). `add_event` requires `--title`; `remove_event` requires `--event`; `attach_event_to_chapter` requires `--event` + `--target-chapter`; `link_foreshadow`/`unlink_foreshadow` require `--event` + `--foreshadows-event`. |
+
+Rules:
+
+- **Route-family guard (AR-84).** `chapter patch` targets the outline
+  **node** route `POST /v1/daemon/works/:work_id/chapters/:n/patch` — NOT
+  the V1.65 chapter-**content** `PATCH /v1/daemon/works/:work_id/chapters/:n`
+  (different DTO family, not §5 remainder). Leaf help names the distinction.
+- **CAS-guarded writes (PL-5).** Every leaf takes `--base-revision` — the
+  `outline_revision` observed on the last canonical read (`outline show`). A
+  stale revision returns **409 `outline_conflict`**; the CLI error renders
+  all four structured fields — `current_revision`, `node_id`,
+  `conflicting_path`, and `recovery_hint` — and `--help` documents the
+  retry guidance: re-read the outline and reapply with the new revision.
+- **Named error surface.** The daemon's public `error_code()` allowlist
+  surfaces the outline family verbatim via the standard `[code]` envelope
+  with non-zero exit — never a generic "request failed":
+  - 409 `outline_conflict` (stale `--base-revision`; renders
+    `current_revision` + `conflicting_path` + `recovery_hint`),
+  - 404 `not_found` (unknown work / chapter / event),
+  - 422 `outline_validation_failed` (domain rules — slug format/uniqueness,
+    volume existence, foreshadow temporal order, published-chapter guard;
+    the CLI renders each `validation_summary.errors` entry), and
+  - 400 `bad_request` for all other 400s (the daemon remaps internal codes
+    such as `work_id_mismatch`, `chapter_id_mismatch`,
+    `invalid_chapter_number`, `missing_event_title`, `missing_event_id`,
+    `self_foreshadow_forbidden` to the coarse public `bad_request`).
+- **Write bodies are typed long flags** (AR-83 #4); chapter outline prose
+  comes from `--content` or `--content-file <path>`.
+- **No TUI / no second editor.** Leaves are single-shot commands
+  (stdin/file/flags only); the web canvas stays the human authoring surface.
 
 ### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
 

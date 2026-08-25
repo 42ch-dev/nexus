@@ -34,6 +34,7 @@ pub struct LiveDaemon {
     http_task: tokio::task::JoinHandle<()>,
 }
 
+#[allow(dead_code)]
 impl LiveDaemon {
     /// Boot the daemon and write the hermetic HOME config.
     pub async fn start() -> Self {
@@ -61,6 +62,55 @@ impl LiveDaemon {
         std::fs::write(&config_path, config).expect("write config.toml");
 
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let pool = state.pool().expect("pool").clone();
+        test_utils::seed_test_creator_and_world(&pool).await;
+
+        let app = api::create_router(
+            state.clone(),
+            DaemonApiConfig::keyless().with_resolved_listen_addr(port, "127.0.0.1"),
+        );
+        let http_task = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("daemon http serve");
+        });
+
+        Self {
+            home: tmp,
+            pool,
+            state,
+            http_task,
+        }
+    }
+
+    /// Boot the daemon with a real workspace directory on disk (needed by
+    /// routes that read/write workspace files, e.g. the V1.72 outline
+    /// canvas). The workspace root is `$HOME/workspace`.
+    pub async fn start_with_workspace() -> Self {
+        let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+        let workspace_dir = tmp.path().join("workspace");
+        std::fs::create_dir_all(&workspace_dir).expect("create workspace dir");
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind daemon port");
+        let port = listener.local_addr().expect("local addr").port();
+        let http_url = format!("http://127.0.0.1:{port}");
+
+        let config_path = nexus_home.join("config.toml");
+        let config = format!(
+            "active_creator_id = \"test_creator\"\n\
+             daemon_url = \"{http_url}\"\n\
+             \n\
+             [active_workspace_slug_by_creator]\n\
+             \"test_creator\" = \"default\"\n"
+        );
+        std::fs::write(&config_path, config).expect("write config.toml");
+
+        let state = WorkspaceState::new_for_testing(
+            nexus_home,
+            db_path,
+            Some(workspace_dir.to_string_lossy().to_string()),
+        )
+        .await;
         let pool = state.pool().expect("pool").clone();
         test_utils::seed_test_creator_and_world(&pool).await;
 

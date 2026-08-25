@@ -23,6 +23,7 @@ use nexus_contracts::local::schedule::http::AddScheduleRequest;
 
 pub mod chronology;
 pub mod cron;
+pub mod outline;
 
 /// Work management subcommands (DF-60 §6.2H).
 #[derive(Debug, Subcommand)]
@@ -198,6 +199,39 @@ pub enum WorksCommand {
     Chronology {
         #[command(subcommand)]
         command: chronology::ChronologyCommand,
+    },
+    // ── V1.175 P1 Task 3: outline/chapter/timeline patch leaves (group 2) ──
+    /// Show / patch the work outline (V1.72 canvas read + structure patch).
+    ///
+    /// Thin daemon-HTTP leaves over the existing canvas routes (AR-84 group
+    /// 2). All writes are CAS-guarded with `--base-revision`; a stale
+    /// revision returns 409 `outline_conflict` (current revision, node,
+    /// conflicting path, recovery hint). Re-read the outline (`outline
+    /// show`) and reapply with the new revision.
+    Outline {
+        #[command(subcommand)]
+        command: outline::OutlineCommand,
+    },
+    /// Patch a chapter's outline-node metadata (V1.72 outline canvas).
+    ///
+    /// **Route-family guard:** targets the outline **node** route
+    /// `POST /v1/daemon/works/:work_id/chapters/:n/patch` — NOT the V1.65
+    /// chapter-**content** `PATCH /v1/daemon/works/:work_id/chapters/:n`
+    /// (different DTO family, not covered here). CAS-guarded with
+    /// `--base-revision`; a stale revision returns 409 `outline_conflict`
+    /// (re-read the outline and reapply).
+    Chapter {
+        #[command(subcommand)]
+        command: outline::ChapterCommand,
+    },
+    /// Patch the work timeline (V1.72 canvas): add/remove events, attach to
+    /// chapters, and link/unlink foreshadow edges.
+    ///
+    /// CAS-guarded with `--base-revision`; a stale revision returns 409
+    /// `outline_conflict` (re-read the outline and reapply).
+    Timeline {
+        #[command(subcommand)]
+        command: outline::TimelineCommand,
     },
 
     // ── Rejected subcommands (Grill #10/#11) ──────────────────────────
@@ -439,6 +473,9 @@ pub async fn handle_works(cmd: WorksCommand, config: &CliConfig) -> Result<()> {
         WorksCommand::Chronology { command } => {
             chronology::handle_chronology(command, config).await
         }
+        WorksCommand::Outline { command } => outline::run(command, config).await,
+        WorksCommand::Chapter { command } => outline::run_chapter(command, config).await,
+        WorksCommand::Timeline { command } => outline::run_timeline(command, config).await,
         WorksCommand::Start { .. } => Err(crate::errors::CliError::Other(
             "`creator works start` is not available. \
              To create a new Work, use `nexus42 creator bootstrap`."
