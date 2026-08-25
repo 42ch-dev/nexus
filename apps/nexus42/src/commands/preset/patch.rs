@@ -170,8 +170,9 @@ impl TransitionKindArg {
 /// # Errors
 ///
 /// Returns `CliError` on invalid input (missing required flags) or any
-/// daemon API / network failure (409 `strategy_conflict`, 400
-/// `strategy_invalid`, 404, … — all named, non-zero exit).
+/// daemon API / network failure (409 `strategy_conflict`, 404 `not_found`,
+/// 422 `strategy_validation_failed`, 400 `bad_request` for other 400s —
+/// all named, non-zero exit).
 pub async fn run(cmd: PatchCommand, config: &CliConfig) -> Result<()> {
     let client = DaemonClient::from_config(config);
     match cmd {
@@ -249,7 +250,8 @@ pub async fn run(cmd: PatchCommand, config: &CliConfig) -> Result<()> {
 ///
 /// Returns a named `CliError::Other` when neither `--label` nor
 /// `--description` is given, or `CliError` for daemon / network failures
-/// (409 `strategy_conflict`, 400 `strategy_invalid`, 404, …).
+/// (409 `strategy_conflict`, 404 `not_found`, 422 `strategy_validation_failed`,
+/// 400 `bad_request` for other 400s).
 async fn patch_state(
     client: &DaemonClient,
     strategy_id: &str,
@@ -297,7 +299,8 @@ async fn patch_state(
 ///
 /// Returns a named `CliError::Other` when a required flag for the chosen
 /// `--op` is missing, or `CliError` for daemon / network failures (409
-/// `strategy_conflict`, 400 `strategy_invalid`, 404, …).
+/// `strategy_conflict`, 404 `not_found`, 422 `strategy_validation_failed`,
+/// 400 `bad_request` for other 400s).
 #[allow(clippy::too_many_arguments)] // CLI param plumbing — house pattern
 async fn patch_transition(
     client: &DaemonClient,
@@ -361,8 +364,9 @@ async fn patch_transition(
 /// # Errors
 ///
 /// Returns a named `CliError::Other` when `--file` cannot be read, or
-/// `CliError` for daemon / network failures (409 `strategy_conflict`, 400
-/// `strategy_invalid`, 404, …).
+/// `CliError` for daemon / network failures (409 `strategy_conflict`, 404
+/// `not_found`, 422 `strategy_validation_failed`, 400 `bad_request` for
+/// other 400s).
 async fn patch_prompt(
     client: &DaemonClient,
     strategy_id: &str,

@@ -7,15 +7,17 @@
 //! (the canonical layout the strategy patch handlers read/write), then
 //! drives the REAL `nexus42` binary. Failure paths: one conflict path per
 //! leaf (stale `--base-revision` → 409 `strategy_conflict` rendering
-//! current revision + conflicting path + recovery hint), plus 404 and
-//! `strategy_invalid` surfaces.
+//! current revision + conflicting path + recovery hint), plus 404
+//! `not_found` and 400 `bad_request` (the daemon's public code for other
+//! 400s) surfaces.
 
 mod common;
 
 use common::LiveDaemon;
 use serde_json::Value;
 use std::path::Path;
-use std::process::Output;
+use std::process::{Output, Stdio};
+use tokio::io::AsyncWriteExt;
 
 /// Seed a minimal valid user preset bundle at the canonical
 /// `<HOME>/.nexus42/presets/<id>/` layout and return the bundle dir.
@@ -170,9 +172,46 @@ async fn patch_state_unknown_strategy_surfaces_404() {
     assert!(!out.status.success(), "unknown strategy must fail");
     let err = stderr(&out);
     assert!(
-        err.contains("404") || err.to_lowercase().contains("not found"),
-        "stderr should surface the daemon 404: {err}"
+        err.contains("[not_found]"),
+        "stderr should surface the named [not_found] code: {err}"
     );
+    assert!(err.contains("404"), "stderr should surface HTTP 404: {err}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn patch_state_malformed_bundle_surfaces_bad_request() {
+    let d = LiveDaemon::start().await;
+    let bundle_dir = seed_bundle(d.home.path(), "test-strategy");
+    // Corrupt the bundle: drop the 'states' array so the daemon's patch
+    // handler rejects with a 400. The handler's internal code is
+    // `strategy_invalid`, which the public error_code() allowlist remaps
+    // to the coarse `bad_request` — the CLI must surface the real wire code.
+    std::fs::write(
+        bundle_dir.join("preset.yaml"),
+        "revision: 1\npreset:\n  id: test-strategy\n",
+    )
+    .expect("write malformed preset.yaml");
+
+    let out = d
+        .cli(&[
+            "preset",
+            "patch",
+            "state",
+            "test-strategy",
+            "start",
+            "--base-revision",
+            "1",
+            "--description",
+            "x",
+        ])
+        .await;
+    assert!(!out.status.success(), "malformed bundle must fail");
+    let err = stderr(&out);
+    assert!(
+        err.contains("[bad_request]"),
+        "stderr should surface the public [bad_request] code: {err}"
+    );
+    assert!(err.contains("400"), "stderr should surface HTTP 400: {err}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -206,9 +245,8 @@ async fn patch_transition_update_rewires_target() {
     let d = LiveDaemon::start().await;
     let bundle_dir = seed_bundle(d.home.path(), "test-strategy");
 
-    // Linear update: start -> end rewired to the same target is a no-op
-    // that still bumps the revision (daemon semantics — the update path
-    // matches the old target and rewrites it).
+    // Real rewire: start -> end becomes start -> draft. 'draft' has no
+    // outgoing transition, so it is a valid (terminal-by-absence) target.
     let out = d
         .cli(&[
             "preset",
@@ -224,7 +262,7 @@ async fn patch_transition_update_rewires_target() {
             "--old-target",
             "end",
             "--new-target",
-            "end",
+            "draft",
         ])
         .await;
     assert!(
@@ -238,6 +276,7 @@ async fn patch_transition_update_rewires_target() {
 
     let yaml = std::fs::read_to_string(bundle_dir.join("preset.yaml")).unwrap();
     assert!(yaml.contains("revision: 2"), "{yaml}");
+    assert!(yaml.contains("next: draft"), "{yaml}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -352,6 +391,12 @@ async fn patch_prompt_writes_template_and_bumps_revision() {
     std::fs::create_dir_all(template_path.parent().unwrap()).expect("create prompts dir");
     std::fs::write(&template_path, "# Hello\n").expect("write template");
 
+    // Distinct source file with different contents — the body assertion
+    // below proves the daemon wrote the NEW bytes, not the pre-existing
+    // template (a skipped write would leave the old body in place).
+    let source_path = bundle_dir.join("prompts/start.new.md");
+    std::fs::write(&source_path, "# Hello, patched world\n").expect("write source");
+
     let out = d
         .cli(&[
             "preset",
@@ -364,7 +409,7 @@ async fn patch_prompt_writes_template_and_bumps_revision() {
             "--template-ref",
             "prompts/start.md",
             "--file",
-            template_path.to_str().unwrap(),
+            source_path.to_str().unwrap(),
         ])
         .await;
     assert!(
@@ -377,7 +422,7 @@ async fn patch_prompt_writes_template_and_bumps_revision() {
     assert!(text.contains("new_revision: 2"), "{text}");
 
     let body = std::fs::read_to_string(&template_path).unwrap();
-    assert_eq!(body, "# Hello\n");
+    assert_eq!(body, "# Hello, patched world\n");
     let yaml = std::fs::read_to_string(bundle_dir.join("preset.yaml")).unwrap();
     assert!(yaml.contains("revision: 2"), "{yaml}");
 }
@@ -443,6 +488,60 @@ async fn patch_prompt_missing_file_fails_fast() {
         "stderr should name --file: {}",
         stderr(&out)
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn patch_prompt_stdin_writes_template() {
+    let d = LiveDaemon::start().await;
+    let bundle_dir = seed_bundle(d.home.path(), "test-strategy");
+    let template_path = bundle_dir.join("prompts/start.md");
+    std::fs::create_dir_all(template_path.parent().unwrap()).expect("create prompts dir");
+    std::fs::write(&template_path, "# Hello\n").expect("write template");
+
+    // `--file -` reads the template body from stdin (the `creator soul`
+    // stdin convention claimed in cli-spec §6.2G.4).
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_nexus42"))
+        .args([
+            "preset",
+            "patch",
+            "prompt",
+            "test-strategy",
+            "start",
+            "--base-revision",
+            "1",
+            "--template-ref",
+            "prompts/start.md",
+            "--file",
+            "-",
+        ])
+        .env("HOME", d.home.path())
+        .env("RUST_LOG", "off")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn nexus42");
+    child
+        .stdin
+        .take()
+        .expect("child stdin")
+        .write_all(b"# From stdin\n")
+        .await
+        .expect("write stdin");
+    let out = child.wait_with_output().await.expect("wait nexus42");
+    assert!(
+        out.status.success(),
+        "patch prompt from stdin failed: {}",
+        stderr(&out)
+    );
+    let text = stdout(&out);
+    assert!(text.contains("Patched prompt template"), "{text}");
+    assert!(text.contains("new_revision: 2"), "{text}");
+
+    let body = std::fs::read_to_string(&template_path).unwrap();
+    assert_eq!(body, "# From stdin\n");
+    let yaml = std::fs::read_to_string(bundle_dir.join("preset.yaml")).unwrap();
+    assert!(yaml.contains("revision: 2"), "{yaml}");
 }
 
 // ── Help documents the retry guidance ─────────────────────────────────────

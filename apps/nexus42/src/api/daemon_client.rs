@@ -595,10 +595,13 @@ impl DaemonClient {
                     if let Some(field) = details.get("field").and_then(|v| v.as_str()) {
                         write!(message, " (field: {field})").expect("infallible");
                     }
-                    // CAS/OCC conflict family (strategy/outline/world-kb 409s):
-                    // render the structured conflict fields so the CLI error
-                    // names the current revision, the conflicting path, and
-                    // the recovery hint (AR-83 #5 / PL-5 — never swallowed).
+                    // CAS/OCC conflict family (strategy/outline 409s): render
+                    // the structured conflict fields so the CLI error names
+                    // the current revision, the conflicting path, and the
+                    // recovery hint (AR-83 #5 / PL-5 — never swallowed).
+                    // NOTE: world-kb 409s (`WorldKbConflict`) serialize
+                    // `current_version` + `entity_id` instead — this renderer
+                    // does NOT cover them.
                     if let Some(rev) = details
                         .get("current_revision")
                         .and_then(serde_json::Value::as_u64)

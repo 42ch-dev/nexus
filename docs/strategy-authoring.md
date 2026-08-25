@@ -335,8 +335,10 @@ observed on the last canonical read, e.g. `nexus42 preset show
 my-strategy`). A stale revision returns 409 `strategy_conflict` naming the
 current revision, the conflicting path, and a recovery hint — re-read the
 Strategy and reapply with the new revision. Embedded/system presets are
-read-only (`strategy_update_forbidden`); only user bundles under
-`~/.nexus42/presets/<id>/` are patchable.
+read-only; only user bundles under `~/.nexus42/presets/<id>/` are patchable
+(the daemon surfaces the rejection as a 400 `bad_request` — its public
+`error_code()` allowlist does not passthrough the internal
+`strategy_update_forbidden` code).
 
 ## Worked examples
 

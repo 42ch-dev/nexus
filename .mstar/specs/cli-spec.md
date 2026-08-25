@@ -680,16 +680,24 @@ Rules:
   `recovery_hint` — and `--help` documents the retry guidance: re-read the
   Strategy and reapply with the new revision. Flock contention between
   concurrent writers rides the same 409 family.
-- **Named error surface.** 400 `strategy_invalid`, 404 (unknown strategy /
-  state), 422 `strategy_validation_failed`, and the transition field errors
-  (`strategy_transition_missing_old_target`, `strategy_transition_not_found`,
-  `strategy_transition_duplicate`, `strategy_self_loop`, …) surface via the
-  standard `[code]` envelope with non-zero exit — never a generic "request
-  failed".
+- **Named error surface.** The daemon's public `error_code()` allowlist
+  passthroughs only a closed set of strategy codes; the CLI surfaces exactly
+  those wire codes via the standard `[code]` envelope with non-zero exit —
+  never a generic "request failed":
+  - 409 `strategy_conflict` (stale `--base-revision`; renders
+    `current_revision` + `conflicting_path` + `recovery_hint`),
+  - 404 `not_found` (unknown strategy / state),
+  - 422 `strategy_validation_failed`,
+  - 400 `strategy_self_loop` / `strategy_transition_duplicate` (passthrough
+    allowlist), and
+  - 400 `bad_request` for all other 400s (the daemon remaps internal codes
+    such as `strategy_invalid`, `strategy_update_forbidden`,
+    `strategy_transition_missing_old_target`, `strategy_transition_not_found`
+    to the coarse public `bad_request`).
 - **Write bodies are typed long flags** (AR-83 #4); prompt bodies come from
   `--file` or stdin (`-`), matching the `creator soul` stdin convention.
-- **User presets only.** The daemon rejects embedded/system presets with
-  `strategy_update_forbidden` (read-only) — surfaced named.
+- **User presets only.** The daemon rejects embedded/system presets
+  (read-only); the CLI surfaces the resulting 400 as `bad_request`.
 
 ### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
 
