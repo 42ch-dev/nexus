@@ -11,6 +11,10 @@
 
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
+use nexus_contracts::daemon_api::memory::{
+    CountPendingReviewsResponse, DeletePendingReviewResponse, ListMemoryFragmentsResponse,
+    ListPendingReviewsResponse, ReviewResponse,
+};
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Write;
 use std::time::Duration;
@@ -302,6 +306,30 @@ impl DaemonClient {
         Ok(data)
     }
 
+    /// Send a DELETE request expecting a success status with no meaningful
+    /// body (the daemon's 204 No Content deletes — reading progress /
+    /// annotations). Unlike [`Self::delete`], the response body is never
+    /// parsed: a 204 response is empty and would fail JSON deserialization.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` if the daemon returns a non-success HTTP
+    /// status, or a network error if the request fails.
+    #[allow(clippy::future_not_send)]
+    pub async fn delete_no_content(&self, path: &str) -> Result<()> {
+        let url = format!("{}{}", self.base_url, path);
+        let resp = self
+            .send_authenticated(self.http.delete(&url), path)
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            return Err(Self::parse_error_response(&url, status, resp).await);
+        }
+
+        Ok(())
+    }
+
     /// Send a PUT request with JSON body.
     ///
     /// # Errors
@@ -567,14 +595,65 @@ impl DaemonClient {
                 let mut message = format!("[{}] {}", detail.code, detail.message);
 
                 // Append field details for validation errors if available
-                if let Some(ref details) = detail.details {
+                if let Some(details) = &detail.details {
                     if let Some(field) = details.get("field").and_then(|v| v.as_str()) {
                         write!(message, " (field: {field})").expect("infallible");
+                    }
+                    // CAS/OCC conflict family (strategy/outline 409s): render
+                    // the structured conflict fields so the CLI error names
+                    // the current revision, the conflicting node, the
+                    // conflicting path, and the recovery hint (AR-83 #5 /
+                    // PL-5 — never swallowed).
+                    if let Some(rev) = details
+                        .get("current_revision")
+                        .and_then(serde_json::Value::as_u64)
+                    {
+                        write!(message, " (current_revision: {rev})").expect("infallible");
+                    }
+                    if let Some(node) = details.get("node_id").and_then(|v| v.as_str()) {
+                        write!(message, " (node_id: {node})").expect("infallible");
+                    }
+                    if let Some(path) = details.get("conflicting_path").and_then(|v| v.as_str()) {
+                        write!(message, " (conflicting_path: {path})").expect("infallible");
+                    }
+                    if let Some(hint) = details.get("recovery_hint").and_then(|v| v.as_str()) {
+                        write!(message, " (recovery_hint: {hint})").expect("infallible");
+                    }
+                    // World-kb 409s (`WorldKbConflict`, F-12 / AR-85 #1):
+                    // the OCC conflict echoes the stale `expected_version`
+                    // as `current_version` + the `entity_id` — rendered so
+                    // the retry guidance names the exact fields the daemon
+                    // prints (never swallowed, PL-5).
+                    if let Some(ver) = details
+                        .get("current_version")
+                        .and_then(serde_json::Value::as_u64)
+                    {
+                        write!(message, " (current_version: {ver})").expect("infallible");
+                    }
+                    if let Some(entity) = details.get("entity_id").and_then(|v| v.as_str()) {
+                        write!(message, " (entity_id: {entity})").expect("infallible");
+                    }
+                    // Domain validation summaries (strategy/outline/world-kb
+                    // 422s): the daemon's top-level message is generic
+                    // ("Outline validation failed"); the actionable rule
+                    // text lives in `details.validation_summary.errors`.
+                    // Render each error so the CLI surfaces the real
+                    // violation (PL-5 — never swallowed).
+                    if let Some(errors) = details
+                        .get("validation_summary")
+                        .and_then(|v| v.get("errors"))
+                        .and_then(serde_json::Value::as_array)
+                    {
+                        for error in errors {
+                            if let Some(text) = error.as_str() {
+                                write!(message, " (validation: {text})").expect("infallible");
+                            }
+                        }
                     }
                 }
 
                 // Append request ID if available for support correlation
-                if let Some(ref req_id) = detail.request_id {
+                if let Some(req_id) = &detail.request_id {
                     write!(message, " (request_id: {req_id})").expect("infallible");
                 }
 
@@ -612,10 +691,7 @@ impl DaemonClient {
     ///
     /// Returns `CliError::DaemonNotReachable` if the daemon is not running
     /// (connection refused or timeout).
-    pub async fn review_pending_memories(
-        &self,
-        creator_id: &str,
-    ) -> Result<crate::api::models::ReviewResponse> {
+    pub async fn review_pending_memories(&self, creator_id: &str) -> Result<ReviewResponse> {
         let path = "/v1/daemon/memory/review";
         let body = serde_json::json!({ "creator_id": creator_id });
 
@@ -639,14 +715,13 @@ impl DaemonClient {
             return Err(Self::parse_error_response(&url, status, resp).await);
         }
 
-        let data: crate::api::models::ReviewResponse = resp.json().await?;
+        let data: ReviewResponse = resp.json().await?;
         Ok(data)
     }
 
-    /// List memory fragments from the daemon.
-    ///
     /// Retrieves stored memory fragments for the given creator, returning
-    /// their IDs and summaries.
+    /// the full `ListMemoryFragmentsResponse` wrapper (`{ "fragments": […] }`)
+    /// so `--json` can emit the wire DTO verbatim (AR-83 #3).
     ///
     /// # Errors
     ///
@@ -655,7 +730,7 @@ impl DaemonClient {
     pub async fn list_memory_fragments(
         &self,
         creator_id: &str,
-    ) -> Result<Vec<crate::api::models::FragmentRow>> {
+    ) -> Result<ListMemoryFragmentsResponse> {
         let path = "/v1/daemon/memory/fragments";
 
         let url = format!("{}{}?creator_id={}", self.base_url, path, creator_id);
@@ -675,8 +750,8 @@ impl DaemonClient {
             return Err(Self::parse_error_response(&url, status, resp).await);
         }
 
-        let wrapper: crate::api::models::ListFragmentsResponse = resp.json().await?;
-        Ok(wrapper.fragments)
+        let wrapper: ListMemoryFragmentsResponse = resp.json().await?;
+        Ok(wrapper)
     }
 
     // ─── Pending review methods ──────────────────────────────────────────
@@ -691,7 +766,7 @@ impl DaemonClient {
     pub async fn list_pending_reviews(
         &self,
         creator_id: &str,
-    ) -> Result<crate::api::models::ListPendingReviewsResponse> {
+    ) -> Result<ListPendingReviewsResponse> {
         let path = "/v1/daemon/memory/pending-review";
 
         let url = format!("{}{}?creator_id={}", self.base_url, path, creator_id);
@@ -711,7 +786,41 @@ impl DaemonClient {
             return Err(Self::parse_error_response(&url, status, resp).await);
         }
 
-        let data: crate::api::models::ListPendingReviewsResponse = resp.json().await?;
+        let data: ListPendingReviewsResponse = resp.json().await?;
+        Ok(data)
+    }
+
+    /// Count pending reviews for a creator via daemon API.
+    ///
+    /// `GET /v1/daemon/memory/pending-review/count?creator_id=...`
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::DaemonNotReachable` if the daemon is not running.
+    pub async fn count_pending_reviews(
+        &self,
+        creator_id: &str,
+    ) -> Result<CountPendingReviewsResponse> {
+        let path = "/v1/daemon/memory/pending-review/count";
+
+        let url = format!("{}{}?creator_id={}", self.base_url, path, creator_id);
+        let resp = match self.send_authenticated(self.http.get(&url), path).await {
+            Ok(resp) => resp,
+            Err(e) => {
+                if let CliError::Api { .. } = &e {
+                    return Err(e);
+                }
+                // V1.43 (P1 §3): daemon not reachable → canonical remediation
+                return Err(CliError::daemon_not_reachable_with_remediation());
+            }
+        };
+
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            return Err(Self::parse_error_response(&url, status, resp).await);
+        }
+
+        let data: CountPendingReviewsResponse = resp.json().await?;
         Ok(data)
     }
 
@@ -726,7 +835,7 @@ impl DaemonClient {
         &self,
         pending_id: &str,
         creator_id: &str,
-    ) -> Result<crate::api::models::DeletePendingReviewResponse> {
+    ) -> Result<DeletePendingReviewResponse> {
         let path = format!("/v1/daemon/memory/pending-review/{pending_id}");
 
         let url = format!("{}{}?creator_id={}", self.base_url, path, creator_id);
@@ -746,7 +855,7 @@ impl DaemonClient {
             return Err(Self::parse_error_response(&url, status, resp).await);
         }
 
-        let data: crate::api::models::DeletePendingReviewResponse = resp.json().await?;
+        let data: DeletePendingReviewResponse = resp.json().await?;
         Ok(data)
     }
 }

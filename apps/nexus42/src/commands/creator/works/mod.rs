@@ -23,6 +23,7 @@ use nexus_contracts::local::schedule::http::AddScheduleRequest;
 
 pub mod chronology;
 pub mod cron;
+pub mod outline;
 
 /// Work management subcommands (DF-60 §6.2H).
 #[derive(Debug, Subcommand)]
@@ -199,6 +200,39 @@ pub enum WorksCommand {
         #[command(subcommand)]
         command: chronology::ChronologyCommand,
     },
+    // ── V1.175 P1 Task 3: outline/chapter/timeline patch leaves (group 2) ──
+    /// Show / patch the work outline (V1.72 canvas read + structure patch).
+    ///
+    /// Thin daemon-HTTP leaves over the existing canvas routes (AR-84 group
+    /// 2). All writes are CAS-guarded with `--base-revision`; a stale
+    /// revision returns 409 `outline_conflict` (current revision, node,
+    /// conflicting path, recovery hint). Re-read the outline (`outline
+    /// show`) and reapply with the new revision.
+    Outline {
+        #[command(subcommand)]
+        command: outline::OutlineCommand,
+    },
+    /// Patch a chapter's outline-node metadata (V1.72 outline canvas).
+    ///
+    /// **Route-family guard:** targets the outline **node** route
+    /// `POST /v1/daemon/works/:work_id/chapters/:n/patch` — NOT the V1.65
+    /// chapter-**content** `PATCH /v1/daemon/works/:work_id/chapters/:n`
+    /// (different DTO family, not covered here). CAS-guarded with
+    /// `--base-revision`; a stale revision returns 409 `outline_conflict`
+    /// (re-read the outline and reapply).
+    Chapter {
+        #[command(subcommand)]
+        command: outline::ChapterCommand,
+    },
+    /// Patch the work timeline (V1.72 canvas): add/remove events, attach to
+    /// chapters, and link/unlink foreshadow edges.
+    ///
+    /// CAS-guarded with `--base-revision`; a stale revision returns 409
+    /// `outline_conflict` (re-read the outline and reapply).
+    Timeline {
+        #[command(subcommand)]
+        command: outline::TimelineCommand,
+    },
 
     // ── Rejected subcommands (Grill #10/#11) ──────────────────────────
     // `creator works start` and `creator works create` are NOT available.
@@ -268,6 +302,88 @@ pub enum FindingsCommand {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
+
+    // ── V1.175 P1 Task 4: findings triage leaves (group 8, AR-87) ──────
+    /// List findings for a Work (`GET /v1/daemon/works/:work_id/findings`).
+    ///
+    /// Optional `--status` / `--severity` filters. `--json` emits the
+    /// `ListFindingsResponse` DTO verbatim.
+    List {
+        /// Work reference (wrk_...). Omit to use pool active Work.
+        work_id: Option<String>,
+        /// Filter by status (single value or comma-separated list, e.g.
+        /// `open,triaged`).
+        #[arg(long)]
+        status: Option<String>,
+        /// Filter by severity (`info`, `minor`, `major`, `blocker`).
+        #[arg(long)]
+        severity: Option<String>,
+        /// Emit machine-readable JSON (the `ListFindingsResponse` DTO
+        /// verbatim) instead of human text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Set a finding's status through the work-findings PATCH route
+    /// (`PATCH /v1/daemon/works/:work_id/findings/:finding_id`).
+    ///
+    /// One generic verb over one route (AR-87 #3 — no `triage|resolve`
+    /// sugar). `--status` accepts exactly the closed lifecycle vocabulary:
+    /// `open`, `triaged`, `in_review`, `resolved`, `wont_fix`, `duplicate`.
+    /// Legal transitions:
+    ///   `open` → `triaged` | `in_review` | `resolved` | `wont_fix` | `duplicate`
+    ///   `triaged` → `in_review` | `resolved` | `wont_fix` | `duplicate`
+    ///   `in_review` → `resolved` | `wont_fix` | `duplicate`
+    ///   `resolved` / `wont_fix` / `duplicate` are terminal
+    /// `from == to` is rejected. An illegal transition returns 422
+    /// `invalid_transition` naming `from → to`.
+    SetStatus {
+        /// Finding ID (fnd_...) to update.
+        finding_id: String,
+        /// Work reference (wrk_...) the finding belongs to.
+        #[arg(long, value_name = "WORK_REF")]
+        work: String,
+        /// New status (closed lifecycle vocabulary above).
+        #[arg(long, value_enum)]
+        status: FindingStatusArg,
+        /// New routing hint (`write`, `brainstorm`, `none`, `master`).
+        #[arg(long)]
+        target_executor: Option<String>,
+        /// Emit machine-readable JSON (the `FindingDetailResponse` DTO
+        /// verbatim) instead of human text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+}
+
+/// `--status` value for `creator works findings set-status` (V1.49 F6
+/// closed lifecycle vocabulary, AR-87).
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum FindingStatusArg {
+    Open,
+    Triaged,
+    /// In review.
+    #[value(name = "in_review")]
+    InReview,
+    Resolved,
+    /// Won't fix.
+    #[value(name = "wont_fix")]
+    WontFix,
+    Duplicate,
+}
+
+impl FindingStatusArg {
+    /// Wire token (`snake_case`) for the PATCH body.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Triaged => "triaged",
+            Self::InReview => "in_review",
+            Self::Resolved => "resolved",
+            Self::WontFix => "wont_fix",
+            Self::Duplicate => "duplicate",
+        }
+    }
 }
 
 /// Layer 2 rules subcommands (V1.48 P2).
@@ -439,6 +555,9 @@ pub async fn handle_works(cmd: WorksCommand, config: &CliConfig) -> Result<()> {
         WorksCommand::Chronology { command } => {
             chronology::handle_chronology(command, config).await
         }
+        WorksCommand::Outline { command } => outline::run(command, config).await,
+        WorksCommand::Chapter { command } => outline::run_chapter(command, config).await,
+        WorksCommand::Timeline { command } => outline::run_timeline(command, config).await,
         WorksCommand::Start { .. } => Err(crate::errors::CliError::Other(
             "`creator works start` is not available. \
              To create a new Work, use `nexus42 creator bootstrap`."

@@ -32,6 +32,8 @@ use nexus_contracts::local::orchestration::http::{
 
 const ORCHESTRATION_BASE: &str = "/v1/daemon/orchestration";
 
+pub mod patch;
+
 #[derive(Debug, Subcommand)]
 pub enum PresetCommand {
     /// List all discoverable presets (embedded + user + system)
@@ -85,6 +87,20 @@ pub enum PresetCommand {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
+    /// Patch a strategy canvas node (state, transition, or prompt template)
+    ///
+    /// CAS-guarded writes over the existing strategy patch routes
+    /// (V1.175 P1 Task 2, group 1). Every leaf takes `--base-revision`;
+    /// a stale revision returns 409 `strategy_conflict` (current revision,
+    /// node, conflicting path, recovery hint). Re-read the Strategy and
+    /// reapply with the new revision.
+    ///
+    /// Retry guidance: on `strategy_conflict`, re-read the Strategy
+    /// (e.g. `preset show`) and reapply with the new revision.
+    Patch {
+        #[command(subcommand)]
+        command: patch::PatchCommand,
+    },
 }
 
 /// Run the `nexus42 preset` command group.
@@ -106,6 +122,7 @@ pub async fn run(cmd: PresetCommand, config: &CliConfig) -> Result<()> {
             crate::commands::creator::run::handle_run(command, config).await
         }
         PresetCommand::Trigger { id, json } => trigger_preset(config, &id, json).await,
+        PresetCommand::Patch { command } => patch::run(command, config).await,
     }
 }
 
@@ -742,6 +759,140 @@ mod tests {
     fn preset_subcommand_required() {
         let result = PresetCli::try_parse_from(["preset"]);
         assert!(result.is_err());
+    }
+
+    // ── V1.175 P1 Task 2: strategy patch leaves ────────────────────────
+
+    #[test]
+    fn preset_patch_state_parses() {
+        let cmd = PresetCli::try_parse_from([
+            "preset",
+            "patch",
+            "state",
+            "my-strategy",
+            "start",
+            "--base-revision",
+            "3",
+            "--label",
+            "begin",
+            "--description",
+            "Renamed start",
+            "--json",
+        ])
+        .unwrap();
+        match cmd.command {
+            PresetCommand::Patch { command } => match command {
+                patch::PatchCommand::State {
+                    strategy_id,
+                    state_id,
+                    base_revision,
+                    label,
+                    description,
+                    json,
+                } => {
+                    assert_eq!(strategy_id, "my-strategy");
+                    assert_eq!(state_id, "start");
+                    assert_eq!(base_revision, 3);
+                    assert_eq!(label.as_deref(), Some("begin"));
+                    assert_eq!(description.as_deref(), Some("Renamed start"));
+                    assert!(json);
+                }
+                other => panic!("expected state, got {other:?}"),
+            },
+            other => panic!("expected patch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn preset_patch_transition_parses() {
+        let cmd = PresetCli::try_parse_from([
+            "preset",
+            "patch",
+            "transition",
+            "my-strategy",
+            "--base-revision",
+            "2",
+            "--source-state",
+            "start",
+            "--op",
+            "create",
+            "--new-target",
+            "end",
+            "--transition-kind",
+            "branch",
+            "--condition",
+            "_context._judge_result == true",
+        ])
+        .unwrap();
+        match cmd.command {
+            PresetCommand::Patch { command } => match command {
+                patch::PatchCommand::Transition {
+                    strategy_id,
+                    base_revision,
+                    source_state,
+                    op,
+                    old_target,
+                    new_target,
+                    condition,
+                    transition_kind,
+                    json,
+                } => {
+                    assert_eq!(strategy_id, "my-strategy");
+                    assert_eq!(base_revision, 2);
+                    assert_eq!(source_state, "start");
+                    assert!(matches!(op, patch::TransitionOpArg::Create));
+                    assert_eq!(old_target, None);
+                    assert_eq!(new_target.as_deref(), Some("end"));
+                    assert_eq!(condition.as_deref(), Some("_context._judge_result == true"));
+                    assert!(matches!(
+                        transition_kind,
+                        Some(patch::TransitionKindArg::Branch)
+                    ));
+                    assert!(!json);
+                }
+                other => panic!("expected transition, got {other:?}"),
+            },
+            other => panic!("expected patch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn preset_patch_prompt_parses() {
+        let cmd = PresetCli::try_parse_from([
+            "preset",
+            "patch",
+            "prompt",
+            "my-strategy",
+            "start",
+            "--base-revision",
+            "1",
+            "--template-ref",
+            "prompts/start.md",
+            "--file",
+            "-",
+        ])
+        .unwrap();
+        match cmd.command {
+            PresetCommand::Patch { command } => match command {
+                patch::PatchCommand::Prompt {
+                    strategy_id,
+                    state_id,
+                    base_revision,
+                    template_ref,
+                    file,
+                    json,
+                } => {
+                    assert_eq!(strategy_id, "my-strategy");
+                    assert_eq!(state_id, "start");
+                    assert_eq!(base_revision, 1);
+                    assert_eq!(template_ref, "prompts/start.md");
+                    assert_eq!(file, "-");
+                    assert!(!json);
+                }
+                other => panic!("expected prompt, got {other:?}"),
+            },
+            other => panic!("expected patch, got {other:?}"),
+        }
     }
 
     // ── W-002/F-001: list rows from the grouped endpoint ─────────────────
