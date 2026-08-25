@@ -409,12 +409,7 @@ async fn progress_clear(
         &[("work_id", work_id), ("chapter", &chapter.to_string())],
     );
     client.delete_no_content(&path).await?;
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({ "ok": true }))?
-        );
-    } else {
+    if !json {
         println!("Cleared reading progress for {work_id} chapter {chapter}.");
     }
     Ok(())
@@ -551,12 +546,7 @@ async fn annotation_patch(
 async fn annotation_remove(client: &DaemonClient, annotation_id: &str, json: bool) -> Result<()> {
     let path = format!("/v1/daemon/reading/annotations/{annotation_id}");
     client.delete_no_content(&path).await?;
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({ "ok": true }))?
-        );
-    } else {
+    if !json {
         println!("Removed annotation {annotation_id}.");
     }
     Ok(())

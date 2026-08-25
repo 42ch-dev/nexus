@@ -614,6 +614,8 @@ Rules:
 - `search` and `add` (World scope) do not have canonical equivalents; they continue to operate inline but emit the deprecation warning.
 - `remove` with World scope now gates on **world ownership** (the legacy path did not enforce auth; forwarding through `kb_delete` adds the `WORLD_KB_FORBIDDEN` gate, which is the correct behavior per entity-scope-model §5.5).
 - The `--scope world` flag on `creator kb` variants is preserved for backward compatibility; it will be removed in V1.53.
+- Work-scope operations (`creator kb --scope work`, the default) are **unaffected** by this consolidation.
+
 ### 6.2G.3 V1.175 P1 amendment — reading, fork, and inspector leaves (RN-1 §5 groups 3, 5, 6)
 
 Thin daemon-HTTP leaves over **existing** routes (AR-83 #1; no daemon route
@@ -650,8 +652,9 @@ Rules:
   per branch, not list-all-forks"): a fork branch carries exactly one canon
   `fork_created` marker; the root branch carries none. `fork list` reads one
   branch (current by default, `--branch` to target a fork branch).
-
-### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
+- **204 deletes** (`progress clear`, `annotation remove`) print empty stdout
+  under `--json` — the daemon returns 204 No Content, so there is no DTO to
+  emit (AR-83 #3: `--json` emits the daemon DTO verbatim; a 204 has none).
 
 ### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
 

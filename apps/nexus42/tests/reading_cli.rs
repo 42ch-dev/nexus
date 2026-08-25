@@ -172,6 +172,71 @@ async fn progress_clear_removes_row() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn progress_clear_json_prints_empty_stdout() {
+    let d = LiveDaemon::start().await;
+    let work_id = seed_work(&d).await;
+
+    let _ = d
+        .cli(&[
+            "creator",
+            "reading",
+            "progress",
+            "set",
+            &work_id,
+            "--chapter",
+            "2",
+            "--scroll",
+            "1000",
+        ])
+        .await;
+    let out = d
+        .cli(&[
+            "creator",
+            "reading",
+            "progress",
+            "clear",
+            &work_id,
+            "--chapter",
+            "2",
+            "--json",
+        ])
+        .await;
+    assert!(
+        out.status.success(),
+        "clear --json failed: {}",
+        stderr(&out)
+    );
+    assert!(
+        stdout(&out).trim().is_empty(),
+        "--json 204 delete should print empty stdout: {}",
+        stdout(&out)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn progress_clear_unknown_work_surfaces_daemon_error() {
+    let d = LiveDaemon::start().await;
+
+    let out = d
+        .cli(&[
+            "creator",
+            "reading",
+            "progress",
+            "clear",
+            "wrk_does_not_exist",
+            "--chapter",
+            "1",
+        ])
+        .await;
+    assert!(!out.status.success(), "unknown work must fail");
+    let err = stderr(&out);
+    assert!(
+        err.contains("404") || err.to_lowercase().contains("not found"),
+        "stderr should surface the daemon 404: {err}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn progress_set_rejects_out_of_range_scroll() {
     let d = LiveDaemon::start().await;
     let work_id = seed_work(&d).await;
@@ -348,6 +413,141 @@ async fn annotation_lifecycle_round_trip() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn annotation_add_json_emits_dto() {
+    let d = LiveDaemon::start().await;
+    let work_id = seed_work(&d).await;
+
+    let out = d
+        .cli(&[
+            "creator",
+            "reading",
+            "annotation",
+            "add",
+            &work_id,
+            "--chapter",
+            "1",
+            "--start",
+            "0",
+            "--end",
+            "5",
+            "--selected-text",
+            "text",
+            "--color",
+            "blue",
+            "--json",
+        ])
+        .await;
+    assert!(out.status.success(), "add --json failed: {}", stderr(&out));
+    let json: Value = serde_json::from_str(&stdout(&out)).expect("json annotation");
+    let annotation_id = json["annotation_id"].as_str().expect("annotation id");
+    assert!(annotation_id.starts_with("ann_"), "{annotation_id}");
+    assert_eq!(json["color"], "blue");
+    assert_eq!(json["selected_text"], "text");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn annotation_patch_json_emits_dto() {
+    let d = LiveDaemon::start().await;
+    let work_id = seed_work(&d).await;
+
+    let add = d
+        .cli(&[
+            "creator",
+            "reading",
+            "annotation",
+            "add",
+            &work_id,
+            "--chapter",
+            "1",
+            "--start",
+            "0",
+            "--end",
+            "5",
+            "--selected-text",
+            "text",
+            "--color",
+            "blue",
+            "--json",
+        ])
+        .await;
+    assert!(add.status.success(), "add failed: {}", stderr(&add));
+    let added: Value = serde_json::from_str(&stdout(&add)).expect("json added");
+    let annotation_id = added["annotation_id"].as_str().expect("annotation id");
+
+    let out = d
+        .cli(&[
+            "creator",
+            "reading",
+            "annotation",
+            "patch",
+            annotation_id,
+            "--color",
+            "green",
+            "--json",
+        ])
+        .await;
+    assert!(
+        out.status.success(),
+        "patch --json failed: {}",
+        stderr(&out)
+    );
+    let json: Value = serde_json::from_str(&stdout(&out)).expect("json patched");
+    assert_eq!(json["annotation_id"], annotation_id);
+    assert_eq!(json["color"], "green");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn annotation_remove_json_prints_empty_stdout() {
+    let d = LiveDaemon::start().await;
+    let work_id = seed_work(&d).await;
+
+    let add = d
+        .cli(&[
+            "creator",
+            "reading",
+            "annotation",
+            "add",
+            &work_id,
+            "--chapter",
+            "1",
+            "--start",
+            "0",
+            "--end",
+            "5",
+            "--selected-text",
+            "text",
+            "--color",
+            "blue",
+            "--json",
+        ])
+        .await;
+    assert!(add.status.success(), "add failed: {}", stderr(&add));
+    let added: Value = serde_json::from_str(&stdout(&add)).expect("json added");
+    let annotation_id = added["annotation_id"].as_str().expect("annotation id");
+
+    let out = d
+        .cli(&[
+            "creator",
+            "reading",
+            "annotation",
+            "remove",
+            annotation_id,
+            "--json",
+        ])
+        .await;
+    assert!(
+        out.status.success(),
+        "remove --json failed: {}",
+        stderr(&out)
+    );
+    assert!(
+        stdout(&out).trim().is_empty(),
+        "--json 204 delete should print empty stdout: {}",
+        stdout(&out)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn annotation_add_rejects_invalid_color() {
     let d = LiveDaemon::start().await;
     let work_id = seed_work(&d).await;
@@ -391,5 +591,51 @@ async fn annotation_remove_unknown_id_surfaces_daemon_error() {
         stderr(&out).contains("404") || stderr(&out).to_lowercase().contains("not found"),
         "stderr should name the daemon 404: {}",
         stderr(&out)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn annotation_list_unknown_work_surfaces_daemon_error() {
+    let d = LiveDaemon::start().await;
+
+    let out = d
+        .cli(&[
+            "creator",
+            "reading",
+            "annotation",
+            "list",
+            "wrk_does_not_exist",
+            "--chapter",
+            "1",
+        ])
+        .await;
+    assert!(!out.status.success(), "unknown work must fail");
+    let err = stderr(&out);
+    assert!(
+        err.contains("404") || err.to_lowercase().contains("not found"),
+        "stderr should surface the daemon 404: {err}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn annotation_patch_unknown_id_surfaces_daemon_error() {
+    let d = LiveDaemon::start().await;
+
+    let out = d
+        .cli(&[
+            "creator",
+            "reading",
+            "annotation",
+            "patch",
+            "ann_missing",
+            "--color",
+            "pink",
+        ])
+        .await;
+    assert!(!out.status.success(), "unknown annotation must fail");
+    let err = stderr(&out);
+    assert!(
+        err.contains("404") || err.to_lowercase().contains("not found"),
+        "stderr should surface the daemon 404: {err}"
     );
 }

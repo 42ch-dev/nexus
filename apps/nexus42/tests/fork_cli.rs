@@ -242,3 +242,49 @@ async fn fork_create_foreign_world_rejected_403() {
         "stderr should surface the 403: {err}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fork_list_unknown_world_surfaces_daemon_error() {
+    let d = LiveDaemon::start().await;
+
+    let out = d
+        .cli(&["creator", "world", "fork", "list", "wld_does_not_exist"])
+        .await;
+    assert!(!out.status.success(), "unknown world must fail");
+    let err = stderr(&out);
+    assert!(
+        err.contains("404") || err.to_lowercase().contains("not found"),
+        "stderr should surface the daemon 404: {err}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fork_create_json_emits_dto() {
+    let d = LiveDaemon::start().await;
+    let (world_id, parent_branch, fork_point) = seed_world_with_fork_point(&d).await;
+
+    let out = d
+        .cli(&[
+            "creator",
+            "world",
+            "fork",
+            "create",
+            &world_id,
+            "--fork-point",
+            &fork_point,
+            "--label",
+            "alt-ending",
+            "--json",
+        ])
+        .await;
+    assert!(
+        out.status.success(),
+        "fork create --json failed: {}",
+        stderr(&out)
+    );
+    let json: Value = serde_json::from_str(&stdout(&out)).expect("json fork create");
+    let branch_id = json["branch_id"].as_str().expect("branch_id");
+    assert!(branch_id.starts_with("fbk_"), "{branch_id}");
+    assert_eq!(json["parent_branch_id"], parent_branch);
+    assert_eq!(json["forked_from_event_id"], fork_point);
+}

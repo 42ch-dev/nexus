@@ -174,8 +174,8 @@ async fn resolve_parent_branch(
     }
     Err(CliError::Other(format!(
         "fork-point event '{fork_point}' not found in the timeline of world '{world_id}' \
-         (canon/provisional first page). Pass --parent-branch <branch-id> to target a \
-         specific branch explicitly (list branches via `creator world fork list {world_id} --json`)."
+         (canon/provisional first page; the timeline read is single-branch). Pass \
+         --parent-branch <branch-id> to target a specific branch explicitly."
     )))
 }
 

@@ -5,9 +5,34 @@
 
 mod common;
 
+use axum::extract::State;
+use axum::Json;
 use common::LiveDaemon;
+use nexus_daemon_runtime::api::handlers::works::{create_work, CreateWorkRequest};
 use serde_json::Value;
 use std::process::Output;
+
+/// Seed one owned Work bound to the fixture's `wld_test_world`.
+async fn seed_work(d: &LiveDaemon) -> String {
+    let (_, Json(resp)) = create_work(
+        State(d.state.clone()),
+        Json(CreateWorkRequest {
+            title: "Inspector Test Novel".to_string(),
+            long_term_goal: "Write".to_string(),
+            initial_idea: "Idea".to_string(),
+            world_id: Some("wld_test_world".to_string()),
+            story_ref: None,
+            primary_preset_id: None,
+            client_request_id: None,
+            lineage_from_work_id: None,
+            set_pool_active: None,
+            work_profile: Some("novel".to_string()),
+        }),
+    )
+    .await
+    .expect("seed work via daemon handler");
+    resp.work_id
+}
 
 /// Seed the deterministic inspector happy path: an owned World plus one
 /// `constant`-activation lore row (always fires → non-empty placement).
@@ -80,6 +105,7 @@ async fn inspector_moment_json_emits_dto() {
 async fn inspector_moment_supports_work_and_stage_flags() {
     let d = LiveDaemon::start().await;
     let world_id = seed_inspector_world(&d).await;
+    let work_id = seed_work(&d).await;
 
     let out = d
         .cli(&[
@@ -87,6 +113,8 @@ async fn inspector_moment_supports_work_and_stage_flags() {
             "inspector",
             "moment",
             &world_id,
+            "--work",
+            &work_id,
             "--stage",
             "produce",
             "--json",
@@ -94,11 +122,15 @@ async fn inspector_moment_supports_work_and_stage_flags() {
         .await;
     assert!(
         out.status.success(),
-        "inspector with --stage failed: {}",
+        "inspector with --work/--stage failed: {}",
         stderr(&out)
     );
     let json: Value = serde_json::from_str(&stdout(&out)).expect("json packet");
     assert!(json["modules"].is_object(), "{json}");
+    // No directive is seeded, so the packet's moment_directive is the
+    // "none" status shape — success itself proves the daemon accepted the
+    // work→world binding (a mismatch surfaces 400).
+    assert_eq!(json["moment_directive"]["status"], "none", "{json}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

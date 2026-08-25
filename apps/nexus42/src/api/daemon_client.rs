@@ -302,7 +302,6 @@ impl DaemonClient {
         Ok(data)
     }
 
-    /// Send a PUT request with JSON body.
     /// Send a DELETE request expecting a success status with no meaningful
     /// body (the daemon's 204 No Content deletes — reading progress /
     /// annotations). Unlike [`Self::delete`], the response body is never
@@ -326,6 +325,8 @@ impl DaemonClient {
 
         Ok(())
     }
+
+    /// Send a PUT request with JSON body.
     ///
     /// # Errors
     ///
