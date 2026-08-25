@@ -178,10 +178,7 @@ async fn run_scripted_agent(
                     .expect("MCP initialize handshake completes");
 
                 // tools/list — full-registry catalog.
-                let list = running
-                    .list_tools(None)
-                    .await
-                    .expect("tools/list succeeds");
+                let list = running.list_tools(None).await.expect("tools/list succeeds");
                 let mut listed: Vec<String> =
                     list.tools.iter().map(|t| t.name.to_string()).collect();
                 listed.sort();
@@ -192,9 +189,7 @@ async fn run_scripted_agent(
                     .await
                     .expect("tools/call succeeds");
                 assert_ne!(call.is_error, Some(true), "peer call not an error");
-                let call_structured = call
-                    .structured_content
-                    .expect("structured result present");
+                let call_structured = call.structured_content.expect("structured result present");
 
                 let _ = evidence_tx.send(McpProbeEvidence {
                     listed_tools: listed.clone(),
@@ -246,10 +241,7 @@ async fn c1_acp_stdio_injection_spawns_child_and_calls_peer_tool() {
                     ]),
             )]);
 
-            let resp = connection
-                .send_request(session_req)
-                .block_task()
-                .await?;
+            let resp = connection.send_request(session_req).block_task().await?;
             assert_eq!(resp.session_id.to_string(), "c1-probe-session");
             Ok(())
         })

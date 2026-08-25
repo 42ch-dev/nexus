@@ -167,10 +167,7 @@ async fn run_scripted_agent(
                     .expect("MCP initialize handshake completes");
 
                 // tools/list — full-registry catalog.
-                let list = running
-                    .list_tools(None)
-                    .await
-                    .expect("tools/list succeeds");
+                let list = running.list_tools(None).await.expect("tools/list succeeds");
                 let mut listed: Vec<String> =
                     list.tools.iter().map(|t| t.name.to_string()).collect();
                 listed.sort();
@@ -181,9 +178,7 @@ async fn run_scripted_agent(
                     .await
                     .expect("tools/call succeeds");
                 assert_ne!(call.is_error, Some(true), "peer call not an error");
-                let call_structured = call
-                    .structured_content
-                    .expect("structured result present");
+                let call_structured = call.structured_content.expect("structured result present");
 
                 let _ = evidence_tx.send(McpSessionEvidence {
                     listed_tools: listed.clone(),
@@ -230,10 +225,7 @@ async fn mcp_session_wiring_agent_sees_full_catalog_and_calls_peer_tool() {
                 nexus_acp_host::nexus_mcp_stdio_server(env!("CARGO_BIN_EXE_nexus42")),
             ]);
 
-            let resp = connection
-                .send_request(session_req)
-                .block_task()
-                .await?;
+            let resp = connection.send_request(session_req).block_task().await?;
             assert_eq!(resp.session_id.to_string(), "t1-session");
             Ok(())
         })

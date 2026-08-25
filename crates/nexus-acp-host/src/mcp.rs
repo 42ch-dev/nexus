@@ -50,10 +50,7 @@ mod tests {
         };
         assert_eq!(stdio.name, NEXUS_MCP_SERVER_NAME);
         assert_eq!(stdio.command, PathBuf::from("/usr/bin/nexus42"));
-        assert_eq!(
-            stdio.args,
-            vec!["mcp".to_string(), "serve".to_string()]
-        );
+        assert_eq!(stdio.args, vec!["mcp".to_string(), "serve".to_string()]);
         assert!(stdio.env.is_empty(), "no env carried by the surface");
         assert!(stdio.meta.is_none());
     }
