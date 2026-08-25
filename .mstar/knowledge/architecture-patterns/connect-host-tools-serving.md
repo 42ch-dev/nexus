@@ -1,13 +1,24 @@
 ---
 module: nexus-spoke-adapter, apps/nexus42
 date: 2026-08-22
-problem_type: knowledge
+problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
 plan_id: 2026-08-22-v1.173-p0-connect-tools-serving
-tags: [spoke-connect, connect-host, tools, capability, dispatch, authorization, df-84, host-capability-manifest]
-applies_when: serving named schema-described tools over the Connect host; extending the served op surface; adopting a spoke `tools.*` capability
-last_updated: 2026-08-22
+tags: 
+  - spoke-connect
+  - connect-host
+  - tools
+  - capability
+  - dispatch
+  - authorization
+  - df-84
+  - host-capability-manifest
+applies_when: 
+  - "serving named schema-described tools over the Connect host"
+  - "extending the served op surface"
+  - "adopting a spoke `tools.*` capability"
+last_updated: 2026-08-25
 ---
 
 # Connect Host `tools.*` serving (DF-84)
@@ -87,7 +98,10 @@ stay behind the world gate.
 The Connect host is a separate OS process: handlers can reach `NexusAdapter`
 ports (observed peers, workspace SQLite via WAL, host-local module dir) —
 **never** daemon HTTP, the daemon-side V1.172 capability registry, or
-`ToolInvokePort` (that is DF-85, client-side, evaluated not implemented).
+`ToolInvokePort` (DF-85 consumer side is a **daemon** lane, not this
+process — it landed in V1.174 as WS registration + MCP exposure; see
+`architecture-patterns/peer-tool-registration-exposure-lanes.md`; this
+serving face is unchanged, V1.173 DF-84 frozen).
 - `list_observed_peers` → `list_observed_peer_hosts`, omit `last_peer_id`,
   empty → `{ "peers": [] }`, never fabricate.
 - `list_modules` → scan `~/.nexus42/modules/` via `is_safe_module_id` +
@@ -101,7 +115,7 @@ ports (observed peers, workspace SQLite via WAL, host-local module dir) —
   { "result": <object> }` — the generic spoke convention so any spoke client
   works without a Nexus-specific envelope.
 - Missing/non-object/non-empty `arguments` → `invalid_input` **before** any
-  adapter read (pin with a unit test — QC F-001).
+  adapter read (pin with a unit test).
 - Tools reuse the existing `BridgeLimits` lane and response cap; no second
   pool. Refusal has zero side effects.
 
@@ -115,10 +129,10 @@ machine-checked lockstep makes drift loud, not silent.
 
 ## When to apply
 
-- Extending the Connect served surface (more `tools.nexus.*` tools).
-- Landing DF-85 (client-side peer-tool invocation) — the remote layer
-  (`remote_adapter` / `multi_peer_router` / `responder`) exists; adoption
-  requires `ToolInvokePort`, product-triggered.
+- Extending the Connect served surface (more `tools.nexus.*` tools) — see
+  also the daemon-side consumer lane (DF-85 landed V1.174:
+  `architecture-patterns/peer-tool-registration-exposure-lanes.md`); the
+  connect-host serving face here is process-local and unchanged.
 - Adding a new spoke `tools.*` namespace (not `nexus`): extend
   `LOCAL_NAMESPACES` + validate_manifest_tools + the honesty family.
 
