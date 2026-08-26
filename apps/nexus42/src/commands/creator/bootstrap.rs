@@ -7,11 +7,19 @@
 //!
 //! This module extracts the V1.33 `run start` handler into a top-level command.
 //! Flags are preserved 1:1; hint strings updated to V1.45 command surface.
+//!
+//! V1.176 P0 T1 (AR-88): this module also hosts the shared local-creator
+//! bootstrap helper [`bootstrap_local_creator`] — the single identity-mint +
+//! workspace-row materialization sequence both named local entry points
+//! (`creator register --local`, `system identity create --persistent`) call.
 
+use crate::commands::system::identity::open_global_db;
 use crate::config::CliConfig;
-use crate::errors::Result;
+use crate::errors::{CliError, Result};
 use clap::Args;
 use nexus_contracts::local::schedule::http::AddScheduleRequest;
+use nexus_creator::local_identity::LocalIdentity;
+use nexus_local_db::create_local_identity;
 
 /// Arguments for `creator bootstrap` (V1.45 P2).
 ///
@@ -493,6 +501,84 @@ pub async fn handle_bootstrap(args: BootstrapArgs, config: &CliConfig) -> Result
     Ok(())
 }
 
+/// Shared local-creator bootstrap helper (V1.176 P0 T1, AR-88).
+///
+/// Owns the single identity-mint + workspace-row materialization sequence
+/// for both named local entry points: `creator register --local --name <n>`
+/// and `system identity create --persistent [--name <n>]`. There is exactly
+/// one minting + materialization sequence in the crate.
+///
+/// Converged end state (compass PL-3, checked by tests, not implied):
+/// 1. a persistent `ctr_local*` row in `~/.nexus42/state.db` `local_identities`;
+/// 2. that id is `active_creator_id` in the CLI config;
+/// 3. the workspace `creators` row exists in the per-creator+workspace db
+///    resolved by `config::resolve_state_db_path` (the same db `creator world
+///    create` FK-prechecks), written via `nexus_local_db::ensure_creator_row`.
+///
+/// The `creator-identities.json` cache is **not** written (AR-88 #3): it is
+/// best-effort display metadata for the platform path only; local display
+/// SSOT is `local_identities`.
+///
+/// Re-entrancy is idempotent (AR-88 #6): every store write is either an
+/// INSERT of a freshly minted random id or an idempotent upsert / config
+/// assignment, so a crash between stores leaves exactly the DF-83 partial
+/// (identity without row), which the next run repairs.
+///
+/// # Errors
+///
+/// Returns `CliError` if the identity database, config, or workspace db
+/// operations fail.
+pub(crate) async fn bootstrap_local_creator(name: Option<String>) -> Result<()> {
+    // R3(identity): reject empty or whitespace-only names at the helper front
+    // door — both entry points now enforce it here (AR-89 #1).
+    let trimmed_name = name.as_deref().map(str::trim).filter(|n| !n.is_empty());
+    if let Some(raw) = &name {
+        if raw.trim().is_empty() {
+            return Err(CliError::Other(
+                "Display name cannot be empty or whitespace-only.".to_string(),
+            ));
+        }
+    }
+
+    // Mint the persistent identity (fresh random `ctr_local*` id — INSERT
+    // cannot collide) and persist it to the global identity store.
+    let identity = LocalIdentity::create_persistent(trimmed_name);
+    let pool = open_global_db().await?;
+    create_local_identity(
+        &pool,
+        &identity.creator_id,
+        identity.identity_type.as_str(),
+        identity.display_name.as_deref(),
+        &identity.created_at,
+    )
+    .await?;
+
+    println!("Created persistent identity: {}", identity.creator_id);
+    if let Some(name) = &identity.display_name {
+        println!("  Name: {name}");
+    }
+    println!("  Stored in ~/.nexus42/state.db");
+
+    // Set as active creator (store 2 of 3).
+    let mut cli_config = CliConfig::load()?;
+    cli_config.active_creator_id = Some(identity.creator_id.clone());
+    cli_config.save()?;
+    println!("  Set as active identity.");
+
+    // Materialize the workspace `creators` row (store 3 of 3) in the same
+    // per-creator+workspace db `creator world create` FK-prechecks.
+    let db_path = crate::config::resolve_state_db_path(&cli_config)?;
+    let workspace_pool = crate::db::Schema::init(&db_path).await?;
+    let row_display_name = identity
+        .display_name
+        .clone()
+        .unwrap_or_else(|| identity.creator_id.clone());
+    nexus_local_db::ensure_creator_row(&workspace_pool, &identity.creator_id, &row_display_name)
+        .await?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -742,5 +828,146 @@ mod tests {
                 // is verified via e2e test (W-004).
             }
         }
+    }
+
+    // ── V1.176 P0 T1 (AR-88): shared bootstrap helper ──────────────
+
+    /// The helper converges all three stores (compass PL-3): a persistent
+    /// `ctr_local*` row in `local_identities`, that id as `active_creator_id`,
+    /// and the workspace `creators` row in the per-creator+workspace db —
+    /// so `creator world create` succeeds immediately after.
+    #[tokio::test]
+    async fn bootstrap_local_creator_converges_three_stores() {
+        let _home = crate::testutil::isolated_home();
+
+        bootstrap_local_creator(Some("  Alice  ".to_string()))
+            .await
+            .expect("bootstrap should succeed");
+
+        // Store 1: persistent row in the global identity store.
+        let pool = open_global_db().await.expect("open global db");
+        let identities = nexus_local_db::list_local_identities(&pool)
+            .await
+            .expect("list local identities");
+        assert_eq!(identities.len(), 1, "exactly one identity minted");
+        let row = &identities[0];
+        assert!(
+            row.creator_id.starts_with("ctr_local"),
+            "expected ctr_local* id, got {}",
+            row.creator_id
+        );
+        assert_eq!(row.identity_type, "persistent");
+        assert_eq!(
+            row.display_name.as_deref(),
+            Some("Alice"),
+            "R3-trimmed name"
+        );
+
+        // Store 2: active creator id in the CLI config.
+        let config = CliConfig::load().expect("reload config");
+        assert_eq!(
+            config.active_creator_id.as_deref(),
+            Some(row.creator_id.as_str()),
+            "minted id must be active"
+        );
+
+        // Store 3: workspace `creators` row in the same db `creator world
+        // create` FK-prechecks.
+        let db_path = crate::config::resolve_state_db_path(&config).expect("resolve state db path");
+        let workspace_pool = crate::db::Schema::init(&db_path)
+            .await
+            .expect("init workspace pool");
+        let creator_exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM creators WHERE creator_id = ? AND status = 'active')",
+        )
+        .bind(&row.creator_id)
+        .fetch_one(&workspace_pool)
+        .await
+        .expect("query workspace creators row");
+        assert_eq!(
+            creator_exists, 1,
+            "workspace creators row must exist for the bootstrapped creator"
+        );
+
+        // `creator world create` succeeds immediately (no FK miss).
+        let result = nexus_local_db::create_world(
+            &workspace_pool,
+            &row.creator_id,
+            "Test World",
+            "test-world",
+            "public",
+            "manual",
+        )
+        .await
+        .expect("create_world must succeed after bootstrap");
+        assert!(result.world_id.starts_with("wld_"));
+    }
+
+    /// Nameless mint: the workspace row `display_name` falls back to the
+    /// `creator_id` string itself (AR-88 #4 — never empty).
+    #[tokio::test]
+    async fn bootstrap_local_creator_nameless_uses_creator_id_as_display_name() {
+        let _home = crate::testutil::isolated_home();
+
+        bootstrap_local_creator(None)
+            .await
+            .expect("bootstrap succeeds");
+
+        let pool = open_global_db().await.expect("open global db");
+        let identities = nexus_local_db::list_local_identities(&pool)
+            .await
+            .expect("list local identities");
+        assert_eq!(identities.len(), 1);
+        let row = &identities[0];
+        assert!(row.display_name.is_none(), "nameless mint stores no name");
+
+        let config = CliConfig::load().expect("reload config");
+        let db_path = crate::config::resolve_state_db_path(&config).expect("resolve state db path");
+        let workspace_pool = crate::db::Schema::init(&db_path)
+            .await
+            .expect("init workspace pool");
+        let display_name: String =
+            sqlx::query_scalar("SELECT display_name FROM creators WHERE creator_id = ?")
+                .bind(&row.creator_id)
+                .fetch_one(&workspace_pool)
+                .await
+                .expect("query creators display_name");
+        assert_eq!(
+            display_name, row.creator_id,
+            "nameless mint row display_name = creator_id (AR-88 #4)"
+        );
+    }
+
+    /// The identity-cache store (`creator-identities.json`) is NOT written
+    /// (AR-88 #3): local identities carry no handle; display SSOT is
+    /// `local_identities`.
+    #[tokio::test]
+    async fn bootstrap_local_creator_does_not_write_identity_cache() {
+        let _home = crate::testutil::isolated_home();
+
+        bootstrap_local_creator(Some("Cache Free".to_string()))
+            .await
+            .expect("bootstrap succeeds");
+
+        let cache_path = crate::creator_identity::cache_path().expect("cache path");
+        assert!(
+            !cache_path.exists(),
+            "creator-identities.json must not be written by the local bootstrap"
+        );
+    }
+
+    /// Whitespace-only names are rejected at the helper front door (R3).
+    #[tokio::test]
+    async fn bootstrap_local_creator_rejects_whitespace_only_name() {
+        let _home = crate::testutil::isolated_home();
+
+        let err = bootstrap_local_creator(Some("   ".to_string()))
+            .await
+            .expect_err("whitespace-only name must be rejected");
+        let display = format!("{err}");
+        assert!(
+            display.contains("Display name cannot be empty or whitespace-only."),
+            "unexpected error: {display}"
+        );
     }
 }

@@ -845,3 +845,121 @@ fn identity_unlink_nonexistent_creator() {
         .failure()
         .stderr(predicate::str::contains("not found"));
 }
+
+// =============================================================================
+// V1.176 P0 T1 (AR-88): shared bootstrap helper — persistent-identity parity
+// =============================================================================
+
+/// `system identity create --persistent --name <n>` reaches the same
+/// observable end state as `register --local` (compass PL-3): the identity is
+/// active and the workspace `creators` row is materialized, so
+/// `creator world create` succeeds immediately (no FK miss).
+#[test]
+fn persistent_identity_create_converges_workspace_row() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("system")
+        .arg("identity")
+        .arg("create")
+        .arg("--kind")
+        .arg("persistent")
+        .arg("--name")
+        .arg("ParityTester")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created persistent identity"))
+        .stdout(predicate::str::contains("Set as active identity."));
+
+    // The workspace `creators` row must exist — `creator world create` passes
+    // its FK precheck immediately after the persistent-identity bootstrap.
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("world")
+        .arg("create")
+        .arg("--title")
+        .arg("Parity World")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("World created"));
+
+    // The identity-cache store is NOT written by the local bootstrap (AR-88 #3).
+    assert!(
+        !home.join(".nexus42/creator-identities.json").exists(),
+        "creator-identities.json must not be written by the local bootstrap"
+    );
+}
+
+/// `creator register --local --name <n>` converges the same three-store end
+/// state (identity active + workspace row) — `creator world create` succeeds
+/// immediately after.
+#[test]
+fn register_local_converges_workspace_row() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("register")
+        .arg("--local")
+        .arg("--name")
+        .arg("LocalParity")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created persistent identity"))
+        .stdout(predicate::str::contains("Local-only (no platform)"));
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("world")
+        .arg("create")
+        .arg("--title")
+        .arg("Local World")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("World created"));
+}
+
+/// `--anonymous` must NOT materialize a workspace row (AR-88 #5): the
+/// ephemeral identity is active, but `creator world create` still fails its
+/// FK precheck.
+#[test]
+fn anonymous_identity_does_not_materialize_workspace_row() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("system")
+        .arg("identity")
+        .arg("create")
+        .arg("--kind")
+        .arg("anonymous")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created anonymous identity"));
+
+    // No workspace `creators` row exists for the anonymous identity — the
+    // world-create FK precheck must fail (referenced creator not found).
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("world")
+        .arg("create")
+        .arg("--title")
+        .arg("Anon World")
+        .env("HOME", home)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("referenced creator"));
+}

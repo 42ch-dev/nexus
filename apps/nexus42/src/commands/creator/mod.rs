@@ -29,7 +29,6 @@ pub mod world;
 
 use crate::auth;
 use crate::challenge::{solve_challenge_with_fallback, UnavailableLlmSolver};
-use crate::commands::system::identity::{create_identity, IdentityKindArg};
 use crate::config::{
     find_workspace_root, nexus_home, workspace_config_path, workspace_nexus_dir, CliConfig,
     DEFAULT_WORKSPACE_SLUG,
@@ -1291,40 +1290,16 @@ async fn register_creator(
     }
 }
 
-/// Register a local-only creator identity (AC-V167-P2-1).
-///
-/// Delegates to the shared identity machinery: [`create_identity`] mints the
-/// persistent `ctr_local*` identity via `create_local_identity` and writes
-/// `active_creator_id` (the same seam `system identity create`/`use` use), so
-/// there is exactly one minting path. No `PlatformClient` calls — zero network.
-///
-/// V1.167 P2 T2: after the identity is active, the workspace state db
-/// `creators` row is materialized via [`nexus_local_db::ensure_creator_row`] —
-/// `create_world` prechecks that table for the owner creator, so the bootstrap
-/// must complete (or error honestly) here rather than deferring the failure to
-/// a confusing `creator world create` FK error.
+/// V1.176 P0 T1 (AR-88): delegates to the shared bootstrap helper
+/// [`bootstrap::bootstrap_local_creator`] — the single identity-mint +
+/// workspace-row materialization sequence both named local entry points
+/// (`creator register --local`, `system identity create --persistent`) call.
+/// No `PlatformClient` calls — zero network.
 async fn register_local_creator(name: String) -> Result<()> {
-    // `create_identity` stores the R3-trimmed name on the identity; mirror it
-    // for the workspace `creators` row so both tables agree on display_name.
-    let display_name = name.trim().to_string();
-    create_identity(IdentityKindArg::Persistent, Some(name)).await?;
+    bootstrap::bootstrap_local_creator(Some(name)).await?;
 
-    // Read back the active creator id written by create_identity for the
-    // workspace `creators` row — same readback pattern as `use_identity`.
-    let config = CliConfig::load()?;
-    let creator_id = config
-        .active_creator_id
-        .as_deref()
-        .ok_or_else(|| CliError::Other("Local identity was not set as active.".to_string()))?;
-
-    // Resolve the workspace state db exactly like `creator world create` does,
-    // then materialize the `creators` row the FK precheck requires.
-    let db_path = crate::config::resolve_state_db_path(&config)?;
-    let pool = crate::db::Schema::init(&db_path).await?;
-    nexus_local_db::ensure_creator_row(&pool, creator_id, &display_name).await?;
-
-    // `create_identity` already printed the mint + active lines; add the one
-    // local-only exit marker so the register flow still names its mode.
+    // The helper rendered the mint + active lines; add the one local-only
+    // exit marker so the register flow still names its mode.
     println!("  Local-only (no platform) — no platform account created.");
 
     Ok(())

@@ -82,7 +82,11 @@ pub async fn run(cmd: IdentityCommand, _config: &CliConfig) -> Result<()> {
 }
 
 /// Open or create the global identity database at `~/.nexus42/state.db`.
-async fn open_global_db() -> Result<nexus_local_db::SqlitePool> {
+///
+/// `pub(crate)` since V1.176 P0 T1 (AR-88): the shared bootstrap helper
+/// (`commands::creator::bootstrap::bootstrap_local_creator`) opens the same
+/// global identity store for the mint leg.
+pub(crate) async fn open_global_db() -> Result<nexus_local_db::SqlitePool> {
     let home = config::user_home_dir()?;
     let nexus_dir = home.join(".nexus42");
 
@@ -149,13 +153,14 @@ async fn list_identities() -> Result<()> {
     Ok(())
 }
 
-/// Create a new local identity.
-///
-/// `pub(crate)` since V1.167 P2 T1: `creator register --local` delegates
-/// here so local minting + active-creator write stay in one seam.
+/// V1.176 P0 T1 (AR-88): the persistent arm delegates to the shared
+/// bootstrap helper [`crate::commands::creator::bootstrap::bootstrap_local_creator`]
+/// so both named local entry points (`system identity create --persistent`,
+/// `creator register --local`) run the same identity-mint + workspace-row
+/// materialization sequence. The anonymous arm is byte-for-byte unchanged —
+/// ephemeral, no workspace row, does not converge (PL-3).
 pub(crate) async fn create_identity(kind: IdentityKindArg, name: Option<String>) -> Result<()> {
     // R3(identity): Validate display_name — reject empty or whitespace-only
-    let trimmed_name = name.as_deref().map(str::trim).filter(|n| !n.is_empty());
     if let Some(raw) = &name {
         if raw.trim().is_empty() {
             return Err(CliError::Other(
@@ -166,7 +171,11 @@ pub(crate) async fn create_identity(kind: IdentityKindArg, name: Option<String>)
 
     let identity = match kind {
         IdentityKindArg::Anonymous => LocalIdentity::create_anonymous(),
-        IdentityKindArg::Persistent => LocalIdentity::create_persistent(trimmed_name),
+        IdentityKindArg::Persistent => {
+            // The shared helper owns mint + active + workspace-row
+            // materialization for the persistent path (AR-88 #1).
+            return crate::commands::creator::bootstrap::bootstrap_local_creator(name).await;
+        }
     };
 
     let is_persistent = identity.is_persistent();
