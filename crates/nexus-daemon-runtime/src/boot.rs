@@ -145,21 +145,29 @@ const fn shutdown_grace_duration(config: &DaemonConfig) -> Duration {
     Duration::from_millis(config.shutdown_grace_ms)
 }
 
-/// Log a user-capability scan outcome at the daemon boot site (AR-35/36).
+/// Log a user-capability scan outcome (AR-35/36), at the boot or watch site.
 ///
 /// Admitted count is logged at `info!`; the skip aggregate is logged at
 /// `warn!` (the scanner already logs each skip individually with its named
-/// reason — this is the boot-site aggregate). The daemon NEVER fails boot on
-/// scan issues (skip-and-log contract, AC-V172-2): this function has no error
+/// reason — this is the aggregate). The daemon NEVER fails boot on scan
+/// issues (skip-and-log contract, AC-V172-2): this function has no error
 /// path.
-fn log_scan_outcome(outcome: &nexus_orchestration::capability::scan::ScanOutcome, scan_dir: &Path) {
+///
+/// `context` names the call site in the skip aggregate ("boot scan" vs
+/// "watch scan", M-5) so a hot reload's skips are not mislabeled as boot
+/// skips.
+fn log_scan_outcome(
+    outcome: &nexus_orchestration::capability::scan::ScanOutcome,
+    scan_dir: &Path,
+    context: &str,
+) {
     if !outcome.skipped.is_empty() {
         let names: Vec<&str> = outcome.skipped.iter().map(|s| s.name.as_str()).collect();
         tracing::warn!(
             dir = %scan_dir.display(),
             count = outcome.skipped.len(),
             names = ?names,
-            "skipped {} user capability(ies) during boot scan (individual reasons logged by scanner)",
+            "skipped {} user capability(ies) during {context} (individual reasons logged by scanner)",
             outcome.skipped.len()
         );
     }
@@ -222,7 +230,13 @@ fn user_capabilities_scan_dir(state: &WorkspaceState) -> PathBuf {
 /// existing shutdown notification (peer-lane precedent). It never panics or
 /// fails the daemon.
 ///
-/// Returns a `JoinHandle` (dropped in production; observed by tests).
+/// The baseline digest is sampled at spawn, BEFORE the first sleep (M-6), so
+/// a change between the boot scan and the first poll is detected instead of
+/// being absorbed as the baseline. A transiently unreadable scan dir keeps
+/// last-good unchanged (I-1): no rescan, no swap.
+///
+/// Returns a `JoinHandle`; the boot site wraps it in a [`WatcherGuard`]
+/// (abort-on-drop, M-2) so the task is cancelled on every daemon exit path.
 #[allow(clippy::needless_pass_by_value)]
 pub fn spawn_user_capability_watcher(
     holder: CapabilityRegistryHolder,
@@ -242,6 +256,37 @@ pub fn spawn_user_capability_watcher(
         shutdown_notify,
         boot_mirror,
     ))
+}
+
+/// Abort-on-drop guard for the user-capability watcher task (V1.175
+/// lesson; AR-91 #6, M-2).
+///
+/// The daemon holds the guard for its whole run; dropping it on ANY exit
+/// path (graceful return, early `?` return, panic unwind) aborts the
+/// watcher task so it can never outlive the daemon as a detached stray
+/// keeping a stale registry generation alive. The task's single graceful
+/// exit is the shutdown notify inside [`user_capability_watch_loop`]; the
+/// abort covers everything else (runtime teardown without the notify, an
+/// unexpected early return or panic of the loop).
+///
+/// There is deliberately NO restart: a silently failing watcher would mask
+/// the defect, and a restart loop could panic repeatedly. A frozen
+/// generation cannot be served forever — the next daemon generation
+/// rebuilds the registry from disk.
+pub struct WatcherGuard(tokio::task::JoinHandle<()>);
+
+impl WatcherGuard {
+    /// Wrap a freshly spawned watcher handle.
+    #[must_use]
+    pub const fn new(handle: tokio::task::JoinHandle<()>) -> Self {
+        Self(handle)
+    }
+}
+
+impl Drop for WatcherGuard {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 /// Drive the watcher loop until the daemon's shutdown notification fires.
@@ -306,9 +351,9 @@ async fn user_capability_watch_loop(
 ///
 /// Runs entirely OUTSIDE the holder lock — the scan, admission, and registry
 /// rebuild are unguarded; the write lock is held only for the pointer swap
-/// (AR-92 #7). Logs the outcome with the boot-site aggregate shape
-/// (`log_scan_outcome`, same vocabulary). Returns the new last-admitted
-/// mirror for the next tick.
+/// (AR-92 #7). Logs the outcome with the same aggregate shape as boot
+/// (`log_scan_outcome`, "watch scan" context — M-5). Returns the new
+/// last-admitted mirror for the next tick.
 fn hot_rebuild_and_swap(
     holder: &CapabilityRegistryHolder,
     deps: &CapabilityRuntimeDeps,
@@ -319,7 +364,7 @@ fn hot_rebuild_and_swap(
 ) -> Vec<UserCapability> {
     let (registry, outcome) =
         rebuild_registry_with_merge(deps, engine, module_cache, scan_dir, mirror);
-    log_scan_outcome(&outcome, scan_dir);
+    log_scan_outcome(&outcome, scan_dir, "watch scan");
     holder.swap(Arc::new(registry));
     outcome.admitted
 }
@@ -539,7 +584,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         // (discoverable); their stub `run()` returns WorkerUnavailable.
         CapabilityRegistry::with_runtime_deps_and_user_caps(&runtime_deps, &user_caps_dir)
     };
-    log_scan_outcome(&boot_outcome, &user_caps_dir);
+    log_scan_outcome(&boot_outcome, &user_caps_dir, "boot scan");
     tracing::info!(
         "Capability registry built (production wiring + WASM singleton where available)"
     );
@@ -643,8 +688,11 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // registry on the SAME scan/admission path as boot and swaps it into
     // the shared holder (AR-92). The mirror seeds from the boot outcome so a
     // failed hot admission carries the last good entry (PL-9). The task
-    // terminates on the daemon's shutdown notification (peer-lane precedent).
-    {
+    // terminates on the daemon's shutdown notification (peer-lane
+    // precedent); the abort-on-drop guard (M-2) additionally cancels the
+    // task on every daemon exit path and lives for the whole run (it is
+    // bound at function scope, not inside this block).
+    let _watcher_guard = {
         let watcher_holder = capability_holder.clone();
         let watcher_deps = runtime_deps.clone();
         let watcher_engine = wasm_singleton
@@ -652,7 +700,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             .map(|(engine, _)| Arc::clone(engine));
         let watcher_cache = wasm_singleton.as_ref().map(|(_, cache)| Arc::clone(cache));
         let watcher_shutdown = state.shutdown_notify();
-        let _watcher_handle = spawn_user_capability_watcher(
+        WatcherGuard::new(spawn_user_capability_watcher(
             watcher_holder,
             watcher_deps,
             watcher_engine,
@@ -660,8 +708,8 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             user_caps_dir.clone(),
             watcher_shutdown,
             boot_mirror,
-        );
-    }
+        ))
+    };
 
     // --- Section 4: Schedule supervisor + core context manager ---
     // Pool-backed subsystems are deferred until Profile attach when no creator DB
@@ -1603,6 +1651,71 @@ mod tests {
             resolved,
             nexus_home.join(".nexus42").join("capabilities"),
             "must NOT double-nest into <home>/.nexus42/.nexus42"
+        );
+    }
+
+    /// A watcher-scoped, engine-less dep set (the AR-44 stub arm).
+    fn watcher_test_deps() -> CapabilityRuntimeDeps {
+        CapabilityRuntimeDeps {
+            pool: None,
+            worker_provider: None,
+            daemon_tool_dispatch: None,
+            cdn_config: None,
+        }
+    }
+
+    /// M-2 / AR-91 #6 spawn/shutdown test: the watcher task starts after
+    /// spawn, stays alive, and exits cleanly when the daemon's shutdown
+    /// notification fires (the single graceful exit path).
+    #[tokio::test]
+    async fn user_capability_watcher_starts_and_exits_on_shutdown_notify() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let holder = CapabilityRegistryHolder::new();
+        let shutdown = Arc::new(tokio::sync::Notify::new());
+        let handle = spawn_user_capability_watcher(
+            holder,
+            watcher_test_deps(),
+            None,
+            None,
+            tmp.path().join("caps"),
+            Arc::clone(&shutdown),
+            Vec::new(),
+        );
+
+        assert!(
+            !handle.is_finished(),
+            "watcher task is running right after spawn"
+        );
+        shutdown.notify_one();
+        let result = handle.await;
+        assert!(
+            result.is_ok(),
+            "watcher exits cleanly on the shutdown notify: {result:?}"
+        );
+    }
+
+    /// M-2 abort-on-drop test: dropping the guard (any daemon exit path)
+    /// cancels the task — an otherwise-infinite counter stops advancing.
+    #[tokio::test]
+    async fn watcher_guard_aborts_task_on_drop() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let ticks = Arc::new(AtomicUsize::new(0));
+        let ticks_for_task = Arc::clone(&ticks);
+        let handle = tokio::spawn(async move {
+            loop {
+                ticks_for_task.fetch_add(1, Ordering::Relaxed);
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        });
+        let guard = WatcherGuard::new(handle);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        drop(guard);
+        let frozen_at = ticks.load(Ordering::Relaxed);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(
+            ticks.load(Ordering::Relaxed),
+            frozen_at,
+            "guard drop aborts the task (abort-on-drop, M-2)"
         );
     }
 }

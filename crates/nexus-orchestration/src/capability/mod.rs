@@ -153,13 +153,21 @@ pub trait Capability: Send + Sync {
 // CapabilityRegistry
 // ---------------------------------------------------------------------------
 
-/// Registry of available capabilities. Built once at daemon startup.
+/// Registry of available capabilities.
+///
+/// Built at daemon startup and **rebuilt as a fresh instance** on
+/// user-capability hot reload (V1.176 P1, AR-92): the live generation is
+/// held by the shared [`CapabilityRegistryHolder`] and the watcher swaps in
+/// a rebuilt registry on scan-dir changes. An instance is immutable after
+/// construction.
 ///
 /// Capabilities are stored in a `Vec` for ordered iteration, with a `HashMap`
-/// index for O(1) lookup by name (built lazily on first `get()` call).
+/// index for O(1) lookup by name. The index is built eagerly by every
+/// constructor and append path — never lazily.
 pub struct CapabilityRegistry {
     capabilities: Vec<Box<dyn Capability>>,
-    /// Lazy index: `name` → position in `capabilities`. Built on first lookup.
+    /// Eager index: `name` → position in `capabilities`. Built by every
+    /// constructor and append path (never on-demand).
     index: Option<std::collections::HashMap<&'static str, usize>>,
 }
 
@@ -431,12 +439,24 @@ impl CapabilityRegistry {
         // admission path for both boot and hot reload. The boot-site
         // aggregate log (`log_scan_outcome`) therefore reports the admitted
         // count it was documented to report.
-        for cap in &outcome.admitted {
+        self.append_user_cap_entries(&outcome.admitted);
+        outcome
+    }
+
+    /// Box and append `admitted` after builtins and rebuild the eager index —
+    /// the single registry-append seam shared by the boot constructors
+    /// ([`append_user_caps`]) and the hot-reload watcher
+    /// (`rebuild_registry_with_merge`, V1.176 P1 M-3) so the boxing stays in
+    /// one place.
+    fn append_user_cap_entries(
+        &mut self,
+        admitted: &[crate::capability::user_capability::UserCapability],
+    ) {
+        for cap in admitted {
             self.capabilities
                 .push(Box::new(cap.clone()) as Box<dyn Capability>);
         }
         self.build_index();
-        outcome
     }
 
     /// Shared body of [`with_runtime_deps`] / [`with_runtime_deps_and_wasm`],
@@ -665,7 +685,9 @@ impl CapabilityRegistry {
 
     /// Build the name-to-index `HashMap` for O(1) lookups.
     ///
-    /// Called once during construction. Must be called after `capabilities` is populated.
+    /// Called by every constructor and by the append seam
+    /// ([`append_user_cap_entries`]) after `capabilities` is populated —
+    /// the index is eager, never built on demand (M-4).
     fn build_index(&mut self) {
         let mut idx = std::collections::HashMap::with_capacity(self.capabilities.len());
         for (i, cap) in self.capabilities.iter().enumerate() {
@@ -748,12 +770,17 @@ impl CapabilityRegistryHolder {
     }
 
     /// Atomically swap in a freshly rebuilt registry (write lock; held only
-    /// for the pointer write — AR-92 #7).
+    /// for the pointer write — AR-92 #7). The previous generation is dropped
+    /// AFTER the write lock is released so a last-reference drop (tearing
+    /// down a full builtin+user registry) never stalls readers (M-1).
     pub fn swap(&self, registry: std::sync::Arc<CapabilityRegistry>) {
-        *self
+        let mut guard = self
             .inner
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(registry);
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let previous = (*guard).replace(registry);
+        drop(guard);
+        drop(previous);
     }
 
     /// Create a holder pre-populated with `registry` — boot convenience:

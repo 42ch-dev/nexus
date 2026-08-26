@@ -20,6 +20,28 @@ use std::collections::HashSet;
 use std::future::Future;
 use std::path::Path;
 use std::time::Duration;
+/// Result of one digest poll of the user-capability scan directory.
+///
+/// The watcher treats the three states differently (I-1, PL-9):
+/// - [`DigestPoll::Missing`]: the scan dir is **absent** (`NotFound`) — the
+///   stable "no dir" state (F-14). A `Missing` poll after a `Tree` baseline
+///   means the user deleted the dir → rescan, and the merge drops the names
+///   (removal contract, AR-94).
+/// - [`DigestPoll::Unreadable`]: the scan dir **exists but could not be
+///   read** (EACCES, EMFILE, ENOTDIR, …) — a transient failure, NOT a
+///   deletion. The watcher keeps last-good unchanged: no rescan, no swap,
+///   no baseline disturbance (the poll is retried next tick).
+/// - [`DigestPoll::Tree`]: the structural digest of a readable scan dir.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DigestPoll {
+    /// Scan directory absent (`NotFound`).
+    Missing,
+    /// Scan directory present but unreadable, with the io error message
+    /// (path + error) for the once-per-error-state log.
+    Unreadable(String),
+    /// Structural digest of the present, readable scan dir.
+    Tree(serde_json::Value),
+}
 
 /// Daemon-side poll interval for the user-capability scan directory
 /// (AR-91 #1).
@@ -37,8 +59,11 @@ pub const USER_CAP_WATCH_INTERVAL: Duration = Duration::from_secs(1);
 /// watch (AR-79, F-11) uses over the tools body; no hash-collision
 /// reasoning, no new hashing dependency.
 ///
-/// - Missing or unreadable scan dir → `None` — a stable "no dir" digest:
-///   no rescans, no skip spam (F-14 missing-dir contract, AR-91 #2/#6).
+/// - Missing dir → [`DigestPoll::Missing`] — a stable "no dir" state: no
+///   rescans, no skip spam (F-14 missing-dir contract, AR-91 #2/#6).
+/// - Present-but-unreadable dir (EACCES, EMFILE, …) → [`DigestPoll::Unreadable`]
+///   — NOT conflated with a deletion (I-1): the watcher keeps last-good
+///   instead of treating every mirrored name as absent.
 /// - `_`- and `.`-prefixed dirs are skipped silently, matching the scan's
 ///   convention.
 /// - Entries are sorted so the tree is byte-stable across ticks.
@@ -47,12 +72,15 @@ pub const USER_CAP_WATCH_INTERVAL: Duration = Duration::from_secs(1);
 ///   change with identical (name, size, mtime) is out of contract
 ///   (AR-91 #3).
 #[must_use]
-pub fn scan_dir_digest(dir: &Path) -> Option<serde_json::Value> {
-    // Missing (the boot missing-dir contract) or unreadable → the scan
-    // would also treat it as empty; keep the digest stable instead of
-    // re-scanning every tick.
-    let Ok(read) = std::fs::read_dir(dir) else {
-        return None;
+pub fn scan_dir_digest(dir: &Path) -> DigestPoll {
+    // A `NotFound` read failure is the honest "no dir" state; ANY other
+    // read failure (EACCES, EMFILE, ENOTDIR, …) is a transient unreadable
+    // dir and must NOT be treated as a deletion (I-1) — the watcher keeps
+    // last-good unchanged.
+    let read = match std::fs::read_dir(dir) {
+        Ok(read) => read,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return DigestPoll::Missing,
+        Err(e) => return DigestPoll::Unreadable(format!("{}: {e}", dir.display())),
     };
     let mut entries: Vec<std::fs::DirEntry> = read.flatten().collect();
     entries.sort_by_key(std::fs::DirEntry::file_name);
@@ -94,7 +122,7 @@ pub fn scan_dir_digest(dir: &Path) -> Option<serde_json::Value> {
         }
         tree.insert(name, serde_json::Value::Object(files));
     }
-    Some(serde_json::Value::Object(tree))
+    DigestPoll::Tree(serde_json::Value::Object(tree))
 }
 
 /// Rebuild a fresh registry for hot reload (AR-92 #3/#5).
@@ -133,11 +161,10 @@ pub fn rebuild_registry_with_merge(
         admitted: merged.clone(),
         skipped: scan.skipped,
     };
-    for cap in &merged {
-        reg.capabilities
-            .push(Box::new(cap.clone()) as Box<dyn Capability>);
-    }
-    reg.build_index();
+    // Shared append seam (M-3): the same boxing path as the boot
+    // constructors' `append_user_caps`, so a change to the append (extra
+    // index/logging) lands in one place.
+    reg.append_user_cap_entries(&merged);
     (reg, outcome)
 }
 
@@ -174,10 +201,18 @@ pub fn merge_user_caps(scan: &ScanOutcome, mirror: &[UserCapability]) -> Vec<Use
 ///
 /// Mirrors the AR-79 child-side `catalog_watch_loop_inner` seam (F-11) so
 /// the baseline / no-op semantics (AR-91 #6, AR-95 #5) are unit-testable
-/// without a real scan dir or daemon. The first tick establishes the digest
-/// WITHOUT re-scanning (boot already scanned); only a change between
-/// established digests re-scans. An unchanged digest produces no scan (and
-/// therefore no swap and no skip spam).
+/// without a real scan dir or daemon. The baseline digest is sampled at
+/// spawn, BEFORE the first sleep (M-6), so a change between boot's scan and
+/// the first poll is detected instead of being absorbed as the baseline.
+/// Only a change between established digests re-scans; an unchanged digest
+/// produces no scan (and therefore no swap and no skip spam).
+///
+/// An [`DigestPoll::Unreadable`] poll never establishes or disturbs the
+/// baseline and never rescans (I-1, PL-9): a transiently unreadable scan
+/// dir keeps the last-good registry generation unchanged, and the failure
+/// is logged once per error-state. [`DigestPoll::Missing`] after a
+/// [`DigestPoll::Tree`] baseline rescans — the merge then drops the absent
+/// names (deletion contract, AR-94).
 ///
 /// Returns the number of rescans executed. `should_stop` lets tests
 /// terminate the otherwise-infinite loop deterministically.
@@ -189,30 +224,53 @@ pub async fn watch_loop_inner<PF, SF, P, S>(
 ) -> usize
 where
     P: FnMut() -> PF,
-    PF: Future<Output = Option<serde_json::Value>> + Send,
+    PF: Future<Output = DigestPoll> + Send,
     S: FnMut() -> SF,
     SF: Future<Output = ()> + Send,
 {
-    // Outer `Option`: `None` = no baseline yet; `Some(None)` = baseline
-    // established with a missing scan dir (stable null digest).
-    let mut last_digest: Option<Option<serde_json::Value>> = None;
+    // `None` = no baseline yet (established by the first readable poll —
+    // `Missing` or `Tree` — at spawn, before the first sleep; M-6). An
+    // `Unreadable` poll never establishes or replaces the baseline.
+    let mut last_digest: Option<DigestPoll> = None;
     let mut rescans = 0usize;
+    let mut unreadable_warned = false;
     loop {
         if should_stop() {
             return rescans;
         }
-        tokio::time::sleep(interval).await;
         let digest = poll().await;
+        match &digest {
+            DigestPoll::Unreadable(message) => {
+                // Transient read failure (EACCES, EMFILE, ENOTDIR, …): keep
+                // last-good unchanged — no rescan, no swap, baseline intact
+                // (I-1). Log once per error-state, not every tick.
+                if !unreadable_warned {
+                    tracing::warn!(
+                        error = %message,
+                        "cannot read user capabilities directory; keeping last-good registry, no rescan (hot-reload skip — will retry)"
+                    );
+                    unreadable_warned = true;
+                }
+                tokio::time::sleep(interval).await;
+                continue;
+            }
+            DigestPoll::Missing | DigestPoll::Tree(_) => {
+                unreadable_warned = false;
+            }
+        }
         if last_digest.as_ref().is_some_and(|prev| prev == &digest) {
+            tokio::time::sleep(interval).await;
             continue;
         }
-        // Baseline tick: establish the digest without scanning (boot already
-        // scanned). Only a change between established digests rescans.
+        // Baseline establishment (first readable poll) does NOT rescan —
+        // boot already scanned (AR-91 #6). Only a change between
+        // established digests rescans.
         if last_digest.is_some() {
             rescan().await;
             rescans += 1;
         }
         last_digest = Some(digest);
+        tokio::time::sleep(interval).await;
     }
 }
 
@@ -222,6 +280,7 @@ mod tests {
     use crate::capability::{CapabilityOrigin, CapabilityRegistryHolder};
     use sha2::Digest;
     use std::fmt::Write as _;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn sha256_hex(bytes: &[u8]) -> String {
         let digest = sha2::Sha256::digest(bytes);
@@ -300,10 +359,25 @@ mod tests {
     // -----------------------------------------------------------------
 
     #[test]
-    fn digest_missing_dir_is_stable_none() {
+    fn digest_missing_dir_is_stable_missing() {
         let tmp = tempfile::tempdir().unwrap();
         let missing = tmp.path().join("does-not-exist");
-        assert_eq!(scan_dir_digest(&missing), None);
+        assert_eq!(scan_dir_digest(&missing), DigestPoll::Missing);
+    }
+
+    #[test]
+    fn digest_present_but_unreadable_path_is_not_missing() {
+        // A path that exists but cannot be read as a directory (here: a
+        // regular file → ENOTDIR; EACCES/EMFILE hit the same non-NotFound
+        // branch) must NOT be conflated with a missing dir (I-1) — the
+        // watcher keeps last-good on `Unreadable`.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("capabilities");
+        std::fs::write(&path, b"not a directory").unwrap();
+        match scan_dir_digest(&path) {
+            DigestPoll::Unreadable(_) => {}
+            other => panic!("non-NotFound read failure must be Unreadable, got {other:?}"),
+        }
     }
 
     #[test]
@@ -311,14 +385,21 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         write_capability_dir(tmp.path(), "demo.pull");
         write_capability_dir(tmp.path(), "zeta.cap");
-        let first = scan_dir_digest(tmp.path()).expect("digest present");
+        let DigestPoll::Tree(first) = scan_dir_digest(tmp.path()) else {
+            panic!("expected a Tree digest for the present dir");
+        };
         // Identical content → identical digest (deterministic ordering).
-        assert_eq!(scan_dir_digest(tmp.path()).unwrap(), first);
+        let DigestPoll::Tree(same) = scan_dir_digest(tmp.path()) else {
+            panic!("expected a Tree digest for the present dir");
+        };
+        assert_eq!(same, first);
 
         // A file change (different size) → changed digest.
         let wasm_path = tmp.path().join("demo.pull/basic-combat.wasm");
         std::fs::write(&wasm_path, b"fake module bytes, now longer").unwrap();
-        let changed = scan_dir_digest(tmp.path()).expect("digest present");
+        let DigestPoll::Tree(changed) = scan_dir_digest(tmp.path()) else {
+            panic!("expected a Tree digest for the present dir");
+        };
         assert_ne!(changed, first, "file size change must change the digest");
     }
 
@@ -328,7 +409,9 @@ mod tests {
         write_capability_dir(tmp.path(), "_system.cap");
         write_capability_dir(tmp.path(), ".hidden.cap");
         write_capability_dir(tmp.path(), "visible.cap");
-        let digest = scan_dir_digest(tmp.path()).expect("digest present");
+        let DigestPoll::Tree(digest) = scan_dir_digest(tmp.path()) else {
+            panic!("expected a Tree digest for the present dir");
+        };
         let tree = digest.as_object().expect("object tree");
         assert_eq!(
             tree.keys().collect::<Vec<_>>(),
@@ -469,13 +552,81 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
-    // No-op stability (AR-95 #5)
+    // No-op stability (AR-95 #5) + transient-error safety (I-1) + M-6
     // -------------------------------------------------------------------------
+
+    /// The real hot-reload action (mirror of the boot wiring): rebuild +
+    /// merge + swap, updating the last-admitted mirror.
+    fn hot_rebuild_test(
+        holder: &CapabilityRegistryHolder,
+        deps: &CapabilityRuntimeDeps,
+        scan_dir: &Path,
+        mirror: &std::sync::Mutex<Vec<UserCapability>>,
+    ) {
+        let mut mirror = mirror
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (reg, outcome) = rebuild_registry_with_merge(deps, None, None, scan_dir, &mirror);
+        holder.swap(std::sync::Arc::new(reg));
+        *mirror = outcome.admitted;
+    }
+
+    /// Drive the real watch loop (real `scan_dir_digest` + real rebuild/swap)
+    /// for `max_ticks`, returning the loop's rescan count. `on_poll` runs
+    /// just before each digest read (with the tick number and the scan dir)
+    /// so a test can mutate the scan dir mid-loop — the baseline and the
+    /// subsequent change happen inside ONE loop invocation, which is how
+    /// the production watcher behaves.
+    #[allow(clippy::too_many_arguments)] // test helper: all eight are the wiring inputs
+    async fn run_real_watch(
+        scan_dir: &Path,
+        holder: &CapabilityRegistryHolder,
+        deps: &CapabilityRuntimeDeps,
+        mirror: &std::sync::Arc<std::sync::Mutex<Vec<UserCapability>>>,
+        rescans: &AtomicUsize,
+        ticks: &AtomicUsize,
+        max_ticks: usize,
+        on_poll: impl Fn(usize, &Path) + Send + Sync,
+    ) -> usize {
+        let scan_dir = scan_dir.to_path_buf();
+        let holder = holder.clone();
+        let deps = deps.clone();
+        let mirror = std::sync::Arc::clone(mirror);
+        let on_poll = std::sync::Arc::new(on_poll);
+        watch_loop_inner(
+            Duration::from_millis(5),
+            || {
+                ticks.fetch_add(1, Ordering::Relaxed);
+                let dir = scan_dir.clone();
+                let on_poll = std::sync::Arc::clone(&on_poll);
+                async move {
+                    on_poll(ticks.load(Ordering::Relaxed), &dir);
+                    scan_dir_digest(&dir)
+                }
+            },
+            || {
+                let h = holder.clone();
+                let d = deps.clone();
+                let m = std::sync::Arc::clone(&mirror);
+                let dir = scan_dir.clone();
+                async move {
+                    rescans.fetch_add(1, Ordering::Relaxed);
+                    hot_rebuild_test(&h, &d, &dir, &m);
+                }
+            },
+            || ticks.load(Ordering::Relaxed) >= max_ticks,
+        )
+        .await
+    }
 
     #[tokio::test]
     async fn unchanged_digest_and_missing_dir_produce_no_rescans() {
         use std::sync::atomic::{AtomicUsize, Ordering};
-        let tree = Some(serde_json::json!({"a.cap": {"capability.json": [12, 34]}}));
+        // M-6: the baseline digest is sampled at spawn, BEFORE the first
+        // sleep — a change between boot's scan and the first poll is
+        // detected (see boot_to_first_poll_change_is_detected). These legs
+        // only assert no-op stability once a baseline exists.
+        let tree = DigestPoll::Tree(serde_json::json!({"a.cap": {"capability.json": [12, 34]}}));
         let tick = AtomicUsize::new(0);
         let mut rescans = 0;
         let scans = watch_loop_inner(
@@ -495,13 +646,13 @@ mod tests {
         assert_eq!(scans, 0, "baseline tick only; no digest change → no scan");
         assert_eq!(rescans, 0, "no rescan action fired");
 
-        // Missing dir: stable null digest → no rescans, no skip spam.
+        // Missing dir → stable `Missing` digest → no rescans, no skip spam.
         tick.store(0, Ordering::Relaxed);
         let scans = watch_loop_inner(
             Duration::from_millis(1),
             || {
                 tick.fetch_add(1, Ordering::Relaxed);
-                async { None }
+                async { DigestPoll::Missing }
             },
             || {
                 rescans += 1;
@@ -510,15 +661,15 @@ mod tests {
             || tick.load(Ordering::Relaxed) >= 3,
         )
         .await;
-        assert_eq!(scans, 0, "missing dir digest stays None → never rescans");
+        assert_eq!(scans, 0, "missing dir digest stays Missing → never rescans");
         assert_eq!(rescans, 0, "no skip spam from a missing dir");
     }
 
     #[tokio::test]
     async fn digest_change_triggers_exactly_one_rescan() {
         use std::sync::atomic::{AtomicUsize, Ordering};
-        let baseline = serde_json::json!({"a.cap": {}});
-        let changed = serde_json::json!({"a.cap": {}, "b.cap": {}});
+        let baseline = DigestPoll::Tree(serde_json::json!({"a.cap": {}}));
+        let changed = DigestPoll::Tree(serde_json::json!({"a.cap": {}, "b.cap": {}}));
         let tick = AtomicUsize::new(0);
         let mut rescans = 0;
         let scans = watch_loop_inner(
@@ -530,11 +681,11 @@ mod tests {
                     // no-op tick — a shared-only capture (AtomicUsize) so
                     // the future has no escaping mutable borrow and stays
                     // Send.
-                    Some(if tick.load(Ordering::Relaxed) <= 2 {
+                    if tick.load(Ordering::Relaxed) <= 2 {
                         baseline.clone()
                     } else {
                         changed.clone()
-                    })
+                    }
                 }
             },
             || {
@@ -546,5 +697,177 @@ mod tests {
         .await;
         assert_eq!(scans, 1, "baseline, no-op, one change rescan, no-op");
         assert_eq!(rescans, 1);
+    }
+
+    #[tokio::test]
+    async fn boot_to_first_poll_change_is_detected() {
+        // M-6: the baseline is sampled at spawn (pre-first-sleep), so an
+        // on-disk change between the boot scan and the first poll triggers
+        // a rebuild — it is NOT absorbed as the baseline.
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let boot_state = DigestPoll::Tree(serde_json::json!({"a.cap": {}}));
+        let changed_on_disk = DigestPoll::Tree(serde_json::json!({"a.cap": {}, "b.cap": {}}));
+        let tick = AtomicUsize::new(0);
+        let mut rescans = 0;
+        let scans = watch_loop_inner(
+            Duration::from_millis(1),
+            || {
+                tick.fetch_add(1, Ordering::Relaxed);
+                async {
+                    if tick.load(Ordering::Relaxed) == 1 {
+                        boot_state.clone()
+                    } else {
+                        changed_on_disk.clone()
+                    }
+                }
+            },
+            || {
+                rescans += 1;
+                async {}
+            },
+            || tick.load(Ordering::Relaxed) >= 3,
+        )
+        .await;
+        assert_eq!(
+            scans, 1,
+            "pre-sleep baseline; the first post-sleep change rescans"
+        );
+        assert_eq!(rescans, 1);
+    }
+
+    #[tokio::test]
+    async fn unreadable_poll_keeps_last_good_no_rescan() {
+        // I-1: a transiently unreadable scan dir must NOT be treated as a
+        // deletion. The baseline survives, no rescan fires, and the
+        // registry generation (the last-good) is untouched.
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let baseline = DigestPoll::Tree(serde_json::json!({"a.cap": {}}));
+        let tick = AtomicUsize::new(0);
+        let mut rescans = 0;
+        let scans = watch_loop_inner(
+            Duration::from_millis(1),
+            || {
+                tick.fetch_add(1, Ordering::Relaxed);
+                async {
+                    if tick.load(Ordering::Relaxed) == 1 {
+                        baseline.clone()
+                    } else {
+                        DigestPoll::Unreadable("Permission denied (os error 13)".to_string())
+                    }
+                }
+            },
+            || {
+                rescans += 1;
+                async {}
+            },
+            || tick.load(Ordering::Relaxed) >= 4,
+        )
+        .await;
+        assert_eq!(scans, 0, "unreadable polls never rescan (I-1)");
+        assert_eq!(rescans, 0, "last-good preserved — no swap, no wipe");
+    }
+
+    #[tokio::test]
+    async fn unreadable_scan_dir_keeps_last_good_registry() {
+        // I-1 end-to-end leg: after a Tree baseline, a present-but-unreadable
+        // scan dir (replaced by a regular file → ENOTDIR, the same
+        // non-NotFound branch as EACCES/EMFILE) keeps the last-good registry
+        // generation: no rescan, no swap, no name drop, mirror untouched.
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let tmp = tempfile::tempdir().unwrap();
+        let scan_dir = tmp.path().join("caps");
+        std::fs::create_dir_all(&scan_dir).unwrap();
+        write_capability_dir(&scan_dir, "demo.pull");
+        let deps = test_deps();
+        let (reg, boot_outcome) = rebuild_registry_with_merge(&deps, None, None, &scan_dir, &[]);
+        let holder = CapabilityRegistryHolder::new();
+        holder.swap(std::sync::Arc::new(reg));
+        let mirror: std::sync::Arc<std::sync::Mutex<Vec<UserCapability>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(boot_outcome.admitted));
+        let ticks = AtomicUsize::new(0);
+        let rescans = AtomicUsize::new(0);
+
+        // On the third poll (after the baseline and one no-op tick) the
+        // scan dir is replaced by a present regular file: every later
+        // read_dir fails with a non-NotFound error → Unreadable, and the
+        // watcher must keep last-good (no rescan, no swap).
+        let scans = run_real_watch(
+            &scan_dir,
+            &holder,
+            &deps,
+            &mirror,
+            &rescans,
+            &ticks,
+            5,
+            |tick, dir| {
+                if tick == 3 {
+                    std::fs::remove_dir_all(dir).unwrap();
+                    std::fs::write(dir, b"transiently unreadable").unwrap();
+                }
+            },
+        )
+        .await;
+        assert_eq!(scans, 0, "unreadable polls never rescan (I-1)");
+        assert_eq!(rescans.load(Ordering::Relaxed), 0, "no swap happened");
+        let live = holder.get().expect("live generation present");
+        assert_eq!(
+            user_cap_names(&live),
+            vec!["demo.pull".to_string()],
+            "last-good registry still serves the capability"
+        );
+        assert_eq!(
+            mirror.lock().unwrap().len(),
+            1,
+            "last-admitted mirror untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn deleted_scan_dir_drops_user_cap_names() {
+        // I-1 deleted leg: an absent dir after a Tree baseline is the honest
+        // removal contract — exactly one rescan, and the merge drops the
+        // name from the swapped registry.
+        let tmp = tempfile::tempdir().unwrap();
+        let scan_dir = tmp.path().join("caps");
+        std::fs::create_dir_all(&scan_dir).unwrap();
+        write_capability_dir(&scan_dir, "demo.pull");
+        let deps = test_deps();
+        let (reg, boot_outcome) = rebuild_registry_with_merge(&deps, None, None, &scan_dir, &[]);
+        let holder = CapabilityRegistryHolder::new();
+        holder.swap(std::sync::Arc::new(reg));
+        let mirror: std::sync::Arc<std::sync::Mutex<Vec<UserCapability>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(boot_outcome.admitted));
+        let ticks = AtomicUsize::new(0);
+        let rescans = AtomicUsize::new(0);
+
+        // The user deletes the scan dir on the third poll (after the
+        // baseline and one no-op tick): Missing after Tree → exactly one
+        // rescan, and the rebuild-with-merge drops the name (removal
+        // contract).
+        let scans = run_real_watch(
+            &scan_dir,
+            &holder,
+            &deps,
+            &mirror,
+            &rescans,
+            &ticks,
+            5,
+            |tick, dir| {
+                if tick == 3 {
+                    std::fs::remove_dir_all(dir).unwrap();
+                }
+            },
+        )
+        .await;
+        assert_eq!(scans, 1, "deleted dir → exactly one rescan");
+        let live = holder.get().expect("live generation present");
+        assert!(
+            user_cap_names(&live).is_empty(),
+            "absent dir removes the mirrored names (removal contract)"
+        );
+        assert!(
+            mirror.lock().unwrap().is_empty(),
+            "mirror drops with the names"
+        );
     }
 }
