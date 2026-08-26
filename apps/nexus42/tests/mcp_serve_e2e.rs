@@ -675,8 +675,12 @@ async fn list_changed_advertised_and_delivered() {
     );
     assert_eq!(after_eviction.len(), 32, "back to 32 rows");
 
-    // ── Leg 3: user-cap leg via mock-catalog change (a runtime user-cap
-    // add is restart-scoped pre-RN-2, AR-79 #6) ──
+    // ── Leg 3: user-cap content change via mock-catalog mutation ──
+    // The child watch is source-agnostic over the tools body (AR-79), so a
+    // content-only change notifies without an id change. The live
+    // add/remove journey (scan dir → daemon hot reload → listChanged) is
+    // covered against the REAL daemon in e2e_peer_mcp.rs (V1.176 P1, AR-95
+    // #4) — user-cap changes are no longer restart-scoped (RN-2).
     let mut body = catalog.current();
     for item in body["items"].as_array_mut().expect("items array") {
         if item["id"] == "t6.wcap" {

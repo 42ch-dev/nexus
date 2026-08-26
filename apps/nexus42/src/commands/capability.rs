@@ -10,7 +10,19 @@
 //! copy); the manifest + `wasm_sha256` pairing reuse `nexus-module-manifest`
 //! (AR-39 — the single content-hash path). The CLI deliberately does NOT
 //! know the builtin name list (AR-41): collision is daemon-side admission
-//! only, checked at daemon restart.
+//! only, re-checked within the reload bound (AR-93). The CLI does not
+//! know the builtin list (AR-41 preserved).
+//!
+//! Hot reload (V1.176 P1, RN-2, AR-91..96): the daemon polls
+//! `~/.nexus42/capabilities/` every 1 s and re-admits changes on the
+//! SAME scan path as boot — no daemon restart. Within ~2 s of a complete,
+//! admissible trio, `capability list` reflects the change; a live MCP
+//! session receives `listChanged` within ~4 s worst case (1 s daemon
+//! watch + 2 s child watch, both legs named — AR-93). Deleting `<name>/`
+//! removes the row within the same bound (AR-94). A trio that fails
+//! admission hot-reloads as skipped-with-reason (boot vocabulary); the
+//! previous good admission for the name keeps serving (last-good-wins,
+//! PL-9).
 //!
 //! Exit-code contract (AR-41, mirrors the AR-9 table of `compute`):
 //!
@@ -61,8 +73,9 @@ pub enum CapabilityCommand {
     ///
     /// Exit codes (AR-41): 0 valid, 2 descriptor/manifest validation
     /// failure (field list, `--json` machine-readable), 3 `wasm_sha256`
-    /// pairing mismatch. Collision with a builtin is checked at daemon
-    /// restart — the CLI does not know the builtin name list.
+    /// pairing mismatch. Collision with a builtin is daemon-side admission
+    /// — re-checked within the reload bound (~2 s, AR-93); the CLI does not
+    /// know the builtin name list.
     Validate {
         /// Path to the capability descriptor (`capability.json`).
         #[arg(long)]
@@ -86,8 +99,10 @@ pub enum CapabilityCommand {
     /// `capability.json` + `manifest.json` + `<module-id>.wasm`).
     ///
     /// Daemon-free. Re-verifies descriptor + manifest + wasm pairing
-    /// (AR-34/39) before copying. Collision with a built-in is checked at
-    /// daemon restart (AR-41). No `run`, no `scaffold` (PL-7).
+    /// (AR-34/39) before copying. Collision with a builtin is daemon-side
+    /// admission — re-checked within the reload bound (~2 s, AR-93); the
+    /// CLI does not know the builtin list (AR-41). No `run`, no
+    /// `scaffold` (PL-7).
     ///
     /// Exit codes (AR-41): 2 = validation, 3 = pairing, 1 = I/O/home.
     Install {
@@ -167,8 +182,9 @@ fn cmd_validate(
             descriptor_path.display()
         );
         println!(
-            "  Collision with a built-in is checked at daemon restart (the CLI does not \
-             know the builtin list, AR-41)."
+            "  Collision with a builtin is daemon-side admission only (the CLI does not \
+             know the builtin list, AR-41); it is re-checked within ~2 s of the daemon's \
+             hot reload — no restart needed."
         );
     }
     Ok(())

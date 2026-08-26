@@ -156,11 +156,14 @@ duplicates are safe, loss is not.
 This is a **child-side watch** (AR-79): the child holds a digest +
 interval only — no registry, allowlist, policy, or read cache. There is
 **no daemon→child push channel** and no new daemon route. Session-visible
-change sources: peer admission, peer eviction, and any other catalog
-content change the next successful poll observes (user-cap set changes
-are restart-scoped today; RN-2). Notification latency ≤ 2 s + one HTTP
-request timeout (never unbounded). A subsequent `tools/list` is still a
-live daemon round trip.
+change sources include peer admission/eviction and user-cap changes: the
+daemon hot-reloads `~/.nexus42/capabilities/` into the live registry
+(V1.176, RN-2), and the next successful poll observes the swap. The
+end-to-end budget for a user-cap change to reach a live session is
+**~1 s daemon watch + ~2 s child watch + one HTTP request ≈ ≤ 4 s worst
+case** (both legs named, AR-93); deleting `<name>/` drops the row on the
+same chain. Notification latency ≤ 2 s + one HTTP request timeout (never
+unbounded). A subsequent `tools/list` is still a live daemon round trip.
 
 
 ### Tools-only vocabulary boundary (PL-7/PL-9)
