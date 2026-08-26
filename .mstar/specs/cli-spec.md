@@ -297,7 +297,7 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。**V1.
   `{ "creator_id": string, "handle": string|null, "display_name":
   string|null, "active": boolean, "origin": "local"|"platform" }`；
   键名 `origin`（非 `kind`，与 capability catalog wire vocabulary 一致）；
-  本地行 `handle`/`display_name` 为 `null`；空列表输出 `[]`；人形默认
+  本地行 `handle` 为 `null`、`display_name` 取 `local_identities`（权威，缺省时为 `null`）；空列表输出 `[]`；人形默认
   empty-state 文案不变。**无 daemon route**；无 `schemas/` / 契约触碰。
 
 ### 6.2C `nexus42 creator workspace`（本地 workspace 子命令）

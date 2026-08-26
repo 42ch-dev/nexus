@@ -1305,6 +1305,16 @@ fn seed_platform_cache(home: &std::path::Path, creator_id: &str, handle: &str, d
     std::fs::write(&path, serde_json::to_string_pretty(&cache).unwrap()).unwrap();
 }
 
+/// ORIGIN cell of one rendered human row, sliced at the header's ORIGIN
+/// column offset. The CREATOR ID column is padded to the widest id in the
+/// listing, so header and data rows share the same column layout — this
+/// pins the ORIGIN cell itself, not a substring (a plain `contains("local")`
+/// would already match `ctr_local*` ids).
+fn origin_cell<'a>(line: &'a str, header_line: &str) -> &'a str {
+    let col = header_line.find("ORIGIN").expect("ORIGIN header token");
+    line.get(col..col + 8).unwrap_or("").trim()
+}
+
 /// Mixed local+platform listing (AR-90): a persistent local identity appears
 /// marked `local` (HANDLE renders `-`, never `[local]`); a seeded platform row
 /// keeps its id/handle/display byte-stable marked `platform`. `--json` emits
@@ -1345,27 +1355,42 @@ fn creator_list_mixed_local_and_platform() {
         stdout.contains("ORIGIN"),
         "table must gain the ORIGIN header: {stdout}"
     );
+    // Column-aware ORIGIN pin: slice each row's ORIGIN cell at the header
+    // column offset — a plain substring would already match `ctr_local*` ids
+    // (which embed "local") and "Alice Platform" (which embeds "platform").
+    let header_line = stdout
+        .lines()
+        .find(|l| l.contains("ORIGIN"))
+        .expect("ORIGIN header line");
     let local_line = stdout
         .lines()
         .find(|l| l.contains(&local_id))
         .expect("local row rendered");
     assert!(
-        local_line.contains("local") && local_line.contains("Local Alice"),
-        "local row marked with authoritative display name: {local_line}"
+        local_line.contains("Local Alice"),
+        "local row authoritative display name: {local_line}"
     );
     assert!(
         !local_line.contains("[local]"),
         "HANDLE must not be overloaded with [local]: {local_line}"
+    );
+    assert_eq!(
+        origin_cell(local_line, header_line),
+        "local",
+        "ORIGIN cell on the local row: {local_line}"
     );
     let platform_line = stdout
         .lines()
         .find(|l| l.contains("ctr_platabc"))
         .expect("platform row rendered");
     assert!(
-        platform_line.contains("alice")
-            && platform_line.contains("Alice Platform")
-            && platform_line.contains("platform"),
-        "platform row byte-stable and marked platform: {platform_line}"
+        platform_line.contains("alice") && platform_line.contains("Alice Platform"),
+        "platform row byte-stable: {platform_line}"
+    );
+    assert_eq!(
+        origin_cell(platform_line, header_line),
+        "platform",
+        "ORIGIN cell on the platform row: {platform_line}"
     );
 
     // `--json`: pinned DTO array verbatim.
@@ -1407,6 +1432,81 @@ fn creator_list_mixed_local_and_platform() {
     assert_eq!(platform["handle"], "alice");
     assert_eq!(platform["display_name"], "Alice Platform");
     assert_eq!(platform["active"], false);
+}
+
+/// `--anonymous` identities are ephemeral, not registered creators (AR-90
+/// #2) — even while an anonymous identity is the active creator, it must not
+/// appear in `creator list` on either surface (CLI-level leg).
+#[test]
+fn creator_list_excludes_anonymous_identity() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    // A persistent local row + a seeded platform row keep the listing
+    // non-empty while the anonymous identity is active.
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("register")
+        .arg("--local")
+        .arg("--name")
+        .arg("Local Alice")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created persistent identity"));
+    seed_platform_cache(home, "ctr_platabc", "alice", "Alice Platform");
+
+    // The anonymous identity becomes the active creator (ephemeral — no
+    // `local_identities` row, no workspace row).
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("system")
+        .arg("identity")
+        .arg("create")
+        .arg("--kind")
+        .arg("anonymous")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created anonymous identity"));
+
+    let human = Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("list")
+        .env("HOME", home)
+        .assert()
+        .success();
+    let stdout = String::from_utf8(human.get_output().stdout.clone()).unwrap();
+    assert!(
+        !stdout.contains("ctr_anon"),
+        "anonymous identity must not appear in the human table: {stdout}"
+    );
+
+    let json_out = Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("list")
+        .arg("--json")
+        .env("HOME", home)
+        .assert()
+        .success();
+    let json_text = String::from_utf8(json_out.get_output().stdout.clone()).unwrap();
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(&json_text).expect("--json must emit a JSON array");
+    assert_eq!(
+        rows.len(),
+        2,
+        "local + platform rows; anonymous excluded: {json_text}"
+    );
+    assert!(
+        rows.iter().all(|r| !r["creator_id"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("ctr_anon")),
+        "anonymous identity must not appear in --json: {json_text}"
+    );
 }
 
 /// `creator list --json` on an empty identity surface emits `[]` (DTO

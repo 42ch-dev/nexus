@@ -87,14 +87,24 @@ pub async fn run(cmd: IdentityCommand, _config: &CliConfig) -> Result<()> {
 /// (`commands::creator::bootstrap::bootstrap_local_creator`) opens the same
 /// global identity store for the mint leg.
 pub(crate) async fn open_global_db() -> Result<nexus_local_db::SqlitePool> {
-    let home = config::user_home_dir()?;
-    let nexus_dir = home.join(".nexus42");
+    let db_path = global_db_path()?;
 
     // Ensure ~/.nexus42/ exists
-    std::fs::create_dir_all(&nexus_dir)?;
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
 
-    let db_path = nexus_dir.join("state.db");
     crate::db::Schema::init(&db_path).await.map_err(Into::into)
+}
+
+/// Resolve the global identity database path at `~/.nexus42/state.db`.
+///
+/// `pub(crate)` since V1.176 P0 T3 fix wave: read-only surfaces (e.g.
+/// `creator list`) check existence via this path so they do not
+/// materialize the db when there are no local rows to merge.
+pub(crate) fn global_db_path() -> Result<std::path::PathBuf> {
+    let home = config::user_home_dir()?;
+    Ok(home.join(".nexus42").join("state.db"))
 }
 
 /// List all local identities.

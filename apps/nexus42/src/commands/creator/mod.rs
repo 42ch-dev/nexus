@@ -29,7 +29,7 @@ pub mod world;
 
 use crate::auth;
 use crate::challenge::{solve_challenge_with_fallback, UnavailableLlmSolver};
-use crate::commands::system::identity::open_global_db;
+use crate::commands::system::identity::{global_db_path, open_global_db};
 use crate::config::{
     find_workspace_root, nexus_home, workspace_config_path, workspace_nexus_dir, CliConfig,
     DEFAULT_WORKSPACE_SLUG,
@@ -1656,6 +1656,19 @@ fn row_to_json(row: &ListRow) -> serde_json::Value {
     })
 }
 
+/// CREATOR ID column width for the human table: the widest id in the
+/// listing, never narrower than the pre-existing 19 — a platform-only
+/// listing of short ids keeps the V1.176 layout byte-for-byte. Minted
+/// `ctr_local` ids are 21 chars (`ctr_local` + 12 hex, V1.176 P0 T1).
+#[must_use]
+fn creator_id_column_width(rows: &[ListRow]) -> usize {
+    rows.iter()
+        .map(|r| r.creator_id.len())
+        .max()
+        .unwrap_or(19)
+        .max(19)
+}
+
 /// List all known Creators with three-layer identity model (V1.16).
 ///
 /// V1.176 P0 T3 (AR-90): persistent local identities from `local_identities`
@@ -1677,8 +1690,15 @@ async fn list_creators(_config: &CliConfig, json: bool) -> Result<()> {
 
     // Local rows come from `local_identities` (SSOT, AR-90 #1) — the JSON
     // cache is platform display metadata only and is never a local source.
-    let pool = open_global_db().await?;
-    let local_rows = nexus_local_db::list_local_identities(&pool).await?;
+    // The global db is opened lazily: `creator list` must not materialize
+    // `~/.nexus42/state.db` for a platform-only / empty surface, and no
+    // local rows can exist when the db file is absent.
+    let local_rows = if global_db_path()?.exists() {
+        let pool = open_global_db().await?;
+        nexus_local_db::list_local_identities(&pool).await?
+    } else {
+        Vec::new()
+    };
     let auth_store = crate::auth::AuthStore::load()?;
 
     let rows = list_rows(&cache, &auth_store, &local_rows, active_id);
@@ -1702,14 +1722,21 @@ async fn list_creators(_config: &CliConfig, json: bool) -> Result<()> {
     }
 
     // Human default: additive ORIGIN column; existing column meanings and
-    // platform values unchanged (local HANDLE renders `-`, PL-6).
-    println!("CREATOR ID          HANDLE         DISPLAY NAME          ORIGIN   ACTIVE");
+    // platform values unchanged (local HANDLE renders `-`, PL-6). The CREATOR
+    // ID column is padded to the widest id in the listing (never narrower
+    // than the pre-existing 19), so 21-char `ctr_local*` ids align and
+    // platform-only listings keep the V1.176 layout byte-for-byte.
+    let id_width = creator_id_column_width(&rows);
+    println!(
+        "{:<id_width$} {:<14} {:<21} {:<8} ACTIVE",
+        "CREATOR ID", "HANDLE", "DISPLAY NAME", "ORIGIN"
+    );
     for row in &rows {
         let handle_str = row.handle.as_deref().unwrap_or("-");
         let display_str = row.display_name.as_deref().unwrap_or("-");
         let active_marker = if row.active { "✓" } else { "" };
         println!(
-            "{:<19} {:<14} {:<21} {:<8} {}",
+            "{:<id_width$} {:<14} {:<21} {:<8} {}",
             row.creator_id, handle_str, display_str, row.origin, active_marker
         );
     }
@@ -2813,6 +2840,37 @@ mod tests {
                 "active": false,
                 "origin": "platform",
             })
+        );
+    }
+
+    #[test]
+    fn creator_id_column_width_fits_widest_id_floor_19() {
+        // No rows → pre-existing width.
+        assert_eq!(creator_id_column_width(&[]), 19);
+        // Short platform-only ids keep the pre-existing width — the V1.176
+        // layout stays byte-for-byte on a platform-only listing.
+        let platform = ListRow {
+            creator_id: "ctr_platabc".to_string(),
+            handle: Some("alice".to_string()),
+            display_name: Some("Alice Platform".to_string()),
+            active: false,
+            origin: "platform",
+        };
+        assert_eq!(creator_id_column_width(std::slice::from_ref(&platform)), 19);
+        // Minted 21-char `ctr_local` ids (V1.176 P0 T1 format) widen the
+        // column so HANDLE / ORIGIN stay aligned on local rows.
+        let local = ListRow {
+            creator_id: "ctr_localf0d65930e496".to_string(),
+            handle: None,
+            display_name: Some("Local Alice".to_string()),
+            active: true,
+            origin: "local",
+        };
+        assert_eq!(creator_id_column_width(std::slice::from_ref(&local)), 21);
+        assert_eq!(
+            creator_id_column_width(&[local, platform]),
+            21,
+            "the widest id drives the column in a mixed listing"
         );
     }
 }
