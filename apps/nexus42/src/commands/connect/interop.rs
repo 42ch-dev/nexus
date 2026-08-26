@@ -34,7 +34,7 @@
 //! resolved via `listen_addrs()`), mDNS off (feature not compiled), and a
 //! handshake timeout ≥ `DEFAULT_HANDSHAKE_TIMEOUT` (10 s). All waits are
 //! bounded event waits on `connect`/`invoke` futures — no sleeps. Scenarios
-//! run one at a time under a process-wide mutex (macOS SO_REUSEPORT loopback
+//! run one at a time under a process-wide mutex (macOS `SO_REUSEPORT` loopback
 //! port allocation can collide across concurrently running network tests —
 //! the same guard the upstream spoke-connect reference tests use).
 
@@ -56,7 +56,7 @@ use std::time::Duration;
 
 /// Seed a `narrative_worlds` row (plus its `creators` FK row) so the
 /// workspace DB satisfies the WAL-adjacent FK constraints the production
-/// adapter's `put_*` ports hit (PRAGMA foreign_keys = ON).
+/// adapter's `put_*` ports hit (PRAGMA `foreign_keys` = ON).
 async fn seed_world(pool: &sqlx::SqlitePool, creator_id: &str, world_id: &str) {
     sqlx::query(
         "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
@@ -173,8 +173,8 @@ fn combat_entry_fixture(
 /// operator-install step the P2 compute route requires (spec §2.1: the peer
 /// can name only a module already installed under `~/.nexus42/modules/`).
 #[cfg(not(nexus42_no_wasm_target))]
-async fn install_test_module(home: &std::path::Path, module_id: &str) {
-    install_test_module_as(home, module_id, module_id).await;
+fn install_test_module(home: &std::path::Path, module_id: &str) {
+    install_test_module_as(home, module_id, module_id);
 }
 
 /// Like [`install_test_module`] but under an arbitrary store id: copies the
@@ -182,7 +182,7 @@ async fn install_test_module(home: &std::path::Path, module_id: &str) {
 /// the module-id pin denies an unrelated INSTALLED module (only the store
 /// id differs — the bytes are the embedded `basic-combat` ones).
 #[cfg(not(nexus42_no_wasm_target))]
-async fn install_test_module_as(home: &std::path::Path, module_id: &str, source_id: &str) {
+fn install_test_module_as(home: &std::path::Path, module_id: &str, source_id: &str) {
     let dir = nexus_home_layout::user_modules_dir(home).join(module_id);
     std::fs::create_dir_all(&dir).expect("mkdir module store dir");
     let bytes = nexus_wasm_host::embedded_module_bytes(source_id)
@@ -207,7 +207,7 @@ async fn network_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
 /// (10 s) per the interop lock; every wait in these tests is bounded by it.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// The Nexus host_id used by the golden tests (deterministic; the builder is
+/// The Nexus `host_id` used by the golden tests (deterministic; the builder is
 /// host_id-injectable so tests are hermetic — no `~/.nexus42` writes).
 const TEST_HOST_ID: &str = "test-device-uuid-0000";
 
@@ -245,7 +245,7 @@ fn host_config(identity: Keypair, allowlist: Vec<PeerId>) -> ConnectConfig {
 }
 
 /// A reference-peer node config (the upstream spoke-connect client shape):
-/// same wiring, a distinct manifest host_id.
+/// same wiring, a distinct manifest `host_id`.
 fn peer_config(identity: Keypair, allowlist: Vec<PeerId>) -> ConnectConfig {
     ConnectConfig {
         identity,
@@ -825,7 +825,7 @@ async fn token_required_host_rejects_tokenless_peer_then_accepts_valid_auth() {
 }
 
 /// The CLI wiring end-to-end: persisted identity + allowlist file/overlay +
-/// device-id host_id + shared manifest builder + the N-C1 workspace-DB open +
+/// device-id `host_id` + shared manifest builder + the N-C1 workspace-DB open +
 /// per-process adapter + invoke handler assemble the full `connect start`
 /// boot path (`build_host_config`) and the node starts.
 #[tokio::test]
@@ -913,7 +913,7 @@ async fn assert_peer_list_ok(
 
 /// N-C3 (V1.155 P0): two-node bidirectional-outbound peer recording over
 /// real Connect sessions. Each side is a full nexus Connect Host (persisted
-/// identity + device-id host_id + hermetic workspace DB + per-process
+/// identity + device-id `host_id` + hermetic workspace DB + per-process
 /// adapter, all through the production `build_host_config` boot).
 ///
 /// - A dials B → the outbound `connect()` return carries B's manifest
@@ -928,6 +928,7 @@ async fn assert_peer_list_ok(
 /// an inbound-only peer is NOT recorded — asserted: after A dials B, B's
 /// store stays empty until B itself dials A.
 #[tokio::test(flavor = "multi_thread")]
+#[expect(clippy::too_many_lines)] // AR-102: linear fail-closed scenario steps by design; extraction refactors are out of scope for this plan
 async fn n_c3_two_node_bidirectional_outbound_records_dialed_peer_manifests() {
     let _guard = network_test_guard().await;
     let temp = tempfile::tempdir().expect("tempdir");
@@ -1132,7 +1133,11 @@ async fn connect_dial_records_dialed_peer_manifest() {
 /// caller inside the runtime while the orchestrator runs on a
 /// `spawn_blocking` lane, which requires a multi-thread runtime).
 #[tokio::test(flavor = "multi_thread")]
+#[expect(clippy::too_many_lines)] // AR-102: linear fail-closed scenario steps by design; extraction refactors are out of scope for this plan
 async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
+    const WORLD_A: &str = "wld_test_a";
+    const WORLD_B: &str = "wld_test_b";
+
     let _guard = network_test_guard().await;
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path();
@@ -1140,9 +1145,6 @@ async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
     let outsider_key = fixed_keypair(63);
     let peer_peer = peer_key.public().to_peer_id();
     let outsider_peer = outsider_key.public().to_peer_id();
-
-    const WORLD_A: &str = "wld_test_a";
-    const WORLD_B: &str = "wld_test_b";
 
     // Hermetic workspace DB (FK rows for both worlds so the production
     // adapter's put paths can persist).
@@ -1433,7 +1435,10 @@ async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
 /// source really switched); equal claim ⇒ served (V1.153 clients sending the
 /// correct payload identity keep working).
 #[tokio::test(flavor = "multi_thread")]
+#[expect(clippy::too_many_lines)] // AR-102: linear fail-closed scenario steps by design; extraction refactors are out of scope for this plan
 async fn n_c1_session_peer_identity_denies_spoofed_payload_claim_and_serves_claimless() {
+    const WORLD_A: &str = "wld_test_a";
+
     let _guard = network_test_guard().await;
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path();
@@ -1441,8 +1446,6 @@ async fn n_c1_session_peer_identity_denies_spoofed_payload_claim_and_serves_clai
     let spoofed_key = fixed_keypair(73);
     let peer_peer = peer_key.public().to_peer_id();
     let spoofed_peer = spoofed_key.public().to_peer_id();
-
-    const WORLD_A: &str = "wld_test_a";
 
     // Hermetic workspace DB (FK rows so the production adapter's put paths
     // can persist).
@@ -1647,22 +1650,23 @@ async fn n_c1_session_peer_identity_denies_spoofed_payload_claim_and_serves_clai
 /// N-C1 fix loop (L2 Critical regression): the orchestrators' stored
 /// lookups and CAS updates match on id + revision only (world-agnostic —
 /// `WHERE key_block_id = ?` / `AND COALESCE(revision,0) = ?`), so a payload
-/// claiming WORLD_A can rewrite a row stored in WORLD_B by replaying the
+/// claiming `WORLD_A` can rewrite a row stored in `WORLD_B` by replaying the
 /// revision the OCC rejects disclose. The dispatch layer must verify the
 /// stored row's world against the payload-claimed world BEFORE the
 /// orchestrator CAS runs and deny with zero side effects. Covers the
 /// update, promote, and relate paths (relate shares the same
 /// world-agnostic lookup/CAS shape).
 #[tokio::test(flavor = "multi_thread")]
+#[expect(clippy::too_many_lines)] // AR-102: linear fail-closed scenario steps by design; extraction refactors are out of scope for this plan
 async fn n_c1_cross_world_update_promote_and_relate_are_denied_with_zero_mutation() {
+    const WORLD_A: &str = "wld_test_a";
+    const WORLD_B: &str = "wld_test_b";
+
     let _guard = network_test_guard().await;
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path();
     let peer_key = fixed_keypair(64);
     let peer_peer = peer_key.public().to_peer_id();
-
-    const WORLD_A: &str = "wld_test_a";
-    const WORLD_B: &str = "wld_test_b";
 
     // Hermetic workspace DB with both worlds seeded.
     let db_path = temp.path().join("workspace").join("state.db");
@@ -1877,13 +1881,13 @@ async fn n_c1_cross_world_update_promote_and_relate_are_denied_with_zero_mutatio
 /// the WHOLE payload is denied and zero entries persist.
 #[tokio::test(flavor = "multi_thread")]
 async fn n_c1_mixed_payload_missing_world_id_denies_whole_payload() {
+    const WORLD_A: &str = "wld_test_a";
+
     let _guard = network_test_guard().await;
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path();
     let peer_key = fixed_keypair(65);
     let peer_peer = peer_key.public().to_peer_id();
-
-    const WORLD_A: &str = "wld_test_a";
 
     let db_path = temp.path().join("workspace").join("state.db");
     let pool = crate::db::Schema::init(&db_path)
@@ -1980,17 +1984,17 @@ async fn n_c1_mixed_payload_missing_world_id_denies_whole_payload() {
 /// to the `op_unsupported` refusal and this loop fails — drift the honesty
 /// check alone cannot see, because it only compares manifest ⇔ const.
 #[tokio::test(flavor = "multi_thread")]
-#[allow(clippy::too_many_lines)] // one routing sweep over SERVED_OPS; the per-op payload fixtures stay linear
+#[expect(clippy::too_many_lines)] // one routing sweep over SERVED_OPS; the per-op payload fixtures stay linear
 async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
+    // Must match the ComputeInput world_ref pattern `^wld_[a-zA-Z0-9]+$`
+    // (the loop's compute arm reaches WASM execution).
+    const WORLD_A: &str = "wld_loop1";
+
     let _guard = network_test_guard().await;
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path();
     let peer_key = fixed_keypair(66);
     let peer_peer = peer_key.public().to_peer_id();
-
-    // Must match the ComputeInput world_ref pattern `^wld_[a-zA-Z0-9]+$`
-    // (the loop's compute arm reaches WASM execution).
-    const WORLD_A: &str = "wld_loop1";
 
     // Hermetic workspace DB with the world seeded.
     let db_path = temp.path().join("workspace").join("state.db");
@@ -2024,7 +2028,7 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
     // covers it wherever the target exists).
     let mut loop_ops: Vec<&str> = super::invoke::SERVED_OPS.to_vec();
     if nexus_wasm_host::embedded_module_bytes("basic-combat").is_some() {
-        install_test_module(home, "basic-combat").await;
+        install_test_module(home, "basic-combat");
         // Stage the compute session the loop's compute arm targets (project
         // is not a served op; the session row is the staging surface).
         nexus_local_db::compute_session::insert_compute_session(
@@ -2170,7 +2174,7 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
 /// CREATE path used to skip the stored-world gate entirely — the relation
 /// row does not exist yet, so the relation-row world check is a no-op, and
 /// `kb_relationships` FKs are single-column on `key_block_id` (world-
-/// agnostic). A peer scoped ONLY to WORLD_A could therefore mint a world-A
+/// agnostic). A peer scoped ONLY to `WORLD_A` could therefore mint a world-A
 /// relation whose endpoints are world-B entry ids (cross-world edge + an
 /// id-existence oracle via insert success vs FK/`internal_error`
 /// differential). The gate must resolve `from_id` / `to_id` on the create
@@ -2179,15 +2183,16 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
 /// insert. Endpoints are immutable on the update path (the update port
 /// carries no endpoint fields), so the create-path check closes the gap.
 #[tokio::test(flavor = "multi_thread")]
+#[expect(clippy::too_many_lines)] // AR-102: linear fail-closed scenario steps by design; extraction refactors are out of scope for this plan
 async fn n_c1_relate_create_rejects_foreign_world_endpoints() {
+    const WORLD_A: &str = "wld_test_a";
+    const WORLD_B: &str = "wld_test_b";
+
     let _guard = network_test_guard().await;
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path();
     let peer_key = fixed_keypair(67);
     let peer_peer = peer_key.public().to_peer_id();
-
-    const WORLD_A: &str = "wld_test_a";
-    const WORLD_B: &str = "wld_test_b";
 
     // Hermetic workspace DB with both worlds seeded.
     let db_path = temp.path().join("workspace").join("state.db");
@@ -2341,7 +2346,7 @@ async fn n_c1_relate_create_rejects_foreign_world_endpoints() {
 }
 
 /// N-C2 (V1.154 P1): the `check` op round-trips over Connect through the
-/// real handler. The peer is scoped to WORLD_A with the full served-op set;
+/// real handler. The peer is scoped to `WORLD_A` with the full served-op set;
 /// the invoke payload deserializes directly into `spoke_schemas::CheckRequest`
 /// (spec §5.1 lock) and runs `orchestrate_check_world_scoped` (V1.166 AR-1:
 /// empty `rule_refs` auto-include the scope world's `status=active` rules;
@@ -2352,13 +2357,13 @@ async fn n_c1_relate_create_rejects_foreign_world_endpoints() {
 /// ports.
 #[tokio::test(flavor = "multi_thread")]
 async fn n_c2_peer_runs_check_over_connect() {
+    const WORLD_A: &str = "wld_test_a";
+
     let _guard = network_test_guard().await;
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path();
     let peer_key = fixed_keypair(70);
     let peer_peer = peer_key.public().to_peer_id();
-
-    const WORLD_A: &str = "wld_test_a";
 
     // Hermetic workspace DB with the world seeded (FK rows for the read
     // ports and the finding-persist path).
@@ -2442,16 +2447,16 @@ async fn n_c2_peer_runs_check_over_connect() {
 /// `spoke_schemas::AssembleRequest` (spec §5.1 lock) and runs
 /// `orchestrate_assemble` — the response carries the assembled packet, and
 /// `max_entries` flows through as the packet truncation hint (spec §5.4's
-/// amplification guard: a huge max_entries is capped before the orchestrator).
+/// amplification guard: a huge `max_entries` is capped before the orchestrator).
 #[tokio::test(flavor = "multi_thread")]
 async fn n_c2_peer_runs_assemble_over_connect() {
+    const WORLD_A: &str = "wld_test_a";
+
     let _guard = network_test_guard().await;
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path();
     let peer_key = fixed_keypair(71);
     let peer_peer = peer_key.public().to_peer_id();
-
-    const WORLD_A: &str = "wld_test_a";
 
     let db_path = temp.path().join("workspace").join("state.db");
     let pool = crate::db::Schema::init(&db_path)
@@ -2557,18 +2562,19 @@ async fn n_c2_peer_runs_assemble_over_connect() {
 /// identical to writes): `check` / `assemble` require the session peer's
 /// `world_scope` to contain the request `scope.scope_id` before either
 /// orchestrator is called. Wrong-world scope ⇒ `op_unsupported`; absent
-/// scope object / missing scope_id ⇒ `op_unsupported` (cannot verify
+/// scope object / missing `scope_id` ⇒ `op_unsupported` (cannot verify
 /// scope). All denials have zero side effects and leave the session usable.
 #[tokio::test(flavor = "multi_thread")]
+#[expect(clippy::too_many_lines)] // AR-102: linear fail-closed scenario steps by design; extraction refactors are out of scope for this plan
 async fn n_c2_check_and_assemble_wrong_world_and_absent_scope_denied() {
+    const WORLD_A: &str = "wld_test_a";
+    const WORLD_B: &str = "wld_test_b";
+
     let _guard = network_test_guard().await;
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path();
     let peer_key = fixed_keypair(72);
     let peer_peer = peer_key.public().to_peer_id();
-
-    const WORLD_A: &str = "wld_test_a";
-    const WORLD_B: &str = "wld_test_b";
 
     let db_path = temp.path().join("workspace").join("state.db");
     let pool = crate::db::Schema::init(&db_path)
@@ -2718,7 +2724,7 @@ async fn n_c2_check_and_assemble_wrong_world_and_absent_scope_denied() {
 /// N-C2 (V1.154 P2) refusal matrix: through the real handler, `project`
 /// and unknown ops are refused with `op_unsupported` and zero side effects
 /// — even for a peer whose `op_scope` covers the full served set (the
-/// SERVED_OPS gate refuses before any scope logic). V1.169 P0 (locks AR-4
+/// `SERVED_OPS` gate refuses before any scope logic). V1.169 P0 (locks AR-4
 /// layer 1) → V1.173 (AR-55): `tools.*` ops join the matrix. The
 /// spoke-side dispatch gate (0.11.1 core rule: the op string itself is
 /// the required capability) refuses any `tools.*` id the nexus does not
@@ -2731,13 +2737,13 @@ async fn n_c2_check_and_assemble_wrong_world_and_absent_scope_denied() {
 /// pinning that the gate really admits it. The session stays usable.
 #[tokio::test(flavor = "multi_thread")]
 async fn n_c2_refusal_matrix_project_and_unknown_ops() {
+    const WORLD_A: &str = "wld_test_a";
+
     let _guard = network_test_guard().await;
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path();
     let peer_key = fixed_keypair(73);
     let peer_peer = peer_key.public().to_peer_id();
-
-    const WORLD_A: &str = "wld_test_a";
 
     let db_path = temp.path().join("workspace").join("state.db");
     let pool = crate::db::Schema::init(&db_path)
@@ -2833,20 +2839,21 @@ async fn n_c2_refusal_matrix_project_and_unknown_ops() {
 /// installed without the embedded bytes).
 #[cfg(not(nexus42_no_wasm_target))]
 #[tokio::test(flavor = "multi_thread")]
+#[expect(clippy::too_many_lines)] // AR-102: linear fail-closed scenario steps by design; extraction refactors are out of scope for this plan
 async fn n_c2_peer_runs_compute_over_connect() {
+    // The world id must match the ComputeInput world_ref pattern
+    // `^wld_[a-zA-Z0-9]+$` (underscores are rejected by the wire type).
+    const WORLD_A: &str = "wld_rt1";
+
     let _guard = network_test_guard().await;
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path();
     let peer_key = fixed_keypair(80);
     let peer_peer = peer_key.public().to_peer_id();
 
-    // The world id must match the ComputeInput world_ref pattern
-    // `^wld_[a-zA-Z0-9]+$` (underscores are rejected by the wire type).
-    const WORLD_A: &str = "wld_rt1";
-
     // Operator-install step: the module the peer will name must already be
     // installed under `~/.nexus42/modules/` (host-local store, fail-closed).
-    install_test_module(home, "basic-combat").await;
+    install_test_module(home, "basic-combat");
 
     let db_path = temp.path().join("workspace").join("state.db");
     let pool = crate::db::Schema::init(&db_path)
@@ -2976,15 +2983,16 @@ async fn n_c2_peer_runs_compute_over_connect() {
 /// (read-only compute lock, spec §5 / §6.5). All denials happen before any
 /// WASM execution with zero side effects, and the session stays usable.
 #[tokio::test(flavor = "multi_thread")]
+#[expect(clippy::too_many_lines)] // AR-102: linear fail-closed scenario steps by design; extraction refactors are out of scope for this plan
 async fn n_c2_compute_wrong_world_missing_module_uninstalled_and_settle_denied() {
+    const WORLD_A: &str = "wld_test_a";
+    const WORLD_B: &str = "wld_test_b";
+
     let _guard = network_test_guard().await;
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path();
     let peer_key = fixed_keypair(81);
     let peer_peer = peer_key.public().to_peer_id();
-
-    const WORLD_A: &str = "wld_test_a";
-    const WORLD_B: &str = "wld_test_b";
 
     // NOTE: no module is installed in this home — the module-scope'd peer
     // still exists, so the not-installed denial is reachable.
@@ -3199,13 +3207,13 @@ async fn n_c2_compute_wrong_world_missing_module_uninstalled_and_settle_denied()
 /// session stays usable.
 #[tokio::test(flavor = "multi_thread")]
 async fn n_c2_compute_unscoped_module_denied() {
+    const WORLD_A: &str = "wld_test_a";
+
     let _guard = network_test_guard().await;
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path();
     let peer_key = fixed_keypair(82);
     let peer_peer = peer_key.public().to_peer_id();
-
-    const WORLD_A: &str = "wld_test_a";
 
     let db_path = temp.path().join("workspace").join("state.db");
     let pool = crate::db::Schema::init(&db_path)
@@ -3316,20 +3324,21 @@ async fn n_c2_compute_unscoped_module_denied() {
 /// scope. Zero side effects; session stays usable.
 #[cfg(not(nexus42_no_wasm_target))]
 #[tokio::test(flavor = "multi_thread")]
+#[expect(clippy::too_many_lines)] // AR-102: linear fail-closed scenario steps by design; extraction refactors are out of scope for this plan
 async fn n_c2_compute_request_module_override_denied() {
+    // Must match the ComputeInput world_ref pattern `^wld_[a-zA-Z0-9]+$`.
+    const WORLD_A: &str = "wld_pin1";
+
     let _guard = network_test_guard().await;
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path();
     let peer_key = fixed_keypair(83);
     let peer_peer = peer_key.public().to_peer_id();
 
-    // Must match the ComputeInput world_ref pattern `^wld_[a-zA-Z0-9]+$`.
-    const WORLD_A: &str = "wld_pin1";
-
     // Both module ids are INSTALLED — without the pin, the override would
     // execute real WASM under the unscoped id.
-    install_test_module(home, "basic-combat").await;
-    install_test_module_as(home, "basic-combat-alt", "basic-combat").await;
+    install_test_module(home, "basic-combat");
+    install_test_module_as(home, "basic-combat-alt", "basic-combat");
 
     let db_path = temp.path().join("workspace").join("state.db");
     let pool = crate::db::Schema::init(&db_path)
@@ -3506,14 +3515,14 @@ async fn n_c2_compute_request_module_override_denied() {
 /// the denial never reaches module resolution).
 #[tokio::test(flavor = "multi_thread")]
 async fn n_c2_compute_missing_entry_denied_invalid_input() {
+    // Must match the ComputeInput world_ref pattern `^wld_[a-zA-Z0-9]+$`.
+    const WORLD_A: &str = "wld_miss1";
+
     let _guard = network_test_guard().await;
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path();
     let peer_key = fixed_keypair(84);
     let peer_peer = peer_key.public().to_peer_id();
-
-    // Must match the ComputeInput world_ref pattern `^wld_[a-zA-Z0-9]+$`.
-    const WORLD_A: &str = "wld_miss1";
 
     let db_path = temp.path().join("workspace").join("state.db");
     let pool = crate::db::Schema::init(&db_path)
@@ -3655,13 +3664,13 @@ fn write_token_config(home: &std::path::Path, body: &str) {
 /// established (a second invoke is answered again, not `session_not_found`).
 #[tokio::test(flavor = "multi_thread")]
 async fn config_require_token_tokenless_peer_invoke_auth_failed_zero_side_effects() {
+    const WORLD_A: &str = "wld_test_a";
+
     let _guard = network_test_guard().await;
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path();
     let peer_key = fixed_keypair(90);
     let peer_peer = peer_key.public().to_peer_id();
-
-    const WORLD_A: &str = "wld_test_a";
 
     // Hermetic workspace DB with the world seeded (FK rows for the write
     // ports the handler would hit — proving they are never reached).
@@ -3788,14 +3797,15 @@ async fn config_require_token_tokenless_peer_invoke_auth_failed_zero_side_effect
 /// token-authorized before the dialer's `connect()` resolves — the peer's
 /// first invoke deterministically finds the host's token gate satisfied.
 #[tokio::test(flavor = "multi_thread")]
+#[expect(clippy::too_many_lines)] // AR-102: linear fail-closed scenario steps by design; extraction refactors are out of scope for this plan
 async fn config_require_token_valid_token_peer_invokes_green() {
+    const WORLD_A: &str = "wld_test_a";
+
     let _guard = network_test_guard().await;
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path();
     let peer_key = fixed_keypair(91);
     let peer_peer = peer_key.public().to_peer_id();
-
-    const WORLD_A: &str = "wld_test_a";
 
     // Hermetic workspace DB with the world seeded.
     let db_path = temp.path().join("workspace").join("state.db");
@@ -3927,17 +3937,18 @@ async fn config_require_token_valid_token_peer_invokes_green() {
 /// allowlist scope. The spoke op-dispatch gate passes (negotiated
 /// capabilities AND the token grant both cover `l2-computable`), so the
 /// denial wire envelope is the nexus `op denied:` refusal family — pinning
-/// that the nexus PeerScope gate, not the spoke gate, refused. The
+/// that the nexus `PeerScope` gate, not the spoke gate, refused. The
 /// intersection is honored: a scoped baseline op still round-trips green.
 #[tokio::test(flavor = "multi_thread")]
+#[expect(clippy::too_many_lines)] // AR-102: linear fail-closed scenario steps by design; extraction refactors are out of scope for this plan
 async fn token_cannot_widen_peer_scope_l2_computable_compute_denied() {
+    const WORLD_A: &str = "wld_test_a";
+
     let _guard = network_test_guard().await;
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path();
     let peer_key = fixed_keypair(92);
     let peer_peer = peer_key.public().to_peer_id();
-
-    const WORLD_A: &str = "wld_test_a";
 
     let db_path = temp.path().join("workspace").join("state.db");
     let pool = crate::db::Schema::init(&db_path)
