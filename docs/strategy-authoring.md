@@ -6,7 +6,7 @@ run in which order, and what the run payload looks like. It is a plain
 directory — `preset.yaml` + a `templates/` directory — consumed through the
 same preset bundle format as embedded presets. Nothing in a strategy is
 compiled into any binary. For a guided authoring reference, use the
-`strategy-author` skill once it is published in the external
+`strategy-author` skill published in the external
 [`42ch-dev/agent-toolkit`](https://github.com/42ch-dev/agent-toolkit)
 repository (no agent skill ships in this repo) — the agent-side on-ramp
 covers bundle layout, the two execution surfaces, the
