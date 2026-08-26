@@ -297,8 +297,28 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。**V1.
   `{ "creator_id": string, "handle": string|null, "display_name":
   string|null, "active": boolean, "origin": "local"|"platform" }`；
   键名 `origin`（非 `kind`，与 capability catalog wire vocabulary 一致）；
-  本地行 `handle` 为 `null`、`display_name` 取 `local_identities`（权威，缺省时为 `null`）；空列表输出 `[]`；人形默认
-  empty-state 文案不变。**无 daemon route**；无 `schemas/` / 契约触碰。
+### 6.2B.3 V1.176 P0 QC fix-wave amendment — validation bounds, TOCTOU fence, list degradation
+
+- **display_name 前门校验**（helper 唯一副本，qc2 S#4 / qc1 S#1/S#6）：拒绝
+  空白-only（R3）、含控制字符（含内嵌换行 / NUL，会破坏人形表格与 collision
+  stderr 行）、超过 **64 字节**（`MAX_CREATOR_NAME_LENGTH`，与平台 register
+  的 WS-B T4 同界）的名称。byte-exact 匹配语义不变（无 case-fold / 无
+  Unicode 归一化）。
+- **TOCTOU 兜底**（qc3 S-002）：`local_identities` 上唯一部分索引
+  `(display_name) WHERE identity_type = 'persistent' AND display_name IS
+  NOT NULL` —— 并发 0-match 双 mint 时第二个 INSERT 以
+  `SQLITE_CONSTRAINT` 失败，helper 映射为与 2+ 决策树同形的
+  `creator_name_collision:`（诚实碰撞，非静默重复）。无名 persistent
+  （display_name = NULL）不受约束。迁移对历史重复名确定性收敛（每名保留
+  最小 creator_id 行，其余 display_name 置 NULL —— 行不删除，仅不再按名
+  匹配）。
+- **`creator list` 本地源降级**（qc3 S-003）：当 `~/.nexus42/state.db` 存在
+  但锁定 / 损坏 / 不可读时，跳过 local 行并向 stderr 输出
+  `warning: local identities unavailable (...); showing platform rows only.`，
+  平台行照常渲染，退出码仍为 0（含 `--json`，stderr 不污染 stdout 合同）。
+- **no-op 写自由**（qc3 F-002）：完全收敛的 no-op 重跑对两个 `state.db`
+  均**零写入**（`mode=ro` 只读校验，跳过 `Schema::init` 的 migrations +
+  seed_versions）；仅在 mint / repair / session-selection 时才写。
 
 ### 6.2C `nexus42 creator workspace`（本地 workspace 子命令）
 

@@ -6,17 +6,15 @@ run in which order, and what the run payload looks like. It is a plain
 directory — `preset.yaml` + a `templates/` directory — consumed through the
 same preset bundle format as embedded presets. Nothing in a strategy is
 compiled into any binary. For a guided authoring reference, use the
-`strategy-author` skill in the external
+`strategy-author` skill once it is published in the external
 [`42ch-dev/agent-toolkit`](https://github.com/42ch-dev/agent-toolkit)
-repository (no agent skill ships in this repo). The authoring reference
-below stays the canonical contract.
-
-> **Guided authoring:** use the `strategy-author` skill from the
-> [`42ch-dev/agent-toolkit`](https://github.com/42ch-dev/agent-toolkit)
-> repository (external — **no** agent skill ships in this repo) for the
-> agent-side on-ramp: bundle layout, the two execution surfaces, the
-> signals-not-delivered trap, and validator verification. This doc
-> remains the human authoring SSOT.
+repository (no agent skill ships in this repo) — the agent-side on-ramp
+covers bundle layout, the two execution surfaces, the
+signals-not-delivered trap, and validator verification. The external
+publish is in flight (PM-coordinated out-of-band); until it lands, the
+in-repo draft is the iteration guide
+(`.mstar/iterations/v1.176/guides/strategy-author-skill.md`). The
+authoring reference below stays the canonical contract.
 
 **A strategy does not execute on the runtime.** It declares the routing and
 the prompts; your backend runs the LLM step (using the templates), performs

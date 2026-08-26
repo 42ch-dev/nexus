@@ -306,6 +306,35 @@ pub async fn open_pool(db_path: &std::path::Path) -> Result<sqlx::SqlitePool, Lo
     Ok(pool)
 }
 
+/// Open a read-only pool (`mode=ro`) for verification / read surfaces.
+///
+/// Used by the fully-converged no-op leg and read-only listing paths
+/// (V1.176 P0 QC F-002 / S-003): unlike [`open_pool`], this never runs
+/// migrations or `seed_versions`, so a converged read cannot write
+/// `workspace_meta` keys or churn the db. No `PRAGMA journal_mode` is set —
+/// that pragma requires write access; WAL-mode databases are still readable
+/// through a read-only connection. Fails honestly when the file is absent,
+/// locked, or corrupt.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the connection pool cannot be created.
+pub async fn open_pool_read_only(
+    db_path: &std::path::Path,
+) -> Result<sqlx::SqlitePool, LocalDbError> {
+    let url = format!("sqlite://{}?mode=ro", db_path.display());
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(4)
+        .connect(&url)
+        .await
+        .map_err(LocalDbError::from)?;
+    // SAFETY: PRAGMA statement — no table schema to validate against.
+    sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&pool)
+        .await?;
+    Ok(pool)
+}
+
 /// Run all pending sqlx migrations from `./migrations/` directory.
 ///
 /// Embeds migration files at compile time via `sqlx::migrate!()`.

@@ -927,6 +927,13 @@ fn register_local_converges_workspace_row() {
         .assert()
         .success()
         .stdout(predicate::str::contains("World created"));
+    // The identity-cache store is NOT written by `register --local` (AR-88
+    // #3 / qc1 S#2): local display SSOT is `local_identities`, never the
+    // platform cache file.
+    assert!(
+        !home.join(".nexus42/creator-identities.json").exists(),
+        "creator-identities.json must not be written by the local bootstrap"
+    );
 }
 
 // =============================================================================
@@ -1158,94 +1165,6 @@ fn persistent_identity_create_nameless_converges_active() {
         .stdout(predicate::str::contains("Created").not());
 
     assert_eq!(single_persistent_id(home), id, "no second identity minted");
-}
-
-/// Honest collision on `system identity create --persistent`: two persistent
-/// rows share the display name → `creator_name_collision:` prefix + id list +
-/// exit 1 (never a silent takeover).
-#[test]
-fn persistent_identity_create_collision_exits_1_with_prefix() {
-    let tmp = TempDir::new().unwrap();
-    let home = tmp.path();
-
-    // Seed two persistent rows sharing the display name directly.
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let pool = nexus42::db::Schema::init(&home.join(".nexus42/state.db"))
-            .await
-            .expect("open global db");
-        for id in ["ctr_localcoll1", "ctr_localcoll2"] {
-            nexus_local_db::create_local_identity(
-                &pool,
-                id,
-                "persistent",
-                Some("Shared Name"),
-                "2026-08-26T00:00:00Z",
-            )
-            .await
-            .expect("seed persistent row");
-        }
-    });
-
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("system")
-        .arg("identity")
-        .arg("create")
-        .arg("--kind")
-        .arg("persistent")
-        .arg("--name")
-        .arg("Shared Name")
-        .env("HOME", home)
-        .assert()
-        .failure()
-        .code(1)
-        .stderr(predicate::str::contains("creator_name_collision:"))
-        .stderr(predicate::str::contains("ctr_localcoll1"))
-        .stderr(predicate::str::contains("ctr_localcoll2"))
-        .stderr(predicate::str::contains("nexus42 system identity use <id>"));
-}
-
-/// Honest collision on `creator register --local`: two persistent rows share
-/// the display name → `creator_name_collision:` prefix + id list + exit 1.
-#[test]
-fn register_local_collision_exits_1_with_prefix() {
-    let tmp = TempDir::new().unwrap();
-    let home = tmp.path();
-
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let pool = nexus42::db::Schema::init(&home.join(".nexus42/state.db"))
-            .await
-            .expect("open global db");
-        for id in ["ctr_localcoll3", "ctr_localcoll4"] {
-            nexus_local_db::create_local_identity(
-                &pool,
-                id,
-                "persistent",
-                Some("Local Shared"),
-                "2026-08-26T00:00:00Z",
-            )
-            .await
-            .expect("seed persistent row");
-        }
-    });
-
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("creator")
-        .arg("register")
-        .arg("--local")
-        .arg("--name")
-        .arg("Local Shared")
-        .env("HOME", home)
-        .assert()
-        .failure()
-        .code(1)
-        .stderr(predicate::str::contains("creator_name_collision:"))
-        .stderr(predicate::str::contains("ctr_localcoll3"))
-        .stderr(predicate::str::contains("ctr_localcoll4"))
-        .stderr(predicate::str::contains("nexus42 system identity use <id>"));
 }
 
 /// `--anonymous` must NOT materialize a workspace row (AR-88 #5): the
@@ -1547,4 +1466,242 @@ fn creator_list_help_documents_json() {
         .assert()
         .success()
         .stdout(predicate::str::contains("--json"));
+}
+// =============================================================================
+// V1.176 P0 QC fix wave (qc2 S#2 / qc3 S-003): hermetic CLI pins for the
+// shipped-but-unpinned legs + local-source failure mode
+// =============================================================================
+
+/// `creator list` must not materialize `~/.nexus42/state.db` when it is
+/// absent (lazy-open pin, qc2 S#2 leg 1) — even while the platform cache
+/// keeps the listing non-empty.
+#[test]
+fn creator_list_does_not_create_state_db_when_absent() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+    seed_platform_cache(home, "ctr_platabc", "alice", "Alice Platform");
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("list")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ctr_platabc"));
+
+    assert!(
+        !home.join(".nexus42/state.db").exists(),
+        "creator list must not create state.db when it is absent"
+    );
+}
+
+/// `Alice` vs `alice` are two distinct byte-exact names (AR-89 #1) — pinned
+/// at the CLI level (qc2 S#2 leg 2): minting both creates two identities and
+/// `creator list` shows both display names verbatim.
+#[test]
+fn creator_list_case_pair_is_byte_exact() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("system")
+        .arg("identity")
+        .arg("create")
+        .arg("--kind")
+        .arg("persistent")
+        .arg("--name")
+        .arg("Alice")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created persistent identity"));
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("system")
+        .arg("identity")
+        .arg("create")
+        .arg("--kind")
+        .arg("persistent")
+        .arg("--name")
+        .arg("alice")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created persistent identity"));
+
+    let human = Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("list")
+        .env("HOME", home)
+        .assert()
+        .success();
+    let stdout = String::from_utf8(human.get_output().stdout.clone()).unwrap();
+    assert!(stdout.contains("Alice"), "byte-exact Alice row: {stdout}");
+    assert!(stdout.contains("alice"), "byte-exact alice row: {stdout}");
+}
+
+/// Named 1-match on a *different* already-registered id is the allowed
+/// session-selection path (AR-89 #2 / qc2 S#2 leg 3): re-running a name whose
+/// single match is another identity activates that id — never a collision,
+/// never a "Created" claim.
+#[test]
+fn persistent_identity_create_session_selection_activates_matched_id() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("system")
+        .arg("identity")
+        .arg("create")
+        .arg("--kind")
+        .arg("persistent")
+        .arg("--name")
+        .arg("TargetName")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created persistent identity"));
+    let target_id = single_persistent_id(home);
+
+    // A second persistent identity becomes the active one.
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("system")
+        .arg("identity")
+        .arg("create")
+        .arg("--kind")
+        .arg("persistent")
+        .arg("--name")
+        .arg("OtherName")
+        .env("HOME", home)
+        .assert()
+        .success();
+
+    // Re-running the target name → single match → activate the matched id.
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("system")
+        .arg("identity")
+        .arg("create")
+        .arg("--kind")
+        .arg("persistent")
+        .arg("--name")
+        .arg("TargetName")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "already registered; set as active identity",
+        ))
+        .stdout(predicate::str::contains("Created").not());
+
+    let listed = Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("system")
+        .arg("identity")
+        .arg("list")
+        .env("HOME", home)
+        .assert()
+        .success();
+    let stdout = String::from_utf8(listed.get_output().stdout.clone()).unwrap();
+    assert!(
+        stdout.contains(&format!("{target_id} [local] TargetName (active)")),
+        "matched identity must be active: {stdout}"
+    );
+}
+
+/// Nameless `system identity create --persistent` on an empty HOME mints a
+/// nameless persistent identity (AR-89 #2 / qc2 S#2 leg 4): no name, and the
+/// workspace row `display_name` falls back to the `creator_id` (AR-88 #4).
+#[test]
+fn persistent_identity_create_nameless_first_mint() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("system")
+        .arg("identity")
+        .arg("create")
+        .arg("--kind")
+        .arg("persistent")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created persistent identity"));
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let pool = nexus42::db::Schema::init(&home.join(".nexus42/state.db"))
+            .await
+            .expect("open global db");
+        let rows = nexus_local_db::list_local_identities(&pool)
+            .await
+            .expect("list local identities");
+        assert_eq!(rows.len(), 1, "nameless first mint creates one identity");
+        assert!(
+            rows[0].display_name.is_none(),
+            "nameless mint stores no name"
+        );
+
+        // The workspace db is per-creator + per-workspace-slug, resolved under
+        // the test's HOME (the child binary's HOME env does not change this
+        // process), so use `paths::state_db_path` with the explicit home.
+        let db_path = nexus42::paths::state_db_path(home, &rows[0].creator_id, "default");
+        let workspace_pool = nexus42::db::Schema::init(&db_path)
+            .await
+            .expect("open workspace db");
+        let display_name: String =
+            sqlx::query_scalar("SELECT display_name FROM creators WHERE creator_id = ?")
+                .bind(&rows[0].creator_id)
+                .fetch_one(&workspace_pool)
+                .await
+                .expect("query creators display_name");
+        assert_eq!(
+            display_name, rows[0].creator_id,
+            "nameless row display_name = creator_id"
+        );
+    });
+}
+
+/// `creator list` degrades with a warning when the local source
+/// (`~/.nexus42/state.db`) exists but is unreadable (qc3 S-003): platform
+/// rows still render, stderr carries an honest note, and exit stays 0.
+#[test]
+fn creator_list_degrades_when_local_source_unreadable() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+    seed_platform_cache(home, "ctr_platabc", "alice", "Alice Platform");
+
+    // Corrupt the local store: garbage bytes make the read-only open fail.
+    let dir = home.join(".nexus42");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("state.db"), b"this is not a sqlite database file").unwrap();
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("list")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ctr_platabc"))
+        .stderr(predicate::str::contains("warning"))
+        .stderr(predicate::str::contains("local identities unavailable"));
+
+    // `--json` keeps its machine contract on the same degraded path.
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("list")
+        .arg("--json")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"origin\": \"platform\""))
+        .stderr(predicate::str::contains("local identities unavailable"));
 }

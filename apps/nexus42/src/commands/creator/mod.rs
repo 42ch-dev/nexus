@@ -29,7 +29,7 @@ pub mod world;
 
 use crate::auth;
 use crate::challenge::{solve_challenge_with_fallback, UnavailableLlmSolver};
-use crate::commands::system::identity::{global_db_path, open_global_db};
+use crate::commands::local_creator_bootstrap::{global_db_path, open_global_db_read_only};
 use crate::config::{
     find_workspace_root, nexus_home, workspace_config_path, workspace_nexus_dir, CliConfig,
     DEFAULT_WORKSPACE_SLUG,
@@ -54,8 +54,10 @@ pub use kb::{KbCommand, KbScope};
 /// Default registration source for the CLI.
 const DEFAULT_REGISTRATION_SOURCE: &str = "cli";
 
-/// Maximum length for creator display name (WS-B T4).
-const MAX_CREATOR_NAME_LENGTH: usize = 64;
+/// Maximum length for creator display name (WS-B T4) — the single definition
+/// lives in `local_creator_bootstrap` so the platform register path and the
+/// local bootstrap helper bound the same display-name token (qc2 S#4 parity).
+use crate::commands::local_creator_bootstrap::MAX_CREATOR_NAME_LENGTH;
 
 /// Handle validation regex: 4–15 chars, starts/ends with `[a-z0-9]`, interior allows `[a-z0-9._-]`.
 /// Frozen spec v3 §7.
@@ -1303,12 +1305,12 @@ async fn register_creator(
 }
 
 /// V1.176 P0 T1 (AR-88): delegates to the shared bootstrap helper
-/// [`bootstrap::bootstrap_local_creator`] — the single identity-mint +
-/// workspace-row materialization sequence both named local entry points
-/// (`creator register --local`, `system identity create --persistent`) call.
-/// No `PlatformClient` calls — zero network.
+/// [`crate::commands::local_creator_bootstrap::bootstrap_local_creator`] — the
+/// single identity-mint + workspace-row materialization sequence both named
+/// local entry points (`creator register --local`, `system identity create
+/// --persistent`) call. No `PlatformClient` calls — zero network.
 async fn register_local_creator(name: String) -> Result<()> {
-    bootstrap::bootstrap_local_creator(Some(name)).await?;
+    crate::commands::local_creator_bootstrap::bootstrap_local_creator(Some(name)).await?;
 
     // The helper rendered the mint + active lines; add the one local-only
     // exit marker so the register flow still names its mode.
@@ -1690,12 +1692,27 @@ async fn list_creators(_config: &CliConfig, json: bool) -> Result<()> {
 
     // Local rows come from `local_identities` (SSOT, AR-90 #1) — the JSON
     // cache is platform display metadata only and is never a local source.
-    // The global db is opened lazily: `creator list` must not materialize
-    // `~/.nexus42/state.db` for a platform-only / empty surface, and no
-    // local rows can exist when the db file is absent.
+    // The global db is opened lazily and read-only (qc3 F-002): `creator
+    // list` must not materialize `~/.nexus42/state.db` for a platform-only /
+    // empty surface, and no local rows can exist when the db file is absent.
+    // A locked / corrupt / unreadable local source degrades with an honest
+    // stderr warning instead of failing the whole listing (qc3 S-003) — the
+    // platform rows are still shown.
     let local_rows = if global_db_path()?.exists() {
-        let pool = open_global_db().await?;
-        nexus_local_db::list_local_identities(&pool).await?
+        let read_result: Result<Vec<nexus_local_db::LocalIdentityRow>> = async {
+            let pool = open_global_db_read_only().await?;
+            Ok(nexus_local_db::list_local_identities(&pool).await?)
+        }
+        .await;
+        match read_result {
+            Ok(rows) => rows,
+            Err(err) => {
+                eprintln!(
+                    "warning: local identities unavailable ({err}); showing platform rows only."
+                );
+                Vec::new()
+            }
+        }
     } else {
         Vec::new()
     };
