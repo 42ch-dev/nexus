@@ -92,7 +92,9 @@ async fn server_with_scan(scan_dir: &Path) -> (TestTempRoot, TestServer, Workspa
         "no skips expected: {:?}",
         outcome.skipped
     );
-    state.set_capability_registry(std::sync::Arc::new(registry));
+    state.set_capability_registry(
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(std::sync::Arc::new(registry)),
+    );
 
     let app = api::create_router(state.clone(), DaemonApiConfig::keyless());
     let server = TestServer::new(app).expect("failed to create test server");

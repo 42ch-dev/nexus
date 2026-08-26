@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT EXISTS(SELECT 1 FROM creators WHERE creator_id = ? AND status = 'active')",
+  "describe": {
+    "columns": [
+      {
+        "name": "EXISTS(SELECT 1 FROM creators WHERE creator_id = ? AND status = 'active')",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b8f965d2ff7d4b177078ac020dec8ff3d183b52c52c0a8bc84537135f9339e93"
+}

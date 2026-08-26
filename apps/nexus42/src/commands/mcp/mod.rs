@@ -59,8 +59,10 @@ use crate::errors::{CliError, Result};
 pub const MCP_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
 /// Catalog watch interval (AR-79, DF-90): the child polls
 /// `GET /v1/daemon/tools` every 2 s and sends `notifications/tools/list_changed`
-/// when the digest changes. A const, not configurable this iteration
-/// (AR-79 #1); the delivery bound is interval + one request timeout.
+/// when the digest changes.
+///
+/// A const, not configurable this iteration (AR-79 #1); the delivery bound
+/// is interval + one request timeout.
 pub const MCP_CATALOG_WATCH_INTERVAL: Duration = Duration::from_secs(2);
 
 /// `nexus42 mcp` subcommands (hidden group; V1.35 CLI surface lock).

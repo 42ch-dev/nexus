@@ -6,14 +6,16 @@
 //! Anonymous identities (`ctr_anon*`) are ephemeral.
 //! Persistent identities (`ctr_local*`) are stored in `SQLite`.
 
-use crate::config::{self, CliConfig};
+use crate::commands::local_creator_bootstrap::{
+    bootstrap_local_creator, open_global_db, validate_display_name,
+};
+use crate::config::CliConfig;
 use crate::domain::DomainError;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
 use nexus_creator::local_identity::{is_valid_creator_id, LocalIdentity, LocalIdentityType};
 use nexus_local_db::{
-    create_local_identity, get_local_identity, link_to_platform, list_local_identities,
-    unlink_from_platform,
+    get_local_identity, link_to_platform, list_local_identities, unlink_from_platform,
 };
 use std::str::FromStr;
 
@@ -81,18 +83,6 @@ pub async fn run(cmd: IdentityCommand, _config: &CliConfig) -> Result<()> {
     }
 }
 
-/// Open or create the global identity database at `~/.nexus42/state.db`.
-async fn open_global_db() -> Result<nexus_local_db::SqlitePool> {
-    let home = config::user_home_dir()?;
-    let nexus_dir = home.join(".nexus42");
-
-    // Ensure ~/.nexus42/ exists
-    std::fs::create_dir_all(&nexus_dir)?;
-
-    let db_path = nexus_dir.join("state.db");
-    crate::db::Schema::init(&db_path).await.map_err(Into::into)
-}
-
 /// List all local identities.
 async fn list_identities() -> Result<()> {
     let pool = open_global_db().await?;
@@ -149,59 +139,46 @@ async fn list_identities() -> Result<()> {
     Ok(())
 }
 
-/// Create a new local identity.
-///
-/// `pub(crate)` since V1.167 P2 T1: `creator register --local` delegates
-/// here so local minting + active-creator write stay in one seam.
+/// V1.176 P0 T1 (AR-88): the persistent arm delegates to the shared
+/// bootstrap helper [`crate::commands::local_creator_bootstrap::bootstrap_local_creator`]
+/// so both named local entry points (`system identity create --persistent`,
+/// `creator register --local`) run the same identity-mint + workspace-row
+/// materialization sequence. The anonymous arm is byte-for-byte unchanged —
+/// ephemeral, no workspace row, does not converge (PL-3).
 pub(crate) async fn create_identity(kind: IdentityKindArg, name: Option<String>) -> Result<()> {
-    // R3(identity): Validate display_name — reject empty or whitespace-only
-    let trimmed_name = name.as_deref().map(str::trim).filter(|n| !n.is_empty());
-    if let Some(raw) = &name {
-        if raw.trim().is_empty() {
-            return Err(CliError::Other(
-                "Display name cannot be empty or whitespace-only.".to_string(),
-            ));
-        }
-    }
+    // Display-name validation lives once in `validate_display_name` (qc1
+    // S#1/S#6): rejected here for both arms so an invalid name never flows
+    // silently through, and re-validated by the helper on the persistent arm.
+    validate_display_name(name.as_deref())?;
 
     let identity = match kind {
         IdentityKindArg::Anonymous => LocalIdentity::create_anonymous(),
-        IdentityKindArg::Persistent => LocalIdentity::create_persistent(trimmed_name),
+        IdentityKindArg::Persistent => {
+            // The shared helper owns mint + active + workspace-row
+            // materialization for the persistent path (AR-88 #1).
+            return bootstrap_local_creator(name).await;
+        }
     };
-
-    let is_persistent = identity.is_persistent();
-
-    if is_persistent {
-        // Persist to SQLite
-        let pool = open_global_db().await?;
-        create_local_identity(
-            &pool,
-            &identity.creator_id,
-            identity.identity_type.as_str(),
-            identity.display_name.as_deref(),
-            &identity.created_at,
-        )
-        .await?;
-    }
 
     println!(
         "Created {} identity: {}",
         kind_label(&kind),
         identity.creator_id
     );
-    if let Some(ref name) = identity.display_name {
+    if let Some(name) = &identity.display_name {
         println!("  Name: {name}");
     }
-    if is_persistent {
-        println!("  Stored in ~/.nexus42/state.db");
-    } else {
-        println!("  Ephemeral — data will be lost when this session ends");
-        println!("  (run `nexus42 system identity create --persistent` for a saved identity)");
-    }
+    // The persistent arm always returns through the helper above, so this
+    // post-match path is anonymous-only: the `Stored in ~/.nexus42/state.db`
+    // printer (and the whole dead persist block) was removed in the QC fix
+    // wave (qc1 W#1) — there is exactly one mint+persist sequence in the
+    // crate, in the helper.
+    println!("  Ephemeral — data will be lost when this session ends");
+    println!("  (run `nexus42 system identity create --persistent` for a saved identity)");
 
     // Auto-set as active
     let mut cli_config = CliConfig::load()?;
-    cli_config.active_creator_id = Some(identity.creator_id.clone());
+    cli_config.active_creator_id = Some(identity.creator_id);
     cli_config.save()?;
     println!("  Set as active identity.");
 

@@ -75,6 +75,12 @@ pub mod desktop;
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
 pub mod host_call;
+#[deny(clippy::unwrap_used)]
+#[cfg_attr(
+    test,
+    allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
+)]
+pub mod local_creator_bootstrap;
 #[cfg(feature = "connect-client")]
 #[deny(clippy::unwrap_used)]
 #[cfg_attr(

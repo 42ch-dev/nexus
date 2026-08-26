@@ -54,12 +54,18 @@ pub(crate) fn ensure_remote_bind_allowed(host: &str) -> anyhow::Result<()> {
     Ok(())
 }
 use graph_flow::{InMemorySessionStorage, SessionStorage};
+use nexus_orchestration::capability::user_capability::UserCapability;
+use nexus_orchestration::capability::watch::{
+    digest_from_admitted, rebuild_registry_with_merge, scan_dir_digest, watch_loop_inner,
+    DigestPoll, USER_CAP_WATCH_INTERVAL,
+};
 use nexus_orchestration::worker::{WorkerManagerSpawner, WorkerRegistry};
 use nexus_orchestration::{
     engine::{EngineSignal, OrchestrationEngine},
     schedule::supervisor::ScheduleSupervisor,
     storage::sqlite::SqliteSessionStorage,
-    system_preset_dir, CapabilityRegistry, CapabilityRuntimeDeps, GraphFlowEngine, WorkerManager,
+    system_preset_dir, CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps,
+    GraphFlowEngine, WorkerManager,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -140,21 +146,29 @@ const fn shutdown_grace_duration(config: &DaemonConfig) -> Duration {
     Duration::from_millis(config.shutdown_grace_ms)
 }
 
-/// Log a user-capability scan outcome at the daemon boot site (AR-35/36).
+/// Log a user-capability scan outcome (AR-35/36), at the boot or watch site.
 ///
 /// Admitted count is logged at `info!`; the skip aggregate is logged at
 /// `warn!` (the scanner already logs each skip individually with its named
-/// reason — this is the boot-site aggregate). The daemon NEVER fails boot on
-/// scan issues (skip-and-log contract, AC-V172-2): this function has no error
+/// reason — this is the aggregate). The daemon NEVER fails boot on scan
+/// issues (skip-and-log contract, AC-V172-2): this function has no error
 /// path.
-fn log_scan_outcome(outcome: &nexus_orchestration::capability::scan::ScanOutcome, scan_dir: &Path) {
+///
+/// `context` names the call site in the skip aggregate ("boot scan" vs
+/// "watch scan", M-5) so a hot reload's skips are not mislabeled as boot
+/// skips.
+fn log_scan_outcome(
+    outcome: &nexus_orchestration::capability::scan::ScanOutcome,
+    scan_dir: &Path,
+    context: &str,
+) {
     if !outcome.skipped.is_empty() {
         let names: Vec<&str> = outcome.skipped.iter().map(|s| s.name.as_str()).collect();
         tracing::warn!(
             dir = %scan_dir.display(),
             count = outcome.skipped.len(),
             names = ?names,
-            "skipped {} user capability(ies) during boot scan (individual reasons logged by scanner)",
+            "skipped {} user capability(ies) during {context} (individual reasons logged by scanner)",
             outcome.skipped.len()
         );
     }
@@ -198,6 +212,172 @@ fn user_capabilities_scan_dir(state: &WorkspaceState) -> PathBuf {
         },
         nexus_home_layout::user_capabilities_dir,
     )
+}
+
+/// Spawn the user-capability hot-reload watcher (V1.176 P1, AR-91/AR-92).
+///
+/// One background tokio task polls the scan directory every
+/// [`USER_CAP_WATCH_INTERVAL`] (1 s, AR-91 #1), digest-compares the
+/// structural tree (AR-91 #2), and — only on a digest change — rebuilds a
+/// fresh [`CapabilityRegistry`] on the SAME scan/admission path as boot and
+/// swaps it into the shared holder (AR-92 #2/#3/#5). A missing scan dir
+/// yields a stable null digest — no rescans, no skip spam (F-14).
+///
+/// The task is best-effort by contract (AR-91 #6): every tick is fail-safe
+/// (scan contract F-9, last-good merge AR-92 #5, pointer-write swap), it
+/// logs with the boot-site vocabulary, and it exits cleanly on the daemon's
+/// existing shutdown notification (peer-lane precedent). It never panics or
+/// fails the daemon.
+///
+/// `boot_digest` is the BOOT scan's structural digest (W-B, V1.176 P1 QC
+/// fix; admission-time ground truth since V1.176 PR wave 2): it seeds the
+/// watcher's initial baseline, so the first poll COMPARES against the
+/// boot state — a complete trio written or an admitted trio edited between
+/// the boot scan and that first poll is detected and rescanned instead of
+/// being absorbed as the baseline. A transiently unreadable scan dir
+/// keeps last-good unchanged (I-1): no rescan, no swap.
+///
+/// Returns a `JoinHandle`; the boot site wraps it in a [`WatcherGuard`]
+/// (abort-on-drop, M-2) so the task is cancelled on every daemon exit path.
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
+// too-many-arguments: the full boot wiring set (holder, deps, engine/cache,
+// scan dir, shutdown, mirror, boot digest) — a struct would churn every
+// caller for no behavioral gain.
+pub fn spawn_user_capability_watcher(
+    holder: CapabilityRegistryHolder,
+    runtime_deps: CapabilityRuntimeDeps,
+    engine: Option<Arc<nexus_wasm_host::WasmEngine>>,
+    module_cache: Option<Arc<nexus_wasm_host::ModuleCache>>,
+    scan_dir: PathBuf,
+    shutdown_notify: Arc<tokio::sync::Notify>,
+    boot_mirror: Vec<UserCapability>,
+    boot_digest: DigestPoll,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(user_capability_watch_loop(
+        holder,
+        runtime_deps,
+        engine,
+        module_cache,
+        scan_dir,
+        shutdown_notify,
+        boot_mirror,
+        boot_digest,
+    ))
+}
+
+/// Abort-on-drop guard for the user-capability watcher task (V1.175
+/// lesson; AR-91 #6, M-2).
+///
+/// The daemon holds the guard for its whole run; dropping it on ANY exit
+/// path (graceful return, early `?` return, panic unwind) aborts the
+/// watcher task so it can never outlive the daemon as a detached stray
+/// keeping a stale registry generation alive. The task's single graceful
+/// exit is the shutdown notify inside [`user_capability_watch_loop`]; the
+/// abort covers everything else (runtime teardown without the notify, an
+/// unexpected early return or panic of the loop).
+///
+/// There is deliberately NO restart: a silently failing watcher would mask
+/// the defect, and a restart loop could panic repeatedly. A frozen
+/// generation cannot be served forever — the next daemon generation
+/// rebuilds the registry from disk.
+pub struct WatcherGuard(tokio::task::JoinHandle<()>);
+
+impl WatcherGuard {
+    /// Wrap a freshly spawned watcher handle.
+    #[must_use]
+    pub const fn new(handle: tokio::task::JoinHandle<()>) -> Self {
+        Self(handle)
+    }
+}
+
+impl Drop for WatcherGuard {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// Drive the watcher loop until the daemon's shutdown notification fires.
+///
+/// The loop itself is the dependency-free, injectable seam in
+/// `nexus-orchestration` (`watch_loop_inner` — unit-tested for no-op
+/// stability, AR-95 #5); this wrapper owns the real poll/scan actions and
+/// the last-admitted mirror.
+#[allow(clippy::too_many_arguments)]
+// too-many-arguments: same boot wiring set as `spawn_user_capability_watcher`.
+async fn user_capability_watch_loop(
+    holder: CapabilityRegistryHolder,
+    runtime_deps: CapabilityRuntimeDeps,
+    engine: Option<Arc<nexus_wasm_host::WasmEngine>>,
+    module_cache: Option<Arc<nexus_wasm_host::ModuleCache>>,
+    scan_dir: PathBuf,
+    shutdown_notify: Arc<tokio::sync::Notify>,
+    boot_mirror: Vec<UserCapability>,
+    boot_digest: DigestPoll,
+) {
+    tracing::info!(
+        dir = %scan_dir.display(),
+        "user-capability watcher started (poll+digest, 1s)"
+    );
+    // The last-admitted mirror lives behind a shared mutex so the loop's
+    // `rescan` closure can both read it (merge input) and write it (next
+    // mirror) without an escaping mutable borrow — the same task owns it,
+    // so the lock never contends.
+    let mirror: Arc<std::sync::Mutex<Vec<UserCapability>>> =
+        Arc::new(std::sync::Mutex::new(boot_mirror));
+    tokio::select! {
+        () = shutdown_notify.notified() => {
+            tracing::info!("user-capability watcher: shutdown received, exiting");
+        }
+        _ = watch_loop_inner(
+            USER_CAP_WATCH_INTERVAL,
+            boot_digest,
+            || async { scan_dir_digest(&scan_dir) },
+            || {
+                let mirror = Arc::clone(&mirror);
+                let holder = &holder;
+                let runtime_deps = &runtime_deps;
+                let engine = &engine;
+                let module_cache = &module_cache;
+                let scan_dir = &scan_dir;
+                async move {
+                    let mut mirror = mirror
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    *mirror = hot_rebuild_and_swap(
+                        holder,
+                        runtime_deps,
+                        engine.as_ref(),
+                        module_cache.as_ref(),
+                        scan_dir,
+                        &mirror,
+                    );
+                }
+            },
+            || false,
+        ) => {}
+    }
+}
+
+/// One hot reload tick: rebuild + merge + swap (AR-92 #3/#5/#7).
+///
+/// Runs entirely OUTSIDE the holder lock — the scan, admission, and registry
+/// rebuild are unguarded; the write lock is held only for the pointer swap
+/// (AR-92 #7). Logs the outcome with the same aggregate shape as boot
+/// (`log_scan_outcome`, "watch scan" context — M-5). Returns the new
+/// last-admitted mirror for the next tick.
+fn hot_rebuild_and_swap(
+    holder: &CapabilityRegistryHolder,
+    deps: &CapabilityRuntimeDeps,
+    engine: Option<&Arc<nexus_wasm_host::WasmEngine>>,
+    module_cache: Option<&Arc<nexus_wasm_host::ModuleCache>>,
+    scan_dir: &Path,
+    mirror: &[UserCapability],
+) -> Vec<UserCapability> {
+    let (registry, outcome) =
+        rebuild_registry_with_merge(deps, engine, module_cache, scan_dir, mirror);
+    log_scan_outcome(&outcome, scan_dir, "watch scan");
+    holder.swap(Arc::new(registry));
+    outcome.admitted
 }
 
 /// Run the daemon runtime to completion.
@@ -398,31 +578,50 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // `state.nexus_home()` (already `<home>/.nexus42`) would scan
     // `<home>/.nexus42/.nexus42/capabilities` and miss user installs.
     let user_caps_dir = user_capabilities_scan_dir(&state);
-    let capabilities = Arc::new(if let Some((engine, cache)) = &wasm_singleton {
+    let (capabilities, boot_outcome) = if let Some((engine, cache)) = &wasm_singleton {
         // V1.147 P0: store daemon-wide engine+cache on WorkspaceState
         // so the direct compute handler can use them. Clone the Arcs
         // before they are moved into the capability registry.
         state.set_wasm_engine(Arc::clone(engine));
         state.set_module_cache(Arc::clone(cache));
-        let (registry, outcome) = CapabilityRegistry::with_runtime_deps_and_wasm_and_user_caps(
+        CapabilityRegistry::with_runtime_deps_and_wasm_and_user_caps(
             &runtime_deps,
             Arc::clone(engine),
             Arc::clone(cache),
             &user_caps_dir,
-        );
-        log_scan_outcome(&outcome, &user_caps_dir);
-        registry
+        )
     } else {
         // AR-44: engine-absent boot still registers user capabilities
         // (discoverable); their stub `run()` returns WorkerUnavailable.
-        let (registry, outcome) =
-            CapabilityRegistry::with_runtime_deps_and_user_caps(&runtime_deps, &user_caps_dir);
-        log_scan_outcome(&outcome, &user_caps_dir);
-        registry
-    });
+        CapabilityRegistry::with_runtime_deps_and_user_caps(&runtime_deps, &user_caps_dir)
+    };
+    log_scan_outcome(&boot_outcome, &user_caps_dir, "boot scan");
     tracing::info!(
         "Capability registry built (production wiring + WASM singleton where available)"
     );
+    // V1.176 P1 (AR-92 #2): ONE shared holder for the live registry. The
+    // boot registry is swapped in immediately; the watcher rebuilds + swaps
+    // on scan-dir changes; the engine and WorkspaceState read through it.
+    let capabilities = Arc::new(capabilities);
+    let capability_holder = CapabilityRegistryHolder::new();
+    capability_holder.swap(Arc::clone(&capabilities));
+    // Last-admitted mirror seed (AR-92 #4): boot's admitted user caps, so a
+    // failed hot admission carries the last good entry (PL-9).
+    let boot_mirror: Vec<UserCapability> = boot_outcome.admitted.clone();
+    // W-B (V1.176 P1 QC fix) + Greptile P1 (V1.176 PR wave + wave 2): the
+    // watcher's initial baseline is derived from what the boot scan
+    // actually ADMITTED — admission-time per-file stat snapshots captured
+    // INSIDE the scan — never from a fresh read of the scan dir. A
+    // complete trio written between the boot scan and this computation
+    // would otherwise land in the baseline digest but NOT in the registry
+    // (wave 1), and an EDIT to an already-admitted trio in the same window
+    // would land in the baseline but NOT in the registry (wave 2) — the
+    // first poll would match the baseline and skip the rebuild, leaving
+    // the capability stale until another fs change. The scan-derived
+    // baseline never contains an unscanned trio or a post-scan edit, so
+    // the first poll sees the divergence and rescans (W-B: a change
+    // between the boot scan and the first poll is detected, not absorbed).
+    let boot_digest = digest_from_admitted(&boot_outcome);
 
     // V1.42 P3 (DF-47): wire daemon-side tool dispatch adapter.
     // Stored in WorkspaceState so schedule-executed HostToolCallTask instances
@@ -436,7 +635,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     tracing::info!("Daemon tool dispatch adapter wired");
 
     let mut concrete_engine =
-        GraphFlowEngine::new_with_storage(session_storage.clone(), capabilities.clone());
+        GraphFlowEngine::new_with_storage(session_storage.clone(), capability_holder.clone());
 
     // DF-47 (V1.42 P3): wire the daemon tool dispatch into the engine so
     // HostTool enter actions in preset graphs can invoke nexus.* tools.
@@ -505,8 +704,40 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 
     state.set_engine(engine);
     state.set_worker_manager(workers);
-    state.set_capability_registry(capabilities);
+    state.set_capability_registry(capability_holder.clone());
     tracing::info!("Orchestration engine wired");
+
+    // --- V1.176 P1 (AR-91/AR-92): user-capability hot-reload watcher ---
+    // One background task polls the scan directory every 1 s (poll + digest,
+    // zero new dependencies — AR-91 #5); a digest change rebuilds a fresh
+    // registry on the SAME scan/admission path as boot and swaps it into
+    // the shared holder (AR-92). The mirror seeds from the boot outcome so a
+    // failed hot admission carries the last good entry (PL-9); the watcher's
+    // initial digest baseline is the BOOT scan's digest (W-B), so a trio
+    // written between the boot scan and the first poll is detected, not
+    // absorbed. The task terminates on the daemon's shutdown notification
+    // (peer-lane precedent); the abort-on-drop guard (M-2) additionally
+    // cancels the task on every exit path and lives for the whole run (it
+    // is bound at function scope, not inside this block).
+    let _watcher_guard = {
+        let watcher_holder = capability_holder.clone();
+        let watcher_deps = runtime_deps.clone();
+        let watcher_engine = wasm_singleton
+            .as_ref()
+            .map(|(engine, _)| Arc::clone(engine));
+        let watcher_cache = wasm_singleton.as_ref().map(|(_, cache)| Arc::clone(cache));
+        let watcher_shutdown = state.shutdown_notify();
+        WatcherGuard::new(spawn_user_capability_watcher(
+            watcher_holder,
+            watcher_deps,
+            watcher_engine,
+            watcher_cache,
+            user_caps_dir.clone(),
+            watcher_shutdown,
+            boot_mirror,
+            boot_digest,
+        ))
+    };
 
     // --- Section 4: Schedule supervisor + core context manager ---
     // Pool-backed subsystems are deferred until Profile attach when no creator DB
@@ -1038,17 +1269,18 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         if let Some(raw_home) = state.nexus_home().parent() {
             let peer_shutdown = state.shutdown_notify();
             // AR-68 #2(ii) reserved namespaces: builtin host-tool ids + user
-            // capability names can never be admitted as peer tools.
-            let mut reserved_tool_ids: Vec<String> =
-                crate::capability_registry::host_tool_registry()
-                    .ids()
-                    .map(ToOwned::to_owned)
-                    .collect();
-            if let Some(reg) = state.capability_registry() {
-                reserved_tool_ids.extend(reg.iter().map(|cap| cap.name().to_owned()));
-            }
-            match crate::connect::start_peer_tools_lane(raw_home, peer_shutdown, &reserved_tool_ids)
-                .await
+            // capability names can never be admitted as peer tools. The set
+            // is derived LIVE from the shared capability holder at each
+            // admission (V1.176 P1 QC fix W-A) — a user capability
+            // hot-added after the lane spawned stays reserved against peer
+            // admission, so the AR-68 #3 collision contract survives hot
+            // reload.
+            match crate::connect::start_peer_tools_lane(
+                raw_home,
+                peer_shutdown,
+                state.capability_registry_holder(),
+            )
+            .await
             {
                 Ok(handle) => {
                     tracing::info!(addr = %handle.addr, "peer-tools Connect accept loop started");
@@ -1448,6 +1680,72 @@ mod tests {
             resolved,
             nexus_home.join(".nexus42").join("capabilities"),
             "must NOT double-nest into <home>/.nexus42/.nexus42"
+        );
+    }
+
+    /// A watcher-scoped, engine-less dep set (the AR-44 stub arm).
+    fn watcher_test_deps() -> CapabilityRuntimeDeps {
+        CapabilityRuntimeDeps {
+            pool: None,
+            worker_provider: None,
+            daemon_tool_dispatch: None,
+            cdn_config: None,
+        }
+    }
+
+    /// M-2 / AR-91 #6 spawn/shutdown test: the watcher task starts after
+    /// spawn, stays alive, and exits cleanly when the daemon's shutdown
+    /// notification fires (the single graceful exit path).
+    #[tokio::test]
+    async fn user_capability_watcher_starts_and_exits_on_shutdown_notify() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let holder = CapabilityRegistryHolder::new();
+        let shutdown = Arc::new(tokio::sync::Notify::new());
+        let handle = spawn_user_capability_watcher(
+            holder,
+            watcher_test_deps(),
+            None,
+            None,
+            tmp.path().join("caps"),
+            Arc::clone(&shutdown),
+            Vec::new(),
+            scan_dir_digest(&tmp.path().join("caps")),
+        );
+
+        assert!(
+            !handle.is_finished(),
+            "watcher task is running right after spawn"
+        );
+        shutdown.notify_one();
+        let result = handle.await;
+        assert!(
+            result.is_ok(),
+            "watcher exits cleanly on the shutdown notify: {result:?}"
+        );
+    }
+
+    /// M-2 abort-on-drop test: dropping the guard (any daemon exit path)
+    /// cancels the task — an otherwise-infinite counter stops advancing.
+    #[tokio::test]
+    async fn watcher_guard_aborts_task_on_drop() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let ticks = Arc::new(AtomicUsize::new(0));
+        let ticks_for_task = Arc::clone(&ticks);
+        let handle = tokio::spawn(async move {
+            loop {
+                ticks_for_task.fetch_add(1, Ordering::Relaxed);
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        });
+        let guard = WatcherGuard::new(handle);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        drop(guard);
+        let frozen_at = ticks.load(Ordering::Relaxed);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(
+            ticks.load(Ordering::Relaxed),
+            frozen_at,
+            "guard drop aborts the task (abort-on-drop, M-2)"
         );
     }
 }

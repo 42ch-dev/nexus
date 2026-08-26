@@ -524,8 +524,11 @@ impl OrchestrationEngine for EngineProxy {
 pub struct GraphFlowEngine {
     /// Shared state (storage, runners, sessions) — WS3 R1 extraction.
     state: Arc<EngineSharedState>,
-    /// Shared capability registry (propagated to composite tasks at runtime).
-    caps: Arc<CapabilityRegistry>,
+    /// Shared capability registry holder (V1.176 P1, AR-92 #6): graph
+    /// builds snapshot `handle.get()` at graph-build time, so NEW graphs see
+    /// hot-reloaded user capabilities while an in-flight session's graph
+    /// keeps its session-start snapshot (in-flight honesty).
+    caps: crate::capability::CapabilityRegistryHolder,
     /// Daemon-side tool dispatch for `nexus.*` host tool actions (DF-47, V1.42 P3).
     daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
 }
@@ -548,7 +551,7 @@ impl GraphFlowEngine {
     /// production.
     pub fn new_with_storage(
         storage: Arc<dyn SessionStorage>,
-        caps: Arc<CapabilityRegistry>,
+        caps: crate::capability::CapabilityRegistryHolder,
     ) -> Self {
         Self {
             state: Arc::new(EngineSharedState::new(storage)),
@@ -609,10 +612,25 @@ impl GraphFlowEngine {
     /// Loads the embedded preset by `preset_id`, builds the wired outer graph,
     /// and creates a `FlowRunner` with the engine's storage. The persisted
     /// session data in `SqliteSessionStorage` preserves the execution position.
+    /// Snapshot the current registry from the shared holder (AR-92 #6).
+    ///
+    /// Returns an empty registry when the holder was never populated — an
+    /// unreachable state in production (boot swaps the registry in before
+    /// the engine exists), kept fail-closed so a never-populated holder
+    /// validates nothing rather than resolving capabilities that do not
+    /// exist.
+    fn current_caps(&self) -> Arc<CapabilityRegistry> {
+        self.caps
+            .get()
+            .unwrap_or_else(|| Arc::new(CapabilityRegistry::empty()))
+    }
+
     async fn reconstruct_runner(&self, summary: &SessionSummary) -> Result<(), EngineError> {
-        // Step 1: Load the embedded preset by preset_id.
+        // Step 1: Load the embedded preset by preset_id (against the
+        // CURRENT registry snapshot).
+        let caps = self.current_caps();
         let loaded =
-            crate::preset::load_embedded_preset(&summary.preset_id, &self.caps).map_err(|e| {
+            crate::preset::load_embedded_preset(&summary.preset_id, &caps).map_err(|e| {
                 EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                     "R6: failed to load embedded preset '{}' for session {}: {}",
                     summary.preset_id, summary.session_id.0, e
@@ -627,7 +645,7 @@ impl GraphFlowEngine {
         let wired = crate::preset::loader::build_wired_outer_graph(
             &loaded,
             &engine_proxy,
-            &self.caps,
+            &caps,
             self.daemon_tool_dispatch.clone(),
         );
 
@@ -888,10 +906,11 @@ impl OrchestrationEngine for GraphFlowEngine {
         let proxy: Arc<dyn OrchestrationEngine> = Arc::new(EngineProxy {
             state: self.state.clone(),
         });
+        let caps = self.current_caps();
         let wired = crate::preset::loader::build_wired_outer_graph(
             loaded,
             &proxy,
-            &self.caps,
+            &caps,
             self.daemon_tool_dispatch.clone(),
         );
         self.start_session(&loaded.id, Arc::new(wired)).await
@@ -905,10 +924,11 @@ impl OrchestrationEngine for GraphFlowEngine {
         let proxy: Arc<dyn OrchestrationEngine> = Arc::new(EngineProxy {
             state: self.state.clone(),
         });
+        let caps = self.current_caps();
         let wired = crate::preset::loader::build_wired_outer_graph(
             loaded,
             &proxy,
-            &self.caps,
+            &caps,
             self.daemon_tool_dispatch.clone(),
         );
         self.start_session_with_creator(&loaded.id, Arc::new(wired), Some(creator_id))
@@ -931,7 +951,9 @@ mod tests {
     /// Helper: create a test engine with in-memory storage and built-in caps.
     fn test_engine() -> GraphFlowEngine {
         let storage: Arc<dyn SessionStorage> = Arc::new(InMemorySessionStorage::new());
-        let caps = Arc::new(CapabilityRegistry::with_builtins());
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
         GraphFlowEngine::new_with_storage(storage, caps)
     }
 
@@ -1014,7 +1036,9 @@ mod tests {
     async fn r6_recovered_session_with_known_preset_has_runner() {
         // Test that recovery works for sessions started with known embedded presets.
         let storage: Arc<dyn SessionStorage> = Arc::new(InMemorySessionStorage::new());
-        let caps = Arc::new(CapabilityRegistry::with_builtins());
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
         let engine = GraphFlowEngine::new_with_storage(storage.clone(), caps);
 
         // Create a session summary that matches an embedded preset

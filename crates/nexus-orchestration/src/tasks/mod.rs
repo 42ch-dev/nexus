@@ -2659,7 +2659,9 @@ mod tests {
         let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
         let engine = crate::GraphFlowEngine::new_with_storage(
             storage,
-            std::sync::Arc::new(CapabilityRegistry::with_builtins()),
+            crate::capability::CapabilityRegistryHolder::with_registry(std::sync::Arc::new(
+                CapabilityRegistry::with_builtins(),
+            )),
         );
         let inner_graph = graph_flow::Graph::new("test_inner");
         inner_graph.add_task(std::sync::Arc::new(InnerGraphNodeTask::new("n1")));

@@ -3,13 +3,14 @@
 //! Scans `~/.nexus42/capabilities/<name>/` (see
 //! `nexus_home_layout::user_capabilities_dir`) for capability descriptors and
 //! produces the entries appended after builtins by the registry constructors
-//! (AR-36). Fail-safe by contract: a missing directory is an empty outcome,
-//! a bad descriptor is a per-entry skip — never a top-level error, never a
-//! panic, never a boot failure (AC-V172-2).
+//! (AR-36). The admitted entries are the concrete [`UserCapability`] type
+//! (AR-92 #4) so the hot-reload watcher can mirror them. Fail-safe by
+//! contract: a missing directory is an empty outcome and a bad descriptor is
+//! a per-entry skip — never a top-level error, never a panic, never a boot
+//! failure (AC-V172-2).
 
 use crate::capability::admission::admit;
 use crate::capability::user_capability::{UserCapability, UserCapabilityDescriptor};
-use crate::capability::Capability;
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -22,17 +23,52 @@ pub struct SkippedCapability {
     pub reason: String,
 }
 
+/// Per-admitted-capability file-stat snapshot captured at scan time
+/// (V1.176 PR wave 2, Greptile P1).
+///
+/// `files` maps file name → `[size, mtime_ns]` — the same shape the
+/// watcher's poll digests use (`watch::scan_dir_digest`), so the
+/// admission-time baseline equals the registry content by construction:
+/// the baseline is derived from what the scan OBSERVED, never from a
+/// later re-read of the filesystem (which could absorb an edit made
+/// between the scan and the baseline derivation).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmittedCapabilityStats {
+    /// The admitted capability's declared name (== directory name).
+    pub name: String,
+    /// `{file_name: [size, mtime_ns]}` captured inside the scan.
+    pub files: serde_json::Map<String, serde_json::Value>,
+}
+
 /// Result of [`scan_user_capabilities`].
 ///
 /// Admitted entries are appended after builtins by the registry constructors
 /// (AR-36); skipped entries carry their reasons and were already logged.
+///
+/// `admitted` carries the concrete [`UserCapability`] type (V1.176 P1,
+/// AR-92 #4) so the hot-reload watcher can keep a last-admitted mirror and
+/// merge last-good entries across rebuilds; the registry append seam boxes
+/// them at the boundary.
 #[derive(Default)]
 pub struct ScanOutcome {
     /// Admitted user capabilities in scan order (first-in-wins for
     /// duplicate declared names).
-    pub admitted: Vec<Box<dyn Capability>>,
+    pub admitted: Vec<UserCapability>,
     /// Skipped capability directories with named reasons — never a scan error.
     pub skipped: Vec<SkippedCapability>,
+    /// Transient marker (W-3, V1.176 P1 QC fix, qc3 S-4): `true` when a
+    /// per-entry `read_dir` error interrupted the iteration, so the scan
+    /// may have missed names. The watcher's merge then carries last-good
+    /// for every name this scan did not re-admit — an incomplete scan must
+    /// never read as a deletion (the I-1 semantics of the digest's
+    /// `Unreadable` case).
+    pub transient: bool,
+    /// Admission-time per-file stat snapshots (V1.176 PR wave 2, Greptile
+    /// P1): one entry per admitted capability, captured INSIDE the scan, so
+    /// the watcher's baseline is scan-time ground truth — never a later
+    /// re-read of the filesystem (which could absorb an edit made between
+    /// the scan and baseline derivation).
+    pub admitted_stats: Vec<AdmittedCapabilityStats>,
 }
 
 /// Scan `dir` (`~/.nexus42/capabilities/<name>/`) for capability descriptors
@@ -49,8 +85,10 @@ pub struct ScanOutcome {
 /// - Entries are processed in **sorted directory-name order** for a
 ///   deterministic scan (catalog order stable across boots; `read_dir`
 ///   order is filesystem-dependent).
-/// - Per-entry `read_dir` errors and non-UTF-8 directory names are logged at
-///   `warn!`; the non-UTF-8 case also gets a skip record (AR-35
+/// - Per-entry `read_dir` errors are logged at `warn!` and mark the
+///   outcome **transient** (W-3): the scan may have missed names, so the
+///   watcher's merge carries last-good instead of treating them as
+///   deletions. Non-UTF-8 directory names get a named skip record (AR-35
 ///   all-skips-logged).
 /// - Duplicate declared names: first-in-sorted-order wins, the rest skipped
 ///   (defensive: with the dir-name == descriptor-name rule, two distinct dirs
@@ -86,11 +124,17 @@ pub fn scan_user_capabilities(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return outcome,
         Err(e) => {
             // Non-missing read failures are still boot-safe: warn and treat
-            // the directory as empty.
+            // the directory as empty — but mark the outcome TRANSIENT
+            // (Bugbot High, V1.176 PR wave): a successful digest poll
+            // followed by a FAILED rescan (EACCES/EMFILE race) must never
+            // read as deletions. The watcher's merge then carries last-good
+            // for every name this scan did not re-admit — the same I-1
+            // semantics as the per-entry `read_dir` error below.
+            outcome.transient = true;
             tracing::warn!(
                 error = %e,
                 path = %dir.display(),
-                "cannot read user capabilities directory; treating as empty"
+                "cannot read user capabilities directory; scan marked transient (last-good carried, no drops)"
             );
             return outcome;
         }
@@ -103,13 +147,17 @@ pub fn scan_user_capabilities(
         match entry {
             Ok(e) => entries.push(e),
             Err(e) => {
-                // Per-entry I/O errors (e.g. an unreadable subdir) are
-                // boot-safe skips — log them (AR-35 all-skips-logged); no
-                // capability name is available for a skip record.
+                // Per-entry I/O error (W-3, V1.176 P1 QC fix, qc3 S-4): the
+                // scan may have MISSED names — mark the outcome transient so
+                // the watcher's merge keeps last-good for every name this
+                // scan did not re-admit (an incomplete scan must never read
+                // as a deletion; no capability name exists for a skip
+                // record). Logged at warn (AR-35 all-skips-logged).
+                outcome.transient = true;
                 tracing::warn!(
                     error = %e,
                     dir = %dir.display(),
-                    "cannot read user capabilities directory entry; skipping"
+                    "cannot read user capabilities directory entry; scan marked transient (last-good carried, no drops)"
                 );
             }
         }
@@ -139,6 +187,16 @@ pub fn scan_user_capabilities(
         if dir_name.starts_with('_') || dir_name.starts_with('.') {
             continue;
         }
+
+        // V1.176 PR wave 2 (Greptile P1): capture the per-file stat
+        // snapshot BEFORE the descriptor read, so the watcher's baseline
+        // is scan-time ground truth. Any edit landing after this capture
+        // diverges the first poll from the baseline and triggers a
+        // rebuild — the baseline and the registry content can never
+        // disagree about the state the scan observed (a later re-read of
+        // the filesystem could absorb an edit made between the scan and
+        // the baseline derivation). Recorded only on admission below.
+        let files = dir_file_digest(&path);
 
         let descriptor_path = path.join("capability.json");
         let descriptor = match read_descriptor(&descriptor_path) {
@@ -200,12 +258,19 @@ pub fn scan_user_capabilities(
         // The engine arm passes Some/Some so run() executes the module; the
         // engine-less arm passes None/None (AR-44) so run() returns
         // WorkerUnavailable.
-        outcome.admitted.push(Box::new(UserCapability::new(
+        outcome.admitted.push(UserCapability::new(
             &descriptor,
             path,
             engine.cloned(),
             module_cache.cloned(),
-        )));
+        ));
+        // V1.176 PR wave 2 (Greptile P1): the admission-time stat snapshot
+        // captured above rides the outcome so the watcher's baseline is
+        // scan-time ground truth (see `digest_from_admitted`).
+        outcome.admitted_stats.push(AdmittedCapabilityStats {
+            name: descriptor.name.clone(),
+            files,
+        });
     }
 
     outcome
@@ -221,6 +286,38 @@ fn read_descriptor(path: &Path) -> Result<UserCapabilityDescriptor, String> {
         .validate()
         .map_err(|e| format!("invalid capability.json: {e}"))?;
     Ok(descriptor)
+}
+
+/// Build the `{file_name: [size, mtime_ns]}` map for one capability dir —
+/// the per-dir leaf of the structural digest (AR-91 #2). Shared by the
+/// scan's admission-time stat capture ([`AdmittedCapabilityStats`]) and
+/// the watcher's poll digests (`watch::scan_dir_digest`) so the baseline
+/// and poll digests use the same file-metadata shape.
+///
+/// A per-capability-dir read error yields an empty map (the dir is
+/// omitted from that digest leaf); the digest then changes and the next
+/// tick re-scans (the merge carries the last good entry — AR-92 #5).
+pub(crate) fn dir_file_digest(cap_dir: &Path) -> serde_json::Map<String, serde_json::Value> {
+    let mut files = serde_json::Map::new();
+    if let Ok(file_read) = std::fs::read_dir(cap_dir) {
+        let mut file_entries: Vec<std::fs::DirEntry> = file_read.flatten().collect();
+        file_entries.sort_by_key(std::fs::DirEntry::file_name);
+        for file in file_entries {
+            let Ok(file_name) = file.file_name().into_string() else {
+                continue;
+            };
+            let Ok(meta) = file.metadata() else {
+                continue;
+            };
+            let mtime_ns = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |t| t.as_nanos());
+            files.insert(file_name, serde_json::json!([meta.len(), mtime_ns]));
+        }
+    }
+    files
 }
 
 /// Record a skip and log it at `warn!` (AR-35: all skips are logged; the
@@ -244,20 +341,11 @@ pub(crate) fn skip(outcome: &mut ScanOutcome, name: &str, reason: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sha2::Digest;
-    use std::fmt::Write as _;
-
-    fn sha256_hex(bytes: &[u8]) -> String {
-        let digest = sha2::Sha256::digest(bytes);
-        let mut hex = String::with_capacity(64);
-        for b in digest {
-            let _ = write!(hex, "{b:02x}");
-        }
-        hex
-    }
+    use crate::capability::test_support::{descriptor_json, write_capability_dir};
+    use crate::capability::Capability;
 
     /// The builtin-name set the registry passes into the scan (a small,
-    /// realistic subset used by scan tests; `sync.pull` collides).
+    /// realistic subset used by the scan tests; `sync.pull` collides).
     fn builtins() -> HashSet<&'static str> {
         HashSet::from(["sync.pull", "narrative.compute"])
     }
@@ -266,49 +354,6 @@ mod tests {
     /// whose skip fires BEFORE admission (validation / mismatch / duplicate
     /// guards) — the module pair's real hash is never consulted.
     const FAKE_SHA: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
-    /// Write `<dir>/manifest.json` + `<dir>/basic-combat.wasm` with a **real**
-    /// matching sha (the AR-39 pairing admission verifies). Returns the sha.
-    fn write_module_pair(dir: &Path) -> String {
-        let wasm = b"fake module bytes";
-        let sha = sha256_hex(wasm);
-        std::fs::write(dir.join("basic-combat.wasm"), wasm).unwrap();
-        let manifest = format!(
-            r#"{{
-                "module_id": "basic-combat",
-                "name": "Basic Combat",
-                "version": "1.0.0",
-                "nexus_abi_version": 1,
-                "required_key_block_types": [],
-                "compute_export": "compute",
-                "init_export": "",
-                "wasm_sha256": "{sha}"
-            }}"#
-        );
-        std::fs::write(dir.join("manifest.json"), manifest).unwrap();
-        sha
-    }
-
-    fn descriptor_json(name: &str, sha: &str) -> String {
-        format!(
-            r#"{{
-                "name": "{name}",
-                "inputSchema": "{{\"type\":\"object\"}}",
-                "outputSchema": "{{\"type\":\"object\"}}",
-                "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{sha}" }}
-            }}"#
-        )
-    }
-
-    /// Write an admitted `<name>/capability.json` trio (AR-35 layout): a
-    /// hash-consistent `manifest.json` + `<module-id>.wasm` pair so the
-    /// AR-43 admission gates pass (P1 T4 wires admission into the scan).
-    fn write_capability_dir(root: &Path, name: &str) {
-        let dir = root.join(name);
-        std::fs::create_dir_all(&dir).unwrap();
-        let sha = write_module_pair(&dir);
-        std::fs::write(dir.join("capability.json"), descriptor_json(name, &sha)).unwrap();
-    }
 
     #[test]
     fn scan_valid_trio_admits_with_declared_name() {
@@ -321,7 +366,7 @@ mod tests {
             "no skips: {:?}",
             outcome.skipped
         );
-        let cap = outcome.admitted[0].as_ref();
+        let cap = &outcome.admitted[0];
         assert_eq!(cap.name(), "demo.pull");
         assert_eq!(cap.input_schema(), r#"{"type":"object"}"#);
         assert_eq!(cap.output_schema(), r#"{"type":"object"}"#);
@@ -340,6 +385,25 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let missing = tmp.path().join("does-not-exist");
         let outcome = scan_user_capabilities(&missing, &builtins(), None, None);
+        assert!(outcome.admitted.is_empty());
+        assert!(outcome.skipped.is_empty());
+    }
+    /// Bugbot High (V1.176 PR wave): a top-level non-`NotFound` `read_dir`
+    /// failure (EACCES/EMFILE race — here: a regular file → ENOTDIR, the
+    /// same non-NotFound branch) must mark the outcome **transient**, so
+    /// the watcher's merge carries last-good instead of reading every
+    /// unmatched name as a deletion. A successful digest poll followed by
+    /// a failed rescan must never wipe the registry.
+    #[test]
+    fn scan_unreadable_dir_marks_outcome_transient() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("capabilities");
+        std::fs::write(&path, b"not a directory").unwrap();
+        let outcome = scan_user_capabilities(&path, &builtins(), None, None);
+        assert!(
+            outcome.transient,
+            "top-level non-NotFound read failure must mark the outcome transient"
+        );
         assert!(outcome.admitted.is_empty());
         assert!(outcome.skipped.is_empty());
     }
@@ -416,7 +480,7 @@ mod tests {
         write_capability_dir(tmp.path(), "sync.pull"); // builtin name (gate 1)
         write_capability_dir(tmp.path(), "demo.pull"); // valid, admitted
         let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
-        let names: Vec<&str> = outcome.admitted.iter().map(|c| c.name()).collect();
+        let names: Vec<&str> = outcome.admitted.iter().map(Capability::name).collect();
         assert_eq!(
             names,
             vec!["demo.pull"],
@@ -441,7 +505,7 @@ mod tests {
         write_capability_dir(tmp.path(), ".hidden.cap");
         write_capability_dir(tmp.path(), "visible.cap");
         let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
-        let names: Vec<&str> = outcome.admitted.iter().map(|c| c.name()).collect();
+        let names: Vec<&str> = outcome.admitted.iter().map(Capability::name).collect();
         assert_eq!(names, vec!["visible.cap"]);
         assert!(outcome.skipped.is_empty());
     }
@@ -465,7 +529,7 @@ mod tests {
         )
         .unwrap();
         let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
-        let names: Vec<&str> = outcome.admitted.iter().map(|c| c.name()).collect();
+        let names: Vec<&str> = outcome.admitted.iter().map(Capability::name).collect();
         assert_eq!(
             names,
             vec!["a.dup"],
@@ -494,7 +558,7 @@ mod tests {
         write_capability_dir(tmp.path(), "alpha.cap");
         write_capability_dir(tmp.path(), "mike.cap");
         let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
-        let names: Vec<&str> = outcome.admitted.iter().map(|c| c.name()).collect();
+        let names: Vec<&str> = outcome.admitted.iter().map(Capability::name).collect();
         assert_eq!(
             names,
             vec!["alpha.cap", "mike.cap", "zeta.cap"],

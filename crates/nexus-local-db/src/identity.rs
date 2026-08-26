@@ -243,22 +243,67 @@ mod tests {
         assert_eq!(fetched.creator_id, "ctr_localTest123");
     }
 
+    // V1.176 P0 QC fix wave (qc3 S-002): the unique partial index on
+    // persistent `display_name` rejects a second INSERT with the same name —
+    // an honest failure instead of a silent duplicate. Two concurrent
+    // 0-match reads can both mint; the index fences the second write.
     #[tokio::test]
-    async fn create_anonymous_identity() {
+    async fn duplicate_persistent_display_name_is_rejected() {
         let (pool, _dir) = fresh_pool().await;
-        let row = create_local_identity(
+        create_local_identity(
             &pool,
-            "ctr_anonTest456",
-            "anonymous",
-            None,
+            "ctr_localDup1",
+            "persistent",
+            Some("Same Name"),
             "2026-01-01T00:00:00Z",
         )
         .await
         .unwrap();
 
-        assert_eq!(row.identity_type, "anonymous");
-        assert!(row.display_name.is_none());
-        assert!(!row.platform_linked);
+        let err = create_local_identity(
+            &pool,
+            "ctr_localDup2",
+            "persistent",
+            Some("Same Name"),
+            "2026-01-01T00:00:00Z",
+        )
+        .await
+        .expect_err("second same-name persistent INSERT must fail");
+
+        // Surface as a unique-constraint failure, not a silent duplicate row.
+        let is_unique_violation = matches!(
+            &err,
+            LocalDbError::Sqlx(sqlx::Error::Database(db)) if db.is_unique_violation()
+        );
+        assert!(
+            is_unique_violation,
+            "expected a unique-constraint error, got: {err:?}"
+        );
+    }
+
+    // qc3 S-002 companion: anonymous rows and nameless persistent rows are
+    // NOT constrained — the index is partial (persistent + non-NULL name).
+    #[tokio::test]
+    async fn duplicate_nameless_persistent_rows_are_allowed() {
+        let (pool, _dir) = fresh_pool().await;
+        create_local_identity(
+            &pool,
+            "ctr_localNoName1",
+            "persistent",
+            None,
+            "2026-01-01T00:00:00Z",
+        )
+        .await
+        .unwrap();
+        create_local_identity(
+            &pool,
+            "ctr_localNoName2",
+            "persistent",
+            None,
+            "2026-01-01T00:00:00Z",
+        )
+        .await
+        .expect("nameless persistent rows are not name-constrained");
     }
 
     #[tokio::test]

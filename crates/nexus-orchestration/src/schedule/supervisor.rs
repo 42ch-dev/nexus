@@ -54,6 +54,12 @@ pub struct ScheduleSupervisor {
     /// review-time KB extraction hook so `nexus.llm.extract` can run when a
     /// worker is available; the hook falls back to the heuristic when this is
     /// `None` or the worker is unavailable.
+    ///
+    /// V1.176 P1 (AR-92 #6): this stays a **boot-time** `Arc` — a documented
+    /// builtin-only consumer. The quality hooks invoke `nexus.llm.extract`,
+    /// a builtin; hot reloads never change builtins, so a swap cannot affect
+    /// it. New graphs (which DO need hot-added user capabilities) snapshot
+    /// the shared holder in the engine instead (`GraphFlowEngine::current_caps`).
     registry: Arc<Option<std::sync::Arc<crate::capability::CapabilityRegistry>>>,
 }
 

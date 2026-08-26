@@ -145,7 +145,7 @@ async fn start_server(
         manifest,
         allowlist,
         peer_keys,
-        reserved_tool_ids: HashSet::new(),
+        capability_registry: None,
     };
     let task = spawn_accept_loop(
         listener,
@@ -397,7 +397,7 @@ async fn boot_derives_hello_from_config_allowlist() {
         )),
     );
     let shutdown = Arc::new(Notify::new());
-    let handle = start_peer_tools_lane(tmp.path(), Arc::clone(&shutdown), &[])
+    let handle = start_peer_tools_lane(tmp.path(), Arc::clone(&shutdown), None)
         .await
         .expect("lane starts");
     let adapter = dial_with_daemon_key(
@@ -440,7 +440,7 @@ async fn boot_default_deny_empty_allowlist_zero_admitted() {
         )),
     );
     let shutdown = Arc::new(Notify::new());
-    let handle = start_peer_tools_lane(tmp.path(), Arc::clone(&shutdown), &[])
+    let handle = start_peer_tools_lane(tmp.path(), Arc::clone(&shutdown), None)
         .await
         .expect("lane starts");
     let adapter = dial_with_daemon_key(
@@ -481,7 +481,7 @@ async fn boot_rejects_peer_not_in_peer_ids() {
         )),
     );
     let shutdown = Arc::new(Notify::new());
-    let handle = start_peer_tools_lane(tmp.path(), Arc::clone(&shutdown), &[])
+    let handle = start_peer_tools_lane(tmp.path(), Arc::clone(&shutdown), None)
         .await
         .expect("lane starts");
     let result = dial_with_daemon_key(
