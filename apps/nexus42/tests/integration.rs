@@ -1121,6 +1121,45 @@ fn register_local_repairs_missing_workspace_row() {
     assert_eq!(single_persistent_id(home), id, "no second identity minted");
 }
 
+/// Nameless `system identity create --persistent` converges the already-active
+/// persistent identity (AR-89 #2): no second mint, no "Created" claim.
+#[test]
+fn persistent_identity_create_nameless_converges_active() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("system")
+        .arg("identity")
+        .arg("create")
+        .arg("--kind")
+        .arg("persistent")
+        .arg("--name")
+        .arg("NamelessBase")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created persistent identity"));
+    let id = single_persistent_id(home);
+
+    // Nameless re-run → converge the active persistent identity (no mint).
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("system")
+        .arg("identity")
+        .arg("create")
+        .arg("--kind")
+        .arg("persistent")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("already converged"))
+        .stdout(predicate::str::contains("Created").not());
+
+    assert_eq!(single_persistent_id(home), id, "no second identity minted");
+}
+
 /// Honest collision on `system identity create --persistent`: two persistent
 /// rows share the display name → `creator_name_collision:` prefix + id list +
 /// exit 1 (never a silent takeover).

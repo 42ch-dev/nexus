@@ -658,7 +658,13 @@ async fn converge_identity(row: &nexus_local_db::LocalIdentityRow) -> Result<()>
     .fetch_one(&workspace_pool)
     .await?;
     let repaired = row_exists == 0;
-    nexus_local_db::ensure_creator_row(&workspace_pool, creator_id, &row_display_name).await?;
+    // True no-op: row present + already active → read-only verification, no
+    // workspace-row write (no `cached_at` churn). Write only when the row is
+    // missing (repair) or a different identity is being activated (session
+    // selection).
+    if repaired || !already_active {
+        nexus_local_db::ensure_creator_row(&workspace_pool, creator_id, &row_display_name).await?;
+    }
 
     if !already_active {
         cli_config.save()?;
@@ -1110,6 +1116,127 @@ mod tests {
         .await
         .expect("query workspace creators row");
         assert_eq!(row_exists, 1, "workspace row still present");
+    }
+
+    /// Store-level no-op pin: the no-op leg must not UPDATE the workspace
+    /// `creators` row (no `cached_at` churn). A sentinel `cached_at` survives
+    /// the re-run untouched.
+    #[tokio::test]
+    async fn bootstrap_local_creator_noop_does_not_touch_workspace_row() {
+        let _home = crate::testutil::isolated_home();
+
+        bootstrap_local_creator(Some("Alice".to_string()))
+            .await
+            .expect("first bootstrap mints");
+        let pool = open_global_db().await.expect("open global db");
+        let identities = nexus_local_db::list_local_identities(&pool)
+            .await
+            .expect("list local identities");
+        assert_eq!(identities.len(), 1);
+        let id = identities[0].creator_id.clone();
+
+        // Stamp the workspace row with a sentinel timestamp; a no-op re-run
+        // must leave it untouched (read-only verification).
+        let config = CliConfig::load().expect("reload config");
+        let db_path = crate::config::resolve_state_db_path(&config).expect("resolve state db path");
+        let workspace_pool = crate::db::Schema::init(&db_path)
+            .await
+            .expect("init workspace pool");
+        sqlx::query("UPDATE creators SET cached_at = ? WHERE creator_id = ?")
+            .bind("2000-01-01T00:00:00Z")
+            .bind(&id)
+            .execute(&workspace_pool)
+            .await
+            .expect("stamp sentinel cached_at");
+
+        bootstrap_local_creator(Some("Alice".to_string()))
+            .await
+            .expect("no-op re-run converges");
+
+        let cached_at: String =
+            sqlx::query_scalar("SELECT cached_at FROM creators WHERE creator_id = ?")
+                .bind(&id)
+                .fetch_one(&workspace_pool)
+                .await
+                .expect("query cached_at");
+        assert_eq!(
+            cached_at, "2000-01-01T00:00:00Z",
+            "no-op must not rewrite the workspace row (cached_at churn)"
+        );
+    }
+
+    /// Match-key negative (case): `Alice` vs `alice` are distinct byte-exact
+    /// keys (AR-89 #1 — no case-fold). Seeding both and re-running `Alice`
+    /// converges the exact `Alice` row (1 match) — never a collision.
+    #[tokio::test]
+    async fn bootstrap_local_creator_match_key_is_case_sensitive() {
+        let _home = crate::testutil::isolated_home();
+
+        let pool = open_global_db().await.expect("open global db");
+        create_local_identity(
+            &pool,
+            "ctr_localcase1",
+            "persistent",
+            Some("Alice"),
+            "2026-08-26T00:00:00Z",
+        )
+        .await
+        .expect("seed Alice");
+        create_local_identity(
+            &pool,
+            "ctr_localcase2",
+            "persistent",
+            Some("alice"),
+            "2026-08-26T00:00:00Z",
+        )
+        .await
+        .expect("seed alice");
+
+        // Byte-exact: "Alice" matches only the "Alice" row → converge, no
+        // collision (a case-folded key would match 2 rows and error).
+        bootstrap_local_creator(Some("Alice".to_string()))
+            .await
+            .expect("exact-case match converges");
+
+        let config = CliConfig::load().expect("reload config");
+        assert_eq!(
+            config.active_creator_id.as_deref(),
+            Some("ctr_localcase1"),
+            "exact byte match activated"
+        );
+    }
+
+    /// Match-key negative (Unicode): no normalization — a decomposed twin
+    /// (`Cafe\u{301}`, NFD) does not match the NFC row (`Café`) → 0 matches
+    /// → mint a distinct identity (AR-89 #1).
+    #[tokio::test]
+    async fn bootstrap_local_creator_match_key_does_not_normalize_unicode() {
+        let _home = crate::testutil::isolated_home();
+
+        let pool = open_global_db().await.expect("open global db");
+        create_local_identity(
+            &pool,
+            "ctr_localnfc1",
+            "persistent",
+            Some("Café"),
+            "2026-08-26T00:00:00Z",
+        )
+        .await
+        .expect("seed NFC row");
+
+        // NFD twin: `e` + U+0301 combining acute. Byte-exact `==` → 0 matches.
+        bootstrap_local_creator(Some("Cafe\u{301}".to_string()))
+            .await
+            .expect("decomposed twin mints a new identity");
+
+        let identities = nexus_local_db::list_local_identities(&pool)
+            .await
+            .expect("list local identities");
+        assert_eq!(identities.len(), 2, "decomposed twin is a distinct name");
+        assert!(
+            identities.iter().any(|r| r.creator_id == "ctr_localnfc1"),
+            "NFC row still present"
+        );
     }
 
     /// Repair: simulate the DF-83 partial (identity present, workspace row

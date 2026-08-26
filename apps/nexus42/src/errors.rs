@@ -286,10 +286,9 @@ impl fmt::Display for CliError {
                 write!(
                     f,
                     "creator_name_collision: display name '{display_name}' is already used by \
-                     {count} persistent local identit{}: {ids}\n\n  \
+                     {count} persistent local identities: {ids}\n\n  \
                      Suggestion: Switch explicitly with `nexus42 system identity use <id>` — \
                      the CLI never switches identity silently.",
-                    if count == 1 { "y" } else { "ies" }
                 )
             }
 
