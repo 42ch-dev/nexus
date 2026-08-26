@@ -12,6 +12,9 @@
 //! bootstrap helper [`bootstrap_local_creator`] — the single identity-mint +
 //! workspace-row materialization sequence both named local entry points
 //! (`creator register --local`, `system identity create --persistent`) call.
+//! V1.176 P0 T2 (AR-89): the helper is idempotent — re-running converges
+//! (no-op / repair) or fails honestly on a name collision instead of
+//! minting a duplicate.
 
 use crate::commands::system::identity::open_global_db;
 use crate::config::CliConfig;
@@ -519,15 +522,18 @@ pub async fn handle_bootstrap(args: BootstrapArgs, config: &CliConfig) -> Result
 /// best-effort display metadata for the platform path only; local display
 /// SSOT is `local_identities`.
 ///
-/// Re-entrancy is idempotent (AR-88 #6): every store write is either an
-/// INSERT of a freshly minted random id or an idempotent upsert / config
-/// assignment, so a crash between stores leaves exactly the DF-83 partial
-/// (identity without row), which the next run repairs.
+/// Re-entrancy is idempotent (AR-88 #6 / AR-89): a crash between stores
+/// leaves exactly the DF-83 partial (identity without row), which the next
+/// run repairs — the named 1-match leg converges that id (row upsert +
+/// activation), and the nameless path converges the already-active
+/// persistent identity. A name shared by 2+ persistent identities is an
+/// honest `creator_name_collision` error, never a silent takeover.
 ///
 /// # Errors
 ///
 /// Returns `CliError` if the identity database, config, or workspace db
-/// operations fail.
+/// operations fail, or if the display name collides with 2+ existing
+/// persistent identities (`CreatorNameCollision`).
 pub(crate) async fn bootstrap_local_creator(name: Option<String>) -> Result<()> {
     // R3(identity): reject empty or whitespace-only names at the helper front
     // door — both entry points now enforce it here (AR-89 #1).
@@ -540,12 +546,58 @@ pub(crate) async fn bootstrap_local_creator(name: Option<String>) -> Result<()> 
         }
     }
 
-    // Mint the persistent identity (fresh random `ctr_local*` id — INSERT
-    // cannot collide) and persist it to the global identity store.
-    let identity = LocalIdentity::create_persistent(trimmed_name);
     let pool = open_global_db().await?;
+
+    // AR-89 decision tree (PL-5): named → 0/1/2+ persistent matches;
+    // nameless → converge the already-active persistent identity if any,
+    // else mint nameless.
+    if let Some(trimmed) = trimmed_name {
+        let matches = persistent_rows_with_name(&pool, trimmed).await?;
+        match matches.len() {
+            0 => mint_and_materialize(&pool, Some(trimmed)).await,
+            1 => converge_identity(&matches[0]).await,
+            _ => Err(CliError::CreatorNameCollision {
+                display_name: trimmed.to_string(),
+                matches: matches.into_iter().map(|r| r.creator_id).collect(),
+            }),
+        }
+    } else {
+        let cli_config = CliConfig::load()?;
+        if let Some(active_id) = &cli_config.active_creator_id {
+            if let Some(row) = nexus_local_db::get_local_identity(&pool, active_id).await? {
+                if row.identity_type == "persistent" {
+                    return converge_identity(&row).await;
+                }
+            }
+        }
+        mint_and_materialize(&pool, None).await
+    }
+}
+
+/// Persistent `local_identities` rows whose display name is byte-exactly
+/// `trimmed` (AR-89 #1: `str::trim` + `==` — no case-fold, no Unicode
+/// normalization, no prefix/substring matching).
+async fn persistent_rows_with_name(
+    pool: &nexus_local_db::SqlitePool,
+    trimmed: &str,
+) -> Result<Vec<nexus_local_db::LocalIdentityRow>> {
+    let rows = nexus_local_db::list_local_identities(pool).await?;
+    Ok(rows
+        .into_iter()
+        .filter(|r| r.identity_type == "persistent" && r.display_name.as_deref() == Some(trimmed))
+        .collect())
+}
+
+/// AR-89 mint leg: fresh persistent identity + INSERT + set active +
+/// `ensure_creator_row`. Prints the recognizable "Created persistent
+/// identity: …" shape (AR-88 #5 / AR-89 #5).
+async fn mint_and_materialize(
+    pool: &nexus_local_db::SqlitePool,
+    trimmed_name: Option<&str>,
+) -> Result<()> {
+    let identity = LocalIdentity::create_persistent(trimmed_name);
     create_local_identity(
-        &pool,
+        pool,
         &identity.creator_id,
         identity.identity_type.as_str(),
         identity.display_name.as_deref(),
@@ -576,6 +628,49 @@ pub(crate) async fn bootstrap_local_creator(name: Option<String>) -> Result<()> 
     nexus_local_db::ensure_creator_row(&workspace_pool, &identity.creator_id, &row_display_name)
         .await?;
 
+    Ok(())
+}
+
+/// AR-89 no-op / repair leg: converge `row`'s identity — ensure the
+/// workspace `creators` row (repair if missing) and activate if not already
+/// active (session selection). Never prints "Created" (PL-5 hard pin).
+async fn converge_identity(row: &nexus_local_db::LocalIdentityRow) -> Result<()> {
+    let creator_id = &row.creator_id;
+    let row_display_name = row
+        .display_name
+        .clone()
+        .unwrap_or_else(|| creator_id.clone());
+
+    let mut cli_config = CliConfig::load()?;
+    let already_active = cli_config.active_creator_id.as_deref() == Some(creator_id.as_str());
+    if !already_active {
+        cli_config.active_creator_id = Some(creator_id.clone());
+    }
+
+    // The workspace db is per-creator (ADR-014): resolve it for the matched
+    // identity, not the currently-active one.
+    let db_path = crate::config::resolve_state_db_path(&cli_config)?;
+    let workspace_pool = crate::db::Schema::init(&db_path).await?;
+    let row_exists: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM creators WHERE creator_id = ? AND status = 'active')",
+    )
+    .bind(creator_id)
+    .fetch_one(&workspace_pool)
+    .await?;
+    let repaired = row_exists == 0;
+    nexus_local_db::ensure_creator_row(&workspace_pool, creator_id, &row_display_name).await?;
+
+    if !already_active {
+        cli_config.save()?;
+    }
+
+    if repaired {
+        println!("Workspace creators row materialized for {creator_id}.");
+    } else if !already_active {
+        println!("Identity {creator_id} is already registered; set as active identity.");
+    } else {
+        println!("Identity {creator_id} is already converged (active + workspace row present).");
+    }
     Ok(())
 }
 
@@ -969,5 +1064,237 @@ mod tests {
             display.contains("Display name cannot be empty or whitespace-only."),
             "unexpected error: {display}"
         );
+    }
+
+    // ── V1.176 P0 T2 (AR-89): idempotent re-register + partial-bootstrap recovery ──
+
+    /// No-op success: re-running the same name against the already-converged
+    /// identity must not mint a second identity (stdout honesty — no
+    /// "Created" — is pinned at the e2e level where stdout is captured).
+    #[tokio::test]
+    async fn bootstrap_local_creator_noop_keeps_single_identity() {
+        let _home = crate::testutil::isolated_home();
+
+        bootstrap_local_creator(Some("  Alice  ".to_string()))
+            .await
+            .expect("first bootstrap mints");
+        let pool = open_global_db().await.expect("open global db");
+        let first = nexus_local_db::list_local_identities(&pool)
+            .await
+            .expect("list local identities");
+        assert_eq!(first.len(), 1);
+        let first_id = first[0].creator_id.clone();
+
+        bootstrap_local_creator(Some("Alice".to_string()))
+            .await
+            .expect("re-run converges, no collision");
+
+        let after = nexus_local_db::list_local_identities(&pool)
+            .await
+            .expect("list local identities");
+        assert_eq!(after.len(), 1, "no second identity minted");
+        assert_eq!(after[0].creator_id, first_id, "same identity id");
+
+        // Still fully converged: active + workspace row present.
+        let config = CliConfig::load().expect("reload config");
+        assert_eq!(config.active_creator_id.as_deref(), Some(first_id.as_str()));
+        let db_path = crate::config::resolve_state_db_path(&config).expect("resolve state db path");
+        let workspace_pool = crate::db::Schema::init(&db_path)
+            .await
+            .expect("init workspace pool");
+        let row_exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM creators WHERE creator_id = ? AND status = 'active')",
+        )
+        .bind(&first_id)
+        .fetch_one(&workspace_pool)
+        .await
+        .expect("query workspace creators row");
+        assert_eq!(row_exists, 1, "workspace row still present");
+    }
+
+    /// Repair: simulate the DF-83 partial (identity present, workspace row
+    /// missing) by deleting the workspace row, then re-run — the row is
+    /// materialized again and no new identity is minted.
+    #[tokio::test]
+    async fn bootstrap_local_creator_repairs_missing_workspace_row() {
+        let _home = crate::testutil::isolated_home();
+
+        bootstrap_local_creator(Some("Repair Me".to_string()))
+            .await
+            .expect("first bootstrap mints");
+        let pool = open_global_db().await.expect("open global db");
+        let identities = nexus_local_db::list_local_identities(&pool)
+            .await
+            .expect("list local identities");
+        assert_eq!(identities.len(), 1);
+        let id = identities[0].creator_id.clone();
+
+        // Simulate the partial: delete the workspace `creators` row.
+        let config = CliConfig::load().expect("reload config");
+        let db_path = crate::config::resolve_state_db_path(&config).expect("resolve state db path");
+        let workspace_pool = crate::db::Schema::init(&db_path)
+            .await
+            .expect("init workspace pool");
+        sqlx::query("DELETE FROM creators WHERE creator_id = ?")
+            .bind(&id)
+            .execute(&workspace_pool)
+            .await
+            .expect("delete workspace row");
+
+        // Re-run the same name → repair leg.
+        bootstrap_local_creator(Some("Repair Me".to_string()))
+            .await
+            .expect("re-run repairs");
+
+        // Same identity, no new mint.
+        let after = nexus_local_db::list_local_identities(&pool)
+            .await
+            .expect("list local identities");
+        assert_eq!(after.len(), 1, "no second identity minted");
+        assert_eq!(after[0].creator_id, id);
+
+        // Row is back.
+        let row_exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM creators WHERE creator_id = ? AND status = 'active')",
+        )
+        .bind(&id)
+        .fetch_one(&workspace_pool)
+        .await
+        .expect("query workspace creators row");
+        assert_eq!(row_exists, 1, "workspace row repaired");
+    }
+
+    /// Honest collision: two persistent rows share the display name → the
+    /// `CreatorNameCollision` error lists both ids (AR-89 #4) — never a
+    /// silent takeover.
+    #[tokio::test]
+    async fn bootstrap_local_creator_collision_lists_matching_ids() {
+        let _home = crate::testutil::isolated_home();
+
+        // Seed two persistent rows sharing the display name directly.
+        let pool = open_global_db().await.expect("open global db");
+        for id in ["ctr_localcoll1", "ctr_localcoll2"] {
+            create_local_identity(
+                &pool,
+                id,
+                "persistent",
+                Some("Shared Name"),
+                "2026-08-26T00:00:00Z",
+            )
+            .await
+            .expect("seed persistent row");
+        }
+
+        let err = bootstrap_local_creator(Some("Shared Name".to_string()))
+            .await
+            .expect_err("ambiguous name must collide");
+        match err {
+            CliError::CreatorNameCollision {
+                display_name,
+                matches,
+            } => {
+                assert_eq!(display_name, "Shared Name");
+                assert_eq!(
+                    matches,
+                    vec!["ctr_localcoll1".to_string(), "ctr_localcoll2".to_string()]
+                );
+            }
+            other => panic!("expected CreatorNameCollision, got {other:?}"),
+        }
+    }
+
+    /// Session selection: a single name match on a *different* identity than
+    /// the active one converges that id (activates it) — never a collision,
+    /// never a silent takeover of an unmatched id (AR-89 #2).
+    #[tokio::test]
+    async fn bootstrap_local_creator_single_match_activates_matched_identity() {
+        let _home = crate::testutil::isolated_home();
+
+        // Mint one identity with a name, then switch active to a different
+        // persistent identity.
+        bootstrap_local_creator(Some("Target Name".to_string()))
+            .await
+            .expect("mint target");
+        let pool = open_global_db().await.expect("open global db");
+        let identities = nexus_local_db::list_local_identities(&pool)
+            .await
+            .expect("list local identities");
+        assert_eq!(identities.len(), 1);
+        let target_id = identities[0].creator_id.clone();
+
+        // Seed a second persistent identity and make it active.
+        create_local_identity(
+            &pool,
+            "ctr_localother",
+            "persistent",
+            Some("Other"),
+            "2026-08-26T00:00:00Z",
+        )
+        .await
+        .expect("seed other identity");
+        let mut cli_config = CliConfig::load().expect("load config");
+        cli_config.active_creator_id = Some("ctr_localother".to_string());
+        cli_config.save().expect("save config");
+
+        // Re-run the target name → single match → converge (activate) the target.
+        bootstrap_local_creator(Some("Target Name".to_string()))
+            .await
+            .expect("single match converges");
+
+        let config = CliConfig::load().expect("reload config");
+        assert_eq!(
+            config.active_creator_id.as_deref(),
+            Some(target_id.as_str()),
+            "matched identity activated (session selection)"
+        );
+    }
+
+    /// Nameless `--persistent` converges the already-active persistent
+    /// identity (AR-89 #2) — no new mint; a missing workspace row is repaired.
+    #[tokio::test]
+    async fn bootstrap_local_creator_nameless_converges_active_persistent() {
+        let _home = crate::testutil::isolated_home();
+
+        bootstrap_local_creator(Some("Active One".to_string()))
+            .await
+            .expect("mint active identity");
+        let pool = open_global_db().await.expect("open global db");
+        let identities = nexus_local_db::list_local_identities(&pool)
+            .await
+            .expect("list local identities");
+        assert_eq!(identities.len(), 1);
+        let active_id = identities[0].creator_id.clone();
+
+        // Simulate the partial: delete the workspace row.
+        let config = CliConfig::load().expect("reload config");
+        let db_path = crate::config::resolve_state_db_path(&config).expect("resolve state db path");
+        let workspace_pool = crate::db::Schema::init(&db_path)
+            .await
+            .expect("init workspace pool");
+        sqlx::query("DELETE FROM creators WHERE creator_id = ?")
+            .bind(&active_id)
+            .execute(&workspace_pool)
+            .await
+            .expect("delete workspace row");
+
+        // Nameless re-run → converge the active persistent identity (repair).
+        bootstrap_local_creator(None)
+            .await
+            .expect("nameless converges active persistent");
+
+        let after = nexus_local_db::list_local_identities(&pool)
+            .await
+            .expect("list local identities");
+        assert_eq!(after.len(), 1, "no new mint");
+        assert_eq!(after[0].creator_id, active_id);
+
+        let row_exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM creators WHERE creator_id = ? AND status = 'active')",
+        )
+        .bind(&active_id)
+        .fetch_one(&workspace_pool)
+        .await
+        .expect("query workspace creators row");
+        assert_eq!(row_exists, 1, "workspace row repaired");
     }
 }

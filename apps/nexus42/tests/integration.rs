@@ -929,6 +929,286 @@ fn register_local_converges_workspace_row() {
         .stdout(predicate::str::contains("World created"));
 }
 
+// =============================================================================
+// V1.176 P0 T2 (AR-89): idempotent re-register + partial-bootstrap recovery
+// =============================================================================
+
+/// Open the global identity store at `$HOME/.nexus42/state.db` (same path
+/// the CLI resolves) and return the single persistent identity's creator id.
+fn single_persistent_id(home: &std::path::Path) -> String {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let pool = nexus42::db::Schema::init(&home.join(".nexus42/state.db"))
+            .await
+            .expect("open global db");
+        let rows = nexus_local_db::list_local_identities(&pool)
+            .await
+            .expect("list local identities");
+        assert_eq!(rows.len(), 1, "expected exactly one identity");
+        rows[0].creator_id.clone()
+    })
+}
+
+/// Delete the workspace `creators` row for `creator_id` — simulates the
+/// DF-83 partial (identity present, workspace row missing).
+fn delete_workspace_row(home: &std::path::Path, creator_id: &str) {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let db_path = nexus42::paths::state_db_path(home, creator_id, "default");
+        let pool = nexus42::db::Schema::init(&db_path)
+            .await
+            .expect("open workspace db");
+        sqlx::query("DELETE FROM creators WHERE creator_id = ?")
+            .bind(creator_id)
+            .execute(&pool)
+            .await
+            .expect("delete workspace row");
+    });
+}
+
+/// No-op success on `system identity create --persistent`: re-running the
+/// same name exits 0, must NOT print "Created", and mints no second identity.
+#[test]
+fn persistent_identity_create_noop_does_not_claim_new_mint() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("system")
+        .arg("identity")
+        .arg("create")
+        .arg("--kind")
+        .arg("persistent")
+        .arg("--name")
+        .arg("NoopTester")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created persistent identity"));
+    let id = single_persistent_id(home);
+
+    // Re-run the same name → no-op success: exit 0, no "Created", no new mint.
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("system")
+        .arg("identity")
+        .arg("create")
+        .arg("--kind")
+        .arg("persistent")
+        .arg("--name")
+        .arg("NoopTester")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("already converged"))
+        .stdout(predicate::str::contains("Created").not());
+
+    assert_eq!(single_persistent_id(home), id, "no second identity minted");
+}
+
+/// No-op success on `creator register --local`: re-running the same name
+/// exits 0, must NOT print "Created", and mints no second identity.
+#[test]
+fn register_local_noop_does_not_claim_new_mint() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("register")
+        .arg("--local")
+        .arg("--name")
+        .arg("LocalNoop")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created persistent identity"));
+    let id = single_persistent_id(home);
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("register")
+        .arg("--local")
+        .arg("--name")
+        .arg("LocalNoop")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("already converged"))
+        .stdout(predicate::str::contains("Created").not());
+
+    assert_eq!(single_persistent_id(home), id, "no second identity minted");
+}
+
+/// Repair on `system identity create --persistent`: after the workspace row
+/// is deleted (simulated partial), re-running the same name materializes the
+/// row again (exit 0, repair named, no "Created").
+#[test]
+fn persistent_identity_create_repairs_missing_workspace_row() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("system")
+        .arg("identity")
+        .arg("create")
+        .arg("--kind")
+        .arg("persistent")
+        .arg("--name")
+        .arg("RepairTester")
+        .env("HOME", home)
+        .assert()
+        .success();
+    let id = single_persistent_id(home);
+    delete_workspace_row(home, &id);
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("system")
+        .arg("identity")
+        .arg("create")
+        .arg("--kind")
+        .arg("persistent")
+        .arg("--name")
+        .arg("RepairTester")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("materialized"))
+        .stdout(predicate::str::contains("Created").not());
+
+    assert_eq!(single_persistent_id(home), id, "no second identity minted");
+}
+
+/// Repair on `creator register --local`: after the workspace row is deleted,
+/// re-running the same name materializes the row again (exit 0, repair named,
+/// no "Created").
+#[test]
+fn register_local_repairs_missing_workspace_row() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("register")
+        .arg("--local")
+        .arg("--name")
+        .arg("LocalRepair")
+        .env("HOME", home)
+        .assert()
+        .success();
+    let id = single_persistent_id(home);
+    delete_workspace_row(home, &id);
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("register")
+        .arg("--local")
+        .arg("--name")
+        .arg("LocalRepair")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("materialized"))
+        .stdout(predicate::str::contains("Created").not());
+
+    assert_eq!(single_persistent_id(home), id, "no second identity minted");
+}
+
+/// Honest collision on `system identity create --persistent`: two persistent
+/// rows share the display name → `creator_name_collision:` prefix + id list +
+/// exit 1 (never a silent takeover).
+#[test]
+fn persistent_identity_create_collision_exits_1_with_prefix() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    // Seed two persistent rows sharing the display name directly.
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let pool = nexus42::db::Schema::init(&home.join(".nexus42/state.db"))
+            .await
+            .expect("open global db");
+        for id in ["ctr_localcoll1", "ctr_localcoll2"] {
+            nexus_local_db::create_local_identity(
+                &pool,
+                id,
+                "persistent",
+                Some("Shared Name"),
+                "2026-08-26T00:00:00Z",
+            )
+            .await
+            .expect("seed persistent row");
+        }
+    });
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("system")
+        .arg("identity")
+        .arg("create")
+        .arg("--kind")
+        .arg("persistent")
+        .arg("--name")
+        .arg("Shared Name")
+        .env("HOME", home)
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("creator_name_collision:"))
+        .stderr(predicate::str::contains("ctr_localcoll1"))
+        .stderr(predicate::str::contains("ctr_localcoll2"))
+        .stderr(predicate::str::contains("nexus42 system identity use <id>"));
+}
+
+/// Honest collision on `creator register --local`: two persistent rows share
+/// the display name → `creator_name_collision:` prefix + id list + exit 1.
+#[test]
+fn register_local_collision_exits_1_with_prefix() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let pool = nexus42::db::Schema::init(&home.join(".nexus42/state.db"))
+            .await
+            .expect("open global db");
+        for id in ["ctr_localcoll3", "ctr_localcoll4"] {
+            nexus_local_db::create_local_identity(
+                &pool,
+                id,
+                "persistent",
+                Some("Local Shared"),
+                "2026-08-26T00:00:00Z",
+            )
+            .await
+            .expect("seed persistent row");
+        }
+    });
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("register")
+        .arg("--local")
+        .arg("--name")
+        .arg("Local Shared")
+        .env("HOME", home)
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("creator_name_collision:"))
+        .stderr(predicate::str::contains("ctr_localcoll3"))
+        .stderr(predicate::str::contains("ctr_localcoll4"))
+        .stderr(predicate::str::contains("nexus42 system identity use <id>"));
+}
+
 /// `--anonymous` must NOT materialize a workspace row (AR-88 #5): the
 /// ephemeral identity is active, but `creator world create` still fails its
 /// FK precheck.

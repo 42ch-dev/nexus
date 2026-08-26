@@ -132,6 +132,17 @@ pub enum CliError {
         work_id: String,
     },
 
+    /// V1.176 P0 T2 (AR-89): the display name matches one or more existing
+    /// persistent local identities — never silently take over another
+    /// identity's id/row. Exit 1 via the default mapping (F-6); no new
+    /// exit-code vocabulary.
+    CreatorNameCollision {
+        /// The trimmed display name that collided.
+        display_name: String,
+        /// Creator IDs of the existing persistent identities sharing the name.
+        matches: Vec<String>,
+    },
+
     /// An advisory file lock is held by another process (V1.51 T-B P0).
     /// Exit code 75 (`EX_TEMPFAIL`) — temporary failure, retry later.
     Locked {
@@ -263,6 +274,22 @@ impl fmt::Display for CliError {
                     "422 world_required_for_extract: Work {work_id} is not World-bound.\n\n  \
                      Suggestion: Extract mode requires a Work with an associated World. \
                      Bind the Work to a World first, or use --mode review for worldless Works."
+                )
+            }
+
+            Self::CreatorNameCollision {
+                display_name,
+                matches,
+            } => {
+                let count = matches.len();
+                let ids = matches.join(", ");
+                write!(
+                    f,
+                    "creator_name_collision: display name '{display_name}' is already used by \
+                     {count} persistent local identit{}: {ids}\n\n  \
+                     Suggestion: Switch explicitly with `nexus42 system identity use <id>` — \
+                     the CLI never switches identity silently.",
+                    if count == 1 { "y" } else { "ies" }
                 )
             }
 
@@ -609,6 +636,27 @@ mod tests {
         assert!(display.contains("not available in local_only mode"));
         assert!(display.contains("sync push"));
         assert!(display.contains("Suggestion:"));
+    }
+
+    // V1.176 P0 T2 (AR-89 #4): the collision error carries the
+    // machine-parsable `creator_name_collision:` prefix, the id list, and
+    // the explicit-switch hint — never a silent takeover.
+    #[test]
+    fn creator_name_collision_display_pins_prefix_and_ids() {
+        let err = CliError::CreatorNameCollision {
+            display_name: "Alice".to_string(),
+            matches: vec!["ctr_local111".to_string(), "ctr_local222".to_string()],
+        };
+        let display = format!("{err}");
+        assert!(
+            display.starts_with("creator_name_collision:"),
+            "prefix must be machine-parsable: {display}"
+        );
+        assert!(display.contains("'Alice'"));
+        assert!(display.contains("2 persistent local identities"));
+        assert!(display.contains("ctr_local111"));
+        assert!(display.contains("ctr_local222"));
+        assert!(display.contains("nexus42 system identity use <id>"));
     }
 
     #[test]
