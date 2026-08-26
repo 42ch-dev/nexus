@@ -23,6 +23,23 @@ pub struct SkippedCapability {
     pub reason: String,
 }
 
+/// Per-admitted-capability file-stat snapshot captured at scan time
+/// (V1.176 PR wave 2, Greptile P1).
+///
+/// `files` maps file name → `[size, mtime_ns]` — the same shape the
+/// watcher's poll digests use (`watch::scan_dir_digest`), so the
+/// admission-time baseline equals the registry content by construction:
+/// the baseline is derived from what the scan OBSERVED, never from a
+/// later re-read of the filesystem (which could absorb an edit made
+/// between the scan and the baseline derivation).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmittedCapabilityStats {
+    /// The admitted capability's declared name (== directory name).
+    pub name: String,
+    /// `{file_name: [size, mtime_ns]}` captured inside the scan.
+    pub files: serde_json::Map<String, serde_json::Value>,
+}
+
 /// Result of [`scan_user_capabilities`].
 ///
 /// Admitted entries are appended after builtins by the registry constructors
@@ -46,6 +63,12 @@ pub struct ScanOutcome {
     /// never read as a deletion (the I-1 semantics of the digest's
     /// `Unreadable` case).
     pub transient: bool,
+    /// Admission-time per-file stat snapshots (V1.176 PR wave 2, Greptile
+    /// P1): one entry per admitted capability, captured INSIDE the scan, so
+    /// the watcher's baseline is scan-time ground truth — never a later
+    /// re-read of the filesystem (which could absorb an edit made between
+    /// the scan and baseline derivation).
+    pub admitted_stats: Vec<AdmittedCapabilityStats>,
 }
 
 /// Scan `dir` (`~/.nexus42/capabilities/<name>/`) for capability descriptors
@@ -165,6 +188,16 @@ pub fn scan_user_capabilities(
             continue;
         }
 
+        // V1.176 PR wave 2 (Greptile P1): capture the per-file stat
+        // snapshot BEFORE the descriptor read, so the watcher's baseline
+        // is scan-time ground truth. Any edit landing after this capture
+        // diverges the first poll from the baseline and triggers a
+        // rebuild — the baseline and the registry content can never
+        // disagree about the state the scan observed (a later re-read of
+        // the filesystem could absorb an edit made between the scan and
+        // the baseline derivation). Recorded only on admission below.
+        let files = dir_file_digest(&path);
+
         let descriptor_path = path.join("capability.json");
         let descriptor = match read_descriptor(&descriptor_path) {
             Ok(d) => d,
@@ -231,6 +264,13 @@ pub fn scan_user_capabilities(
             engine.cloned(),
             module_cache.cloned(),
         ));
+        // V1.176 PR wave 2 (Greptile P1): the admission-time stat snapshot
+        // captured above rides the outcome so the watcher's baseline is
+        // scan-time ground truth (see `digest_from_admitted`).
+        outcome.admitted_stats.push(AdmittedCapabilityStats {
+            name: descriptor.name.clone(),
+            files,
+        });
     }
 
     outcome
@@ -246,6 +286,38 @@ fn read_descriptor(path: &Path) -> Result<UserCapabilityDescriptor, String> {
         .validate()
         .map_err(|e| format!("invalid capability.json: {e}"))?;
     Ok(descriptor)
+}
+
+/// Build the `{file_name: [size, mtime_ns]}` map for one capability dir —
+/// the per-dir leaf of the structural digest (AR-91 #2). Shared by the
+/// scan's admission-time stat capture ([`AdmittedCapabilityStats`]) and
+/// the watcher's poll digests (`watch::scan_dir_digest`) so the baseline
+/// and poll digests use the same file-metadata shape.
+///
+/// A per-capability-dir read error yields an empty map (the dir is
+/// omitted from that digest leaf); the digest then changes and the next
+/// tick re-scans (the merge carries the last good entry — AR-92 #5).
+pub(crate) fn dir_file_digest(cap_dir: &Path) -> serde_json::Map<String, serde_json::Value> {
+    let mut files = serde_json::Map::new();
+    if let Ok(file_read) = std::fs::read_dir(cap_dir) {
+        let mut file_entries: Vec<std::fs::DirEntry> = file_read.flatten().collect();
+        file_entries.sort_by_key(std::fs::DirEntry::file_name);
+        for file in file_entries {
+            let Ok(file_name) = file.file_name().into_string() else {
+                continue;
+            };
+            let Ok(meta) = file.metadata() else {
+                continue;
+            };
+            let mtime_ns = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |t| t.as_nanos());
+            files.insert(file_name, serde_json::json!([meta.len(), mtime_ns]));
+        }
+    }
+    files
 }
 
 /// Record a skip and log it at `warn!` (AR-35: all skips are logged; the

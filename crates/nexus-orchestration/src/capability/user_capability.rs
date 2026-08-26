@@ -23,7 +23,7 @@ use nexus_wasm_host::{ComputeError, ComputeInput, ComputeOutput, ModuleCache, Wa
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::num::NonZeroU64;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -283,17 +283,6 @@ impl UserCapability {
     pub(crate) fn wasm_sha256(&self) -> &str {
         &self.wasm_sha256
     }
-    /// The capability's own directory (`<scan_root>/<name>/`, AR-35).
-    ///
-    /// `pub(crate)`: the watcher's scan-outcome-derived baseline
-    /// (`watch::digest_from_admitted`) reads each admitted dir's file
-    /// metadata to build the initial digest — the same shape the poll
-    /// digests use.
-    #[must_use]
-    pub(crate) fn dir(&self) -> &Path {
-        &self.dir
-    }
-
     /// AR-37 envelope mapping: capability input JSON → [`ComputeInput`].
     ///
     /// - `schema_version` = 1 (literal; same as `narrative_compute.rs`

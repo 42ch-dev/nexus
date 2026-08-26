@@ -119,9 +119,11 @@ async fn rig(
 
     // The same spawn seam boot.rs uses; boot_mirror = the boot outcome's
     // admitted set (AR-92 #4), so a hot tick carries last-good correctly;
-    // boot_digest = the boot scan's structural digest (W-B), so the first
-    // poll compares against the boot state instead of absorbing it.
+    // boot_digest = the boot scan's structural digest (W-B, admission-time
+    // ground truth since V1.176 PR wave 2), so the first poll compares
+    // against the boot state instead of absorbing it.
     let shutdown = Arc::new(tokio::sync::Notify::new());
+    let boot_digest = nexus_orchestration::capability::watch::digest_from_admitted(&outcome);
     let watcher = boot::spawn_user_capability_watcher(
         holder,
         deps,
@@ -130,7 +132,7 @@ async fn rig(
         scan_dir.to_path_buf(),
         Arc::clone(&shutdown),
         outcome.admitted,
-        nexus_orchestration::capability::watch::scan_dir_digest(scan_dir),
+        boot_digest,
     );
 
     let app = api::create_router(state.clone(), DaemonApiConfig::keyless());

@@ -230,11 +230,12 @@ fn user_capabilities_scan_dir(state: &WorkspaceState) -> PathBuf {
 /// fails the daemon.
 ///
 /// `boot_digest` is the BOOT scan's structural digest (W-B, V1.176 P1 QC
-/// fix): it seeds the watcher's initial baseline, so the first poll
-/// COMPARES against the boot state — a complete trio written between the
-/// boot scan and that first poll is detected and rescanned instead of
-/// being absorbed as the baseline. A transiently unreadable scan dir keeps
-/// last-good unchanged (I-1): no rescan, no swap.
+/// fix; admission-time ground truth since V1.176 PR wave 2): it seeds the
+/// watcher's initial baseline, so the first poll COMPARES against the
+/// boot state — a complete trio written or an admitted trio edited between
+/// the boot scan and that first poll is detected and rescanned instead of
+/// being absorbed as the baseline. A transiently unreadable scan dir
+/// keeps last-good unchanged (I-1): no rescan, no swap.
 ///
 /// Returns a `JoinHandle`; the boot site wraps it in a [`WatcherGuard`]
 /// (abort-on-drop, M-2) so the task is cancelled on every daemon exit path.
@@ -607,17 +608,20 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // Last-admitted mirror seed (AR-92 #4): boot's admitted user caps, so a
     // failed hot admission carries the last good entry (PL-9).
     let boot_mirror: Vec<UserCapability> = boot_outcome.admitted.clone();
-    // W-B (V1.176 P1 QC fix) + Greptile P1 (V1.176 PR wave): the watcher's
-    // initial baseline is derived from what the boot scan actually
-    // ADMITTED, not from a fresh read of the scan dir. A complete trio
-    // written between the boot scan and this computation would otherwise
-    // land in the baseline digest but NOT in the registry — the first poll
-    // would match the baseline and skip the rebuild, leaving the
-    // capability unavailable until another fs change. The scan-derived
-    // baseline never contains an unscanned trio, so the first poll sees
-    // the divergence and rescans (W-B: a trio written between the boot
-    // scan and the first poll is detected, not absorbed).
-    let boot_digest = digest_from_admitted(&boot_outcome.admitted);
+    // W-B (V1.176 P1 QC fix) + Greptile P1 (V1.176 PR wave + wave 2): the
+    // watcher's initial baseline is derived from what the boot scan
+    // actually ADMITTED — admission-time per-file stat snapshots captured
+    // INSIDE the scan — never from a fresh read of the scan dir. A
+    // complete trio written between the boot scan and this computation
+    // would otherwise land in the baseline digest but NOT in the registry
+    // (wave 1), and an EDIT to an already-admitted trio in the same window
+    // would land in the baseline but NOT in the registry (wave 2) — the
+    // first poll would match the baseline and skip the rebuild, leaving
+    // the capability stale until another fs change. The scan-derived
+    // baseline never contains an unscanned trio or a post-scan edit, so
+    // the first poll sees the divergence and rescans (W-B: a change
+    // between the boot scan and the first poll is detected, not absorbed).
+    let boot_digest = digest_from_admitted(&boot_outcome);
 
     // V1.42 P3 (DF-47): wire daemon-side tool dispatch adapter.
     // Stored in WorkspaceState so schedule-executed HostToolCallTask instances

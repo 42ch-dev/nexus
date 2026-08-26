@@ -202,8 +202,9 @@ impl E2eDaemon {
         // suites are unaffected; the hot-reload journey mutates the dir.
         let watcher_shutdown = Arc::new(Notify::new());
         // W-B: seed the watcher's baseline with the boot scan's digest
-        // (computed before `scan_dir` is moved into the spawn).
-        let boot_digest = nexus_orchestration::capability::watch::scan_dir_digest(&scan_dir);
+        // (admission-time ground truth, V1.176 PR wave 2 — computed before
+        // `scan_dir` is moved into the spawn).
+        let boot_digest = nexus_orchestration::capability::watch::digest_from_admitted(&outcome);
         let watcher = nexus_daemon_runtime::boot::spawn_user_capability_watcher(
             holder,
             deps,

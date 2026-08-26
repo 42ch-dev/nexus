@@ -63,9 +63,15 @@ restart-free. Two wrong first instincts, both caught before landing:
   a per-entry `read_dir` error marks the scan incomplete → merge **carries
   every unmatched last-good entry** (an incomplete scan never reads as
   deletions).
-- **Seed the baseline from boot.** The watcher's first poll must **compare**
-  against the digest computed at boot-scan time, not establish it — else a
-  write between boot scan and first poll is absorbed as baseline.
+- **Seed the baseline from boot — from admission-time ground truth.** The
+  watcher's first poll must **compare** against the digest computed at
+  boot-scan time, not establish it — else a write between boot scan and
+  first poll is absorbed as baseline. Derive that digest from per-file
+  stat snapshots captured **inside the scan**
+  (`ScanOutcome.admitted_stats`), never from a later re-read of the scan
+  dir: a re-read can absorb an edit to an already-admitted trio (registry
+  holds the pre-edit capability while the baseline matches disk → stale
+  until another fs change).
 - **Derived sets must be live too.** Anything reserved/derived from the
   registry at boot (peer-lane `reserved_tool_ids`) must re-derive **at use
   time** from the holder, or hot-admitted names silently lose protection
@@ -104,13 +110,15 @@ hot (`hot_rebuild_equals_boot_constructor_for_identical_dir`).
 
 - V1.176 P1 (RN-2): `crates/nexus-orchestration/src/capability/watch.rs`
   (`DigestPoll`, `watch_loop_inner(initial_digest)`, `WatcherGuard`
-  abort-on-drop), `scan.rs` (`ScanOutcome.transient`), `user_capability.rs`
-  (interner), `boot.rs` (boot digest seeding, holder wiring),
+  abort-on-drop), `scan.rs` (`ScanOutcome.transient`, admission-time
+  `admitted_stats`), `user_capability.rs` (interner), `boot.rs` (boot
+  digest seeding, holder wiring),
   `connect/table.rs` (`live_reserved_tool_ids`).
 - QC findings that shaped it: transient-wipe (I-1), boot-to-first-poll absorb
   (F-001/W-1), per-admission leak (F-002/W-2), reserved-set boot snapshot
   (W-1/F-003) — all fixed in wave `4db562da`; boot-equivalence + journey
-  pins green.
+  pins green. PR wave 2 (Greptile P1): baseline derived from admission-time
+  stats so an edit between scan and digest is caught by the first poll.
 - Catalog/MCP consistency rides existing consumers unchanged: `GET
   /v1/daemon/tools` reads the holder; the V1.175 MCP child watch is
   source-agnostic (digest over the tools body) — zero child change.

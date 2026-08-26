@@ -28,7 +28,14 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 /// matching sha (the AR-39 pairing admission verifies). Returns the sha.
 #[must_use]
 pub fn write_module_pair(dir: &Path) -> String {
-    let wasm = b"fake module bytes";
+    write_module_pair_with_bytes(dir, b"fake module bytes")
+}
+
+/// Like [`write_module_pair`] but with caller-chosen wasm bytes — the
+/// hot-reload edit tests need a trio whose digest differs from the
+/// fixture's constant bytes while the sha pairing still passes.
+#[must_use]
+pub fn write_module_pair_with_bytes(dir: &Path, wasm: &[u8]) -> String {
     let sha = sha256_hex(wasm);
     std::fs::write(dir.join("basic-combat.wasm"), wasm).unwrap();
     let manifest = format!(

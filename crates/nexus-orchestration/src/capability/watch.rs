@@ -29,7 +29,7 @@
 //!   budget includes the rebuild in the daemon leg ("1 s watch + rebuild +
 //!   2 s child watch + one HTTP request").
 
-use crate::capability::scan::{self, ScanOutcome};
+use crate::capability::scan::{self, dir_file_digest, ScanOutcome};
 use crate::capability::user_capability::UserCapability;
 use crate::capability::{Capability, CapabilityRegistry, CapabilityRuntimeDeps};
 use std::collections::HashSet;
@@ -120,58 +120,40 @@ pub fn scan_dir_digest(dir: &Path) -> DigestPoll {
     DigestPoll::Tree(serde_json::Value::Object(tree))
 }
 
-/// Build the `{file_name: [size, mtime_ns]}` map for one capability dir —
-/// the per-dir leaf of the structural digest (AR-91 #2). Shared by
-/// [`scan_dir_digest`] and [`digest_from_admitted`] so the watcher's
-/// baseline and poll digests use the same file-metadata shape.
-///
-/// A per-capability-dir read error omits the dir this tick; the digest
-/// then changes and the next tick re-scans (the merge carries the last
-/// good entry — AR-92 #5).
-fn dir_file_digest(cap_dir: &Path) -> serde_json::Map<String, serde_json::Value> {
-    let mut files = serde_json::Map::new();
-    if let Ok(file_read) = std::fs::read_dir(cap_dir) {
-        let mut file_entries: Vec<std::fs::DirEntry> = file_read.flatten().collect();
-        file_entries.sort_by_key(std::fs::DirEntry::file_name);
-        for file in file_entries {
-            let Ok(file_name) = file.file_name().into_string() else {
-                continue;
-            };
-            let Ok(meta) = file.metadata() else {
-                continue;
-            };
-            let mtime_ns = meta
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map_or(0, |t| t.as_nanos());
-            files.insert(file_name, serde_json::json!([meta.len(), mtime_ns]));
-        }
-    }
-    files
-}
-
 /// Build the watcher's initial baseline from the BOOT scan's admitted
 /// outcome.
 ///
 /// The baseline must represent exactly what the registry serves — never a
 /// fresh read of the scan dir, which can include a complete trio written
 /// between the boot scan and the digest computation (Greptile P1, V1.176
-/// PR wave). Such a trio would land in the baseline but NOT in the
-/// registry, so the first poll would match the baseline and skip the
-/// rebuild — the capability stays unavailable until another fs change.
+/// PR wave) or an EDIT to an already-admitted trio landing in the same
+/// window (Greptile P1, V1.176 PR wave 2). Such a trio/edit would land in
+/// the baseline but NOT in the registry, so the first poll would match
+/// the baseline and skip the rebuild — the capability stays stale until
+/// another fs change.
+///
+/// The baseline is therefore built from the admission-time per-file stat
+/// snapshots captured INSIDE the scan (`ScanOutcome::admitted_stats`):
+/// "baseline == registry content" holds by construction, and any post-scan
+/// edit/write/deletion diverges from the baseline no matter where in the
+/// boot→first-poll window it lands.
 ///
 /// The tree shape matches [`scan_dir_digest`] (dir name → {file name →
 /// [`size`, `mtime_ns`]}) so the first poll's `Value` equality comparison
 /// is meaningful. A dir the scan did NOT admit (skipped trio, stray dir)
 /// is deliberately absent: if it becomes a complete capability later, the
-/// first poll sees the change and rescans instead of absorbing it.
+/// first poll sees the change and rescans instead of absorbing it. An
+/// admitted capability without a captured snapshot (only possible for
+/// hand-constructed outcomes) is likewise absent — fail-safe: the first
+/// poll sees it on disk and rescans.
 #[must_use]
-pub fn digest_from_admitted(admitted: &[UserCapability]) -> DigestPoll {
+pub fn digest_from_admitted(outcome: &ScanOutcome) -> DigestPoll {
     let mut tree = serde_json::Map::new();
-    for cap in admitted {
-        let files = dir_file_digest(cap.dir());
-        tree.insert(cap.name().to_string(), serde_json::Value::Object(files));
+    for stats in &outcome.admitted_stats {
+        tree.insert(
+            stats.name.clone(),
+            serde_json::Value::Object(stats.files.clone()),
+        );
     }
     DigestPoll::Tree(serde_json::Value::Object(tree))
 }
@@ -222,6 +204,12 @@ pub fn rebuild_registry_with_merge(
         // transient — the merge keeps last-good for every name it did not
         // re-admit, so an incomplete scan never reads as deletions.
         transient: scan.transient,
+        // V1.176 PR wave 2: admission-time stats for the entries THIS scan
+        // admitted (carried last-good entries have no fresh stats — theirs
+        // were captured at their own admission). The boot site derives the
+        // watcher baseline only from the boot outcome, where admitted ==
+        // scan-admitted, so the baseline is complete by construction.
+        admitted_stats: scan.admitted_stats,
     };
     // Shared append seam (M-3): the same boxing path as the boot
     // constructors' `append_user_caps`, so a change to the append (extra
@@ -528,6 +516,7 @@ mod tests {
             admitted: vec![mirror[0].clone()],
             skipped: Vec::new(),
             transient: true,
+            admitted_stats: Vec::new(),
         };
         let merged = merge_user_caps(&scan, &mirror);
         let names: Vec<String> = merged.iter().map(|c| c.name().to_string()).collect();
@@ -541,6 +530,7 @@ mod tests {
             admitted: vec![mirror[0].clone()],
             skipped: Vec::new(),
             transient: false,
+            admitted_stats: Vec::new(),
         };
         let merged = merge_user_caps(&scan, &mirror);
         let names: Vec<String> = merged.iter().map(|c| c.name().to_string()).collect();
@@ -671,10 +661,10 @@ mod tests {
         // W-B: the baseline is seeded from the boot-state digest the
         // production boot site computes (the state the mirror was built
         // from) — the first poll compares against it. Production derives
-        // the baseline from the scan's admitted outcome
-        // (`digest_from_admitted`); this helper's scan dirs admit every
-        // written trio, so `scan_dir_digest` and the scan-derived digest
-        // agree here.
+        // the baseline from admission-time stat snapshots captured inside
+        // the scan (`digest_from_admitted`); this helper's scan dirs admit
+        // every written trio, so `scan_dir_digest` and the scan-derived
+        // digest agree here.
         let boot_digest = scan_dir_digest(&scan_dir);
         watch_loop_inner(
             Duration::from_millis(5),
@@ -1005,7 +995,7 @@ mod tests {
         // is derived. The scan-outcome-derived baseline must NOT contain
         // it.
         write_capability_dir(&scan_dir, "beta.cap");
-        let baseline = digest_from_admitted(&boot_outcome.admitted);
+        let baseline = digest_from_admitted(&boot_outcome);
         let DigestPoll::Tree(baseline_tree) = &baseline else {
             panic!("expected a Tree baseline from the admitted outcome");
         };
@@ -1048,6 +1038,158 @@ mod tests {
             vec!["alpha.cap".to_string(), "beta.cap".to_string()],
             "the between-scan-and-digest trio is dispatchable after the first poll"
         );
+    }
+
+    /// Rewrite `<root>/<name>/` with a NEW consistent trio whose wasm
+    /// differs in size from the fixture's constant bytes — the AR-39 sha
+    /// pairing still passes (manifest + descriptor are rewritten to
+    /// match), but the digest diverges from any pre-edit baseline.
+    fn rewrite_capability_dir(root: &Path, name: &str) {
+        let dir = root.join(name);
+        let sha = crate::capability::test_support::write_module_pair_with_bytes(
+            &dir,
+            b"fake module bytes, now longer",
+        );
+        std::fs::write(
+            dir.join("capability.json"),
+            crate::capability::test_support::descriptor_json(name, &sha),
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn baseline_from_admission_stats_detects_edit_between_scan_and_digest() {
+        // Greptile P1 (V1.176 PR wave 2): an EDIT to an admitted trio
+        // between the boot scan and the baseline derivation must NOT be
+        // absorbed into the baseline. The baseline is built from
+        // admission-time stat snapshots captured INSIDE the scan, so the
+        // first poll sees the edited disk state and rescans — the stale
+        // pre-edit capability is never served past the first poll.
+        let tmp = tempfile::tempdir().unwrap();
+        let scan_dir = tmp.path().join("caps");
+        std::fs::create_dir_all(&scan_dir).unwrap();
+        write_capability_dir(&scan_dir, "alpha.cap");
+        let deps = test_deps();
+        let (reg, boot_outcome) = rebuild_registry_with_merge(&deps, None, None, &scan_dir, &[]);
+        let holder = CapabilityRegistryHolder::new();
+        holder.swap(std::sync::Arc::new(reg));
+        let mirror: std::sync::Arc<std::sync::Mutex<Vec<UserCapability>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(boot_outcome.admitted.clone()));
+        assert_eq!(mirror.lock().unwrap().len(), 1, "alpha.cap admitted at boot");
+
+        // The between-scan-and-digest EDIT: the trio is rewritten with new
+        // content (a longer wasm + matching shas) AFTER the boot scan
+        // admitted it but BEFORE the baseline is derived. The
+        // admission-time baseline must reflect the PRE-edit state, so the
+        // first poll diverges.
+        rewrite_capability_dir(&scan_dir, "alpha.cap");
+        let baseline = digest_from_admitted(&boot_outcome);
+        let DigestPoll::Tree(baseline_tree) = &baseline else {
+            panic!("expected a Tree baseline from the admitted outcome");
+        };
+        let wasm_entry = baseline_tree
+            .as_object()
+            .expect("tree is an object")
+            .get("alpha.cap")
+            .expect("admitted cap in baseline")
+            .as_object()
+            .expect("cap leaf is an object")
+            .get("basic-combat.wasm")
+            .expect("wasm in the baseline leaf");
+        let wasm_size = wasm_entry
+            .as_array()
+            .expect("wasm entry is an array")[0]
+            .as_u64()
+            .expect("wasm size is a number");
+        assert_eq!(
+            wasm_size,
+            b"fake module bytes".len() as u64,
+            "baseline carries the PRE-edit wasm size (admission-time ground truth)"
+        );
+        let DigestPoll::Tree(disk) = scan_dir_digest(&scan_dir) else {
+            panic!("expected a Tree digest for the present dir");
+        };
+        assert_ne!(
+            baseline_tree, &disk,
+            "the edited disk state diverges from the admission-time baseline"
+        );
+
+        let ticks = AtomicUsize::new(0);
+        let rescans = AtomicUsize::new(0);
+        let scans = watch_loop_inner(
+            Duration::from_millis(5),
+            baseline,
+            || {
+                ticks.fetch_add(1, Ordering::Relaxed);
+                let dir = scan_dir.clone();
+                async move { scan_dir_digest(&dir) }
+            },
+            || {
+                rescans.fetch_add(1, Ordering::Relaxed);
+                let h = holder.clone();
+                let d = deps.clone();
+                let m = std::sync::Arc::clone(&mirror);
+                let dir = scan_dir.clone();
+                async move { hot_rebuild_test(&h, &d, &dir, &m) }
+            },
+            || ticks.load(Ordering::Relaxed) >= 3,
+        )
+        .await;
+        assert_eq!(
+            scans, 1,
+            "first poll diverges from the admission-time baseline → exactly one rescan"
+        );
+        // The rebuilt registry serves the EDITED content — the stale
+        // pre-edit capability is not served past the first poll.
+        let new_sha = crate::capability::test_support::sha256_hex(b"fake module bytes, now longer");
+        let live_mirror = mirror.lock().unwrap();
+        assert_eq!(
+            live_mirror[0].wasm_sha256(),
+            new_sha,
+            "stale pre-edit capability is not served after the first poll"
+        );
+    }
+
+    #[tokio::test]
+    async fn admission_time_baseline_unchanged_scan_produces_no_rescans() {
+        // V1.176 PR wave 2: with the baseline derived from admission-time
+        // stats, an UNCHANGED scan dir keeps the no-op contract (AR-91 #6
+        // / AR-95 #5): the first poll matches the baseline and no rebuild
+        // fires.
+        let tmp = tempfile::tempdir().unwrap();
+        let scan_dir = tmp.path().join("caps");
+        std::fs::create_dir_all(&scan_dir).unwrap();
+        write_capability_dir(&scan_dir, "alpha.cap");
+        let deps = test_deps();
+        let (reg, boot_outcome) = rebuild_registry_with_merge(&deps, None, None, &scan_dir, &[]);
+        let holder = CapabilityRegistryHolder::new();
+        holder.swap(std::sync::Arc::new(reg));
+        let mirror: std::sync::Arc<std::sync::Mutex<Vec<UserCapability>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(boot_outcome.admitted.clone()));
+        let baseline = digest_from_admitted(&boot_outcome);
+        let ticks = AtomicUsize::new(0);
+        let rescans = AtomicUsize::new(0);
+        let scans = watch_loop_inner(
+            Duration::from_millis(5),
+            baseline,
+            || {
+                ticks.fetch_add(1, Ordering::Relaxed);
+                let dir = scan_dir.clone();
+                async move { scan_dir_digest(&dir) }
+            },
+            || {
+                rescans.fetch_add(1, Ordering::Relaxed);
+                let h = holder.clone();
+                let d = deps.clone();
+                let m = std::sync::Arc::clone(&mirror);
+                let dir = scan_dir.clone();
+                async move { hot_rebuild_test(&h, &d, &dir, &m) }
+            },
+            || ticks.load(Ordering::Relaxed) >= 3,
+        )
+        .await;
+        assert_eq!(scans, 0, "unchanged scan dir → no rescan (no-op preserved)");
+        assert_eq!(rescans.load(Ordering::Relaxed), 0, "no rebuild fired");
     }
 
     #[tokio::test]
