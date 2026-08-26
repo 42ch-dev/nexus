@@ -12,8 +12,6 @@ repository (no agent skill ships in this repo) — the agent-side on-ramp
 covers bundle layout, the two execution surfaces, the
 signals-not-delivered trap, and validator verification. The external
 publish is in flight (PM-coordinated out-of-band); until it lands, the
-in-repo draft is the iteration guide
-(`.mstar/iterations/v1.176/guides/strategy-author-skill.md`). The
 authoring reference below stays the canonical contract.
 
 **A strategy does not execute on the runtime.** It declares the routing and

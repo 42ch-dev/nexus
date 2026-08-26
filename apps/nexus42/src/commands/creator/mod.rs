@@ -1142,7 +1142,7 @@ async fn register_creator(
     // WS-B T4: validate name length (cheap check before regex)
     if name.len() > MAX_CREATOR_NAME_LENGTH {
         return Err(CliError::Other(format!(
-            "Creator name exceeds maximum length ({MAX_CREATOR_NAME_LENGTH} characters)"
+            "Creator name exceeds maximum length ({MAX_CREATOR_NAME_LENGTH} bytes)"
         )));
     }
     // --- Local-only mode (AC-V167-P2-1): delegate to identity machinery ---

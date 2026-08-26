@@ -55,7 +55,7 @@ pub(crate) fn validate_display_name(name: Option<&str>) -> Result<Option<&str>> 
     }
     if raw.len() > MAX_CREATOR_NAME_LENGTH {
         return Err(CliError::Other(format!(
-            "Creator name exceeds maximum length ({MAX_CREATOR_NAME_LENGTH} characters)"
+            "Creator name exceeds maximum length ({MAX_CREATOR_NAME_LENGTH} bytes)"
         )));
     }
     Ok(Some(raw.trim()))
@@ -614,7 +614,8 @@ mod tests {
     /// qc3 F-002 sentinel: a fully-converged no-op re-run must be
     /// db-write-free — no `workspace_meta` seed-version churn on the global
     /// identity store, no `creators` churn on the workspace db. Pinned via
-    /// file size + mtime of both `state.db` files across the no-op.
+    /// file size + mtime of both `state.db` files across the no-op, plus
+    /// absent/zero-size `-wal` files after it (qc3 R-2 — WAL-only writes).
     #[tokio::test]
     async fn bootstrap_local_creator_noop_is_write_free() {
         let _home = crate::testutil::isolated_home();
@@ -671,6 +672,24 @@ mod tests {
             workspace_before, workspace_after,
             "no-op must not write the workspace db"
         );
+
+        // qc3 R-2: WAL-only writes would slip past the main-file fingerprint
+        // (a deferred checkpoint could fold them in later) — a no-op must
+        // also leave both `-wal` files absent or zero-size after the
+        // TRUNCATE checkpoint + re-run.
+        for db_path in [&global_path, &workspace_path] {
+            let wal_path = db_path.with_extension("db-wal");
+            match std::fs::metadata(&wal_path) {
+                Ok(md) => assert_eq!(
+                    md.len(),
+                    0,
+                    "no-op must not leave WAL content for {}",
+                    db_path.display()
+                ),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => panic!("stat {}: {e}", wal_path.display()),
+            }
+        }
     }
 
     /// Match-key negative (case): `Alice` vs `alice` are distinct byte-exact
