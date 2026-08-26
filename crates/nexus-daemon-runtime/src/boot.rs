@@ -56,8 +56,8 @@ pub(crate) fn ensure_remote_bind_allowed(host: &str) -> anyhow::Result<()> {
 use graph_flow::{InMemorySessionStorage, SessionStorage};
 use nexus_orchestration::capability::user_capability::UserCapability;
 use nexus_orchestration::capability::watch::{
-    rebuild_registry_with_merge, scan_dir_digest, watch_loop_inner, DigestPoll,
-    USER_CAP_WATCH_INTERVAL,
+    digest_from_admitted, rebuild_registry_with_merge, scan_dir_digest, watch_loop_inner,
+    DigestPoll, USER_CAP_WATCH_INTERVAL,
 };
 use nexus_orchestration::worker::{WorkerManagerSpawner, WorkerRegistry};
 use nexus_orchestration::{
@@ -607,13 +607,17 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // Last-admitted mirror seed (AR-92 #4): boot's admitted user caps, so a
     // failed hot admission carries the last good entry (PL-9).
     let boot_mirror: Vec<UserCapability> = boot_outcome.admitted.clone();
-    // W-B (V1.176 P1 QC fix): the boot scan's structural digest seeds the
-    // watcher's initial baseline — computed AFTER the boot scan so a trio
-    // written while the constructor scanned is captured here and forces a
-    // first-poll rescan. A trio written between the boot scan and the
-    // watcher's first poll is therefore detected, not absorbed as the
-    // baseline.
-    let boot_digest = scan_dir_digest(&user_caps_dir);
+    // W-B (V1.176 P1 QC fix) + Greptile P1 (V1.176 PR wave): the watcher's
+    // initial baseline is derived from what the boot scan actually
+    // ADMITTED, not from a fresh read of the scan dir. A complete trio
+    // written between the boot scan and this computation would otherwise
+    // land in the baseline digest but NOT in the registry — the first poll
+    // would match the baseline and skip the rebuild, leaving the
+    // capability unavailable until another fs change. The scan-derived
+    // baseline never contains an unscanned trio, so the first poll sees
+    // the divergence and rescans (W-B: a trio written between the boot
+    // scan and the first poll is detected, not absorbed).
+    let boot_digest = digest_from_admitted(&boot_outcome.admitted);
 
     // V1.42 P3 (DF-47): wire daemon-side tool dispatch adapter.
     // Stored in WorkspaceState so schedule-executed HostToolCallTask instances

@@ -101,11 +101,17 @@ pub fn scan_user_capabilities(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return outcome,
         Err(e) => {
             // Non-missing read failures are still boot-safe: warn and treat
-            // the directory as empty.
+            // the directory as empty — but mark the outcome TRANSIENT
+            // (Bugbot High, V1.176 PR wave): a successful digest poll
+            // followed by a FAILED rescan (EACCES/EMFILE race) must never
+            // read as deletions. The watcher's merge then carries last-good
+            // for every name this scan did not re-admit — the same I-1
+            // semantics as the per-entry `read_dir` error below.
+            outcome.transient = true;
             tracing::warn!(
                 error = %e,
                 path = %dir.display(),
-                "cannot read user capabilities directory; treating as empty"
+                "cannot read user capabilities directory; scan marked transient (last-good carried, no drops)"
             );
             return outcome;
         }
@@ -307,6 +313,25 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let missing = tmp.path().join("does-not-exist");
         let outcome = scan_user_capabilities(&missing, &builtins(), None, None);
+        assert!(outcome.admitted.is_empty());
+        assert!(outcome.skipped.is_empty());
+    }
+    /// Bugbot High (V1.176 PR wave): a top-level non-`NotFound` `read_dir`
+    /// failure (EACCES/EMFILE race — here: a regular file → ENOTDIR, the
+    /// same non-NotFound branch) must mark the outcome **transient**, so
+    /// the watcher's merge carries last-good instead of reading every
+    /// unmatched name as a deletion. A successful digest poll followed by
+    /// a failed rescan must never wipe the registry.
+    #[test]
+    fn scan_unreadable_dir_marks_outcome_transient() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("capabilities");
+        std::fs::write(&path, b"not a directory").unwrap();
+        let outcome = scan_user_capabilities(&path, &builtins(), None, None);
+        assert!(
+            outcome.transient,
+            "top-level non-NotFound read failure must mark the outcome transient"
+        );
         assert!(outcome.admitted.is_empty());
         assert!(outcome.skipped.is_empty());
     }

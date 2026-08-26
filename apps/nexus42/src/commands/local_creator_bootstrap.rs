@@ -294,10 +294,13 @@ async fn converge_identity(row: &nexus_local_db::LocalIdentityRow) -> Result<()>
         let read_only_pool = nexus_local_db::open_pool_read_only(&db_path)
             .await
             .map_err(CliError::from)?;
-        let row_exists: i64 = sqlx::query_scalar(
+        // Bugbot Medium (V1.176 PR wave): static SQL must use the
+        // compile-time macro (SQLX_OFFLINE=true drift gate) — the runtime
+        // `query_scalar` form is unchecked against the schema.
+        let row_exists: i64 = sqlx::query_scalar!(
             "SELECT EXISTS(SELECT 1 FROM creators WHERE creator_id = ? AND status = 'active')",
+            creator_id
         )
-        .bind(creator_id)
         .fetch_one(&read_only_pool)
         .await?;
         if row_exists == 1 && already_active {
@@ -309,10 +312,10 @@ async fn converge_identity(row: &nexus_local_db::LocalIdentityRow) -> Result<()>
     }
 
     let workspace_pool = crate::db::Schema::init(&db_path).await?;
-    let row_exists: i64 = sqlx::query_scalar(
+    let row_exists: i64 = sqlx::query_scalar!(
         "SELECT EXISTS(SELECT 1 FROM creators WHERE creator_id = ? AND status = 'active')",
+        creator_id
     )
-    .bind(creator_id)
     .fetch_one(&workspace_pool)
     .await?;
     let repaired = row_exists == 0;
