@@ -25,9 +25,10 @@ use std::io::IsTerminal;
 use serde::Deserialize;
 
 use crate::api::DaemonClient;
-use crate::commands::creator::work_utils::resolve_active_work_id;
+use crate::commands::creator::work_utils::{query_path, resolve_active_work_id};
 use crate::commands::creator::works::{FindingsCommand, RulesCommand};
 use crate::errors::{CliError, Result};
+use nexus_contracts::daemon_api::findings::UpdateFindingRequest;
 
 /// Subset of the daemon `GET /v1/daemon/works/{work_id}` payload that this
 /// module needs. Deserializing via `serde_json::Value` keeps the CLI
@@ -62,6 +63,29 @@ pub async fn handle_findings(client: &DaemonClient, command: FindingsCommand) ->
             dry_run,
             json,
         } => handle_findings_prune(client, older_than_days, dry_run, json).await,
+        FindingsCommand::List {
+            work_id,
+            status,
+            severity,
+            json,
+        } => handle_findings_list(client, work_id, status, severity, json).await,
+        FindingsCommand::SetStatus {
+            finding_id,
+            work,
+            status,
+            target_executor,
+            json,
+        } => {
+            handle_findings_set_status(
+                client,
+                &finding_id,
+                &work,
+                status.as_str(),
+                target_executor.as_deref(),
+                json,
+            )
+            .await
+        }
     }
 }
 
@@ -248,6 +272,102 @@ async fn handle_findings_prune(
     } else {
         println!("✓ Pruned {count} resolved finding(s) older than {days} day(s).");
     }
+    Ok(())
+}
+
+/// `creator works findings list <work_ref> [--status …] [--severity …] [--json]`
+/// — list findings for a Work (`GET /v1/daemon/works/:work_id/findings`, AR-87).
+///
+/// `--status` accepts a single status or a comma-separated list (e.g.
+/// `open,triaged`). `--json` emits the `ListFindingsResponse` DTO verbatim.
+///
+/// # Errors
+///
+/// Returns `CliError` for daemon / network failures (404 `not_found` for an
+/// unknown work, 422 `invalid_input` for an unknown status/severity token).
+async fn handle_findings_list(
+    client: &DaemonClient,
+    work_id: Option<String>,
+    status: Option<String>,
+    severity: Option<String>,
+    json: bool,
+) -> Result<()> {
+    let resolved_id = resolve_active_work_id(client, work_id).await?;
+    let mut pairs: Vec<(&str, &str)> = Vec::new();
+    if let Some(s) = &status {
+        pairs.push(("status", s));
+    }
+    if let Some(s) = &severity {
+        pairs.push(("severity", s));
+    }
+    let path = query_path(&format!("/v1/daemon/works/{resolved_id}/findings"), &pairs);
+    let resp: nexus_contracts::daemon_api::findings::ListFindingsResponse =
+        client.get(&path).await?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+        return Ok(());
+    }
+    if resp.items.is_empty() {
+        println!("No findings for work '{resolved_id}'.");
+        return Ok(());
+    }
+    println!("Findings for work '{resolved_id}':\n");
+    println!(
+        "{:<36} {:<10} {:<10} {:<12} TITLE",
+        "FINDING_ID", "STATUS", "SEVERITY", "TARGET"
+    );
+    println!("{}", "-".repeat(100));
+    for f in &resp.items {
+        println!(
+            "{:<36} {:<10} {:<10} {:<12} {}",
+            f.finding_id, f.status, f.severity, f.target_executor, f.title
+        );
+    }
+    if resp.pagination.has_more {
+        println!(
+            "\n(truncated — more findings exist; refine with --status/--severity or use --json for the complete DTO)"
+        );
+    }
+    println!("\n{} finding(s)", resp.items.len());
+    Ok(())
+}
+
+/// `creator works findings set-status <finding_id> --work <work_ref> --status <s>
+/// [--target-executor <exec>] [--json]` — set a finding's status through the
+/// work-findings PATCH route (`PATCH /v1/daemon/works/:work_id/findings/:finding_id`,
+/// AR-87 #2/#3).
+///
+/// One generic verb over one route. An illegal lifecycle transition returns
+/// 422 `invalid_transition` naming `from → to` (rendered by
+/// `DaemonClient::parse_error_response`); `--help` documents the closed
+/// transition table.
+///
+/// # Errors
+///
+/// Returns `CliError` for daemon / network failures (404 `not_found` for an
+/// unknown work/finding, 422 `invalid_transition` for an illegal status move,
+/// 422 `invalid_input` for an unknown enum token).
+async fn handle_findings_set_status(
+    client: &DaemonClient,
+    finding_id: &str,
+    work_ref: &str,
+    status: &str,
+    target_executor: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    let body = UpdateFindingRequest {
+        status: Some(status.to_string()),
+        target_executor: target_executor.map(str::to_string),
+        ..UpdateFindingRequest::default()
+    };
+    let path = format!("/v1/daemon/works/{work_ref}/findings/{finding_id}");
+    let resp: nexus_contracts::daemon_api::findings::FindingDetailResponse =
+        client.patch(&path, &body).await?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+        return Ok(());
+    }
+    println!("Finding '{finding_id}' status set to '{}'.", resp.status);
     Ok(())
 }
 

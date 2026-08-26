@@ -310,6 +310,36 @@ Strategies can also be installed for daemon-side runs via the 3-tier preset
 resolution: `~/.nexus42/presets/<id>/` overrides embedded presets with the
 same id.
 
+## Editing an installed strategy (`preset patch`)
+
+Once a strategy is installed under `~/.nexus42/presets/<id>/`, the **write
+path is the daemon's strategy canvas API** via the CLI leaves
+(`nexus42 preset patch state|transition|prompt`, V1.175 P1 — see
+[cli-spec §6.2G.4](../.mstar/specs/cli-spec.md)):
+
+```bash
+# Patch a state node (rename via --label, or update --description).
+nexus42 preset patch state my-strategy start --base-revision 1 --description "New description"
+
+# Rewire a transition (create or update).
+nexus42 preset patch transition my-strategy --base-revision 1 --source-state start \
+  --op update --old-target end --new-target done
+
+# Patch a state's prompt template (--file <path> or '-' for stdin).
+nexus42 preset patch prompt my-strategy start --base-revision 1 \
+  --template-ref prompts/start.md --file prompts/start.md
+```
+
+Every write is **CAS-guarded**: pass `--base-revision` (the revision
+observed on the last canonical read, e.g. `nexus42 preset show
+my-strategy`). A stale revision returns 409 `strategy_conflict` naming the
+current revision, the conflicting path, and a recovery hint — re-read the
+Strategy and reapply with the new revision. Embedded/system presets are
+read-only; only user bundles under `~/.nexus42/presets/<id>/` are patchable
+(the daemon surfaces the rejection as a 400 `bad_request` — its public
+`error_code()` allowlist does not passthrough the internal
+`strategy_update_forbidden` code).
+
 ## Worked examples
 
 - [`react-trpg-turn/`](../strategy-samples/react-trpg-turn/) — README

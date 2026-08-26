@@ -13,6 +13,7 @@
 **V1.54 P0 Draft overlay:** §6.2M ACP host write-tool CLI mappings — 6 new mutation-capable `nexus.*` host tools map to `creator world kb edit/adopt`, `creator world configure`, `creator works cron set`, `creator findings resolve`, and `creator pool` entry management (DF-46).
 **V1.64 P3 Draft overlay:** §6.3 daemon Web UI serving — `daemon start` logs Web UI URL; new `daemon ui`/`daemon web` convenience command; §7.1 first-run path updated. See also [web-ui.md](./web-ui.md) §11 and [daemon-runtime.md](./daemon-runtime.md) §4.4.
 **V1.65 Prepare amendment:** outline and chapter-structure editing becomes UI-first through the bundled Web UI chapter-content Daemon API. CLI parity for existing creator/run/chapter workflows is retained; no shipped CLI command is removed or renamed by this UI-first slice.
+**V1.175 P1 amendment:** §6.2G.3-6 — reading / fork / inspector leaves (groups 3, 5, 6), strategy patch leaves (group 1), outline/timeline/chapter leaves (group 2), KB entity patch + memory closure + findings triage (groups 4, 7, 8). Thin daemon-HTTP leaves over existing routes (AR-83); no daemon route changes.
 
 ## 0. 文档定位
 
@@ -615,6 +616,193 @@ Rules:
 - `remove` with World scope now gates on **world ownership** (the legacy path did not enforce auth; forwarding through `kb_delete` adds the `WORLD_KB_FORBIDDEN` gate, which is the correct behavior per entity-scope-model §5.5).
 - The `--scope world` flag on `creator kb` variants is preserved for backward compatibility; it will be removed in V1.53.
 - Work-scope operations (`creator kb --scope work`, the default) are **unaffected** by this consolidation.
+
+### 6.2G.3 V1.175 P1 amendment — reading, fork, and inspector leaves (RN-1 §5 groups 3, 5, 6)
+
+Thin daemon-HTTP leaves over **existing** routes (AR-83 #1; no daemon route
+changes, no DTO redesign). All leaves: human-readable default output,
+`--json` emits the daemon DTO / projection verbatim (AR-83 #3), typed long
+flags, daemon error envelopes surfaced via `DaemonClient::parse_error_response`
+(named `[code]`, non-zero exit — PL-5).
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 creator reading progress get <work_id> --chapter <n> [--json]` | Read persisted scroll progress (V1.89 `GET /v1/daemon/reading/progress`). |
+| `nexus42 creator reading progress set <work_id> --chapter <n> --scroll <0..10000> [--json]` | Upsert scroll progress (`PUT`). `--scroll` is thousandths (0–10000), CLI-validated. |
+| `nexus42 creator reading progress clear <work_id> --chapter <n> [--json]` | Delete scroll progress (`DELETE`, 204). |
+| `nexus42 creator reading annotation list <work_id> --chapter <n> [--json]` | List annotations (`GET /v1/daemon/reading/annotations`). |
+| `nexus42 creator reading annotation add <work_id> --chapter <n> --start <o> --end <o> --selected-text <text> --color <yellow\|blue\|green\|pink> [--note <text>] [--json]` | Create an annotation (`POST`). `--end` must be strictly greater than `--start`. |
+| `nexus42 creator reading annotation patch <annotation_id> [--color <c>] [--note <text>] [--json]` | Edit an annotation's color / note (`PATCH`). Empty `--note` clears the note. |
+| `nexus42 creator reading annotation remove <annotation_id> [--json]` | Delete an annotation (`DELETE`, 204). |
+| `nexus42 creator world fork create <world_id> --fork-point <event_id> [--label <text>] [--parent-branch <branch_id>] [--json]` | Create a timeline fork (`POST /v1/daemon/worlds/:world_id/forks`, V1.162 P1 T2). The parent branch is derived from the fork-point event's branch via the existing timeline-events read unless `--parent-branch` is given. The derivation scans only the first page of each status (**100 canon + 100 provisional events** — the timeline read has no cursor pagination); a fork-point older than that bound requires `--parent-branch` (the error message names the remediation). 403 foreign world / 422 bad-fork-point surface named. |
+| `nexus42 creator world fork list <world_id> [--branch <branch_id>] [--json]` | **Pure projection** of the existing `GET /v1/daemon/worlds/:world_id/timeline/events?event_type=fork_created&status=canon` read (+ optional `branch_id` per F-14): canon `fork_created` markers → `{branch_id, parent_branch_id, forked_from_event_id, label}` from `extensions.fork_lineage`. **No new read route.** Lineage is branch-scoped (V1.162 carrier B): the World's current (root) branch carries no marker — pass `--branch` (the id printed by `fork create`) to read a fork branch's marker. |
+| `nexus42 creator inspector moment <world_id> [--work <work_id>] [--stage <stage>] [--json]` | **Hidden debug group** (clap `hide`, PL-6 — absent from root `--help`, documented here + `creator inspector --help`). Prints the observe-only V1.151 inspector packet (`POST /v1/daemon/inspector/moment`); `--json` emits the `MomentInspectResponse` DTO verbatim. `--stage` ∈ `intake\|research\|produce\|review\|persist\|work_maintenance\|system_maintenance\|unspecified`. `moment-directive` is NOT covered (not §5 remainder). |
+
+Rules:
+
+- **Data CRUD only (PL-7).** Reading leaves are not a manuscript reader /
+  TUI pager; the V1.79 reading surface stays web.
+- **`<work_id>` is the daemon's canonical work reference** (`wrk_...`) —
+  the reading routes key on `work_id` (same convention as `creator works`).
+- **Error honesty (PL-5).** CLI-side validation (chapter ≥ 1, scroll range,
+  color enum, `--end > --start`, stage enum) fails fast with named messages;
+  daemon-side errors (404 unknown work/annotation, 403 foreign world, 422
+  bad fork-point) surface via the standard `[code]` envelope with non-zero
+  exit.
+- **Fork lineage is branch-scoped** (V1.162 carrier B, "point-lookup lineage
+  per branch, not list-all-forks"): a fork branch carries exactly one canon
+  `fork_created` marker; the root branch carries none. `fork list` reads one
+  branch (current by default, `--branch` to target a fork branch).
+- **204 deletes** (`progress clear`, `annotation remove`) print empty stdout
+  under `--json` — the daemon returns 204 No Content, so there is no DTO to
+  emit (AR-83 #3: `--json` emits the daemon DTO verbatim; a 204 has none).
+
+### 6.2G.4 V1.175 P1 amendment — strategy patch leaves (RN-1 §5 group 1)
+
+Thin daemon-HTTP leaves over the **existing** strategy canvas write routes
+(AR-83 #1 / AR-84 group 1, F-9; no daemon route changes, no DTO redesign).
+All leaves: human-readable default output, `--json` emits the daemon
+`StrategyPatchResponse` DTO verbatim (AR-83 #3), typed long flags, daemon
+error envelopes surfaced via `DaemonClient::parse_error_response` (named
+`[code]`, non-zero exit — PL-5).
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 preset patch state <strategy_id> <state_id> --base-revision <N> [--label <id>] [--description <text>] [--json]` | Patch a state node (`POST /v1/daemon/strategies/:strategy_id/states/:state_id/patch`). `--label` renames the state and rewrites all references (next targets, `preset.initial`, branches); `--description` updates the description. At least one of `--label`/`--description` is required. |
+| `nexus42 preset patch transition <strategy_id> --base-revision <N> --source-state <id> [--op create\|update] [--old-target <id>] [--new-target <id>] [--condition <expr>] [--transition-kind next\|branch\|default] [--json]` | Rewire a transition (`POST /v1/daemon/strategies/:strategy_id/transitions/patch`). `--op create` requires `--new-target`; `--op update` (default) requires `--old-target`. `--transition-kind` selects the create form: `next` (linear scalar), `branch` (conditional rule), `default` (conditional default target). |
+| `nexus42 preset patch prompt <strategy_id> <state_id> --base-revision <N> --template-ref <path> --file <path>\|'-' [--json]` | Patch a state's prompt template (`POST /v1/daemon/strategies/:strategy_id/states/:state_id/prompt/patch`). `--file` is a template body file path, or `-` to read stdin. |
+
+Rules:
+
+- **CAS-guarded writes (PL-5).** Every leaf takes `--base-revision` — the
+  revision observed on the last canonical read (e.g. `preset show`). A stale
+  revision returns **409 `strategy_conflict`**; the CLI error renders all
+  four structured fields — `current_revision`, `node_id`,
+  `conflicting_path`, and `recovery_hint` — and `--help` documents the
+  retry guidance: re-read the Strategy and reapply with the new revision.
+  Flock contention between concurrent writers rides the same 409 family.
+- **Named error surface.** The daemon's public `error_code()` allowlist
+  passthroughs only a closed set of strategy codes; the CLI surfaces exactly
+  those wire codes via the standard `[code]` envelope with non-zero exit —
+  never a generic "request failed":
+  - 409 `strategy_conflict` (stale `--base-revision`; renders
+    `current_revision` + `node_id` + `conflicting_path` + `recovery_hint`),
+  - 404 `not_found` (unknown strategy / state),
+  - 422 `strategy_validation_failed`,
+  - 422 `strategy_self_loop` / `strategy_transition_duplicate` (passthrough
+    allowlist; HTTP 422 per `status_code()`), and
+  - 400 `bad_request` for all other 400s (the daemon remaps internal codes
+    such as `strategy_invalid`, `strategy_update_forbidden`,
+    `strategy_transition_missing_old_target`, `strategy_transition_not_found`
+    to the coarse public `bad_request`).
+- **Write bodies are typed long flags** (AR-83 #4); prompt bodies come from
+  `--file` or stdin (`-`), matching the `creator soul` stdin convention.
+- **User presets only.** The daemon rejects embedded/system presets
+  (read-only); the CLI surfaces the resulting 400 as `bad_request`.
+
+### 6.2G.5 V1.175 P1 amendment — outline/chapter/timeline patch leaves (RN-1 §5 group 2)
+
+Thin daemon-HTTP leaves over the **existing** V1.72 canvas outline+timeline
+routes (AR-83 #1 / AR-84 group 2, F-10; no daemon route changes, no DTO
+redesign). All leaves: human-readable default output, `--json` emits the
+daemon DTO verbatim (AR-83 #3), typed long flags, daemon error envelopes
+surfaced via `DaemonClient::parse_error_response` (named `[code]`, non-zero
+exit — PL-5).
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 creator works outline show <work_ref> [--json]` | Read the canonical work outline + timeline (`GET /v1/daemon/works/:work_id/outline`). The printed `outline_revision` is the `--base-revision` for the patch leaves. |
+| `nexus42 creator works outline patch <work_ref> --base-revision <N> --op <move_chapter\|link_event\|attach_to_volume> [--chapter <n>] [--volume <n>] [--event <id>] [--target-chapter <n>] [--json]` | Patch the outline structure (`POST /v1/daemon/works/:work_id/outline/patch`). `move_chapter`/`attach_to_volume` require `--chapter` + `--volume`; `link_event` requires `--event` + `--target-chapter`. |
+| `nexus42 creator works chapter patch <work_ref> --n <n> --base-revision <N> [--title <text>] [--slug <slug>] [--planned-word-count <n>] [--actual-word-count <n>] [--volume <n>] [--status <not_started\|outlined\|draft\|finalized\|published>] [--content <text>\|--content-file <path>] [--json]` | Patch a chapter's **outline-node** metadata (`POST /v1/daemon/works/:work_id/chapters/:n/patch`). At least one set field is required. `--content`/`--content-file` write chapter outline prose to the chapter's `outline_path` markdown file under the same `outline_revision` CAS (never `body_path`). |
+| `nexus42 creator works timeline patch <work_ref> --base-revision <N> --op <add_event\|remove_event\|attach_event_to_chapter\|link_foreshadow\|unlink_foreshadow> [--event <id>] [--title <text>] [--description <text>] [--realizes-chapter <n>] [--target-chapter <n>] [--foreshadows-event <id>] [--json]` | Patch the work timeline (`POST /v1/daemon/works/:work_id/timeline/patch`). `add_event` requires `--title`; `remove_event` requires `--event`; `attach_event_to_chapter` requires `--event` + `--target-chapter`; `link_foreshadow`/`unlink_foreshadow` require `--event` + `--foreshadows-event`. |
+
+Rules:
+
+- **Route-family guard (AR-84).** `chapter patch` targets the outline
+  **node** route `POST /v1/daemon/works/:work_id/chapters/:n/patch` — NOT
+  the V1.65 chapter-**content** `PATCH /v1/daemon/works/:work_id/chapters/:n`
+  (different DTO family, not §5 remainder). Leaf help names the distinction.
+- **CAS-guarded writes (PL-5).** Every leaf takes `--base-revision` — the
+  `outline_revision` observed on the last canonical read (`outline show`). A
+  stale revision returns **409 `outline_conflict`**; the CLI error renders
+  all four structured fields — `current_revision`, `node_id`,
+  `conflicting_path`, and `recovery_hint` — and `--help` documents the
+  retry guidance: re-read the outline and reapply with the new revision.
+- **Named error surface.** The daemon's public `error_code()` allowlist
+  surfaces the outline family verbatim via the standard `[code]` envelope
+  with non-zero exit — never a generic "request failed":
+  - 409 `outline_conflict` (stale `--base-revision`; renders
+    `current_revision` + `node_id` + `conflicting_path` + `recovery_hint`),
+  - 404 `not_found` (unknown work / chapter / event),
+  - 422 `outline_validation_failed` (domain rules — slug format/uniqueness,
+    volume existence, foreshadow temporal order, published-chapter guard;
+    the CLI renders each `validation_summary.errors` entry), and
+  - 400 `bad_request` for all other 400s (the daemon remaps internal codes
+    such as `work_id_mismatch`, `chapter_id_mismatch`,
+    `invalid_chapter_number`, `missing_event_title`, `missing_event_id`,
+    `self_foreshadow_forbidden` to the coarse public `bad_request`).
+- **Write bodies are typed long flags** (AR-83 #4); chapter outline prose
+  comes from `--content` or `--content-file <path>`.
+- **No TUI / no second editor.** Leaves are single-shot commands
+  (stdin/file/flags only); the web canvas stays the human authoring surface.
+
+### 6.2G.6 V1.175 P1 amendment — KB entity patch + memory closure + findings triage (RN-1 §5 groups 4, 7, 8)
+
+Thin daemon-HTTP leaves over **existing** routes (AR-83 #1 / AR-85..87; no
+daemon route changes, no DTO redesign). All leaves: human-readable default
+output, `--json` emits the daemon DTO verbatim (AR-83 #3), typed long flags,
+daemon error envelopes surfaced via `DaemonClient::parse_error_response`
+(named `[code]`, non-zero exit — PL-5).
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 creator world kb entity patch --world-id <id> --entity-id <id> --expected-version <N> [--title <text>] [--body <json>] [--aliases a,b] [--block-type <t>] [--modules <json>] [--json]` | Patch a World KB entity through the daemon OCC route (`POST /v1/daemon/worlds/:world_id/kb/patch-entity`; entity id + `expected_version` ride in the **body** — there is no `entities/:id/patch` path route, F-12). Per-row OCC on `kb_key_blocks.revision`. At least one patch field is required. |
+| `nexus42 creator world kb graph --world-id <id> [--include-suggested] [--json]` | Show the World KB entity graph (`GET /v1/daemon/worlds/:world_id/kb/graph`). The printed per-entity `version` is the `--expected-version` for `entity patch`. The daemon caps the projection at 500 entities / 1000 stored relationships with **no wire `truncated` flag yet**; the human output notes the cap when the relationship count hits it, and `--json` stays DTO-verbatim. |
+| `nexus42 creator memory pending count [--json]` | Count pending review entries (`GET /v1/daemon/memory/pending-review/count`). |
+| `nexus42 creator memory review [--json]` | Drain the pending-review queue: loops `POST /v1/daemon/memory/review` while `has_more == true` (cap 100 calls, zero-progress guard), reporting cumulative `promoted/fragmented/dropped` — matches the web `useReviewMemory` drain contract (F-16). |
+| `nexus42 creator memory fragments [--json]` | List memory fragments (`GET /v1/daemon/memory/fragments`). |
+| `nexus42 creator memory pending-list [--json]` | List pending review entries (`GET /v1/daemon/memory/pending-review`). |
+| `nexus42 creator memory pending-show <id> [--json]` | Show a pending review entry (reads from the list). |
+| `nexus42 creator memory pending-dismiss <id> [--json]` | Dismiss a pending review entry (`DELETE /v1/daemon/memory/pending-review/:id`). |
+| `nexus42 creator works findings list <work_ref> [--status <s>] [--severity <s>] [--json]` | List findings for a Work (`GET /v1/daemon/works/:work_id/findings`). `--status` accepts a single status or a comma-separated list (e.g. `open,triaged`). |
+| `nexus42 creator works findings set-status <finding_id> --work <work_ref> --status <s> [--target-executor <exec>] [--json]` | Set a finding's status through the work-findings PATCH (`PATCH /v1/daemon/works/:work_id/findings/:finding_id`, body `{status?, target_executor?}`). One generic verb over one route (AR-87 #3 — no `triage|resolve` sugar). |
+| `nexus42 creator world findings list --world-id <id> [--json]` | List world-attached check findings (`GET /v1/daemon/worlds/:world_id/findings`, V1.165). **GET-only by design** — there is NO world-findings write route; triage writes ride the work-findings PATCH above. |
+
+Rules:
+
+- **Dual-write guard (AR-85 #3).** `kb entity patch` writes through the
+  **daemon** OCC route (per-row version CAS on `kb_key_blocks.revision`);
+  `creator world kb edit` writes the **local DB** directly (SQLite, no OCC,
+  different code path). Two write paths exist by product decision; only the
+  daemon path is OCC-guarded. `kb entity patch` is a NEW verb — never an
+  overload of `edit` (no `edit --daemon`).
+- **OCC error surface (PL-5).** A stale `--expected-version` returns **409
+  `world_kb_conflict`** echoing the stale version as `current_version` +
+  `entity_id` (rendered by the CLI error envelope); `--help` documents the
+  retry guidance: refetch the graph (`creator world kb graph`) and reapply
+  with the new version. 422 `world_kb_validation_failed` (domain rules) and
+  400 `bad_request` (other 400s) surface named, non-zero exit.
+- **Memory closure (AR-86).** `review` drains while `has_more == true`
+  (server batch ≤ 50 rows/call; CLI cap 100 calls + zero-progress guard —
+  matches the web drain contract). `--json` on all daemon-backed memory
+  verbs (`review`, `fragments`, `pending-list`, `pending-show`,
+  `pending-dismiss`, `pending count`). Local-file verbs
+  (`list/create/show/edit/delete`) are untouched. No leaf for
+  `POST /memory/pending-review` (ingestion) or `POST /memory/soul/reflect`
+  (SOUL surface) — not §5 remainder.
+- **Findings transition table (AR-87).** `set-status --status` accepts
+  exactly the closed lifecycle vocabulary: `open`, `triaged`, `in_review`,
+  `resolved`, `wont_fix`, `duplicate`. Legal transitions:
+  `open → triaged | in_review | resolved | wont_fix | duplicate`;
+  `triaged → in_review | resolved | wont_fix | duplicate`;
+  `in_review → resolved | wont_fix | duplicate`;
+  `resolved` / `wont_fix` / `duplicate` are terminal. `from == to` is
+  rejected. An illegal transition returns **422 `invalid_transition`**
+  naming `from → to`; `--help` documents the table verbatim. Existing
+  `findings accept` + `findings prune` leaves are untouched (different
+  journeys: rule-suggestion adoption; retention).
+- **World findings are read-only (AR-87 #1).** `creator world findings`
+  is a GET-only read; any world-findings write route is a P1 non-goal.
 
 ### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
 

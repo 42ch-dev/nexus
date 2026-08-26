@@ -5,14 +5,16 @@ problem_type: architecture_pattern
 category: architecture-patterns
 severity: medium
 plan_id: 2026-08-24-v1.174-p0-peer-tools-transport-registry
-tags: 
+tags:
   - mcp
   - rmcp
   - stdio
   - bridge-child
-  - stateless-proxy
   - serverhandler
   - tools-only
+  - listchanged
+  - watcher
+last_updated: 2026-08-26
 applies_when:
   - "Exposing the daemon tool registry to an external MCP client (ACP agent, native CLI, third-party)"
   - "Choosing the process model for an MCP server (client-spawned child vs in-daemon service)"
@@ -88,8 +90,9 @@ stdio child**, and the child is a thin, stateless proxy.
   `nexus-acp-host → agent-client-protocol =0.11.1` — not graph introduction
   (see `conventions/graph-pin-honesty-discipline.md`). No streamable-HTTP,
   no child-process, no client features.
-- Advertisement: **tools only, without `listChanged`** (no daemon→child push
-  channel; clients re-list; push = DF-90).
+- Advertisement: **tools + `tools.listChanged`** — delivered V1.175
+  (DF-90 / AR-79) by the child-side watch in section 6; still no
+  daemon→child push channel.
 
 ### 3. Schema mapping (descriptors → rmcp `Tool`)
 
@@ -97,10 +100,12 @@ stdio child**, and the child is a thin, stateless proxy.
 |--------|----------------|-----------------|
 | Peer tools (manifest) | carried **verbatim** after catalog root-object filter (`mcp_catalog: input_schema not root-object` = named refusal from the MCP catalog; registration lane unaffected) | included iff present **and** root-object; else omitted — never invented, never wrapped |
 | User capabilities | parsed draft-2020-12; unparseable ⇒ named catalog refusal | same parse rule |
-| Builtin `nexus.*` | uniform permissive `{"type":"object"}` placeholder (the `AcpWire` schema refs are pseudo-schemas, not valid 2020-12); description carries the summary + parameter pointer | none |
+| Builtin `nexus.*` | real authored draft-2020-12 schemas from the registry row (`CatalogDescriptor`, DF-89 — the uniform placeholder is retired); named `$comment: nexus42:schema-pending` fallback only for a hypothetical schema-less row | pinned where the success shape is a stable object; omitted otherwise |
 
-No schema is ever synthesized from a non-schema source beyond the declared,
-uniform, documented builtin placeholder (real per-tool schemas = DF-89).
+No schema is ever synthesized from a non-schema source; builtin rows carry
+authored descriptors (DF-89, `descriptive-first-builtin-schema-authoring.md`)
+and the named `schema-pending` placeholder is the machine-distinguishable
+no-schema fallback only.
 
 ### 4. Alternatives evaluated (roadmap, not leftovers)
 
@@ -124,10 +129,46 @@ uniform, documented builtin placeholder (real per-tool schemas = DF-89).
   mapping must carry `args` (`["mcp", "serve"]`); a hand-built stdio entry
   that drops args spawns the CLI without the serve subcommand. Pin with a
   unit test on the propagation.
-- **Timeout ordering:** the child's request timeout must strictly exceed
-  the user-cap sandbox wall (30 s) so a slow-but-legitimate user-cap call is
-  not raced by the child's own timeout (side-effects-after-timeout must be
-  documented).
+### 6. Child-side `listChanged` watch (DF-90 / AR-79, shipped V1.175)
+
+`tools.listChanged` is **not** a daemon push — the child polls and digests:
+
+- **2 s poll** (`MCP_CATALOG_WATCH_INTERVAL`, not configurable this
+  iteration) of `GET /v1/daemon/tools`; digest = the raw `serde_json::Value`
+  body. Object keys are order-insensitive in the comparison; the `items`
+  array is order-sensitive **by design** — the route's id-sort is the
+  documented invariant that makes an unchanged catalog compare equal.
+- **Baseline without notify:** the first successful poll establishes the
+  baseline digest; no notification. `notify_tool_list_changed()` fires only
+  when the digest changes **between successful polls**.
+- **Notify-retry on failure:** `last_digest` advances only after a
+  successful notify (or the baseline poll). On notify `Err` the previous
+  digest is kept, so the next poll retries the idempotent notification — a
+  lost `listChanged` on notify failure was a blocking QC finding; the
+  retry semantics live in a generic `catalog_watch_loop_inner(interval,
+  poll, notify, should_stop)` seam so they are unit-testable without a
+  daemon or MCP transport.
+- **Poll errors never notify:** they keep the last digest and log to stderr
+  once per error-state transition (bounded, no per-poll spam).
+- **Lifecycle:** the watcher spawns after `serve_server` returns
+  (post-initialize — notifications only inside an initialized session); a
+  `WatcherGuard` scope guard aborts the task on EVERY exit path (success,
+  `waiting()` Err, panic unwinding).
+- **Advertisement:** `get_info` builds
+  `enable_tools().enable_tool_list_changed()` (order pinned — the builder
+  only touches an existing `tools` capability).
+- **Model A preserved:** the child holds a digest + interval — no registry,
+  no allowlist, no policy, no read cache. Every `tools/list` remains a live
+  daemon round trip; zero daemon-side change, zero wire change.
+- Delivery bound = interval + one request timeout (bounded, never a hang).
+- Proof: `apps/nexus42/tests/mcp_serve_e2e.rs` —
+  `list_changed_advertised_and_delivered` (three legs: peer admission, peer
+  eviction, user-cap content change; each asserts exactly one
+  notification), `no_list_changed_when_catalog_unchanged` (≥ 2 intervals,
+  zero notifications); unit pins `get_info_advertises_tools_list_changed`
+  and `notify_failure_retries_on_next_poll`; docs `docs/mcp-server.md`.
+
+## Why This Matters
 
 ## Why This Matters
 
@@ -150,8 +191,9 @@ server.
 - Mapping a domain error vocabulary onto MCP: unroutable ⇒ protocol error,
   executed-but-failed ⇒ `is_error` result; keep the split typed, not
   text-matched.
-- Extending the exposure lane (HTTP transport, `listChanged`, embedded
-  Model B) — reuse this child's daemon-round-trip + resolution rules.
+- Extending the exposure lane (HTTP transport, embedded Model B) — reuse
+  this child's daemon-round-trip + resolution rules; `listChanged` is
+  delivered by the child-side watch (section 6), not a daemon push.
 
 ## Examples
 
