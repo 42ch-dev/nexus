@@ -169,6 +169,13 @@ impl UserCapabilityDescriptor {
 /// [`CapabilityError::WorkerUnavailable`] variant (no new variant — exhaustive
 /// matches like `fork.rs` keep compiling). The admitted-with-engine path never
 /// returns it (PL-10 closed).
+///
+/// `Clone` (V1.176 P1, AR-92 #4): the hot-reload watcher keeps a last-admitted
+/// mirror of concrete `UserCapability` entries so the merge rule can carry the
+/// last good admission across rebuilds. Cloning is cheap — the three catalog
+/// strings are `&'static str` (shared, no re-leak), the handles are `Arc`s,
+/// and the remaining fields are plain data.
+#[derive(Clone)]
 pub struct UserCapability {
     name: &'static str,
     input_schema: &'static str,
@@ -230,6 +237,18 @@ impl UserCapability {
             engine,
             module_cache,
         }
+    }
+
+    /// The admitted module's expected content hash (AR-39 single hash path).
+    ///
+    /// Test-only accessor: the hot-reload boot-equivalence test (AR-95 #1)
+    /// compares name + `wasm_sha256` between the boot-constructor and
+    /// hot-rebuild user-cap sets. Runtime enforcement is the executor's
+    /// lazy-load re-verification (F2) — no production caller needs the value.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn wasm_sha256(&self) -> &str {
+        &self.wasm_sha256
     }
 
     /// AR-37 envelope mapping: capability input JSON → [`ComputeInput`].

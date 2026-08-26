@@ -15,7 +15,10 @@ use std::sync::Arc;
 async fn system_preset_runs_to_terminal_state() {
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let registry = Arc::new(CapabilityRegistry::with_builtins());
-    let engine = GraphFlowEngine::new_with_storage(storage, registry.clone());
+    let engine = GraphFlowEngine::new_with_storage(
+        storage,
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(registry.clone()),
+    );
     let graph = system_preset::build(registry);
     let sid = engine
         .start_session("_system.maintenance", graph)
@@ -61,7 +64,10 @@ async fn restart_durability_e2e() {
             std::sync::Arc::new(pool),
         ));
         let registry = Arc::new(CapabilityRegistry::with_builtins());
-        let engine = GraphFlowEngine::new_with_storage(storage, registry.clone());
+        let engine = GraphFlowEngine::new_with_storage(
+            storage,
+            nexus_orchestration::CapabilityRegistryHolder::with_registry(registry.clone()),
+        );
         let graph = system_preset::build(registry);
         let sid = engine
             .start_session("_system.maintenance", graph)

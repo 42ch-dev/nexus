@@ -29,9 +29,14 @@ async fn test_server_with_engine() -> EngineCtx {
 
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let registry = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
-    let engine = Arc::new(GraphFlowEngine::new_with_storage(storage, registry.clone()));
+    let engine = Arc::new(GraphFlowEngine::new_with_storage(
+        storage,
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(registry.clone()),
+    ));
     state.set_engine(engine as Arc<dyn OrchestrationEngine>);
-    state.set_capability_registry(registry);
+    state.set_capability_registry(
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(registry),
+    );
 
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
@@ -147,9 +152,14 @@ async fn sessions_without_active_creator_returns_409_not_404() {
     let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let registry = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
-    let engine = Arc::new(GraphFlowEngine::new_with_storage(storage, registry.clone()));
+    let engine = Arc::new(GraphFlowEngine::new_with_storage(
+        storage,
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(registry.clone()),
+    ));
     state.set_engine(engine as Arc<dyn OrchestrationEngine>);
-    state.set_capability_registry(registry);
+    state.set_capability_registry(
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(registry),
+    );
 
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);

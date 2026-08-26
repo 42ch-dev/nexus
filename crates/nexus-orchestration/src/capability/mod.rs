@@ -6,6 +6,7 @@ pub mod admission;
 pub mod builtins;
 pub mod scan;
 pub mod user_capability;
+pub mod watch;
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -86,6 +87,10 @@ pub trait DaemonToolDispatch: Send + Sync {
 ///
 /// Groups pool and worker provider so daemon boot can construct a single
 /// struct and pass it to the registry factory.
+///
+/// `Clone` (V1.176 P1, AR-92 #3): the hot-reload watcher retains a cloned
+/// copy from boot to rebuild fresh registries on the same admission path.
+#[derive(Clone)]
 pub struct CapabilityRuntimeDeps {
     /// Pool for pool-backed capabilities (`kb.extract_work`, etc.).
     pub pool: Option<sqlx::SqlitePool>,
@@ -419,11 +424,17 @@ impl CapabilityRegistry {
     ) -> scan::ScanOutcome {
         let builtin_names: std::collections::HashSet<&str> =
             self.capabilities.iter().map(|c| c.name()).collect();
-        let mut outcome =
-            scan::scan_user_capabilities(scan_dir, &builtin_names, engine, module_cache);
-        // `Vec::append` moves every element out of `outcome.admitted`,
-        // leaving the vec empty so `outcome` can still be returned.
-        self.capabilities.append(&mut outcome.admitted);
+        let outcome = scan::scan_user_capabilities(scan_dir, &builtin_names, engine, module_cache);
+        // V1.176 P1 (AR-92 #4): the outcome keeps its concrete admitted
+        // entries (cloned into the registry) so the boot site can seed the
+        // watcher's last-good mirror from them — the scan is the single
+        // admission path for both boot and hot reload. The boot-site
+        // aggregate log (`log_scan_outcome`) therefore reports the admitted
+        // count it was documented to report.
+        for cap in &outcome.admitted {
+            self.capabilities
+                .push(Box::new(cap.clone()) as Box<dyn Capability>);
+        }
         self.build_index();
         outcome
     }
@@ -688,6 +699,71 @@ impl CapabilityRegistry {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.capabilities.is_empty()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CapabilityRegistryHolder — hot-reload swap seam (V1.176 P1, AR-92)
+// ---------------------------------------------------------------------------
+
+/// Shared holder for the live capability registry (AR-92).
+///
+/// A hot reload rebuilds a **fresh** [`CapabilityRegistry`] on the same
+/// scan/admission path as boot and atomically swaps it into this holder —
+/// never an in-place mutation of a live registry (races `iter()`/`get()`
+/// borrowers) and never a second registry lane (single-spine invariant,
+/// AR-92 #1/#8).
+///
+/// Lock/re-entrancy contract (AR-92 #7): readers clone the inner `Arc`
+/// under the read lock and release immediately — no reader holds the lock
+/// across an `.await`, and wasm execution never runs under the holder lock.
+/// An in-flight dispatch that cloned the pre-swap `Arc` finishes against
+/// last-good (no abort, no half-call — PL-9). The write lock is held only
+/// for the pointer write; swaps are serialized by construction (one watcher
+/// task, one tick at a time).
+///
+/// Boot creates exactly **one** holder and shares it with `WorkspaceState`,
+/// the engine, and the watcher (AR-92 #2/#6).
+#[derive(Clone, Default)]
+pub struct CapabilityRegistryHolder {
+    inner: std::sync::Arc<std::sync::RwLock<Option<std::sync::Arc<CapabilityRegistry>>>>,
+}
+
+impl CapabilityRegistryHolder {
+    /// Create an empty holder. The boot registry is swapped in before any
+    /// reader, the engine, or a graph build touches it.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Clone the current registry under the read lock, if one has been
+    /// swapped in.
+    #[must_use]
+    pub fn get(&self) -> Option<std::sync::Arc<CapabilityRegistry>> {
+        self.inner
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) // poison-recovery (crate policy)
+            .clone()
+    }
+
+    /// Atomically swap in a freshly rebuilt registry (write lock; held only
+    /// for the pointer write — AR-92 #7).
+    pub fn swap(&self, registry: std::sync::Arc<CapabilityRegistry>) {
+        *self
+            .inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(registry);
+    }
+
+    /// Create a holder pre-populated with `registry` — boot convenience:
+    /// the boot registry is swapped in before readers, the engine, and the
+    /// watcher exist, and every later generation arrives via [`swap`](Self::swap).
+    #[must_use]
+    pub fn with_registry(registry: std::sync::Arc<CapabilityRegistry>) -> Self {
+        let holder = Self::new();
+        holder.swap(registry);
+        holder
     }
 }
 

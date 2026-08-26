@@ -193,7 +193,9 @@ async fn start_server(
             "no skips expected: {:?}",
             outcome.skipped
         );
-        state.set_capability_registry(Arc::new(registry));
+        state.set_capability_registry(
+            nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(registry)),
+        );
     }
 
     WorkerSpineServer {
@@ -819,7 +821,9 @@ async fn worker_spine_peer_user_cap_run_error_is_honest_failure() {
     };
     let (registry, outcome) = CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &scan_dir);
     assert!(outcome.skipped.is_empty(), "skips: {:?}", outcome.skipped);
-    state.set_capability_registry(Arc::new(registry));
+    state.set_capability_registry(
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(registry)),
+    );
 
     let result =
         HostToolExecutor::dispatch_from_worker("ws.demo.cap", &json!({}), "req-ws-ucap", &state)
@@ -866,7 +870,9 @@ async fn worker_spine_peer_user_cap_structural_gate_rejects_non_object_pre_io() 
     };
     let (registry, outcome) = CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &scan_dir);
     assert!(outcome.skipped.is_empty(), "skips: {:?}", outcome.skipped);
-    state.set_capability_registry(Arc::new(registry));
+    state.set_capability_registry(
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(registry)),
+    );
 
     // Non-object arguments: the structural gate must refuse BEFORE
     // `run()` (which would load + execute the WASM module — adapter I/O).
@@ -917,7 +923,9 @@ async fn worker_spine_peer_user_cap_structural_gate_rejects_missing_required_pre
     };
     let (registry, outcome) = CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &scan_dir);
     assert!(outcome.skipped.is_empty(), "skips: {:?}", outcome.skipped);
-    state.set_capability_registry(Arc::new(registry));
+    state.set_capability_registry(
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(registry)),
+    );
 
     // Object but missing the declared top-level required key `topic`.
     let result = HostToolExecutor::dispatch_from_worker(
@@ -967,7 +975,9 @@ async fn worker_spine_peer_user_cap_structural_gate_rejects_http_lane_pre_io() {
     };
     let (registry, outcome) = CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &scan_dir);
     assert!(outcome.skipped.is_empty(), "skips: {:?}", outcome.skipped);
-    state.set_capability_registry(Arc::new(registry));
+    state.set_capability_registry(
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(registry)),
+    );
 
     let req = nexus_daemon_runtime::api::handlers::host_tool_executor::ToolExecuteRequest {
         tool_name: "ws.demo.capreq".to_string(),

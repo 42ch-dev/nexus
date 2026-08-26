@@ -54,12 +54,17 @@ pub(crate) fn ensure_remote_bind_allowed(host: &str) -> anyhow::Result<()> {
     Ok(())
 }
 use graph_flow::{InMemorySessionStorage, SessionStorage};
+use nexus_orchestration::capability::user_capability::UserCapability;
+use nexus_orchestration::capability::watch::{
+    rebuild_registry_with_merge, scan_dir_digest, watch_loop_inner, USER_CAP_WATCH_INTERVAL,
+};
 use nexus_orchestration::worker::{WorkerManagerSpawner, WorkerRegistry};
 use nexus_orchestration::{
     engine::{EngineSignal, OrchestrationEngine},
     schedule::supervisor::ScheduleSupervisor,
     storage::sqlite::SqliteSessionStorage,
-    system_preset_dir, CapabilityRegistry, CapabilityRuntimeDeps, GraphFlowEngine, WorkerManager,
+    system_preset_dir, CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps,
+    GraphFlowEngine, WorkerManager,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -198,6 +203,125 @@ fn user_capabilities_scan_dir(state: &WorkspaceState) -> PathBuf {
         },
         nexus_home_layout::user_capabilities_dir,
     )
+}
+
+/// Spawn the user-capability hot-reload watcher (V1.176 P1, AR-91/AR-92).
+///
+/// One background tokio task polls the scan directory every
+/// [`USER_CAP_WATCH_INTERVAL`] (1 s, AR-91 #1), digest-compares the
+/// structural tree (AR-91 #2), and — only on a digest change — rebuilds a
+/// fresh [`CapabilityRegistry`] on the SAME scan/admission path as boot and
+/// swaps it into the shared holder (AR-92 #2/#3/#5). The first tick
+/// establishes the baseline digest without scanning (boot already scanned;
+/// AR-91 #6); a missing scan dir yields a stable null digest — no rescans,
+/// no skip spam (F-14).
+///
+/// The task is best-effort by contract (AR-91 #6): every tick is fail-safe
+/// (scan contract F-9, last-good merge AR-92 #5, pointer-write swap), it
+/// logs with the boot-site vocabulary, and it exits cleanly on the daemon's
+/// existing shutdown notification (peer-lane precedent). It never panics or
+/// fails the daemon.
+///
+/// Returns a `JoinHandle` (dropped in production; observed by tests).
+#[allow(clippy::needless_pass_by_value)]
+pub fn spawn_user_capability_watcher(
+    holder: CapabilityRegistryHolder,
+    runtime_deps: CapabilityRuntimeDeps,
+    engine: Option<Arc<nexus_wasm_host::WasmEngine>>,
+    module_cache: Option<Arc<nexus_wasm_host::ModuleCache>>,
+    scan_dir: PathBuf,
+    shutdown_notify: Arc<tokio::sync::Notify>,
+    boot_mirror: Vec<UserCapability>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(user_capability_watch_loop(
+        holder,
+        runtime_deps,
+        engine,
+        module_cache,
+        scan_dir,
+        shutdown_notify,
+        boot_mirror,
+    ))
+}
+
+/// Drive the watcher loop until the daemon's shutdown notification fires.
+///
+/// The loop itself is the dependency-free, injectable seam in
+/// `nexus-orchestration` (`watch_loop_inner` — unit-tested for no-op
+/// stability, AR-95 #5); this wrapper owns the real poll/scan actions and
+/// the last-admitted mirror.
+async fn user_capability_watch_loop(
+    holder: CapabilityRegistryHolder,
+    runtime_deps: CapabilityRuntimeDeps,
+    engine: Option<Arc<nexus_wasm_host::WasmEngine>>,
+    module_cache: Option<Arc<nexus_wasm_host::ModuleCache>>,
+    scan_dir: PathBuf,
+    shutdown_notify: Arc<tokio::sync::Notify>,
+    boot_mirror: Vec<UserCapability>,
+) {
+    tracing::info!(
+        dir = %scan_dir.display(),
+        "user-capability watcher started (poll+digest, 1s)"
+    );
+    // The last-admitted mirror lives behind a shared mutex so the loop's
+    // `rescan` closure can both read it (merge input) and write it (next
+    // mirror) without an escaping mutable borrow — the same task owns it,
+    // so the lock never contends.
+    let mirror: Arc<std::sync::Mutex<Vec<UserCapability>>> =
+        Arc::new(std::sync::Mutex::new(boot_mirror));
+    tokio::select! {
+        () = shutdown_notify.notified() => {
+            tracing::info!("user-capability watcher: shutdown received, exiting");
+        }
+        _ = watch_loop_inner(
+            USER_CAP_WATCH_INTERVAL,
+            || async { scan_dir_digest(&scan_dir) },
+            || {
+                let mirror = Arc::clone(&mirror);
+                let holder = &holder;
+                let runtime_deps = &runtime_deps;
+                let engine = &engine;
+                let module_cache = &module_cache;
+                let scan_dir = &scan_dir;
+                async move {
+                    let mut mirror = mirror
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    *mirror = hot_rebuild_and_swap(
+                        holder,
+                        runtime_deps,
+                        engine.as_ref(),
+                        module_cache.as_ref(),
+                        scan_dir,
+                        &mirror,
+                    );
+                }
+            },
+            || false,
+        ) => {}
+    }
+}
+
+/// One hot reload tick: rebuild + merge + swap (AR-92 #3/#5/#7).
+///
+/// Runs entirely OUTSIDE the holder lock — the scan, admission, and registry
+/// rebuild are unguarded; the write lock is held only for the pointer swap
+/// (AR-92 #7). Logs the outcome with the boot-site aggregate shape
+/// (`log_scan_outcome`, same vocabulary). Returns the new last-admitted
+/// mirror for the next tick.
+fn hot_rebuild_and_swap(
+    holder: &CapabilityRegistryHolder,
+    deps: &CapabilityRuntimeDeps,
+    engine: Option<&Arc<nexus_wasm_host::WasmEngine>>,
+    module_cache: Option<&Arc<nexus_wasm_host::ModuleCache>>,
+    scan_dir: &Path,
+    mirror: &[UserCapability],
+) -> Vec<UserCapability> {
+    let (registry, outcome) =
+        rebuild_registry_with_merge(deps, engine, module_cache, scan_dir, mirror);
+    log_scan_outcome(&outcome, scan_dir);
+    holder.swap(Arc::new(registry));
+    outcome.admitted
 }
 
 /// Run the daemon runtime to completion.
@@ -398,31 +522,36 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // `state.nexus_home()` (already `<home>/.nexus42`) would scan
     // `<home>/.nexus42/.nexus42/capabilities` and miss user installs.
     let user_caps_dir = user_capabilities_scan_dir(&state);
-    let capabilities = Arc::new(if let Some((engine, cache)) = &wasm_singleton {
+    let (capabilities, boot_outcome) = if let Some((engine, cache)) = &wasm_singleton {
         // V1.147 P0: store daemon-wide engine+cache on WorkspaceState
         // so the direct compute handler can use them. Clone the Arcs
         // before they are moved into the capability registry.
         state.set_wasm_engine(Arc::clone(engine));
         state.set_module_cache(Arc::clone(cache));
-        let (registry, outcome) = CapabilityRegistry::with_runtime_deps_and_wasm_and_user_caps(
+        CapabilityRegistry::with_runtime_deps_and_wasm_and_user_caps(
             &runtime_deps,
             Arc::clone(engine),
             Arc::clone(cache),
             &user_caps_dir,
-        );
-        log_scan_outcome(&outcome, &user_caps_dir);
-        registry
+        )
     } else {
         // AR-44: engine-absent boot still registers user capabilities
         // (discoverable); their stub `run()` returns WorkerUnavailable.
-        let (registry, outcome) =
-            CapabilityRegistry::with_runtime_deps_and_user_caps(&runtime_deps, &user_caps_dir);
-        log_scan_outcome(&outcome, &user_caps_dir);
-        registry
-    });
+        CapabilityRegistry::with_runtime_deps_and_user_caps(&runtime_deps, &user_caps_dir)
+    };
+    log_scan_outcome(&boot_outcome, &user_caps_dir);
     tracing::info!(
         "Capability registry built (production wiring + WASM singleton where available)"
     );
+    // V1.176 P1 (AR-92 #2): ONE shared holder for the live registry. The
+    // boot registry is swapped in immediately; the watcher rebuilds + swaps
+    // on scan-dir changes; the engine and WorkspaceState read through it.
+    let capabilities = Arc::new(capabilities);
+    let capability_holder = CapabilityRegistryHolder::new();
+    capability_holder.swap(Arc::clone(&capabilities));
+    // Last-admitted mirror seed (AR-92 #4): boot's admitted user caps, so a
+    // failed hot admission carries the last good entry (PL-9).
+    let boot_mirror: Vec<UserCapability> = boot_outcome.admitted.clone();
 
     // V1.42 P3 (DF-47): wire daemon-side tool dispatch adapter.
     // Stored in WorkspaceState so schedule-executed HostToolCallTask instances
@@ -436,7 +565,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     tracing::info!("Daemon tool dispatch adapter wired");
 
     let mut concrete_engine =
-        GraphFlowEngine::new_with_storage(session_storage.clone(), capabilities.clone());
+        GraphFlowEngine::new_with_storage(session_storage.clone(), capability_holder.clone());
 
     // DF-47 (V1.42 P3): wire the daemon tool dispatch into the engine so
     // HostTool enter actions in preset graphs can invoke nexus.* tools.
@@ -505,8 +634,34 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 
     state.set_engine(engine);
     state.set_worker_manager(workers);
-    state.set_capability_registry(capabilities);
+    state.set_capability_registry(capability_holder.clone());
     tracing::info!("Orchestration engine wired");
+
+    // --- V1.176 P1 (AR-91/AR-92): user-capability hot-reload watcher ---
+    // One background task polls the scan directory every 1 s (poll+digest,
+    // zero new dependencies — AR-91 #5); a digest change rebuilds a fresh
+    // registry on the SAME scan/admission path as boot and swaps it into
+    // the shared holder (AR-92). The mirror seeds from the boot outcome so a
+    // failed hot admission carries the last good entry (PL-9). The task
+    // terminates on the daemon's shutdown notification (peer-lane precedent).
+    {
+        let watcher_holder = capability_holder.clone();
+        let watcher_deps = runtime_deps.clone();
+        let watcher_engine = wasm_singleton
+            .as_ref()
+            .map(|(engine, _)| Arc::clone(engine));
+        let watcher_cache = wasm_singleton.as_ref().map(|(_, cache)| Arc::clone(cache));
+        let watcher_shutdown = state.shutdown_notify();
+        let _watcher_handle = spawn_user_capability_watcher(
+            watcher_holder,
+            watcher_deps,
+            watcher_engine,
+            watcher_cache,
+            user_caps_dir.clone(),
+            watcher_shutdown,
+            boot_mirror,
+        );
+    }
 
     // --- Section 4: Schedule supervisor + core context manager ---
     // Pool-backed subsystems are deferred until Profile attach when no creator DB

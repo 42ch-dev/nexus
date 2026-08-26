@@ -189,7 +189,9 @@ impl E2eDaemon {
             "no skips expected: {:?}",
             outcome.skipped
         );
-        state.set_capability_registry(Arc::new(registry));
+        state.set_capability_registry(
+            nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(registry)),
+        );
 
         // ── Real axum HTTP listener on 127.0.0.1:0 ──
         let http_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

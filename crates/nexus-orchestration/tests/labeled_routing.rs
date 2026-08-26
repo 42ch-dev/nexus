@@ -247,7 +247,10 @@ async fn labeled_no_match_does_not_stall_session() {
     let loaded = preset::load_preset_from_str(&yaml, &caps).expect("labeled preset should load");
 
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
-    let engine = GraphFlowEngine::new_with_storage(storage.clone(), caps.clone());
+    let engine = GraphFlowEngine::new_with_storage(
+        storage.clone(),
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(caps.clone()),
+    );
 
     let sid = engine
         .start_session_with_preset(&loaded)

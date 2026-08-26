@@ -250,7 +250,9 @@ mod tests {
         let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
         let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
-        let caps = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
         let engine = nexus_orchestration::GraphFlowEngine::new_with_storage(storage, caps);
 
         // Mirror boot.rs WS-D: `_system.*` preset session auto-started at boot.
@@ -289,7 +291,9 @@ mod tests {
         let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
         let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
-        let caps = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
         let engine = nexus_orchestration::GraphFlowEngine::new_with_storage(storage, caps);
 
         engine

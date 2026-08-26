@@ -60,7 +60,9 @@ async fn preset_gates_failed_returns_canonical_envelope() {
     state.set_schedule_supervisor(supervisor);
 
     let registry = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
-    state.set_capability_registry(registry);
+    state.set_capability_registry(
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(registry),
+    );
 
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);

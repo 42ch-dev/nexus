@@ -69,7 +69,9 @@ async fn test_state(
     state.set_schedule_supervisor(supervisor);
 
     let registry = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
-    state.set_capability_registry(registry);
+    state.set_capability_registry(
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(registry),
+    );
 
     std::mem::forget(tmp);
     state

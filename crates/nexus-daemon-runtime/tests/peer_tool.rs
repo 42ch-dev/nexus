@@ -176,7 +176,9 @@ async fn start_server(
             "no skips expected: {:?}",
             outcome.skipped
         );
-        state.set_capability_registry(Arc::new(registry));
+        state.set_capability_registry(
+            nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(registry)),
+        );
     }
     let app = api::create_router(state, DaemonApiConfig::keyless());
     let http = TestServer::new(app).expect("test server");

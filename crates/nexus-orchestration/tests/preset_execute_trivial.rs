@@ -42,7 +42,10 @@ async fn linear_two_state_preset_executes_to_terminal() {
     assert_eq!(loaded.id, "trivial");
 
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
-    let engine = GraphFlowEngine::new_with_storage(storage, Arc::new(caps));
+    let engine = GraphFlowEngine::new_with_storage(
+        storage,
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(caps)),
+    );
 
     let sid = engine
         .start_session_with_graph("trivial", loaded.outer_graph.clone())
@@ -113,7 +116,10 @@ async fn capability_enter_state_composites_correctly() {
     assert_eq!(loaded.id, "cap-enter");
 
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
-    let engine = GraphFlowEngine::new_with_storage(storage, Arc::new(caps));
+    let engine = GraphFlowEngine::new_with_storage(
+        storage,
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(caps)),
+    );
 
     let sid = engine
         .start_session_with_graph("cap-enter", loaded.outer_graph.clone())

@@ -3,13 +3,14 @@
 //! Scans `~/.nexus42/capabilities/<name>/` (see
 //! `nexus_home_layout::user_capabilities_dir`) for capability descriptors and
 //! produces the entries appended after builtins by the registry constructors
-//! (AR-36). Fail-safe by contract: a missing directory is an empty outcome,
-//! a bad descriptor is a per-entry skip — never a top-level error, never a
-//! panic, never a boot failure (AC-V172-2).
+//! (AR-36). The admitted entries are the concrete [`UserCapability`] type
+//! (AR-92 #4) so the hot-reload watcher can mirror them. Fail-safe by
+//! contract: a missing directory is an empty outcome and a bad descriptor is
+//! a per-entry skip — never a top-level error, never a panic, never a boot
+//! failure (AC-V172-2).
 
 use crate::capability::admission::admit;
 use crate::capability::user_capability::{UserCapability, UserCapabilityDescriptor};
-use crate::capability::Capability;
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -26,11 +27,16 @@ pub struct SkippedCapability {
 ///
 /// Admitted entries are appended after builtins by the registry constructors
 /// (AR-36); skipped entries carry their reasons and were already logged.
+///
+/// `admitted` carries the concrete [`UserCapability`] type (V1.176 P1,
+/// AR-92 #4) so the hot-reload watcher can keep a last-admitted mirror and
+/// merge last-good entries across rebuilds; the registry append seam boxes
+/// them at the boundary.
 #[derive(Default)]
 pub struct ScanOutcome {
     /// Admitted user capabilities in scan order (first-in-wins for
     /// duplicate declared names).
-    pub admitted: Vec<Box<dyn Capability>>,
+    pub admitted: Vec<UserCapability>,
     /// Skipped capability directories with named reasons — never a scan error.
     pub skipped: Vec<SkippedCapability>,
 }
@@ -200,12 +206,12 @@ pub fn scan_user_capabilities(
         // The engine arm passes Some/Some so run() executes the module; the
         // engine-less arm passes None/None (AR-44) so run() returns
         // WorkerUnavailable.
-        outcome.admitted.push(Box::new(UserCapability::new(
+        outcome.admitted.push(UserCapability::new(
             &descriptor,
             path,
             engine.cloned(),
             module_cache.cloned(),
-        )));
+        ));
     }
 
     outcome
@@ -244,6 +250,7 @@ pub(crate) fn skip(outcome: &mut ScanOutcome, name: &str, reason: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capability::Capability;
     use sha2::Digest;
     use std::fmt::Write as _;
 
@@ -321,7 +328,7 @@ mod tests {
             "no skips: {:?}",
             outcome.skipped
         );
-        let cap = outcome.admitted[0].as_ref();
+        let cap = &outcome.admitted[0];
         assert_eq!(cap.name(), "demo.pull");
         assert_eq!(cap.input_schema(), r#"{"type":"object"}"#);
         assert_eq!(cap.output_schema(), r#"{"type":"object"}"#);
@@ -416,7 +423,7 @@ mod tests {
         write_capability_dir(tmp.path(), "sync.pull"); // builtin name (gate 1)
         write_capability_dir(tmp.path(), "demo.pull"); // valid, admitted
         let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
-        let names: Vec<&str> = outcome.admitted.iter().map(|c| c.name()).collect();
+        let names: Vec<&str> = outcome.admitted.iter().map(Capability::name).collect();
         assert_eq!(
             names,
             vec!["demo.pull"],
@@ -441,7 +448,7 @@ mod tests {
         write_capability_dir(tmp.path(), ".hidden.cap");
         write_capability_dir(tmp.path(), "visible.cap");
         let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
-        let names: Vec<&str> = outcome.admitted.iter().map(|c| c.name()).collect();
+        let names: Vec<&str> = outcome.admitted.iter().map(Capability::name).collect();
         assert_eq!(names, vec!["visible.cap"]);
         assert!(outcome.skipped.is_empty());
     }
@@ -465,7 +472,7 @@ mod tests {
         )
         .unwrap();
         let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
-        let names: Vec<&str> = outcome.admitted.iter().map(|c| c.name()).collect();
+        let names: Vec<&str> = outcome.admitted.iter().map(Capability::name).collect();
         assert_eq!(
             names,
             vec!["a.dup"],
@@ -494,7 +501,7 @@ mod tests {
         write_capability_dir(tmp.path(), "alpha.cap");
         write_capability_dir(tmp.path(), "mike.cap");
         let outcome = scan_user_capabilities(tmp.path(), &builtins(), None, None);
-        let names: Vec<&str> = outcome.admitted.iter().map(|c| c.name()).collect();
+        let names: Vec<&str> = outcome.admitted.iter().map(Capability::name).collect();
         assert_eq!(
             names,
             vec!["alpha.cap", "mike.cap", "zeta.cap"],

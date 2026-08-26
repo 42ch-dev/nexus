@@ -159,7 +159,9 @@ mod tests {
         let mut state =
             crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         let registry = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
-        state.set_capability_registry(registry);
+        state.set_capability_registry(
+            nexus_orchestration::CapabilityRegistryHolder::with_registry(registry),
+        );
 
         let Json(resp) = list_capabilities(State(state), Query(ListCapabilitiesQuery::default()))
             .await
@@ -200,7 +202,9 @@ mod tests {
             "no skips expected: {:?}",
             outcome.skipped
         );
-        state.set_capability_registry(Arc::new(registry));
+        state.set_capability_registry(
+            nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(registry)),
+        );
 
         let Json(resp) = list_capabilities(State(state), Query(ListCapabilitiesQuery::default()))
             .await

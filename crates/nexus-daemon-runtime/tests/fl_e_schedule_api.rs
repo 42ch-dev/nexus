@@ -55,7 +55,9 @@ async fn test_ctx() -> TestCtx {
 
     // Wire a capability registry so preset gates are evaluated.
     let registry = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
-    state.set_capability_registry(registry);
+    state.set_capability_registry(
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(registry),
+    );
 
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
