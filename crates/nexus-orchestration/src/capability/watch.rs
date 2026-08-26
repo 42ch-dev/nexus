@@ -1075,7 +1075,11 @@ mod tests {
         holder.swap(std::sync::Arc::new(reg));
         let mirror: std::sync::Arc<std::sync::Mutex<Vec<UserCapability>>> =
             std::sync::Arc::new(std::sync::Mutex::new(boot_outcome.admitted.clone()));
-        assert_eq!(mirror.lock().unwrap().len(), 1, "alpha.cap admitted at boot");
+        assert_eq!(
+            mirror.lock().unwrap().len(),
+            1,
+            "alpha.cap admitted at boot"
+        );
 
         // The between-scan-and-digest EDIT: the trio is rewritten with new
         // content (a longer wasm + matching shas) AFTER the boot scan
@@ -1096,9 +1100,7 @@ mod tests {
             .expect("cap leaf is an object")
             .get("basic-combat.wasm")
             .expect("wasm in the baseline leaf");
-        let wasm_size = wasm_entry
-            .as_array()
-            .expect("wasm entry is an array")[0]
+        let wasm_size = wasm_entry.as_array().expect("wasm entry is an array")[0]
             .as_u64()
             .expect("wasm size is a number");
         assert_eq!(
