@@ -281,6 +281,25 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。**V1.
 - 唯一允许的激活切换：新 mint 的 id、单一 name 匹配的 id、无名路径上
   已活跃的 id（AR-89 #2 — "never silent takeover" pin）。
 
+### 6.2B.2 V1.176 P0 T3 amendment — `creator list` local-identity visibility + `--json` (AR-90)
+
+`creator list` 合并平台缓存/auth 行与 persistent `local_identities` 行
+（SSOT，**非** identity-cache；按 `creator_id` 去重、排序不变），新增
+**ORIGIN** 列（`local` | `platform`）：
+
+- **本地行**（`origin = local`）：display_name 取自 `local_identities`
+  （权威）；HANDLE 渲染 `-`（不 overload HANDLE，PL-6）；匿名 / ephemeral
+  身份**不出现**在本列表（`system identity list` 是身份调试面）。
+- **平台行**（`origin = platform`）：id / handle / display_name / active
+  语义与来源（identity cache ∪ auth store）完全不变，byte-stable。
+- **`--json`**（本命令新增，无 JSON 模式先例）：机器合同 DTO **逐字**
+  输出 —— JSON **数组**，元素恰为
+  `{ "creator_id": string, "handle": string|null, "display_name":
+  string|null, "active": boolean, "origin": "local"|"platform" }`；
+  键名 `origin`（非 `kind`，与 capability catalog wire vocabulary 一致）；
+  本地行 `handle`/`display_name` 为 `null`；空列表输出 `[]`；人形默认
+  empty-state 文案不变。**无 daemon route**；无 `schemas/` / 契约触碰。
+
 ### 6.2C `nexus42 creator workspace`（本地 workspace 子命令）
 
 `workspace_slug` 在同一 `creator_id` 下唯一，并映射到 `"$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/"`。默认 slug 为 `default`。

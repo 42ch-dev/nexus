@@ -1282,3 +1282,169 @@ fn anonymous_identity_does_not_materialize_workspace_row() {
         .failure()
         .stderr(predicate::str::contains("referenced creator"));
 }
+
+// =============================================================================
+// V1.176 P0 T3 (AR-90): creator list local-identity visibility + --json
+// =============================================================================
+
+/// Seed a platform creator in the identity cache (`creator-identities.json`)
+/// — exactly today's platform source for `creator list`.
+fn seed_platform_cache(home: &std::path::Path, creator_id: &str, handle: &str, display_name: &str) {
+    let dir = home.join(".nexus42");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("creator-identities.json");
+    let cache = serde_json::json!({
+        "creators": {
+            creator_id: {
+                "creator_id": creator_id,
+                "handle": handle,
+                "display_name": display_name,
+            }
+        }
+    });
+    std::fs::write(&path, serde_json::to_string_pretty(&cache).unwrap()).unwrap();
+}
+
+/// Mixed local+platform listing (AR-90): a persistent local identity appears
+/// marked `local` (HANDLE renders `-`, never `[local]`); a seeded platform row
+/// keeps its id/handle/display byte-stable marked `platform`. `--json` emits
+/// the pinned DTO array verbatim (`origin` key; nullable `handle`/`display_name`).
+#[test]
+fn creator_list_mixed_local_and_platform() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    // Platform row via the identity cache (today's platform source).
+    seed_platform_cache(home, "ctr_platabc", "alice", "Alice Platform");
+
+    // Local persistent row via the shared bootstrap helper.
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("register")
+        .arg("--local")
+        .arg("--name")
+        .arg("Local Alice")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created persistent identity"));
+    let local_id = single_persistent_id(home);
+
+    // Human default: additive ORIGIN column — local row marked, platform row
+    // byte-stable (id/handle/display unchanged).
+    let human = Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("list")
+        .env("HOME", home)
+        .assert()
+        .success();
+    let stdout = String::from_utf8(human.get_output().stdout.clone()).unwrap();
+    assert!(
+        stdout.contains("ORIGIN"),
+        "table must gain the ORIGIN header: {stdout}"
+    );
+    let local_line = stdout
+        .lines()
+        .find(|l| l.contains(&local_id))
+        .expect("local row rendered");
+    assert!(
+        local_line.contains("local") && local_line.contains("Local Alice"),
+        "local row marked with authoritative display name: {local_line}"
+    );
+    assert!(
+        !local_line.contains("[local]"),
+        "HANDLE must not be overloaded with [local]: {local_line}"
+    );
+    let platform_line = stdout
+        .lines()
+        .find(|l| l.contains("ctr_platabc"))
+        .expect("platform row rendered");
+    assert!(
+        platform_line.contains("alice")
+            && platform_line.contains("Alice Platform")
+            && platform_line.contains("platform"),
+        "platform row byte-stable and marked platform: {platform_line}"
+    );
+
+    // `--json`: pinned DTO array verbatim.
+    let json_out = Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("list")
+        .arg("--json")
+        .env("HOME", home)
+        .assert()
+        .success();
+    let json_text = String::from_utf8(json_out.get_output().stdout.clone()).unwrap();
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(&json_text).expect("--json must emit a JSON array");
+    assert_eq!(rows.len(), 2, "local + platform rows");
+    for row in &rows {
+        let obj = row.as_object().expect("row is an object");
+        assert_eq!(obj.len(), 5, "exactly the pinned keys: {row}");
+        for key in ["creator_id", "handle", "display_name", "active", "origin"] {
+            assert!(obj.contains_key(key), "missing pinned key {key}: {row}");
+        }
+    }
+    let local = rows
+        .iter()
+        .find(|r| r["creator_id"] == local_id)
+        .expect("local row in json");
+    assert_eq!(local["origin"], "local");
+    assert!(
+        local["handle"].is_null(),
+        "local handle must be null: {local}"
+    );
+    assert_eq!(local["display_name"], "Local Alice");
+    assert_eq!(local["active"], true);
+    let platform = rows
+        .iter()
+        .find(|r| r["creator_id"] == "ctr_platabc")
+        .expect("platform row in json");
+    assert_eq!(platform["origin"], "platform");
+    assert_eq!(platform["handle"], "alice");
+    assert_eq!(platform["display_name"], "Alice Platform");
+    assert_eq!(platform["active"], false);
+}
+
+/// `creator list --json` on an empty identity surface emits `[]` (DTO
+/// verbatim); the human default keeps the unchanged empty-state copy.
+#[test]
+fn creator_list_empty_states_json_and_human() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("list")
+        .arg("--json")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[]"));
+
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("list")
+        .env("HOME", home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No registered Creators found."));
+}
+
+/// `creator list --help` documents the new `--json` flag.
+#[test]
+fn creator_list_help_documents_json() {
+    Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("list")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--json"));
+}
