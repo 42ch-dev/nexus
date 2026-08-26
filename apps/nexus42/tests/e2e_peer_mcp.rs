@@ -42,6 +42,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -124,8 +125,10 @@ struct E2eDaemon {
     accept_task: JoinHandle<()>,
     http_task: JoinHandle<()>,
     sessions: Arc<PeerSessionManager>,
-    _scan: tempfile::TempDir,
+    scan: tempfile::TempDir,
     _tmp: TestTempRoot,
+    watcher_shutdown: Arc<Notify>,
+    _watcher: JoinHandle<()>,
 }
 
 impl E2eDaemon {
@@ -158,7 +161,7 @@ impl E2eDaemon {
             manifest,
             allowlist: peer_allowlist,
             peer_keys,
-            reserved_tool_ids: std::collections::HashSet::new(),
+            capability_registry: None,
         };
         let accept_task = spawn_accept_loop(
             listener,
@@ -189,7 +192,28 @@ impl E2eDaemon {
             "no skips expected: {:?}",
             outcome.skipped
         );
-        state.set_capability_registry(Arc::new(registry));
+        let holder =
+            nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(registry));
+        state.set_capability_registry(holder.clone());
+
+        // ── V1.176 P1 hot-reload watcher (RN-2, AR-91/AR-92) ──
+        // The REAL daemon watch over the scan dir, spawned through the same
+        // boot seam. A stable scan dir ⇒ no rescans, no swaps, so existing
+        // suites are unaffected; the hot-reload journey mutates the dir.
+        let watcher_shutdown = Arc::new(Notify::new());
+        // W-B: seed the watcher's baseline with the boot scan's digest
+        // (computed before `scan_dir` is moved into the spawn).
+        let boot_digest = nexus_orchestration::capability::watch::scan_dir_digest(&scan_dir);
+        let watcher = nexus_daemon_runtime::boot::spawn_user_capability_watcher(
+            holder,
+            deps,
+            None,
+            None,
+            scan_dir,
+            Arc::clone(&watcher_shutdown),
+            outcome.admitted,
+            boot_digest,
+        );
 
         // ── Real axum HTTP listener on 127.0.0.1:0 ──
         let http_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -209,8 +233,10 @@ impl E2eDaemon {
             accept_task,
             http_task,
             sessions,
-            _scan: scan,
+            scan,
             _tmp: tmp,
+            watcher_shutdown,
+            _watcher: watcher,
         }
     }
 
@@ -220,6 +246,8 @@ impl E2eDaemon {
         self.shutdown.notify_one();
         self.accept_task.abort();
         self.http_task.abort();
+        // The hot-reload watcher (AR-91 #6) exits on this notify.
+        self.watcher_shutdown.notify_one();
     }
 }
 
@@ -227,6 +255,7 @@ impl Drop for E2eDaemon {
     fn drop(&mut self) {
         self.shutdown.notify_one();
         self.http_task.abort();
+        self.watcher_shutdown.notify_one();
     }
 }
 
@@ -1051,4 +1080,145 @@ async fn journey_b_child_exit_mid_session_is_bounded_failure() {
 
     drop(running);
     teardown(server, &[peer_id]);
+}
+// ── Journey C: user-cap hot reload reaches a live session (RN-2, AR-95 #4) ──
+
+/// Counts `notifications/tools/list_changed` received by the client (same
+/// shape as the stub harness's `ListChangedCounter` in `mcp_serve_e2e.rs`).
+#[derive(Clone, Default)]
+struct JourneyListChangedCounter {
+    count: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl JourneyListChangedCounter {
+    fn count(&self) -> usize {
+        self.count.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl rmcp::ClientHandler for JourneyListChangedCounter {
+    fn on_tool_list_changed(
+        &self,
+        _context: rmcp::service::NotificationContext<rmcp::RoleClient>,
+    ) -> impl Future<Output = ()> + rmcp::service::MaybeSendFuture + '_ {
+        self.count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        std::future::ready(())
+    }
+}
+
+/// Await the next `tools/list_changed` (count > `before`). The deadline
+/// pins the AR-93 chain: 1 s daemon watch (incl. rebuild) + 2 s child
+/// watch + one HTTP request ≈ ≤ 4 s worst case; 6 s = 1.5 × the documented
+/// bound, so a regression from ≤ 4 s toward 8 s fails this journey
+/// (qc3 S-2).
+async fn await_journey_list_changed(
+    counter: &JourneyListChangedCounter,
+    before: usize,
+    what: &str,
+) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(6);
+    loop {
+        if counter.count() > before {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for tools/list_changed after {what}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Sorted `tools/list` names from a journey client.
+async fn journey_list_ids(
+    running: &RunningService<rmcp::RoleClient, JourneyListChangedCounter>,
+) -> Vec<String> {
+    let list = running.list_tools(None).await.expect("tools/list succeeds");
+    let mut ids: Vec<String> = list.tools.iter().map(|t| t.name.to_string()).collect();
+    ids.sort();
+    ids
+}
+
+// The spawned watcher task + real HTTP server must progress alongside the
+// rmcp session; multi_thread (4 workers) is the house precedent for the
+// full-fidelity daemon harness in this file.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial(e2e_peer_mcp)]
+async fn journey_c_user_cap_hot_reload_reaches_live_session() {
+    clear_peer_table();
+
+    // The daemon harness runs the REAL hot-reload watcher (RN-2). No user
+    // caps at boot: the scan dir does not exist, so the watcher is seeded
+    // with the boot digest `Missing` (stable — no rescans until the dir
+    // appears).
+    let server = E2eDaemon::start(Vec::new(), Vec::new(), HashMap::new(), false).await;
+
+    // A live MCP session against the REAL daemon. The child is the same
+    // spawned binary as every other journey here — zero child-side change
+    // (the AR-79 watch is source-agnostic over the tools body; AR-95 #4).
+    let mut child = McpChild::spawn(&server.http_url);
+    let transport = child.take_transport();
+    let counter = JourneyListChangedCounter::default();
+    let running = tokio::time::timeout(
+        Duration::from_secs(15),
+        serve_client(counter.clone(), transport),
+    )
+    .await
+    .expect("initialize handshake is bounded (no hang)")
+    .expect("initialize handshake completes");
+
+    // Advertisement pin (AR-79 #4): initialize capabilities include
+    // `tools.listChanged`.
+    let info = running.peer_info().expect("server info from initialize");
+    let tools = info.capabilities.tools.as_ref().expect("tools capability");
+    assert_eq!(
+        tools.list_changed,
+        Some(true),
+        "initialize advertises tools.listChanged"
+    );
+
+    // Baseline: the name is not in the live catalog.
+    let baseline = journey_list_ids(&running).await;
+    assert!(
+        !baseline.contains(&"journey.mcp".to_owned()),
+        "baseline tools/list must not contain the not-yet-written name"
+    );
+
+    // Settle the child-side baseline BEFORE mutating: the catalog watch
+    // loop SLEEPS first, then polls (`catalog_watch_loop_inner`, AR-79), so
+    // the first digest is established by the first successful poll at ~2 s.
+    // Mutating the catalog before that baseline would fold the add into it
+    // and no `listChanged` would ever fire (the mcp_serve_e2e harness
+    // guards the same race with `wait_for_baseline_poll`). 5 s = 2 × 2 s
+    // interval + 1 s margin — ≥ 2 successful polls pre-mutation.
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    // ── Add: a complete trio → listChanged within the bound → present ──
+    write_capability_dir(server.scan.path(), "journey.mcp");
+    let before = counter.count();
+    await_journey_list_changed(&counter, before, "adding a user-cap trio").await;
+    assert_eq!(counter.count(), before + 1, "exactly one notification");
+    let after_add = journey_list_ids(&running).await;
+    assert!(
+        after_add.contains(&"journey.mcp".to_owned()),
+        "refreshed tools/list includes the hot-added user capability"
+    );
+    assert_eq!(after_add.len(), baseline.len() + 1, "one row added");
+
+    // ── Remove: directory delete → listChanged → gone ──
+    std::fs::remove_dir_all(server.scan.path().join("capabilities").join("journey.mcp"))
+        .expect("remove trio dir");
+    let before = counter.count();
+    await_journey_list_changed(&counter, before, "removing a user-cap trio").await;
+    assert_eq!(counter.count(), before + 1, "exactly one notification");
+    let after_remove = journey_list_ids(&running).await;
+    assert!(
+        !after_remove.contains(&"journey.mcp".to_owned()),
+        "refreshed tools/list drops the removed user capability"
+    );
+    assert_eq!(after_remove, baseline, "back to the baseline catalog");
+
+    drop(running);
+    child.kill();
+    teardown(server, &[]);
 }

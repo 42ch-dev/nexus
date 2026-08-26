@@ -23,11 +23,16 @@ pub async fn axum_app_with_ephemeral_engine() -> Router {
     // Wire an ephemeral engine with in-memory storage.
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let registry = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
-    let engine = Arc::new(GraphFlowEngine::new_with_storage(storage, registry.clone()));
+    let engine = Arc::new(GraphFlowEngine::new_with_storage(
+        storage,
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(registry.clone()),
+    ));
     state.set_engine(engine as Arc<dyn OrchestrationEngine>);
 
     // Wire a capability registry.
-    state.set_capability_registry(registry);
+    state.set_capability_registry(
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(registry),
+    );
 
     // Keep tmp alive for the duration of the test.
     // The caller receives the Router; tmp is dropped when this function returns,

@@ -51,7 +51,7 @@
 // signal; `.unwrap()`/`.expect()` keep the tests linear and readable.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -186,8 +186,9 @@ fn write_capability_dir(root: &std::path::Path, name: &str) {
 }
 
 /// Test harness: accept loop + daemon router (+ optional user-cap scan dir).
-/// `reserved_tool_ids` mirrors boot's computed reserved set (builtin ids +
-/// user-cap names — AR-68 #2(iii)); default = empty like `peer_tool.rs`.
+/// The peer lane holds no capability holder (`None`), so only the static
+/// builtin host-tool ids are reserved — host ids cannot collide with the
+/// `tools.<ns>.<id>` test grammar (W-A; default posture like `peer_tool.rs`).
 struct PeerTestServer {
     addr: std::net::SocketAddr,
     task: JoinHandle<()>,
@@ -224,7 +225,7 @@ async fn start_server(
         manifest,
         allowlist,
         peer_keys,
-        reserved_tool_ids: HashSet::new(),
+        capability_registry: None,
     };
     let task = spawn_accept_loop(
         listener,
@@ -249,7 +250,9 @@ async fn start_server(
             "no skips expected: {:?}",
             outcome.skipped
         );
-        state.set_capability_registry(Arc::new(registry));
+        state.set_capability_registry(
+            nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(registry)),
+        );
     }
     let app = api::create_router(state, DaemonApiConfig::keyless());
     let http = TestServer::new(app).expect("test server");

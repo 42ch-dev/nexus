@@ -33,7 +33,8 @@ pub mod user_preset_dir;
 pub mod worker;
 
 pub use capability::{
-    Capability, CapabilityError, CapabilityRegistry, CapabilityRuntimeDeps, WorkerHandleProvider,
+    Capability, CapabilityError, CapabilityRegistry, CapabilityRegistryHolder,
+    CapabilityRuntimeDeps, WorkerHandleProvider,
 };
 pub use engine::{ChildSessionParams, EngineError, GraphFlowEngine, OrchestrationEngine};
 pub use preset::resolve_preset;

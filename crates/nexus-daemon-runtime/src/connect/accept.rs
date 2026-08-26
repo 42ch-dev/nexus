@@ -47,7 +47,9 @@ use tokio::task::JoinHandle;
 use crate::connect::config::PeerToolsConfig;
 use crate::connect::identity::{self, IdentityError};
 use crate::connect::session::PeerSessionManager;
+use crate::connect::table::live_reserved_tool_ids;
 use crate::connect::ws_transport::{ws_config, WsTransport};
+use nexus_orchestration::CapabilityRegistryHolder;
 
 /// Poll interval for the close-observation fallback (`responder.state()`).
 const CLOSE_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -173,9 +175,13 @@ pub struct PeerResponderOptions {
     pub allowlist: Vec<String>,
     /// Preconfigured dialer Ed25519 public keys by peer id (fail-closed).
     pub peer_keys: HashMap<String, [u8; 32]>,
-    /// Tool ids that can never be admitted (builtin ids + user-cap names,
-    /// AR-68 #2(iii) reserved namespaces).
-    pub reserved_tool_ids: std::collections::HashSet<String>,
+    /// Shared capability registry holder (AR-92) from which the
+    /// AR-68 #2(iii) reserved set is derived **live** at each admission:
+    /// builtin ids ∪ the current user-capability names. A user capability
+    /// hot-added after the lane spawned stays reserved against peer
+    /// admission (V1.176 P1 QC fix W-A). `None` reserves only the static
+    /// builtin host-tool ids.
+    pub capability_registry: Option<CapabilityRegistryHolder>,
 }
 
 /// Spawn the peer-tools accept loop over an already-bound listener.
@@ -313,13 +319,17 @@ async fn monitor_session(
                 options.manifest.capabilities.iter().cloned().collect();
             let allowlist: std::collections::HashSet<String> =
                 config.tool_allowlist.iter().cloned().collect();
+            // W-A (V1.176 P1 QC fix): the reserved set is derived LIVE from
+            // the shared holder at admission time — hot-reloaded user-cap
+            // names stay reserved against peer admission.
+            let reserved = live_reserved_tool_ids(options.capability_registry.as_ref());
             match crate::connect::peer_tool_table().admit_and_register(
                 &peer_id,
                 &manifest,
                 &responder,
                 &daemon_caps,
                 &allowlist,
-                &options.reserved_tool_ids,
+                &reserved,
             ) {
                 crate::connect::AdmissionOutcome::Admitted { tool_ids } => tool_ids,
                 crate::connect::AdmissionOutcome::ManifestInvalid { message } => {
@@ -390,6 +400,12 @@ async fn wait_until_established(responder: &Arc<ConnectResponder>) -> Option<Str
 /// apply on daemon restart (AR-69 restart-scoped, documented in
 /// `config.rs`).
 ///
+/// `capability_registry` is the shared [`CapabilityRegistryHolder`] (AR-92)
+/// the peer lane keeps for the AR-68 #2(ii) reserved-set check — derived
+/// LIVE at each admission so hot-reloaded user-capability names stay
+/// reserved against peer admission (V1.176 P1 QC fix W-A). `None` reserves
+/// only the static builtin host-tool ids.
+///
 /// # Errors
 /// Config load, identity persistence, or listener bind failures are
 /// returned as errors — the caller decides whether to fail boot or keep the
@@ -397,7 +413,7 @@ async fn wait_until_established(responder: &Arc<ConnectResponder>) -> Option<Str
 pub async fn start_peer_tools_lane(
     home: &Path,
     shutdown: Arc<Notify>,
-    reserved_tool_ids: &[String],
+    capability_registry: Option<CapabilityRegistryHolder>,
 ) -> anyhow::Result<PeerToolsLaneHandle> {
     let config = Arc::new(PeerToolsConfig::load(home)?);
     // PR #229 F-2 (Cursor Security HIGH): the peer lane binds PLAINTEXT
@@ -438,7 +454,7 @@ pub async fn start_peer_tools_lane(
         manifest,
         allowlist: config.peer_ids.clone(),
         peer_keys,
-        reserved_tool_ids: reserved_tool_ids.iter().cloned().collect(),
+        capability_registry,
     };
     let task = spawn_accept_loop(
         listener,
@@ -523,7 +539,7 @@ mod tests {
         )
         .expect("write daemon.json");
         let shutdown = Arc::new(Notify::new());
-        let Err(err) = start_peer_tools_lane(home.path(), shutdown, &[]).await else {
+        let Err(err) = start_peer_tools_lane(home.path(), shutdown, None).await else {
             panic!("non-loopback bind must fail closed without TLS")
         };
         let msg = format!("{err:#}");

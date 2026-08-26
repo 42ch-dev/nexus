@@ -21,7 +21,7 @@ use nexus_contracts::local::domain::RuntimeMode;
 use nexus_contracts::CertFingerprintResponse;
 use nexus_orchestration::{
     engine::OrchestrationEngine, schedule::supervisor::ScheduleSupervisor, CapabilityRegistry,
-    WorkerManager,
+    CapabilityRegistryHolder, WorkerManager,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -78,8 +78,11 @@ pub struct WorkspaceState {
     engine: Arc<Option<Arc<dyn OrchestrationEngine>>>,
     /// Worker manager (set at daemon startup when WS2 is wired).
     worker_manager: Arc<Option<Arc<WorkerManager>>>,
-    /// Capability registry (set at daemon startup when WS2 is wired).
-    capability_registry: Arc<Option<Arc<CapabilityRegistry>>>,
+    /// Capability registry holder (set at daemon startup when WS2 is wired;
+    /// V1.176 P1, AR-92 #2). The holder is shared with the engine and the
+    /// hot-reload watcher; every `capability_registry()` read clones the
+    /// current registry under the holder's read lock.
+    capability_registry: Arc<Option<CapabilityRegistryHolder>>,
     /// Schedule supervisor for WS7 schedule management (set at daemon startup).
     schedule_supervisor: Arc<Option<Arc<ScheduleSupervisor>>>,
     /// Agent host facade (set at daemon startup when agent host subsystem is wired).
@@ -516,9 +519,11 @@ impl WorkspaceState {
         self.worker_manager = Arc::new(Some(worker_manager));
     }
 
-    /// Set the capability registry.
-    pub fn set_capability_registry(&mut self, registry: Arc<CapabilityRegistry>) {
-        self.capability_registry = Arc::new(Some(registry));
+    /// Set the capability registry holder (shared with the engine and the
+    /// hot-reload watcher — AR-92 #2). The registry itself is swapped into
+    /// the holder by the watcher; readers clone per call.
+    pub fn set_capability_registry(&mut self, holder: CapabilityRegistryHolder) {
+        self.capability_registry = Arc::new(Some(holder));
     }
 
     /// Set the schedule supervisor (WS7).
@@ -608,9 +613,28 @@ impl WorkspaceState {
         self.worker_manager.as_ref().clone()
     }
 
-    /// Get the capability registry, if set.
+    /// Get the current capability registry, if set (V1.176 P1, AR-92).
+    ///
+    /// Reads through the shared holder: each call clones the current
+    /// registry under the read lock and releases immediately, so callers see
+    /// hot reloads without holding the lock (AR-92 #7).
     #[must_use]
     pub fn capability_registry(&self) -> Option<Arc<CapabilityRegistry>> {
+        self.capability_registry
+            .as_ref()
+            .clone()
+            .and_then(|holder| holder.get())
+    }
+
+    /// Get the shared capability registry holder itself, if set (V1.176 P1,
+    /// AR-92).
+    ///
+    /// The peer-tools lane (AR-68 #2(ii)) derives its reserved-name set
+    /// LIVE from this holder at each admission, so a user capability
+    /// hot-added after the lane spawned stays reserved against peer
+    /// admission (V1.176 P1 QC fix, W-A).
+    #[must_use]
+    pub fn capability_registry_holder(&self) -> Option<CapabilityRegistryHolder> {
         self.capability_registry.as_ref().clone()
     }
 

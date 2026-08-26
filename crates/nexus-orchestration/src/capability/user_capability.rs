@@ -9,9 +9,11 @@
 //! It is a **closed contract** (`deny_unknown_fields`): unknown fields are
 //! authoring errors, not forward-compat hints (AR-34).
 //!
-//! The registered capability leaks the three `String` fields to `&'static str`
-//! once at construction (T2/AR-44) — one bounded allocation per admitted user
-//! capability per boot, same lifetime as builtin literal constants.
+//! The registered capability interns the three `String` fields to
+//! `&'static str` once per distinct value at construction (W-2, V1.176 P1
+//! QC fix) — same lifetime as builtin literal constants, bounded by the
+//! number of DISTINCT admitted strings across the daemon run, NOT by the
+//! hot-reload count.
 
 use crate::capability::{Capability, CapabilityError, CapabilityOrigin};
 use nexus_contracts::generated::daemon_api::compute::compute_input::{
@@ -156,11 +158,15 @@ impl UserCapabilityDescriptor {
 /// first `run()`, compiled once through the shared [`ModuleCache`]
 /// (hash-keyed compile-once), then invoked via [`WasmEngine::compute`].
 ///
-/// **Lifetime**: the descriptor's three `String` fields are leaked once at
-/// construction (`Box::leak`) — one bounded allocation per admitted user
-/// capability per boot, same process-lifetime semantics as the builtins'
-/// literal constants (AR-34/AR-44). Deliberate and documented; do not convert
-/// the `Capability` trait to owned types.
+/// **Lifetime** (W-2, V1.176 P1 QC fix): the descriptor's three `String`
+/// fields are **interned** once per distinct value at construction — the
+/// first occurrence leaks, every later construction of the same value
+/// reuses the existing `&'static str` (a hot-reload rebuild of an
+/// unchanged entry leaks nothing). Memory is bounded by the number of
+/// DISTINCT admitted strings over the daemon run, not by the reload count.
+/// Same process-lifetime semantics as the builtins' literal constants
+/// (AR-34/AR-44). Deliberate and documented; do not convert the
+/// `Capability` trait to owned types.
 ///
 /// The executor handle quartet (`dir`, `module_id`/`wasm_sha256`, `engine`,
 /// `module_cache`) is `Option`al where the handle needs a runtime so the
@@ -169,6 +175,14 @@ impl UserCapabilityDescriptor {
 /// [`CapabilityError::WorkerUnavailable`] variant (no new variant — exhaustive
 /// matches like `fork.rs` keep compiling). The admitted-with-engine path never
 /// returns it (PL-10 closed).
+///
+/// `Clone` (V1.176 P1, AR-92 #4): the hot-reload watcher keeps a last-admitted
+/// mirror of concrete `UserCapability` entries so the merge rule can carry the
+/// last good admission across rebuilds. Cloning is cheap — the three catalog
+/// strings are `&'static str` (interned once per distinct value; clones
+/// share, never re-leak), the handles are `Arc`s, and the remaining fields
+/// are plain data.
+#[derive(Clone)]
 pub struct UserCapability {
     name: &'static str,
     input_schema: &'static str,
@@ -198,11 +212,37 @@ pub struct UserCapability {
     module_cache: Option<Arc<ModuleCache>>,
 }
 
+/// Intern a catalog string to a `&'static str`, deduplicating identical
+/// values across hot-reload rebuilds (W-2, V1.176 P1 QC fix).
+///
+/// The [`Capability`] trait requires `&'static str` for the three catalog
+/// strings (AR-34/AR-44; "do not convert the trait to owned types"), so
+/// the first construction of a value must promote it to `'static`. This
+/// interner leaks each DISTINCT value exactly once and reuses it forever:
+/// an author iterating on one capability (save → reload cycles) leaks its
+/// name/schemas a single time — memory is bounded by the number of
+/// distinct admitted strings, not by the reload count.
+fn intern(value: String) -> &'static str {
+    static INTERNED: std::sync::LazyLock<
+        std::sync::Mutex<std::collections::HashMap<&'static str, &'static str>>,
+    > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let mut map = INTERNED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(&existing) = map.get(value.as_str()) {
+        return existing;
+    }
+    let leaked: &'static str = Box::leak(value.into_boxed_str());
+    map.insert(leaked, leaked);
+    leaked
+}
+
 impl UserCapability {
-    /// Construct from a validated descriptor, leaking the three catalog
-    /// strings once (AR-34/AR-44), and carrying the capability dir + the
-    /// descriptor's wasm hash + sandbox overrides + the shared engine/cache
-    /// (AR-37/AR-38/AR-39).
+    /// Construct from a validated descriptor, interning the three catalog
+    /// strings once per distinct value (W-2: unchanged re-admissions on hot
+    /// reload reuse the existing `&'static str` — no per-rebuild leak), and
+    /// carrying the capability dir + the descriptor's wasm hash + sandbox
+    /// overrides + the shared engine/cache (AR-37/AR-38/AR-39).
     ///
     /// `dir` is the capability's own directory (`<scan_root>/<name>/`); the
     /// executor reads `manifest.json` + `<module-id>.wasm` from it at first
@@ -220,9 +260,9 @@ impl UserCapability {
         module_cache: Option<Arc<ModuleCache>>,
     ) -> Self {
         Self {
-            name: Box::leak(descriptor.name.clone().into_boxed_str()),
-            input_schema: Box::leak(descriptor.input_schema.clone().into_boxed_str()),
-            output_schema: Box::leak(descriptor.output_schema.clone().into_boxed_str()),
+            name: intern(descriptor.name.clone()),
+            input_schema: intern(descriptor.input_schema.clone()),
+            output_schema: intern(descriptor.output_schema.clone()),
             dir,
             module_id: descriptor.wasm.module_id.clone(),
             wasm_sha256: descriptor.wasm.wasm_sha256.clone(),
@@ -230,6 +270,18 @@ impl UserCapability {
             engine,
             module_cache,
         }
+    }
+
+    /// The admitted module's expected content hash (AR-39 single hash path).
+    ///
+    /// Test-only accessor: the hot-reload boot-equivalence test (AR-95 #1)
+    /// compares name + `wasm_sha256` between the boot-constructor and
+    /// hot-rebuild user-cap sets. Runtime enforcement is the executor's
+    /// lazy-load re-verification (F2) — no production caller needs the value.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn wasm_sha256(&self) -> &str {
+        &self.wasm_sha256
     }
 
     /// AR-37 envelope mapping: capability input JSON → [`ComputeInput`].
@@ -661,6 +713,29 @@ mod tests {
         descriptor
             .validate()
             .expect("minimal descriptor must validate");
+    }
+    /// W-2 (V1.176 P1 QC fix): the three catalog strings are interned once
+    /// per DISTINCT value — constructing a capability from an identical
+    /// descriptor again reuses the existing `&'static str` (pointer
+    /// equality), so a hot reload of an unchanged entry leaks nothing.
+    #[test]
+    fn interned_catalog_strings_are_reused_across_constructions() {
+        let dir = tempfile::tempdir().unwrap();
+        let descriptor = parse(&minimal_json()).expect("minimal descriptor must parse");
+        let first = UserCapability::new(&descriptor, dir.path().join("sync.pull"), None, None);
+        let second = UserCapability::new(&descriptor, dir.path().join("sync.pull"), None, None);
+        assert!(
+            std::ptr::eq(first.name(), second.name()),
+            "identical name reuses the interned &'static str (no re-leak)"
+        );
+        assert!(
+            std::ptr::eq(first.input_schema(), second.input_schema()),
+            "identical input schema reuses the interned &'static str"
+        );
+        assert!(
+            std::ptr::eq(first.output_schema(), second.output_schema()),
+            "identical output schema reuses the interned &'static str"
+        );
     }
 
     #[test]

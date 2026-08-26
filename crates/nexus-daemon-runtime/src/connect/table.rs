@@ -12,9 +12,11 @@
 //! 2. Per-tool named exact-id filters, in order:
 //!    - spoke grammar (`parse_tool_capability_id`; defensive — the typed
 //!      `ToolDescriptorCapabilityId` already enforces the pattern);
-//!    - reserved namespaces: `tools.nexus.` prefix refused; id equal to an
-//!      existing builtin (`host_tool_registry`) or user capability name
-//!      refused; id in the caller-supplied `reserved_tool_ids` refused;
+//!    - reserved namespaces: `tools.nexus.` prefix refused; id equal to a
+//!      builtin (`host_tool_registry`) or user capability name refused;
+//!      the `reserved_tool_ids` set is derived **live** at admission time
+//!      from the shared capability holder (builtin ids ∪ current user-cap
+//!      names — V1.176 P1 QC fix W-A), so hot-reloaded names stay reserved;
 //!    - negotiated membership: id must be in the daemon hello
 //!      `capabilities[]` (the `daemon_capabilities` set);
 //!    - operator allowlist: id must be in `tool_allowlist` (missing/empty
@@ -39,6 +41,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
+use nexus_orchestration::CapabilityRegistryHolder;
 use spoke_connect::remote::ConnectResponder;
 use spoke_operations::{
     parse_tool_capability_id, validate_manifest_tools, SpokeResult, ToolDescriptor,
@@ -173,7 +176,9 @@ impl PeerToolTable {
     /// per-tool named filters. `daemon_capabilities` is the daemon hello
     /// `capabilities[]` (negotiation, AR-69 #1); `tool_allowlist` is the
     /// operator allowlist (empty = default deny); `reserved_tool_ids` is
-    /// the caller-computed reserved set (builtin ids + user-cap names).
+    /// the caller's reserved set — computed **live** at admission time from
+    /// the shared capability holder (builtin ids + current user-cap names,
+    /// V1.176 P1 QC fix W-A) so hot-reloaded names stay reserved.
     ///
     /// Same-peer reconnect evicts the peer's prior rows before admitting
     /// (deterministic last-wins). Returns the admitted id set.
@@ -330,6 +335,32 @@ impl Default for PeerToolTable {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// AR-68 #2(ii) reserved namespaces, derived **live** at admission time
+/// (V1.176 P1 QC fix W-A): builtin host-tool ids ∪ the current user
+/// capability names in the shared holder.
+///
+/// The peer lane's options are built once at boot; holding the shared
+/// [`CapabilityRegistryHolder`] instead of a frozen name set means a user
+/// capability hot-added (or removed) AFTER the lane spawned is immediately
+/// reserved against (or freed for) peer admission — the AR-68 #3 collision
+/// contract survives hot reload. `None` (no holder wired) reserves only
+/// the static builtin host-tool ids.
+#[must_use]
+pub(crate) fn live_reserved_tool_ids(
+    capability_registry: Option<&CapabilityRegistryHolder>,
+) -> HashSet<String> {
+    let mut reserved: HashSet<String> = crate::capability_registry::host_tool_registry()
+        .ids()
+        .map(ToOwned::to_owned)
+        .collect();
+    if let Some(holder) = capability_registry {
+        if let Some(reg) = holder.get() {
+            reserved.extend(reg.iter().map(|cap| cap.name().to_owned()));
+        }
+    }
+    reserved
 }
 
 /// The per-tool named refusal chain (AR-68 #2(iii)).
@@ -556,6 +587,111 @@ mod tests {
             }
         );
         assert!(table.is_empty());
+    }
+    /// Write an admitted `<name>/capability.json` trio (AR-35 layout): a
+    /// hash-consistent `manifest.json` + `<module-id>.wasm` pair so the
+    /// AR-43 admission gates pass inside the scan. House convention
+    /// (qc1 S-1): each test crate carries its own copy of this fixture; a
+    /// feature-gated shared helper is the documented follow-up if the
+    /// copies keep churning.
+    fn write_capability_dir(root: &std::path::Path, name: &str) {
+        use sha2::{Digest, Sha256};
+        use std::fmt::Write as _;
+        let dir = root.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        let wasm = b"fake module bytes";
+        let sha: String = {
+            let mut hex = String::with_capacity(64);
+            for b in Sha256::digest(wasm) {
+                let _ = write!(hex, "{b:02x}");
+            }
+            hex
+        };
+        let descriptor = format!(
+            r#"{{
+                "name": "{name}",
+                "inputSchema": "{{\"type\":\"object\"}}",
+                "outputSchema": "{{\"type\":\"object\"}}",
+                "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{sha}" }}
+            }}"#
+        );
+        std::fs::write(dir.join("capability.json"), descriptor).unwrap();
+        let manifest = format!(
+            r#"{{
+                "module_id": "basic-combat",
+                "name": "Basic Combat",
+                "version": "1.0.0",
+                "nexus_abi_version": 1,
+                "required_key_block_types": [],
+                "compute_export": "compute",
+                "init_export": "",
+                "wasm_sha256": "{sha}"
+            }}"#
+        );
+        std::fs::write(dir.join("manifest.json"), manifest).unwrap();
+        std::fs::write(dir.join("basic-combat.wasm"), wasm).unwrap();
+    }
+
+    /// W-A (V1.176 P1 QC fix): the reserved set is derived LIVE from the
+    /// shared capability holder at admission time. A user capability
+    /// hot-added AFTER the peer lane's options were built is still
+    /// reserved — peer admission with the same id fails closed (the
+    /// AR-68 #3 collision contract, restored for hot reloads).
+    #[test]
+    fn hot_admitted_user_cap_name_is_reserved_against_peer_admission() {
+        use nexus_orchestration::capability::watch::rebuild_registry_with_merge;
+        use nexus_orchestration::{CapabilityRegistryHolder, CapabilityRuntimeDeps};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let scan_dir = tmp.path().join("caps");
+        std::fs::create_dir_all(&scan_dir).unwrap();
+        // The lane's options are built BEFORE this swap; only the shared
+        // holder is handed over (boot passes the same holder the watcher
+        // swaps into — the hot admission lands here).
+        let deps = CapabilityRuntimeDeps {
+            pool: None,
+            worker_provider: None,
+            daemon_tool_dispatch: None,
+            cdn_config: None,
+        };
+        write_capability_dir(&scan_dir, "tools.operator.demo");
+        let (registry, outcome) = rebuild_registry_with_merge(&deps, None, None, &scan_dir, &[]);
+        assert!(
+            outcome.skipped.is_empty(),
+            "no skips: {:?}",
+            outcome.skipped
+        );
+        let holder = CapabilityRegistryHolder::new();
+        holder.swap(std::sync::Arc::new(registry));
+
+        // Live derivation: the hot-added name is in the reserved set even
+        // though it did not exist when the lane's options were built.
+        let reserved = live_reserved_tool_ids(Some(&holder));
+        assert!(
+            reserved.contains("tools.operator.demo"),
+            "hot-admitted user-cap name must be reserved at admission time"
+        );
+
+        // End-to-end chain: peer registration with the same id fails
+        // closed (zero ingestion of that tool, no shadowing row).
+        let table = PeerToolTable::new();
+        let manifest = manifest_with_tools(&["tools.operator.demo"]);
+        let outcome = table.admit_and_register(
+            "peer-a",
+            &manifest,
+            &responder(),
+            &caps(&["tools.operator.demo"]),
+            &caps(&["tools.operator.demo"]),
+            &reserved,
+        );
+        assert_eq!(
+            outcome,
+            AdmissionOutcome::Admitted {
+                tool_ids: Vec::new()
+            },
+            "peer admission with a hot-admitted user-cap id fails closed"
+        );
+        assert!(table.is_empty(), "no peer row shadows the user capability");
     }
 
     #[test]

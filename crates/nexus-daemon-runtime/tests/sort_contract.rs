@@ -27,9 +27,14 @@ async fn sessions_ctx() -> TestCtx {
 
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let registry = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
-    let engine = Arc::new(GraphFlowEngine::new_with_storage(storage, registry.clone()));
+    let engine = Arc::new(GraphFlowEngine::new_with_storage(
+        storage,
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(registry.clone()),
+    ));
     state.set_engine(engine as Arc<dyn OrchestrationEngine>);
-    state.set_capability_registry(registry);
+    state.set_capability_registry(
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(registry),
+    );
 
     std::mem::forget(tmp);
 
