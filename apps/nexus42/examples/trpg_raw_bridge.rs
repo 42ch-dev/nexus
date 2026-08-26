@@ -90,6 +90,7 @@ fn served_ops(manifest: &HostCapabilityManifest) -> Vec<String> {
         .collect()
 }
 
+#[expect(clippy::missing_const_for_fn)] // match-only mapping kept non-const; const conversion is an off-path refactor (AR-100 off-path set)
 fn transport_code(error: &InvokeError) -> &'static str {
     match error {
         InvokeError::SessionClosed | InvokeError::SequenceExhausted => "SESSION_CLOSED",
@@ -125,6 +126,7 @@ async fn connect_host(
 }
 
 #[tokio::main]
+#[expect(clippy::too_many_lines)] // AR-102: linear bridge setup + event-loop teardown in one executable; extraction out of scope
 async fn main() -> anyhow::Result<()> {
     let args = parse_args()?;
     let identity = load_identity(&args.identity_seed)?;
