@@ -7,6 +7,7 @@
 //!
 //! This module extracts the V1.33 `run start` handler into a top-level command.
 //! Flags are preserved 1:1; hint strings updated to V1.45 command surface.
+//!
 
 use crate::config::CliConfig;
 use crate::errors::Result;

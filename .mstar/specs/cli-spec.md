@@ -259,6 +259,67 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。**V1.
 - **默认操作主体**：未显式指定时，daemon / sync 使用的 **`creator_id`** 必须与 `creator use` 当前活跃主体一致；本地 `state.db` 解析自 **当前活跃 Creator + 当前活跃 workspace_slug**。
 - **凭证隔离**：User refresh/access 与 `creator_api_key` 分桶存储。
 
+### 6.2B.1 V1.176 P0 T2 amendment — idempotent local bootstrap (AR-89)
+
+`creator register --local --name <n>` 与 `system identity create --persistent
+[--name <n>]` 共享同一 bootstrap helper（AR-88），重跑时按 **display_name
+三腿决策树** 收敛（PL-5），绝不静默换身份：
+
+| 输入 | 匹配（persistent `local_identities` 中 trim 后 byte-exact `==` 的 display_name 行数） | 行为 | 退出码 | stdout 诚实性 |
+| --- | --- | --- | --- | --- |
+| 具名 | 0 | mint（新 `ctr_local*` + 激活 + workspace `creators` 行） | 0 | "Created persistent identity: …" |
+| 具名 | 1 | converge 该 id（`ensure_creator_row` 修复缺失行 + 必要时激活 = session selection） | 0 | **不得**出现 "Created"；no-op 声明已收敛 / repair 声明 "Workspace creators row materialized for `<id>`" |
+| 具名 | 2+ | 失败：`creator_name_collision` | **1** | stderr 前缀 `creator_name_collision:` + 名称 + 匹配数 + 现有 id 列表 + 提示 `nexus42 system identity use <id>` |
+| 无名 | 活跃 id 解析为 persistent 本地身份 | converge 该 id（修复行；激活已成立） | 0 | 不得出现 "Created" |
+| 无名 | 无活跃 persistent 身份 | mint 无名 persistent（行 display_name = creator_id） | 0 | "Created persistent identity: …" |
+
+- **匹配键**：`str::trim` + byte-exact `==`，**无** case-fold、**无** Unicode
+  归一化、**无** 前缀/子串匹配（AR-89 #1）。R3 空白名拒绝仍在 helper 前门。
+- **错误面**：专用 `CliError::CreatorNameCollision`（非 `Other`），机器可解析
+  stderr 前缀 `creator_name_collision:`，exit 1（默认映射，无新 exit 词汇）。
+- **匿名** `--anonymous` 不进入决策树（AR-88 #5，不收敛）。
+- 唯一允许的激活切换：新 mint 的 id、单一 name 匹配的 id、无名路径上
+  已活跃的 id（AR-89 #2 — "never silent takeover" pin）。
+
+### 6.2B.2 V1.176 P0 T3 amendment — `creator list` local-identity visibility + `--json` (AR-90)
+
+`creator list` 合并平台缓存/auth 行与 persistent `local_identities` 行
+（SSOT，**非** identity-cache；按 `creator_id` 去重、排序不变），新增
+**ORIGIN** 列（`local` | `platform`）：
+
+- **本地行**（`origin = local`）：display_name 取自 `local_identities`
+  （权威）；HANDLE 渲染 `-`（不 overload HANDLE，PL-6）；匿名 / ephemeral
+  身份**不出现**在本列表（`system identity list` 是身份调试面）。
+- **平台行**（`origin = platform`）：id / handle / display_name / active
+  语义与来源（identity cache ∪ auth store）完全不变，byte-stable。
+- **`--json`**（本命令新增，无 JSON 模式先例）：机器合同 DTO **逐字**
+  输出 —— JSON **数组**，元素恰为
+  `{ "creator_id": string, "handle": string|null, "display_name":
+  string|null, "active": boolean, "origin": "local"|"platform" }`；
+  键名 `origin`（非 `kind`，与 capability catalog wire vocabulary 一致）；
+### 6.2B.3 V1.176 P0 QC fix-wave amendment — validation bounds, TOCTOU fence, list degradation
+
+- **display_name 前门校验**（helper 唯一副本，qc2 S#4 / qc1 S#1/S#6）：拒绝
+  空白-only（R3）、含控制字符（含内嵌换行 / NUL，会破坏人形表格与 collision
+  stderr 行）、超过 **64 字节**（`MAX_CREATOR_NAME_LENGTH`，与平台 register
+  的 WS-B T4 同界）的名称。byte-exact 匹配语义不变（无 case-fold / 无
+  Unicode 归一化）。
+- **TOCTOU 兜底**（qc3 S-002）：`local_identities` 上唯一部分索引
+  `(display_name) WHERE identity_type = 'persistent' AND display_name IS
+  NOT NULL` —— 并发 0-match 双 mint 时第二个 INSERT 以
+  `SQLITE_CONSTRAINT` 失败，helper 映射为与 2+ 决策树同形的
+  `creator_name_collision:`（诚实碰撞，非静默重复）。无名 persistent
+  （display_name = NULL）不受约束。迁移对历史重复名确定性收敛（每名保留
+  最小 creator_id 行，其余 display_name 置 NULL —— 行不删除，仅不再按名
+  匹配）。
+- **`creator list` 本地源降级**（qc3 S-003）：当 `~/.nexus42/state.db` 存在
+  但锁定 / 损坏 / 不可读时，跳过 local 行并向 stderr 输出
+  `warning: local identities unavailable (...); showing platform rows only.`，
+  平台行照常渲染，退出码仍为 0（含 `--json`，stderr 不污染 stdout 合同）。
+- **no-op 写自由**（qc3 F-002）：完全收敛的 no-op 重跑对两个 `state.db`
+  均**零写入**（`mode=ro` 只读校验，跳过 `Schema::init` 的 migrations +
+  seed_versions）；仅在 mint / repair / session-selection 时才写。
+
 ### 6.2C `nexus42 creator workspace`（本地 workspace 子命令）
 
 `workspace_slug` 在同一 `creator_id` 下唯一，并映射到 `"$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/"`。默认 slug 为 `default`。

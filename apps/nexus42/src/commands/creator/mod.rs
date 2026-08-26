@@ -29,7 +29,7 @@ pub mod world;
 
 use crate::auth;
 use crate::challenge::{solve_challenge_with_fallback, UnavailableLlmSolver};
-use crate::commands::system::identity::{create_identity, IdentityKindArg};
+use crate::commands::local_creator_bootstrap::{global_db_path, open_global_db_read_only};
 use crate::config::{
     find_workspace_root, nexus_home, workspace_config_path, workspace_nexus_dir, CliConfig,
     DEFAULT_WORKSPACE_SLUG,
@@ -54,8 +54,10 @@ pub use kb::{KbCommand, KbScope};
 /// Default registration source for the CLI.
 const DEFAULT_REGISTRATION_SOURCE: &str = "cli";
 
-/// Maximum length for creator display name (WS-B T4).
-const MAX_CREATOR_NAME_LENGTH: usize = 64;
+/// Maximum length for creator display name (WS-B T4) — the single definition
+/// lives in `local_creator_bootstrap` so the platform register path and the
+/// local bootstrap helper bound the same display-name token (qc2 S#4 parity).
+use crate::commands::local_creator_bootstrap::MAX_CREATOR_NAME_LENGTH;
 
 /// Handle validation regex: 4–15 chars, starts/ends with `[a-z0-9]`, interior allows `[a-z0-9._-]`.
 /// Frozen spec v3 §7.
@@ -515,7 +517,18 @@ pub enum CreatorCommand {
     },
 
     /// List all registered Creator identities
-    List,
+    ///
+    /// Persistent local identities (from `local_identities`) appear alongside
+    /// platform rows with an additive ORIGIN column (`local` | `platform`).
+    /// `--json` emits the machine DTO verbatim (a JSON array of objects with
+    /// keys `creator_id`, `handle`, `display_name`, `active`, `origin`;
+    /// nullable `handle`/`display_name` — AR-90 #4) instead of the human table.
+    List {
+        /// Emit machine-readable JSON (the AR-90 #4 DTO verbatim) instead of
+        /// the human table.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 
     // ── Assets tier (scoped knowledge and narrative) ────────────────
     /// Operational workspace slugs for the active creator (local ADR-014 tree)
@@ -734,7 +747,7 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         } => register_creator(config, name, source, handle, local).await,
         CreatorCommand::Status { creator_id } => creator_status(config, creator_id).await,
         CreatorCommand::Use { creator_ref } => use_creator(config, creator_ref.as_str()).await,
-        CreatorCommand::List => list_creators(config),
+        CreatorCommand::List { json } => list_creators(config, json).await,
         CreatorCommand::Pair { creator_id } => {
             pair_creator(config, creator_id.as_str());
             Ok(())
@@ -1129,7 +1142,7 @@ async fn register_creator(
     // WS-B T4: validate name length (cheap check before regex)
     if name.len() > MAX_CREATOR_NAME_LENGTH {
         return Err(CliError::Other(format!(
-            "Creator name exceeds maximum length ({MAX_CREATOR_NAME_LENGTH} characters)"
+            "Creator name exceeds maximum length ({MAX_CREATOR_NAME_LENGTH} bytes)"
         )));
     }
     // --- Local-only mode (AC-V167-P2-1): delegate to identity machinery ---
@@ -1291,40 +1304,16 @@ async fn register_creator(
     }
 }
 
-/// Register a local-only creator identity (AC-V167-P2-1).
-///
-/// Delegates to the shared identity machinery: [`create_identity`] mints the
-/// persistent `ctr_local*` identity via `create_local_identity` and writes
-/// `active_creator_id` (the same seam `system identity create`/`use` use), so
-/// there is exactly one minting path. No `PlatformClient` calls — zero network.
-///
-/// V1.167 P2 T2: after the identity is active, the workspace state db
-/// `creators` row is materialized via [`nexus_local_db::ensure_creator_row`] —
-/// `create_world` prechecks that table for the owner creator, so the bootstrap
-/// must complete (or error honestly) here rather than deferring the failure to
-/// a confusing `creator world create` FK error.
+/// V1.176 P0 T1 (AR-88): delegates to the shared bootstrap helper
+/// [`crate::commands::local_creator_bootstrap::bootstrap_local_creator`] — the
+/// single identity-mint + workspace-row materialization sequence both named
+/// local entry points (`creator register --local`, `system identity create
+/// --persistent`) call. No `PlatformClient` calls — zero network.
 async fn register_local_creator(name: String) -> Result<()> {
-    // `create_identity` stores the R3-trimmed name on the identity; mirror it
-    // for the workspace `creators` row so both tables agree on display_name.
-    let display_name = name.trim().to_string();
-    create_identity(IdentityKindArg::Persistent, Some(name)).await?;
+    crate::commands::local_creator_bootstrap::bootstrap_local_creator(Some(name)).await?;
 
-    // Read back the active creator id written by create_identity for the
-    // workspace `creators` row — same readback pattern as `use_identity`.
-    let config = CliConfig::load()?;
-    let creator_id = config
-        .active_creator_id
-        .as_deref()
-        .ok_or_else(|| CliError::Other("Local identity was not set as active.".to_string()))?;
-
-    // Resolve the workspace state db exactly like `creator world create` does,
-    // then materialize the `creators` row the FK precheck requires.
-    let db_path = crate::config::resolve_state_db_path(&config)?;
-    let pool = crate::db::Schema::init(&db_path).await?;
-    nexus_local_db::ensure_creator_row(&pool, creator_id, &display_name).await?;
-
-    // `create_identity` already printed the mint + active lines; add the one
-    // local-only exit marker so the register flow still names its mode.
+    // The helper rendered the mint + active lines; add the one local-only
+    // exit marker so the register flow still names its mode.
     println!("  Local-only (no platform) — no platform account created.");
 
     Ok(())
@@ -1565,17 +1554,49 @@ async fn use_creator(_config: &CliConfig, creator_ref: &str) -> Result<()> {
     Ok(())
 }
 
-/// List all known Creators with three-layer identity model (V1.16).
-fn list_creators(_config: &CliConfig) -> Result<()> {
-    let config = CliConfig::load()?;
-    let cache = creator_identity::load_creator_identity_cache();
-    let active_id = config.active_creator_id.as_deref();
+/// One resolved row for `creator list` (V1.176 P0 T3, AR-90).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ListRow {
+    creator_id: String,
+    /// `None` on local rows (PL-6: HANDLE renders `-`; JSON `null`).
+    handle: Option<String>,
+    /// Local rows: the `local_identities` value (authoritative). Platform
+    /// rows: today's cache/auth value. Absent metadata renders `-` (human) /
+    /// `null` (JSON).
+    display_name: Option<String>,
+    active: bool,
+    /// `"local"` iff the id has a persistent `local_identities` row.
+    origin: &'static str,
+}
 
-    // Collect all known creators from both the identity cache and auth store.
-    // The identity cache is the primary source for display metadata.
-    let auth_store = crate::auth::AuthStore::load()?;
+/// Resolve the merged `creator list` rows (AR-90 #1-#3).
+///
+/// Sources: platform ids = identity cache ∪ auth store (exactly today's
+/// sources); persistent local ids = `local_identities` (SSOT — the JSON
+/// cache is platform display metadata only and is NOT a local source).
+/// Deduped by `creator_id` (a platform-linked persistent local id appears
+/// once, as local), sorted by id (unchanged ordering). Anonymous/ephemeral
+/// identities are absent — they are not registered creators (AR-90 #2).
+///
+/// Row-field precedence (AR-90 #3): local row `display_name` from
+/// `local_identities` (authoritative), `handle = None` (PL-6); platform row
+/// uses today's cache lookups unchanged (byte-stable).
+#[must_use]
+fn list_rows(
+    cache: &creator_identity::CreatorIdentityCache,
+    auth_store: &crate::auth::AuthStore,
+    local_rows: &[nexus_local_db::LocalIdentityRow],
+    active_id: Option<&str>,
+) -> Vec<ListRow> {
+    let local_by_id: std::collections::HashMap<&str, &nexus_local_db::LocalIdentityRow> =
+        local_rows
+            .iter()
+            .filter(|r| r.identity_type == "persistent")
+            .map(|r| (r.creator_id.as_str(), r))
+            .collect();
 
-    // Gather all known creator IDs from both sources.
+    // Gather all known creator IDs from the two platform sources (unchanged
+    // from V1.16 behavior).
     let mut all_ids: Vec<String> = cache.creators.keys().cloned().collect();
     if let Some(creators) = &auth_store.creators {
         for id in creators.keys() {
@@ -1584,25 +1605,157 @@ fn list_creators(_config: &CliConfig) -> Result<()> {
             }
         }
     }
+    // Join persistent local rows; dedupe by id — local wins (AR-90 #1).
+    for row in local_by_id.values() {
+        if !all_ids.contains(&row.creator_id) {
+            all_ids.push(row.creator_id.clone());
+        }
+    }
     all_ids.sort();
 
-    if all_ids.is_empty() {
-        println!("No registered Creators found.");
-        println!("Use: nexus42 creator register --name <name> [--local]");
+    all_ids
+        .into_iter()
+        .map(|id| {
+            let local_row = local_by_id.get(id.as_str()).copied();
+            let (handle, display_name) = local_row.map_or_else(
+                || {
+                    let entry = creator_identity::get_creator_identity(cache, &id);
+                    (
+                        entry.and_then(|e| e.handle.clone()),
+                        entry.and_then(|e| e.display_name.clone()),
+                    )
+                },
+                |row| (None, row.display_name.clone()),
+            );
+            let active = active_id == Some(id.as_str());
+            let origin = if local_row.is_some() {
+                "local"
+            } else {
+                "platform"
+            };
+            ListRow {
+                creator_id: id,
+                handle,
+                display_name,
+                active,
+                origin,
+            }
+        })
+        .collect()
+}
+
+/// Build the pinned `--json` DTO object for one row (AR-90 #4) — exactly
+/// `creator_id`, `handle`, `display_name`, `active`, `origin` (`snake_case`;
+/// `handle`/`display_name` nullable; `origin` = `"local"` | `"platform"`).
+#[must_use]
+fn row_to_json(row: &ListRow) -> serde_json::Value {
+    serde_json::json!({
+        "creator_id": row.creator_id,
+        "handle": row.handle,
+        "display_name": row.display_name,
+        "active": row.active,
+        "origin": row.origin,
+    })
+}
+
+/// CREATOR ID column width for the human table: the widest id in the
+/// listing, never narrower than the pre-existing 19 — a platform-only
+/// listing of short ids keeps the V1.176 layout byte-for-byte. Minted
+/// `ctr_local` ids are 21 chars (`ctr_local` + 12 hex, V1.176 P0 T1).
+#[must_use]
+fn creator_id_column_width(rows: &[ListRow]) -> usize {
+    rows.iter()
+        .map(|r| r.creator_id.len())
+        .max()
+        .unwrap_or(19)
+        .max(19)
+}
+
+/// List all known Creators with three-layer identity model (V1.16).
+///
+/// V1.176 P0 T3 (AR-90): persistent local identities from `local_identities`
+/// (SSOT) appear alongside platform rows with an additive ORIGIN column
+/// (`local` | `platform`); existing id/handle/display/active semantics are
+/// unchanged and platform rows stay byte-stable. `--json` emits the pinned
+/// machine DTO verbatim — a JSON array of `{creator_id, handle, display_name,
+/// active, origin}` objects with nullable `handle`/`display_name` — never a
+/// string dump of the table. Empty-state copy unchanged.
+///
+/// # Errors
+///
+/// Returns `CliError` if the identity store, config, or auth store cannot be
+/// read, or JSON serialization fails.
+async fn list_creators(_config: &CliConfig, json: bool) -> Result<()> {
+    let config = CliConfig::load()?;
+    let cache = creator_identity::load_creator_identity_cache();
+    let active_id = config.active_creator_id.as_deref();
+
+    // Local rows come from `local_identities` (SSOT, AR-90 #1) — the JSON
+    // cache is platform display metadata only and is never a local source.
+    // The global db is opened lazily and read-only (qc3 F-002): `creator
+    // list` must not materialize `~/.nexus42/state.db` for a platform-only /
+    // empty surface, and no local rows can exist when the db file is absent.
+    // A locked / corrupt / unreadable local source degrades with an honest
+    // stderr warning instead of failing the whole listing (qc3 S-003) — the
+    // platform rows are still shown.
+    let local_rows = if global_db_path()?.exists() {
+        let read_result: Result<Vec<nexus_local_db::LocalIdentityRow>> = async {
+            let pool = open_global_db_read_only().await?;
+            Ok(nexus_local_db::list_local_identities(&pool).await?)
+        }
+        .await;
+        match read_result {
+            Ok(rows) => rows,
+            Err(err) => {
+                eprintln!(
+                    "warning: local identities unavailable ({err}); showing platform rows only."
+                );
+                Vec::new()
+            }
+        }
+    } else {
+        Vec::new()
+    };
+    let auth_store = crate::auth::AuthStore::load()?;
+
+    let rows = list_rows(&cache, &auth_store, &local_rows, active_id);
+
+    if rows.is_empty() {
+        if json {
+            println!("[]");
+        } else {
+            println!("No registered Creators found.");
+            println!("Use: nexus42 creator register --name <name> [--local]");
+        }
         return Ok(());
     }
 
-    println!("CREATOR ID          HANDLE         DISPLAY NAME          ACTIVE");
-    for id in &all_ids {
-        let entry = creator_identity::get_creator_identity(&cache, id);
-        let handle_str = entry.and_then(|e| e.handle.as_deref()).unwrap_or("-");
-        let display_str = entry.and_then(|e| e.display_name.as_deref()).unwrap_or("-");
-        let active_marker = if active_id == Some(id.as_str()) {
-            "✓"
-        } else {
-            ""
-        };
-        println!("{id:<19} {handle_str:<14} {display_str:<21} {active_marker}");
+    if json {
+        // AR-90 #4: verbatim DTO serialization (house pattern) — never a
+        // string dump of the table.
+        let items: Vec<serde_json::Value> = rows.iter().map(row_to_json).collect();
+        println!("{}", serde_json::to_string_pretty(&items)?);
+        return Ok(());
+    }
+
+    // Human default: additive ORIGIN column; existing column meanings and
+    // platform values unchanged (local HANDLE renders `-`, PL-6). The CREATOR
+    // ID column is padded to the widest id in the listing (never narrower
+    // than the pre-existing 19), so 21-char `ctr_local*` ids align and
+    // platform-only listings keep the V1.176 layout byte-for-byte.
+    let id_width = creator_id_column_width(&rows);
+    println!(
+        "{:<id_width$} {:<14} {:<21} {:<8} ACTIVE",
+        "CREATOR ID", "HANDLE", "DISPLAY NAME", "ORIGIN"
+    );
+    for row in &rows {
+        let handle_str = row.handle.as_deref().unwrap_or("-");
+        let display_str = row.display_name.as_deref().unwrap_or("-");
+        let active_marker = if row.active { "✓" } else { "" };
+        println!(
+            "{:<id_width$} {:<14} {:<21} {:<8} {}",
+            row.creator_id, handle_str, display_str, row.origin, active_marker
+        );
     }
 
     Ok(())
@@ -2578,5 +2731,163 @@ mod tests {
         let ok = command
             .try_get_matches_from(["nexus42", "creator", "register", "--local", "--name", "T"]);
         assert!(ok.is_ok(), "--local alone must parse: {ok:?}");
+    }
+
+    // ── V1.176 P0 T3 (AR-90): creator list row resolution + --json DTO ──
+
+    #[test]
+    fn list_rows_marks_local_and_keeps_platform_byte_stable() {
+        let mut cache = creator_identity::CreatorIdentityCache::default();
+        cache.creators.insert(
+            "ctr_plat_abc".to_string(),
+            CreatorIdentityEntry {
+                creator_id: "ctr_plat_abc".to_string(),
+                handle: Some("alice".to_string()),
+                display_name: Some("Alice Platform".to_string()),
+            },
+        );
+        let auth_store = AuthStore::default();
+        let local_rows = vec![
+            nexus_local_db::LocalIdentityRow {
+                creator_id: "ctr_local_xyz".to_string(),
+                identity_type: "persistent".to_string(),
+                display_name: Some("Local Alice".to_string()),
+                created_at: "2026-08-26T00:00:00Z".to_string(),
+                platform_linked: false,
+                platform_creator_id: None,
+            },
+            // Anonymous/ephemeral identities are NOT registered creators —
+            // absent from the display list (AR-90 #2).
+            nexus_local_db::LocalIdentityRow {
+                creator_id: "ctr_anon_zzz".to_string(),
+                identity_type: "anonymous".to_string(),
+                display_name: Some("Ghost".to_string()),
+                created_at: "2026-08-26T00:00:00Z".to_string(),
+                platform_linked: false,
+                platform_creator_id: None,
+            },
+        ];
+
+        let rows = list_rows(&cache, &auth_store, &local_rows, Some("ctr_local_xyz"));
+
+        assert_eq!(
+            rows.iter()
+                .map(|r| r.creator_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["ctr_local_xyz", "ctr_plat_abc"],
+            "sorted by id; anonymous identity excluded"
+        );
+        let local = &rows[0];
+        assert_eq!(local.origin, "local");
+        assert_eq!(local.handle, None, "local handle is null (renders `-`)");
+        assert_eq!(local.display_name.as_deref(), Some("Local Alice"));
+        assert!(local.active);
+        let platform = &rows[1];
+        assert_eq!(platform.origin, "platform");
+        assert_eq!(platform.handle.as_deref(), Some("alice"));
+        assert_eq!(platform.display_name.as_deref(), Some("Alice Platform"));
+        assert!(!platform.active);
+    }
+
+    #[test]
+    fn list_rows_dedupes_platform_linked_local_id_as_local() {
+        let mut cache = creator_identity::CreatorIdentityCache::default();
+        cache.creators.insert(
+            "ctr_local_dup".to_string(),
+            CreatorIdentityEntry {
+                creator_id: "ctr_local_dup".to_string(),
+                handle: Some("dup_handle".to_string()),
+                display_name: Some("Platform Copy".to_string()),
+            },
+        );
+        let auth_store = AuthStore::default();
+        let local_rows = vec![nexus_local_db::LocalIdentityRow {
+            creator_id: "ctr_local_dup".to_string(),
+            identity_type: "persistent".to_string(),
+            display_name: Some("Local Authority".to_string()),
+            created_at: "2026-08-26T00:00:00Z".to_string(),
+            platform_linked: true,
+            platform_creator_id: Some("ctr_plat_dup".to_string()),
+        }];
+
+        let rows = list_rows(&cache, &auth_store, &local_rows, None);
+
+        assert_eq!(rows.len(), 1, "same id in both sources appears once");
+        assert_eq!(rows[0].origin, "local");
+        assert_eq!(
+            rows[0].handle, None,
+            "cache handle must not leak onto the local row (PL-6)"
+        );
+        assert_eq!(rows[0].display_name.as_deref(), Some("Local Authority"));
+    }
+
+    #[test]
+    fn row_to_json_emits_pinned_dto() {
+        let local = ListRow {
+            creator_id: "ctr_local_xyz".to_string(),
+            handle: None,
+            display_name: Some("Local Alice".to_string()),
+            active: true,
+            origin: "local",
+        };
+        assert_eq!(
+            row_to_json(&local),
+            serde_json::json!({
+                "creator_id": "ctr_local_xyz",
+                "handle": null,
+                "display_name": "Local Alice",
+                "active": true,
+                "origin": "local",
+            })
+        );
+
+        let platform = ListRow {
+            creator_id: "ctr_plat_abc".to_string(),
+            handle: Some("alice".to_string()),
+            display_name: None,
+            active: false,
+            origin: "platform",
+        };
+        assert_eq!(
+            row_to_json(&platform),
+            serde_json::json!({
+                "creator_id": "ctr_plat_abc",
+                "handle": "alice",
+                "display_name": null,
+                "active": false,
+                "origin": "platform",
+            })
+        );
+    }
+
+    #[test]
+    fn creator_id_column_width_fits_widest_id_floor_19() {
+        // No rows → pre-existing width.
+        assert_eq!(creator_id_column_width(&[]), 19);
+        // Short platform-only ids keep the pre-existing width — the V1.176
+        // layout stays byte-for-byte on a platform-only listing.
+        let platform = ListRow {
+            creator_id: "ctr_platabc".to_string(),
+            handle: Some("alice".to_string()),
+            display_name: Some("Alice Platform".to_string()),
+            active: false,
+            origin: "platform",
+        };
+        assert_eq!(creator_id_column_width(std::slice::from_ref(&platform)), 19);
+        // Minted 21-char `ctr_local` ids (V1.176 P0 T1 format) widen the
+        // column so HANDLE / ORIGIN stay aligned on local rows.
+        let local = ListRow {
+            creator_id: "ctr_localf0d65930e496".to_string(),
+            handle: None,
+            display_name: Some("Local Alice".to_string()),
+            active: true,
+            origin: "local",
+        };
+        assert_eq!(creator_id_column_width(std::slice::from_ref(&local)), 21);
+        assert_eq!(
+            creator_id_column_width(&[local, platform]),
+            21,
+            "the widest id drives the column in a mixed listing"
+        );
     }
 }
