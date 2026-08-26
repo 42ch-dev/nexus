@@ -12,6 +12,22 @@
 //!
 //! Zero new dependencies (AR-91 #5 / AR-98): `std::fs` + `serde_json` +
 //! `tokio::time` only — fs-notify was rejected and recorded at lock time.
+//!
+//! # Cost & worker-thread model (qc3 S-1)
+//!
+//! The poll + rebuild run synchronously on the watcher's tokio task:
+//! - Per tick: one small stat walk (`read_dir` ×2 + `metadata()` per file +
+//!   a `serde_json` tree over a handful of capability dirs) — author-sized
+//!   (one subdir per installed capability), microseconds-to-low-ms locally.
+//! - Rebuild (only on a digest change): full re-scan + builtin
+//!   re-construction, bounded by the capability count.
+//! - `spawn_blocking` deliberately NOT used: the work is small file IO +
+//!   serde only; a handoff adds latency without removing the
+//!   blocking-on-worker property, and the swap must run on this task anyway.
+//! - The loop sleeps AFTER the work (no drift compensation): a
+//!   slow/networked fs or a large caps dir stretches the tick; the AR-93
+//!   budget includes the rebuild in the daemon leg ("1 s watch + rebuild +
+//!   2 s child watch + one HTTP request").
 
 use crate::capability::scan::{self, ScanOutcome};
 use crate::capability::user_capability::UserCapability;
@@ -152,6 +168,13 @@ pub fn rebuild_registry_with_merge(
             std::sync::Arc::clone(engine),
             std::sync::Arc::clone(cache),
         ),
+        // Engine-less arm (AR-44). qc3 S-5: with `deps.pool` present this
+        // rebuilds a fresh `NarrativeCompute` (its own `WasmEngine` +
+        // `ModuleCache::warm_embedded`) per reload — production exposure is
+        // ~nil because this arm is only taken when the daemon-wide
+        // `WasmEngine::new()` already failed at boot, and `with_pool` then
+        // fails the same way and degrades to `engine: None` cheaply; tests
+        // use `pool: None` → the no-op `NarrativeCompute::new()`.
         _ => CapabilityRegistry::with_runtime_deps(deps),
     };
     let builtin_names: HashSet<&str> = reg.capabilities.iter().map(|c| c.name()).collect();
@@ -160,6 +183,10 @@ pub fn rebuild_registry_with_merge(
     let outcome = ScanOutcome {
         admitted: merged.clone(),
         skipped: scan.skipped,
+        // W-3 (qc3 S-4): a scan interrupted by a per-entry read error is
+        // transient — the merge keeps last-good for every name it did not
+        // re-admit, so an incomplete scan never reads as deletions.
+        transient: scan.transient,
     };
     // Shared append seam (M-3): the same boxing path as the boot
     // constructors' `append_user_caps`, so a change to the append (extra
@@ -175,7 +202,11 @@ pub fn rebuild_registry_with_merge(
 /// - skipped by this scan (dir present, trio failed) → **carry the
 ///   last-good entry** from `mirror` (the skip is already `warn!`-logged by
 ///   the scanner, boot vocabulary — PL-9);
-/// - absent from the scan (dir deleted) → dropped (removal, AR-94).
+/// - absent from the scan (dir deleted) → dropped (removal, AR-94);
+/// - **transient scan** (W-3, qc3 S-4): a per-entry `read_dir` error
+///   interrupted the scan — it may have missed names, so it must NOT read
+///   as deletions. Every mirrored name the scan did not re-admit is
+///   carried (last-good), regardless of skip records.
 ///
 /// Output order: admitted entries in scan order, then carried entries in
 /// mirror order — deterministic across ticks (mirror order is itself
@@ -190,7 +221,12 @@ pub fn merge_user_caps(scan: &ScanOutcome, mirror: &[UserCapability]) -> Vec<Use
     }
     let skipped_names: HashSet<&str> = scan.skipped.iter().map(|s| s.name.as_str()).collect();
     for cap in mirror {
-        if !seen.contains(cap.name()) && skipped_names.contains(cap.name()) {
+        if seen.contains(cap.name()) {
+            continue;
+        }
+        // A transient scan is incomplete — carry every unmatched last-good
+        // entry instead of dropping it as if deleted (W-3).
+        if scan.transient || skipped_names.contains(cap.name()) {
             merged.push(cap.clone());
         }
     }
@@ -201,23 +237,28 @@ pub fn merge_user_caps(scan: &ScanOutcome, mirror: &[UserCapability]) -> Vec<Use
 ///
 /// Mirrors the AR-79 child-side `catalog_watch_loop_inner` seam (F-11) so
 /// the baseline / no-op semantics (AR-91 #6, AR-95 #5) are unit-testable
-/// without a real scan dir or daemon. The baseline digest is sampled at
-/// spawn, BEFORE the first sleep (M-6), so a change between boot's scan and
-/// the first poll is detected instead of being absorbed as the baseline.
-/// Only a change between established digests re-scans; an unchanged digest
-/// produces no scan (and therefore no swap and no skip spam).
+/// without a real scan dir or daemon. `initial_digest` seeds the baseline
+/// from the BOOT scan's digest (W-B): the first poll COMPARES against it,
+/// so a change between boot's scan and the first poll is detected instead
+/// of being absorbed as the baseline. Only a change between established
+/// digests re-scans; an unchanged digest produces no scan (and therefore
+/// no swap and no skip spam).
 ///
 /// An [`DigestPoll::Unreadable`] poll never establishes or disturbs the
 /// baseline and never rescans (I-1, PL-9): a transiently unreadable scan
 /// dir keeps the last-good registry generation unchanged, and the failure
 /// is logged once per error-state. [`DigestPoll::Missing`] after a
-/// [`DigestPoll::Tree`] baseline rescans — the merge then drops the absent
+/// [`DigestPoll::Tree`] baseline rescans — the merge then drops the missing
 /// names (deletion contract, AR-94).
 ///
-/// Returns the number of rescans executed. `should_stop` lets tests
-/// terminate the otherwise-infinite loop deterministically.
+/// Returns the number of rescans executed. `should_stop` is a test-only
+/// seam (qc1 S-3): production always passes `|| false` (boot.rs) — the
+/// loop never self-terminates; it is cancelled via the shutdown-notify
+/// `select!` in `user_capability_watch_loop` or by dropping the
+/// [`WatcherGuard`](crate::boot::WatcherGuard) (abort-on-drop).
 pub async fn watch_loop_inner<PF, SF, P, S>(
     interval: Duration,
+    initial_digest: DigestPoll,
     mut poll: P,
     mut rescan: S,
     mut should_stop: impl FnMut() -> bool,
@@ -228,10 +269,10 @@ where
     S: FnMut() -> SF,
     SF: Future<Output = ()> + Send,
 {
-    // `None` = no baseline yet (established by the first readable poll —
-    // `Missing` or `Tree` — at spawn, before the first sleep; M-6). An
-    // `Unreadable` poll never establishes or replaces the baseline.
-    let mut last_digest: Option<DigestPoll> = None;
+    // Seeded baseline (W-B): the boot scan's digest, so the first poll is
+    // a comparison, not a baseline establishment. An `Unreadable` poll
+    // never disturbs it (I-1); `Missing`/`Tree` after it rescan on change.
+    let mut last_digest: Option<DigestPoll> = Some(initial_digest);
     let mut rescans = 0usize;
     let mut unreadable_warned = false;
     loop {
@@ -262,13 +303,12 @@ where
             tokio::time::sleep(interval).await;
             continue;
         }
-        // Baseline establishment (first readable poll) does NOT rescan —
-        // boot already scanned (AR-91 #6). Only a change between
-        // established digests rescans.
-        if last_digest.is_some() {
-            rescan().await;
-            rescans += 1;
-        }
+        // Any divergence from the seeded baseline rescans — including the
+        // first poll when it differs from the boot scan's digest (W-B).
+        // `last_digest` is always `Some` after seeding; `Unreadable` polls
+        // never reach this point (they `continue` above).
+        rescan().await;
+        rescans += 1;
         last_digest = Some(digest);
         tokio::time::sleep(interval).await;
     }
@@ -277,52 +317,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capability::test_support::write_capability_dir;
     use crate::capability::{CapabilityOrigin, CapabilityRegistryHolder};
-    use sha2::Digest;
-    use std::fmt::Write as _;
     use std::sync::atomic::{AtomicUsize, Ordering};
-
-    fn sha256_hex(bytes: &[u8]) -> String {
-        let digest = sha2::Sha256::digest(bytes);
-        let mut hex = String::with_capacity(64);
-        for b in digest {
-            let _ = write!(hex, "{b:02x}");
-        }
-        hex
-    }
-
-    /// Write an admitted `<name>/capability.json` trio (AR-35 layout): a
-    /// hash-consistent `manifest.json` + `<module-id>.wasm` pair so the
-    /// AR-43 admission gates pass inside the scan.
-    fn write_capability_dir(root: &Path, name: &str) {
-        let dir = root.join(name);
-        std::fs::create_dir_all(&dir).unwrap();
-        let wasm = b"fake module bytes";
-        let sha = sha256_hex(wasm);
-        let descriptor = format!(
-            r#"{{
-                "name": "{name}",
-                "inputSchema": "{{\"type\":\"object\"}}",
-                "outputSchema": "{{\"type\":\"object\"}}",
-                "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{sha}" }}
-            }}"#
-        );
-        std::fs::write(dir.join("capability.json"), descriptor).unwrap();
-        let manifest = format!(
-            r#"{{
-                "module_id": "basic-combat",
-                "name": "Basic Combat",
-                "version": "1.0.0",
-                "nexus_abi_version": 1,
-                "required_key_block_types": [],
-                "compute_export": "compute",
-                "init_export": "",
-                "wasm_sha256": "{sha}"
-            }}"#
-        );
-        std::fs::write(dir.join("manifest.json"), manifest).unwrap();
-        std::fs::write(dir.join("basic-combat.wasm"), wasm).unwrap();
-    }
 
     fn test_deps() -> CapabilityRuntimeDeps {
         CapabilityRuntimeDeps {
@@ -475,6 +472,49 @@ mod tests {
         assert_eq!(hot_outcome.admitted.len(), 1, "no duplication");
         assert_eq!(user_cap_names(&reg), vec!["demo.pull".to_string()]);
     }
+    #[test]
+    fn merge_transient_scan_carries_unmatched_last_good() {
+        // W-3 (qc3 S-4): a per-entry `read_dir` error makes the scan
+        // outcome transient — the merge keeps last-good for EVERY name the
+        // scan did not re-admit, instead of dropping it as if the dir had
+        // been deleted (I-1 consistency with the digest's Unreadable case).
+        let tmp = tempfile::tempdir().unwrap();
+        write_capability_dir(tmp.path(), "demo.pull");
+        write_capability_dir(tmp.path(), "gone.cap");
+        let deps = test_deps();
+        let (_, boot_outcome) = rebuild_registry_with_merge(&deps, None, None, tmp.path(), &[]);
+        let mirror = boot_outcome.admitted;
+        assert_eq!(mirror.len(), 2, "both names admitted at boot");
+
+        // The interrupted hot scan re-admits only demo.pull and is marked
+        // transient — gone.cap was never observed, so it must NOT be
+        // dropped as a deletion.
+        let scan = ScanOutcome {
+            admitted: vec![mirror[0].clone()],
+            skipped: Vec::new(),
+            transient: true,
+        };
+        let merged = merge_user_caps(&scan, &mirror);
+        let names: Vec<String> = merged.iter().map(|c| c.name().to_string()).collect();
+        assert_eq!(
+            names,
+            vec!["demo.pull".to_string(), "gone.cap".to_string()],
+            "transient scan carries every unmatched last-good entry"
+        );
+        // Control: a NON-transient scan drops the absent name (removal).
+        let scan = ScanOutcome {
+            admitted: vec![mirror[0].clone()],
+            skipped: Vec::new(),
+            transient: false,
+        };
+        let merged = merge_user_caps(&scan, &mirror);
+        let names: Vec<String> = merged.iter().map(|c| c.name().to_string()).collect();
+        assert_eq!(
+            names,
+            vec!["demo.pull".to_string()],
+            "non-transient scan drops the absent name (removal contract)"
+        );
+    }
 
     // -----------------------------------------------------------------
     // Boot equivalence (AR-95 #1)
@@ -593,8 +633,13 @@ mod tests {
         let deps = deps.clone();
         let mirror = std::sync::Arc::clone(mirror);
         let on_poll = std::sync::Arc::new(on_poll);
+        // W-B: the baseline is seeded from the same boot-state digest the
+        // production boot site computes (the state the mirror was built
+        // from) — the first poll compares against it.
+        let boot_digest = scan_dir_digest(&scan_dir);
         watch_loop_inner(
             Duration::from_millis(5),
+            boot_digest,
             || {
                 ticks.fetch_add(1, Ordering::Relaxed);
                 let dir = scan_dir.clone();
@@ -622,15 +667,15 @@ mod tests {
     #[tokio::test]
     async fn unchanged_digest_and_missing_dir_produce_no_rescans() {
         use std::sync::atomic::{AtomicUsize, Ordering};
-        // M-6: the baseline digest is sampled at spawn, BEFORE the first
-        // sleep — a change between boot's scan and the first poll is
-        // detected (see boot_to_first_poll_change_is_detected). These legs
-        // only assert no-op stability once a baseline exists.
+        // W-B: the baseline is SEEDED (boot digest), so these legs only
+        // assert no-op stability when the first poll equals the seed —
+        // exactly the production steady state.
         let tree = DigestPoll::Tree(serde_json::json!({"a.cap": {"capability.json": [12, 34]}}));
         let tick = AtomicUsize::new(0);
         let mut rescans = 0;
         let scans = watch_loop_inner(
             Duration::from_millis(1),
+            tree.clone(),
             || {
                 tick.fetch_add(1, Ordering::Relaxed);
                 async { tree.clone() }
@@ -643,13 +688,14 @@ mod tests {
         )
         .await;
         assert_eq!(tick.load(Ordering::Relaxed), 3, "three ticks observed");
-        assert_eq!(scans, 0, "baseline tick only; no digest change → no scan");
+        assert_eq!(scans, 0, "unchanged digest → no scan");
         assert_eq!(rescans, 0, "no rescan action fired");
 
         // Missing dir → stable `Missing` digest → no rescans, no skip spam.
         tick.store(0, Ordering::Relaxed);
         let scans = watch_loop_inner(
             Duration::from_millis(1),
+            DigestPoll::Missing,
             || {
                 tick.fetch_add(1, Ordering::Relaxed);
                 async { DigestPoll::Missing }
@@ -674,6 +720,7 @@ mod tests {
         let mut rescans = 0;
         let scans = watch_loop_inner(
             Duration::from_millis(1),
+            baseline.clone(),
             || {
                 tick.fetch_add(1, Ordering::Relaxed);
                 async {
@@ -695,15 +742,17 @@ mod tests {
             || tick.load(Ordering::Relaxed) >= 4,
         )
         .await;
-        assert_eq!(scans, 1, "baseline, no-op, one change rescan, no-op");
+        assert_eq!(scans, 1, "seed no-op, no-op, one change rescan, no-op");
         assert_eq!(rescans, 1);
     }
 
     #[tokio::test]
     async fn boot_to_first_poll_change_is_detected() {
-        // M-6: the baseline is sampled at spawn (pre-first-sleep), so an
-        // on-disk change between the boot scan and the first poll triggers
-        // a rebuild — it is NOT absorbed as the baseline.
+        // W-B (qc2 F-001 / qc3 W-1): the watcher is seeded with the BOOT
+        // scan's digest as its initial baseline, so an on-disk change
+        // between the boot scan and the FIRST poll (a complete trio written
+        // in that window) triggers a rebuild — it is NOT absorbed as the
+        // baseline.
         use std::sync::atomic::{AtomicUsize, Ordering};
         let boot_state = DigestPoll::Tree(serde_json::json!({"a.cap": {}}));
         let changed_on_disk = DigestPoll::Tree(serde_json::json!({"a.cap": {}, "b.cap": {}}));
@@ -711,26 +760,22 @@ mod tests {
         let mut rescans = 0;
         let scans = watch_loop_inner(
             Duration::from_millis(1),
+            boot_state.clone(),
             || {
                 tick.fetch_add(1, Ordering::Relaxed);
-                async {
-                    if tick.load(Ordering::Relaxed) == 1 {
-                        boot_state.clone()
-                    } else {
-                        changed_on_disk.clone()
-                    }
-                }
+                // The first poll ALREADY diverges from the boot baseline.
+                async { changed_on_disk.clone() }
             },
             || {
                 rescans += 1;
                 async {}
             },
-            || tick.load(Ordering::Relaxed) >= 3,
+            || tick.load(Ordering::Relaxed) >= 2,
         )
         .await;
         assert_eq!(
             scans, 1,
-            "pre-sleep baseline; the first post-sleep change rescans"
+            "first poll diverging from the boot baseline rescans (not absorbed)"
         );
         assert_eq!(rescans, 1);
     }
@@ -746,6 +791,7 @@ mod tests {
         let mut rescans = 0;
         let scans = watch_loop_inner(
             Duration::from_millis(1),
+            baseline.clone(),
             || {
                 tick.fetch_add(1, Ordering::Relaxed);
                 async {

@@ -5,6 +5,8 @@
 pub mod admission;
 pub mod builtins;
 pub mod scan;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod user_capability;
 pub mod watch;
 
@@ -797,6 +799,7 @@ impl CapabilityRegistryHolder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capability::test_support::write_capability_dir;
 
     #[test]
     fn registry_has_34_builtins() {
@@ -899,47 +902,8 @@ mod tests {
     }
 
     // ── User capability constructors (T2 / AR-36) ───────────────────────
-
-    /// Write an admitted `<name>/capability.json` trio into `root` (AR-35
-    /// layout): a hash-consistent `manifest.json` + `<module-id>.wasm` pair
-    /// so the AR-43 admission gates (P1 T4) pass inside the scan.
-    fn write_capability_dir(root: &std::path::Path, name: &str) {
-        use sha2::{Digest, Sha256};
-        use std::fmt::Write as _;
-        let dir = root.join(name);
-        std::fs::create_dir_all(&dir).unwrap();
-        let wasm = b"fake module bytes";
-        let sha: String = {
-            let mut hex = String::with_capacity(64);
-            for b in Sha256::digest(wasm) {
-                let _ = write!(hex, "{b:02x}");
-            }
-            hex
-        };
-        let json = format!(
-            r#"{{
-                "name": "{name}",
-                "inputSchema": "{{\"type\":\"object\"}}",
-                "outputSchema": "{{\"type\":\"object\"}}",
-                "wasm": {{ "moduleId": "basic-combat", "wasmSha256": "{sha}" }}
-            }}"#
-        );
-        std::fs::write(dir.join("capability.json"), json).unwrap();
-        let manifest = format!(
-            r#"{{
-                "module_id": "basic-combat",
-                "name": "Basic Combat",
-                "version": "1.0.0",
-                "nexus_abi_version": 1,
-                "required_key_block_types": [],
-                "compute_export": "compute",
-                "init_export": "",
-                "wasm_sha256": "{sha}"
-            }}"#
-        );
-        std::fs::write(dir.join("manifest.json"), manifest).unwrap();
-        std::fs::write(dir.join("basic-combat.wasm"), wasm).unwrap();
-    }
+    // The trio fixture is the shared `test_support::write_capability_dir`
+    // (qc1 S-1): one writer for the in-crate test modules.
 
     #[test]
     fn with_runtime_deps_and_user_caps_appends_after_builtins() {

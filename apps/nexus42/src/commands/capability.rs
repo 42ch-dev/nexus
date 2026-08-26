@@ -7,22 +7,21 @@
 //! The descriptor contract is the shared `UserCapabilityDescriptor` from
 //! `nexus-orchestration` (AR-34 — nexus42 already depends on the crate, so
 //! the CLI reuses the exact validator instead of hand-rolling a second
-//! copy); the manifest + `wasm_sha256` pairing reuse `nexus-module-manifest`
+//! copy); the manifest + `wasm_sha256` pairing reuses `nexus-module-manifest`
 //! (AR-39 — the single content-hash path). The CLI deliberately does NOT
 //! know the builtin name list (AR-41): collision is daemon-side admission
-//! only, re-checked within the reload bound (AR-93). The CLI does not
-//! know the builtin list (AR-41 preserved).
+//! only, re-checked within the reload bound (AR-93).
 //!
 //! Hot reload (V1.176 P1, RN-2, AR-91..96): the daemon polls
 //! `~/.nexus42/capabilities/` every 1 s and re-admits changes on the
 //! SAME scan path as boot — no daemon restart. Within ~2 s of a complete,
 //! admissible trio, `capability list` reflects the change; a live MCP
 //! session receives `listChanged` within ~4 s worst case (1 s daemon
-//! watch + 2 s child watch, both legs named — AR-93). Deleting `<name>/`
-//! removes the row within the same bound (AR-94). A trio that fails
-//! admission hot-reloads as skipped-with-reason (boot vocabulary); the
-//! previous good admission for the name keeps serving (last-good-wins,
-//! PL-9).
+//! watch incl. the hot-rebuild + 2 s child watch, both legs named —
+//! AR-93). Deleting `<name>/` removes the row within the same bound
+//! (AR-94). A trio that fails admission hot-reloads as skipped-with-reason
+//! (boot vocabulary); the previous good admission for the name keeps
+//! serving (last-good-wins, PL-9).
 //!
 //! Exit-code contract (AR-41, mirrors the AR-9 table of `compute`):
 //!
@@ -101,7 +100,7 @@ pub enum CapabilityCommand {
     /// Daemon-free. Re-verifies descriptor + manifest + wasm pairing
     /// (AR-34/39) before copying. Collision with a builtin is daemon-side
     /// admission — re-checked within the reload bound (~2 s, AR-93); the
-    /// CLI does not know the builtin list (AR-41). No `run`, no
+    /// CLI does not know the builtin name list (AR-41). No `run`, no
     /// `scaffold` (PL-7).
     ///
     /// Exit codes (AR-41): 2 = validation, 3 = pairing, 1 = I/O/home.
@@ -303,7 +302,7 @@ fn cmd_install(
         );
     } else {
         println!(
-            "installed capability `{}` → {} (the daemon picks the trio up on next boot)",
+            "installed capability `{}` → {} (daemon hot-reloads it within ~2 s — no restart; a failed admission keeps the previous good version serving)",
             descriptor.name,
             dir.display()
         );

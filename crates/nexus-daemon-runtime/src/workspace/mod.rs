@@ -626,6 +626,18 @@ impl WorkspaceState {
             .and_then(|holder| holder.get())
     }
 
+    /// Get the shared capability registry holder itself, if set (V1.176 P1,
+    /// AR-92).
+    ///
+    /// The peer-tools lane (AR-68 #2(ii)) derives its reserved-name set
+    /// LIVE from this holder at each admission, so a user capability
+    /// hot-added after the lane spawned stays reserved against peer
+    /// admission (V1.176 P1 QC fix, W-A).
+    #[must_use]
+    pub fn capability_registry_holder(&self) -> Option<CapabilityRegistryHolder> {
+        self.capability_registry.as_ref().clone()
+    }
+
     /// Get the shutdown notification handle.
     ///
     /// Callers await `.notified()` to block until the daemon enters Stopping state.

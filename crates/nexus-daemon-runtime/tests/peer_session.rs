@@ -116,7 +116,7 @@ async fn start_server(
         manifest,
         allowlist,
         peer_keys,
-        reserved_tool_ids: std::collections::HashSet::new(),
+        capability_registry: None,
     };
     let task = spawn_accept_loop(listener, config, Arc::clone(&sessions), options, shutdown);
     TestServer {

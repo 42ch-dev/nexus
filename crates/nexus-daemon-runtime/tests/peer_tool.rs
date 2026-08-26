@@ -150,7 +150,7 @@ async fn start_server(
         manifest,
         allowlist,
         peer_keys,
-        reserved_tool_ids: HashSet::new(),
+        capability_registry: None,
     };
     let task = spawn_accept_loop(
         listener,

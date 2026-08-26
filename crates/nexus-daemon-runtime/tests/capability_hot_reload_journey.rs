@@ -118,7 +118,9 @@ async fn rig(
     state.set_capability_registry(holder.clone());
 
     // The same spawn seam boot.rs uses; boot_mirror = the boot outcome's
-    // admitted set (AR-92 #4), so a hot tick carries last-good correctly.
+    // admitted set (AR-92 #4), so a hot tick carries last-good correctly;
+    // boot_digest = the boot scan's structural digest (W-B), so the first
+    // poll compares against the boot state instead of absorbing it.
     let shutdown = Arc::new(tokio::sync::Notify::new());
     let watcher = boot::spawn_user_capability_watcher(
         holder,
@@ -128,6 +130,7 @@ async fn rig(
         scan_dir.to_path_buf(),
         Arc::clone(&shutdown),
         outcome.admitted,
+        nexus_orchestration::capability::watch::scan_dir_digest(scan_dir),
     );
 
     let app = api::create_router(state.clone(), DaemonApiConfig::keyless());
@@ -162,11 +165,12 @@ async fn capability_names(server: &TestServer) -> Vec<String> {
 }
 
 /// Poll `GET /v1/daemon/tools` until `id` is (or is not) present. The
-/// deadline is > 2 × the 1 s watch interval (AR-95 #7), so a failure means
-/// the refresh did NOT happen within the bounded interval — not a slow
-/// poll.
+/// deadline pins the AR-93 daemon-leg budget: the documented bound for
+/// `capability list` (the route behind this catalog) is **~2 s** (1 s
+/// watch incl. rebuild + one HTTP round trip); 3 s = 1.5 × the documented
+/// bound, so a regression past it fails this journey (qc3 S-2).
 async fn wait_tools(server: &TestServer, id: &str, present: bool, what: &str) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(6);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
     loop {
         let ids = tools_ids(server).await;
         if ids.contains(&id.to_owned()) == present {
@@ -181,9 +185,9 @@ async fn wait_tools(server: &TestServer, id: &str, present: bool, what: &str) {
 }
 
 /// Poll `GET /v1/daemon/orchestration/capabilities` until `name` is (or is
-/// not) present (same bounds as [`wait_tools`]).
+/// not) present (same AR-93-pinned bounds as [`wait_tools`]).
 async fn wait_orchestration(server: &TestServer, name: &str, present: bool, what: &str) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(6);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
     loop {
         let names = capability_names(server).await;
         if names.contains(&name.to_owned()) == present {
@@ -199,8 +203,8 @@ async fn wait_orchestration(server: &TestServer, name: &str, present: bool, what
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn catalog_routes_reflect_add_and_remove_within_bounded_interval() {
-    // Empty scan dir at boot → no user caps; the watcher baselines the
-    // empty `Tree` digest and rescans only on change (AR-91 #6).
+    // Empty scan dir at boot → no user caps; the watcher is seeded with
+    // the boot `Tree` digest (W-B) and rescans only on change (AR-91 #6).
     let tmp_root = tempfile::TempDir::new().unwrap();
     let scan_dir = tmp_root.path().join("capabilities");
     std::fs::create_dir_all(&scan_dir).unwrap();

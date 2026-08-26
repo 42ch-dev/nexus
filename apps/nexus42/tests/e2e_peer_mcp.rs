@@ -161,7 +161,7 @@ impl E2eDaemon {
             manifest,
             allowlist: peer_allowlist,
             peer_keys,
-            reserved_tool_ids: std::collections::HashSet::new(),
+            capability_registry: None,
         };
         let accept_task = spawn_accept_loop(
             listener,
@@ -201,6 +201,9 @@ impl E2eDaemon {
         // boot seam. A stable scan dir ⇒ no rescans, no swaps, so existing
         // suites are unaffected; the hot-reload journey mutates the dir.
         let watcher_shutdown = Arc::new(Notify::new());
+        // W-B: seed the watcher's baseline with the boot scan's digest
+        // (computed before `scan_dir` is moved into the spawn).
+        let boot_digest = nexus_orchestration::capability::watch::scan_dir_digest(&scan_dir);
         let watcher = nexus_daemon_runtime::boot::spawn_user_capability_watcher(
             holder,
             deps,
@@ -209,6 +212,7 @@ impl E2eDaemon {
             scan_dir,
             Arc::clone(&watcher_shutdown),
             outcome.admitted,
+            boot_digest,
         );
 
         // ── Real axum HTTP listener on 127.0.0.1:0 ──
@@ -1102,15 +1106,17 @@ impl rmcp::ClientHandler for JourneyListChangedCounter {
     }
 }
 
-/// Await the next `tools/list_changed` (count > `before`). Bounded by the
-/// AR-93 chain — 1 s daemon watch + 2 s child watch + one HTTP request ≈
-/// ≤ 4 s worst case; the 10 s deadline is > 2 × the chain (AR-95 #7).
+/// Await the next `tools/list_changed` (count > `before`). The deadline
+/// pins the AR-93 chain: 1 s daemon watch (incl. rebuild) + 2 s child
+/// watch + one HTTP request ≈ ≤ 4 s worst case; 6 s = 1.5 × the documented
+/// bound, so a regression from ≤ 4 s toward 8 s fails this journey
+/// (qc3 S-2).
 async fn await_journey_list_changed(
     counter: &JourneyListChangedCounter,
     before: usize,
     what: &str,
 ) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(6);
     loop {
         if counter.count() > before {
             return;
@@ -1142,8 +1148,9 @@ async fn journey_c_user_cap_hot_reload_reaches_live_session() {
     clear_peer_table();
 
     // The daemon harness runs the REAL hot-reload watcher (RN-2). No user
-    // caps at boot: the scan dir does not exist, so the watcher baselines
-    // `Missing` (stable — no rescans until the dir appears).
+    // caps at boot: the scan dir does not exist, so the watcher is seeded
+    // with the boot digest `Missing` (stable — no rescans until the dir
+    // appears).
     let server = E2eDaemon::start(Vec::new(), Vec::new(), HashMap::new(), false).await;
 
     // A live MCP session against the REAL daemon. The child is the same
