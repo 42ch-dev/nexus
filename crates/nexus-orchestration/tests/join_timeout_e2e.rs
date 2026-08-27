@@ -13,6 +13,14 @@
 //! (d) merge error — `converge_timeout: gate=merge …` (same discriminator).
 //! (e) default-None — no `timeout_ms` set → waiting behaviour byte-identical
 //!     to pre-DR-06 (no wait-start tracking key ever written).
+//! (f) F-001 (QC fix) — a successful join exit clears `_join_wait_start_{id}`
+//!     so a same-session re-entry starts a fresh wait budget; a merge-success
+//!     tick whose converge gate still waits keeps the shared state-level
+//!     budget alive (§3.3.3).
+//! (h) `timeout_ms: 0` — fires on the first waiting tick (reroute or typed
+//!     fail), pinned as the documented §3.3.3 semantics.
+//! (i) elapsed uses a saturating comparison — `u64::MAX` never wraps into a
+//!     spurious deadline.
 //!
 //! All timing is exercised through [`DeterministicClock`] — no wall-clock
 //! sleeps. Converge arrivals go through the real runtime path
@@ -170,6 +178,16 @@ async fn converge_timeout_without_on_timeout_fails_typed_not_wait() {
     assert!(msg.contains("arrived=0"), "names arrived: {msg}");
     assert!(msg.contains("expected=2"), "names expected: {msg}");
     assert!(msg.contains("elapsed_ms=101"), "names elapsed: {msg}");
+    // F-004 (qc2): the typed-fail path also clears arrivals + wait-start.
+    assert!(
+        ctx.get_sync::<HashSet<String>>("_converge_arrivals_join_b")
+            .is_none(),
+        "typed fail must clear the converge arrivals key"
+    );
+    assert!(
+        ctx.get_sync::<u64>("_join_wait_start_join_b").is_none(),
+        "typed fail must clear the wait-start key"
+    );
 }
 
 // ── (c) merge reroute ────────────────────────────────────────────────────
@@ -231,6 +249,15 @@ async fn merge_timeout_without_on_timeout_fails_typed_with_merge_gate() {
     assert!(msg.contains("state_id=join_d"), "names the state: {msg}");
     assert!(msg.contains("arrived=1"), "names arrived: {msg}");
     assert!(msg.contains("expected=2"), "names expected: {msg}");
+    // F-004 (qc2): the typed-fail path also clears arrivals + wait-start.
+    assert!(
+        ctx.get_sync::<Vec<String>>("_merge_join_d").is_none(),
+        "typed fail must clear the merge arrivals key"
+    );
+    assert!(
+        ctx.get_sync::<u64>("_join_wait_start_join_d").is_none(),
+        "typed fail must clear the wait-start key"
+    );
 }
 
 // ── (e) default-None byte-identical behaviour ────────────────────────────
@@ -284,5 +311,174 @@ async fn converge_timeout_fires_exactly_at_deadline() {
     assert!(
         msg.contains("elapsed_ms=500"),
         "fires at the deadline: {msg}"
+    );
+}
+
+// ── (f) F-001 (v1.179 QC fix): success-leave wait-start clearing ─────────
+
+/// F-001: a successful join exit must clear `_join_wait_start_{id}`. A
+/// same-session re-entry (runtime `GoTo` loop — the DAG load only rejects
+/// *static* cycles) otherwise reuses the stale timestamp and fires the
+/// deadline immediately instead of starting a fresh wait budget.
+#[tokio::test]
+async fn join_exit_clears_wait_start_so_same_session_reentry_gets_fresh_budget() {
+    let clock = Arc::new(DeterministicClock::new(1_000));
+    let task = make_converge_task("join_f", Some(100), Some("timeout_handler"), clock.clone());
+    let ctx = Context::new();
+
+    // Cycle 1: partial arrival → the waiting tick starts the budget at t=1000.
+    converge_arrive(&ctx, "join_f", "a");
+    let result = task.run(ctx.clone()).await.unwrap();
+    assert!(matches!(result.next_action, NextAction::WaitForInput));
+
+    // Last predecessor arrives → the gate passes and the join LEAVES. The
+    // wait-start key must retire with the join cycle.
+    converge_arrive(&ctx, "join_f", "b");
+    let result = task.run(ctx.clone()).await.unwrap();
+    assert!(
+        matches!(result.next_action, NextAction::Continue),
+        "complete join should advance; got {:?}",
+        result.next_action
+    );
+    assert!(
+        ctx.get_sync::<u64>("_join_wait_start_join_f").is_none(),
+        "successful join exit must clear the wait-start key"
+    );
+
+    // Same-session re-entry far past the ORIGINAL deadline: a fresh budget
+    // must start — the stale timestamp must not fire the deadline.
+    clock.advance(5_000);
+    converge_arrive(&ctx, "join_f", "a");
+    let result = task.run(ctx.clone()).await.unwrap();
+    assert!(
+        matches!(result.next_action, NextAction::WaitForInput),
+        "re-entry must wait on a fresh budget, not fire the stale deadline; \
+         got {:?}",
+        result.next_action
+    );
+
+    // And the fresh budget still bounds: past the NEW deadline it fires.
+    clock.advance(150);
+    let result = task.run(ctx.clone()).await.unwrap();
+    assert!(
+        matches!(&result.next_action, NextAction::GoTo(t) if t == "timeout_handler"),
+        "deadline still enforced after re-entry; got {:?}",
+        result.next_action
+    );
+}
+
+/// F-001 corollary: `timeout_ms` is ONE state-level budget shared by BOTH
+/// gates (§3.3.3) — a merge-success tick whose converge gate still has to
+/// wait in the same tick must NOT clear the wait-start key.
+#[tokio::test]
+async fn merge_pass_keeps_state_level_wait_budget_for_converge_gate() {
+    let clock = Arc::new(DeterministicClock::new(1_000));
+    let preds: HashSet<String> = ["a", "b"].iter().map(|s| (*s).to_string()).collect();
+    let task = StateCompositeTask::from_manifest(&StateDefinition {
+        id: "join_g".to_string(),
+        description: None,
+        enter: vec![],
+        exit_when: None,
+        next: Some(NextTarget::Linear("done".to_string())),
+        terminal: false,
+        context_update: None,
+        merge: None,
+        converge: Some(ConvergeConfig {
+            strategy: ConvergeStrategy::WaitForAll,
+        }),
+        timeout_ms: Some(100),
+        on_timeout: None,
+    })
+    .with_expected_incoming(2)
+    .with_converge_predecessors(preds)
+    .with_join_clock(clock.clone());
+    let ctx = Context::new();
+
+    // Tick 1: merge gate waiting (1/2) → the waiting tick starts the budget.
+    merge_arrive(&ctx, "join_g", "label_a");
+    let result = task.run(ctx.clone()).await.unwrap();
+    assert!(matches!(result.next_action, NextAction::WaitForInput));
+
+    // Tick 2 (t=1050): the merge gate passes, but the converge gate still
+    // waits in the same tick — the budget must survive the merge success.
+    clock.advance(50);
+    merge_arrive(&ctx, "join_g", "label_b");
+    let result = task.run(ctx.clone()).await.unwrap();
+    assert!(matches!(result.next_action, NextAction::WaitForInput));
+
+    // Tick 3 (t=1110): elapsed measured from the ORIGINAL wait-start
+    // (110 ms) fires the shared budget (whichever gate is waiting — the
+    // merge key was cleared by the merge success, so the merge gate re-check
+    // sees 0/2). A merge-success clear would have restarted the budget at
+    // t=1050 and the deadline would NOT fire (only 60 ms would have elapsed).
+    clock.advance(60);
+    let err = task
+        .run(ctx.clone())
+        .await
+        .expect_err("shared budget measured from the first waiting tick must fire");
+    let msg = match &err {
+        graph_flow::GraphError::TaskExecutionFailed(m) => m.clone(),
+        other => panic!("expected TaskExecutionFailed, got {other:?}"),
+    };
+    assert!(
+        msg.contains("elapsed_ms=110"),
+        "deadline measured from the ORIGINAL wait-start, not the merge-pass \
+         tick: {msg}"
+    );
+}
+
+// ── (h) timeout_ms = 0 semantics (qc2 F-003 / qc3 S-4) ───────────────────
+
+/// `timeout_ms: 0` means the deadline is already elapsed on the first
+/// waiting tick: that tick immediately reroutes (with `on_timeout`) or
+/// fails typed (without). Pinned as the documented §3.3.3 semantics.
+#[tokio::test]
+async fn timeout_ms_zero_fires_immediately_on_first_waiting_tick() {
+    // With `on_timeout` → immediate reroute on the first waiting tick.
+    let clock = Arc::new(DeterministicClock::new(500));
+    let reroute = make_converge_task("join_h1", Some(0), Some("timeout_handler"), clock);
+    let ctx = Context::new();
+    let result = reroute.run(ctx.clone()).await.unwrap();
+    assert!(
+        matches!(&result.next_action, NextAction::GoTo(t) if t == "timeout_handler"),
+        "timeout_ms=0 reroutes on the first waiting tick; got {:?}",
+        result.next_action
+    );
+
+    // Without `on_timeout` → typed fail on the first waiting tick, elapsed 0.
+    let clock = Arc::new(DeterministicClock::new(500));
+    let fail = make_converge_task("join_h2", Some(0), None, clock);
+    let ctx = Context::new();
+    let err = fail.run(ctx.clone()).await.unwrap_err();
+    let msg = match &err {
+        graph_flow::GraphError::TaskExecutionFailed(m) => m.clone(),
+        other => panic!("expected TaskExecutionFailed, got {other:?}"),
+    };
+    assert!(
+        msg.contains("elapsed_ms=0"),
+        "timeout_ms=0 fires with zero elapsed: {msg}"
+    );
+}
+
+// ── (i) saturating elapsed comparison (no wrap at extreme clock values) ──
+
+/// The elapsed comparison is `now − start` (saturating) against
+/// `timeout_ms` — never `start + timeout_ms` — so extreme clock values
+/// cannot wrap into a spurious deadline.
+#[tokio::test]
+async fn timeout_ms_u64_max_never_spuriously_fires_near_clock_maximum() {
+    let clock = Arc::new(DeterministicClock::new(u64::MAX - 1_000));
+    let task = make_converge_task("join_i", Some(u64::MAX), None, clock.clone());
+    let ctx = Context::new();
+
+    let result = task.run(ctx.clone()).await.unwrap();
+    assert!(matches!(result.next_action, NextAction::WaitForInput));
+
+    clock.advance(500); // now = u64::MAX − 500; elapsed = 500, no wrap.
+    let result = task.run(ctx.clone()).await.unwrap();
+    assert!(
+        matches!(result.next_action, NextAction::WaitForInput),
+        "elapsed 500 < u64::MAX must keep waiting; got {:?}",
+        result.next_action
     );
 }

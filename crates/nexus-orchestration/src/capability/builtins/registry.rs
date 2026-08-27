@@ -947,6 +947,23 @@ mod tests {
                 assert!(j < bound, "jitter {j} ms escapes band [0, {bound})");
             }
         }
+        // S-6 (v1.179 QC fix): a dead entropy source (constant clock) passes
+        // every containment assert — the samples must vary. Checked at
+        // attempt 5 (bound 8000): on hosts with coarse clock granularity
+        // (µs-scale ticks quantize subsec_nanos to multiples of 1000, which
+        // collapse bound ≤ 4000 samples without being dead), consecutive
+        // 1000 ns ticks still change `nanos % 8000`; only a constant clock
+        // yields a single distinct value.
+        let mut distinct: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        for _ in 0..1000 {
+            distinct.insert(retry_jitter_ms(5));
+        }
+        assert!(
+            distinct.len() >= 2,
+            "dead entropy source: 1000 samples at attempt 5 produced \
+             {} distinct values",
+            distinct.len()
+        );
     }
 
     #[test]

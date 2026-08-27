@@ -7,9 +7,10 @@
 //!    eligible row per §4.5.2.
 //! 2. `current_chapter` transitions — changes only on finalize, becoming the
 //!    just-finalized chapter number (§4.5.2 work-level invariant).
-//! 3. Novel completion — fires only when every row is `finalized`,
-//!    `current_chapter >= total_planned_chapters`, and
-//!    `intake_status == complete` (§6.1).
+//! 3. Novel completion — fires only when the row set covers
+//!    `total_planned_chapters`, every row is `finalized`, and
+//!    `intake_status == complete` (V1.44 F-002 volume-aware row-count
+//!    contract implemented by `is_work_completed`).
 //! 4. Resume — a new run against a Work with one `draft` row resumes that
 //!    row and does not create a new row (§4.5.2 / §5.4.5).
 //! 5. Reconciliation — reconcile rebuilds missing `work_chapters` rows/files
@@ -209,53 +210,63 @@ async fn w179_dr67_02_current_chapter_advances_only_on_finalize() {
     assert_eq!(read_current_chapter(&pool, "dr67_cc").await, 3);
 }
 
-/// §4.5.7 #3 — Completion fires only when every row is finalized,
-/// `current_chapter >= total_planned_chapters`, and `intake_status == complete`
-/// (§6.1).
+/// §4.5.7 #3 — Completion fires only when the row set covers
+/// `total_planned_chapters`, every row is `finalized`, and
+/// `intake_status == complete` — the V1.44 F-002 volume-aware row-count
+/// contract implemented by `is_work_completed` (`work_chapters.rs`). Per the
+/// workflow-profile.md §4.5.7 annotation, §6.1's
+/// `current_chapter >= total_planned_chapters` conjunct is NOT enforced by
+/// this DAO today (spec-pointer gap, historical) — every fixture below with
+/// a full finalized row set sets `current_chapter == total`, which keeps the
+/// unenforced conjunct out of the assertion path by construction.
 #[tokio::test]
-async fn w179_dr67_03_completion_requires_all_finalized_current_and_intake() {
+async fn w179_dr67_03_completion_requires_all_rows_finalized_count_match_and_intake() {
     let tmp = tempfile::NamedTempFile::new().unwrap();
     let pool = nexus_local_db::open_pool(tmp.path()).await.unwrap();
     nexus_local_db::run_migrations(&pool).await.unwrap();
 
-    // Complete configuration: 3/3 finalized, current_chapter = 3, intake done.
+    // Complete: 3 rows exist == total_planned_chapters 3, all finalized,
+    // intake complete → complete.
     insert_work(&pool, "dr67_done", 3, 3, "complete").await;
     for ch in 1..=3 {
         insert_chapter_row(&pool, "dr67_done", ch, "finalized").await;
     }
     assert!(
         is_work_completed(&pool, "dr67_done").await.unwrap(),
-        "§6.1: all-finalized + current>=total + intake complete → complete"
+        "V1.44 row-count contract: rows cover total, all finalized, intake \
+         complete → complete"
     );
 
-    // Missing intake: identical except intake_status pending → NOT complete.
+    // Missing intake: identical row set except intake_status pending → NOT
+    // complete.
     insert_work(&pool, "dr67_intake", 3, 3, "pending").await;
     for ch in 1..=3 {
         insert_chapter_row(&pool, "dr67_intake", ch, "finalized").await;
     }
     assert!(
         !is_work_completed(&pool, "dr67_intake").await.unwrap(),
-        "§6.1: intake_status != complete blocks completion"
+        "intake_status != complete blocks completion"
     );
 
-    // Un-finalized row: ch3 still draft, current_chapter = 2 → NOT complete.
+    // Un-finalized row: ch3 still draft → NOT complete.
     insert_work(&pool, "dr67_draft", 3, 2, "complete").await;
     insert_chapter_row(&pool, "dr67_draft", 1, "finalized").await;
     insert_chapter_row(&pool, "dr67_draft", 2, "finalized").await;
     insert_chapter_row(&pool, "dr67_draft", 3, "draft").await;
     assert!(
         !is_work_completed(&pool, "dr67_draft").await.unwrap(),
-        "§6.1: a non-finalized row blocks completion"
+        "a non-finalized row blocks completion"
     );
 
-    // Under-seeded: total_planned_chapters = 4 but only 3 rows exist.
+    // Under-seeded: total_planned_chapters = 4 but only 3 rows exist (count
+    // mismatch) → NOT complete.
     insert_work(&pool, "dr67_under", 4, 3, "complete").await;
     for ch in 1..=3 {
         insert_chapter_row(&pool, "dr67_under", ch, "finalized").await;
     }
     assert!(
         !is_work_completed(&pool, "dr67_under").await.unwrap(),
-        "§6.1: rows must cover every planned chapter before completion"
+        "the row set must cover every planned chapter before completion"
     );
 }
 

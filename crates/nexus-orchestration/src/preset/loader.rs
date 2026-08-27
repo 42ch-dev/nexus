@@ -464,6 +464,12 @@ fn validate_manifest(
 
     let state_ids: HashSet<&str> = manifest.states.iter().map(|s| s.id.as_str()).collect();
 
+    // W-1 (v1.179 QC fix): runtime join-gate parity — pre-compute which
+    // states the runtime gates as a merge join (`expected_incoming > 0`)
+    // so the bounded-join fail-closed rule below accepts implicit
+    // labeled-edge merges exactly as `build_outer_graph` wires them.
+    let incoming_labeled = incoming_labeled_edge_counts(manifest);
+
     // --- Field type checks (serde already handles most, but we add semantic checks) ---
 
     // Validate requires_capabilities
@@ -704,18 +710,26 @@ fn validate_manifest(
         }
 
         // DR-06 (v1.179): bounded-join fields fail closed at load.
-        // `timeout_ms`/`on_timeout` are only meaningful on a join state (one
-        // carrying `merge:` or `converge:`), and `on_timeout` must resolve to
-        // a real state in this preset — anything else is a load-time error so
-        // the runtime typed-error path stays defense-in-depth only.
-        if (state.timeout_ms.is_some() || state.on_timeout.is_some())
-            && state.merge.is_none()
-            && state.converge.is_none()
-        {
+        // `timeout_ms`/`on_timeout` are only meaningful on a join state —
+        // one the runtime gates as a join: explicit `merge:`, explicit
+        // `converge:`, or an implicit labeled-edge merge (≥1 incoming
+        // labeled/GoNogo edge; default wait-all per §3.2). `on_timeout`
+        // must resolve to a real state in this preset — anything else is
+        // a load-time error so the runtime typed-error path stays
+        // defense-in-depth only.
+        let is_join_state = state.merge.is_some()
+            || state.converge.is_some()
+            || incoming_labeled
+                .get(state.id.as_str())
+                .copied()
+                .unwrap_or(0)
+                > 0;
+        if (state.timeout_ms.is_some() || state.on_timeout.is_some()) && !is_join_state {
             problems.push(ValidationProblem {
                 path: format!("{state_path}.timeout_ms"),
                 error: "timeout_ms/on_timeout are only valid on join states \
-                        (states carrying 'merge:' or 'converge:')"
+                        (states carrying 'merge:' or 'converge:', or targeted \
+                        by incoming labeled edges — implicit merge)"
                     .to_string(),
             });
         }
@@ -728,7 +742,6 @@ fn validate_manifest(
             }
         }
     }
-
     // --- WS-E T6: Role validation ---
     // Build role ID set for agent reference validation
     let role_ids: HashSet<&str> = manifest.roles.iter().map(|r| r.id.as_str()).collect();
@@ -958,6 +971,31 @@ fn validate_skill_slug_format(s: &str) -> bool {
 // Graph building per §8.2 mapping table
 // ---------------------------------------------------------------------------
 
+/// Incoming labeled/GoNogo edge counts per target state (W-1, v1.179 QC).
+///
+/// Single source of truth for "which states the runtime gates as a merge
+/// join" (`expected_incoming > 0`): [`validate_manifest`]'s bounded-join
+/// fail-closed rule and [`build_outer_graph`]'s `with_expected_incoming`
+/// wiring MUST agree, so both scan through this helper. Mirrors the §3.2
+/// semantics documented on `MergeKind`: a state with ≥1 incoming labeled
+/// edge is a merge node even without an explicit `merge:` (default
+/// wait-all).
+fn incoming_labeled_edge_counts(manifest: &PresetManifest) -> HashMap<&str, usize> {
+    let mut incoming_labeled: HashMap<&str, usize> = HashMap::new();
+    for state in &manifest.states {
+        if let Some(NextTarget::Labeled(edges)) = &state.next {
+            for edge in edges {
+                *incoming_labeled.entry(edge.target.as_str()).or_insert(0) += 1;
+            }
+        }
+        if let Some(NextTarget::GoNogo(gonogo)) = &state.next {
+            *incoming_labeled.entry(gonogo.go.as_str()).or_insert(0) += 1;
+            *incoming_labeled.entry(gonogo.nogo.as_str()).or_insert(0) += 1;
+        }
+    }
+    incoming_labeled
+}
+
 /// Build the outer state-machine graph per §8.2.
 ///
 /// Each `states[].id` → a composite `Task` that encodes the enter actions,
@@ -973,18 +1011,7 @@ fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
     let graph = graph_flow::Graph::new(&manifest.preset.id);
 
     // V1.52 T-B P1: pre-compute incoming labeled edge counts for merge nodes.
-    let mut incoming_labeled: HashMap<&str, usize> = HashMap::new();
-    for state in &manifest.states {
-        if let Some(crate::preset::manifest::NextTarget::Labeled(edges)) = &state.next {
-            for edge in edges {
-                *incoming_labeled.entry(edge.target.as_str()).or_insert(0) += 1;
-            }
-        }
-        if let Some(crate::preset::manifest::NextTarget::GoNogo(gonogo)) = &state.next {
-            *incoming_labeled.entry(gonogo.go.as_str()).or_insert(0) += 1;
-            *incoming_labeled.entry(gonogo.nogo.as_str()).or_insert(0) += 1;
-        }
-    }
+    let incoming_labeled = incoming_labeled_edge_counts(manifest);
 
     // V1.56 P2 fix-wave (H-001): pre-compute converge predecessor sets.
     // Count which states can route to each converge-annotated state.
@@ -1587,6 +1614,61 @@ states:
         assert_eq!(join.on_timeout.as_deref(), Some("a"));
     }
 
+    #[test]
+    fn join_timeout_fields_load_cleanly_on_implicit_labeled_edge_merge() {
+        // W-1 (v1.179 QC fix): a state targeted by incoming labeled edges
+        // with NO explicit `merge:` is an implicit wait-all merge (§3.2) —
+        // the runtime gates it on `expected_incoming > 0`, so the
+        // bounded-join fields must load and bind to that gate instead of
+        // failing closed.
+        let yaml = r"
+preset:
+  id: ok-timeout-implicit-merge
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: j1
+  terminal: done
+states:
+  - id: j1
+    exit_when: { kind: rule }
+    next: j2
+  - id: j2
+    exit_when: { kind: llm_judge }
+    next:
+      - label: go
+        target: m
+      - label: research
+        target: m
+  - id: m
+    timeout_ms: 1000
+    on_timeout: j1
+    next: done
+  - id: done
+    terminal: true
+";
+        let caps = test_capability_registry();
+        let loaded = load_preset_from_str(yaml, &caps)
+            .expect("bounded join on an implicit labeled-edge merge loads");
+        let join = loaded
+            .manifest
+            .states
+            .iter()
+            .find(|s| s.id == "m")
+            .expect("implicit merge state present");
+        assert!(
+            join.merge.is_none(),
+            "fixture must stay implicit (no explicit merge:)"
+        );
+        assert_eq!(join.timeout_ms, Some(1000));
+        assert_eq!(join.on_timeout.as_deref(), Some("j1"));
+        // Runtime wait-bounding for this exact shape (expected_incoming 2,
+        // no merge:) is pinned by the join_timeout_e2e merge-gate tests; the
+        // loader and the graph wiring share `incoming_labeled_edge_counts`,
+        // so acceptance here means the gate the fields bound is the gate the
+        // runtime builds.
+    }
     #[test]
     fn reject_unknown_judge_capability() {
         let yaml = r"

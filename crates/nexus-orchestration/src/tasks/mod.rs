@@ -1166,6 +1166,14 @@ impl StateCompositeTask {
     ///
     /// - the arrivals key (`_merge_{id}` / `_converge_arrivals_{id}`) and the
     ///   wait-start key are cleared for the next cycle;
+    /// - the wait-start key is ALSO cleared when the join LEAVES — every
+    ///   present gate passed and processing proceeds (success-leave clear
+    ///   in `run()`). Without it a same-session re-entry (runtime `GoTo`
+    ///   loop; the DAG load only rejects static cycles) reuses the stale
+    ///   timestamp and fires the deadline immediately (F-001, QC fix).
+    ///   The clear sits after BOTH gates, so a merge-success tick whose
+    ///   converge gate still waits keeps the shared state-level budget
+    ///   (§3.3.3);
     /// - with a resolvable `on_timeout` target the run reroutes there and a
     ///   note is written to `_join_timeout_note`;
     /// - without one, the task fails with a `GraphError::TaskExecutionFailed`
@@ -1666,6 +1674,22 @@ impl Task for StateCompositeTask {
                     "converge node condition met, advancing"
                 );
             }
+        }
+
+        // F-001 (v1.179 QC fix): the join has LEFT — every present gate
+        // passed (§0.5/§0.6 return early while waiting), so retire the
+        // shared wait-start with the join cycle. A merge-success tick whose
+        // converge gate still waits returns inside §0.6 and never reaches
+        // this point, keeping `timeout_ms` one state-level budget for BOTH
+        // gates (§3.3.3). Without this clear, a same-session re-entry
+        // (runtime GoTo loop; the DAG load only rejects static cycles)
+        // reuses the stale timestamp and fires the deadline immediately.
+        // Guarded on `timeout_ms` so states without bounded-join fields
+        // keep writing no tracking keys (byte-identical behaviour, e2e (e)).
+        if self.timeout_ms.is_some() {
+            context
+                .set(&format!("_join_wait_start_{}", self.id), Value::Null)
+                .await;
         }
 
         // 1. Process enter actions.
