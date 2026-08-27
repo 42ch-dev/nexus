@@ -256,19 +256,35 @@ join states may declare a bounded-join deadline. ONE field pair on the
 Semantics:
 - The first waiting tick records `_join_wait_start_{state_id}` in context;
   subsequent ticks compare elapsed wall time against `timeout_ms`.
+  `timeout_ms` is ONE state-level budget shared by BOTH gates on the state
+  (merge §3.2 and converge §3.3.3): a merge-success tick whose converge
+  gate still has to wait does NOT restart the budget.
+- The wait-start key is cleared when the deadline fires (below) AND when
+  the join LEAVES — every present gate passed and processing proceeds — so
+  a same-session re-entry (runtime `GoTo` loop; the DAG load only rejects
+  static cycles) starts a fresh budget instead of firing the stale
+  deadline immediately (F-001, v1.179 QC fix).
+- `timeout_ms: 0` is legal and means the deadline is already elapsed: the
+  FIRST waiting tick immediately reroutes (with `on_timeout`) or fails
+  typed (without). `on_timeout` without `timeout_ms` is inert (no
+  deadline ever fires).
 - Deadline exceeded **with** a resolvable `on_timeout`: the arrivals key
   (`_merge_{id}` / `_converge_arrivals_{id}`) and the wait-start key are
   cleared, a note is written to `_join_timeout_note`, and the run reroutes
-  to the target state (`NextAction::GoTo`).
+  to the target state (`NextAction::GoTo` — the target re-enters through
+  the normal task path, so its enter actions run).
 - Deadline exceeded **without** `on_timeout` (or unresolvable): the task
   fails with `GraphError::TaskExecutionFailed` whose message begins with
   the typed discriminator `converge_timeout:` and names
   `gate=<merge|converge>`, `state_id`, `arrived`, `expected`, `elapsed_ms`
   (single discriminator for both gates — there is no sibling
   `merge_timeout` code).
-- Loader fails closed: `timeout_ms`/`on_timeout` on a state carrying
-  neither `merge:` nor `converge:` is a load-time error;
-  `on_timeout` naming an unknown state is a load-time error.
+- Loader fails closed: `timeout_ms`/`on_timeout` on a state the runtime
+  does not treat as a join is a load-time error. A join state carries
+  `merge:`, `converge:`, OR has ≥1 incoming labeled/GoNogo edge (implicit
+  wait-all merge per §3.2 — W-1 parity fix, v1.179 QC: the loader
+  validation and the graph wiring share one edge-count scan). `on_timeout`
+  naming an unknown state is a load-time error.
 
 > Historical note: this paragraph previously deferred a
 > `wait_for_all_timeout_seconds` field (default 3600 s) on `ConvergeConfig`
