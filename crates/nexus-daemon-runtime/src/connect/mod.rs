@@ -21,6 +21,7 @@ pub mod mcp_bridge;
 pub mod mcp_embedded;
 pub mod session;
 pub mod table;
+pub mod watch;
 pub mod ws_transport;
 
 pub use accept::{
@@ -29,6 +30,10 @@ pub use accept::{
 };
 pub use config::{load_peer_keys, CollisionPolicy, PeerToolsConfig, DEFAULT_CONNECT_PORT};
 pub use identity::load_or_create_identity;
+pub use watch::{
+    peer_config_digest, spawn_peer_config_watch, supervise_peer_config_watch, PeerConfigHolder,
+    PeerConfigSnapshot,
+};
 // V1.179 P0 T1 (DF-88): shared MCP bridge core re-exports.
 pub use mcp_bridge::{
     is_unroutable, CatalogResponse, CatalogRow, McpBackend, McpBridgeHandler, ToolCallOutcome,
