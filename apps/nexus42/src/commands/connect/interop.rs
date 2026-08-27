@@ -4106,7 +4106,7 @@ async fn token_cannot_widen_peer_scope_l2_computable_compute_denied() {
 /// the nexus handler runs); the seeded observed-peer store is left
 /// untouched and a served op round-trips afterwards.
 #[tokio::test(flavor = "multi_thread")]
-#[allow(clippy::too_many_lines)] // two-node authz scenario; the per-peer steps stay linear
+#[expect(clippy::too_many_lines)] // two-node authz scenario; the per-peer steps stay linear
 async fn served_tool_invoke_requires_peer_to_advertise_the_capability() {
     const WORLD_A: &str = "wld_t3_absent";
     let _guard = network_test_guard().await;
@@ -4280,7 +4280,7 @@ async fn served_tool_invoke_requires_peer_to_advertise_the_capability() {
 /// spoke gate before the nexus handler runs. The baseline op the token
 /// also grants (intersection-honored) still round-trips green.
 #[tokio::test(flavor = "multi_thread")]
-#[allow(clippy::too_many_lines)] // token-policy + two-node authz scenario
+#[expect(clippy::too_many_lines)] // token-policy + two-node authz scenario
 async fn tool_token_grant_never_substitutes_for_missing_negotiation() {
     const WORLD_A: &str = "wld_t3_token";
     let _guard = network_test_guard().await;
@@ -4415,9 +4415,9 @@ async fn tool_token_grant_never_substitutes_for_missing_negotiation() {
 /// nexus `op denied:` family — the same boundary proof as the
 /// tenant-isolation test. The seeded observed-peer store is unchanged
 /// (the handler never ran) and the session stays usable for a scoped
-/// baseline op.
+/// baseline op. Two-node authz + seeded-store zero-I/O scenario; the
+/// steps stay linear by design.
 #[tokio::test(flavor = "multi_thread")]
-#[allow(clippy::too_many_lines)] // two-node authz + seeded-store zero-I/O scenario
 async fn served_tool_op_scope_miss_denies_with_zero_adapter_io() {
     const WORLD_A: &str = "wld_t3_scopemiss";
     let _guard = network_test_guard().await;
@@ -4559,7 +4559,7 @@ async fn served_tool_op_scope_miss_denies_with_zero_adapter_io() {
 /// seeds are fixed; the module store is written before the invokes (no
 /// filesystem race).
 #[tokio::test(flavor = "multi_thread")]
-#[allow(clippy::too_many_lines)] // one two-node journey sweep over S; the per-tool steps stay linear
+#[expect(clippy::too_many_lines)] // one two-node journey sweep over S; the per-tool steps stay linear
 async fn ac_v173_1_two_node_interop_for_each_served_tool() {
     const WORLD_A: &str = "wld_t4_interop";
     let _guard = network_test_guard().await;
