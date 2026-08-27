@@ -1123,18 +1123,10 @@ pub fn build_wired_outer_graph(
     let graph = graph_flow::Graph::new(&loaded.id);
 
     // V1.52 T-B P1: pre-compute incoming labeled edge counts for merge nodes.
-    let mut incoming_labeled: HashMap<&str, usize> = HashMap::new();
-    for state in &loaded.manifest.states {
-        if let Some(crate::preset::manifest::NextTarget::Labeled(edges)) = &state.next {
-            for edge in edges {
-                *incoming_labeled.entry(edge.target.as_str()).or_insert(0) += 1;
-            }
-        }
-        if let Some(crate::preset::manifest::NextTarget::GoNogo(gonogo)) = &state.next {
-            *incoming_labeled.entry(gonogo.go.as_str()).or_insert(0) += 1;
-            *incoming_labeled.entry(gonogo.nogo.as_str()).or_insert(0) += 1;
-        }
-    }
+    // W-2 (v1.179 QC fix round 2): production wiring shares the exact scan
+    // used by `validate_manifest` and `build_outer_graph`, keeping the
+    // "loader accepts ⇔ runtime gates" parity invariant total.
+    let incoming_labeled = incoming_labeled_edge_counts(&loaded.manifest);
 
     // V1.56 P2 fix-wave (H-001): pre-compute converge predecessor sets.
     let mut converge_predecessors: HashMap<&str, std::collections::HashSet<&str>> = HashMap::new();
@@ -1668,6 +1660,139 @@ states:
         // loader and the graph wiring share `incoming_labeled_edge_counts`,
         // so acceptance here means the gate the fields bound is the gate the
         // runtime builds.
+    }
+    /// Engine stub for wiring-only tests: every method panics. The
+    /// merge-gate wait path returns before any engine call, so a panic
+    /// here would mean the test drove the wrong code path.
+    struct UnreachableEngine;
+
+    #[async_trait::async_trait]
+    impl crate::engine::OrchestrationEngine for UnreachableEngine {
+        async fn run_step(
+            &self,
+            _: &crate::engine::SessionId,
+        ) -> Result<crate::engine::StepOutcome, crate::engine::EngineError> {
+            unimplemented!("wiring test must not execute engine steps")
+        }
+        async fn new_session(
+            &self,
+            _: crate::engine::SessionKey,
+            _: crate::engine::Context,
+        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+            unimplemented!()
+        }
+        async fn start_session_with_graph(
+            &self,
+            _: &str,
+            _: std::sync::Arc<graph_flow::Graph>,
+        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+            unimplemented!()
+        }
+        async fn get_status(
+            &self,
+            _: &crate::engine::SessionId,
+        ) -> Result<crate::engine::SessionStatus, crate::engine::EngineError> {
+            unimplemented!()
+        }
+        async fn signal(
+            &self,
+            _: &crate::engine::SessionId,
+            _: crate::engine::EngineSignal,
+        ) -> Result<(), crate::engine::EngineError> {
+            unimplemented!()
+        }
+        async fn list_active(
+            &self,
+            _: crate::engine::SessionFilter,
+        ) -> Result<Vec<crate::engine::SessionSummary>, crate::engine::EngineError> {
+            unimplemented!()
+        }
+        async fn spawn_child_session(
+            &self,
+            _: crate::engine::ChildSessionParams,
+        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+            unimplemented!()
+        }
+        async fn start_session_with_preset(
+            &self,
+            _: &LoadedPreset,
+        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+            unimplemented!()
+        }
+        async fn get_context(
+            &self,
+            _: &crate::engine::SessionId,
+        ) -> Result<graph_flow::Context, crate::engine::EngineError> {
+            unimplemented!()
+        }
+        async fn start_session_with_preset_for_creator(
+            &self,
+            _: &LoadedPreset,
+            _: &str,
+        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+            unimplemented!()
+        }
+    }
+
+    #[tokio::test]
+    async fn wired_builder_gates_implicit_merge_like_validate_path() {
+        // W-2 (v1.179 QC fix round 2): the production builder
+        // `build_wired_outer_graph` must wire the same `expected_incoming`
+        // the loader's bounded-join validation accepts — both now scan
+        // through `incoming_labeled_edge_counts`. Fixture: implicit
+        // labeled-edge merge (no `merge:`) with two incoming edges; a
+        // single arrival must hold the wired gate at 1/2.
+        let yaml = r"
+preset:
+  id: wired-merge-parity
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: j1
+  terminal: done
+states:
+  - id: j1
+    exit_when: { kind: rule }
+    next: j2
+  - id: j2
+    exit_when: { kind: llm_judge }
+    next:
+      - label: go
+        target: m
+      - label: research
+        target: m
+  - id: m
+    next: done
+  - id: done
+    terminal: true
+";
+        let caps = test_capability_registry();
+        let loaded = load_preset_from_str(yaml, &caps).expect("implicit labeled-edge merge loads");
+
+        let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
+        let graph = build_wired_outer_graph(&loaded, &engine, &Arc::new(caps), None);
+
+        let task = graph
+            .get_task("m")
+            .expect("merge state task present in wired graph");
+        let ctx = graph_flow::Context::new();
+        ctx.set_sync("_merge_m", vec!["go".to_string()]);
+        let result = task.run(ctx).await.expect("merge gate check runs");
+
+        assert_eq!(
+            result.next_action,
+            graph_flow::NextAction::WaitForInput,
+            "one arrival of two must leave the wired merge gate waiting"
+        );
+        let response = result
+            .response
+            .expect("waiting merge node returns a message");
+        assert!(
+            response.contains("1/2 arrivals, waiting"),
+            "wired builder must wire expected_incoming=2 from the shared \
+             incoming_labeled_edge_counts scan; got: {response}"
+        );
     }
     #[test]
     fn reject_unknown_judge_capability() {
