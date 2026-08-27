@@ -387,14 +387,14 @@ Operational semantics:
 
 ### 5.7 Outbox consolidation (V1.59)
 
-The dual-outbox architecture identified in TD-8 (`dual-outbox-architecture.md`) is consolidated in V1.59. The unified outbox schema uses `outbox_entries` / `partial_apply_states` (migration `20260420_outbox_tables.sql`) as the single source of truth.
+The dual-outbox architecture identified in TD-8 (`dual-outbox-architecture.md`) was consolidated in V1.59. The unified outbox schema uses `outbox_entries` / `partial_apply_states` (migration `20260420_outbox_tables.sql`) as the single source of truth.
 
-**Single-writer rule**: each outbox event type has exactly one authorized writer subsystem. `nexus-cloud-sync::outbox::Outbox` owns sync push/pull commands. `nexus-orchestration` capabilities (`outbox.flush`, `outbox.compact`) own maintenance operations. The daemon legacy `outbox` queue table is deprecated and has zero active consumers (V1.59 T3 audit).
+**Single-writer rule**: each outbox event type has exactly one authorized writer subsystem. `nexus-cloud-sync::outbox::Outbox` owns sync push/pull commands. `nexus-orchestration` capabilities (`outbox.flush`, `outbox.compact`) own maintenance operations. The daemon legacy `outbox` queue table had no active Rust-level consumers (confirmed by the V1.59 T3 audit) and was dropped at V1.163 by migration `20260812_drop_legacy_outbox.sql`.
 
 **Flush/compact invocation path**:
 - `outbox.flush` (`OutboxFlush`, pool-backed): drains pending (`staged`/`ready`) entries by marking them `acked`. Input: optional `limit`. Output: `{ flushed: N }`.
 - `outbox.compact` (`OutboxCompact`, pool-backed): deletes `acked` entries older than a configurable retention window (default 7 days). Input: optional `retentionDays`. Output: `{ removed: N, retained: M }`.
-- Both capabilities are local-only (platform paused). Full semantics and test vectors are defined in the Draft overlay [outbox-consolidation.md](outbox-consolidation.md).
+- Both capabilities are local-only (platform paused). Full semantics and test vectors are defined in the Master spec [outbox-consolidation.md](outbox-consolidation.md) (Normative).
 
 **Pool injection**: both capabilities receive `sqlx::SqlitePool` through `with_pool()` constructors, following the same pattern as `kb.extract_work`, `novel.project_scaffold`, and other pool-backed capabilities. The `with_builtins_and_pool()` and `with_runtime_deps()` registry factories inject the pool.
 
