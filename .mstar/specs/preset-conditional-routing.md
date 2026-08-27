@@ -132,6 +132,10 @@ On each labeled edge match (`resolve_labeled_target`), the runtime writes the ma
    - `Quorum { n, .. }`: `arrived_count >= n`
 4. If satisfied: clears the context key and processes enter actions normally.
 5. If not satisfied: returns `NextAction::WaitForInput` — the engine will re-enter the state when the next labeled edge arrives.
+   Bounded-join opt-in (DR-06, v1.179): if the merge state sets
+   `timeout_ms`, the wait is bounded — deadline expiry reroutes to
+   `on_timeout` or fails with the typed `converge_timeout:` error
+   (`gate=merge`); see §3.3.3 "Bounded joins" for the normative table.
 
 **Incoming count discovery**: the loader pre-computes incoming labeled edge counts per state during graph construction. The `expected_incoming` field on `StateCompositeTask` is populated at build time.
 
@@ -240,13 +244,38 @@ states:
 
 **DAG enforcement**: cycles remain rejected at load time. Acyclic paths through converge nodes (e.g. `A → M → B`, `C → M → B` where M waits for both A and C) are allowed.
 
-**Converge timeout** (V1.58 P2 — R-V156P2-L003): the current implementation does **not** enforce a timeout on `wait_for_all` converge nodes. A converge state with `strategy: wait_for_all` that never receives all predecessor arrivals will wait indefinitely (returns `NextAction::WaitForInput` on each `run()` call). The engine relies on external signals (Resume, Cancel) to break deadlocks. A configurable `wait_for_all_timeout_seconds` field (default 3600s) with deadline-based enforcement is planned but deferred — **Durable roadmap:** DR-06 — adding it requires schema changes to `ConvergeConfig` (out of scope for P2: "schemas/ changes") and runtime behavior changes to the converge gate in `StateCompositeTask::run()`. For local-only single-user daemons (pre-1.0), indefinite wait is acceptabl…
-> *(v1.179 cross-ref: DR-06 is now scheduled — plan
-> `2026-08-27-v1.179-p2-reliability-convergence` ships it as additive
-> optional `timeout_ms` + `on_timeout` on join states (merge AND
-> converge), NOT as the deferred `wait_for_all_timeout_seconds` name;
-> single typed failure discriminator `converge_timeout` for both gates.
-> This paragraph is rewritten with the historical note when DR-06 lands.)*
+**Bounded joins — `timeout_ms` / `on_timeout`** (DR-06, v1.179 — Normative):
+join states may declare a bounded-join deadline. ONE field pair on the
+**state** serves BOTH join gates (merge §3.2 and converge §3.3.3):
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `timeout_ms` | `u64` (optional) | absent | Deadline in ms, measured from the join state's first waiting tick. Absent = unbounded wait (pre-DR-06 behaviour, byte-identical). |
+| `on_timeout` | `string` (optional) | absent | State ID to reroute to when the deadline fires. Must resolve to a state in this preset (loader-enforced). |
+
+Semantics:
+- The first waiting tick records `_join_wait_start_{state_id}` in context;
+  subsequent ticks compare elapsed wall time against `timeout_ms`.
+- Deadline exceeded **with** a resolvable `on_timeout`: the arrivals key
+  (`_merge_{id}` / `_converge_arrivals_{id}`) and the wait-start key are
+  cleared, a note is written to `_join_timeout_note`, and the run reroutes
+  to the target state (`NextAction::GoTo`).
+- Deadline exceeded **without** `on_timeout` (or unresolvable): the task
+  fails with `GraphError::TaskExecutionFailed` whose message begins with
+  the typed discriminator `converge_timeout:` and names
+  `gate=<merge|converge>`, `state_id`, `arrived`, `expected`, `elapsed_ms`
+  (single discriminator for both gates — there is no sibling
+  `merge_timeout` code).
+- Loader fails closed: `timeout_ms`/`on_timeout` on a state carrying
+  neither `merge:` nor `converge:` is a load-time error;
+  `on_timeout` naming an unknown state is a load-time error.
+
+> Historical note: this paragraph previously deferred a
+> `wait_for_all_timeout_seconds` field (default 3600 s) on `ConvergeConfig`
+> (V1.58 P2 — R-V156P2-L003). That name is RETIRED — v1.179 DR-06 (plan
+> `2026-08-27-v1.179-p2-reliability-convergence`) shipped the state-level
+> additive `timeout_ms`/`on_timeout` pair above instead, keeping
+> `ConvergeConfig`/`MergeKind` shapes unchanged.
 
 ### 3.4 Registry and workspace context fields (V1.56 P3 — Normative)
 

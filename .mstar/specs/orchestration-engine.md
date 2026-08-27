@@ -672,6 +672,16 @@ Converge strategies:
 
 Runtime enforcement lives in `StateCompositeTask::run()` via the converge gate. Predecessor tracking is populated at graph build time. Source states record arrivals via `_converge_arrivals_{target_id}` in context.
 
+**Bounded joins** (DR-06, v1.179): join states (carrying `merge:` or
+`converge:`) may set additive `timeout_ms` / `on_timeout` fields to bound
+the wait — deadline expiry reroutes to the `on_timeout` state or fails
+with the typed `converge_timeout:` error naming gate, state, arrivals, and
+elapsed time. One field pair serves both gates; the normative field table
+and semantics live in
+[preset-conditional-routing.md §3.3.3](preset-conditional-routing.md)
+("Bounded joins"). The deferred `wait_for_all_timeout_seconds` name is
+retired.
+
 **Expression depth limit** (V1.56 P2 fix-wave, W-003): `MAX_EXPR_DEPTH = 32` bounds parsing depth to prevent stack overflow from user-installable presets.
 
 ```yaml

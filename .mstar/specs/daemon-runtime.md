@@ -428,11 +428,10 @@ current implementation is correct and documented):
   refresher scenarios is speculative without a measured contention incident
   — the daemon runtime is single-process local-first and does not currently
   approach N=100. Deferred until a surge-load incident is observed.
-  *(v1.179 cross-ref: the synchronized-retry clustering DR-01 names is the
-  observed trigger — plan `2026-08-27-v1.179-p2-reliability-convergence`
-  ships attempt-aware full-jitter, base 500 ms / cap 8 000 ms,
-  superseding the 100–1000 ms expansion question here; this row gets a
-  landed note when DR-01 merges.)*
+  *(v1.179 DR-01 LANDED — plan `2026-08-27-v1.179-p2-reliability-convergence`:
+  attempt-aware full-jitter shipped in `registry.refresh` — base 500 ms /
+  cap 8 000 ms via `retry_jitter_ms(attempt)`, superseding both the
+  100–500 ms additive band and the 100–1000 ms expansion question here.)*
 - **S-002 (metrics overhead benchmarking)**: the four `AtomicU64` counters
   in `registry.rs` use `Ordering::Relaxed` (optimal for non-cross-thread
   data-dependency counters). Expected overhead is < 10 ns per call
