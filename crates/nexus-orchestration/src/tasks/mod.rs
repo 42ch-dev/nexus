@@ -615,6 +615,63 @@ impl LlmExtractTask {
 }
 
 // ---------------------------------------------------------------------------
+// Join clock (DR-06, v1.179 — bounded join deadlines)
+// ---------------------------------------------------------------------------
+
+/// Millisecond clock source for bounded-join deadlines (DR-06).
+///
+/// Mirrors the [`crate::scheduler::ClockSource`] pattern (production impl +
+/// mock for hermetic tests) but at millisecond resolution, which the
+/// `timeout_ms` join deadline requires. Time is read as milliseconds since
+/// an arbitrary fixed epoch — only differences are meaningful.
+pub trait JoinClock: Send + Sync {
+    /// Current time in milliseconds since an arbitrary fixed epoch.
+    fn now_ms(&self) -> u64;
+}
+
+/// Production clock: `SystemTime` wall time.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SystemJoinClock;
+
+impl JoinClock for SystemJoinClock {
+    fn now_ms(&self) -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+    }
+}
+
+/// Deterministic clock for hermetic timeout tests (DR-06).
+///
+/// Starts at a fixed value and advances only when [`Self::advance`] is
+/// called, so join-deadline branches can be exercised without sleeping.
+#[derive(Debug)]
+pub struct DeterministicClock {
+    now_ms: std::sync::atomic::AtomicU64,
+}
+
+impl DeterministicClock {
+    /// Create a deterministic clock at `start_ms`.
+    #[must_use]
+    pub const fn new(start_ms: u64) -> Self {
+        Self {
+            now_ms: std::sync::atomic::AtomicU64::new(start_ms),
+        }
+    }
+
+    /// Advance the clock by `delta_ms`.
+    pub fn advance(&self, delta_ms: u64) {
+        self.now_ms
+            .fetch_add(delta_ms, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl JoinClock for DeterministicClock {
+    fn now_ms(&self) -> u64 {
+        self.now_ms.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+// ---------------------------------------------------------------------------
 // StateCompositeTask (outer graph — per §8.2)
 // ---------------------------------------------------------------------------
 
@@ -677,6 +734,18 @@ pub struct StateCompositeTask {
     /// object. Tests set this directly; in production the engine populates it
     /// from the active workspace session.
     workspace_state: Option<serde_json::Value>,
+    /// Bounded-join deadline in milliseconds for this state's join gate
+    /// (DR-06, v1.179). `None` = unbounded wait (legacy behaviour).
+    timeout_ms: Option<u64>,
+    /// Reroute target when the join deadline fires (DR-06, v1.179).
+    ///
+    /// `None` = fail with the typed `converge_timeout:` error.
+    on_timeout: Option<String>,
+    /// Millisecond clock for join-deadline checks (DR-06, v1.179).
+    ///
+    /// Defaults to [`SystemJoinClock`]; tests inject [`DeterministicClock`]
+    /// via [`Self::with_join_clock`].
+    clock: Arc<dyn JoinClock>,
 }
 
 /// Pre-compiled expression ASTs for conditional routing (V1.56 P2 fix-wave, M-004).
@@ -712,6 +781,9 @@ impl StateCompositeTask {
             exit_when: state.exit_when.clone(),
             next: state.next.clone(),
             engine: None,
+            timeout_ms: state.timeout_ms,
+            on_timeout: state.on_timeout.clone(),
+            clock: Arc::new(SystemJoinClock),
             inner_graphs: std::collections::HashMap::new(),
             output_bindings: std::collections::HashMap::new(),
             registry: None,
@@ -782,6 +854,17 @@ impl StateCompositeTask {
     #[must_use]
     pub fn with_converge_predecessors(mut self, preds: HashSet<String>) -> Self {
         self.converge_predecessors = preds;
+        self
+    }
+
+    /// Set the millisecond clock used for join-deadline checks (DR-06, v1.179).
+    ///
+    /// Production leaves the default [`SystemJoinClock`]; hermetic tests
+    /// inject [`DeterministicClock`] to exercise timeout branches without
+    /// sleeping.
+    #[must_use]
+    pub fn with_join_clock(mut self, clock: Arc<dyn JoinClock>) -> Self {
+        self.clock = clock;
         self
     }
 
@@ -1072,6 +1155,90 @@ impl StateCompositeTask {
             context.set_sync(&converge_key, arrived);
         }
         // else: duplicate arrival from same source → idempotent no-op.
+    }
+
+    /// Bounded-join deadline check for one waiting tick (DR-06, v1.179).
+    ///
+    /// No-op unless this state sets `timeout_ms`. On the first waiting tick
+    /// records `_join_wait_start_{id}` in the context; every subsequent tick
+    /// compares elapsed wall time (via the injected clock) against the
+    /// deadline. When the deadline has elapsed:
+    ///
+    /// - the arrivals key (`_merge_{id}` / `_converge_arrivals_{id}`) and the
+    ///   wait-start key are cleared for the next cycle;
+    /// - with a resolvable `on_timeout` target the run reroutes there and a
+    ///   note is written to `_join_timeout_note`;
+    /// - without one, the task fails with a `GraphError::TaskExecutionFailed`
+    ///   whose message begins with the typed discriminator `converge_timeout:`
+    ///   and names `gate`, `state_id`, `arrived`, `expected`, `elapsed_ms`.
+    ///
+    /// `gate` is `"merge"` or `"converge"`; `arrived`/`expected` are the
+    /// arrival counts observed on the timing-out tick. Returns `Ok(None)`
+    /// when the join may keep waiting.
+    async fn join_timeout_tick(
+        &self,
+        context: &graph_flow::Context,
+        gate: &'static str,
+        arrived: usize,
+        expected: usize,
+    ) -> Result<Option<TaskResult>, graph_flow::GraphError> {
+        let Some(timeout_ms) = self.timeout_ms else {
+            return Ok(None);
+        };
+        let wait_start_key = format!("_join_wait_start_{}", self.id);
+        let wait_start: u64 = if let Some(t) = context.get(&wait_start_key).await {
+            t
+        } else {
+            let now = self.clock.now_ms();
+            context.set(&wait_start_key, now).await;
+            now
+        };
+        let elapsed_ms = self.clock.now_ms().saturating_sub(wait_start);
+        if elapsed_ms < timeout_ms {
+            return Ok(None);
+        }
+
+        // Deadline exceeded — clear arrivals + wait-start for the next cycle.
+        let arrivals_key = if gate == "merge" {
+            &self.merge_key
+        } else {
+            &self.converge_key
+        };
+        context.set(arrivals_key, Value::Null).await;
+        context.set(&wait_start_key, Value::Null).await;
+
+        if let Some(target) = &self.on_timeout {
+            let note = format!(
+                "join timeout at '{}': rerouting to '{target}' (gate={gate}, elapsed_ms={elapsed_ms})",
+                self.id
+            );
+            context.set("_join_timeout_note", note.clone()).await;
+            tracing::info!(
+                state_id = %self.id,
+                gate,
+                target = %target,
+                elapsed_ms,
+                "join deadline exceeded; rerouting to on_timeout target"
+            );
+            return Ok(Some(TaskResult::new(
+                Some(note),
+                NextAction::GoTo(target.clone()),
+            )));
+        }
+
+        tracing::warn!(
+            state_id = %self.id,
+            gate,
+            arrived,
+            expected,
+            elapsed_ms,
+            "join deadline exceeded with no on_timeout target; failing task"
+        );
+        Err(graph_flow::GraphError::TaskExecutionFailed(format!(
+            "converge_timeout: gate={gate}, state_id={}, arrived={arrived}, \
+             expected={expected}, elapsed_ms={elapsed_ms}",
+            self.id
+        )))
     }
 
     /// Inject context dependencies before expression evaluation (V1.56 P3).
@@ -1413,6 +1580,14 @@ impl Task for StateCompositeTask {
             };
 
             if !condition_met {
+                // DR-06: bounded join — reroute or fail typed when the
+                // deadline has elapsed (no-op when timeout_ms is absent).
+                if let Some(timeout_result) = self
+                    .join_timeout_tick(&context, "merge", arrived_count, self.expected_incoming)
+                    .await?
+                {
+                    return Ok(timeout_result);
+                }
                 let state_id = self.id.clone();
                 tracing::debug!(
                     state_id = %state_id,
@@ -1456,6 +1631,14 @@ impl Task for StateCompositeTask {
 
                 if !condition_met {
                     let state_id = self.id.clone();
+                    // DR-06: bounded join — reroute or fail typed when the
+                    // deadline has elapsed (no-op when timeout_ms is absent).
+                    if let Some(timeout_result) = self
+                        .join_timeout_tick(&context, "converge", arrived_count, expected)
+                        .await?
+                    {
+                        return Ok(timeout_result);
+                    }
                     tracing::debug!(
                         state_id = %state_id,
                         arrived = arrived_count,
@@ -3103,6 +3286,8 @@ mod tests {
             context_update: None,
             merge: None,
             converge: None,
+            timeout_ms: None,
+            on_timeout: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
@@ -3152,6 +3337,8 @@ mod tests {
             context_update: None,
             merge: None,
             converge: None,
+            timeout_ms: None,
+            on_timeout: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
@@ -3189,6 +3376,8 @@ mod tests {
             context_update: None,
             merge: None,
             converge: None,
+            timeout_ms: None,
+            on_timeout: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
@@ -3223,6 +3412,8 @@ mod tests {
             context_update: None,
             merge: None,
             converge: None,
+            timeout_ms: None,
+            on_timeout: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
@@ -3256,6 +3447,8 @@ mod tests {
             context_update: None,
             merge: None,
             converge: None,
+            timeout_ms: None,
+            on_timeout: None,
         };
 
         let task =
@@ -3305,6 +3498,8 @@ mod tests {
             context_update: None,
             merge: None,
             converge: None,
+            timeout_ms: None,
+            on_timeout: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -3677,6 +3872,8 @@ mod tests {
             context_update: None,
             merge: None,
             converge: None,
+            timeout_ms: None,
+            on_timeout: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -3733,6 +3930,8 @@ mod tests {
             context_update: None,
             merge: None,
             converge: None,
+            timeout_ms: None,
+            on_timeout: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -3781,6 +3980,8 @@ mod tests {
             context_update: None,
             merge: None,
             converge: None,
+            timeout_ms: None,
+            on_timeout: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -3890,6 +4091,8 @@ mod tests {
             context_update: None,
             merge: None,
             converge: None,
+            timeout_ms: None,
+            on_timeout: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -3965,6 +4168,9 @@ mod tests {
             converge_predecessors: std::collections::HashSet::new(),
             cached_expr: None,
             workspace_state: None,
+            timeout_ms: None,
+            on_timeout: None,
+            clock: Arc::new(SystemJoinClock),
         }
     }
 
@@ -4191,6 +4397,9 @@ mod tests {
             converge_predecessors: std::collections::HashSet::new(),
             cached_expr: None,
             workspace_state: None,
+            timeout_ms: None,
+            on_timeout: None,
+            clock: Arc::new(SystemJoinClock),
         };
 
         let ctx = graph_flow::Context::new();
@@ -4257,6 +4466,9 @@ mod tests {
             converge_predecessors: std::collections::HashSet::new(),
             cached_expr,
             workspace_state: None,
+            timeout_ms: None,
+            on_timeout: None,
+            clock: Arc::new(SystemJoinClock),
         }
     }
 

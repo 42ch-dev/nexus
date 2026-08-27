@@ -215,6 +215,22 @@ pub struct StateDefinition {
     /// [`ConvergeStrategy`] controls join behaviour.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub converge: Option<ConvergeConfig>,
+    /// Bounded-join deadline in milliseconds (DR-06, v1.179).
+    ///
+    /// Valid only on join states — a state carrying `merge:` or `converge:`.
+    /// When set, the join gate fails (or reroutes via [`Self::on_timeout`])
+    /// if not all arrivals have landed within this many milliseconds of the
+    /// first waiting tick. Absent (default `None`) = today's unbounded wait.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+    /// Reroute target when the `timeout_ms` deadline fires (DR-06, v1.179).
+    ///
+    /// Must name an existing state in the same preset (loader-validated).
+    /// When the deadline fires and this resolves, arrivals are cleared and
+    /// the run enters the named state; when absent or unresolvable the task
+    /// fails with the typed `converge_timeout:` error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_timeout: Option<String>,
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]
@@ -1326,6 +1342,8 @@ states:
                     context_update: None,
                     merge: None,
                     converge: None,
+                    timeout_ms: None,
+                    on_timeout: None,
                 },
                 StateDefinition {
                     id: "b".into(),
@@ -1337,6 +1355,8 @@ states:
                     context_update: None,
                     merge: None,
                     converge: None,
+                    timeout_ms: None,
+                    on_timeout: None,
                 },
             ],
             inner_graphs: None,

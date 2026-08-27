@@ -702,6 +702,31 @@ fn validate_manifest(
                 });
             }
         }
+
+        // DR-06 (v1.179): bounded-join fields fail closed at load.
+        // `timeout_ms`/`on_timeout` are only meaningful on a join state (one
+        // carrying `merge:` or `converge:`), and `on_timeout` must resolve to
+        // a real state in this preset — anything else is a load-time error so
+        // the runtime typed-error path stays defense-in-depth only.
+        if (state.timeout_ms.is_some() || state.on_timeout.is_some())
+            && state.merge.is_none()
+            && state.converge.is_none()
+        {
+            problems.push(ValidationProblem {
+                path: format!("{state_path}.timeout_ms"),
+                error: "timeout_ms/on_timeout are only valid on join states \
+                        (states carrying 'merge:' or 'converge:')"
+                    .to_string(),
+            });
+        }
+        if let Some(target) = &state.on_timeout {
+            if !state_ids.contains(target.as_str()) {
+                problems.push(ValidationProblem {
+                    path: format!("{state_path}.on_timeout"),
+                    error: format!("unknown state: '{target}'"),
+                });
+            }
+        }
     }
 
     // --- WS-E T6: Role validation ---
@@ -1457,6 +1482,109 @@ inner_graphs:
             problems.iter().any(|p| p.error.contains("cycle")),
             "expected 'cycle' problem in inner_graphs: {problems:?}"
         );
+    }
+
+    // ── DR-06 (v1.179): bounded-join loader validation ──────────────────
+
+    #[test]
+    fn reject_timeout_fields_on_non_join_state() {
+        let yaml = r"
+preset:
+  id: bad-timeout-non-join
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    exit_when: { kind: rule }
+    next: b
+    timeout_ms: 1000
+  - id: b
+    terminal: true
+";
+        let caps = test_capability_registry();
+        let err = load_preset_from_str(yaml, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.path.contains("timeout_ms")
+                    && p.error.contains("only valid on join states")),
+            "expected 'only valid on join states' problem: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn reject_on_timeout_naming_unknown_state() {
+        let yaml = r"
+preset:
+  id: bad-timeout-target
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    exit_when: { kind: rule }
+    next: b
+  - id: b
+    terminal: true
+    converge: { strategy: wait_for_all }
+    timeout_ms: 1000
+    on_timeout: nowhere
+";
+        let caps = test_capability_registry();
+        let err = load_preset_from_str(yaml, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.path.contains("on_timeout")
+                    && p.error.contains("unknown state: 'nowhere'")),
+            "expected 'unknown state' problem on on_timeout: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn join_timeout_fields_load_cleanly_on_converge_state() {
+        // Positive control: the same fields on a real join state load fine.
+        let yaml = r"
+preset:
+  id: ok-timeout-join
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: c
+states:
+  - id: a
+    exit_when: { kind: rule }
+    next: b
+  - id: b
+    converge: { strategy: wait_for_all }
+    timeout_ms: 1000
+    on_timeout: a
+    next: c
+  - id: c
+    terminal: true
+";
+        let caps = test_capability_registry();
+        let loaded =
+            load_preset_from_str(yaml, &caps).expect("bounded join on a converge state loads");
+        let join = loaded
+            .manifest
+            .states
+            .iter()
+            .find(|s| s.id == "b")
+            .expect("join state present");
+        assert_eq!(join.timeout_ms, Some(1000));
+        assert_eq!(join.on_timeout.as_deref(), Some("a"));
     }
 
     #[test]
