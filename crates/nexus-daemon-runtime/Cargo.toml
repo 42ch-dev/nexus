@@ -61,8 +61,9 @@ futures-util = { workspace = true }
 # sink/stream transport (`connect/mcp_embedded.rs`). `futures_channel::mpsc`
 # Sender/Receiver are `Sink`/`Stream` + `Unpin` — the rmcp
 # `SinkStreamTransport` bounds. Already in the lockfile at 0.3.34 via
-# rmcp's `futures` umbrella dep — graph-neutral.
-futures-channel = "0.3"
+# rmcp's `futures` umbrella dep — graph-neutral. Optional + wired ONLY to
+# the nested `embedded-mcp` feature (GC #1: no stray default-graph deps).
+futures-channel = { version = "0.3", optional = true }
 tokio-stream = { workspace = true }
 regex = { workspace = true }
 serde_yaml = { workspace = true }
@@ -174,9 +175,10 @@ connect-client = [
 # feature under `connect-client`. `--features connect-client` compiles the
 # shared bridge core (`connect/mcp_bridge.rs`) but NOT the embedded server
 # (`connect/mcp_embedded.rs`); `--features connect-client,embedded-mcp`
-# compiles both. No additional deps — rmcp 1.8's `transport::sink_stream`
-# is an ungated core module.
-embedded-mcp = ["connect-client"]
+# compiles both. Deps: `dep:futures-channel` (the sink/stream transport
+# channels) — rmcp 1.8's `transport::sink_stream` is an ungated core
+# module, no extra rmcp features.
+embedded-mcp = ["connect-client", "dep:futures-channel"]
 # V1.153 P2 (DF-73): embedded Web UI (rust-embed SPA bytes) — default ON so
 # the creator-facing daemon is unchanged; OFF (`--no-default-features`)
 # compiles the SPA serving stack out of the `nexus-runtime` artifact.

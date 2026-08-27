@@ -4,7 +4,12 @@
 //! Drives the embedded MCP server (`connect/mcp_embedded.rs`) with a REAL
 //! in-process rmcp client over a `SinkStreamTransport` pair — the same
 //! `start_embedded_mcp_server` function the daemon boot block (`boot.rs`
-//! §8.5) calls. Scope (DF-88 verify):
+//! §8.5) calls, plus the boot-path wiring itself. Scope (DF-88 verify):
+//! - the BOOT PATH (`connect::boot_embedded_mcp_server`, the exact
+//!   function `run_daemon`'s §8.5 block calls) stores ONE boot-scoped
+//!   instance on `WorkspaceState`, gated by GC #9 enablement (config key
+//!   OR `--embedded-mcp` CLI flag), and that stored instance is reachable
+//!   for `establish()` (I-1 / M-2);
 //! - `tools/list` mirrors the spine catalog (builtin rows from the real
 //!   `host_tool_registry()`);
 //! - `tools/call` against a registered builtin returns the structured
@@ -16,6 +21,13 @@
 //!
 //! Gated: `--features connect-client,embedded-mcp` (the nested feature
 //! proof — the embedded server module compiles only under `embedded-mcp`).
+//!
+//! Note (M-2): a full `run_daemon` e2e (real $HOME mutation + HTTP bind +
+//! shutdown coordination) is out of scope for this task because `run_daemon`
+//! never exposes its internal `WorkspaceState` — the boot-path coverage
+//! below drives `boot_embedded_mcp_server`, the EXACT function `run_daemon`
+//! calls for the embedded server, so the enablement gate, the store-on-state
+//! wiring, and establish-on-the-boot-instance are all exercised end-to-end.
 
 #![cfg(feature = "embedded-mcp")]
 // Justification (repo convention, cf. tests/works_api.rs): integration-test
@@ -23,7 +35,9 @@
 // signal; `.unwrap()`/`.expect()` keep the tests linear and readable.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use nexus_daemon_runtime::connect::mcp_embedded::start_embedded_mcp_server;
+use nexus_daemon_runtime::connect::mcp_embedded::{
+    boot_embedded_mcp_server, start_embedded_mcp_server,
+};
 use nexus_daemon_runtime::test_utils::create_test_workspace;
 use nexus_daemon_runtime::workspace::WorkspaceState;
 use rmcp::model::{CallToolRequestParams, ClientInfo, ErrorCode};
@@ -40,11 +54,33 @@ async fn establish_session(
         .expect("initialize handshake completes")
 }
 
+async fn boot_server(
+    daemon_json: Option<&str>,
+    cli_embedded_mcp: bool,
+) -> (
+    nexus_daemon_runtime::test_utils::TestTempRoot,
+    WorkspaceState,
+) {
+    let (tmp, nexus_home, db_path) = create_test_workspace().await;
+    let raw_home = nexus_home
+        .parent()
+        .expect("temp root is the raw user home")
+        .to_path_buf();
+    if let Some(body) = daemon_json {
+        std::fs::create_dir_all(nexus_home.join("connect")).expect("connect dir");
+        std::fs::write(nexus_home.join("connect").join("daemon.json"), body)
+            .expect("write daemon.json");
+    }
+    let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    boot_embedded_mcp_server(&mut state, &raw_home, cli_embedded_mcp).await;
+    (tmp, state)
+}
+
 #[tokio::test]
 async fn embedded_server_lists_and_calls_builtin_without_child_process() {
     let (_tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    let server = start_embedded_mcp_server(state);
+    let server = start_embedded_mcp_server(state, true).expect("enabled server");
     let running = establish_session(&server).await;
     assert!(!running.is_closed(), "client alive after handshake");
 
@@ -87,7 +123,7 @@ async fn embedded_server_lists_and_calls_builtin_without_child_process() {
 async fn embedded_unroutable_id_is_method_not_found() {
     let (_tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    let server = start_embedded_mcp_server(state);
+    let server = start_embedded_mcp_server(state, true).expect("enabled server");
     let running = establish_session(&server).await;
 
     // Same exact-id discriminator as the stdio path fixture
@@ -107,4 +143,54 @@ async fn embedded_unroutable_id_is_method_not_found() {
         "unsupported tool: → -32601 (AR-70 #4 discriminator parity)"
     );
     drop(running);
+}
+
+#[tokio::test]
+async fn boot_path_config_key_stores_boot_server_reachable_for_establish() {
+    // I-1/M-2: the BOOT WIRING (the exact function `run_daemon`'s §8.5
+    // block calls) must retain ONE boot-scoped server instance on
+    // `WorkspaceState` — reachable for `establish()` — gated by the GC #9
+    // config-key SSOT (`~/.nexus42/connect/daemon.json` `"embedded_mcp":
+    // true`; serde default false). CLI flag off: the key alone enables.
+    let (_tmp, state) = boot_server(Some(r#"{"embedded_mcp": true}"#), false).await;
+
+    let server = state
+        .embedded_mcp_server()
+        .expect("boot instance stored on WorkspaceState");
+    let running = establish_session(&server).await;
+    assert!(!running.is_closed(), "client alive after handshake");
+
+    // The stored boot instance serves the spine catalog end-to-end.
+    let result = running.list_tools(None).await.expect("tools/list succeeds");
+    assert!(
+        result
+            .tools
+            .iter()
+            .any(|t| t.name.as_ref() == "nexus.context.whoami"),
+        "boot-path server lists builtin tools"
+    );
+    let call = running
+        .call_tool(CallToolRequestParams::new("nexus.context.whoami"))
+        .await
+        .expect("successful call");
+    assert_ne!(call.is_error, Some(true), "boot-path call succeeds");
+    drop(running);
+}
+
+#[tokio::test]
+async fn boot_path_cli_flag_enables_and_no_enablement_leaves_no_server() {
+    // CLI-flag path: no config file, `--embedded-mcp` alone enables (union
+    // semantics, GC #9).
+    let (_tmp, state) = boot_server(None, true).await;
+    assert!(
+        state.embedded_mcp_server().is_some(),
+        "CLI flag alone enables the boot-scoped server"
+    );
+
+    // Neither key nor flag: no server is stored, no embedded surface.
+    let (_tmp2, state2) = boot_server(None, false).await;
+    assert!(
+        state2.embedded_mcp_server().is_none(),
+        "no enablement ⇒ no boot server stored"
+    );
 }

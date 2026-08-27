@@ -36,8 +36,8 @@ pub use mcp_bridge::{
 // V1.179 P0 T1 (DF-88): embedded MCP server re-exports (feature-gated).
 #[cfg(feature = "embedded-mcp")]
 pub use mcp_embedded::{
-    start_embedded_mcp_server, EmbeddedMcpError, EmbeddedMcpServer, EmbeddedSession,
-    EMBEDDED_MCP_MAX_SESSIONS,
+    boot_embedded_mcp_server, start_embedded_mcp_server, EmbeddedMcpError, EmbeddedMcpServer,
+    EmbeddedSession, EMBEDDED_MCP_MAX_SESSIONS,
 };
 pub use session::{PeerSessionManager, SessionRecord, DEFAULT_MAX_SESSIONS};
 pub use table::{

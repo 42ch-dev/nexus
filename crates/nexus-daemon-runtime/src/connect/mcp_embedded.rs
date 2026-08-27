@@ -24,18 +24,24 @@
 //! daemon-internal and few; the bound keeps the surface finite, it does not
 //! shape remote load): the (N+1)-th concurrent embedded session establish
 //! is refused with the honest discriminator `embedded_mcp_session_limit`.
+//! The budget is **process-global** (I-1): every [`EmbeddedMcpServer`]
+//! handle in the process shares ONE registry, so the boot instance and any
+//! consumer-constructed handle count against the same cap.
 //!
 //! # Lifecycle
 //!
 //! The server is created at daemon boot (`boot.rs` §8.5, the peer-tools
-//! lane block) and lives until daemon shutdown (`state.shutdown_notify()`)
-//! — restart-scoped per AR-67, same class as `host`/`port`/`max_sessions`.
+//! lane block, via [`boot_embedded_mcp_server`]) and the ONE boot-scoped
+//! instance is stored on [`WorkspaceState`] — the handle in-daemon
+//! consumers `establish()` on. It lives until daemon shutdown
+//! (`state.shutdown_notify()`) — restart-scoped per AR-67, same class as
+//! `host`/`port`/`max_sessions`.
 //! Enablement is the union of the `PeerToolsConfig.embedded_mcp` key and
 //! the `nexus42 daemon start --embedded-mcp` flag (GC #9); the cargo
 //! `embedded-mcp` feature is the hard gate (feature off + enablement
 //! requested ⇒ warn-and-skip at boot, never an abort — PR #229 F-1
 //! posture).
-
+//!
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -45,6 +51,7 @@ use rmcp::model::{
     ClientNotification, ClientRequest, ClientResult, JsonRpcMessage, ServerNotification,
     ServerRequest, ServerResult,
 };
+use rmcp::transport::sink_stream::SinkStreamTransport;
 use rmcp::{serve_server, ErrorData as McpError};
 
 use crate::api::errors::NexusApiError;
@@ -91,12 +98,15 @@ impl EmbeddedMcpError {
     }
 }
 
-/// The embedded MCP server (Model B). Clone is cheap — every clone shares
-/// the session registry and the spine state.
+/// The embedded MCP server (Model B); clone is cheap.
+///
+/// Every clone shares the spine state, and the session budget is
+/// PROCESS-GLOBAL: every handle in the process counts against the same
+/// [`EMBEDDED_MCP_MAX_SESSIONS`] cap, so the boot instance and any
+/// consumer-constructed handle cannot bypass the bound.
 #[derive(Clone)]
 pub struct EmbeddedMcpServer {
     state: WorkspaceState,
-    sessions: Arc<SessionRegistry>,
 }
 
 /// One established embedded session: the client-side transport for
@@ -105,11 +115,12 @@ pub struct EmbeddedMcpServer {
 /// The consumer completes the handshake with
 /// `rmcp::serve_client(ClientInfo::default(), session.transport)`; the slot
 /// is released when the session is dropped (teardown frees the budget).
-#[derive(Debug)]
 pub struct EmbeddedSession {
     /// Client-side transport: sink = client→server writes, stream =
-    /// server→client reads.
-    pub transport: (mpsc::Sender<ClientToServer>, mpsc::Receiver<ServerToClient>),
+    /// server→client reads. Named [`SinkStreamTransport`] explicitly (M-3)
+    /// — the rmcp 1.8 `IntoTransport` blanket covers it for `serve_client`.
+    pub transport:
+        SinkStreamTransport<mpsc::Sender<ClientToServer>, mpsc::Receiver<ServerToClient>>,
     /// Session slot — releases the [`EMBEDDED_MCP_MAX_SESSIONS`] budget on
     /// drop.
     _slot: SessionSlot,
@@ -197,10 +208,25 @@ fn map_spine_error(e: NexusApiError) -> ToolCallOutcome {
     }
 }
 
-/// Process-scoped embedded session registry (one per server).
+/// Process-global embedded session registry (shared by every server handle).
 #[derive(Debug)]
 struct SessionRegistry {
     active: AtomicUsize,
+}
+/// The ONE process-wide embedded session registry (lazy-initialized, I-1).
+///
+/// The session budget is process-global, not per-server-instance: every
+/// [`EmbeddedMcpServer`] handle in the process — the boot-scoped instance
+/// stored on `WorkspaceState` and any consumer-constructed handle — counts
+/// against the same [`EMBEDDED_MCP_MAX_SESSIONS`] cap, so no second server
+/// instance can bypass the bound.
+fn process_registry() -> Arc<SessionRegistry> {
+    static REGISTRY: std::sync::LazyLock<Arc<SessionRegistry>> = std::sync::LazyLock::new(|| {
+        Arc::new(SessionRegistry {
+            active: AtomicUsize::new(0),
+        })
+    });
+    Arc::clone(&REGISTRY)
 }
 
 impl SessionRegistry {
@@ -273,14 +299,14 @@ impl EmbeddedMcpServer {
     /// Returns [`EmbeddedMcpError::SessionLimit`] when the session budget
     /// is exhausted.
     pub fn establish(&self) -> Result<EmbeddedSession, EmbeddedMcpError> {
-        let slot = self.sessions.try_acquire()?;
+        let slot = process_registry().try_acquire()?;
         // Channel A: client→server (the client's sink, the server's
         // stream). Channel B: server→client (the server's sink, the
         // client's stream). Both carry the concrete JSON-RPC wire message
         // types of their direction.
         let (client_tx, server_rx) = mpsc::channel::<ClientToServer>(16);
         let (server_tx, client_rx) = mpsc::channel::<ServerToClient>(16);
-        let server_transport = (server_tx, server_rx);
+        let server_transport = SinkStreamTransport::new(server_tx, server_rx);
         let handler = McpBridgeHandler {
             backend: EmbeddedMcpBackend {
                 state: self.state.clone(),
@@ -302,56 +328,112 @@ impl EmbeddedMcpServer {
             }
         });
         Ok(EmbeddedSession {
-            transport: (client_tx, client_rx),
+            transport: SinkStreamTransport::new(client_tx, client_rx),
             _slot: slot,
         })
     }
 }
 
-/// Start the embedded MCP server (Model B).
+/// Start the embedded MCP server (Model B), honoring the GC #9 enablement
+/// gate.
 ///
-/// Called from the peer-tools lane boot block (`boot.rs` §8.5); the caller
-/// keeps the returned server alive for the daemon lifetime (bound to
-/// `state.shutdown_notify()`).
+/// `embedded_enabled` is the union of the `PeerToolsConfig.embedded_mcp`
+/// key and the `--embedded-mcp` CLI flag (computed by
+/// [`boot_embedded_mcp_server`] at daemon boot, or directly by tests).
+/// Returns `None` when enablement was not requested — the caller then
+/// stores nothing and in-daemon consumers see no embedded surface.
+///
+/// The session budget is PROCESS-global: every server handle shares the
+/// same [`EMBEDDED_MCP_MAX_SESSIONS`] registry, so the boot instance and
+/// any consumer-constructed handle count against the same cap.
 #[must_use]
-pub fn start_embedded_mcp_server(state: WorkspaceState) -> EmbeddedMcpServer {
-    let server = EmbeddedMcpServer {
-        state,
-        sessions: Arc::new(SessionRegistry {
-            active: AtomicUsize::new(0),
-        }),
-    };
+pub fn start_embedded_mcp_server(
+    state: WorkspaceState,
+    embedded_enabled: bool,
+) -> Option<EmbeddedMcpServer> {
+    if !embedded_enabled {
+        tracing::info!(
+            "embedded MCP not enabled (config key `embedded_mcp` and --embedded-mcp \
+             both unset); no server created"
+        );
+        return None;
+    }
+    let server = EmbeddedMcpServer { state };
     tracing::info!(
         max_sessions = EMBEDDED_MCP_MAX_SESSIONS,
         "embedded MCP server ready (Model B, in-process sink/stream; exempt from \
-         PeerSessionManager::max_sessions per GC #8)"
+         PeerSessionManager::max_sessions per GC #8; process-global session budget)"
     );
-    server
+    Some(server)
+}
+/// Boot-wire the embedded MCP server (DF-88 Model B) per GC #9.
+///
+/// The exact function the daemon boot block (`boot.rs` §8.5) calls.
+/// Enablement is the union of the `PeerToolsConfig.embedded_mcp` key (read
+/// from `~/.nexus42/connect/daemon.json` via [`crate::connect::PeerToolsConfig::load`];
+/// `raw_home` is the raw `$HOME`, the path helper joins `.nexus42`
+/// internally) and the `--embedded-mcp` CLI flag. When enabled, ONE
+/// boot-scoped server instance is created and stored on `state` — the
+/// handle in-daemon consumers `establish()` on (I-1). The cargo
+/// `embedded-mcp` feature remains the hard gate: with this module not
+/// compiled, the feature-off warn-and-skip lives in `boot.rs` (the CLI
+/// flag warns on every graph; the config-key path needs `connect-client`
+/// to load `PeerToolsConfig`).
+pub async fn boot_embedded_mcp_server(
+    state: &mut WorkspaceState,
+    raw_home: &std::path::Path,
+    cli_embedded_mcp: bool,
+) {
+    let embedded_enabled = match crate::connect::PeerToolsConfig::load(raw_home) {
+        Ok(cfg) => cfg.embedded_mcp || cli_embedded_mcp,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "embedded MCP config load failed; continuing without embedded MCP"
+            );
+            false
+        }
+    };
+    if let Some(server) = start_embedded_mcp_server(state.clone(), embedded_enabled) {
+        state.set_embedded_mcp_server(Arc::new(server));
+        tracing::info!(
+            "embedded MCP server started (Model B, in-process sink/stream; boot instance \
+             stored on WorkspaceState for in-daemon consumers)"
+        );
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::connect::session::PeerSessionManager;
+    use serial_test::serial;
 
     #[tokio::test]
+    #[serial]
     async fn session_limit_refuses_fifth_concurrent_session() {
-        let server = EmbeddedMcpServer {
-            state: WorkspaceState::new_for_testing(
+        // The budget is PROCESS-global (I-1): the registry is shared across
+        // every `EmbeddedMcpServer` handle in this process, so the boot
+        // instance and any consumer-constructed handle count against the
+        // same cap. `#[serial]` keeps this test's 4-session hold isolated
+        // from the other budget-touching unit test in this binary.
+        let server = start_embedded_mcp_server(
+            WorkspaceState::new_for_testing(
                 std::env::temp_dir().join("embedded-mcp-test-home"),
                 std::env::temp_dir().join("embedded-mcp-test.db"),
                 None,
             )
             .await,
-            sessions: Arc::new(SessionRegistry {
-                active: AtomicUsize::new(0),
-            }),
-        };
+            true,
+        )
+        .expect("enabled server");
         let mut sessions = Vec::new();
         for _ in 0..EMBEDDED_MCP_MAX_SESSIONS {
             sessions.push(server.establish().expect("session within budget"));
         }
-        let err = server.establish().expect_err("5th session refused");
+        let Err(err) = server.establish() else {
+            panic!("5th concurrent session must be refused")
+        };
         assert_eq!(err, EmbeddedMcpError::SessionLimit);
         assert_eq!(
             err.code(),
@@ -359,44 +441,74 @@ mod tests {
             "honest discriminator (GC #8)"
         );
         assert_eq!(
-            server.sessions.active_count(),
+            process_registry().active_count(),
             EMBEDDED_MCP_MAX_SESSIONS,
-            "budget fully consumed"
+            "budget fully consumed (process-global)"
         );
 
         // Teardown frees the slot: dropping one session lets the next
         // establish succeed.
         drop(sessions.pop().expect("session to drop"));
         assert_eq!(
-            server.sessions.active_count(),
+            process_registry().active_count(),
             EMBEDDED_MCP_MAX_SESSIONS - 1,
             "teardown frees the slot"
         );
         let _replacement = server.establish().expect("slot freed by teardown");
         assert_eq!(
-            server.sessions.active_count(),
+            process_registry().active_count(),
             EMBEDDED_MCP_MAX_SESSIONS,
             "freed slot re-acquired"
         );
     }
 
     #[tokio::test]
+    #[serial]
     async fn embedded_sessions_never_touch_peer_session_counters() {
         // GC #8: the embedded surface is exempt from
         // `PeerSessionManager::max_sessions` and MUST NOT consume or
-        // perturb peer-session counters. Establish + teardown embedded
-        // sessions and assert the peer manager stays untouched.
+        // perturb peer-session counters. Non-tautological baseline (M-1):
+        // the manager starts in a NONZERO state (one in-flight reservation
+        // simulating an accepted-but-unregistered dial), so the assertions
+        // prove embedded establish/teardown leaves the peer counters
+        // untouched rather than asserting 0 == 0 on a fresh manager.
         let (_tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let server = start_embedded_mcp_server(
             WorkspaceState::new_for_testing(nexus_home, db_path, None).await,
-        );
+            true,
+        )
+        .expect("enabled server");
         let peer_sessions = PeerSessionManager::new();
+        assert!(
+            peer_sessions.reserve_in_flight(8),
+            "baseline in-flight reservation accepted"
+        );
+        assert_eq!(peer_sessions.session_count(), 0);
+        assert_eq!(peer_sessions.connection_count(), 1, "nonzero baseline");
 
         let session = server.establish().expect("establish");
-        assert_eq!(peer_sessions.session_count(), 0);
-        assert_eq!(peer_sessions.connection_count(), 0);
+        assert_eq!(
+            peer_sessions.session_count(),
+            0,
+            "embedded establish must not register a peer session"
+        );
+        assert_eq!(
+            peer_sessions.connection_count(),
+            1,
+            "embedded establish must not consume the peer budget"
+        );
         drop(session);
-        assert_eq!(peer_sessions.session_count(), 0);
+        assert_eq!(
+            peer_sessions.session_count(),
+            0,
+            "embedded teardown must not perturb peer sessions"
+        );
+        assert_eq!(
+            peer_sessions.connection_count(),
+            1,
+            "embedded teardown must not perturb the peer budget"
+        );
+        peer_sessions.release_in_flight();
         assert_eq!(peer_sessions.connection_count(), 0);
     }
 

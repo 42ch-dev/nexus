@@ -1264,6 +1264,22 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // (empty allowlist ⇒ every dial rejected). A lane failure (config load
     // / identity / bind) is non-fatal: the daemon core keeps running
     // without peer tools, and nothing is admitted.
+    //
+    // GC #9 F-1 posture (I-2): `--embedded-mcp` with the cargo feature
+    // compiled off must warn-and-skip on EVERY graph — including the
+    // default `nexus42` graph where the `connect-client` block below does
+    // not compile. Never a silent swallow, never a boot abort (PR #229
+    // F-1). The CONFIG-KEY path (`PeerToolsConfig.embedded_mcp`) needs
+    // `connect-client` to load the peer-tools config, so its warn-and-skip
+    // lives inside the lane block below.
+    #[cfg(not(feature = "embedded-mcp"))]
+    if config.embedded_mcp {
+        tracing::warn!(
+            "embedded MCP requested via --embedded-mcp but the embedded-mcp cargo \
+             feature is not compiled; skipping (Model B off; build with \
+             `--features connect-client,embedded-mcp` to enable)"
+        );
+    }
     #[cfg(feature = "connect-client")]
     {
         // PR #229 F-1 (Bugbot): the peer-tools lane must be warn-and-skip,
@@ -1274,6 +1290,10 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         // peer tools, and nothing is admitted.
         if let Some(raw_home) = state.nexus_home().parent() {
             let peer_shutdown = state.shutdown_notify();
+            // Own the path: the embedded boot wiring below needs `&mut
+            // state` (store-on-state, I-1), which cannot coexist with a
+            // borrow held through `state.nexus_home()`.
+            let raw_home = raw_home.to_path_buf();
             // AR-68 #2(ii) reserved namespaces: builtin host-tool ids + user
             // capability names can never be admitted as peer tools. The set
             // is derived LIVE from the shared capability holder at each
@@ -1282,7 +1302,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             // admission, so the AR-68 #3 collision contract survives hot
             // reload.
             match crate::connect::start_peer_tools_lane(
-                raw_home,
+                &raw_home,
                 peer_shutdown,
                 state.capability_registry_holder(),
             )
@@ -1306,37 +1326,44 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             // flag (union semantics, GC #9 — the `--allow-peer` precedent);
             // the cargo `embedded-mcp` feature is the hard gate. Feature
             // compiled off + enablement requested ⇒ warn-and-skip with an
-            // honest log line, never a boot abort (PR #229 F-1 posture). The
-            // server lives until daemon shutdown (`state.shutdown_notify()`)
-            // — restart-scoped per AR-67, same class as
-            // `host`/`port`/`max_sessions`.
-            let embedded_enabled = match crate::connect::PeerToolsConfig::load(raw_home) {
-                Ok(cfg) => cfg.embedded_mcp || config.embedded_mcp,
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        "embedded MCP config load failed; continuing without embedded MCP"
-                    );
-                    false
-                }
-            };
-            if embedded_enabled {
-                #[cfg(feature = "embedded-mcp")]
-                {
-                    let server = crate::connect::start_embedded_mcp_server(state.clone());
-                    let shutdown = state.shutdown_notify();
-                    tokio::spawn(async move {
-                        shutdown.notified().await;
-                        drop(server);
-                    });
-                    tracing::info!("embedded MCP server started (Model B, in-process sink/stream)");
-                }
-                #[cfg(not(feature = "embedded-mcp"))]
-                {
-                    tracing::warn!(
-                        "embedded MCP requested (config key or --embedded-mcp) but the \
-                         embedded-mcp cargo feature is not compiled; skipping (Model B off)"
-                    );
+            // honest log line, never a boot abort (PR #229 F-1 posture).
+            //
+            // I-1: the boot wiring is EXTRACTED to
+            // `connect::boot_embedded_mcp_server` — the same function the
+            // e2e exercises directly. It stores the ONE boot-scoped server
+            // instance on `WorkspaceState` (reachable for `establish()` by
+            // in-daemon consumers) and lives until daemon shutdown
+            // (`state.shutdown_notify()`) — restart-scoped per AR-67, same
+            // class as `host`/`port`/`max_sessions`.
+            #[cfg(feature = "embedded-mcp")]
+            crate::connect::boot_embedded_mcp_server(&mut state, &raw_home, config.embedded_mcp)
+                .await;
+            #[cfg(not(feature = "embedded-mcp"))]
+            {
+                // The `--embedded-mcp` CLI-flag case already warned outside
+                // the connect-client block (I-2). This covers the
+                // CONFIG-KEY path only — it needs connect-client to load
+                // `PeerToolsConfig`, and the warn text names that
+                // distinction.
+                if !config.embedded_mcp {
+                    match crate::connect::PeerToolsConfig::load(&raw_home) {
+                        Ok(cfg) if cfg.embedded_mcp => {
+                            tracing::warn!(
+                                "embedded MCP requested via the `embedded_mcp` config key but \
+                                 the embedded-mcp cargo feature is not compiled; skipping \
+                                 (Model B off; build with \
+                                 `--features connect-client,embedded-mcp` to enable)"
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::debug!(
+                                error = %e,
+                                "embedded MCP config not loadable; config-key enablement \
+                                 unknown (feature-off graph)"
+                            );
+                        }
+                    }
                 }
             }
         } else {
