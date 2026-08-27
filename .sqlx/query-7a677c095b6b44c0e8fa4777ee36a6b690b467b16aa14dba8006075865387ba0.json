@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT status FROM work_chapters WHERE work_id = ? AND volume = 1 AND chapter = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "status",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7a677c095b6b44c0e8fa4777ee36a6b690b467b16aa14dba8006075865387ba0"
+}

@@ -44,7 +44,7 @@ async fn insert_work(
     current_chapter: i32,
     intake_status: &str,
 ) {
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO works (work_id, creator_id, workspace_slug, status, title,
          long_term_goal, initial_idea, intake_status, inspiration_log,
          primary_preset_id, schedule_ids, created_at, updated_at,
@@ -52,13 +52,13 @@ async fn insert_work(
          auto_chain_enabled, auto_chain_interrupted, auto_review_master_on_timeout)
          VALUES (?, 'ctr_dr67', 'ws', 'active', 'DR-67', 'goal', 'idea', ?,
          '[]', 'novel-writing', '[]', ?, ?, 'produce', 'active', ?, ?, 1, 0, 0)",
+        work_id,
+        intake_status,
+        NOW,
+        NOW,
+        current_chapter,
+        total,
     )
-    .bind(work_id)
-    .bind(intake_status)
-    .bind(NOW)
-    .bind(NOW)
-    .bind(current_chapter)
-    .bind(total)
     .execute(pool)
     .await
     .unwrap();
@@ -66,17 +66,18 @@ async fn insert_work(
 
 /// Insert one chapter row at a given status.
 async fn insert_chapter_row(pool: &sqlx::SqlitePool, work_id: &str, chapter: i32, status: &str) {
-    sqlx::query(
+    let slug = format!("ch{chapter:02}");
+    sqlx::query!(
         "INSERT INTO work_chapters
          (work_id, volume, chapter, slug, status, created_at, updated_at)
          VALUES (?, 1, ?, ?, ?, ?, ?)",
+        work_id,
+        chapter,
+        slug,
+        status,
+        NOW,
+        NOW,
     )
-    .bind(work_id)
-    .bind(chapter)
-    .bind(format!("ch{chapter:02}"))
-    .bind(status)
-    .bind(NOW)
-    .bind(NOW)
     .execute(pool)
     .await
     .unwrap();
@@ -84,20 +85,22 @@ async fn insert_chapter_row(pool: &sqlx::SqlitePool, work_id: &str, chapter: i32
 
 /// Read `works.current_chapter` back.
 async fn read_current_chapter(pool: &sqlx::SqlitePool, work_id: &str) -> i32 {
-    sqlx::query_scalar("SELECT current_chapter FROM works WHERE work_id = ?")
-        .bind(work_id)
-        .fetch_one(pool)
-        .await
-        .unwrap()
+    sqlx::query_scalar!(
+        r#"SELECT current_chapter as "current_chapter: i32" FROM works WHERE work_id = ?"#,
+        work_id
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 
 /// Read one chapter's status back.
 async fn read_chapter_status(pool: &sqlx::SqlitePool, work_id: &str, chapter: i32) -> String {
-    sqlx::query_scalar(
+    sqlx::query_scalar!(
         "SELECT status FROM work_chapters WHERE work_id = ? AND volume = 1 AND chapter = ?",
+        work_id,
+        chapter,
     )
-    .bind(work_id)
-    .bind(chapter)
     .fetch_one(pool)
     .await
     .unwrap()
