@@ -313,7 +313,8 @@ Partial unique index: one row per `(creator_id, work_id)` where `work_id IS NOT 
 | `acp_tool_audit_log` | ACP 工具调用审计 | Daemon |
 | `acp_sessions` | ACP 会话持久化 | Daemon |
 | `workspace_sessions` | Workspace session persistence for `workspace.open`/`workspace.commit` with file-level OCC content hashes (V1.56 P0) | Daemon |
-> **Provenance（GC-6 / AC-V178-2）**：零活跃消费者审计完成于 **V1.59 P1 T3**（commit `c39e4afc`，2026-06-22）。migration `20260812_drop_legacy_outbox.sql` 头注的 "V1.159 T3" 为已知不可变值（PL-2：`crates/nexus-local-db/migrations/` 禁止原地修改），以 **V1.59 T3** 为 verified 值。
+
+> **Provenance**：零活跃消费者审计完成于 **V1.59 P1 T3**（commit `c39e4afc`，2026-06-22）。migration `20260812_drop_legacy_outbox.sql` 头注的 "V1.159 T3" 为已知不可变值（migration 文件自应用起不可变：sqlx checksum 锁定，禁止原地修改），以 **V1.59 T3** 为 verified 值。
 
 #### 4.2.1 `workspace_sessions` (V1.56 P0)
 
