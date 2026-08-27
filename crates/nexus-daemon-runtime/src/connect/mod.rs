@@ -31,8 +31,9 @@ pub use accept::{
 pub use config::{load_peer_keys, CollisionPolicy, PeerToolsConfig, DEFAULT_CONNECT_PORT};
 pub use identity::load_or_create_identity;
 pub use watch::{
-    peer_config_digest, reload_peer_config, spawn_peer_config_watch, ConfigEvent, PeerConfigHolder,
-    PeerConfigSnapshot, PeerConfigWatchStats, PEER_CONFIG_WATCH_INTERVAL,
+    peer_config_digest, reload_peer_config, spawn_peer_config_watch, supervise_peer_config_watch,
+    ConfigEvent, PeerConfigHolder, PeerConfigSnapshot, PeerConfigWatchStats,
+    PeerConfigWatchSupervision, PEER_CONFIG_WATCH_INTERVAL,
 };
 // V1.179 P0 T1 (DF-88): shared MCP bridge core re-exports.
 pub use mcp_bridge::{

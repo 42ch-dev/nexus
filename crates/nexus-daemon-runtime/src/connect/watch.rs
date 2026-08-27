@@ -376,18 +376,23 @@ where
 }
 
 /// Spawn the peer config watcher: validated reloads swapped into `holder`
-/// and fed to the process-global table seam, until `shutdown` fires.
+/// and fed to the `table` admission seam, until `shutdown` fires.
 ///
 /// `initial_digest` is the BOOT baseline — the caller computes it with
 /// [`peer_config_digest`] BEFORE the boot `PeerToolsConfig::load` so an
 /// edit landing anywhere in the boot window diverges from the baseline and
 /// the first poll reloads (never absorbed — the capability watcher's W-B
 /// rule).
+///
+/// `table` is injected (production passes the process-global singleton) so
+/// the full spawned path runs against a local table in tests — a normal
+/// parameter, not a prod test hook (see [`apply_reload`]).
 #[must_use]
 pub fn spawn_peer_config_watch(
     initial_digest: DigestPoll,
     home: PathBuf,
     holder: PeerConfigHolder,
+    table: Arc<PeerToolTable>,
     shutdown: Arc<Notify>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -396,9 +401,47 @@ pub fn spawn_peer_config_watch(
             () = shutdown.notified() => {
                 tracing::info!("peer config watch: shutdown received, exiting");
             }
-            _ = peer_config_watch_loop(initial_digest, home, holder) => {}
+            _ = peer_config_watch_loop(initial_digest, home, holder, table) => {}
         }
     })
+}
+
+/// Await one config-watcher task and degrade honestly (DF-92).
+///
+/// A watcher panic surfaces here as a [`tokio::task::JoinError`] — log ONE
+/// named `peer config reload degraded` warn and keep serving the LAST-GOOD
+/// snapshot. The holder is never touched (admission continues against
+/// whatever the last successful swap left); a restart restores reload. The
+/// accept loop never awaits session or watcher work, so the daemon stays up
+/// throughout.
+///
+/// Returns a [`PeerConfigWatchSupervision`] outcome (test evidence; the
+/// production spawner discards it, mirroring [`PeerConfigWatchStats`]).
+pub async fn supervise_peer_config_watch(
+    watch: tokio::task::JoinHandle<()>,
+) -> PeerConfigWatchSupervision {
+    match watch.await {
+        Ok(()) => {
+            tracing::info!("peer config watch stopped");
+            PeerConfigWatchSupervision { degraded: false }
+        }
+        Err(join_error) => {
+            tracing::warn!(
+                error = %join_error,
+                "peer config reload degraded; keeping last-good admission config \
+                 (restart restores reload)"
+            );
+            PeerConfigWatchSupervision { degraded: true }
+        }
+    }
+}
+
+/// Outcome of supervising one config-watcher task (DF-92; test evidence).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PeerConfigWatchSupervision {
+    /// The watcher task ended in a panic (`JoinError`): the named degraded
+    /// warn was logged and the lane keeps the last-good admission config.
+    pub degraded: bool,
 }
 
 /// Production watch loop: real digest poll + validated reload/swap.
@@ -406,6 +449,7 @@ async fn peer_config_watch_loop(
     initial_digest: DigestPoll,
     home: PathBuf,
     holder: PeerConfigHolder,
+    table: Arc<PeerToolTable>,
 ) -> PeerConfigWatchStats {
     peer_config_watch_loop_inner(
         PEER_CONFIG_WATCH_INTERVAL,
@@ -414,7 +458,7 @@ async fn peer_config_watch_loop(
         // watcher's stat walk (spawn_blocking adds latency without
         // removing the blocking-on-worker property at this size).
         || async { peer_config_digest(&home) },
-        || async { apply_reload(&home, &holder, crate::connect::peer_tool_table()).await },
+        || async { apply_reload(&home, &holder, &table).await },
         || false,
     )
     .await
@@ -595,8 +639,8 @@ mod tests {
     #[tokio::test]
     async fn baseline_seeded_without_initial_event() {
         let baseline = DigestPoll::Tree(serde_json::json!({"daemon.json": "aa"}));
-        // Two polls identical to the baseline: no apply, no warnings — the
-        // boot baseline is seeded WITHOUT emitting an initial event.
+        // ONE poll identical to the baseline: no apply, no warnings —
+        // the boot baseline is seeded WITHOUT emitting an initial event.
         let stats = drive_loop(
             baseline.clone(),
             vec![baseline],
@@ -1006,6 +1050,10 @@ mod tests {
             boot_digest,
             home.path().to_path_buf(),
             PeerConfigHolder::clone(&holder),
+            // Injected local table: the full spawned path (including the
+            // reload's `set_config` feed) runs against a table this test
+            // owns — no process-global pollution (T2 review carry).
+            Arc::new(PeerToolTable::new()),
             Arc::clone(&shutdown),
         );
 
@@ -1030,5 +1078,60 @@ mod tests {
 
         shutdown.notify_one();
         let _ = watch.await;
+    }
+    /// DF-92 verify: a watcher-task PANIC (injected through the generic
+    /// poll closure — the T1 test-only seam, no prod hooks) is supervised
+    /// as a `JoinError`: ONE `peer config reload degraded` warn, and the
+    /// lane keeps admitting against the LAST-GOOD (boot) snapshot — the
+    /// holder is never touched; a restart restores reload.
+    #[tokio::test]
+    async fn watcher_panic_degrades_supervision_and_keeps_last_good_admission() {
+        let boot = PeerToolsConfig {
+            peer_ids: vec!["peer-a".to_owned()],
+            tool_allowlist: vec!["tools.t3.echo".to_owned()],
+            ..PeerToolsConfig::default()
+        };
+        let holder = PeerConfigHolder::new(boot_snapshot(boot));
+        // The admission-shaped read a NEW hello would take: the last-good
+        // generation, cloned before the watcher dies (grant-at-establish
+        // semantics — a live clone keeps serving its generation).
+        let admission = holder.get();
+
+        // The watcher task runs the GENERIC loop core; the poll closure
+        // panics on its second poll (the first matches the baseline). The
+        // stats output is discarded — the task shape must match the
+        // production watcher's `JoinHandle<()>`.
+        let mut polled = false;
+        let watch = tokio::spawn(async move {
+            peer_config_watch_loop_inner(
+                Duration::from_millis(1),
+                DigestPoll::Missing,
+                move || {
+                    let panic_now = polled;
+                    polled = true;
+                    async move {
+                        assert!(!panic_now, "injected watcher panic");
+                        DigestPoll::Missing
+                    }
+                },
+                || async { Ok(ConfigEvent::Changed) },
+                || false,
+            )
+            .await;
+        });
+        let supervision = supervise_peer_config_watch(watch).await;
+        assert!(
+            supervision.degraded,
+            "a watcher panic must surface as the degraded supervision outcome"
+        );
+
+        // Daemon stays up + admission continues against LAST-GOOD: the
+        // holder was never swapped and both the pre-panic admission clone
+        // and a fresh holder read serve the boot generation.
+        assert_eq!(admission.config.peer_ids, vec!["peer-a"]);
+        assert_eq!(admission.config.tool_allowlist, vec!["tools.t3.echo"]);
+        let fresh = holder.get();
+        assert_eq!(fresh.config.peer_ids, vec!["peer-a"]);
+        assert_eq!(fresh.config.tool_allowlist, vec!["tools.t3.echo"]);
     }
 }

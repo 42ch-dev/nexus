@@ -23,11 +23,11 @@
 //!   missing key is rejected by the responder's fail-closed handshake; the
 //!   session manager never sees it.
 //!
-//! The daemon hello manifest is an input parameter (AR-69: boot derives it
-//! from the operator allowlist — baseline ∪ allowlist exact ids; tests pass
-//! tool ids directly).
+//! The daemon hello manifest derives PER CONNECTION from the live config
+//! allowlist (AR-69: baseline ∪ allowlist exact ids; DF-92 — a hot-added
+//! allowlist entry is negotiable for the next handshake without a
+//! restart; tests seed the holder with the ids directly).
 
-use std::collections::HashMap;
 use std::future::Future;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -49,7 +49,8 @@ use crate::connect::identity::{self, IdentityError};
 use crate::connect::session::PeerSessionManager;
 use crate::connect::table::live_reserved_tool_ids;
 use crate::connect::watch::{
-    peer_config_digest, spawn_peer_config_watch, PeerConfigHolder, PeerConfigSnapshot,
+    peer_config_digest, spawn_peer_config_watch, supervise_peer_config_watch, PeerConfigHolder,
+    PeerConfigSnapshot,
 };
 use crate::connect::ws_transport::{ws_config, WsTransport};
 use nexus_orchestration::CapabilityRegistryHolder;
@@ -134,9 +135,9 @@ impl Transport for ObservedTransport {
 /// T4 wiring chooses to advertise). `host_id` is the installation device id.
 ///
 /// AR-69 derivation lock: the tool `capabilities[]` derive ONLY from the
-/// operator allowlist (the `tool_ids` argument — boot passes the validated
-/// config allowlist; tests pass ids directly). No runtime discovery ever
-/// feeds this manifest. `namespaces[]` is derived from the tool ids
+/// operator allowlist (the `tool_ids` argument — connections pass the live
+/// config allowlist, DF-92; tests pass ids directly). No runtime discovery
+/// ever feeds this manifest. `namespaces[]` is derived from the tool ids
 /// (`tools.<ns>.<id>` ⇒ `ns`), deduplicated and order-stable.
 ///
 /// # Panics
@@ -167,17 +168,24 @@ pub fn daemon_manifest(host_id: &str, tool_ids: &[String]) -> HostCapabilityMani
     }))
     .expect("static daemon manifest is valid")
 }
-/// Per-connection responder options (identity + hello + trust material).
+/// Per-lane responder identity (AR-69 trust material minus the frozen
+/// generation).
+///
+/// DF-92: the ADMISSION-affecting material — dialer allowlist, preconfigured
+/// keys, allowlist-derived hello — is NOT frozen here. Each connection reads
+/// ONE generation from `config`, the live [`PeerConfigHolder`] (see
+/// [`handle_connection`]); only the fields below are lane-static.
 #[derive(Clone)]
 pub struct PeerResponderOptions {
     /// Daemon Ed25519 seed (persistent identity).
     pub identity_seed: [u8; 32],
-    /// Daemon hello manifest (T4 derives it from the allowlist).
-    pub manifest: Arc<HostCapabilityManifest>,
-    /// Dialer peer ids allowed at the handshake (fail-closed).
-    pub allowlist: Vec<String>,
-    /// Preconfigured dialer Ed25519 public keys by peer id (fail-closed).
-    pub peer_keys: HashMap<String, [u8; 32]>,
+    /// Installation device id — the hello `host_id`. The hello itself is
+    /// derived per connection from the live allowlist.
+    pub host_id: String,
+    /// Live peer config holder (DF-92): one read per connection supplies
+    /// the handshake allowlist (`peer_ids`), the handshake keys, and the
+    /// allowlist the hello + admission derive from.
+    pub config: PeerConfigHolder,
     /// Shared capability registry holder (AR-92) from which the
     /// AR-68 #2(iii) reserved set is derived **live** at each admission:
     /// builtin ids ∪ the current user-capability names. A user capability
@@ -185,6 +193,17 @@ pub struct PeerResponderOptions {
     /// admission (V1.176 P1 QC fix W-A). `None` reserves only the static
     /// builtin host-tool ids.
     pub capability_registry: Option<CapabilityRegistryHolder>,
+}
+
+/// The connection's grant-at-establish generation (DF-92): the config
+/// snapshot the handshake validated against + the allowlist-derived hello it
+/// negotiated with. Admission reads THIS generation — never a fresh holder
+/// read — so a session's grant is internally coherent even if a reload lands
+/// mid-handshake (plan risk table: the handshake clones the snapshot `Arc`
+/// for its duration; the swap is RwLock-quick and never blocks readers).
+struct ConnectionGeneration {
+    snapshot: Arc<PeerConfigSnapshot>,
+    manifest: Arc<HostCapabilityManifest>,
 }
 
 /// Spawn the peer-tools accept loop over an already-bound listener.
@@ -245,8 +264,25 @@ async fn handle_connection(
     sessions: Arc<PeerSessionManager>,
     options: PeerResponderOptions,
 ) {
+    // DF-92: ONE holder read per connection. The handshake (dialer
+    // allowlist + keys) and the admission (negotiation hello + operator
+    // allowlist) validate against THIS generation — grant-at-establish for
+    // the session it establishes. A reload landing mid-handshake applies
+    // at the NEXT connection; a live session keeps its generation until
+    // close/reconnect (AR-67 reconnect=replace, no mid-call yank).
+    let generation = {
+        let snapshot = options.config.get();
+        ConnectionGeneration {
+            manifest: Arc::new(daemon_manifest(
+                &options.host_id,
+                &snapshot.config.tool_allowlist,
+            )),
+            snapshot,
+        }
+    };
     let ws = match tokio_tungstenite::accept_async_with_config(
         stream,
+        // Boot-scoped (GC #7): the envelope cap never hot-applies.
         Some(ws_config(config.max_envelope_bytes)),
     )
     .await
@@ -266,14 +302,17 @@ async fn handle_connection(
         identity: RemoteIdentity {
             seed: options.identity_seed,
         },
-        manifest: (*options.manifest).clone(),
-        allowlist: options.allowlist.clone(),
-        peer_keys: options.peer_keys.clone(),
+        // Handshake admission material from THIS connection's generation
+        // (DF-92): a fresh snapshot's peer_ids + keys gate the dialer.
+        manifest: (*generation.manifest).clone(),
+        allowlist: generation.snapshot.config.peer_ids.clone(),
+        peer_keys: (*generation.snapshot.peer_keys).clone(),
         ports: None,
+        // Boot-scoped (GC #7): the invoke timeout never hot-applies.
         invoke_timeout_ms: Some(config.invoke_timeout_ms),
     })
     .await;
-    monitor_session(responder, observed, sessions, config, options).await;
+    monitor_session(responder, observed, sessions, config, generation, options).await;
 }
 
 /// Establish / register / observe-close for one session.
@@ -286,6 +325,7 @@ async fn monitor_session(
     observed: Arc<ObservedTransport>,
     sessions: Arc<PeerSessionManager>,
     config: Arc<PeerToolsConfig>,
+    generation: ConnectionGeneration,
     options: PeerResponderOptions,
 ) {
     // Phase 1: bounded handshake outcome (a dialer that never sends its
@@ -316,12 +356,13 @@ async fn monitor_session(
         .map(|manifest| {
             // Negotiation (AR-69 #1): the daemon hello `capabilities[]` is
             // the negotiated-membership set (baseline ∪ operator-allowlisted
-            // tool ids; T4 owns the allowlist-derived hello — boot builds
-            // the baseline, tests pass tool ids directly).
+            // tool ids) — derived from THIS connection's generation (DF-92):
+            // the same allowlist-derived hello the handshake negotiated
+            // with, so admission stays coherent with it.
             let daemon_caps: std::collections::HashSet<String> =
-                options.manifest.capabilities.iter().cloned().collect();
+                generation.manifest.capabilities.iter().cloned().collect();
             let allowlist: std::collections::HashSet<String> =
-                config.tool_allowlist.iter().cloned().collect();
+                generation.snapshot.config.tool_allowlist.iter().cloned().collect();
             // W-A (V1.176 P1 QC fix): the reserved set is derived LIVE from
             // the shared holder at admission time — hot-reloaded user-cap
             // names stay reserved against peer admission.
@@ -387,9 +428,8 @@ async fn wait_until_established(responder: &Arc<ConnectResponder>) -> Option<Str
     }
 }
 
-/// Boot helper: load config + persistent identity from `home`, build the
-/// allowlist-derived daemon manifest, bind the listener, spawn the accept
-/// loop.
+/// Boot helper: load config + persistent identity from `home`, bind the
+/// listener, spawn the accept loop + the supervised config watcher.
 ///
 /// AR-69 outbound authz (all fail-closed):
 /// - Layer 0 (dialer identity): `config.peer_ids` (handshake allowlist) +
@@ -460,27 +500,23 @@ pub async fn start_peer_tools_lane(
             source: std::io::Error::other(format!("device id resolution failed: {e}")),
         }
     })?;
-    // AR-69 derivation lock: the hello tool capabilities derive ONLY from
-    // the operator allowlist (validated at config load). The boot-time
-    // snapshot is restart-scoped.
-    let manifest = Arc::new(daemon_manifest(&device_id, &config.tool_allowlist));
-    let peer_keys = crate::connect::config::load_peer_keys(home)?;
     // DF-92: the live config holder is seeded with the boot generation;
-    // the watcher (below) swaps validated reloads into it — T2's
-    // accept-loop rewiring reads it per admission. The responder options
-    // keep a plain clone of the boot keys until that rewiring lands.
+    // the watcher (below) swaps validated reloads into it and every
+    // connection reads it (see `handle_connection`) — handshake
+    // allowlist + keys, the allowlist-derived hello, and the admission
+    // allowlist are live per connection. The boot `config` Arc stays the
+    // source for every boot-scoped field (GC #7).
     let config_holder = PeerConfigHolder::new(PeerConfigSnapshot {
         config: Arc::clone(&config),
-        peer_keys: Arc::new(peer_keys.clone()),
+        peer_keys: Arc::new(crate::connect::config::load_peer_keys(home)?),
     });
     let listener = TcpListener::bind((config.host.as_str(), config.port)).await?;
     let addr = listener.local_addr()?;
     let sessions = Arc::new(PeerSessionManager::new());
     let options = PeerResponderOptions {
         identity_seed,
-        manifest,
-        allowlist: config.peer_ids.clone(),
-        peer_keys,
+        host_id: device_id,
+        config: PeerConfigHolder::clone(&config_holder),
         capability_registry,
     };
     // DF-92: the config watcher runs alongside the accept loop. The
@@ -501,12 +537,22 @@ pub async fn start_peer_tools_lane(
             watch_shutdown.notify_one();
         }
     });
-    let watch_task = spawn_peer_config_watch(
-        boot_digest,
-        home.to_path_buf(),
-        PeerConfigHolder::clone(&config_holder),
-        watch_shutdown,
-    );
+    // DF-92 supervision: the supervisor awaits the watcher task; a watcher
+    // panic surfaces as a JoinError, logs ONE `peer config reload degraded`
+    // warn, and the lane keeps serving the last-good snapshot until a
+    // restart restores reload. `handle.watch_task` is the supervisor.
+    let watch_home = home.to_path_buf();
+    let watch_holder = PeerConfigHolder::clone(&config_holder);
+    let watch_task = tokio::spawn(async move {
+        let _ = supervise_peer_config_watch(spawn_peer_config_watch(
+            boot_digest,
+            watch_home,
+            watch_holder,
+            Arc::clone(crate::connect::peer_tool_table()),
+            watch_shutdown,
+        ))
+        .await;
+    });
     let task = spawn_accept_loop(
         listener,
         Arc::clone(&config),
@@ -539,14 +585,17 @@ pub struct PeerToolsLaneHandle {
     /// this; the reverse index into the `PeerToolTable` lands with T3).
     pub sessions: Arc<PeerSessionManager>,
     /// Live peer config holder (DF-92): the watcher swaps validated
-    /// reloads into it; admission reads the current generation per
-    /// connection (T2's accept-loop rewiring).
+    /// reloads into it; every connection reads ONE generation from it for
+    /// the handshake + admission (grant-at-establish — see
+    /// [`handle_connection`]).
     pub config: PeerConfigHolder,
     /// Accept-loop task.
     pub task: JoinHandle<()>,
-    /// Config-watcher task (DF-92). Detached by boot (like `task`); it
-    /// exits on the same shutdown Notify. A supervisor that awaits it
-    /// observes a watcher panic as a `JoinError`.
+    /// SUPERVISED config-watcher task (DF-92): the supervisor awaits the
+    /// inner watcher, so a watcher panic is logged as ONE `peer config
+    /// reload degraded` warn while the lane keeps serving the last-good
+    /// snapshot (restart restores reload). Exits when the watcher exits on
+    /// the relayed shutdown Notify. Detached by boot (like `task`).
     pub watch_task: JoinHandle<()>,
 }
 
