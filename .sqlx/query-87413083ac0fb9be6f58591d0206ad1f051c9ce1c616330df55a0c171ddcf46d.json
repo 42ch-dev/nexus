@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT current_chapter as \"current_chapter: i32\" FROM works WHERE work_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "current_chapter: i32",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "87413083ac0fb9be6f58591d0206ad1f051c9ce1c616330df55a0c171ddcf46d"
+}
