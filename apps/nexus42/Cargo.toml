@@ -222,6 +222,11 @@ connect-host = ["dep:spoke-connect", "dep:spoke-schemas", "dep:libp2p"]
 # libp2p-free; `--features connect-client` links the peer-tools transport +
 # session subsystem into the daemon build.
 connect-client = ["nexus-daemon-runtime/connect-client", "nexus-acp-host/connect-client", "dep:rmcp"]
+# V1.179 P0 T1 (DF-88): forwarded gate for the embedded MCP server (Model B)
+# on nexus-daemon-runtime. Nested under connect-client: `--features
+# connect-client` compiles the shared bridge core but NOT the embedded
+# server; `--features connect-client,embedded-mcp` compiles both.
+embedded-mcp = ["connect-client", "nexus-daemon-runtime/embedded-mcp"]
 # V1.153 P2 (DF-73): forwarded gate for the embedded Web UI — ON by default
 # (the `nexus42` bin is unchanged); OFF for the `nexus-runtime` artifact via
 # `--no-default-features --features connect-host` (compile-time exclusion of

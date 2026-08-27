@@ -9,9 +9,16 @@
 //! feature (the default daemon graph stays libp2p-free and
 //! tungstenite-free).
 
+// V1.179 P0 T1 (DF-88): shared MCP bridge core — the rmcp `ServerHandler`
+// surface generic over an `McpBackend` (Model A stdio child + Model B
+// embedded). Compiles with `connect-client`; the embedded server module
+// below compiles only under the nested `embedded-mcp` feature.
 pub mod accept;
 pub mod config;
 pub mod identity;
+pub mod mcp_bridge;
+#[cfg(feature = "embedded-mcp")]
+pub mod mcp_embedded;
 pub mod session;
 pub mod table;
 pub mod ws_transport;
@@ -22,6 +29,16 @@ pub use accept::{
 };
 pub use config::{load_peer_keys, PeerToolsConfig, DEFAULT_CONNECT_PORT};
 pub use identity::load_or_create_identity;
+// V1.179 P0 T1 (DF-88): shared MCP bridge core re-exports.
+pub use mcp_bridge::{
+    is_unroutable, CatalogResponse, CatalogRow, McpBackend, McpBridgeHandler, ToolCallOutcome,
+};
+// V1.179 P0 T1 (DF-88): embedded MCP server re-exports (feature-gated).
+#[cfg(feature = "embedded-mcp")]
+pub use mcp_embedded::{
+    start_embedded_mcp_server, EmbeddedMcpError, EmbeddedMcpServer, EmbeddedSession,
+    EMBEDDED_MCP_MAX_SESSIONS,
+};
 pub use session::{PeerSessionManager, SessionRecord, DEFAULT_MAX_SESSIONS};
 pub use table::{
     mcp_catalog_admission, mcp_catalog_output_root_object, peer_tool_table, AdmissionOutcome,

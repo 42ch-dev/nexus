@@ -57,6 +57,12 @@ async-trait = "0.1"
 tokio-util = { workspace = true }
 subtle = { workspace = true }
 futures-util = { workspace = true }
+# V1.179 P0 T1 (DF-88): in-process mpsc channels for the embedded MCP
+# sink/stream transport (`connect/mcp_embedded.rs`). `futures_channel::mpsc`
+# Sender/Receiver are `Sink`/`Stream` + `Unpin` — the rmcp
+# `SinkStreamTransport` bounds. Already in the lockfile at 0.3.34 via
+# rmcp's `futures` umbrella dep — graph-neutral.
+futures-channel = "0.3"
 tokio-stream = { workspace = true }
 regex = { workspace = true }
 serde_yaml = { workspace = true }
@@ -97,6 +103,14 @@ spoke-schemas = { workspace = true, optional = true }
 # getrandom 0.2 is the already-locked default-graph CSPRNG stack (uuid et
 # al.); optional keeps the feature-off graph unchanged.
 getrandom = { version = "0.2", optional = true }
+# V1.179 P0 T1 (DF-88): embedded MCP server (Model B) — in-process rmcp
+# over sink/stream. Optional + wired to `connect-client` (the shared
+# bridge core compiles there); the embedded server module compiles only
+# under the nested `embedded-mcp` feature. rmcp 1.8's
+# `transport::sink_stream` is an ungated core module — no new crate
+# features. Pinned exactly `=1.8.0` (AR-73: exactly-one-version, already
+# in the default graph via agent-client-protocol).
+rmcp = { version = "=1.8.0", default-features = false, features = ["server"], optional = true }
 # V1.174 P0 T3 (AR-68): pure tool manifest/ABI helpers for the PeerToolTable
 # admission chain (`validate_manifest_tools`, `parse_tool_capability_id`,
 # `validate_tool_arguments`) AND for the user-capability catalog grammar
@@ -124,10 +138,23 @@ parking_lot = "0.12"
 # `SpokeResult`/`spoke_ok` in the tool handler). Both crates are already in
 # the default graph via nexus-spoke-adapter — no graph change.
 spoke-operations = { workspace = true }
+# V1.179 P0 T1 (DF-88): in-process rmcp CLIENT for the embedded-server e2e
+# (`tests/embedded_mcp_e2e.rs`) — dev-only, tests-only. The shipped graph
+# keeps exactly one rmcp 1.8.0 with `server` only; graph pins use
+# `--edges normal`, dev-deps excluded (AR-74 caveat).
+rmcp = { version = "=1.8.0", default-features = false, features = ["client"] }
 
 [[bench]]
 name = "dispatch_latency"
 harness = false
+
+# V1.179 P0 T1 (DF-88): embedded MCP e2e — in-process rmcp client over
+# sink/stream against the embedded server (Model B). Feature-gated so the
+# default-feature CI never compiles it.
+[[test]]
+name = "embedded_mcp_e2e"
+path = "tests/embedded_mcp_e2e.rs"
+required-features = ["connect-client", "embedded-mcp"]
 
 [features]
 test-support = []
@@ -141,7 +168,15 @@ connect-client = [
     "dep:tokio-tungstenite",
     "dep:spoke-schemas",
     "dep:getrandom",
+    "dep:rmcp",
 ]
+# V1.179 P0 T1 (DF-88): embedded MCP server (Model B) — nested cargo
+# feature under `connect-client`. `--features connect-client` compiles the
+# shared bridge core (`connect/mcp_bridge.rs`) but NOT the embedded server
+# (`connect/mcp_embedded.rs`); `--features connect-client,embedded-mcp`
+# compiles both. No additional deps — rmcp 1.8's `transport::sink_stream`
+# is an ungated core module.
+embedded-mcp = ["connect-client"]
 # V1.153 P2 (DF-73): embedded Web UI (rust-embed SPA bytes) — default ON so
 # the creator-facing daemon is unchanged; OFF (`--no-default-features`)
 # compiles the SPA serving stack out of the `nexus-runtime` artifact.

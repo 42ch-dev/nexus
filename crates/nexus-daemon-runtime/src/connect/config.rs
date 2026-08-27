@@ -76,6 +76,16 @@ pub struct PeerToolsConfig {
     /// list AND have a preconfigured key in `peer_keys.json`.
     #[serde(default)]
     pub peer_ids: Vec<String>,
+    /// Enable the embedded MCP server (V1.179 P0 T1, DF-88 Model B) at
+    /// daemon boot — in-process rmcp over sink/stream, no sockets/TLS.
+    /// Serde default `false` keeps existing `daemon.json` files valid; the
+    /// cargo `embedded-mcp` feature remains the hard gate (feature off +
+    /// enablement requested ⇒ warn-and-skip at boot, never an abort — GC
+    /// #9, PR #229 F-1 posture). Boot-scoped: p1's hot reload does NOT
+    /// hot-toggle it (restart-scoped, same class as `host`/`port`/
+    /// `max_sessions`).
+    #[serde(default)]
+    pub embedded_mcp: bool,
 }
 
 impl Default for PeerToolsConfig {
@@ -88,6 +98,7 @@ impl Default for PeerToolsConfig {
             max_envelope_bytes: DEFAULT_MAX_ENVELOPE_BYTES,
             tool_allowlist: Vec::new(),
             peer_ids: Vec::new(),
+            embedded_mcp: false,
         }
     }
 }
@@ -282,6 +293,25 @@ mod tests {
         assert_eq!(config.max_envelope_bytes, DEFAULT_MAX_ENVELOPE_BYTES);
         assert!(config.tool_allowlist.is_empty());
         assert!(config.peer_ids.is_empty());
+    }
+
+    #[test]
+    fn embedded_mcp_key_parses_explicit_true() {
+        // GC #9: `~/.nexus42/connect/daemon.json` key `"embedded_mcp": true`
+        // is the persistent operator SSOT for Model B. Absent key → false
+        // (pinned in `default_when_file_absent`); explicit true → enabled.
+        let home = isolated_home();
+        fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
+        fs::write(
+            nexus_home_layout::connect_daemon_config_path(home.path()),
+            r#"{"embedded_mcp":true}"#,
+        )
+        .expect("write");
+        let config = PeerToolsConfig::load(home.path()).expect("load");
+        assert!(
+            config.embedded_mcp,
+            "explicit embedded_mcp:true enables Model B"
+        );
     }
 
     #[test]

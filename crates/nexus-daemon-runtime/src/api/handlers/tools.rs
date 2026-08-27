@@ -37,14 +37,11 @@ pub struct CatalogTool {
     pub origin: String,
 }
 
-/// `GET /v1/daemon/tools`
-///
-/// # Errors
-/// Returns `NexusApiError` only on internal failures (the catalog is a
-/// read-only projection of already-admitted state).
-pub async fn list_tools(
-    State(state): State<WorkspaceState>,
-) -> Result<Json<serde_json::Value>, NexusApiError> {
+/// Build the spine catalog rows — the single catalog builder shared by
+/// `GET /v1/daemon/tools` and the embedded MCP backend (DF-88 Model B,
+/// `connect/mcp_embedded.rs`): one builder, two faces, byte-identical
+/// rows (AR-74 round-trip equality holds for BOTH transports).
+pub(crate) fn build_catalog(state: &WorkspaceState) -> Vec<CatalogTool> {
     let mut items: Vec<CatalogTool> = Vec::new();
 
     // Static `nexus.*` rows (AR-78, DF-89): authored `CatalogDescriptor`
@@ -124,5 +121,17 @@ pub async fn list_tools(
         });
     }
     items.sort_by(|a, b| a.id.cmp(&b.id));
+    items
+}
+
+/// `GET /v1/daemon/tools`
+///
+/// # Errors
+/// Returns `NexusApiError` only on internal failures (the catalog is a
+/// read-only projection of already-admitted state).
+pub async fn list_tools(
+    State(state): State<WorkspaceState>,
+) -> Result<Json<serde_json::Value>, NexusApiError> {
+    let items = build_catalog(&state);
     Ok(Json(serde_json::json!({ "items": items })))
 }

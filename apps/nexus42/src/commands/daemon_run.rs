@@ -45,6 +45,12 @@ pub struct DaemonRunArgs {
     /// loopback, link-local, and metadata endpoints are rejected.
     #[arg(long)]
     pub cdn_url: Option<String>,
+
+    /// Enable the embedded MCP server (V1.179 P0 T1, DF-88 Model B) —
+    /// ephemeral opt-in; the persistent SSOT is the
+    /// `~/.nexus42/connect/daemon.json` `"embedded_mcp": true` key (GC #9).
+    #[arg(long)]
+    pub embedded_mcp: bool,
 }
 
 /// Execute the internal daemon-run command.
@@ -65,6 +71,7 @@ pub async fn run(args: DaemonRunArgs) -> Result<()> {
         verbose: args.verbose,
         shutdown_grace_ms: args.shutdown_grace_ms,
         cdn_url: args.cdn_url,
+        embedded_mcp: args.embedded_mcp,
     };
 
     nexus_daemon_runtime::boot::run_daemon(config)

@@ -136,6 +136,7 @@ async fn start_server(
         // T4 (AR-69): the dialer handshake allowlist (Layer 0). The tests
         // pass the peer allowlist separately via `PeerResponderOptions`.
         peer_ids: Vec::new(),
+        embedded_mcp: false,
     });
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

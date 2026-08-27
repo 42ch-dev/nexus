@@ -150,6 +150,7 @@ impl E2eDaemon {
             max_envelope_bytes: DEFAULT_MAX_ENVELOPE_BYTES,
             tool_allowlist: operator_allowlist.clone(),
             peer_ids: Vec::new(),
+            embedded_mcp: false,
         });
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let ws_addr = listener.local_addr().unwrap();

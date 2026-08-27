@@ -96,6 +96,12 @@ pub struct DaemonConfig {
     /// with built-in timeout and retry. When absent (default),
     /// `registry.refresh` returns synthetic output only.
     pub cdn_url: Option<String>,
+    /// Enable the embedded MCP server (V1.179 P0 T1, DF-88 Model B) —
+    /// ephemeral opt-in (`nexus42 daemon start --embedded-mcp`). Union
+    /// with the persistent `PeerToolsConfig.embedded_mcp` key (GC #9); the
+    /// cargo `embedded-mcp` feature is the hard gate (feature off +
+    /// enablement requested ⇒ warn-and-skip at boot, never an abort).
+    pub embedded_mcp: bool,
 }
 
 impl DaemonConfig {
@@ -1293,6 +1299,46 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                     );
                 }
             }
+
+            // Model B (V1.179 P0 T1, DF-88): embedded MCP server — in-process
+            // rmcp over sink/stream, no sockets/TLS. Enablement = the
+            // `PeerToolsConfig.embedded_mcp` key OR the `--embedded-mcp` CLI
+            // flag (union semantics, GC #9 — the `--allow-peer` precedent);
+            // the cargo `embedded-mcp` feature is the hard gate. Feature
+            // compiled off + enablement requested ⇒ warn-and-skip with an
+            // honest log line, never a boot abort (PR #229 F-1 posture). The
+            // server lives until daemon shutdown (`state.shutdown_notify()`)
+            // — restart-scoped per AR-67, same class as
+            // `host`/`port`/`max_sessions`.
+            let embedded_enabled = match crate::connect::PeerToolsConfig::load(raw_home) {
+                Ok(cfg) => cfg.embedded_mcp || config.embedded_mcp,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "embedded MCP config load failed; continuing without embedded MCP"
+                    );
+                    false
+                }
+            };
+            if embedded_enabled {
+                #[cfg(feature = "embedded-mcp")]
+                {
+                    let server = crate::connect::start_embedded_mcp_server(state.clone());
+                    let shutdown = state.shutdown_notify();
+                    tokio::spawn(async move {
+                        shutdown.notified().await;
+                        drop(server);
+                    });
+                    tracing::info!("embedded MCP server started (Model B, in-process sink/stream)");
+                }
+                #[cfg(not(feature = "embedded-mcp"))]
+                {
+                    tracing::warn!(
+                        "embedded MCP requested (config key or --embedded-mcp) but the \
+                         embedded-mcp cargo feature is not compiled; skipping (Model B off)"
+                    );
+                }
+            }
         } else {
             tracing::warn!(
                 home = %state.nexus_home().display(),
@@ -1544,6 +1590,7 @@ mod tests {
             verbose: false,
             shutdown_grace_ms: 20000,
             cdn_url: None,
+            embedded_mcp: false,
         };
 
         std::env::remove_var("NEXUS_DAEMON_SOCKET_PATH");
@@ -1567,6 +1614,7 @@ mod tests {
             verbose: false,
             shutdown_grace_ms: 20000,
             cdn_url: None,
+            embedded_mcp: false,
         };
 
         let transport = config.resolve_transport();
@@ -1587,6 +1635,7 @@ mod tests {
             verbose: false,
             shutdown_grace_ms: 20000,
             cdn_url: None,
+            embedded_mcp: false,
         };
 
         std::env::remove_var("NEXUS_DAEMON_SOCKET_PATH");
@@ -1643,6 +1692,7 @@ mod tests {
             verbose: false,
             shutdown_grace_ms: 1234,
             cdn_url: None,
+            embedded_mcp: false,
         };
         assert_eq!(
             shutdown_grace_duration(&config),

@@ -211,6 +211,7 @@ async fn start_server(
         max_envelope_bytes: DEFAULT_MAX_ENVELOPE_BYTES,
         tool_allowlist: tool_ids.iter().map(|s| (*s).to_owned()).collect(),
         peer_ids: Vec::new(),
+        embedded_mcp: false,
     });
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
