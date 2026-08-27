@@ -241,6 +241,12 @@ states:
 **DAG enforcement**: cycles remain rejected at load time. Acyclic paths through converge nodes (e.g. `A → M → B`, `C → M → B` where M waits for both A and C) are allowed.
 
 **Converge timeout** (V1.58 P2 — R-V156P2-L003): the current implementation does **not** enforce a timeout on `wait_for_all` converge nodes. A converge state with `strategy: wait_for_all` that never receives all predecessor arrivals will wait indefinitely (returns `NextAction::WaitForInput` on each `run()` call). The engine relies on external signals (Resume, Cancel) to break deadlocks. A configurable `wait_for_all_timeout_seconds` field (default 3600s) with deadline-based enforcement is planned but deferred — **Durable roadmap:** DR-06 — adding it requires schema changes to `ConvergeConfig` (out of scope for P2: "schemas/ changes") and runtime behavior changes to the converge gate in `StateCompositeTask::run()`. For local-only single-user daemons (pre-1.0), indefinite wait is acceptabl…
+> *(v1.179 cross-ref: DR-06 is now scheduled — plan
+> `2026-08-27-v1.179-p2-reliability-convergence` ships it as additive
+> optional `timeout_ms` + `on_timeout` on join states (merge AND
+> converge), NOT as the deferred `wait_for_all_timeout_seconds` name;
+> single typed failure discriminator `converge_timeout` for both gates.
+> This paragraph is rewritten with the historical note when DR-06 lands.)*
 
 ### 3.4 Registry and workspace context fields (V1.56 P3 — Normative)
 

@@ -274,7 +274,11 @@ gained the following quality hardening in V1.58 P0:
   (default 8 MiB via `DEFAULT_MAX_CDN_BODY_SIZE`); `CdnConfig::new`
   constructor.
 - **Retry jitter** (R-V156P1-L004): 100–500 ms randomized jitter added to
-  the exponential backoff via `retry_jitter_ms()`.
+  the exponential backoff via `retry_jitter_ms()`. *(v1.179 cross-ref:
+  DR-01 — plan `2026-08-27-v1.179-p2-reliability-convergence` replaces
+  this fixed additive band with attempt-aware full-jitter
+  `[0, min(8 000, 500·2^attempt))` via `retry_jitter_ms(attempt)` /
+  `retry_jitter_ms_with(...)`; this bullet is updated when DR-01 lands.)*
 - **Latency benchmark** (R-V156P1-L005):
   `crates/nexus-orchestration/benches/registry_refresh_latency.rs` (cold +
   warm).
