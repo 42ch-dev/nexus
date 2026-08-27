@@ -1332,9 +1332,16 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             // `connect::boot_embedded_mcp_server` — the same function the
             // e2e exercises directly. It stores the ONE boot-scoped server
             // instance on `WorkspaceState` (reachable for `establish()` by
-            // in-daemon consumers) and lives until daemon shutdown
-            // (`state.shutdown_notify()`) — restart-scoped per AR-67, same
-            // class as `host`/`port`/`max_sessions`.
+            // in-daemon consumers). Restart semantics (QC F-002): the
+            // instance is restart-scoped per AR-67, same class as
+            // `host`/`port`/`max_sessions` — one boot instance per
+            // `run_daemon` invocation, and every live embedded SESSION
+            // serve task selects on THIS state's shutdown notification, so
+            // none can outlive the daemon run that spawned it. A real
+            // daemon restart is a new process with a fresh process-global
+            // session registry; the registry is never reset mid-process,
+            // so a hypothetical second boot in one process would share —
+            // not bypass — the same budget (I-1).
             #[cfg(feature = "embedded-mcp")]
             crate::connect::boot_embedded_mcp_server(&mut state, &raw_home, config.embedded_mcp)
                 .await;

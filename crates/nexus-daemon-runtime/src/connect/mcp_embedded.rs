@@ -26,7 +26,12 @@
 //! is refused with the honest discriminator `embedded_mcp_session_limit`.
 //! The budget is **process-global** (I-1): every [`EmbeddedMcpServer`]
 //! handle in the process shares ONE registry, so the boot instance and any
-//! consumer-constructed handle count against the same cap.
+//! consumer-constructed handle count against the same cap. A budget slot
+//! is held by the session's SERVER-side serve task for the whole
+//! CONNECTION LIFETIME — from before the initialize handshake until the
+//! transport ends or the daemon shuts down — never by the client-side
+//! [`EmbeddedSession`] handle, so the documented consumer pattern (moving
+//! `transport` into `rmcp::serve_client`) cannot release the slot early.
 //!
 //! # Lifecycle
 //!
@@ -35,7 +40,11 @@
 //! instance is stored on [`WorkspaceState`] — the handle in-daemon
 //! consumers `establish()` on. It lives until daemon shutdown
 //! (`state.shutdown_notify()`) — restart-scoped per AR-67, same class as
-//! `host`/`port`/`max_sessions`.
+//! `host`/`port`/`max_sessions`. Each session's serve task also selects on
+//! the same shutdown notification, so live sessions end with the daemon
+//! run that spawned them and release their budget slots; a real restart is
+//! a new process with a fresh registry.
+//!
 //! Enablement is the union of the `PeerToolsConfig.embedded_mcp` key and
 //! the `nexus42 daemon start --embedded-mcp` flag (GC #9); the cargo
 //! `embedded-mcp` feature is the hard gate (feature off + enablement
@@ -110,20 +119,20 @@ pub struct EmbeddedMcpServer {
 }
 
 /// One established embedded session: the client-side transport for
-/// `serve_client` plus the session-budget slot.
+/// `serve_client`.
 ///
 /// The consumer completes the handshake with
-/// `rmcp::serve_client(ClientInfo::default(), session.transport)`; the slot
-/// is released when the session is dropped (teardown frees the budget).
+/// `rmcp::serve_client(ClientInfo::default(), session.transport)`. The
+/// session-budget slot is NOT carried on this handle: it lives in the
+/// session's server-side serve task (see [`EmbeddedMcpServer::establish`]
+/// for the exact lifetime), so consuming the transport — the documented
+/// pattern — never releases the budget early.
 pub struct EmbeddedSession {
     /// Client-side transport: sink = client→server writes, stream =
     /// server→client reads. Named [`SinkStreamTransport`] explicitly (M-3)
     /// — the rmcp 1.8 `IntoTransport` blanket covers it for `serve_client`.
     pub transport:
         SinkStreamTransport<mpsc::Sender<ClientToServer>, mpsc::Receiver<ServerToClient>>,
-    /// Session slot — releases the [`EMBEDDED_MCP_MAX_SESSIONS`] budget on
-    /// drop.
-    _slot: SessionSlot,
 }
 
 /// The embedded spine backend: direct function calls into the same catalog
@@ -152,6 +161,13 @@ impl McpBackend for EmbeddedMcpBackend {
         tool_name: &str,
         parameters: serde_json::Value,
     ) -> Result<ToolCallOutcome, McpError> {
+        // Embedded-lane audit honesty (QC S-005): session/request
+        // identifiers are unavailable at this seam — the in-process
+        // sink/stream transport carries no session identity and none is
+        // invented for Model B. Audit entries for embedded MCP calls
+        // therefore carry `caller_kind`/`session_id`/`request_id` as
+        // `None` (distinguishable from ACP/schedule callers only by this
+        // dispatch lane).
         let req = ToolExecuteRequest {
             tool_name: tool_name.to_owned(),
             parameters,
@@ -291,8 +307,11 @@ impl EmbeddedMcpServer {
     ///
     /// Refused with [`EmbeddedMcpError::SessionLimit`] (discriminator
     /// `embedded_mcp_session_limit`) when [`EMBEDDED_MCP_MAX_SESSIONS`]
-    /// sessions are already live. The slot is freed when the returned
-    /// session is dropped.
+    /// sessions are already live. The budget slot is held by the session's
+    /// server-side task for the CONNECTION LIFETIME — from before the
+    /// initialize handshake until the transport ends or the daemon
+    /// shutdown notification fires — never by the returned handle, so
+    /// moving `transport` into `serve_client` cannot free the slot early.
     ///
     /// # Errors
     ///
@@ -317,19 +336,40 @@ impl EmbeddedMcpServer {
         // until the transport ends (the consumer drops the session or the
         // client service). A session torn down before the handshake ends
         // with a logged debug line — normal teardown, not an error.
+        //
+        // GC #8 (QC F-001): the budget slot MOVES INTO this task — held
+        // for the connection lifetime and released only when the task
+        // ends. Dropping the client-side `EmbeddedSession` after moving
+        // `transport` into `serve_client` does NOT free the slot.
+        // Lifecycle (QC F-002): the task also selects on the daemon
+        // shutdown notification, so a live session ends with the daemon
+        // run that spawned it instead of outliving it as a detached stray
+        // — the same coordination class as the peer accept loop
+        // (`accept.rs`); the transport end remains the primary exit.
+        let shutdown = self.state.shutdown_notify();
         tokio::spawn(async move {
-            match serve_server(handler, server_transport).await {
-                Ok(service) => {
-                    let _ = service.waiting().await;
+            let serve = async {
+                match serve_server(handler, server_transport).await {
+                    Ok(service) => {
+                        let _ = service.waiting().await;
+                    }
+                    Err(e) => {
+                        tracing::debug!(error = %e, "embedded MCP session ended before handshake");
+                    }
                 }
-                Err(e) => {
-                    tracing::debug!(error = %e, "embedded MCP session ended before handshake");
+            };
+            tokio::select! {
+                () = shutdown.notified() => {
+                    tracing::debug!("embedded MCP session ended by daemon shutdown");
                 }
+                () = serve => {}
             }
+            // The slot is owned by this task: dropped here — at connection
+            // end or daemon shutdown — the budget frees (GC #8).
+            drop(slot);
         });
         Ok(EmbeddedSession {
             transport: SinkStreamTransport::new(client_tx, client_rx),
-            _slot: slot,
         })
     }
 }
@@ -387,10 +427,24 @@ pub async fn boot_embedded_mcp_server(
     let embedded_enabled = match crate::connect::PeerToolsConfig::load(raw_home) {
         Ok(cfg) => cfg.embedded_mcp || cli_embedded_mcp,
         Err(e) => {
-            tracing::warn!(
-                error = %e,
-                "embedded MCP config load failed; continuing without embedded MCP"
-            );
+            // QC W-002: the Err path keeps the CLI flag's enablement (GC #9
+            // union — a malformed config must not silently disable a
+            // requested feature), so the warn copy names the ACTUAL
+            // outcome per branch: flag-on keeps embedded MCP enabled;
+            // flag-off means embedded MCP is off.
+            if cli_embedded_mcp {
+                tracing::warn!(
+                    error = %e,
+                    "embedded MCP config load failed; continuing with embedded MCP \
+                     enabled via the --embedded-mcp flag (GC #9 union)"
+                );
+            } else {
+                tracing::warn!(
+                    error = %e,
+                    "embedded MCP config load failed; continuing without embedded MCP \
+                     (no config key and no --embedded-mcp flag)"
+                );
+            }
             cli_embedded_mcp
         }
     };
@@ -409,14 +463,30 @@ mod tests {
     use crate::connect::session::PeerSessionManager;
     use serial_test::serial;
 
+    async fn wait_for_budget(condition: impl Fn() -> bool, what: &str) {
+        // Bounded wait for a budget condition: slot release is
+        // asynchronous (the owning server task must observe the transport
+        // end or the shutdown notification), so teardown assertions poll
+        // instead of asserting synchronously.
+        for _ in 0..500 {
+            if condition() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("timed out waiting for the session budget to settle: {what}");
+    }
+
     #[tokio::test]
     #[serial]
-    async fn session_limit_refuses_fifth_concurrent_session() {
-        // The budget is PROCESS-global (I-1): the registry is shared across
-        // every `EmbeddedMcpServer` handle in this process, so the boot
-        // instance and any consumer-constructed handle count against the
-        // same cap. `#[serial]` keeps this test's 4-session hold isolated
-        // from the other budget-touching unit test in this binary.
+    async fn session_limit_refuses_fifth_live_session() {
+        // The budget is PROCESS-global (I-1) and enforced on LIVE sessions
+        // (QC F-001): each slot is held by the session's SERVER-side serve
+        // task, so this test follows the documented consumer pattern —
+        // move `transport` into `serve_client`, dropping the
+        // `EmbeddedSession` wrapper at once — and the wrapper's drop must
+        // NOT free the budget. `#[serial]` keeps this hold isolated from
+        // the other budget-touching unit test in this binary.
         let server = start_embedded_mcp_server(
             WorkspaceState::new_for_testing(
                 std::env::temp_dir().join("embedded-mcp-test-home"),
@@ -427,12 +497,22 @@ mod tests {
             true,
         )
         .expect("enabled server");
-        let mut sessions = Vec::new();
+        let mut running = Vec::new();
         for _ in 0..EMBEDDED_MCP_MAX_SESSIONS {
-            sessions.push(server.establish().expect("session within budget"));
+            let session = server.establish().expect("session within budget");
+            running.push(
+                rmcp::serve_client(rmcp::model::ClientInfo::default(), session.transport)
+                    .await
+                    .expect("initialize handshake completes"),
+            );
         }
+        assert_eq!(
+            process_registry().active_count(),
+            EMBEDDED_MCP_MAX_SESSIONS,
+            "slots held by LIVE sessions (server tasks), not by the dropped wrappers"
+        );
         let Err(err) = server.establish() else {
-            panic!("5th concurrent session must be refused")
+            panic!("5th concurrent live session must be refused")
         };
         assert_eq!(err, EmbeddedMcpError::SessionLimit);
         assert_eq!(
@@ -440,24 +520,20 @@ mod tests {
             "embedded_mcp_session_limit",
             "honest discriminator (GC #8)"
         );
-        assert_eq!(
-            process_registry().active_count(),
-            EMBEDDED_MCP_MAX_SESSIONS,
-            "budget fully consumed (process-global)"
-        );
 
-        // Teardown frees the slot: dropping one session lets the next
-        // establish succeed.
-        drop(sessions.pop().expect("session to drop"));
+        // Teardown frees the slots — asynchronously: dropping the client
+        // services ends their transports, and each server task releases
+        // its slot when it observes the end.
+        drop(running);
+        wait_for_budget(
+            || process_registry().active_count() == 0,
+            "live sessions to drain to zero",
+        )
+        .await;
+        let _replacement = server.establish().expect("slots freed by teardown");
         assert_eq!(
             process_registry().active_count(),
-            EMBEDDED_MCP_MAX_SESSIONS - 1,
-            "teardown frees the slot"
-        );
-        let _replacement = server.establish().expect("slot freed by teardown");
-        assert_eq!(
-            process_registry().active_count(),
-            EMBEDDED_MCP_MAX_SESSIONS,
+            1,
             "freed slot re-acquired"
         );
     }
@@ -510,6 +586,15 @@ mod tests {
         );
         peer_sessions.release_in_flight();
         assert_eq!(peer_sessions.connection_count(), 0);
+        // QC F-001 serial hygiene: the slot of the session dropped above
+        // is released asynchronously by its server task; wait for the
+        // budget to drain so the OTHER `#[serial]` budget test starts from
+        // a settled registry.
+        wait_for_budget(
+            || process_registry().active_count() == 0,
+            "embedded session slot to drain",
+        )
+        .await;
     }
 
     #[test]

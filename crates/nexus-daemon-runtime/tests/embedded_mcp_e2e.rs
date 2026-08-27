@@ -43,6 +43,7 @@ use nexus_daemon_runtime::workspace::WorkspaceState;
 use rmcp::model::{CallToolRequestParams, ClientInfo, ErrorCode};
 use rmcp::serve_client;
 use rmcp::ServiceError;
+use serial_test::serial;
 
 /// Establish one embedded session and complete the initialize handshake.
 async fn establish_session(
@@ -76,7 +77,11 @@ async fn boot_server(
     (tmp, state)
 }
 
+// `#[serial]`: each test below holds a LIVE embedded session (the budget
+// slot lives in the session's server task, QC F-001), so the
+// process-global registry is touched by one test at a time.
 #[tokio::test]
+#[serial]
 async fn embedded_server_lists_and_calls_builtin_without_child_process() {
     let (_tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
@@ -120,6 +125,7 @@ async fn embedded_server_lists_and_calls_builtin_without_child_process() {
 }
 
 #[tokio::test]
+#[serial]
 async fn embedded_unroutable_id_is_method_not_found() {
     let (_tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
@@ -146,6 +152,7 @@ async fn embedded_unroutable_id_is_method_not_found() {
 }
 
 #[tokio::test]
+#[serial]
 async fn boot_path_config_key_stores_boot_server_reachable_for_establish() {
     // I-1/M-2: the BOOT WIRING (the exact function `run_daemon`'s §8.5
     // block calls) must retain ONE boot-scoped server instance on
