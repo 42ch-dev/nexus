@@ -48,6 +48,9 @@ use crate::connect::config::PeerToolsConfig;
 use crate::connect::identity::{self, IdentityError};
 use crate::connect::session::PeerSessionManager;
 use crate::connect::table::live_reserved_tool_ids;
+use crate::connect::watch::{
+    peer_config_digest, spawn_peer_config_watch, PeerConfigHolder, PeerConfigSnapshot,
+};
 use crate::connect::ws_transport::{ws_config, WsTransport};
 use nexus_orchestration::CapabilityRegistryHolder;
 
@@ -396,9 +399,13 @@ async fn wait_until_established(responder: &Arc<ConnectResponder>) -> Option<Str
 ///   operator-allowlisted tool ids (derived from config, validated at load
 ///   — never from runtime discovery).
 ///
-/// The whole surface is a boot-time snapshot: allowlist / peer / key edits
-/// apply on daemon restart (AR-69 restart-scoped, documented in
-/// `config.rs`).
+/// V1.179 P1 (DF-92): the admission surface is no longer boot-frozen — a
+/// digest-poll watcher (`connect/watch.rs`) swaps validated admission
+/// fields (allowlist, peer ids, keys, collision policy, ranks) into the
+/// live `PeerConfigHolder` for NEW admissions; the boot-scoped fields
+/// (`host`, `port`, `max_sessions`, `invoke_timeout_ms`,
+/// `max_envelope_bytes`, `embedded_mcp`) and every in-flight session stay
+/// restart-scoped (grant-at-establish, AR-67 reconnect=replace).
 ///
 /// `capability_registry` is the shared [`CapabilityRegistryHolder`] (AR-92)
 /// the peer lane keeps for the AR-68 #2(ii) reserved-set check — derived
@@ -415,6 +422,11 @@ pub async fn start_peer_tools_lane(
     shutdown: Arc<Notify>,
     capability_registry: Option<CapabilityRegistryHolder>,
 ) -> anyhow::Result<PeerToolsLaneHandle> {
+    // DF-92: seed the digest baseline BEFORE the boot load — an edit
+    // landing anywhere in the boot window diverges from the baseline and
+    // the first poll reloads (never absorbed; the capability watcher's
+    // W-B rule).
+    let boot_digest = peer_config_digest(home);
     let config = Arc::new(PeerToolsConfig::load(home)?);
     // DF-91: wire the live config snapshot into the process-global table
     // so admission reads `collision_policy` + `peer_priority` at
@@ -453,6 +465,14 @@ pub async fn start_peer_tools_lane(
     // snapshot is restart-scoped.
     let manifest = Arc::new(daemon_manifest(&device_id, &config.tool_allowlist));
     let peer_keys = crate::connect::config::load_peer_keys(home)?;
+    // DF-92: the live config holder is seeded with the boot generation;
+    // the watcher (below) swaps validated reloads into it — T2's
+    // accept-loop rewiring reads it per admission. The responder options
+    // keep a plain clone of the boot keys until that rewiring lands.
+    let config_holder = PeerConfigHolder::new(PeerConfigSnapshot {
+        config: Arc::clone(&config),
+        peer_keys: Arc::new(peer_keys.clone()),
+    });
     let listener = TcpListener::bind((config.host.as_str(), config.port)).await?;
     let addr = listener.local_addr()?;
     let sessions = Arc::new(PeerSessionManager::new());
@@ -463,12 +483,36 @@ pub async fn start_peer_tools_lane(
         peer_keys,
         capability_registry,
     };
+    // DF-92: the config watcher runs alongside the accept loop. The
+    // caller's shutdown Notify stays SINGLE-consumer — `notify_one` stores
+    // exactly one permit, so a second direct consumer (the watcher) could
+    // steal it and leave the accept loop un-woken (a hung lane, observed
+    // by the p0 lane tests). A tiny relay owns the caller's notify and
+    // fans out to per-child notifies; `notify_one` STORES permits, so
+    // relay-before-registration cannot lose a wakeup.
+    let accept_shutdown = Arc::new(Notify::new());
+    let watch_shutdown = Arc::new(Notify::new());
+    let _shutdown_relay = tokio::spawn({
+        let accept_shutdown = Arc::clone(&accept_shutdown);
+        let watch_shutdown = Arc::clone(&watch_shutdown);
+        async move {
+            shutdown.notified().await;
+            accept_shutdown.notify_one();
+            watch_shutdown.notify_one();
+        }
+    });
+    let watch_task = spawn_peer_config_watch(
+        boot_digest,
+        home.to_path_buf(),
+        PeerConfigHolder::clone(&config_holder),
+        watch_shutdown,
+    );
     let task = spawn_accept_loop(
         listener,
         Arc::clone(&config),
         Arc::clone(&sessions),
         options,
-        shutdown,
+        accept_shutdown,
     );
     tracing::info!(
         %addr,
@@ -481,7 +525,9 @@ pub async fn start_peer_tools_lane(
     Ok(PeerToolsLaneHandle {
         addr,
         sessions,
+        config: config_holder,
         task,
+        watch_task,
     })
 }
 
@@ -492,8 +538,16 @@ pub struct PeerToolsLaneHandle {
     /// Session registry shared by the accept loop (T3's dispatch arm reads
     /// this; the reverse index into the `PeerToolTable` lands with T3).
     pub sessions: Arc<PeerSessionManager>,
+    /// Live peer config holder (DF-92): the watcher swaps validated
+    /// reloads into it; admission reads the current generation per
+    /// connection (T2's accept-loop rewiring).
+    pub config: PeerConfigHolder,
     /// Accept-loop task.
     pub task: JoinHandle<()>,
+    /// Config-watcher task (DF-92). Detached by boot (like `task`); it
+    /// exits on the same shutdown Notify. A supervisor that awaits it
+    /// observes a watcher panic as a `JoinError`.
+    pub watch_task: JoinHandle<()>,
 }
 
 #[cfg(test)]

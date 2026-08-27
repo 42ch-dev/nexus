@@ -13,14 +13,21 @@
 //! - Existing but malformed / unknown fields / validation failure ⇒ hard
 //!   boot error (fail-closed, same guard as `allowlist.json` /
 //!   `config.json` in `apps/nexus42`).
-//! - Read **once** at subsystem boot; changes apply on daemon restart
-//!   (runtime reload = Non-Goal, roadmap row in the AR-67 spec).
+//! - V1.174 locked this read to subsystem boot ("changes apply on daemon
+//!   restart"; runtime reload = Non-Goal, AR-67 #4 roadmap row). V1.179 P1
+//!   (DF-92) supersedes that for the ADMISSION fields: a digest-poll
+//!   watcher (`connect/watch.rs`) hot-reloads `tool_allowlist`, `peer_ids`,
+//!   `collision_policy`, `peer_priority`, and the `peer_keys.json` keys
+//!   for NEW admissions. The boot-scoped fields (`host`, `port`,
+//!   `max_sessions`, `invoke_timeout_ms`, `max_envelope_bytes`,
+//!   `embedded_mcp`) remain restart-scoped.
 //! - AR-69 outbound authz: `tool_allowlist` entries are validated at load
 //!   (umbrella / reserved-ns / malformed ⇒ named `InvalidAllowlist` error,
 //!   never silently dropped); `peer_ids` is the dialer handshake allowlist;
 //!   `peer_keys.json` supplies the preconfigured dialer Ed25519 keys.
-//!   Allowlist edits (tool ids, peer ids, keys) apply on daemon restart —
-//!   never mid-session (restart-scoped snapshot, AR-69).
+//!   Allowlist/peer/key edits hot-reload for new admissions (DF-92) —
+//!   never mid-session (in-flight sessions keep grant-at-establish,
+//!   AR-67 reconnect=replace).
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -51,7 +58,8 @@ pub const DEFAULT_INVOKE_TIMEOUT_MS: u64 = 5000;
 /// priority): a later-registering higher-priority peer preempts the
 /// lower-priority row (rows rebind; the preempted peer's session is
 /// untouched). An unknown value is a hard config-load error
-/// (fail-closed). Boot-scoped: p1 (DF-92) owns runtime reload.
+/// (fail-closed). Reload-scoped (DF-92): read from the live config
+/// snapshot at each admission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CollisionPolicy {
@@ -110,7 +118,8 @@ pub struct PeerToolsConfig {
     /// Duplicate tool-id collision policy (DF-91). Serde default
     /// `first_stays` keeps the AR-68 #3 behavior for every existing
     /// deployment; an unknown value is a hard config-load error
-    /// (fail-closed). Boot-scoped: p1 (DF-92) owns runtime reload.
+    /// (fail-closed). Reload-scoped (DF-92): read from the live config
+    /// snapshot at each admission.
     #[serde(default)]
     pub collision_policy: CollisionPolicy,
     /// Operator peer rank for `priority_order` collisions (DF-91): array
@@ -231,8 +240,8 @@ fn validate_allowlist_entry(entry: &str) -> Result<(), ConnectConfigError> {
 /// file yields an empty map (fail-closed — no dialer passes the responder
 /// handshake without a preconfigured key). An existing-but-invalid file
 /// (malformed JSON, unknown fields, non-hex / wrong-length key) is a hard
-/// error — never silently dropped. Read once at boot; key edits apply on
-/// daemon restart (AR-69 restart-scoped snapshot).
+/// error — never silently dropped. Key edits hot-reload for new
+/// handshakes (DF-92); live sessions keep grant-at-establish (AR-67).
 ///
 /// # Errors
 /// Returns an I/O error when the file exists but cannot be read, or a
