@@ -299,3 +299,11 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | Document | Description |
 | --- | --- |
 | [engineering/sqlx-migration-checksum-immutability.md](engineering/sqlx-migration-checksum-immutability.md) | sqlx migration files are immutable once shipped — `migrate!` embeds bytes + `_sqlx_migrations` stores the checksum; any in-place edit (even a comment typo fix) → `VersionMismatch` at boot for every existing install while fresh installs stay green; correct prose errors in the spec corpus with known-immutable notes, keep plans' writable sets excluding `migrations/`, diff-scope assertion `git diff --name-only … \| grep migrations` (V1.178 AR-106 distilled; compound follow-up) |
+
+### V1.179 additions
+
+| Document | Description |
+| --- | --- |
+| [architecture-patterns/tokio-notify-permit-steal-relay-fanout.md](architecture-patterns/tokio-notify-permit-steal-relay-fanout.md) | tokio::sync::Notify permit-steal — `notify_one` stores ONE permit, so a second `.notified()` waiter on a shared signal steals it and the original consumer hangs silently; rule = caller Notify stays single-consumer, every extra consumer gets a per-child Notify + one-shot relay task (V1.179 P1 DF-92 T1 distilled; compound V1.179) |
+| [conventions/wire-invisible-additive-fields-raw-yaml-carrier.md](conventions/wire-invisible-additive-fields-raw-yaml-carrier.md) | Wire-invisible additive fields — `wire_contracts_changed: true` with an EMPTY schema diff is legitimate when the carrier is raw YAML (presets cross the daemon API untyped; no schemas/ file references the struct); record the codegen no-op as evidence, name the carrier in plan Clarify, and home field semantics in the normative spec (V1.179 P2 DR-06 distilled; compound V1.179) |
+| [architecture-patterns/frozen-registry-hot-reload-rebuild-swap.md](architecture-patterns/frozen-registry-hot-reload-rebuild-swap.md) | **Updated** — V1.179 P1 DF-92 extends the pattern to the peer-config lane: same DigestPoll three-state + last-good + boot-baseline discipline now governs `daemon.json`/`peer_keys.json` via `PeerConfigHolder` (std RwLock<Arc>), plus two new hazard notes: baseline must advance ONLY on successful apply (transient-load-error generation swallow) and shared-Notify consumers need relay fan-out (see tokio-notify-permit-steal doc) |
