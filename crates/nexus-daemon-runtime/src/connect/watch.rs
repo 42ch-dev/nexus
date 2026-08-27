@@ -19,8 +19,10 @@
 //!   effective snapshot into the holder and feeds the process-global
 //!   [`PeerToolTable`] seam (`set_config` — takes ONLY the config mutex,
 //!   never the table `inner`, so the p0 lock rank is preserved).
-//!   Failure keeps last-good and warns once per error-state transition —
-//!   the daemon never fails closed on a bad edit.
+//!   Failure keeps last-good and warns once per error-state transition;
+//!   the baseline advances ONLY on success, so a transiently failed
+//!   load (EACCES, mid-write) applies on recovery without a further
+//!   byte change — the daemon never fails closed on a bad edit.
 //! - The loop CORE is generic over the poll + apply closures (the
 //!   `catalog_watch_loop_inner` / `watch_loop_inner` precedent) so
 //!   failure/panic injection is test-only — no prod-code test hooks.
@@ -127,6 +129,9 @@ impl PeerConfigHolder {
         let mut guard = self.inner.write().unwrap_or_else(PoisonError::into_inner);
         let previous = std::mem::replace(&mut *guard, Arc::new(snapshot));
         drop(guard);
+        // M-1: drop AFTER the write-lock release — a last-reference drop
+        // of the previous generation never runs under the lock, so it
+        // can never stall readers.
         drop(previous);
     }
 }
@@ -296,9 +301,11 @@ pub struct PeerConfigWatchStats {
 /// logged once per error-state transition (readable→unreadable, or a
 /// CHANGED error message). A digest change applies even into `Missing` —
 /// the reload adopts the documented defaults (fail-closed), the daemon
-/// stays up. A FAILED apply (invalid config) still advances the baseline:
-/// the on-disk bytes are the new reference, the second identical poll must
-/// not re-apply or re-warn, and a fixed file diverges again and reloads.
+/// stays up. A FAILED apply keeps the PREVIOUS baseline — the failed
+/// bytes do NOT become the reference — so the next poll re-attempts: a
+/// transient load failure (EACCES, mid-write) applies on recovery
+/// WITHOUT a further byte change, while a persistently invalid file is
+/// re-validated every tick but warns once per error message.
 ///
 /// Returns the [`PeerConfigWatchStats`]. `should_stop` is a test-only
 /// seam: production always passes `|| false` — the loop is cancelled via
@@ -351,15 +358,21 @@ where
             continue;
         }
         // Digest diverged from the reference: attempt the validated
-        // reload. The baseline advances EITHER WAY (see doc).
+        // reload. The baseline advances ONLY on a successful apply — a
+        // failed apply keeps the PREVIOUS digest so the next poll
+        // re-attempts (transient-failure recovery; see doc above).
         match apply().await {
             Ok(event) => {
                 apply_error_logged = None;
+                last_digest = Some(digest);
                 match event {
                     ConfigEvent::Changed => stats.applied += 1,
                 }
             }
             Err(message) => {
+                // Baseline unchanged: the same bytes re-attempt next
+                // tick; the message-compare keeps this at ONE warn per
+                // error state despite the per-tick retry.
                 if apply_error_logged.as_deref() != Some(message.as_str()) {
                     tracing::warn!(
                         error = %message,
@@ -370,7 +383,6 @@ where
                 }
             }
         }
-        last_digest = Some(digest);
         tokio::time::sleep(interval).await;
     }
 }
@@ -396,7 +408,10 @@ pub fn spawn_peer_config_watch(
     shutdown: Arc<Notify>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        tracing::info!("peer config watch started (poll+raw-byte digest, 2s)");
+        tracing::info!(
+            "peer config watch started (poll+raw-byte digest, {}s)",
+            PEER_CONFIG_WATCH_INTERVAL.as_secs()
+        );
         tokio::select! {
             () = shutdown.notified() => {
                 tracing::info!("peer config watch: shutdown received, exiting");
@@ -498,7 +513,11 @@ async fn apply_reload(
     );
     // Lock-rank safe (p0 QC F-003): `set_config` takes ONLY the config
     // mutex — never the table `inner` — so a reload can never invert the
-    // rank against an in-flight admission.
+    // rank against an in-flight admission. Order invariant (p1 QC): the
+    // table feed happens BEFORE the holder swap with no `.await` between
+    // — an admission landing between them could read the new table
+    // config against the old holder snapshot; keeping the pair adjacent
+    // bounds that skew to a few pointer writes.
     table.set_config(Some(Arc::clone(&snapshot.config)));
     holder.swap(snapshot);
     Ok(ConfigEvent::Changed)
@@ -716,23 +735,56 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_reload_keeps_last_good_warns_once_and_does_not_reapply() {
+    async fn failed_reload_keeps_last_good_warns_once_and_retries_each_tick() {
         let baseline = DigestPoll::Missing;
         let corrupt = DigestPoll::Tree(serde_json::json!({"daemon.json": "cc"}));
         let applies = Arc::new(AtomicUsize::new(0));
-        // Corrupt edit → apply fails (warn once, baseline advances) → the
-        // SAME corrupt digest polls again: no re-apply, no re-warn (the
-        // last-good config is kept; the daemon stays up).
+        // Corrupt edit → apply fails (warn ONCE) → the SAME corrupt
+        // digest re-attempts on every following poll (the baseline did
+        // NOT advance — p1 QC F-001) but never re-warns (same error
+        // message) and never applies: last-good is kept, the daemon
+        // stays up.
         let stats = drive_loop(
             baseline,
-            vec![corrupt.clone(), corrupt],
+            vec![corrupt.clone(), corrupt.clone(), corrupt],
             Arc::clone(&applies),
             || Err("invalid daemon.json: expected value".to_owned()),
         )
         .await;
         assert_eq!(stats.applied, 0);
         assert_eq!(stats.warnings, 1);
-        assert_eq!(applies.load(Ordering::SeqCst), 1);
+        assert_eq!(applies.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn transient_apply_failure_applies_once_bytes_are_restored() {
+        let baseline = DigestPoll::Missing;
+        let restored = DigestPoll::Tree(serde_json::json!({"daemon.json": "dd"}));
+        let applies = Arc::new(AtomicUsize::new(0));
+        // The p1 QC F-001 swallow scenario: a poll reads bytes D, the
+        // apply fails TRANSIENTLY (e.g. EACCES during the load), the
+        // file is restored to the SAME bytes D — the valid generation
+        // must still apply on the next poll (no baseline advance on the
+        // failed apply ⇒ no permanent swallow).
+        let calls = Arc::new(AtomicUsize::new(0));
+        let apply_calls = Arc::clone(&calls);
+        let stats = drive_loop(
+            baseline,
+            vec![restored.clone(), restored],
+            Arc::clone(&applies),
+            move || {
+                let n = apply_calls.fetch_add(1, Ordering::SeqCst);
+                if n == 0 {
+                    Err("cannot read daemon.json: EACCES".to_owned())
+                } else {
+                    Ok(ConfigEvent::Changed)
+                }
+            },
+        )
+        .await;
+        assert_eq!(stats.applied, 1);
+        assert_eq!(stats.warnings, 1);
+        assert_eq!(applies.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
@@ -993,10 +1045,6 @@ mod tests {
                 "peer_priority": ["peer-b", "peer-a"]
             }"#,
         );
-        // The on-disk digest differs from the boot baseline (the watcher's
-        // trigger condition).
-        let boot_digest = peer_config_digest(home.path());
-        let _ = boot_digest;
 
         // The production apply path runs (spawn_blocking load + swap).
         let event = apply_reload(home.path(), &holder, &table)

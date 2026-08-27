@@ -541,6 +541,14 @@ pub async fn start_peer_tools_lane(
     // panic surfaces as a JoinError, logs ONE `peer config reload degraded`
     // warn, and the lane keeps serving the last-good snapshot until a
     // restart restores reload. `handle.watch_task` is the supervisor.
+    //
+    // Detachment semantics (p1 QC): dropping/aborting `watch_task`
+    // cancels only the supervisor — the inner watcher `JoinHandle`
+    // detaches on drop (deliberately NO abort-on-drop guard). The
+    // loop's only exit path is the COOPERATIVE one: the lane must
+    // consume the caller shutdown Notify — relayed above into
+    // `watch_shutdown` — a dropped handle never aborts a mid-apply
+    // reload.
     let watch_home = home.to_path_buf();
     let watch_holder = PeerConfigHolder::clone(&config_holder);
     let watch_task = tokio::spawn(async move {
