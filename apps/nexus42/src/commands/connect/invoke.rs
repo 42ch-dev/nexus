@@ -302,6 +302,8 @@ pub(crate) fn build_handler_with_limits(
     // compute_runs.rs W-2 permit is the same shape).
     let compute_serializer = Arc::new(Semaphore::new(1));
     let serializer_for_handler = Arc::clone(&compute_serializer);
+    #[expect(clippy::result_large_err)]
+    // closure returns Result<_, ErrorEnvelope> — the locked wire error type, payload-heavy by design
     let handler = Arc::new(move |peer: &PeerId, op: &str, payload: Value| {
         dispatch(
             &scope,
@@ -339,6 +341,7 @@ enum Route {
 /// adapter, lane, compute serializer, limits, caller, op, payload);
 /// bundling it would obscure the explicit fail-closed ordering.
 #[allow(clippy::too_many_arguments)]
+#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
 fn dispatch(
     scope: &PeerScope,
     adapter: Arc<NexusAdapter<'static>>,
@@ -542,6 +545,7 @@ fn dispatch(
 // ^ Nine args mirror dispatch's architect-locked pipeline context (route,
 // scope, adapter, serializer, caller, payload, permit, deadline, limits);
 // bundling them would obscure the explicit fail-closed ordering.
+#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
 fn run_in_lane(
     route: Route,
     scope: &PeerScope,
@@ -611,6 +615,7 @@ fn run_in_lane(
 /// `tokio::time::timeout`, so a compute queued behind another compute
 /// fails fast with `invoke_deadline_exceeded` instead of holding its lane
 /// permit on an unbounded serializer backlog (Greptile P1).
+#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
 async fn route_orchestrator(
     route: Route,
     adapter: &NexusAdapter<'static>,
@@ -746,7 +751,7 @@ async fn route_orchestrator(
 /// input schemas for both locked tools are `{ "type": "object",
 /// "additionalProperties": false }`, so the only legal argument is an
 /// object.
-#[allow(clippy::result_large_err)] // ErrorEnvelope is the locked wire error type; matches the rest of dispatch
+#[expect(clippy::result_large_err)] // ErrorEnvelope (String code + JSON Map details + HashMap extensions) is the locked wire error type; matches the rest of dispatch
 async fn route_tool(
     adapter: &NexusAdapter<'static>,
     op: &str,
@@ -813,7 +818,7 @@ fn tool_invalid_input(op: &str, reason: &str) -> ErrorEnvelope {
 /// spoof/collision diagnostic is not an integrator contract, spec §2.1
 /// C-1 risks). An empty store → `{ "peers": [] }` (never fabricated).
 /// Adapter read only.
-#[allow(clippy::result_large_err)] // ErrorEnvelope is the locked wire error type
+#[expect(clippy::result_large_err)] // ErrorEnvelope (String code + JSON Map details + HashMap extensions) is the locked wire error type
 async fn tool_list_observed_peers(adapter: &NexusAdapter<'static>) -> Result<Value, ErrorEnvelope> {
     match adapter.list_observed_peer_hosts().await {
         SpokeResult::Ok(observed) => {
@@ -842,7 +847,7 @@ async fn tool_list_observed_peers(adapter: &NexusAdapter<'static>) -> Result<Val
 /// returns bytes, absolute paths, or file contents (spec §2.1 C-2 risks).
 /// A missing store dir → `{ "modules": [] }`. Does NOT list V1.172
 /// `~/.nexus42/capabilities/`.
-#[allow(clippy::unused_async, clippy::result_large_err)] // awaited through route_tool; ErrorEnvelope is the locked wire error type
+#[expect(clippy::unused_async, clippy::result_large_err)] // awaited through route_tool; ErrorEnvelope (String code + JSON Map details + HashMap extensions) is the locked wire error type
 async fn tool_list_modules(adapter: &NexusAdapter<'static>) -> Result<Value, ErrorEnvelope> {
     let Some(modules_dir) = adapter.user_modules_dir() else {
         return Ok(serde_json::json!({ "result": { "modules": [] } }));
@@ -1014,6 +1019,7 @@ fn payload_collection_entries(route: Route, payload: &Value) -> usize {
 /// F-001 / QC2 W-2) — `from_id` / `to_id` are resolved and their stored
 /// worlds must equal the claimed world; mismatch or missing endpoint denies
 /// the whole payload with zero insert.
+#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
 async fn verify_stored_worlds(
     adapter: &NexusAdapter<'static>,
     route: Route,
@@ -1172,6 +1178,7 @@ async fn verify_stored_worlds(
 /// Returns `Ok(())` once every gate passes (the orchestrator route
 /// re-parses the payload for execution); the first denial returns the
 /// mapped envelope.
+#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
 async fn verify_compute_gates(
     scope: &PeerScope,
     adapter: &NexusAdapter<'static>,
@@ -1393,6 +1400,7 @@ fn compute_entry_not_found(entry_id: &str) -> ErrorEnvelope {
 /// `world_id` (fix loop, Critical). A missing stored entry (create path) needs
 /// no check; any other read reject fails closed through the locked reject
 /// mapping (a storage fault must not read as a scope denial).
+#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
 async fn assert_stored_entry_world_matches(
     adapter: &NexusAdapter<'static>,
     entry_id: &str,
@@ -1420,6 +1428,7 @@ async fn assert_stored_entry_world_matches(
 /// surface as an FK `internal_error` — an id-existence oracle via insert
 /// success vs FK-failure differential. Denied like the stored-world gate:
 /// `op_unsupported` family, zero insert.
+#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
 async fn assert_relate_endpoint_world_matches(
     adapter: &NexusAdapter<'static>,
     endpoint_id: &str,
@@ -1498,6 +1507,7 @@ impl std::task::Wake for ThreadWaker {
 /// keeps the wait bounded even when no wake arrives; the semaphore unparks
 /// the thread via [`ThreadWaker`] as soon as a permit is released, so a
 /// briefly saturated lane does not wait out the deadline.
+#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
 fn acquire_permit(
     lane: &Arc<Semaphore>,
     deadline: std::time::Instant,
@@ -1575,6 +1585,7 @@ fn response_too_large(reason: &str) -> ErrorEnvelope {
 /// returns the `Value` — so an amplified response fails as a graceful
 /// envelope, never as a hard peer codec failure. Rejects pass through
 /// untouched.
+#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
 fn enforce_response_cap(
     result: Result<Value, ErrorEnvelope>,
     max_response_bytes: usize,
@@ -1699,6 +1710,7 @@ fn invalid_payload(op: &str, error: &serde_json::Error) -> SpokeReject {
 /// success body the wire carries. Serialization cannot fail for a typed
 /// spoke response; a failure would be a wire-shape drift, mapped to
 /// `internal_error` (server fault).
+#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
 fn serialize_response<T: serde::Serialize>(response: &T) -> Result<Value, ErrorEnvelope> {
     serde_json::to_value(response).map_err(|error| ErrorEnvelope {
         code: "internal_error".to_string(),
@@ -1839,9 +1851,9 @@ mod tests {
     ) {
         let peer = fixed_keypair(7).public().to_peer_id();
         let scope = scoped_scope(peer);
-        let (_temp, adapter) = test_adapter().await;
+        let (temp, adapter) = test_adapter().await;
         let (handler, lane, serializer) = build_handler_with_limits(scope, adapter, limits);
-        (handler, lane, serializer, peer, _temp)
+        (handler, lane, serializer, peer, temp)
     }
 
     /// A compute-capable variant of [`test_handler`]: the adapter carries a
@@ -1868,7 +1880,7 @@ mod tests {
     ) {
         let peer = fixed_keypair(17).public().to_peer_id();
         let scope = scoped_scope_for(peer, &["compute", "upsert"]);
-        let (_temp, pool) = test_pool().await;
+        let (temp, pool) = test_pool().await;
         // Host-local module store (spec §2.1): `<id>/<id>.wasm` +
         // `<id>/manifest.json` under a hermetic `~/.nexus42/modules/`.
         let modules_dir = tempfile::tempdir().expect("modules tempdir");
@@ -1905,7 +1917,7 @@ mod tests {
         .await
         .expect("staged compute session");
         let (handler, lane, serializer) = build_handler_with_limits(scope, adapter, limits);
-        (handler, lane, serializer, peer, _temp, modules_dir)
+        (handler, lane, serializer, peer, temp, modules_dir)
     }
 
     /// (a) Saturated lane: with the only permit held by a concurrent
@@ -1921,7 +1933,6 @@ mod tests {
         })
         .await;
         let held = lane
-            .clone()
             .try_acquire_owned()
             .expect("test holds the only lane permit");
         let payload = serde_json::json!({
@@ -2097,7 +2108,7 @@ mod tests {
     /// N-C2 (T1 Minor follow-up, spec §5.4): the entry cap extends to the
     /// check op's collection fields — `rule_refs` + `rules` +
     /// `checker_kinds` all count as logical collection entries. 501
-    /// rule_refs (> 500) are rejected with `payload_too_large` before the
+    /// `rule_refs` (> 500) are rejected with `payload_too_large` before the
     /// bridge.
     #[tokio::test(flavor = "multi_thread")]
     async fn check_payload_entry_cap_counts_collection_fields() {
@@ -2148,7 +2159,7 @@ mod tests {
     /// scope-object batch arrays — `scope.entry_ids` / `scope.entry_types`
     /// / `scope.timeline_event_ids` all count as logical collection
     /// entries (the spoke Scope schema places no `maxItems` on them and
-    /// the adapter consumes them as IN-list filters). 501 entry_ids
+    /// the adapter consumes them as IN-list filters). 501 `entry_ids`
     /// (> 500) are rejected with `payload_too_large` before the bridge —
     /// zero side effects, no orchestrator call.
     #[tokio::test(flavor = "multi_thread")]
@@ -2324,7 +2335,7 @@ mod tests {
     }
 
     /// R3 wire spelling (spec §3.2 LOCKED): a zero-row CAS caused by a world
-    /// mismatch must surface as the `world_conflict` ErrorEnvelope code —
+    /// mismatch must surface as the `world_conflict` `ErrorEnvelope` code —
     /// never collapsed into `revision_conflict` / `stored_revision_stale` —
     /// and a same-world stale revision keeps its existing code.
     #[test]
@@ -2386,7 +2397,7 @@ mod tests {
     }
 
     /// V1.169 P0 (locks AR-4 layer 2): a `tools.*` op that somehow reaches
-    /// the nexus invoke handler is refused by the SERVED_OPS pre-routing
+    /// the nexus invoke handler is refused by the `SERVED_OPS` pre-routing
     /// gate with the `op_unsupported` envelope — code + the locked message
     /// prefix (`op <op> is not supported: …`, NOT the scope-denial
     /// `op denied:` shape) — before any lane permit acquisition or
@@ -2404,8 +2415,7 @@ mod tests {
             ..BridgeLimits::default()
         })
         .await;
-        let _held = lane
-            .clone()
+        let held = lane
             .try_acquire_owned()
             .expect("test holds the only lane permit");
         for op in ["tools.math.add", "tools.demo.lookup"] {
@@ -2426,7 +2436,7 @@ mod tests {
                 Ok(_) => panic!("op {op} must be refused, got a served response"),
             }
         }
-        drop(_held);
+        drop(held);
         // Zero side effects: the refusals consumed nothing — a served op
         // round-trips normally afterwards.
         let served = handler(
