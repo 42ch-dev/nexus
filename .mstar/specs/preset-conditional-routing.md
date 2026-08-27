@@ -118,7 +118,7 @@ Three merge modes:
 - **`any`**: advance on FIRST incoming labeled edge result.
 - **`quorum N/M`**: advance when at least N of M incoming edges have produced their target.
 
-When `merge:` is absent on a state with multiple incoming labeled edges, the default is `wait-all`. States with ≤1 incoming labeled edge are not merge nodes.
+When `merge:` is absent on a state with multiple incoming labeled edges, the default is `wait-all`. States with 0 incoming labeled edges are not merge nodes; a state with exactly 1 incoming labeled edge is still join-gated by the implicit wait-all rule (it waits for that single arrival). Reconciliation with §3.3.3 (v1.179 QC): bounded-join fields are accepted from that same ≥1-incoming threshold — at `expected_incoming == 1` the `timeout_ms` budget is meaningful, bounding the wait for the single edge — while explicit `merge:` states additionally require ≥2 incoming edges (§3.2.3) and explicit `converge:` states accept the fields at any predecessor count (0 predecessors skips the gate per §3.3.3).
 
 #### §3.2.2 Runtime tracking
 
