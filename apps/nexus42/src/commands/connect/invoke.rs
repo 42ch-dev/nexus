@@ -340,7 +340,7 @@ enum Route {
 /// The argument list is the architect-locked pipeline context (scope,
 /// adapter, lane, compute serializer, limits, caller, op, payload);
 /// bundling it would obscure the explicit fail-closed ordering.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)] // bundling it would obscure the explicit fail-closed ordering.
 #[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
 fn dispatch(
     scope: &PeerScope,
@@ -541,7 +541,7 @@ fn dispatch(
 /// its own gate set ([`verify_compute_gates`] — stored world + module
 /// identity + `module_scope` + host-local store + the read-only settle
 /// lock, spec §2.1–§2.3), all before any WASM execution.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 // ^ Nine args mirror dispatch's architect-locked pipeline context (route,
 // scope, adapter, serializer, caller, payload, permit, deadline, limits);
 // bundling them would obscure the explicit fail-closed ordering.
