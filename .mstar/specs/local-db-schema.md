@@ -307,12 +307,13 @@ Partial unique index: one row per `(creator_id, work_id)` where `work_id IS NOT 
 
 | Table | 作用 | Owner |
 | --- | --- | --- |
-| `outbox` | 同步命令队列 | Daemon |
+| `outbox`（已删除） | 同步命令队列（V1.163 由 `20260812_drop_legacy_outbox.sql` 删除；schema 15→16） | — |
 | `auth_tokens` | OAuth token 本地存储 | Daemon |
 | `device_code_sessions` | 设备授权会话 | Daemon |
 | `acp_tool_audit_log` | ACP 工具调用审计 | Daemon |
 | `acp_sessions` | ACP 会话持久化 | Daemon |
 | `workspace_sessions` | Workspace session persistence for `workspace.open`/`workspace.commit` with file-level OCC content hashes (V1.56 P0) | Daemon |
+> **Provenance（GC-6 / AC-V178-2）**：零活跃消费者审计完成于 **V1.59 P1 T3**（commit `c39e4afc`，2026-06-22）。migration `20260812_drop_legacy_outbox.sql` 头注的 "V1.159 T3" 为已知不可变值（PL-2：`crates/nexus-local-db/migrations/` 禁止原地修改），以 **V1.59 T3** 为 verified 值。
 
 #### 4.2.1 `workspace_sessions` (V1.56 P0)
 

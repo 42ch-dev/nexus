@@ -510,7 +510,7 @@ The unified outbox follows a single-writer rule per event type (see [outbox-cons
 - **Flush/compact operations**: written exclusively by `nexus-orchestration` capability layer (`OutboxFlush`, `OutboxCompact`).
 - **Daemon runtime**: does NOT write to `outbox_entries` directly. All outbox access is routed through the capability registry.
 
-The daemon legacy `outbox` table (initial migration `20260417_000001_initial.sql`) is deprecated with zero active consumers (V1.59 T3 audit). The daemon-runtime schema test emits a `tracing::warn!` on access documenting the phased-removal plan.
+The daemon legacy `outbox` table (initial migration `20260417_000001_initial.sql`) had no active Rust-level consumers (confirmed by the V1.59 T3 audit) and was dropped at V1.163 by migration `20260812_drop_legacy_outbox.sql`; the daemon-runtime schema test's deprecation `tracing::warn!` and its presence assertion were removed together with the table. No daemon subsystem reads or writes the legacy table — it no longer exists.
 
 ### 11.4 Runtime deps injection
 
