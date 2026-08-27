@@ -1080,3 +1080,59 @@ is operator config only: it is absent from the peer-visible hello
 (AR-69 allowlist-only derivation) and from every wire schema
 (`wire_contracts_changed: false`).
 
+### 18.3 Peer config hot reload (V1.179 P1, DF-92)
+
+**Historical note:** §18.2 (and the V1.174 AR-67 #4 lock it cites) read the
+peer config once at subsystem boot — "changes apply on daemon restart;
+runtime reload = Non-Goal." V1.179 P1 (DF-92) **supersedes that posture for
+the admission-affecting fields only**; the lock history — including
+`v1.174-peer-tools-lock.md` — is not rewritten, and the boot-scoped field
+class remains restart-scoped exactly as V1.174 locked it.
+
+**Trigger:** a digest-poll watcher (`connect/watch.rs`; 2 s interval,
+`PEER_CONFIG_WATCH_INTERVAL`) digests the FULL BYTES of
+`~/.nexus42/connect/daemon.json` + `peer_keys.json` — never mtime (editors
+and containers may preserve it). Only these two peer-lane files are watched;
+the connect-host lane's `config.json` / `allowlist.json` are a different
+surface and are NOT watched. The boot baseline is seeded BEFORE the boot
+load (a boot-window edit diverges and reloads) and without emitting an
+initial event; two identical polls apply at most once (no event storm).
+
+**Validation:** on any full-bytes digest divergence the reload runs the SAME
+fail-closed chain boot uses — full `PeerToolsConfig::load`
+(deny-unknown-fields, allowlist grammar, rank-duplicate checks) plus
+`load_peer_keys` — on a blocking lane. There is no reload-only shortcut or
+validation bypass.
+
+**Field scope (architect-locked, GC #7):** a successful reload adopts
+**admission-affecting fields only** — `tool_allowlist`, `peer_ids`,
+`peer_keys.json` keys, `collision_policy`, `peer_priority` — by swapping a
+fresh `Arc` into the live `PeerConfigHolder` (std `RwLock<Arc<_>>` swap;
+no `arc_swap`). Boot-scoped fields — `host`, `port`, `max_sessions`,
+`invoke_timeout_ms`, `max_envelope_bytes`, `embedded_mcp` — are PINNED to
+their boot values: a reload whose diff touches one logs one named info line
+(`peer config reload: <field> changed; restart required`) and ignores the
+field — no silent no-op, no hot rebind of listeners/limits.
+
+**Session-snapshot rule (extends AR-67 reconnect=replace):** every NEW
+connection reads the holder ONCE — the handshake (dialer allowlist +
+preconfigured keys) and the admission (allowlist-derived hello, negotiated
+set, operator allowlist) validate against that single generation, so a
+session's grant is internally coherent even if a reload lands mid-handshake.
+Existing `PeerSessionManager` rows immutably hold grant-at-establish until
+close/reconnect: a live session's catalog, keys, and negotiated set never
+change mid-session even when a reload retires them; removal, rotation, and
+hot edits take effect at the NEXT handshake (register = last-wins replace,
+evict-then-admit on reconnect). In-flight invokes keep grant-at-establish
+clones. The peer-visible hello/manifest never carries policy or rank (AR-69
+allowlist-only derivation).
+
+**Failure mode:** an invalid edited config (malformed, unknown field,
+failed validation) keeps last-good — the daemon never fails closed on a bad
+edit — and warns ONCE per error-state transition (a changed failure message
+warns again; a second identical poll does not re-warn; `Missing` ≠
+`Unreadable` per the RN-2 three-state vocabulary). A watcher-task panic is
+supervised through the lane's watch task: it surfaces as a `JoinError`, ONE
+`peer config reload degraded` warn is logged, the daemon stays up, and new
+hellos keep admitting against the last-good snapshot — a restart restores
+reload.
