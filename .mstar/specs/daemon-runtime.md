@@ -1013,3 +1013,70 @@ Implement **`require_active_creator`** (or equivalent) on Tier-2 route groups. T
 | — | `PATCH …/creators/{id}` display_name | Tier-1 route; updating `display_name` calls `pool_or_uninit()` and may return HTTP **409** `uninitialized` when no pool is open yet |
 | I-1 | Desktop clean-home CI | Regression tests live in `apps/desktop` but are not yet run in GitHub Actions — tracked **DR-04** |
 
+## 18. Peer-tools serving & transport (V1.174 P0 lock + V1.179 P0 additive)
+
+**Iteration SSOT:** `v1.174-peer-tools-lock.md` (AR-66..77) + this paragraph.
+**V1.174 lock cross-ref:** the peer-tools lane (WS registration + MCP
+exposure) is locked in V1.174 (AR-66..77); this section is an ADDITIVE
+V1.179 P0 overlay — it does not rewrite the lock history.
+
+### 18.1 Serving & transport topology
+
+The peer-tools surface is served over three transports, all riding the
+SAME dispatch spine (`CapabilityRegistry::lookup`/`dispatch`) and the
+SAME catalog builder (`GET /v1/daemon/tools`):
+
+1. **WS registration lane** (V1.174, AR-67): the daemon-side listening
+   face for spoke dialers — one `TcpListener` (config-gated host/port,
+   loopback default), one WebSocket upgrade per connection, one
+   `connect_responder` per connection, admission into the process-global
+   `PeerToolTable`, session registration/eviction via
+   `PeerSessionManager` (reserve-at-accept, last-wins replace,
+   evict-same-tick).
+2. **Model A — stdio MCP child** (V1.174, AR-71): `nexus42 mcp serve`
+   runs as a stateless stdio child that proxies the daemon loopback HTTP
+   face. The child is the exposure path for external MCP hosts
+   (ACP/`--mcp-config`).
+3. **Model B — embedded MCP server** (V1.179 P0, DF-88, feature-gated
+   `embedded-mcp`): an in-process rmcp server over
+   `transport::sink_stream` pairs (no sockets, no bind, no TLS — DF-87's
+   territory). It adapts the SAME spine as direct function calls and is
+   exempt from `PeerSessionManager::max_sessions` (in-process consumer
+   presents no remote dial surface); it carries its own compile-time
+   bound `EMBEDDED_MCP_MAX_SESSIONS = 4` with the honest refusal
+   discriminator `embedded_mcp_session_limit`. Enablement is the union
+   of the `PeerToolsConfig.embedded_mcp` key and the
+   `nexus42 daemon start --embedded-mcp` flag (GC #9); the cargo feature
+   is the hard gate (feature off + enablement requested ⇒ warn-and-skip,
+   never a boot abort).
+
+### 18.2 Duplicate tool-id collision policy (V1.179 P0, DF-91)
+
+`~/.nexus42/connect/daemon.json` (`PeerToolsConfig`, flat JSON,
+`deny_unknown_fields`) gains two top-level operator keys:
+
+- `"collision_policy": "first_stays" | "priority_order"` — serde default
+  `first_stays` (the AR-68 #3 behavior every existing deployment relies
+  on); an unknown value is a hard config-load error (fail-closed).
+- `"peer_priority": ["<peer-id>", …]` — array-order rank, EARLIER =
+  higher priority; serde default `[]`; duplicate entries are rejected at
+  load (fail-closed).
+
+Semantics (deterministic, tested): on a two-peer id collision, the peer
+ranked EARLIER in `peer_priority` wins. A later-registering
+higher-priority peer PREEMPTS: its collided tool rows replace the
+earlier registrant's via the AR-68 #3 eviction path (rows rebind; the
+preempted peer's session is untouched; in-flight invokes on evicted rows
+resolve as honest per-call failures per AR-76 #4 — the spine reads the
+table at invoke time, so a rebound row dispatches to the new owner and a
+removed row yields `not_supported`, never a silent retry). Equal or
+unlisted rank ⇒ first stays (registration order); unlisted peers rank
+below all listed peers. Same-peer reconnect is not a collision
+(unchanged evict-then-admit). The policy + rank are read from the LIVE
+`PeerToolsConfig` snapshot at admission time (live-derivation precedent:
+`live_reserved_tool_ids`); p0 reads the config once at boot (restart-
+scoped, AR-67 #4) — runtime reload is p1 (DF-92). The collision policy
+is operator config only: it is absent from the peer-visible hello
+(AR-69 allowlist-only derivation) and from every wire schema
+(`wire_contracts_changed: false`).
+
