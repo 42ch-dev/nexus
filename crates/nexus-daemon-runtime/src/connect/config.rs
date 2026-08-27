@@ -23,7 +23,7 @@
 //!   never mid-session (restart-scoped snapshot, AR-69).
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::connect::session::DEFAULT_MAX_SESSIONS;
@@ -41,6 +41,27 @@ pub const DEFAULT_CONNECT_HOST: &str = "127.0.0.1";
 /// Default per-invoke bounded wait (ms) — parity with
 /// `DEFAULT_INVOKE_TIMEOUT_MS` in spoke-connect.
 pub const DEFAULT_INVOKE_TIMEOUT_MS: u64 = 5000;
+
+/// Duplicate tool-id collision policy (DF-91, V1.179 P0 T2).
+///
+/// `first_stays` (the serde default) keeps the AR-68 #3 behavior for
+/// every existing deployment: the first registration wins and the later
+/// colliding peer is refused. `priority_order` resolves collisions by the
+/// operator `peer_priority` rank (earlier in the array = higher
+/// priority): a later-registering higher-priority peer preempts the
+/// lower-priority row (rows rebind; the preempted peer's session is
+/// untouched). An unknown value is a hard config-load error
+/// (fail-closed). Boot-scoped: p1 (DF-92) owns runtime reload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CollisionPolicy {
+    /// First registration wins; the later colliding peer is refused
+    /// (AR-68 #3).
+    #[default]
+    FirstStays,
+    /// Operator `peer_priority` rank decides; the higher-ranked peer wins.
+    PriorityOrder,
+}
 
 /// On-disk accept-loop config (`daemon.json`).
 ///
@@ -86,6 +107,18 @@ pub struct PeerToolsConfig {
     /// `max_sessions`).
     #[serde(default)]
     pub embedded_mcp: bool,
+    /// Duplicate tool-id collision policy (DF-91). Serde default
+    /// `first_stays` keeps the AR-68 #3 behavior for every existing
+    /// deployment; an unknown value is a hard config-load error
+    /// (fail-closed). Boot-scoped: p1 (DF-92) owns runtime reload.
+    #[serde(default)]
+    pub collision_policy: CollisionPolicy,
+    /// Operator peer rank for `priority_order` collisions (DF-91): array
+    /// order, EARLIER = higher priority. Serde default `[]`; duplicate
+    /// entries are rejected at load (fail-closed). Unlisted peers rank
+    /// below all listed peers.
+    #[serde(default)]
+    pub peer_priority: Vec<String>,
 }
 
 impl Default for PeerToolsConfig {
@@ -99,6 +132,8 @@ impl Default for PeerToolsConfig {
             tool_allowlist: Vec::new(),
             peer_ids: Vec::new(),
             embedded_mcp: false,
+            collision_policy: CollisionPolicy::FirstStays,
+            peer_priority: Vec::new(),
         }
     }
 }
@@ -130,6 +165,18 @@ impl PeerToolsConfig {
                 }
                 for entry in &parsed.tool_allowlist {
                     validate_allowlist_entry(entry)?;
+                }
+                // DF-91: `peer_priority` is an ordered rank — a peer id may
+                // appear at most once (a duplicate would make the rank
+                // ambiguous). Fail-closed, never silently deduped.
+                let mut seen_peers: HashSet<&str> = HashSet::new();
+                for entry in &parsed.peer_priority {
+                    if !seen_peers.insert(entry.as_str()) {
+                        return Err(ConnectConfigError::Invalid(format!(
+                            "peer_priority contains duplicate entry {entry:?} (each peer id may \
+                             appear at most once)"
+                        )));
+                    }
                 }
                 Ok(parsed)
             }
@@ -312,6 +359,81 @@ mod tests {
             config.embedded_mcp,
             "explicit embedded_mcp:true enables Model B"
         );
+    }
+
+    // ── DF-91: collision policy + peer priority grammar ──────────────────
+
+    #[test]
+    fn absent_policy_keys_default_to_first_stays_empty_rank() {
+        // DF-91: a `daemon.json` without the new keys must parse as
+        // `first_stays` + empty `peer_priority` — every existing
+        // deployment keeps the AR-68 #3 behavior.
+        let home = isolated_home();
+        let config = PeerToolsConfig::load(home.path()).expect("default load");
+        assert_eq!(
+            config.collision_policy,
+            CollisionPolicy::FirstStays,
+            "absent collision_policy ⇒ first_stays"
+        );
+        assert!(
+            config.peer_priority.is_empty(),
+            "absent peer_priority ⇒ empty rank"
+        );
+    }
+
+    #[test]
+    fn priority_order_policy_and_rank_parse() {
+        let home = isolated_home();
+        fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
+        fs::write(
+            nexus_home_layout::connect_daemon_config_path(home.path()),
+            r#"{"collision_policy":"priority_order","peer_priority":["peer-b","peer-a"]}"#,
+        )
+        .expect("write");
+        let config = PeerToolsConfig::load(home.path()).expect("load");
+        assert_eq!(config.collision_policy, CollisionPolicy::PriorityOrder);
+        assert_eq!(
+            config.peer_priority,
+            vec!["peer-b".to_owned(), "peer-a".to_owned()],
+            "array order preserved (earlier = higher priority)"
+        );
+    }
+
+    #[test]
+    fn unknown_collision_policy_value_fails_load() {
+        // DF-91: an unknown policy value is a HARD config-load error
+        // (fail-closed) — never a silent fallback to first_stays.
+        let home = isolated_home();
+        fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
+        fs::write(
+            nexus_home_layout::connect_daemon_config_path(home.path()),
+            r#"{"collision_policy":"round_robin"}"#,
+        )
+        .expect("write");
+        assert!(matches!(
+            PeerToolsConfig::load(home.path()),
+            Err(ConnectConfigError::Malformed(_))
+        ));
+    }
+
+    #[test]
+    fn duplicate_peer_priority_entries_fail_load() {
+        // DF-91: `peer_priority` is an ordered rank — a duplicate entry
+        // makes the rank ambiguous and fails load (fail-closed, never
+        // silently deduped).
+        let home = isolated_home();
+        fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
+        fs::write(
+            nexus_home_layout::connect_daemon_config_path(home.path()),
+            r#"{"peer_priority":["peer-a","peer-a"]}"#,
+        )
+        .expect("write");
+        match PeerToolsConfig::load(home.path()) {
+            Err(ConnectConfigError::Invalid(msg)) => {
+                assert!(msg.contains("duplicate"), "duplicate reason named: {msg}");
+            }
+            other => panic!("duplicate peer_priority must fail load, got {other:?}"),
+        }
     }
 
     #[test]

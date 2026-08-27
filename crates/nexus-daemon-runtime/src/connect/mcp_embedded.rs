@@ -391,7 +391,7 @@ pub async fn boot_embedded_mcp_server(
                 error = %e,
                 "embedded MCP config load failed; continuing without embedded MCP"
             );
-            false
+            cli_embedded_mcp
         }
     };
     if let Some(server) = start_embedded_mcp_server(state.clone(), embedded_enabled) {
