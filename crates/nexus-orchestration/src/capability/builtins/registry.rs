@@ -95,18 +95,40 @@ pub const fn registry_refresh_help_text() -> &'static str {
      response body is capped (default 8 MiB)."
 }
 
-// ─── Retry jitter (V1.58 P0 T13 — R-V156P1-L004) ───────────────────────────
+// ─── Retry jitter (V1.58 P0 T13 — R-V156P1-L004; DR-01 v1.179) ──────────────
 
-/// Compute a randomized jitter in the range 100..=500 ms (V1.58 P0 T13).
+/// Backoff base for the first retry attempt, in milliseconds.
+const RETRY_BASE_MS: u64 = 500;
+/// Upper bound on any retry sleep, in milliseconds. 500·2^5 = 16 s exceeds
+/// this from attempt ≥ 5, so the cap is a latent guard for future
+/// retry-count growth (`max_retries` is 3 today).
+const RETRY_CAP_MS: u64 = 8_000;
+
+/// Full-jitter retry sleep for `attempt` (1 on the first retry), in
+/// milliseconds (DR-01).
 ///
-/// Avoids thundering-herd synchronized retries against the CDN. Uses
-/// `SystemTime` nanosecond entropy rather than pulling in a `rand` dependency
-/// (sufficient for jitter; not cryptographic).
-fn retry_jitter_ms() -> u64 {
+/// The returned value IS the entire sleep: a uniform sample from
+/// `[0, min(RETRY_CAP_MS, RETRY_BASE_MS · 2^attempt))`. Decorrelates
+/// concurrent daemons far better than the former fixed 100–500 ms additive
+/// band, which made same-generation retries cluster in a tight window.
+///
+/// Entropy is `SystemTime` subsecond nanos rather than a `rand` dependency
+/// (sufficient for jitter; non-cryptographic by design).
+fn retry_jitter_ms(attempt: u32) -> u64 {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.subsec_nanos());
-    100 + (u64::from(nanos) % 400)
+    retry_jitter_ms_with(attempt, &mut || u64::from(nanos))
+}
+
+/// Pure, injectable-entropy core of [`retry_jitter_ms`].
+///
+/// `bound = min(RETRY_CAP_MS, RETRY_BASE_MS · 2^attempt)` (saturating);
+/// the sample is `entropy() % bound`. The modulo introduces a slight
+/// distribution bias, documented as negligible for jitter purposes.
+fn retry_jitter_ms_with(attempt: u32, entropy: &mut dyn FnMut() -> u64) -> u64 {
+    let bound = RETRY_CAP_MS.min(RETRY_BASE_MS.saturating_mul(2u64.saturating_pow(attempt)));
+    entropy() % bound
 }
 
 // ─── CDN Error Type ────────────────────────────────────────────────────────
@@ -548,11 +570,10 @@ async fn fetch_from_cdn(cdn: &CdnConfig) -> Result<(u32, u32), CdnError> {
 
     for attempt in 0..=cdn.max_retries {
         if attempt > 0 {
-            // Exponential backoff with jitter (V1.58 P0 T13 — R-V156P1-L004):
-            // base 500ms * 2^(attempt-1) plus 100-500ms random jitter to avoid
-            // thundering-herd synchronized retries against the CDN.
-            let base_ms = 500u64 * (1u64 << (attempt - 1));
-            let backoff_ms = base_ms + retry_jitter_ms();
+            // Full-jitter backoff (DR-01): the sample itself is the sleep,
+            // uniform in [0, min(8 s, 500 ms · 2^attempt)). No additive base
+            // and no second cap — the helper is the single authority.
+            let backoff_ms = retry_jitter_ms(attempt);
             tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
         }
 
@@ -877,15 +898,88 @@ mod tests {
         assert_eq!(cfg.max_body_bytes, 1024);
     }
 
-    // ── V1.58 P0 T13 (R-V156P1-L004): retry jitter bounds ──────────────────
+    // ── DR-01 (v1.179): attempt-aware full-jitter retry band ────────────────
+
+    /// Test-local copy of the locked bound formula:
+    /// `min(RETRY_CAP_MS, RETRY_BASE_MS · 2^attempt)` (saturating).
+    fn expected_jitter_bound(attempt: u32) -> u64 {
+        RETRY_CAP_MS.min(RETRY_BASE_MS.saturating_mul(2u64.saturating_pow(attempt)))
+    }
 
     #[test]
-    fn retry_jitter_is_in_100_to_500ms_range() {
+    fn retry_jitter_samples_stay_within_attempt_band() {
+        // Injected entropy extremes pin the band edges exactly.
+        assert_eq!(retry_jitter_ms_with(1, &mut || 0), 0);
+        assert_eq!(retry_jitter_ms_with(3, &mut || 0), 0);
+        // u64::MAX maps exactly through the modulo (2^64−1 is only ≡ bound−1
+        // for power-of-two bounds, so pin the true residue).
+        assert_eq!(
+            retry_jitter_ms_with(1, &mut || u64::MAX),
+            u64::MAX % expected_jitter_bound(1)
+        );
+        assert_eq!(
+            retry_jitter_ms_with(3, &mut || u64::MAX),
+            u64::MAX % expected_jitter_bound(3)
+        );
+        // Stepped entropy sweeps the band 1000× per attempt without
+        // escaping it.
+        let mut s = 0u64;
+        let mut stepped = || {
+            s = s.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            s
+        };
+        for attempt in 1..=3u32 {
+            let bound = expected_jitter_bound(attempt);
+            for _ in 0..1000 {
+                let j = retry_jitter_ms_with(attempt, &mut stepped);
+                assert!(j < bound, "jitter {j} ms escapes band [0, {bound})");
+            }
+        }
+    }
+
+    #[test]
+    fn retry_jitter_production_entropy_stays_in_band() {
+        // n=1000 smoke through the real SystemTime-nanos entropy path.
+        for attempt in 1..=3u32 {
+            let bound = expected_jitter_bound(attempt);
+            for _ in 0..1000 {
+                let j = retry_jitter_ms(attempt);
+                assert!(j < bound, "jitter {j} ms escapes band [0, {bound})");
+            }
+        }
+        // S-6 (v1.179 QC fix): a dead entropy source (constant clock) passes
+        // every containment assert — the samples must vary. Checked at
+        // attempt 5 (bound 8000): on hosts with coarse clock granularity
+        // (µs-scale ticks quantize subsec_nanos to multiples of 1000, which
+        // collapse bound ≤ 4000 samples without being dead), consecutive
+        // 1000 ns ticks still change `nanos % 8000`; only a constant clock
+        // yields a single distinct value.
+        let mut distinct: std::collections::HashSet<u64> = std::collections::HashSet::new();
         for _ in 0..1000 {
-            let j = retry_jitter_ms();
+            distinct.insert(retry_jitter_ms(5));
+        }
+        assert!(
+            distinct.len() >= 2,
+            "dead entropy source: 1000 samples at attempt 5 produced \
+             {} distinct values",
+            distinct.len()
+        );
+    }
+
+    #[test]
+    fn retry_jitter_cap_binds_from_attempt_five() {
+        // 500·2^5 = 16 s exceeds the 8 s cap, so attempt ≥ 5 tops out just
+        // under RETRY_CAP_MS regardless of entropy.
+        // Max entropy lands at the top of the capped band (exact residue).
+        assert_eq!(
+            retry_jitter_ms_with(5, &mut || u64::MAX),
+            u64::MAX % RETRY_CAP_MS
+        );
+        for attempt in 5..=16u32 {
+            let j = retry_jitter_ms_with(attempt, &mut || u64::MAX);
             assert!(
-                (100..=500).contains(&j),
-                "jitter {j} ms must be in [100, 500]"
+                j < RETRY_CAP_MS,
+                "jitter {j} ms escapes the {RETRY_CAP_MS} ms cap at attempt {attempt}"
             );
         }
     }

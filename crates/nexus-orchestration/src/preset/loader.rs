@@ -464,6 +464,12 @@ fn validate_manifest(
 
     let state_ids: HashSet<&str> = manifest.states.iter().map(|s| s.id.as_str()).collect();
 
+    // W-1 (v1.179 QC fix): runtime join-gate parity — pre-compute which
+    // states the runtime gates as a merge join (`expected_incoming > 0`)
+    // so the bounded-join fail-closed rule below accepts implicit
+    // labeled-edge merges exactly as `build_outer_graph` wires them.
+    let incoming_labeled = incoming_labeled_edge_counts(manifest);
+
     // --- Field type checks (serde already handles most, but we add semantic checks) ---
 
     // Validate requires_capabilities
@@ -702,8 +708,40 @@ fn validate_manifest(
                 });
             }
         }
-    }
 
+        // DR-06 (v1.179): bounded-join fields fail closed at load.
+        // `timeout_ms`/`on_timeout` are only meaningful on a join state —
+        // one the runtime gates as a join: explicit `merge:`, explicit
+        // `converge:`, or an implicit labeled-edge merge (≥1 incoming
+        // labeled/GoNogo edge; default wait-all per §3.2). `on_timeout`
+        // must resolve to a real state in this preset — anything else is
+        // a load-time error so the runtime typed-error path stays
+        // defense-in-depth only.
+        let is_join_state = state.merge.is_some()
+            || state.converge.is_some()
+            || incoming_labeled
+                .get(state.id.as_str())
+                .copied()
+                .unwrap_or(0)
+                > 0;
+        if (state.timeout_ms.is_some() || state.on_timeout.is_some()) && !is_join_state {
+            problems.push(ValidationProblem {
+                path: format!("{state_path}.timeout_ms"),
+                error: "timeout_ms/on_timeout are only valid on join states \
+                        (states carrying 'merge:' or 'converge:', or targeted \
+                        by incoming labeled edges — implicit merge)"
+                    .to_string(),
+            });
+        }
+        if let Some(target) = &state.on_timeout {
+            if !state_ids.contains(target.as_str()) {
+                problems.push(ValidationProblem {
+                    path: format!("{state_path}.on_timeout"),
+                    error: format!("unknown state: '{target}'"),
+                });
+            }
+        }
+    }
     // --- WS-E T6: Role validation ---
     // Build role ID set for agent reference validation
     let role_ids: HashSet<&str> = manifest.roles.iter().map(|r| r.id.as_str()).collect();
@@ -933,6 +971,31 @@ fn validate_skill_slug_format(s: &str) -> bool {
 // Graph building per §8.2 mapping table
 // ---------------------------------------------------------------------------
 
+/// Incoming labeled/GoNogo edge counts per target state (W-1, v1.179 QC).
+///
+/// Single source of truth for "which states the runtime gates as a merge
+/// join" (`expected_incoming > 0`): [`validate_manifest`]'s bounded-join
+/// fail-closed rule and [`build_outer_graph`]'s `with_expected_incoming`
+/// wiring MUST agree, so both scan through this helper. Mirrors the §3.2
+/// semantics documented on `MergeKind`: a state with ≥1 incoming labeled
+/// edge is a merge node even without an explicit `merge:` (default
+/// wait-all).
+fn incoming_labeled_edge_counts(manifest: &PresetManifest) -> HashMap<&str, usize> {
+    let mut incoming_labeled: HashMap<&str, usize> = HashMap::new();
+    for state in &manifest.states {
+        if let Some(NextTarget::Labeled(edges)) = &state.next {
+            for edge in edges {
+                *incoming_labeled.entry(edge.target.as_str()).or_insert(0) += 1;
+            }
+        }
+        if let Some(NextTarget::GoNogo(gonogo)) = &state.next {
+            *incoming_labeled.entry(gonogo.go.as_str()).or_insert(0) += 1;
+            *incoming_labeled.entry(gonogo.nogo.as_str()).or_insert(0) += 1;
+        }
+    }
+    incoming_labeled
+}
+
 /// Build the outer state-machine graph per §8.2.
 ///
 /// Each `states[].id` → a composite `Task` that encodes the enter actions,
@@ -948,18 +1011,7 @@ fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
     let graph = graph_flow::Graph::new(&manifest.preset.id);
 
     // V1.52 T-B P1: pre-compute incoming labeled edge counts for merge nodes.
-    let mut incoming_labeled: HashMap<&str, usize> = HashMap::new();
-    for state in &manifest.states {
-        if let Some(crate::preset::manifest::NextTarget::Labeled(edges)) = &state.next {
-            for edge in edges {
-                *incoming_labeled.entry(edge.target.as_str()).or_insert(0) += 1;
-            }
-        }
-        if let Some(crate::preset::manifest::NextTarget::GoNogo(gonogo)) = &state.next {
-            *incoming_labeled.entry(gonogo.go.as_str()).or_insert(0) += 1;
-            *incoming_labeled.entry(gonogo.nogo.as_str()).or_insert(0) += 1;
-        }
-    }
+    let incoming_labeled = incoming_labeled_edge_counts(manifest);
 
     // V1.56 P2 fix-wave (H-001): pre-compute converge predecessor sets.
     // Count which states can route to each converge-annotated state.
@@ -1071,18 +1123,10 @@ pub fn build_wired_outer_graph(
     let graph = graph_flow::Graph::new(&loaded.id);
 
     // V1.52 T-B P1: pre-compute incoming labeled edge counts for merge nodes.
-    let mut incoming_labeled: HashMap<&str, usize> = HashMap::new();
-    for state in &loaded.manifest.states {
-        if let Some(crate::preset::manifest::NextTarget::Labeled(edges)) = &state.next {
-            for edge in edges {
-                *incoming_labeled.entry(edge.target.as_str()).or_insert(0) += 1;
-            }
-        }
-        if let Some(crate::preset::manifest::NextTarget::GoNogo(gonogo)) = &state.next {
-            *incoming_labeled.entry(gonogo.go.as_str()).or_insert(0) += 1;
-            *incoming_labeled.entry(gonogo.nogo.as_str()).or_insert(0) += 1;
-        }
-    }
+    // W-2 (v1.179 QC fix round 2): production wiring shares the exact scan
+    // used by `validate_manifest` and `build_outer_graph`, keeping the
+    // "loader accepts ⇔ runtime gates" parity invariant total.
+    let incoming_labeled = incoming_labeled_edge_counts(&loaded.manifest);
 
     // V1.56 P2 fix-wave (H-001): pre-compute converge predecessor sets.
     let mut converge_predecessors: HashMap<&str, std::collections::HashSet<&str>> = HashMap::new();
@@ -1459,6 +1503,297 @@ inner_graphs:
         );
     }
 
+    // ── DR-06 (v1.179): bounded-join loader validation ──────────────────
+
+    #[test]
+    fn reject_timeout_fields_on_non_join_state() {
+        let yaml = r"
+preset:
+  id: bad-timeout-non-join
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    exit_when: { kind: rule }
+    next: b
+    timeout_ms: 1000
+  - id: b
+    terminal: true
+";
+        let caps = test_capability_registry();
+        let err = load_preset_from_str(yaml, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.path.contains("timeout_ms")
+                    && p.error.contains("only valid on join states")),
+            "expected 'only valid on join states' problem: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn reject_on_timeout_naming_unknown_state() {
+        let yaml = r"
+preset:
+  id: bad-timeout-target
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    exit_when: { kind: rule }
+    next: b
+  - id: b
+    terminal: true
+    converge: { strategy: wait_for_all }
+    timeout_ms: 1000
+    on_timeout: nowhere
+";
+        let caps = test_capability_registry();
+        let err = load_preset_from_str(yaml, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.path.contains("on_timeout")
+                    && p.error.contains("unknown state: 'nowhere'")),
+            "expected 'unknown state' problem on on_timeout: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn join_timeout_fields_load_cleanly_on_converge_state() {
+        // Positive control: the same fields on a real join state load fine.
+        let yaml = r"
+preset:
+  id: ok-timeout-join
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: c
+states:
+  - id: a
+    exit_when: { kind: rule }
+    next: b
+  - id: b
+    converge: { strategy: wait_for_all }
+    timeout_ms: 1000
+    on_timeout: a
+    next: c
+  - id: c
+    terminal: true
+";
+        let caps = test_capability_registry();
+        let loaded =
+            load_preset_from_str(yaml, &caps).expect("bounded join on a converge state loads");
+        let join = loaded
+            .manifest
+            .states
+            .iter()
+            .find(|s| s.id == "b")
+            .expect("join state present");
+        assert_eq!(join.timeout_ms, Some(1000));
+        assert_eq!(join.on_timeout.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn join_timeout_fields_load_cleanly_on_implicit_labeled_edge_merge() {
+        // W-1 (v1.179 QC fix): a state targeted by incoming labeled edges
+        // with NO explicit `merge:` is an implicit wait-all merge (§3.2) —
+        // the runtime gates it on `expected_incoming > 0`, so the
+        // bounded-join fields must load and bind to that gate instead of
+        // failing closed.
+        let yaml = r"
+preset:
+  id: ok-timeout-implicit-merge
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: j1
+  terminal: done
+states:
+  - id: j1
+    exit_when: { kind: rule }
+    next: j2
+  - id: j2
+    exit_when: { kind: llm_judge }
+    next:
+      - label: go
+        target: m
+      - label: research
+        target: m
+  - id: m
+    timeout_ms: 1000
+    on_timeout: j1
+    next: done
+  - id: done
+    terminal: true
+";
+        let caps = test_capability_registry();
+        let loaded = load_preset_from_str(yaml, &caps)
+            .expect("bounded join on an implicit labeled-edge merge loads");
+        let join = loaded
+            .manifest
+            .states
+            .iter()
+            .find(|s| s.id == "m")
+            .expect("implicit merge state present");
+        assert!(
+            join.merge.is_none(),
+            "fixture must stay implicit (no explicit merge:)"
+        );
+        assert_eq!(join.timeout_ms, Some(1000));
+        assert_eq!(join.on_timeout.as_deref(), Some("j1"));
+        // Runtime wait-bounding for this exact shape (expected_incoming 2,
+        // no merge:) is pinned by the join_timeout_e2e merge-gate tests; the
+        // loader and the graph wiring share `incoming_labeled_edge_counts`,
+        // so acceptance here means the gate the fields bound is the gate the
+        // runtime builds.
+    }
+    /// Engine stub for wiring-only tests: every method panics. The
+    /// merge-gate wait path returns before any engine call, so a panic
+    /// here would mean the test drove the wrong code path.
+    struct UnreachableEngine;
+
+    #[async_trait::async_trait]
+    impl crate::engine::OrchestrationEngine for UnreachableEngine {
+        async fn run_step(
+            &self,
+            _: &crate::engine::SessionId,
+        ) -> Result<crate::engine::StepOutcome, crate::engine::EngineError> {
+            unimplemented!("wiring test must not execute engine steps")
+        }
+        async fn new_session(
+            &self,
+            _: crate::engine::SessionKey,
+            _: crate::engine::Context,
+        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+            unimplemented!()
+        }
+        async fn start_session_with_graph(
+            &self,
+            _: &str,
+            _: std::sync::Arc<graph_flow::Graph>,
+        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+            unimplemented!()
+        }
+        async fn get_status(
+            &self,
+            _: &crate::engine::SessionId,
+        ) -> Result<crate::engine::SessionStatus, crate::engine::EngineError> {
+            unimplemented!()
+        }
+        async fn signal(
+            &self,
+            _: &crate::engine::SessionId,
+            _: crate::engine::EngineSignal,
+        ) -> Result<(), crate::engine::EngineError> {
+            unimplemented!()
+        }
+        async fn list_active(
+            &self,
+            _: crate::engine::SessionFilter,
+        ) -> Result<Vec<crate::engine::SessionSummary>, crate::engine::EngineError> {
+            unimplemented!()
+        }
+        async fn spawn_child_session(
+            &self,
+            _: crate::engine::ChildSessionParams,
+        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+            unimplemented!()
+        }
+        async fn start_session_with_preset(
+            &self,
+            _: &LoadedPreset,
+        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+            unimplemented!()
+        }
+        async fn get_context(
+            &self,
+            _: &crate::engine::SessionId,
+        ) -> Result<graph_flow::Context, crate::engine::EngineError> {
+            unimplemented!()
+        }
+        async fn start_session_with_preset_for_creator(
+            &self,
+            _: &LoadedPreset,
+            _: &str,
+        ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
+            unimplemented!()
+        }
+    }
+
+    #[tokio::test]
+    async fn wired_builder_gates_implicit_merge_like_validate_path() {
+        // W-2 (v1.179 QC fix round 2): the production builder
+        // `build_wired_outer_graph` must wire the same `expected_incoming`
+        // the loader's bounded-join validation accepts — both now scan
+        // through `incoming_labeled_edge_counts`. Fixture: implicit
+        // labeled-edge merge (no `merge:`) with two incoming edges; a
+        // single arrival must hold the wired gate at 1/2.
+        let yaml = r"
+preset:
+  id: wired-merge-parity
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: j1
+  terminal: done
+states:
+  - id: j1
+    exit_when: { kind: rule }
+    next: j2
+  - id: j2
+    exit_when: { kind: llm_judge }
+    next:
+      - label: go
+        target: m
+      - label: research
+        target: m
+  - id: m
+    next: done
+  - id: done
+    terminal: true
+";
+        let caps = test_capability_registry();
+        let loaded = load_preset_from_str(yaml, &caps).expect("implicit labeled-edge merge loads");
+
+        let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
+        let graph = build_wired_outer_graph(&loaded, &engine, &Arc::new(caps), None);
+
+        let task = graph
+            .get_task("m")
+            .expect("merge state task present in wired graph");
+        let ctx = graph_flow::Context::new();
+        ctx.set_sync("_merge_m", vec!["go".to_string()]);
+        let result = task.run(ctx).await.expect("merge gate check runs");
+
+        assert_eq!(
+            result.next_action,
+            graph_flow::NextAction::WaitForInput,
+            "one arrival of two must leave the wired merge gate waiting"
+        );
+        let response = result
+            .response
+            .expect("waiting merge node returns a message");
+        assert!(
+            response.contains("1/2 arrivals, waiting"),
+            "wired builder must wire expected_incoming=2 from the shared \
+             incoming_labeled_edge_counts scan; got: {response}"
+        );
+    }
     #[test]
     fn reject_unknown_judge_capability() {
         let yaml = r"
