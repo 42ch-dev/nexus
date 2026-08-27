@@ -154,6 +154,10 @@ async fn start_server(
         // Layer 0 dialer allowlist: tests pass the peer allowlist via
         // `PeerResponderOptions`.
         peer_ids: Vec::new(),
+        embedded_mcp: false,
+        // DF-91: the new collision-policy fields default to first_stays +
+        // empty rank (AR-68 #3 behavior preserved for every fixture).
+        ..PeerToolsConfig::default()
     });
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

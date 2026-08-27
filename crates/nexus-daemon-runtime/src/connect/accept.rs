@@ -416,6 +416,13 @@ pub async fn start_peer_tools_lane(
     capability_registry: Option<CapabilityRegistryHolder>,
 ) -> anyhow::Result<PeerToolsLaneHandle> {
     let config = Arc::new(PeerToolsConfig::load(home)?);
+    // DF-91: wire the live config snapshot into the process-global table
+    // so admission reads `collision_policy` + `peer_priority` at
+    // admission time (live-derivation precedent: `live_reserved_tool_ids`
+    // reads the capability holder the same way — p1's reload swaps the
+    // Arc and NEW registrations pick up the new policy without further
+    // table mutation).
+    crate::connect::peer_tool_table().set_config(Some(Arc::clone(&config)));
     // PR #229 F-2 (Cursor Security HIGH): the peer lane binds PLAINTEXT
     // (no WSS — `accept_async_with_config`), so a non-loopback bind must
     // FAIL CLOSED — mirroring the V1.92 daemon HTTP API posture
@@ -492,6 +499,7 @@ pub struct PeerToolsLaneHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::connect::config::CollisionPolicy;
 
     #[test]
     fn observed_transport_latches_flag() {
@@ -522,6 +530,33 @@ mod tests {
         assert!(manifest.capabilities.contains(&"spoke-baseline".to_owned()));
         assert!(manifest.tools.is_empty());
         assert_eq!(manifest.host_id.as_str(), "device-1");
+    }
+
+    #[test]
+    fn daemon_manifest_never_carries_collision_policy() {
+        // DF-91 (AR-69 derivation lock): the peer-visible hello derives
+        // ONLY from the operator allowlist. The collision policy + peer
+        // priority are operator config consumed by the admission table —
+        // they must never leak into the hello.
+        let config = PeerToolsConfig {
+            collision_policy: CollisionPolicy::PriorityOrder,
+            peer_priority: vec!["peer-b".to_owned()],
+            ..PeerToolsConfig::default()
+        };
+        let manifest = daemon_manifest("device-1", &config.tool_allowlist);
+        let hello = serde_json::to_string(&manifest).expect("hello serializes");
+        assert!(
+            !hello.contains("collision_policy"),
+            "collision policy must not leak into the peer-visible hello"
+        );
+        assert!(
+            !hello.contains("peer_priority"),
+            "peer priority must not leak into the peer-visible hello"
+        );
+        assert!(
+            !hello.contains("priority_order"),
+            "policy value must not leak into the peer-visible hello"
+        );
     }
 
     /// PR #229 F-2: a non-loopback `daemon.json` host must fail closed —

@@ -136,6 +136,10 @@ async fn start_server(
         // T4 (AR-69): the dialer handshake allowlist (Layer 0). The tests
         // pass the peer allowlist separately via `PeerResponderOptions`.
         peer_ids: Vec::new(),
+        embedded_mcp: false,
+        // DF-91: the new collision-policy fields default to first_stays +
+        // empty rank (AR-68 #3 behavior preserved for every fixture).
+        ..PeerToolsConfig::default()
     });
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

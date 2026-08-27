@@ -128,6 +128,16 @@ pub struct WorkspaceState {
     /// makes each invocation's watchdog observe only its own budget; it also
     /// caps W-1's worst case (one CPU-bound compute at a time).
     compute_serializer: Arc<tokio::sync::Semaphore>,
+    /// V1.179 P0 T1 (DF-88): boot-scoped embedded MCP server (Model B).
+    /// Stored at daemon boot (`boot.rs` §8.5) so in-daemon consumers can
+    /// `establish()` on the ONE boot instance (GC #9 enablement gate: the
+    /// `PeerToolsConfig.embedded_mcp` key OR the `--embedded-mcp` CLI flag;
+    /// the cargo `embedded-mcp` feature is the hard gate). The session
+    /// budget is process-global — every `EmbeddedMcpServer` handle shares
+    /// the same registry, so the boot instance and any consumer-constructed
+    /// handle count against the same `EMBEDDED_MCP_MAX_SESSIONS` cap.
+    #[cfg(feature = "embedded-mcp")]
+    embedded_mcp_server: Arc<Option<Arc<crate::connect::mcp_embedded::EmbeddedMcpServer>>>,
 }
 
 impl WorkspaceState {
@@ -188,6 +198,8 @@ impl WorkspaceState {
             wasm_engine: Arc::new(None),
             module_cache: Arc::new(None),
             compute_serializer: Arc::new(tokio::sync::Semaphore::new(1)),
+            #[cfg(feature = "embedded-mcp")]
+            embedded_mcp_server: Arc::new(None),
         }
     }
 
@@ -281,6 +293,8 @@ impl WorkspaceState {
             wasm_engine: Arc::new(None),
             module_cache: Arc::new(None),
             compute_serializer: Arc::new(tokio::sync::Semaphore::new(1)),
+            #[cfg(feature = "embedded-mcp")]
+            embedded_mcp_server: Arc::new(None),
         })
     }
 
@@ -644,6 +658,27 @@ impl WorkspaceState {
     #[must_use]
     pub fn shutdown_notify(&self) -> Arc<Notify> {
         Arc::clone(&self.shutdown_notify)
+    }
+    /// Get the boot-scoped embedded MCP server (DF-88 Model B), if one was
+    /// started at boot. `None` when the `embedded-mcp` feature is compiled
+    /// off, or when GC #9 enablement (the `PeerToolsConfig.embedded_mcp`
+    /// key OR the `--embedded-mcp` CLI flag) was not requested.
+    #[cfg(feature = "embedded-mcp")]
+    #[must_use]
+    pub fn embedded_mcp_server(
+        &self,
+    ) -> Option<Arc<crate::connect::mcp_embedded::EmbeddedMcpServer>> {
+        self.embedded_mcp_server.as_ref().clone()
+    }
+
+    /// Store the boot-scoped embedded MCP server (called from `boot.rs`
+    /// §8.5; the ONE instance in-daemon consumers `establish()` on).
+    #[cfg(feature = "embedded-mcp")]
+    pub fn set_embedded_mcp_server(
+        &mut self,
+        server: Arc<crate::connect::mcp_embedded::EmbeddedMcpServer>,
+    ) {
+        self.embedded_mcp_server = Arc::new(Some(server));
     }
 
     /// Request graceful shutdown — fires the shutdown notification.
