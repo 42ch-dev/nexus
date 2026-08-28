@@ -43,7 +43,12 @@
 //! `host`/`port`/`max_sessions`. Each session's serve task also selects on
 //! the same shutdown notification, so live sessions end with the daemon
 //! run that spawned them and release their budget slots; a real restart is
-//! a new process with a fresh registry.
+//! a new process with a fresh registry. `request_shutdown` BROADCASTS on
+//! that Notify (`notify_waiters` — many subsystems and N sessions wait on
+//! it, so a single permit would be stolen), and `establish()` refuses with
+//! [`EmbeddedMcpError::Shutdown`] once the `shutdown_requested` gate is
+//! up: the broadcast reaches only waiters registered at fire time, so a
+//! post-shutdown session would otherwise await `notified()` forever.
 //!
 //! Enablement is the union of the `PeerToolsConfig.embedded_mcp` key and
 //! the `nexus42 daemon start --embedded-mcp` flag (GC #9); the cargo
@@ -95,6 +100,12 @@ pub enum EmbeddedMcpError {
          embedded MCP sessions"
     )]
     SessionLimit,
+    /// The daemon has requested shutdown (`WorkspaceState::request_shutdown`):
+    /// new sessions are refused because the shutdown broadcast wakes only
+    /// waiters registered at fire time — a session established afterwards
+    /// would never end and would leak its budget slot (Bugbot PR #234).
+    #[error("embedded_mcp_shutdown: daemon shutdown requested; no new embedded MCP sessions")]
+    Shutdown,
 }
 
 impl EmbeddedMcpError {
@@ -103,6 +114,7 @@ impl EmbeddedMcpError {
     pub const fn code(&self) -> &'static str {
         match self {
             Self::SessionLimit => "embedded_mcp_session_limit",
+            Self::Shutdown => "embedded_mcp_shutdown",
         }
     }
 }
@@ -307,17 +319,33 @@ impl EmbeddedMcpServer {
     ///
     /// Refused with [`EmbeddedMcpError::SessionLimit`] (discriminator
     /// `embedded_mcp_session_limit`) when [`EMBEDDED_MCP_MAX_SESSIONS`]
-    /// sessions are already live. The budget slot is held by the session's
-    /// server-side task for the CONNECTION LIFETIME — from before the
-    /// initialize handshake until the transport ends or the daemon
-    /// shutdown notification fires — never by the returned handle, so
-    /// moving `transport` into `serve_client` cannot free the slot early.
+    /// sessions are already live, and with [`EmbeddedMcpError::Shutdown`]
+    /// (discriminator `embedded_mcp_shutdown`) once
+    /// `WorkspaceState::request_shutdown` has fired. The budget slot is
+    /// held by the session's server-side task for the CONNECTION LIFETIME
+    /// — from before the initialize handshake until the transport ends or
+    /// the daemon shutdown notification fires — never by the returned
+    /// handle, so moving `transport` into `serve_client` cannot free the
+    /// slot early.
+    ///
+    /// Shutdown gate (Bugbot PR #234): `request_shutdown` broadcasts with
+    /// `notify_waiters`, which wakes only waiters registered at fire time
+    /// and stores no permit. A session established after the broadcast
+    /// would await `notified()` forever and leak its budget slot, so the
+    /// `shutdown_requested` gate (raised BEFORE the broadcast) refuses it
+    /// up front.
     ///
     /// # Errors
     ///
-    /// Returns [`EmbeddedMcpError::SessionLimit`] when the session budget
-    /// is exhausted.
+    /// Returns [`EmbeddedMcpError::Shutdown`] when the daemon has
+    /// requested shutdown, and [`EmbeddedMcpError::SessionLimit`] when the
+    /// session budget is exhausted.
     pub fn establish(&self) -> Result<EmbeddedSession, EmbeddedMcpError> {
+        // Check the shutdown gate BEFORE acquiring a slot: a refused
+        // establish must not consume budget it can never hold a session in.
+        if self.state.shutdown_requested() {
+            return Err(EmbeddedMcpError::Shutdown);
+        }
         let slot = process_registry().try_acquire()?;
         // Channel A: client→server (the client's sink, the server's
         // stream). Channel B: server→client (the server's sink, the
@@ -647,5 +675,80 @@ mod tests {
             },
             "executed failure names the spine code"
         );
+    }
+
+    /// Bugbot PR #234: `request_shutdown` broadcasts (`notify_waiters`) on
+    /// the shared `WorkspaceState::shutdown_notify`, and `establish()`
+    /// refuses once the `shutdown_requested` gate is up. Here: two
+    /// subsystem-style waiters + one LIVE session's server task must ALL
+    /// wake within their timeouts (under the old `notify_one`, one waiter
+    /// steals the permit and the rest hang), and a LATE `establish()` —
+    /// after the broadcast, so it could never receive `notified()` — must
+    /// be refused with the honest `embedded_mcp_shutdown` discriminator
+    /// instead of registering a waiter the broadcast can never reach.
+    #[tokio::test]
+    #[serial]
+    async fn shutdown_broadcast_wakes_waiters_and_late_establish_refused() {
+        let state = WorkspaceState::new_for_testing(
+            std::env::temp_dir().join("embedded-mcp-shutdown-test-home"),
+            std::env::temp_dir().join("embedded-mcp-shutdown-test.db"),
+            None,
+        )
+        .await;
+        let server = start_embedded_mcp_server(state.clone(), true).expect("enabled server");
+
+        // One LIVE session before shutdown: its server task selects on the
+        // same shutdown Notify and holds a budget slot until it fires.
+        let live = server.establish().expect("session before shutdown");
+        let running = rmcp::serve_client(rmcp::model::ClientInfo::default(), live.transport)
+            .await
+            .expect("initialize handshake completes");
+
+        // Two explicit waiters, the same shape as the boot.rs subsystems.
+        let notify = state.shutdown_notify();
+        let waiters: Vec<_> = (0..2)
+            .map(|_| {
+                let notify = notify.clone();
+                tokio::spawn(async move { notify.notified().await })
+            })
+            .collect();
+        // Let the waiters register before the broadcast.
+        tokio::task::yield_now().await;
+
+        state.request_shutdown();
+
+        // ALL waiters — explicit and in-session — must wake; the timeouts
+        // turn a permit-steal regression into a hard failure, not a hang.
+        let deadline = std::time::Duration::from_secs(5);
+        for waiter in waiters {
+            tokio::time::timeout(deadline, waiter)
+                .await
+                .expect(
+                    "subsystem-style waiter must wake within 5s — request_shutdown \
+                     must broadcast (notify_waiters), not notify_one",
+                )
+                .expect("waiter task joins");
+        }
+        // Ending the client transport (or the broadcast) ends the server
+        // task; its budget slot drains asynchronously.
+        drop(running);
+        wait_for_budget(
+            || process_registry().active_count() == 0,
+            "live session slot to drain after shutdown wake",
+        )
+        .await;
+
+        // Late arrival: establish AFTER request_shutdown is refused — the
+        // broadcast has already fired and stores no permit, so such a
+        // session would await `notified()` forever and leak its slot.
+        assert!(
+            state.shutdown_requested(),
+            "gate must be up when the late establish arrives"
+        );
+        let Err(err) = server.establish() else {
+            panic!("establish after request_shutdown must be refused")
+        };
+        assert_eq!(err, EmbeddedMcpError::Shutdown);
+        assert_eq!(err.code(), "embedded_mcp_shutdown");
     }
 }

@@ -25,6 +25,7 @@ use nexus_orchestration::{
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::sync::Notify;
@@ -92,6 +93,13 @@ pub struct WorkspaceState {
     /// Shutdown notification — fired when the daemon enters Stopping state.
     /// Consumers (HTTP server, engine drainer) await this to initiate graceful shutdown.
     shutdown_notify: Arc<Notify>,
+    /// Shutdown gate (Bugbot PR #234): raised by [`WorkspaceState::request_shutdown`]
+    /// BEFORE the `notify_waiters` broadcast. `notify_waiters` wakes only
+    /// waiters registered at broadcast time and stores no permit, so a
+    /// consumer that would register AFTER the broadcast (an embedded MCP
+    /// session established post-shutdown) must consult this flag instead
+    /// of awaiting [`WorkspaceState::shutdown_notify`] forever.
+    shutdown_requested: Arc<AtomicBool>,
     /// Daemon-side tool dispatch for nexus.* tools (DF-47, V1.42 P3).
     /// Set at daemon boot so schedule-executed `HostToolCallTask` can invoke tools.
     daemon_tool_dispatch: Arc<Option<Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>>,
@@ -192,6 +200,7 @@ impl WorkspaceState {
             agent_host: Arc::new(None),
             agent_host_config: Arc::new(AgentHostConfig::default()),
             shutdown_notify: Arc::new(Notify::new()),
+            shutdown_requested: Arc::new(AtomicBool::new(false)),
             daemon_tool_dispatch: Arc::new(None),
             memory_review_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
             tls_fingerprint: Arc::new(None),
@@ -287,6 +296,7 @@ impl WorkspaceState {
             agent_host: Arc::new(None),
             agent_host_config: Arc::new(agent_host_config),
             shutdown_notify: Arc::new(Notify::new()),
+            shutdown_requested: Arc::new(AtomicBool::new(false)),
             daemon_tool_dispatch: Arc::new(None),
             memory_review_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
             tls_fingerprint: Arc::new(None),
@@ -651,13 +661,35 @@ impl WorkspaceState {
     pub fn capability_registry_holder(&self) -> Option<CapabilityRegistryHolder> {
         self.capability_registry.as_ref().clone()
     }
-
     /// Get the shutdown notification handle.
     ///
-    /// Callers await `.notified()` to block until the daemon enters Stopping state.
+    /// Callers await `.notified()` to block until the daemon enters Stopping
+    /// state. This Notify is MULTI-CONSUMER: boot's engine drainer and HTTP
+    /// accept loop, the cron supervisor, refresh scheduler, auto-chronology
+    /// tick, connect relay/watcher, and — since the v1.179 P0 fix wave —
+    /// every live embedded MCP session all wait on it. A single-permit
+    /// `notify_one` would let one arbitrary waiter steal the permit and
+    /// hang the rest, so [`WorkspaceState::request_shutdown`] broadcasts
+    /// with `notify_waiters`.
+    ///
+    /// `notify_waiters` wakes only waiters registered at call time and
+    /// stores no permit: a consumer that registers AFTER the broadcast
+    /// must consult [`WorkspaceState::shutdown_requested`] instead of
+    /// awaiting blindly (embedded MCP `establish()` refuses on that gate).
     #[must_use]
     pub fn shutdown_notify(&self) -> Arc<Notify> {
         Arc::clone(&self.shutdown_notify)
+    }
+
+    /// Whether [`WorkspaceState::request_shutdown`] has fired on this state
+    /// (or any `WorkspaceState` clone sharing the same gate).
+    ///
+    /// Late-arriving shutdown consumers — anything that would register a
+    /// `shutdown_notify` waiter after the broadcast — poll this gate
+    /// instead of awaiting a notification that can never reach them.
+    #[must_use]
+    pub fn shutdown_requested(&self) -> bool {
+        self.shutdown_requested.load(Ordering::SeqCst)
     }
     /// Get the boot-scoped embedded MCP server (DF-88 Model B), if one was
     /// started at boot. `None` when the `embedded-mcp` feature is compiled
@@ -679,13 +711,6 @@ impl WorkspaceState {
         server: Arc<crate::connect::mcp_embedded::EmbeddedMcpServer>,
     ) {
         self.embedded_mcp_server = Arc::new(Some(server));
-    }
-
-    /// Request graceful shutdown — fires the shutdown notification.
-    ///
-    /// Called from lifecycle `Stopping` entry or signal handlers.
-    pub fn request_shutdown(&self) {
-        self.shutdown_notify.notify_one();
     }
 
     /// Get the lifecycle, if set.
@@ -788,6 +813,42 @@ impl WorkspaceState {
     #[must_use]
     pub const fn started_at(&self) -> chrono::DateTime<chrono::Utc> {
         self.started_at_wall
+    }
+
+    /// Request graceful shutdown — raise the shutdown gate, then broadcast
+    /// the shutdown notification to ALL current waiters.
+    ///
+    /// Called from lifecycle `Stopping` entry or signal handlers.
+    ///
+    /// # Why `notify_waiters` (Bugbot PR #234)
+    ///
+    /// Many independent subsystems wait on the ONE `shutdown_notify` —
+    /// boot.rs: engine drainer, HTTP accept loop, user-capability watcher,
+    /// stale-findings watcher, cron supervisor, auto-chronology tick,
+    /// refresh scheduler, connect relay/watcher — and, since the v1.179 P0
+    /// fix wave, every live embedded MCP session (`mcp_embedded.rs`
+    /// selects on it per session). `notify_one` stores a SINGLE permit, so
+    /// with N > 1 waiters one arbitrary waiter steals it and every other
+    /// waiter hangs forever — the daemon shutdown deadlocks.
+    /// `notify_waiters` wakes every currently-registered waiter and stores
+    /// no permit (same multi-consumer pattern as the peer accept lane's
+    /// `closed` latch, `connect/accept.rs`).
+    ///
+    /// # Pre-registration window (pre-existing, unchanged)
+    ///
+    /// A waiter that has not yet registered `.notified()` when this fires
+    /// is not woken by the broadcast — the same window every subsystem on
+    /// this Notify already has; signal handlers run post-boot, after the
+    /// accept loop and subsystems have registered. To keep NEW arrivals
+    /// honest, the gate is raised BEFORE the broadcast and embedded MCP
+    /// `establish()` refuses with `embedded_mcp_shutdown` once it is up:
+    /// a session established after `request_shutdown` can never receive
+    /// the broadcast, so it must never be created.
+    pub fn request_shutdown(&self) {
+        // Gate FIRST: a consumer loading the flag around the broadcast
+        // observes shutdown one way or the other (refusal or wake-up).
+        self.shutdown_requested.store(true, Ordering::SeqCst);
+        self.shutdown_notify.notify_waiters();
     }
 
     /// Workspace session manager (DF-31 skeleton).
@@ -1075,5 +1136,67 @@ mod tests {
             Some(v) => std::env::set_var("HOME", v),
             None => std::env::remove_var("HOME"),
         }
+    }
+
+    /// Bugbot PR #234: `request_shutdown` must BROADCAST on the shared
+    /// `shutdown_notify`. Boot's engine drainer + HTTP accept loop, the
+    /// cron supervisor, refresh scheduler, auto-chronology tick, connect
+    /// relay/watcher, and every live embedded MCP session all wait on the
+    /// ONE Notify; a single-permit `notify_one` lets one arbitrary waiter
+    /// steal the permit and hangs the rest at shutdown. Four concurrent
+    /// waiters must ALL wake, each within the per-waiter timeout — under
+    /// `notify_one` this test times out.
+    #[tokio::test]
+    async fn request_shutdown_wakes_all_concurrent_waiters() {
+        const WAITERS: usize = 4;
+
+        let state = WorkspaceState::new_for_testing(
+            std::env::temp_dir().join("shutdown-waiters-test-home"),
+            std::env::temp_dir().join("shutdown-waiters-test.db"),
+            None,
+        )
+        .await;
+
+        assert!(
+            !state.shutdown_requested(),
+            "gate must start lower before request_shutdown"
+        );
+        let notify = state.shutdown_notify();
+        let waiters: Vec<_> = (0..WAITERS)
+            .map(|i| {
+                let notify = notify.clone();
+                tokio::spawn(async move {
+                    notify.notified().await;
+                    i
+                })
+            })
+            .collect();
+        // Let every waiter register before the broadcast: `notify_waiters`
+        // wakes only waiters registered at fire time.
+        tokio::task::yield_now().await;
+
+        state.request_shutdown();
+
+        let deadline = std::time::Duration::from_secs(5);
+        let mut woken = std::collections::HashSet::new();
+        for waiter in waiters {
+            let i = tokio::time::timeout(deadline, waiter)
+                .await
+                .expect(
+                    "waiter must wake within 5s — request_shutdown must broadcast \
+                     (notify_waiters), not notify_one",
+                )
+                .expect("waiter task joins");
+            assert!(woken.insert(i), "waiter {i} woke more than once");
+        }
+        assert_eq!(
+            woken.len(),
+            WAITERS,
+            "EVERY concurrent waiter must observe the shutdown broadcast"
+        );
+        assert!(
+            state.shutdown_requested(),
+            "request_shutdown must raise the shutdown_requested gate"
+        );
     }
 }
