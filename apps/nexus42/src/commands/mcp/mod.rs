@@ -8,6 +8,13 @@
 //! over daemon loopback HTTP (reusing the CLI daemon-client resolution
 //! exactly — config `daemon_url`, default `http://127.0.0.1:8420`).
 //!
+//! The rmcp `ServerHandler` surface, the catalog-row→`Tool` mapping, and the
+//! AR-70 #4 refusal vocabulary live in the shared bridge core
+//! (`nexus_daemon_runtime::connect::mcp_bridge`, V1.179 P0 T1 DF-88); this
+//! module supplies the Model A [`DaemonClientBackend`] adapter (loopback
+//! HTTP) and the AR-79 catalog-watch loop (Model-A-only, not shared — the
+//! embedded Model B server has no watcher).
+//!
 //! Error mapping (AR-70 #4):
 //! - Unroutable (never-admitted / evicted / allowlist-missing /
 //!   non-exposable id) → `Err(ErrorData)` `METHOD_NOT_FOUND` naming the
@@ -27,16 +34,14 @@
 //! handler overrides exist beyond the tools family + server info.
 
 use std::future::Future;
-use std::sync::Arc;
 use std::time::Duration;
 
-use rmcp::model::{
-    CallToolRequestParams, CallToolResult, Content, ErrorCode, Implementation, ListToolsResult,
-    PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
+use nexus_daemon_runtime::connect::mcp_bridge::{
+    is_unroutable, CatalogResponse, CatalogRow, McpBackend, McpBridgeHandler, ToolCallOutcome,
 };
-use rmcp::service::{Peer, RequestContext};
+use rmcp::service::Peer;
 use rmcp::transport::stdio;
-use rmcp::{serve_server, ErrorData as McpError, RoleServer, ServerHandler};
+use rmcp::{serve_server, ErrorData as McpError, RoleServer};
 
 use crate::api::daemon_client::DaemonClient;
 use crate::config::CliConfig;
@@ -104,7 +109,9 @@ async fn serve(config: &CliConfig) -> Result<()> {
         crate::api::daemon_client::DEFAULT_CONNECT_TIMEOUT,
         MCP_REQUEST_TIMEOUT,
     )?;
-    let handler = McpBridgeHandler { client };
+    let handler = McpBridgeHandler {
+        backend: DaemonClientBackend { client },
+    };
 
     let service = serve_server(handler, stdio())
         .await
@@ -142,140 +149,33 @@ impl Drop for WatcherGuard {
     }
 }
 
-/// The stateless MCP bridge handler (AR-70).
-struct McpBridgeHandler {
+/// Model A backend (AR-71): loopback HTTP through the daemon client. Every
+/// `tools/list` is a live `GET /v1/daemon/tools` and every `tools/call` is
+/// a live `POST …/tool-executions` — the child holds a digest + interval,
+/// not a registry, not an allowlist, not policy, not a read cache (AR-79
+/// #5).
+struct DaemonClientBackend {
     client: DaemonClient,
 }
 
-/// One catalog row from `GET /v1/daemon/tools` (wire shape mirrors
-/// `catalog-tool.schema.json`).
-#[derive(Debug, serde::Deserialize)]
-struct CatalogRow {
-    id: String,
-    description: String,
-    input_schema: String,
-    #[serde(default)]
-    output_schema: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct CatalogResponse {
-    items: Vec<CatalogRow>,
-}
-
-/// Structured outcome of one spine tool execution, preserving the daemon's
-/// wire code for the protocol mapping (AR-70 #4).
-enum ToolCallOutcome {
-    /// HTTP 200 `{ success: true, result: <value> }`.
-    Success(serde_json::Value),
-    /// Executed-but-failed: spine code preserved (`invalid_input`,
-    /// `not_supported` + peer wire code, `service_unavailable`, ...).
-    ExecutedError {
-        code: String,
-        message: String,
-        wire_code: Option<String>,
-    },
-    /// Unroutable: never-admitted / evicted / allowlist-missing id.
-    Unroutable { code: String, message: String },
-    /// The daemon refuses the caller itself (auth rejected) — an opaque
-    /// `INTERNAL_ERROR` per AR-70 #4, the message never reaches the client.
-    DaemonRefused { message: String },
-}
-
-impl ServerHandler for McpBridgeHandler {
-    fn get_info(&self) -> ServerInfo {
-        // AR-79 #4 (F-6): order matters — `enable_tools()` must precede
-        // `enable_tool_list_changed()` (the builder only touches an
-        // existing `tools` capability).
-        ServerInfo::new(
-            ServerCapabilities::builder()
-                .enable_tools()
-                .enable_tool_list_changed()
-                .build(),
-        )
-        .with_server_info(Implementation::new("nexus42", env!("CARGO_PKG_VERSION")))
-    }
-
-    async fn list_tools(
-        &self,
-        _request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
-    ) -> std::result::Result<ListToolsResult, McpError> {
+impl McpBackend for DaemonClientBackend {
+    async fn list_tools(&self) -> std::result::Result<Vec<CatalogRow>, McpError> {
         let catalog: CatalogResponse = self.client.get("/v1/daemon/tools").await.map_err(|e| {
             McpError::internal_error(format!("daemon tools list failed: {e}"), None)
         })?;
-        let tools: Vec<Tool> = catalog.items.into_iter().map(row_into_tool).collect();
-        Ok(ListToolsResult::with_all_items(tools))
+        Ok(catalog.items)
     }
 
     async fn call_tool(
         &self,
-        request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
-    ) -> std::result::Result<CallToolResult, McpError> {
-        let name = request.name.to_string();
-        let parameters = serde_json::Value::Object(request.arguments.unwrap_or_default());
-
-        let outcome = self
-            .call_tool_inner(&name, parameters)
-            .await
-            .map_err(|e| McpError::internal_error(format!("daemon tool call failed: {e}"), None))?;
-
-        match outcome {
-            ToolCallOutcome::Success(result) => Ok(success_result(result)),
-            ToolCallOutcome::ExecutedError {
-                code,
-                message,
-                wire_code,
-            } => {
-                // AR-70 #4: the daemon threads the peer wire code verbatim in
-                // `details.wire_code` (lowercase, e.g. `op_unsupported`);
-                // surface it exactly once, ahead of the message. Other
-                // executed-but-failed outcomes name the spine `code`.
-                Ok(CallToolResult::error(vec![Content::text(
-                    executed_error_text(&code, &message, wire_code.as_deref()),
-                )]))
-            }
-            ToolCallOutcome::Unroutable { code, message } => Err(McpError::new(
-                ErrorCode::METHOD_NOT_FOUND,
-                format!("unroutable: {code}: {message}"),
-                None,
-            )),
-            ToolCallOutcome::DaemonRefused { message } => Err(McpError::internal_error(
-                format!("daemon refused tool call: {message}"),
-                None,
-            )),
-        }
-    }
-}
-
-impl McpBridgeHandler {
-    /// Typed unroutable discrimination (T4 review M-1): `not_supported`
-    /// without `details.wire_code` is unroutable (never-admitted /
-    /// evicted / allowlist-missing — the daemon `BadRequest` path never
-    /// supplies a wire code); `not_supported` WITH a wire code is always
-    /// a peer deny (executed-but-failed). Pure so it can be unit-pinned.
-    fn is_unroutable(code: &str, wire_code: Option<&str>) -> bool {
-        code == "not_supported" && wire_code.is_none()
-    }
-
-    /// Call the daemon spine, mapping the wire outcome into the MCP result
-    /// vocabulary. The daemon distinguishes:
-    /// - unroutable: `not_supported` + no `details.wire_code`;
-    /// - peer deny: `not_supported` + `details.wire_code` (lowercase,
-    ///   e.g. `op_unsupported`) + message;
-    /// - executed failure: `invalid_input` / `forbidden` /
-    ///   `policy_blocked` / `service_unavailable` / `internal`;
-    /// - auth rejected: `auth_required`.
-    async fn call_tool_inner(
-        &self,
         tool_name: &str,
         parameters: serde_json::Value,
-    ) -> std::result::Result<ToolCallOutcome, CliError> {
+    ) -> std::result::Result<ToolCallOutcome, McpError> {
         let wire = self
             .client
             .post_execution_raw(tool_name, parameters)
-            .await?;
+            .await
+            .map_err(|e| McpError::internal_error(format!("daemon tool call failed: {e}"), None))?;
         let error = wire
             .body
             .get("error")
@@ -325,7 +225,7 @@ impl McpBridgeHandler {
             // path. Classify on the presence of the typed field — never
             // on message text (a future spoke reject message containing
             // a matching substring must not misclassify).
-            _ if Self::is_unroutable(&code, wire_code.as_deref()) => {
+            _ if is_unroutable(&code, wire_code.as_deref()) => {
                 Ok(ToolCallOutcome::Unroutable { code, message })
             }
             // Auth rejected → the daemon refuses the caller (INTERNAL_ERROR
@@ -340,6 +240,12 @@ impl McpBridgeHandler {
                 wire_code,
             }),
         }
+    }
+
+    fn advertise_tool_list_changed(&self) -> bool {
+        // AR-79 (DF-90): this backend runs the catalog-watch loop, so the
+        // advertisement carries `tools.listChanged: true`.
+        true
     }
 }
 
@@ -456,155 +362,24 @@ async fn fetch_catalog_body(
     Ok(body)
 }
 
-/// Map one daemon catalog row to an rmcp `Tool` (AR-70 §3 schema mapping):
-/// `input_schema` carried verbatim; `output_schema` carried only when
-/// present (the catalog already omits non-root-object outputs).
-fn row_into_tool(row: CatalogRow) -> Tool {
-    let input = parse_schema(&row.input_schema).unwrap_or_else(default_object_schema);
-    let mut tool = Tool::new(row.id, row.description, Arc::new(input));
-    if let Some(out) = row.output_schema {
-        if let Some(map) = parse_schema(&out) {
-            tool = tool.with_raw_output_schema(Arc::new(map));
-        }
-    }
-    tool
-}
-
-/// The documented permissive fallback input schema (AR-70 §3 placeholder).
-fn default_object_schema() -> serde_json::Map<String, serde_json::Value> {
-    let mut map = serde_json::Map::new();
-    map.insert("type".into(), serde_json::Value::String("object".into()));
-    map
-}
-
-/// Parse a JSON-Schema string into an object, or `None` on failure.
-fn parse_schema(raw: &str) -> Option<serde_json::Map<String, serde_json::Value>> {
-    serde_json::from_str::<serde_json::Value>(raw)
-        .ok()
-        .and_then(|v| v.as_object().cloned())
-}
-
-/// Build the success result: `structured_content` when the spine result is
-/// a JSON object (matches the advertised output schema), text-only else.
-fn success_result(value: serde_json::Value) -> CallToolResult {
-    if value.is_object() {
-        CallToolResult::structured(value)
-    } else {
-        let text = serde_json::to_string(&value).unwrap_or_else(|_| "null".to_owned());
-        CallToolResult::success(vec![Content::text(text)])
-    }
-}
-
-/// Format the executed-but-failed content (AR-70 #4): the typed peer wire
-/// code (`details.wire_code`, lowercase e.g. `op_unsupported`) takes
-/// precedence when present; otherwise the spine `code` names the failure.
-fn executed_error_text(code: &str, message: &str, wire_code: Option<&str>) -> String {
-    let effective = wire_code.unwrap_or(code);
-    format!("{effective}: {message}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn row_into_tool_carries_schemas_verbatim() {
-        let row = CatalogRow {
-            id: "tools.t5.echo".to_owned(),
-            description: "echo".to_owned(),
-            input_schema: r#"{"type":"object","required":["x"]}"#.to_owned(),
-            output_schema: Some(r#"{"type":"object","properties":{"echo":{}}}"#.to_owned()),
-        };
-        let tool = row_into_tool(row);
-        assert_eq!(tool.name, "tools.t5.echo");
-        assert_eq!(
-            tool.input_schema.get("required"),
-            Some(&serde_json::json!(["x"]))
-        );
-        let out = tool.output_schema.expect("output schema carried");
-        assert_eq!(
-            out.get("properties").and_then(|p| p.get("echo")),
-            Some(&serde_json::Value::Object(serde_json::Map::new()))
-        );
-    }
-
-    #[test]
-    fn unparseable_input_schema_falls_back_to_permissive_object() {
-        let row = CatalogRow {
-            id: "nexus.workspace.info".to_owned(),
-            description: "info".to_owned(),
-            input_schema: "not-json".to_owned(),
-            output_schema: None,
-        };
-        let tool = row_into_tool(row);
-        assert_eq!(
-            tool.input_schema.get("type"),
-            Some(&serde_json::Value::String("object".into()))
-        );
-        assert!(tool.output_schema.is_none());
-    }
-
-    #[test]
-    fn executed_error_text_surfaces_typed_wire_code_exactly_once() {
-        // AR-70 #4 fidelity: the daemon threads the ORIGINAL lowercase spoke
-        // wire code (`details.wire_code`, e.g. `op_unsupported`) — it must
-        // appear exactly once in the caller-visible content, and the message
-        // must not duplicate any uppercase re-derivation.
-        let text = executed_error_text(
-            "not_supported",
-            "tool tools.t4.ghost is not supported by this peer",
-            Some("op_unsupported"),
-        );
-        assert_eq!(
-            text,
-            "op_unsupported: tool tools.t4.ghost is not supported by this peer"
-        );
-        assert_eq!(text.matches("op_unsupported").count(), 1);
-        assert!(
-            !text.contains("OP_UNSUPPORTED"),
-            "uppercase re-derivation must be gone: {text}"
-        );
-    }
+    use rmcp::ServerHandler;
+    use std::sync::Arc;
 
     #[test]
     fn unroutable_classification_is_typed_not_textual() {
         // Unroutable: not_supported + NO wire code.
-        assert!(super::McpBridgeHandler::is_unroutable(
-            "not_supported",
-            None
-        ));
+        assert!(is_unroutable("not_supported", None));
         // Peer deny: not_supported + typed wire code — executed failure,
         // even when the message text contains the unroutable substring.
-        assert!(!super::McpBridgeHandler::is_unroutable(
-            "not_supported",
-            Some("op_unsupported")
-        ));
+        assert!(!is_unroutable("not_supported", Some("op_unsupported")));
         // Other codes never classify unroutable regardless of wire code.
-        assert!(!super::McpBridgeHandler::is_unroutable(
-            "invalid_input",
-            None
-        ));
-        assert!(!super::McpBridgeHandler::is_unroutable("internal", None));
+        assert!(!is_unroutable("invalid_input", None));
+        assert!(!is_unroutable("internal", None));
     }
 
-    #[test]
-    fn executed_error_text_falls_back_to_spine_code_without_wire_code() {
-        let text = executed_error_text("invalid_input", "missing required argument", None);
-        assert_eq!(text, "invalid_input: missing required argument");
-    }
-
-    #[test]
-    fn success_result_uses_structured_content_for_objects() {
-        let result = success_result(serde_json::json!({"ok": true}));
-        assert_eq!(result.is_error, Some(false));
-        assert_eq!(
-            result.structured_content,
-            Some(serde_json::json!({ "ok": true }))
-        );
-        let scalar = success_result(serde_json::json!("hello"));
-        assert!(scalar.structured_content.is_none());
-        assert_eq!(scalar.content.len(), 1);
-    }
     #[test]
     fn mcp_request_timeout_strictly_exceeds_user_cap_sandbox_wall() {
         // QC-fix S-b: the child's request timeout must NEVER fire before
@@ -709,14 +484,16 @@ mod tests {
 
     #[test]
     fn get_info_advertises_tools_list_changed() {
-        // AR-79 #4 (F-6): the advertisement must carry
-        // `tools.listChanged: true` — the wire shape a long-lived MCP
-        // client checks before relying on `notifications/tools/list_changed`.
-        // The builder order pin (`enable_tools()` before
-        // `enable_tool_list_changed()`) is exercised by the real
-        // `get_info` path.
+        // AR-79 #4 (F-6): the Model A backend runs the catalog watcher, so
+        // the advertisement must carry `tools.listChanged: true` — the wire
+        // shape a long-lived MCP client checks before relying on
+        // `notifications/tools/list_changed`. The builder order pin
+        // (`enable_tools()` before `enable_tool_list_changed()`) is
+        // exercised by the real `get_info` path.
         let handler = McpBridgeHandler {
-            client: DaemonClient::new("http://127.0.0.1:1"),
+            backend: DaemonClientBackend {
+                client: DaemonClient::new("http://127.0.0.1:1"),
+            },
         };
         let info = handler.get_info();
         let tools = info

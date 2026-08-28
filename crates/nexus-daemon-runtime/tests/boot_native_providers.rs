@@ -111,6 +111,7 @@ fn test_config(port: u16) -> DaemonConfig {
         verbose: false,
         shutdown_grace_ms: 1000,
         cdn_url: None,
+        embedded_mcp: false,
     }
 }
 

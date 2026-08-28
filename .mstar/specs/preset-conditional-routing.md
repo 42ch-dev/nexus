@@ -118,7 +118,7 @@ Three merge modes:
 - **`any`**: advance on FIRST incoming labeled edge result.
 - **`quorum N/M`**: advance when at least N of M incoming edges have produced their target.
 
-When `merge:` is absent on a state with multiple incoming labeled edges, the default is `wait-all`. States with ≤1 incoming labeled edge are not merge nodes.
+When `merge:` is absent on a state with multiple incoming labeled edges, the default is `wait-all`. States with 0 incoming labeled edges are not merge nodes; a state with exactly 1 incoming labeled edge is still join-gated by the implicit wait-all rule (it waits for that single arrival). Reconciliation with §3.3.3 (v1.179 QC): bounded-join fields are accepted from that same ≥1-incoming threshold — at `expected_incoming == 1` the `timeout_ms` budget is meaningful, bounding the wait for the single edge — while explicit `merge:` states additionally require ≥2 incoming edges (§3.2.3) and explicit `converge:` states accept the fields at any predecessor count (0 predecessors skips the gate per §3.3.3).
 
 #### §3.2.2 Runtime tracking
 
@@ -132,6 +132,10 @@ On each labeled edge match (`resolve_labeled_target`), the runtime writes the ma
    - `Quorum { n, .. }`: `arrived_count >= n`
 4. If satisfied: clears the context key and processes enter actions normally.
 5. If not satisfied: returns `NextAction::WaitForInput` — the engine will re-enter the state when the next labeled edge arrives.
+   Bounded-join opt-in (DR-06, v1.179): if the merge state sets
+   `timeout_ms`, the wait is bounded — deadline expiry reroutes to
+   `on_timeout` or fails with the typed `converge_timeout:` error
+   (`gate=merge`); see §3.3.3 "Bounded joins" for the normative table.
 
 **Incoming count discovery**: the loader pre-computes incoming labeled edge counts per state during graph construction. The `expected_incoming` field on `StateCompositeTask` is populated at build time.
 
@@ -240,7 +244,54 @@ states:
 
 **DAG enforcement**: cycles remain rejected at load time. Acyclic paths through converge nodes (e.g. `A → M → B`, `C → M → B` where M waits for both A and C) are allowed.
 
-**Converge timeout** (V1.58 P2 — R-V156P2-L003): the current implementation does **not** enforce a timeout on `wait_for_all` converge nodes. A converge state with `strategy: wait_for_all` that never receives all predecessor arrivals will wait indefinitely (returns `NextAction::WaitForInput` on each `run()` call). The engine relies on external signals (Resume, Cancel) to break deadlocks. A configurable `wait_for_all_timeout_seconds` field (default 3600s) with deadline-based enforcement is planned but deferred — **Durable roadmap:** DR-06 — adding it requires schema changes to `ConvergeConfig` (out of scope for P2: "schemas/ changes") and runtime behavior changes to the converge gate in `StateCompositeTask::run()`. For local-only single-user daemons (pre-1.0), indefinite wait is acceptabl…
+**Bounded joins — `timeout_ms` / `on_timeout`** (DR-06, v1.179 — Normative):
+join states may declare a bounded-join deadline. ONE field pair on the
+**state** serves BOTH join gates (merge §3.2 and converge §3.3.3):
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `timeout_ms` | `u64` (optional) | absent | Deadline in ms, measured from the join state's first waiting tick. Absent = unbounded wait (pre-DR-06 behaviour, byte-identical). |
+| `on_timeout` | `string` (optional) | absent | State ID to reroute to when the deadline fires. Must resolve to a state in this preset (loader-enforced). |
+
+Semantics:
+- The first waiting tick records `_join_wait_start_{state_id}` in context;
+  subsequent ticks compare elapsed wall time against `timeout_ms`.
+  `timeout_ms` is ONE state-level budget shared by BOTH gates on the state
+  (merge §3.2 and converge §3.3.3): a merge-success tick whose converge
+  gate still has to wait does NOT restart the budget.
+- The wait-start key is cleared when the deadline fires (below) AND when
+  the join LEAVES — every present gate passed and processing proceeds — so
+  a same-session re-entry (runtime `GoTo` loop; the DAG load only rejects
+  static cycles) starts a fresh budget instead of firing the stale
+  deadline immediately (F-001, v1.179 QC fix).
+- `timeout_ms: 0` is legal and means the deadline is already elapsed: the
+  FIRST waiting tick immediately reroutes (with `on_timeout`) or fails
+  typed (without). `on_timeout` without `timeout_ms` is inert (no
+  deadline ever fires).
+- Deadline exceeded **with** a resolvable `on_timeout`: the arrivals key
+  (`_merge_{id}` / `_converge_arrivals_{id}`) and the wait-start key are
+  cleared, a note is written to `_join_timeout_note`, and the run reroutes
+  to the target state (`NextAction::GoTo` — the target re-enters through
+  the normal task path, so its enter actions run).
+- Deadline exceeded **without** `on_timeout` (or unresolvable): the task
+  fails with `GraphError::TaskExecutionFailed` whose message begins with
+  the typed discriminator `converge_timeout:` and names
+  `gate=<merge|converge>`, `state_id`, `arrived`, `expected`, `elapsed_ms`
+  (single discriminator for both gates — there is no sibling
+  `merge_timeout` code).
+- Loader fails closed: `timeout_ms`/`on_timeout` on a state the runtime
+  does not treat as a join is a load-time error. A join state carries
+  `merge:`, `converge:`, OR has ≥1 incoming labeled/GoNogo edge (implicit
+  wait-all merge per §3.2 — W-1 parity fix, v1.179 QC: the loader
+  validation and the graph wiring share one edge-count scan). `on_timeout`
+  naming an unknown state is a load-time error.
+
+> Historical note: this paragraph previously deferred a
+> `wait_for_all_timeout_seconds` field (default 3600 s) on `ConvergeConfig`
+> (V1.58 P2 — R-V156P2-L003). That name is RETIRED — v1.179 DR-06 (plan
+> `2026-08-27-v1.179-p2-reliability-convergence`) shipped the state-level
+> additive `timeout_ms`/`on_timeout` pair above instead, keeping
+> `ConvergeConfig`/`MergeKind` shapes unchanged.
 
 ### 3.4 Registry and workspace context fields (V1.56 P3 — Normative)
 

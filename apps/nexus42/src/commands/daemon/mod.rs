@@ -37,6 +37,13 @@ pub enum DaemonCommand {
         /// and metadata endpoints (169.254.x.x) are rejected at startup.
         #[arg(long)]
         cdn_url: Option<String>,
+
+        /// Enable the embedded MCP server (V1.179 P0 T1, DF-88 Model B) —
+        /// ephemeral opt-in; the persistent SSOT is the
+        /// `~/.nexus42/connect/daemon.json` `"embedded_mcp": true` key
+        /// (GC #9 union semantics).
+        #[arg(long)]
+        embedded_mcp: bool,
     },
 
     /// Stop the running daemon
@@ -60,6 +67,13 @@ pub enum DaemonCommand {
         /// Must be a public HTTPS CDN URL. Private/loopback IPs are rejected.
         #[arg(long)]
         cdn_url: Option<String>,
+
+        /// Enable the embedded MCP server (V1.179 P0 T1, DF-88 Model B) —
+        /// ephemeral opt-in; the persistent SSOT is the
+        /// `~/.nexus42/connect/daemon.json` `"embedded_mcp": true` key
+        /// (GC #9 union semantics).
+        #[arg(long)]
+        embedded_mcp: bool,
     },
 
     /// Check daemon status / health
@@ -116,13 +130,15 @@ pub async fn run(cmd: DaemonCommand, config: &CliConfig) -> Result<()> {
             port,
             foreground,
             cdn_url,
-        } => start_daemon(port, foreground, cdn_url).await,
+            embedded_mcp,
+        } => start_daemon(port, foreground, cdn_url, embedded_mcp).await,
         DaemonCommand::Stop { port } => stop_daemon(port).await,
         DaemonCommand::Restart {
             port,
             foreground,
             cdn_url,
-        } => restart_daemon(port, foreground, cdn_url).await,
+            embedded_mcp,
+        } => restart_daemon(port, foreground, cdn_url, embedded_mcp).await,
         DaemonCommand::Status { port } => daemon_status(port, config).await,
         DaemonCommand::Logs { port, lines } => daemon_logs(port, lines).await,
         DaemonCommand::Doctor { port } => daemon_doctor(port).await,
@@ -151,7 +167,12 @@ pub async fn run(cmd: DaemonCommand, config: &CliConfig) -> Result<()> {
 /// - Self-spawn fails
 /// - PID file operations fail
 #[allow(clippy::too_many_lines)]
-async fn start_daemon(port: u16, foreground: bool, cdn_url: Option<String>) -> Result<()> {
+async fn start_daemon(
+    port: u16,
+    foreground: bool,
+    cdn_url: Option<String>,
+    embedded_mcp: bool,
+) -> Result<()> {
     // Check if already running
     let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
     if client.health_check().await? {
@@ -186,6 +207,7 @@ async fn start_daemon(port: u16, foreground: bool, cdn_url: Option<String>) -> R
             verbose: false,
             shutdown_grace_ms: 20_000,
             cdn_url,
+            embedded_mcp,
         };
 
         let result = nexus_daemon_runtime::boot::run_daemon(config).await;
@@ -218,6 +240,10 @@ async fn start_daemon(port: u16, foreground: bool, cdn_url: Option<String>) -> R
 
         if let Some(ref url) = cdn_url {
             cmd.arg("--cdn-url").arg(url);
+        }
+
+        if embedded_mcp {
+            cmd.arg("--embedded-mcp");
         }
 
         // Detach the process so it outlives the CLI
@@ -622,7 +648,12 @@ async fn daemon_status(port: u16, config: &CliConfig) -> Result<()> {
 /// First attempts a normal stop. If no PID file is found, uses port-based
 /// lsof to discover and kill the process. Polls with health check to
 /// confirm the old daemon is fully dead before starting the new one.
-async fn restart_daemon(port: u16, foreground: bool, cdn_url: Option<String>) -> Result<()> {
+async fn restart_daemon(
+    port: u16,
+    foreground: bool,
+    cdn_url: Option<String>,
+    embedded_mcp: bool,
+) -> Result<()> {
     println!("Restarting daemon...");
 
     // Stop the old daemon
@@ -690,7 +721,7 @@ async fn restart_daemon(port: u16, foreground: bool, cdn_url: Option<String>) ->
         }
     }
 
-    start_daemon(port, foreground, cdn_url).await
+    start_daemon(port, foreground, cdn_url, embedded_mcp).await
 }
 
 /// Read the last `n` lines from a file without loading the entire file.
@@ -886,8 +917,8 @@ async fn open_ui(port: u16) -> Result<()> {
     // Start daemon in background if not already running.
     if !client.health_check().await? {
         println!("Daemon is not running — starting on port {port}...");
-        // Reuse the self-spawn path (no --foreground).
-        start_daemon(port, false, None).await?;
+        // Reuse the self-spawn path (no --foreground, no --embedded-mcp).
+        start_daemon(port, false, None, false).await?;
     }
 
     let url = format!("http://127.0.0.1:{port}/");

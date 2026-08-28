@@ -21,9 +21,15 @@
 //!      `capabilities[]` (the `daemon_capabilities` set);
 //!    - operator allowlist: id must be in `tool_allowlist` (missing/empty
 //!      allowlist = default deny ⇒ zero admitted).
-//! 3. Collision policy (AR-68 #3): two peers, same id ⇒ later peer refused
-//!    (first stays bound; skip + warn). Same peer reconnect ⇒
-//!    evict-then-admit (deterministic last-wins, mirroring
+//! 3. Collision policy (AR-68 #3 + DF-91): two peers, same id ⇒ the
+//!    policy read from the LIVE `PeerToolsConfig` snapshot at admission
+//!    decides. `first_stays` (default): later peer refused (first stays
+//!    bound; skip + warn). `priority_order`: the peer ranked EARLIER in
+//!    `peer_priority` wins — a later-registering higher-priority peer
+//!    preempts (its collided rows replace the lower-priority peer's via
+//!    the AR-68 #3 eviction path; the preempted peer's session is
+//!    untouched); equal or unlisted rank ⇒ first stays. Same peer
+//!    reconnect ⇒ evict-then-admit (deterministic last-wins, mirroring
 //!    `PeerSessionManager::register`).
 //!
 //! Eviction (AR-68 #8): `evict_peer` removes every entry of that `peer_id`
@@ -41,6 +47,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
+use crate::connect::config::{CollisionPolicy, PeerToolsConfig};
 use nexus_orchestration::CapabilityRegistryHolder;
 use spoke_connect::remote::ConnectResponder;
 use spoke_operations::{
@@ -81,6 +88,25 @@ struct TableInner {
 /// The process-global peer tool table (AR-68 #1).
 pub struct PeerToolTable {
     inner: Mutex<TableInner>,
+    /// Live `PeerToolsConfig` snapshot holder (DF-91): the table reads
+    /// `collision_policy` + `peer_priority` from the CURRENT config at
+    /// each admission (live-derivation precedent: `live_reserved_tool_ids`
+    /// reads the capability holder the same way — p1's reload swaps the
+    /// Arc and NEW registrations pick up the new policy without further
+    /// table mutation). `None` (the [`PeerToolTable::new`] default) ⇒
+    /// `first_stays` + empty rank — the AR-68 #3 default is preserved.
+    ///
+    /// # Lock rank (QC F-003)
+    ///
+    /// `inner` (the table mutex) ranks BEFORE `config` (this mutex):
+    /// [`PeerToolTable::admit_and_register`] holds `inner` across the
+    /// whole admission and takes `config` inside it for the policy
+    /// snapshot (via [`collision_decision`]'s caller). The REVERSE order
+    /// is forbidden — a path that held `config` and then took `inner`
+    /// could deadlock against an in-flight admission.
+    /// [`PeerToolTable::set_config`] (and p1's reload) takes ONLY
+    /// `config` and never `inner`, so a reload can never invert the rank.
+    config: Mutex<Option<Arc<PeerToolsConfig>>>,
 }
 
 /// Named admission outcome for one manifest ingestion (AR-68 #2).
@@ -159,6 +185,10 @@ pub fn mcp_catalog_output_root_object(descriptor: &ToolDescriptor) -> bool {
 
 impl PeerToolTable {
     /// Create an empty table.
+    ///
+    /// The default carries NO config holder ⇒ `first_stays` + empty
+    /// `peer_priority` (DF-91) — the AR-68 #3 collision behavior every
+    /// existing deployment relies on.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -166,7 +196,19 @@ impl PeerToolTable {
                 tools: HashMap::new(),
                 sessions: HashMap::new(),
             }),
+            config: Mutex::new(None),
         }
+    }
+
+    /// Wire the live config snapshot (DF-91).
+    ///
+    /// Called once at boot by the peer-tools lane
+    /// ([`crate::connect::start_peer_tools_lane`]); p1's reload swaps the
+    /// Arc and NEW registrations pick up the new policy without any
+    /// further table mutation (live-derivation precedent:
+    /// `live_reserved_tool_ids` reads the capability holder the same way).
+    pub fn set_config(&self, config: Option<Arc<PeerToolsConfig>>) {
+        *self.config.lock().unwrap_or_else(PoisonError::into_inner) = config;
     }
 
     /// Admit one authenticated manifest.
@@ -210,19 +252,55 @@ impl PeerToolTable {
             }
         }
 
+        // DF-91: the collision policy + peer rank are read from the LIVE
+        // config snapshot at admission time (live-derivation precedent:
+        // `live_reserved_tool_ids`). Lock scope (QC F-003): the `inner`
+        // table lock IS held across this read and the whole per-tool loop
+        // below — the admission is atomic; only the CONFIG guard is
+        // scoped to this block, dropped once the rank Vec is cloned
+        // (admission is not a hot path). Lock rank: `inner` before
+        // `config`, never the reverse (see the `config` field docs).
+        let (policy, peer_priority) = {
+            let config_guard = self.config.lock().unwrap_or_else(PoisonError::into_inner);
+            config_guard
+                .as_ref()
+                .map_or((CollisionPolicy::FirstStays, Vec::new()), |cfg| {
+                    (cfg.collision_policy, cfg.peer_priority.clone())
+                })
+        };
+
         let mut admitted: Vec<String> = Vec::new();
         for tool in &manifest.tools {
             let id = String::from(tool.capability_id.clone());
-            // (iii) named exact-id filters.
-            if let Some(refusal) = refuse_tool(
-                &id,
-                daemon_capabilities,
-                tool_allowlist,
-                reserved_tool_ids,
-                &inner.tools,
-            ) {
+            // (iii) named exact-id filters (grammar → reserved-ns →
+            // negotiated → allowlist). The duplicate-peer collision is
+            // policy-aware (DF-91) and decided below.
+            if let Some(refusal) =
+                refuse_tool(&id, daemon_capabilities, tool_allowlist, reserved_tool_ids)
+            {
                 tracing::warn!(%peer_id, tool_id = %id, refusal = ?refusal, "peer tool refused at admission");
                 continue;
+            }
+            // (iii) duplicate-peer collision (AR-68 #3 + DF-91).
+            match collision_decision(&id, peer_id, &inner.tools, policy, &peer_priority) {
+                CollisionDecision::Admit => {}
+                CollisionDecision::Preempt => {
+                    // AR-68 #3 eviction path (reconnect=replace): the
+                    // lower-priority peer's row is removed and rebound to
+                    // the higher-priority peer. The preempted peer's
+                    // session record is untouched (its other rows keep
+                    // dispatching); in-flight invokes on the evicted row
+                    // resolve as honest per-call failures per AR-76 #4 —
+                    // the spine reads the table at invoke time, so a
+                    // rebound row dispatches to the new owner and a
+                    // removed row yields `not_supported`, never a silent
+                    // retry.
+                    inner.tools.remove(&id);
+                }
+                CollisionDecision::Refuse => {
+                    tracing::warn!(%peer_id, tool_id = %id, refusal = ?ToolRefusal::DuplicatePeer, "peer tool refused at admission (collision)");
+                    continue;
+                }
             }
             inner.tools.insert(
                 id.clone(),
@@ -365,14 +443,15 @@ pub(crate) fn live_reserved_tool_ids(
 
 /// The per-tool named refusal chain (AR-68 #2(iii)).
 ///
-/// Order: grammar → reserved-ns → negotiated → allowlist → duplicate-peer.
-/// `existing` is the current table's tool map (for the collision check).
+/// Order: grammar → reserved-ns → negotiated → allowlist. The
+/// duplicate-peer collision is NOT part of this chain — it is
+/// policy-aware (DF-91) and decided by [`collision_decision`] in
+/// `admit_and_register`.
 fn refuse_tool(
     id: &str,
     daemon_capabilities: &HashSet<String>,
     tool_allowlist: &HashSet<String>,
     reserved_tool_ids: &HashSet<String>,
-    existing: &HashMap<String, PeerToolEntry>,
 ) -> Option<ToolRefusal> {
     // Grammar (defensive; typed ids already enforce the pattern).
     if !matches!(parse_tool_capability_id(id), SpokeResult::Ok(_)) {
@@ -391,11 +470,62 @@ fn refuse_tool(
     if !tool_allowlist.contains(id) {
         return Some(ToolRefusal::NotAllowlisted);
     }
-    // Duplicate-id two-peer collision: later peer refused, first stays.
-    if existing.contains_key(id) {
-        return Some(ToolRefusal::DuplicatePeer);
-    }
     None
+}
+
+/// Policy-aware duplicate-id collision decision (DF-91).
+///
+/// `first_stays` (the default): the existing row stays, the new peer is
+/// refused (AR-68 #3). `priority_order`: the peer ranked EARLIER in
+/// `peer_priority` wins — a later-registering higher-priority peer
+/// preempts (the caller rebinds the row); equal or unlisted rank falls
+/// back to registration order (first stays). Unlisted peers rank below
+/// every listed peer. A same-peer collision (duplicate id within one
+/// manifest) is always refused — the AR-68 #3 duplicate guard.
+fn collision_decision(
+    id: &str,
+    new_peer: &str,
+    existing: &HashMap<String, PeerToolEntry>,
+    policy: CollisionPolicy,
+    peer_priority: &[String],
+) -> CollisionDecision {
+    let Some(entry) = existing.get(id) else {
+        return CollisionDecision::Admit;
+    };
+    if entry.peer_id == new_peer {
+        // Duplicate id within one manifest: the first occurrence stays.
+        return CollisionDecision::Refuse;
+    }
+    if policy == CollisionPolicy::PriorityOrder {
+        let new_rank = peer_rank(new_peer, peer_priority);
+        let existing_rank = peer_rank(&entry.peer_id, peer_priority);
+        if new_rank < existing_rank {
+            return CollisionDecision::Preempt;
+        }
+    }
+    CollisionDecision::Refuse
+}
+
+/// Array-order rank: EARLIER in `peer_priority` = higher priority
+/// (smaller rank). Unlisted peers rank below every listed peer.
+fn peer_rank(peer_id: &str, peer_priority: &[String]) -> usize {
+    peer_priority
+        .iter()
+        .position(|p| p == peer_id)
+        .unwrap_or(usize::MAX)
+}
+
+/// Policy-aware collision outcome for one tool id (DF-91).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CollisionDecision {
+    /// No existing row — admit.
+    Admit,
+    /// The new peer outranks the existing owner — the caller removes the
+    /// old row and admits the new one (rows rebind; the preempted peer's
+    /// session is untouched).
+    Preempt,
+    /// The existing row stays — the new peer is refused.
+    Refuse,
 }
 
 /// Process-global singleton accessor (AR-68 #1).
@@ -752,6 +882,440 @@ mod tests {
         assert_eq!(
             table.get("tools.t3.echo").expect("first stays").peer_id,
             "peer-a"
+        );
+    }
+
+    // ── DF-91: policy-aware collision (priority_order) ──────────────────
+
+    /// A config snapshot with the given collision policy + peer rank
+    /// (everything else defaulted).
+    fn config_with(policy: CollisionPolicy, peer_priority: &[&str]) -> Arc<PeerToolsConfig> {
+        Arc::new(PeerToolsConfig {
+            collision_policy: policy,
+            peer_priority: peer_priority.iter().map(|s| (*s).to_owned()).collect(),
+            ..PeerToolsConfig::default()
+        })
+    }
+
+    /// Admit one manifest of tools for `peer_id` against `table`.
+    fn admit(table: &PeerToolTable, peer_id: &str, tools: &[&str]) -> AdmissionOutcome {
+        let manifest = manifest_with_tools(tools);
+        table.admit_and_register(
+            peer_id,
+            &manifest,
+            &responder(),
+            &caps(tools),
+            &caps(tools),
+            &HashSet::new(),
+        )
+    }
+
+    #[test]
+    fn priority_order_collision_selects_higher_ranked_peer() {
+        // DF-91: under `priority_order`, the peer ranked EARLIER in
+        // `peer_priority` wins the collision — even when it registers
+        // later.
+        let table = PeerToolTable::new();
+        table.set_config(Some(config_with(
+            CollisionPolicy::PriorityOrder,
+            &["peer-b", "peer-a"],
+        )));
+        let first = admit(&table, "peer-a", &["tools.t3.echo"]);
+        assert_eq!(
+            first,
+            AdmissionOutcome::Admitted {
+                tool_ids: vec!["tools.t3.echo".to_owned()]
+            }
+        );
+        let second = admit(&table, "peer-b", &["tools.t3.echo"]);
+        assert_eq!(
+            second,
+            AdmissionOutcome::Admitted {
+                tool_ids: vec!["tools.t3.echo".to_owned()]
+            },
+            "higher-ranked peer wins the collision"
+        );
+        assert_eq!(
+            table.get("tools.t3.echo").expect("row present").peer_id,
+            "peer-b"
+        );
+    }
+
+    #[test]
+    fn priority_order_equal_rank_falls_back_to_registration_order() {
+        // DF-91: equal rank (both unlisted) ⇒ first stays (registration
+        // order), exactly like the AR-68 #3 default.
+        let table = PeerToolTable::new();
+        table.set_config(Some(config_with(CollisionPolicy::PriorityOrder, &[])));
+        let first = admit(&table, "peer-a", &["tools.t3.echo"]);
+        assert_eq!(
+            first,
+            AdmissionOutcome::Admitted {
+                tool_ids: vec!["tools.t3.echo".to_owned()]
+            }
+        );
+        let second = admit(&table, "peer-b", &["tools.t3.echo"]);
+        assert_eq!(
+            second,
+            AdmissionOutcome::Admitted {
+                tool_ids: Vec::new()
+            },
+            "equal rank falls back to registration order (first stays)"
+        );
+        assert_eq!(
+            table.get("tools.t3.echo").expect("first stays").peer_id,
+            "peer-a"
+        );
+    }
+
+    #[test]
+    fn priority_order_later_higher_rank_preempts_existing_row() {
+        // DF-91: a later-registering higher-priority peer PREEMPTS — its
+        // collided row replaces the lower-priority registrant's via the
+        // AR-68 #3 eviction path. The preempted peer's session record is
+        // untouched (its other rows keep dispatching; its tool_ids list is
+        // not rewritten).
+        let table = PeerToolTable::new();
+        table.set_config(Some(config_with(
+            CollisionPolicy::PriorityOrder,
+            &["peer-b", "peer-a"],
+        )));
+        let responder_a = responder();
+        let responder_b = responder();
+        let manifest = manifest_with_tools(&["tools.t3.echo", "tools.t3.ping"]);
+        let first = table.admit_and_register(
+            "peer-a",
+            &manifest,
+            &responder_a,
+            &caps(&["tools.t3.echo", "tools.t3.ping"]),
+            &caps(&["tools.t3.echo", "tools.t3.ping"]),
+            &HashSet::new(),
+        );
+        assert_eq!(
+            first,
+            AdmissionOutcome::Admitted {
+                tool_ids: vec!["tools.t3.echo".to_owned(), "tools.t3.ping".to_owned()]
+            }
+        );
+        let manifest_b = manifest_with_tools(&["tools.t3.echo"]);
+        let second = table.admit_and_register(
+            "peer-b",
+            &manifest_b,
+            &responder_b,
+            &caps(&["tools.t3.echo"]),
+            &caps(&["tools.t3.echo"]),
+            &HashSet::new(),
+        );
+        assert_eq!(
+            second,
+            AdmissionOutcome::Admitted {
+                tool_ids: vec!["tools.t3.echo".to_owned()]
+            }
+        );
+        // The collided row rebinds to the higher-priority peer — responder
+        // handle included (dispatch would reverse-invoke peer-b).
+        let rebound = table.get("tools.t3.echo").expect("rebound row");
+        assert_eq!(rebound.peer_id, "peer-b");
+        assert!(
+            Arc::ptr_eq(&rebound.responder, &responder_b),
+            "rebound row carries the higher-priority peer's responder"
+        );
+        // The preempted peer's non-collided row is untouched.
+        assert_eq!(
+            table.get("tools.t3.ping").expect("untouched row").peer_id,
+            "peer-a"
+        );
+        // The preempted peer's SESSION record is untouched — it still lists
+        // the collided id (the row itself moved; the session did not).
+        assert_eq!(
+            table.peer_tool_ids("peer-a"),
+            vec!["tools.t3.echo".to_owned(), "tools.t3.ping".to_owned()],
+            "preempted peer's session record is untouched"
+        );
+        assert_eq!(
+            table.peer_tool_ids("peer-b"),
+            vec!["tools.t3.echo".to_owned()]
+        );
+    }
+
+    #[test]
+    fn evict_after_preemption_keeps_rebound_row_of_new_owner() {
+        // QC F-004: after a priority_order preemption, the OLD peer's
+        // eviction (close observation, expected-responder guard) must keep
+        // the NEW owner's rebound row — `evict_peer` removes only rows
+        // owned by the evicted peer, never the rebound owner's row.
+        let table = PeerToolTable::new();
+        table.set_config(Some(config_with(
+            CollisionPolicy::PriorityOrder,
+            &["peer-b", "peer-a"],
+        )));
+        let responder_a = responder();
+        let responder_b = responder();
+        // peer-a registers echo + ping; peer-b preempts echo.
+        let manifest_a = manifest_with_tools(&["tools.t3.echo", "tools.t3.ping"]);
+        let first = table.admit_and_register(
+            "peer-a",
+            &manifest_a,
+            &responder_a,
+            &caps(&["tools.t3.echo", "tools.t3.ping"]),
+            &caps(&["tools.t3.echo", "tools.t3.ping"]),
+            &HashSet::new(),
+        );
+        assert_eq!(
+            first,
+            AdmissionOutcome::Admitted {
+                tool_ids: vec!["tools.t3.echo".to_owned(), "tools.t3.ping".to_owned()]
+            }
+        );
+        let manifest_b = manifest_with_tools(&["tools.t3.echo"]);
+        let second = table.admit_and_register(
+            "peer-b",
+            &manifest_b,
+            &responder_b,
+            &caps(&["tools.t3.echo"]),
+            &caps(&["tools.t3.echo"]),
+            &HashSet::new(),
+        );
+        assert_eq!(
+            second,
+            AdmissionOutcome::Admitted {
+                tool_ids: vec!["tools.t3.echo".to_owned()]
+            }
+        );
+        // The old peer closes: eviction with its own (expected) responder.
+        assert!(
+            table.evict_peer("peer-a", Some(&responder_a)),
+            "preempted peer evicted by its own close observation"
+        );
+        // The rebound row SURVIVES — owned by peer-b now.
+        let rebound = table
+            .get("tools.t3.echo")
+            .expect("rebound row survives the old peer's eviction");
+        assert_eq!(rebound.peer_id, "peer-b");
+        assert!(
+            Arc::ptr_eq(&rebound.responder, &responder_b),
+            "surviving row still dispatches to the new owner's responder"
+        );
+        // The evicted peer's remaining row + session are gone.
+        assert!(
+            table.get("tools.t3.ping").is_none(),
+            "the evicted peer's non-collided row goes with the eviction"
+        );
+        assert!(table.peer_tool_ids("peer-a").is_empty());
+        // peer-b's session is untouched by peer-a's eviction.
+        assert_eq!(
+            table.peer_tool_ids("peer-b"),
+            vec!["tools.t3.echo".to_owned()]
+        );
+    }
+
+    #[test]
+    fn reconnect_of_preempted_peer_does_not_delete_rebound_row() {
+        // QC F-004: the preempted peer reconnects carrying a STALE session
+        // record (its old tool_ids list still names the rebound id). The
+        // reconnect's evict-then-admit must not delete the rebound row —
+        // the owner check keeps the new owner's row, and the collision
+        // decision refuses the lower-ranked peer again.
+        let table = PeerToolTable::new();
+        table.set_config(Some(config_with(
+            CollisionPolicy::PriorityOrder,
+            &["peer-b", "peer-a"],
+        )));
+        let responder_a = responder();
+        let responder_b = responder();
+        // peer-a registers echo + ping; peer-b preempts echo.
+        let manifest_a = manifest_with_tools(&["tools.t3.echo", "tools.t3.ping"]);
+        let first = table.admit_and_register(
+            "peer-a",
+            &manifest_a,
+            &responder_a,
+            &caps(&["tools.t3.echo", "tools.t3.ping"]),
+            &caps(&["tools.t3.echo", "tools.t3.ping"]),
+            &HashSet::new(),
+        );
+        assert_eq!(
+            first,
+            AdmissionOutcome::Admitted {
+                tool_ids: vec!["tools.t3.echo".to_owned(), "tools.t3.ping".to_owned()]
+            }
+        );
+        let manifest_b = manifest_with_tools(&["tools.t3.echo"]);
+        let second = table.admit_and_register(
+            "peer-b",
+            &manifest_b,
+            &responder_b,
+            &caps(&["tools.t3.echo"]),
+            &caps(&["tools.t3.echo"]),
+            &HashSet::new(),
+        );
+        assert_eq!(
+            second,
+            AdmissionOutcome::Admitted {
+                tool_ids: vec!["tools.t3.echo".to_owned()]
+            }
+        );
+        // peer-a reconnects (new session, new responder) STILL advertising
+        // the collided id — the stale tool_ids list names it.
+        let responder_a2 = responder();
+        let reconnect = table.admit_and_register(
+            "peer-a",
+            &manifest_a,
+            &responder_a2,
+            &caps(&["tools.t3.echo", "tools.t3.ping"]),
+            &caps(&["tools.t3.echo", "tools.t3.ping"]),
+            &HashSet::new(),
+        );
+        assert_eq!(
+            reconnect,
+            AdmissionOutcome::Admitted {
+                tool_ids: vec!["tools.t3.ping".to_owned()]
+            },
+            "reconnect re-admits the non-collided row; the collided id is refused again"
+        );
+        // The rebound row was NOT deleted via the stale tool_ids walk.
+        let rebound = table
+            .get("tools.t3.echo")
+            .expect("rebound row survives the old peer's reconnect");
+        assert_eq!(rebound.peer_id, "peer-b");
+        assert!(
+            Arc::ptr_eq(&rebound.responder, &responder_b),
+            "rebound row still carries the new owner's responder"
+        );
+        // peer-a's new session lists only the re-admitted id — the stale
+        // collided id is gone from its record.
+        assert_eq!(
+            table.peer_tool_ids("peer-a"),
+            vec!["tools.t3.ping".to_owned()]
+        );
+    }
+
+    #[test]
+    fn priority_order_unlisted_peer_loses_to_listed_peer() {
+        // DF-91: unlisted peers rank below every listed peer — a listed
+        // peer's row survives a later unlisted registration.
+        let table = PeerToolTable::new();
+        table.set_config(Some(config_with(
+            CollisionPolicy::PriorityOrder,
+            &["peer-a"],
+        )));
+        let first = admit(&table, "peer-a", &["tools.t3.echo"]);
+        assert_eq!(
+            first,
+            AdmissionOutcome::Admitted {
+                tool_ids: vec!["tools.t3.echo".to_owned()]
+            }
+        );
+        let second = admit(&table, "peer-b", &["tools.t3.echo"]);
+        assert_eq!(
+            second,
+            AdmissionOutcome::Admitted {
+                tool_ids: Vec::new()
+            },
+            "unlisted peer loses to a listed peer"
+        );
+        assert_eq!(
+            table.get("tools.t3.echo").expect("listed stays").peer_id,
+            "peer-a"
+        );
+    }
+
+    #[test]
+    fn priority_order_listed_peer_preempts_unlisted_peer() {
+        // DF-91: a listed peer registering later preempts an unlisted
+        // peer's row (unlisted ranks below all listed peers).
+        let table = PeerToolTable::new();
+        table.set_config(Some(config_with(
+            CollisionPolicy::PriorityOrder,
+            &["peer-b"],
+        )));
+        let first = admit(&table, "peer-a", &["tools.t3.echo"]);
+        assert_eq!(
+            first,
+            AdmissionOutcome::Admitted {
+                tool_ids: vec!["tools.t3.echo".to_owned()]
+            }
+        );
+        let second = admit(&table, "peer-b", &["tools.t3.echo"]);
+        assert_eq!(
+            second,
+            AdmissionOutcome::Admitted {
+                tool_ids: vec!["tools.t3.echo".to_owned()]
+            },
+            "listed peer preempts the unlisted peer"
+        );
+        assert_eq!(
+            table.get("tools.t3.echo").expect("listed preempts").peer_id,
+            "peer-b"
+        );
+    }
+
+    #[test]
+    fn first_stays_default_holds_when_config_wired() {
+        // DF-91: `first_stays` (the serde default) keeps the AR-68 #3
+        // behavior even when a config snapshot IS wired — a higher-ranked
+        // later peer is still refused.
+        let table = PeerToolTable::new();
+        table.set_config(Some(config_with(CollisionPolicy::FirstStays, &["peer-b"])));
+        let first = admit(&table, "peer-a", &["tools.t3.echo"]);
+        assert_eq!(
+            first,
+            AdmissionOutcome::Admitted {
+                tool_ids: vec!["tools.t3.echo".to_owned()]
+            }
+        );
+        let second = admit(&table, "peer-b", &["tools.t3.echo"]);
+        assert_eq!(
+            second,
+            AdmissionOutcome::Admitted {
+                tool_ids: Vec::new()
+            },
+            "first_stays refuses the later peer regardless of rank"
+        );
+        assert_eq!(
+            table.get("tools.t3.echo").expect("first stays").peer_id,
+            "peer-a"
+        );
+    }
+
+    #[test]
+    fn policy_read_live_at_admission_swaps_apply_to_new_registrations() {
+        // DF-91 live-derivation: the table reads the CURRENT config at
+        // each admission — swapping the Arc (p1's reload shape) changes
+        // the collision outcome for NEW registrations without any further
+        // table mutation.
+        let table = PeerToolTable::new();
+        table.set_config(Some(config_with(CollisionPolicy::FirstStays, &[])));
+        let first = admit(&table, "peer-a", &["tools.t3.echo"]);
+        assert_eq!(
+            first,
+            AdmissionOutcome::Admitted {
+                tool_ids: vec!["tools.t3.echo".to_owned()]
+            }
+        );
+        let refused = admit(&table, "peer-b", &["tools.t3.echo"]);
+        assert_eq!(
+            refused,
+            AdmissionOutcome::Admitted {
+                tool_ids: Vec::new()
+            }
+        );
+        // Swap to priority_order with peer-b ranked first: a NEW peer-b
+        // registration now preempts peer-a's row.
+        table.set_config(Some(config_with(
+            CollisionPolicy::PriorityOrder,
+            &["peer-b"],
+        )));
+        let preempted = admit(&table, "peer-b", &["tools.t3.echo"]);
+        assert_eq!(
+            preempted,
+            AdmissionOutcome::Admitted {
+                tool_ids: vec!["tools.t3.echo".to_owned()]
+            },
+            "live policy swap applies to new registrations"
+        );
+        assert_eq!(
+            table.get("tools.t3.echo").expect("rebound").peer_id,
+            "peer-b"
         );
     }
 

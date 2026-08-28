@@ -273,8 +273,14 @@ gained the following quality hardening in V1.58 P0:
 - **Body-size cap configurable** (R-V156P1-L002): `CdnConfig.max_body_bytes`
   (default 8 MiB via `DEFAULT_MAX_CDN_BODY_SIZE`); `CdnConfig::new`
   constructor.
-- **Retry jitter** (R-V156P1-L004): 100–500 ms randomized jitter added to
-  the exponential backoff via `retry_jitter_ms()`.
+- **Retry jitter** (R-V156P1-L004; DR-01 landed v1.179): attempt-aware
+  full-jitter — the sleep IS the sample, uniform in
+  `[0, min(8 000, 500·2^attempt))` ms (`RETRY_BASE_MS=500`,
+  `RETRY_CAP_MS=8 000`; cap binds only from attempt ≥ 5), via
+  `retry_jitter_ms(attempt)` (SystemTime-nanos entropy, non-cryptographic)
+  with injectable seam `retry_jitter_ms_with(attempt, entropy)`. Supersedes
+  the former fixed 100–500 ms additive band that let same-generation
+  retries cluster.
 - **Latency benchmark** (R-V156P1-L005):
   `crates/nexus-orchestration/benches/registry_refresh_latency.rs` (cold +
   warm).

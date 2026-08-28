@@ -31,8 +31,8 @@ use ed25519_dalek::SigningKey;
 use futures_util::future::BoxFuture;
 use nexus_daemon_runtime::connect::{
     daemon_manifest, peer_tool_table, spawn_accept_loop, start_peer_tools_lane, ws_config,
-    PeerResponderOptions, PeerSessionManager, PeerToolsConfig, WsTransport,
-    DEFAULT_MAX_ENVELOPE_BYTES,
+    PeerConfigHolder, PeerConfigSnapshot, PeerResponderOptions, PeerSessionManager,
+    PeerToolsConfig, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES,
 };
 use serde_json::{json, Value};
 use serial_test::serial;
@@ -131,20 +131,24 @@ async fn start_server(
         max_envelope_bytes: DEFAULT_MAX_ENVELOPE_BYTES,
         tool_allowlist: tool_ids.iter().map(|s| (*s).to_owned()).collect(),
         peer_ids: allowlist.clone(),
+        embedded_mcp: false,
+        // DF-91: the new collision-policy fields default to first_stays +
+        // empty rank (AR-68 #3 behavior preserved for every fixture).
+        ..PeerToolsConfig::default()
     });
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let sessions = Arc::new(PeerSessionManager::new());
-    let manifest = Arc::new(daemon_manifest(
-        "daemon-test",
-        &tool_ids.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>(),
-    ));
     let shutdown = Arc::new(Notify::new());
+    // DF-92: the hello derives per connection from the live holder — the
+    // harness seeds it with the fixed boot generation (allowlist + keys).
     let options = PeerResponderOptions {
         identity_seed: seed_host(),
-        manifest,
-        allowlist,
-        peer_keys,
+        host_id: "daemon-test".to_owned(),
+        config: PeerConfigHolder::new(PeerConfigSnapshot {
+            config: Arc::clone(&config),
+            peer_keys: Arc::new(peer_keys),
+        }),
         capability_registry: None,
     };
     let task = spawn_accept_loop(
@@ -499,6 +503,284 @@ async fn boot_rejects_peer_not_in_peer_ids() {
         peer_tool_table().is_empty(),
         "no session state for the rejected dialer"
     );
+    shutdown.notify_one();
+    let _ = handle.task.await;
+}
+// ── V1.179 P1 T2 (DF-92): session-consistent adoption points ───────────────
+
+/// Rewrite `daemon.json` mid-lane (the reload trigger — full-byte digest
+/// divergence) and `peer_keys.json` in the same operator edit.
+fn rewrite_lane_config(home: &std::path::Path, daemon_json: &str, peer_keys_json: &str) {
+    use std::fs;
+    fs::write(
+        nexus_home_layout::connect_daemon_config_path(home),
+        daemon_json,
+    )
+    .unwrap();
+    fs::write(
+        nexus_home_layout::connect_peer_keys_path(home),
+        peer_keys_json,
+    )
+    .unwrap();
+}
+
+/// The headline DF-92 verify: a config rotation (A's tool retired, B added,
+/// policy → `priority_order`, a boot-scoped `max_sessions` flip) is adopted
+/// ONLY at session boundaries. A's LIVE session keeps grant-at-establish
+/// (old catalog, old tool still dispatchable) even though the tool left the
+/// allowlist; B's first hello after the reload registers cleanly against
+/// the FRESH snapshot; A's reconnect admits the new grant (and preempts B's
+/// row under the reloaded policy + rank). The boot-scoped flip is pinned.
+#[tokio::test]
+#[serial]
+async fn reload_rotates_grants_at_session_boundaries_only() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let a = peer_id_of(seed_peer(1));
+    let b = peer_id_of(seed_peer(2));
+    write_boot_config(
+        tmp.path(),
+        &["tools.t4.echo"],
+        &[&a],
+        Some(&format!(
+            r#"{{"peer_keys":{{"{a}":"{}"}}}}"#,
+            hex32(pubkey(seed_peer(1)))
+        )),
+    );
+    let shutdown = Arc::new(Notify::new());
+    let handle = start_peer_tools_lane(tmp.path(), Arc::clone(&shutdown), None)
+        .await
+        .expect("lane starts");
+    let boot_max_sessions = handle.config.get().config.max_sessions;
+
+    // A establishes the LIVE session from the boot generation.
+    let adapter_a = dial_with_daemon_key(
+        handle.addr,
+        seed_peer(1),
+        &["tools.t4.echo"],
+        pubkey(seed_host()),
+    )
+    .await
+    .expect("dial A succeeds at boot generation");
+    adapter_a.register_tool_handler("tools.t4.echo", echo_handler());
+    assert!(
+        wait_until(
+            || peer_tool_table().get("tools.t4.echo").is_some(),
+            Duration::from_secs(5)
+        )
+        .await,
+        "A admitted at boot"
+    );
+
+    // Operator rotation: A's tool retired, B added (peer_ids + key),
+    // policy → priority_order with A ranked above B, and a boot-scoped
+    // max_sessions flip (must NOT hot-apply).
+    rewrite_lane_config(
+        tmp.path(),
+        &format!(
+            r#"{{"host":"127.0.0.1","port":0,"max_sessions":3,"tool_allowlist":["tools.t4.echo2"],"peer_ids":["{a}","{b}"],"collision_policy":"priority_order","peer_priority":["{a}","{b}"]}}"#
+        ),
+        &format!(
+            r#"{{"peer_keys":{{"{a}":"{}","{b}":"{}"}}}}"#,
+            hex32(pubkey(seed_peer(1))),
+            hex32(pubkey(seed_peer(2)))
+        ),
+    );
+    assert!(
+        wait_until(
+            || handle.config.get().config.tool_allowlist == vec!["tools.t4.echo2".to_owned()],
+            Duration::from_secs(10)
+        )
+        .await,
+        "the validated reload adopted the rotated allowlist (2s poll budget)"
+    );
+    // Boot-scoped field: pinned to boot, never hot-applied (GC #7).
+    assert_eq!(
+        handle.config.get().config.max_sessions,
+        boot_max_sessions,
+        "boot-scoped max_sessions must stay pinned to boot (restart required)"
+    );
+
+    // A's LIVE session keeps grant-at-establish: the old catalog row and
+    // the session's admitted set survive even though the tool LEFT the
+    // allowlist, and a live reverse-invoke on the OLD grant still works.
+    assert!(
+        peer_tool_table()
+            .get("tools.t4.echo")
+            .is_some_and(|e| e.peer_id == a),
+        "live A row must survive the rotation (grant-at-establish)"
+    );
+    assert_eq!(
+        handle.sessions.get(&a).expect("A session").admitted_ids,
+        vec!["tools.t4.echo".to_owned()],
+        "A live session keeps the old catalog"
+    );
+    let live_invoke = handle
+        .sessions
+        .get(&a)
+        .expect("A session")
+        .responder
+        .invoke_tool("tools.t4.echo", serde_json::json!({}))
+        .await;
+    assert!(
+        matches!(live_invoke, SpokeResult::Ok(_)),
+        "A live session must still dispatch the OLD grant, got {live_invoke:?}"
+    );
+
+    // B's FIRST hello post-reload registers cleanly: fresh peer_ids, fresh
+    // keys, fresh allowlist-derived hello (negotiation) — all from the
+    // reloaded snapshot, no restart.
+    let adapter_b = dial_with_daemon_key(
+        handle.addr,
+        seed_peer(2),
+        &["tools.t4.echo2"],
+        pubkey(seed_host()),
+    )
+    .await
+    .expect("B dials post-reload (adopted peer_ids + keys)");
+    adapter_b.register_tool_handler("tools.t4.echo2", echo_handler());
+    assert!(
+        wait_until(
+            || peer_tool_table()
+                .get("tools.t4.echo2")
+                .is_some_and(|e| e.peer_id == b),
+            Duration::from_secs(5)
+        )
+        .await,
+        "B registered post-reload"
+    );
+
+    // A RECONNECTS advertising both tools: the handshake validates against
+    // the FRESH snapshot; the new grant = echo2 only (echo is retired —
+    // not negotiated, not allowlisted). The reloaded policy + rank apply:
+    // A (ranked above B) PREEMPTS B's echo2 row.
+    let adapter_a2 = dial_with_daemon_key(
+        handle.addr,
+        seed_peer(1),
+        &["tools.t4.echo", "tools.t4.echo2"],
+        pubkey(seed_host()),
+    )
+    .await
+    .expect("A reconnect dial admitted against the fresh snapshot");
+    adapter_a2.register_tool_handler("tools.t4.echo", echo_handler());
+    adapter_a2.register_tool_handler("tools.t4.echo2", echo_handler());
+    assert!(
+        wait_until(
+            || handle
+                .sessions
+                .get(&a)
+                .is_some_and(|rec| rec.admitted_ids == vec!["tools.t4.echo2".to_owned()]),
+            Duration::from_secs(5)
+        )
+        .await,
+        "A reconnect admits the new grant (echo2)"
+    );
+    assert!(
+        peer_tool_table().get("tools.t4.echo").is_none(),
+        "retired tool row is gone after A's reconnect (evict-then-admit)"
+    );
+    assert!(
+        peer_tool_table()
+            .get("tools.t4.echo2")
+            .is_some_and(|e| e.peer_id == a),
+        "A's reconnect preempted B's row (priority_order + rank from the reloaded snapshot)"
+    );
+
+    peer_tool_table().evict_peer(&a, None);
+    peer_tool_table().evict_peer(&b, None);
+    peer_tool_table().set_config(None);
+    shutdown.notify_one();
+    let _ = handle.task.await;
+}
+
+/// DF-92 failure mode: an INVALID rotation (unknown field — hard load
+/// error) that would have added B keeps last-good: A's live grant is
+/// untouched, B is NOT adopted (`peer_ids` stay boot — B's dial is rejected
+/// at the Layer 0 gate), and the daemon stays up.
+#[tokio::test]
+#[serial]
+async fn invalid_reload_keeps_last_good_and_does_not_apply_new_peer() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let a = peer_id_of(seed_peer(1));
+    let b = peer_id_of(seed_peer(2));
+    write_boot_config(
+        tmp.path(),
+        &["tools.t4.echo"],
+        &[&a],
+        Some(&format!(
+            r#"{{"peer_keys":{{"{a}":"{}"}}}}"#,
+            hex32(pubkey(seed_peer(1)))
+        )),
+    );
+    let shutdown = Arc::new(Notify::new());
+    let handle = start_peer_tools_lane(tmp.path(), Arc::clone(&shutdown), None)
+        .await
+        .expect("lane starts");
+    let adapter_a = dial_with_daemon_key(
+        handle.addr,
+        seed_peer(1),
+        &["tools.t4.echo"],
+        pubkey(seed_host()),
+    )
+    .await
+    .expect("dial A succeeds at boot generation");
+    adapter_a.register_tool_handler("tools.t4.echo", echo_handler());
+    assert!(
+        wait_until(|| handle.sessions.get(&a).is_some(), Duration::from_secs(5)).await,
+        "A established"
+    );
+
+    // INVALID edit: unknown field (deny_unknown_fields fails the load) AND
+    // b smuggled into peer_ids + keys — neither may be adopted.
+    rewrite_lane_config(
+        tmp.path(),
+        &format!(
+            r#"{{"bogus_field":1,"tool_allowlist":["tools.t4.echo"],"peer_ids":["{a}","{b}"]}}"#
+        ),
+        &format!(
+            r#"{{"peer_keys":{{"{a}":"{}","{b}":"{}"}}}}"#,
+            hex32(pubkey(seed_peer(1))),
+            hex32(pubkey(seed_peer(2)))
+        ),
+    );
+    // ≥1 watcher tick (2s interval): the apply fails, last-good stands.
+    tokio::time::sleep(Duration::from_millis(3500)).await;
+
+    let snapshot = handle.config.get();
+    assert_eq!(
+        snapshot.config.peer_ids,
+        vec![a.clone()],
+        "invalid edit must not adopt B (last-good peer_ids)"
+    );
+    assert_eq!(
+        snapshot.config.tool_allowlist,
+        vec!["tools.t4.echo".to_owned()],
+        "invalid edit must not change the live allowlist"
+    );
+    assert!(
+        snapshot.peer_keys.contains_key(&a) && !snapshot.peer_keys.contains_key(&b),
+        "invalid edit must not adopt B's key (the reload failed as a whole)"
+    );
+    assert!(
+        peer_tool_table()
+            .get("tools.t4.echo")
+            .is_some_and(|e| e.peer_id == a)
+            && handle.sessions.get(&a).is_some(),
+        "A's live grant untouched by the failed reload"
+    );
+    let result = dial_with_daemon_key(
+        handle.addr,
+        seed_peer(2),
+        &["tools.t4.echo"],
+        pubkey(seed_host()),
+    )
+    .await;
+    assert!(
+        result.is_err(),
+        "B must be rejected at the handshake — last-good peer_ids gate the dial (rewired read)"
+    );
+
+    peer_tool_table().evict_peer(&a, None);
+    peer_tool_table().set_config(None);
     shutdown.notify_one();
     let _ = handle.task.await;
 }

@@ -428,6 +428,10 @@ current implementation is correct and documented):
   refresher scenarios is speculative without a measured contention incident
   — the daemon runtime is single-process local-first and does not currently
   approach N=100. Deferred until a surge-load incident is observed.
+  *(v1.179 DR-01 LANDED — plan `2026-08-27-v1.179-p2-reliability-convergence`:
+  attempt-aware full-jitter shipped in `registry.refresh` — base 500 ms /
+  cap 8 000 ms via `retry_jitter_ms(attempt)`, superseding both the
+  100–500 ms additive band and the 100–1000 ms expansion question here.)*
 - **S-002 (metrics overhead benchmarking)**: the four `AtomicU64` counters
   in `registry.rs` use `Ordering::Relaxed` (optimal for non-cross-thread
   data-dependency counters). Expected overhead is < 10 ns per call
@@ -1008,3 +1012,126 @@ Implement **`require_active_creator`** (or equivalent) on Tier-2 route groups. T
 | — | `PATCH …/creators/{id}` display_name | Tier-1 route; updating `display_name` calls `pool_or_uninit()` and may return HTTP **409** `uninitialized` when no pool is open yet |
 | I-1 | Desktop clean-home CI | Regression tests live in `apps/desktop` but are not yet run in GitHub Actions — tracked **DR-04** |
 
+## 18. Peer-tools serving & transport (V1.174 P0 lock + V1.179 P0 additive)
+
+**Iteration SSOT:** `v1.174-peer-tools-lock.md` (AR-66..77) + this paragraph.
+**V1.174 lock cross-ref:** the peer-tools lane (WS registration + MCP
+exposure) is locked in V1.174 (AR-66..77); this section is an ADDITIVE
+V1.179 P0 overlay — it does not rewrite the lock history.
+
+### 18.1 Serving & transport topology
+
+The peer-tools surface is served over three transports, all riding the
+SAME dispatch spine (`CapabilityRegistry::lookup`/`dispatch`) and the
+SAME catalog builder (`GET /v1/daemon/tools`):
+
+1. **WS registration lane** (V1.174, AR-67): the daemon-side listening
+   face for spoke dialers — one `TcpListener` (config-gated host/port,
+   loopback default), one WebSocket upgrade per connection, one
+   `connect_responder` per connection, admission into the process-global
+   `PeerToolTable`, session registration/eviction via
+   `PeerSessionManager` (reserve-at-accept, last-wins replace,
+   evict-same-tick).
+2. **Model A — stdio MCP child** (V1.174, AR-71): `nexus42 mcp serve`
+   runs as a stateless stdio child that proxies the daemon loopback HTTP
+   face. The child is the exposure path for external MCP hosts
+   (ACP/`--mcp-config`).
+3. **Model B — embedded MCP server** (V1.179 P0, DF-88, feature-gated
+   `embedded-mcp`): an in-process rmcp server over
+   `transport::sink_stream` pairs (no sockets, no bind, no TLS — DF-87's
+   territory). It adapts the SAME spine as direct function calls and is
+   exempt from `PeerSessionManager::max_sessions` (in-process consumer
+   presents no remote dial surface); it carries its own compile-time
+   bound `EMBEDDED_MCP_MAX_SESSIONS = 4` with the honest refusal
+   discriminator `embedded_mcp_session_limit`. Enablement is the union
+   of the `PeerToolsConfig.embedded_mcp` key and the
+   `nexus42 daemon start --embedded-mcp` flag (GC #9); the cargo feature
+   is the hard gate (feature off + enablement requested ⇒ warn-and-skip,
+   never a boot abort).
+
+### 18.2 Duplicate tool-id collision policy (V1.179 P0, DF-91)
+
+`~/.nexus42/connect/daemon.json` (`PeerToolsConfig`, flat JSON,
+`deny_unknown_fields`) gains two top-level operator keys:
+
+- `"collision_policy": "first_stays" | "priority_order"` — serde default
+  `first_stays` (the AR-68 #3 behavior every existing deployment relies
+  on); an unknown value is a hard config-load error (fail-closed).
+- `"peer_priority": ["<peer-id>", …]` — array-order rank, EARLIER =
+  higher priority; serde default `[]`; duplicate entries are rejected at
+  load (fail-closed).
+
+Semantics (deterministic, tested): on a two-peer id collision, the peer
+ranked EARLIER in `peer_priority` wins. A later-registering
+higher-priority peer PREEMPTS: its collided tool rows replace the
+earlier registrant's via the AR-68 #3 eviction path (rows rebind; the
+preempted peer's session is untouched; in-flight invokes on evicted rows
+resolve as honest per-call failures per AR-76 #4 — the spine reads the
+table at invoke time, so a rebound row dispatches to the new owner and a
+removed row yields `not_supported`, never a silent retry). Equal or
+unlisted rank ⇒ first stays (registration order); unlisted peers rank
+below all listed peers. Same-peer reconnect is not a collision
+(unchanged evict-then-admit). The policy + rank are read from the LIVE
+`PeerToolsConfig` snapshot at admission time (live-derivation precedent:
+`live_reserved_tool_ids`); p0 reads the config once at boot (restart-
+scoped, AR-67 #4) — runtime reload is p1 (DF-92). The collision policy
+is operator config only: it is absent from the peer-visible hello
+(AR-69 allowlist-only derivation) and from every wire schema
+(`wire_contracts_changed: false`).
+
+### 18.3 Peer config hot reload (V1.179 P1, DF-92)
+
+**Historical note:** §18.2 (and the V1.174 AR-67 #4 lock it cites) read the
+peer config once at subsystem boot — "changes apply on daemon restart;
+runtime reload = Non-Goal." V1.179 P1 (DF-92) **supersedes that posture for
+the admission-affecting fields only**; the lock history — including
+`v1.174-peer-tools-lock.md` — is not rewritten, and the boot-scoped field
+class remains restart-scoped exactly as V1.174 locked it.
+
+**Trigger:** a digest-poll watcher (`connect/watch.rs`; 2 s interval,
+`PEER_CONFIG_WATCH_INTERVAL`) digests the FULL BYTES of
+`~/.nexus42/connect/daemon.json` + `peer_keys.json` — never mtime (editors
+and containers may preserve it). Only these two peer-lane files are watched;
+the connect-host lane's `config.json` / `allowlist.json` are a different
+surface and are NOT watched. The boot baseline is seeded BEFORE the boot
+load (a boot-window edit diverges and reloads) and without emitting an
+initial event; two identical polls apply at most once (no event storm).
+
+**Validation:** on any full-bytes digest divergence the reload runs the SAME
+fail-closed chain boot uses — full `PeerToolsConfig::load`
+(deny-unknown-fields, allowlist grammar, rank-duplicate checks) plus
+`load_peer_keys` — on a blocking lane. There is no reload-only shortcut or
+validation bypass.
+
+**Field scope (architect-locked, GC #7):** a successful reload adopts
+**admission-affecting fields only** — `tool_allowlist`, `peer_ids`,
+`peer_keys.json` keys, `collision_policy`, `peer_priority` — by swapping a
+fresh `Arc` into the live `PeerConfigHolder` (std `RwLock<Arc<_>>` swap;
+no `arc_swap`). Boot-scoped fields — `host`, `port`, `max_sessions`,
+`invoke_timeout_ms`, `max_envelope_bytes`, `embedded_mcp` — are PINNED to
+their boot values: a reload whose diff touches one logs one named info line
+(`peer config reload: <field> changed; restart required`) and ignores the
+field — no silent no-op, no hot rebind of listeners/limits.
+
+**Session-snapshot rule (extends AR-67 reconnect=replace):** every NEW
+connection reads the holder ONCE — the handshake (dialer allowlist +
+preconfigured keys) and the admission (allowlist-derived hello, negotiated
+set, operator allowlist) validate against that single generation, so a
+session's grant is internally coherent even if a reload lands mid-handshake.
+Existing `PeerSessionManager` rows immutably hold grant-at-establish until
+close/reconnect: a live session's catalog, keys, and negotiated set never
+change mid-session even when a reload retires them; removal, rotation, and
+hot edits take effect at the NEXT handshake (register = last-wins replace,
+evict-then-admit on reconnect). In-flight invokes keep grant-at-establish
+clones. The peer-visible hello/manifest never carries policy or rank (AR-69
+allowlist-only derivation).
+
+**Failure mode:** an invalid edited config (malformed, unknown field,
+failed validation) keeps last-good — the daemon never fails closed on a bad
+edit — and warns ONCE per error-state transition (a changed failure message
+warns again; a second identical poll does not re-warn; `Missing` ≠
+`Unreadable` per the RN-2 three-state vocabulary). A watcher-task panic is
+supervised through the lane's watch task: it surfaces as a `JoinError`, ONE
+`peer config reload degraded` warn is logged, the daemon stays up, and new
+hellos keep admitting against the last-good snapshot — a restart restores
+reload.

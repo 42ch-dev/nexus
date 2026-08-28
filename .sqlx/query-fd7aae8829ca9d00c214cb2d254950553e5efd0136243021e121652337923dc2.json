@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO works (work_id, creator_id, workspace_slug, status, title,\n         long_term_goal, initial_idea, intake_status, inspiration_log,\n         primary_preset_id, schedule_ids, created_at, updated_at,\n         current_stage, stage_status, current_chapter, total_planned_chapters,\n         auto_chain_enabled, auto_chain_interrupted, auto_review_master_on_timeout)\n         VALUES (?, 'ctr_dr67', 'ws', 'active', 'DR-67', 'goal', 'idea', ?,\n         '[]', 'novel-writing', '[]', ?, ?, 'produce', 'active', ?, ?, 1, 0, 0)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "fd7aae8829ca9d00c214cb2d254950553e5efd0136243021e121652337923dc2"
+}

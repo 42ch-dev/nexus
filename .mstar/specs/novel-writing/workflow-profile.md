@@ -380,13 +380,14 @@ This keeps `novel-writing` a single preset that scales from chapter 1 to chapter
 
 #### 4.5.7 Future acceptance and migration tests
 
-**V1.42 P1 (Implemented subset):** Test #6 (Future multi-volume migration: the `(work_id, chapter)` → `(work_id, volume, chapter)` migration is idempotent and preserves row data) is implemented. Verified by `w01_v142_migration_idempotent` test in `crates/nexus-local-db/tests/v142_migration_fixes.rs`. Index coverage for `next_chapter_volume_aware` query is also verified by `w02_volume_aware_index_coverage` test. Other tests (#1–#5) remain future per the existing roadmap below.
+**V1.42 P1 (Implemented subset):** Test #6 (Future multi-volume migration: the `(work_id, chapter)` → `(work_id, volume, chapter)` migration is idempotent and preserves row data) is implemented. Verified by `w01_v142_migration_idempotent` test in `crates/nexus-local-db/tests/v142_migration_fixes.rs`. Index coverage for `next_chapter_volume_aware` query is also verified by `w02_volume_aware_index_coverage` test.
+**v1.179 (DR-67 landed — plan `2026-08-27-v1.179-p2-reliability-convergence`):** Tests #1–#5 are implemented in `crates/nexus-local-db/tests/v179_dr67_acceptance.rs`: `w179_dr67_01_next_chapter_selects_lowest_eligible` (#1, §4.5.2), `w179_dr67_02_current_chapter_advances_only_on_finalize` (#2, §4.5.2 work-level invariant), `w179_dr67_03_completion_requires_all_rows_finalized_count_match_and_intake` (#3, V1.44 row-count contract — see the #3 note below), `w179_dr67_04_resume_reuses_draft_row_without_creating_new` (#4, §4.5.2 resume + §5.4.5), and `w179_dr67_05_reconcile_rebuilds_missing_rows_with_db_status_ssot` (#5, §4.5.3) — mirroring the #6 annotation style above.
 
-A future implementation plan for this roadmap must include at least these tests — **Durable roadmap:** DR-67 (future acceptance tests #1–5):
+The DR-67 acceptance tests pin the following invariants (**Durable roadmap:** DR-67 — #1–#5 are implemented as of the v1.179 landed note above; #6 is implemented as of the V1.42 note above; the list below is the normative description of what each pin covers):
 
 1. **Chapter selection**: a 3-chapter Work with rows at varied statuses; assert `next_chapter(work_id)` returns the lowest eligible row per §4.5.2.
 2. **`current_chapter` transitions**: `current_chapter` changes only when a row transitions to `finalized`, and it becomes the just-finalized chapter number.
-3. **Novel completion**: completion fires only when every row is `finalized`, `current_chapter >= total_planned_chapters`, and `intake_status == complete` (§6.1).
+3. **Novel completion**: completion fires only when the row set covers `total_planned_chapters`, every row is `finalized`, and `intake_status == complete` (V1.44 F-002 volume-aware row-count contract implemented by `is_work_completed`). **Spec-pointer gap (historical):** §6.1's `current_chapter >= total_planned_chapters` conjunct is NOT enforced by `is_work_completed` today — the V1.44 row-count contract superseded it, and the v1.179 test pins the implemented contract rather than the unenforced pointer.
 4. **Resume behavior**: a new run against a Work with one `draft` row resumes that row and does not create a new row.
 5. **Reconciliation**: `creator run reconcile-chapters <work_id>` rebuilds missing `work_chapters` rows/files from `Works/<work_ref>/Stories/` while preserving DB-as-status-SSOT conflict resolution (§4.5.3).
 6. **Future multi-volume migration**: the `(work_id, chapter)` → `(work_id, volume, chapter)` migration is idempotent and preserves row data.

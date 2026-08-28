@@ -48,6 +48,8 @@ fn make_converge_task(
         terminal: false,
         context_update: None,
         merge: None,
+        timeout_ms: None,
+        on_timeout: None,
         converge: Some(ConvergeConfig { strategy }),
     })
     .with_converge_predecessors(pred_set)
@@ -287,6 +289,8 @@ async fn converge_non_converge_state_skips_gate() {
             terminal: false,
             context_update: None,
             merge: None,
+            timeout_ms: None,
+            on_timeout: None,
             converge: None,
         },
     );

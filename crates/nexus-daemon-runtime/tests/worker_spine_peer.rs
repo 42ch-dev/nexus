@@ -33,8 +33,9 @@ use ed25519_dalek::SigningKey;
 use futures_util::future::BoxFuture;
 use nexus_daemon_runtime::api::handlers::host_tool_executor::HostToolExecutor;
 use nexus_daemon_runtime::connect::{
-    daemon_manifest, peer_tool_table, spawn_accept_loop, ws_config, PeerResponderOptions,
-    PeerSessionManager, PeerToolsConfig, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES,
+    peer_tool_table, spawn_accept_loop, ws_config, PeerConfigHolder, PeerConfigSnapshot,
+    PeerResponderOptions, PeerSessionManager, PeerToolsConfig, WsTransport,
+    DEFAULT_MAX_ENVELOPE_BYTES,
 };
 use nexus_daemon_runtime::test_utils::{self, TestTempRoot};
 use nexus_daemon_runtime::workspace::WorkspaceState;
@@ -151,23 +152,27 @@ async fn start_server(
         invoke_timeout_ms,
         max_envelope_bytes: DEFAULT_MAX_ENVELOPE_BYTES,
         tool_allowlist: tool_ids.iter().map(|s| (*s).to_owned()).collect(),
-        // Layer 0 dialer allowlist: tests pass the peer allowlist via
-        // `PeerResponderOptions`.
-        peer_ids: Vec::new(),
+        // T4 (AR-69): the dialer handshake allowlist (Layer 0) — DF-92: it
+        // lives in the config generation the holder serves.
+        peer_ids: allowlist,
+        embedded_mcp: false,
+        // DF-91: the new collision-policy fields default to first_stays +
+        // empty rank (AR-68 #3 behavior preserved for every fixture).
+        ..PeerToolsConfig::default()
     });
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let sessions = Arc::new(PeerSessionManager::new());
-    let manifest = Arc::new(daemon_manifest(
-        "daemon-test",
-        &tool_ids.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>(),
-    ));
     let shutdown = Arc::new(Notify::new());
+    // DF-92: the hello derives per connection from the live holder — the
+    // harness seeds it with the fixed boot generation (allowlist + keys).
     let options = PeerResponderOptions {
         identity_seed: seed_host(),
-        manifest,
-        allowlist,
-        peer_keys,
+        host_id: "daemon-test".to_owned(),
+        config: PeerConfigHolder::new(PeerConfigSnapshot {
+            config: Arc::clone(&config),
+            peer_keys: Arc::new(peer_keys),
+        }),
         capability_registry: None,
     };
     let task = spawn_accept_loop(
