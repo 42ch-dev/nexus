@@ -204,6 +204,24 @@ async fn boot_path_cli_flag_enables_and_no_enablement_leaves_no_server() {
 }
 
 #[tokio::test]
+async fn boot_path_invalid_visibility_refuses_embedded_start() {
+    // V1.180 P1 (RN-OGA-2) T1-minor decision: a semantically invalid
+    // `mcp_visibility` entry (umbrella / malformed) is a fail-closed
+    // construction refusal — the embedded server is NOT started (no
+    // surface) rather than silently widening the surface to all-visible.
+    // Other config error classes keep the W-002 warn-and-continue.
+    let (_tmp, state) = boot_server(
+        Some(r#"{"embedded_mcp": true, "mcp_visibility": ["tools.*"]}"#),
+        false,
+    )
+    .await;
+    assert!(
+        state.embedded_mcp_server().is_none(),
+        "InvalidVisibility refuses embedded start (no surface, never all-visible)"
+    );
+}
+
+#[tokio::test]
 #[serial]
 async fn embedded_visibility_policy_filters_list_and_short_circuits_hidden_call() {
     // V1.180 P1 (RN-OGA-2): Model B respects the daemon-side visibility
@@ -236,7 +254,7 @@ async fn embedded_visibility_policy_filters_list_and_short_circuits_hidden_call(
         .expect("visible tool call succeeds");
     assert_ne!(call.is_error, Some(true), "visible call not an error");
 
-    // A hidden tool is refused at the seam with the `hidden_tool`
+    // A hidden tool is refused at the seam with the `tool_not_authorized`
     // discriminator (METHOD_NOT_FOUND), never dispatched.
     let err = running
         .call_tool(CallToolRequestParams::new("nexus.workspace.info"))
@@ -251,9 +269,60 @@ async fn embedded_visibility_policy_filters_list_and_short_circuits_hidden_call(
         "hidden tool refused with METHOD_NOT_FOUND"
     );
     assert!(
-        data.message.contains("hidden_tool"),
+        data.message.contains("tool_not_authorized"),
         "refusal names the visibility class: {}",
         data.message
+    );
+    drop(running);
+}
+
+#[tokio::test]
+#[serial]
+async fn embedded_visible_but_denied_call_is_typed_refusal() {
+    // V1.180 P1 (RN-OGA-2): a tool VISIBLE per policy but denied by the
+    // authz spine (admission_pipeline Forbidden — `fs/*` requires an
+    // active workspace, and the test state has none) is a typed refusal:
+    // `Ok(CallToolResult::error)` naming the honest spine code ahead of
+    // the message. Visibility never grants execute — the spine's denial
+    // maps through the existing daemon error mapping, unchanged.
+    let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let server = start_embedded_mcp_server(
+        state,
+        true,
+        VisibilityPolicy::from_visible(["fs/read_text_file".to_owned()]),
+    )
+    .expect("enabled server");
+    let running = establish_session(&server).await;
+
+    // The tool is listed (visible per policy)…
+    let result = running.list_tools(None).await.expect("tools/list succeeds");
+    let listed: Vec<String> = result.tools.iter().map(|t| t.name.to_string()).collect();
+    assert_eq!(
+        listed,
+        vec!["fs/read_text_file".to_owned()],
+        "only the visible tool is listed"
+    );
+
+    // …but the spine denies the execution — a typed refusal, not a
+    // silent drop, not a 500.
+    let call = running
+        .call_tool(CallToolRequestParams::new("fs/read_text_file"))
+        .await
+        .expect("visible-but-denied is an Ok(CallToolResult::error)");
+    assert_eq!(
+        call.is_error,
+        Some(true),
+        "is_error set for the spine-owned denial"
+    );
+    let text = call
+        .content
+        .iter()
+        .find_map(|c| c.as_text().map(|t| t.text.clone()))
+        .expect("text content");
+    assert_eq!(
+        text, "forbidden: Forbidden: fs/* tools require an active workspace with defined bounds",
+        "spine-owned denial names the honest spine code ahead of the message"
     );
     drop(running);
 }

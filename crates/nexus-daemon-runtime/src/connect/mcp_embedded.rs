@@ -56,6 +56,12 @@
 //! requested ⇒ warn-and-skip at boot, never an abort — PR #229 F-1
 //! posture).
 //!
+//! V1.180 P1 (RN-OGA-2): the boot instance carries the daemon-side
+//! `mcp_visibility` policy. A semantically invalid visibility entry
+//! (`InvalidVisibility` — umbrella / malformed) is a fail-closed
+//! CONSTRUCTION refusal: the embedded server is not started (no surface)
+//! rather than silently widening the surface to all-visible. Other config
+//! error classes keep the W-002 warn-and-continue (absent policy).
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -465,6 +471,23 @@ pub async fn boot_embedded_mcp_server(
             cfg.embedded_mcp || cli_embedded_mcp,
             VisibilityPolicy::from_visible(cfg.mcp_visibility),
         ),
+        // V1.180 P1 (RN-OGA-2) T1-minor decision: a semantically invalid
+        // `mcp_visibility` entry (umbrella / malformed) is a fail-closed
+        // CONSTRUCTION refusal — the embedded server is not started (no
+        // surface) rather than silently widening the surface to
+        // all-visible. The operator explicitly configured a visibility
+        // subset; honoring intent means either the subset or nothing,
+        // never "everything visible". Other config error classes keep
+        // the W-002 warn-and-continue below.
+        Err(crate::connect::config::ConnectConfigError::InvalidVisibility { entry, reason }) => {
+            tracing::error!(
+                entry = %entry,
+                reason = %reason,
+                "embedded MCP refused: invalid mcp_visibility entry (fail-closed — a \
+                 broken visibility config must not silently widen the surface)"
+            );
+            return;
+        }
         Err(e) => {
             // QC W-002: the Err path keeps the CLI flag's enablement (GC #9
             // union — a malformed config must not silently disable a
@@ -678,6 +701,25 @@ mod tests {
 
         let auth = map_spine_error(NexusApiError::AuthRequired);
         assert!(matches!(auth, ToolCallOutcome::DaemonRefused { .. }));
+
+        // V1.180 P1 (RN-OGA-2): visible-but-denied — the admission
+        // pipeline's Forbidden (e.g. `fs/*` without an active workspace)
+        // is a spine-owned typed refusal naming the honest `forbidden`
+        // code, wire-parity with the stdio child's HTTP mapping.
+        let forbidden = map_spine_error(NexusApiError::Forbidden {
+            resource: "tool_execution".to_owned(),
+            reason: "fs/* tools require an active workspace with defined bounds".to_owned(),
+        });
+        assert_eq!(
+            forbidden,
+            ToolCallOutcome::ExecutedError {
+                code: "forbidden".to_owned(),
+                message: "Forbidden: fs/* tools require an active workspace with defined bounds"
+                    .to_owned(),
+                wire_code: None,
+            },
+            "admission-pipeline Forbidden names the honest spine code"
+        );
 
         let invalid = map_spine_error(NexusApiError::InvalidInput {
             field: "x".to_owned(),

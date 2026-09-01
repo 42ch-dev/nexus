@@ -30,6 +30,14 @@
 //! - Success → text content + `structured_content` when the spine result is
 //!   a JSON object (matching the advertised output schema), else text-only.
 //!
+//! V1.180 P1 (RN-OGA-2) adds the visibility refusal class: a tool hidden
+//! by the per-consumer `VisibilityPolicy` is refused at the seam BEFORE
+//! the backend — `Err(ErrorData)` `METHOD_NOT_FOUND` with the
+//! `tool_not_authorized` discriminator (honest-discriminator convention).
+//! Distinct from unroutable: the spine may resolve the id fine; the
+//! consumer just cannot see it. Visible-but-denied (visible per policy but
+//! denied by the authz spine) stays spine-owned — the existing
+//! `ExecutedError` / `Unroutable` / `DaemonRefused` mapping is unchanged.
 //! Boundary (AR-72): the handler implements ONLY `get_info` / `list_tools` /
 //! `call_tool`. `prompts/list` and `resources/list` keep the rmcp defaults
 //! (empty lists — SDK reality, documented in the T5 report) and
@@ -82,6 +90,15 @@ pub enum ToolCallOutcome {
     /// The spine refuses the caller itself (auth rejected) — an opaque
     /// `INTERNAL_ERROR` per AR-70 #4, the message never reaches the client.
     DaemonRefused { message: String },
+    /// Visibility refusal (V1.180 P1, RN-OGA-2): the consumer is not
+    /// authorized for this tool — hidden by the per-consumer
+    /// `VisibilityPolicy`, refused at the seam BEFORE the backend.
+    /// Distinct from `Unroutable` (the spine cannot resolve the id at
+    /// all): the tool may be perfectly spine-resolvable, but the
+    /// consumer cannot see it. Mapped to `METHOD_NOT_FOUND` with the
+    /// `tool_not_authorized` discriminator (honest-discriminator
+    /// convention, cf. `embedded_mcp_session_limit` / `converge_timeout`).
+    NotAuthorized { tool_name: String },
 }
 
 /// The spine face a concrete MCP backend adapts (AR-71 Model A loopback
@@ -167,45 +184,52 @@ impl<B: McpBackend> ServerHandler for McpBridgeHandler<B> {
 
         // V1.180 P1 (RN-OGA-2): the visibility seam short-circuits a
         // hidden-tool call BEFORE the backend — a tool the consumer cannot
-        // see is refused at the seam, never dispatched. Distinct from
-        // unroutable (the spine cannot resolve the id at all): the
-        // `hidden_tool` discriminator names the visibility refusal class
-        // (Task 2 formalizes the typed refusal mapping).
+        // see is refused at the seam, never dispatched. The refusal mints
+        // the `NotAuthorized` outcome (mapped per the AR-70 #4 classes to
+        // `METHOD_NOT_FOUND` with the `tool_not_authorized` discriminator),
+        // distinct from unroutable (the spine cannot resolve the id at
+        // all).
         if !self.policy.is_visible(&name) {
-            return Err(McpError::new(
-                ErrorCode::METHOD_NOT_FOUND,
-                format!("hidden_tool: {name}"),
-                None,
-            ));
+            return map_outcome(ToolCallOutcome::NotAuthorized { tool_name: name });
         }
 
         let outcome = self.backend.call_tool(&name, parameters).await?;
+        map_outcome(outcome)
+    }
+}
 
-        match outcome {
-            ToolCallOutcome::Success(result) => Ok(success_result(result)),
-            ToolCallOutcome::ExecutedError {
-                code,
-                message,
-                wire_code,
-            } => {
-                // AR-70 #4: the daemon threads the peer wire code verbatim in
-                // `details.wire_code` (lowercase, e.g. `op_unsupported`);
-                // surface it exactly once, ahead of the message. Other
-                // executed-but-failed outcomes name the spine `code`.
-                Ok(CallToolResult::error(vec![Content::text(
-                    executed_error_text(&code, &message, wire_code.as_deref()),
-                )]))
-            }
-            ToolCallOutcome::Unroutable { code, message } => Err(McpError::new(
-                ErrorCode::METHOD_NOT_FOUND,
-                format!("unroutable: {code}: {message}"),
-                None,
-            )),
-            ToolCallOutcome::DaemonRefused { message } => Err(McpError::internal_error(
-                format!("daemon refused tool call: {message}"),
-                None,
-            )),
+/// Map one [`ToolCallOutcome`] to the MCP protocol result (AR-70 #4 +
+/// V1.180 P1 visibility refusal). Pure so it can be unit-pinned.
+fn map_outcome(outcome: ToolCallOutcome) -> std::result::Result<CallToolResult, McpError> {
+    match outcome {
+        ToolCallOutcome::Success(result) => Ok(success_result(result)),
+        ToolCallOutcome::ExecutedError {
+            code,
+            message,
+            wire_code,
+        } => {
+            // AR-70 #4: the daemon threads the peer wire code verbatim in
+            // `details.wire_code` (lowercase, e.g. `op_unsupported`);
+            // surface it exactly once, ahead of the message. Other
+            // executed-but-failed outcomes name the spine `code`.
+            Ok(CallToolResult::error(vec![Content::text(
+                executed_error_text(&code, &message, wire_code.as_deref()),
+            )]))
         }
+        ToolCallOutcome::Unroutable { code, message } => Err(McpError::new(
+            ErrorCode::METHOD_NOT_FOUND,
+            format!("unroutable: {code}: {message}"),
+            None,
+        )),
+        ToolCallOutcome::DaemonRefused { message } => Err(McpError::internal_error(
+            format!("daemon refused tool call: {message}"),
+            None,
+        )),
+        ToolCallOutcome::NotAuthorized { tool_name } => Err(McpError::new(
+            ErrorCode::METHOD_NOT_FOUND,
+            format!("tool_not_authorized: {tool_name}"),
+            None,
+        )),
     }
 }
 
@@ -626,7 +650,7 @@ mod tests {
     async fn present_policy_hidden_tool_call_short_circuits_before_backend() {
         // V1.180 P1 (RN-OGA-2): a hidden-tool `tools/call` is refused at
         // the visibility seam BEFORE the backend — the backend is never
-        // invoked, and the refusal is a distinct `hidden_tool` protocol
+        // invoked, and the refusal is a distinct `tool_not_authorized` protocol
         // error (not success, not a silent no-op, not unroutable).
         let backend = GoldenBackend::new(Vec::new());
         let running = serve_handler(McpBridgeHandler {
@@ -647,7 +671,7 @@ mod tests {
             "hidden tool refused with METHOD_NOT_FOUND"
         );
         assert!(
-            data.message.contains("hidden_tool"),
+            data.message.contains("tool_not_authorized"),
             "refusal names the visibility class: {}",
             data.message
         );
@@ -655,5 +679,46 @@ mod tests {
             backend.called().is_empty(),
             "hidden-tool call must never reach the backend"
         );
+    }
+
+    #[test]
+    fn map_outcome_visible_but_denied_is_typed_refusal() {
+        // V1.180 P1 (RN-OGA-2): a tool VISIBLE per policy but denied by
+        // the authz spine (admission_pipeline Forbidden / peer deny wire
+        // code) maps to an executed-but-failed `CallToolResult::error`
+        // naming the spine code — never a silent drop, never a 500.
+        let result = map_outcome(ToolCallOutcome::ExecutedError {
+            code: "forbidden".to_owned(),
+            message: "Forbidden: fs/* tools require an active workspace with defined bounds"
+                .to_owned(),
+            wire_code: None,
+        })
+        .expect("executed-but-failed is a CallToolResult, not a protocol error");
+        assert_eq!(result.is_error, Some(true));
+        let text = result
+            .content
+            .iter()
+            .find_map(|c| c.as_text().map(|t| t.text.clone()))
+            .expect("text content");
+        assert_eq!(
+            text,
+            "forbidden: Forbidden: fs/* tools require an active workspace with defined bounds",
+            "spine-owned denial names the honest spine code ahead of the message"
+        );
+    }
+
+    #[test]
+    fn map_outcome_not_authorized_is_typed_refusal() {
+        // V1.180 P1 (RN-OGA-2): the visibility-seam refusal mints the
+        // `NotAuthorized` outcome, mapped per the AR-70 #4 classes to
+        // `METHOD_NOT_FOUND` with the `tool_not_authorized` discriminator
+        // (honest-discriminator convention) — distinct from unroutable.
+        let err = map_outcome(ToolCallOutcome::NotAuthorized {
+            tool_name: "tools.t5.echo".to_owned(),
+        })
+        .expect_err("not authorized is a protocol error");
+        let McpError { code, message, .. } = err;
+        assert_eq!(code, ErrorCode::METHOD_NOT_FOUND);
+        assert_eq!(message, "tool_not_authorized: tools.t5.echo");
     }
 }

@@ -755,7 +755,7 @@ async fn visibility_policy_filters_list_and_short_circuits_hidden_call() {
     // V1.180 P1 (RN-OGA-2): the child reads the daemon-local
     // `mcp_visibility` subset and applies it at the bridge seam —
     // `tools/list` is filtered to the configured subset and a hidden-tool
-    // `tools/call` is refused with the `hidden_tool` discriminator (never
+    // `tools/call` is refused with the `tool_not_authorized` discriminator (never
     // dispatched to the daemon), while a visible tool still dispatches.
     let mock = MockServer::start().await;
     mount_catalog(&mock).await;
@@ -804,9 +804,63 @@ async fn visibility_policy_filters_list_and_short_circuits_hidden_call() {
         "hidden tool refused with METHOD_NOT_FOUND"
     );
     assert!(
-        data.message.contains("hidden_tool"),
+        data.message.contains("tool_not_authorized"),
         "refusal names the visibility class: {}",
         data.message
+    );
+
+    drop(running);
+    child.kill();
+}
+
+#[tokio::test]
+async fn visible_but_denied_call_is_typed_refusal() {
+    // V1.180 P1 (RN-OGA-2): a tool VISIBLE per policy but denied by
+    // the authz spine (admission_pipeline Forbidden) is a typed
+    // refusal — `Ok(CallToolResult::error)` naming the honest spine
+    // code ahead of the message. Visibility never grants execute:
+    // the spine's denial maps through the existing daemon error
+    // mapping, unchanged.
+    let mock = MockServer::start().await;
+    mount_catalog(&mock).await;
+    mount_execution(
+        &mock,
+        "tools.t6.echo",
+        ResponseTemplate::new(403).set_body_json(json!({
+            "success": false,
+            "error": {
+                "code": "forbidden",
+                "message": "Forbidden: fs/* tools require an active workspace with defined bounds",
+                "details": {
+                    "resource": "tool_execution",
+                    "reason": "fs/* tools require an active workspace with defined bounds"
+                }
+            }
+        })),
+    )
+    .await;
+    let mut child = McpChild::spawn_with(&mock, Some(r#"{"mcp_visibility":["tools.t6.echo"]}"#));
+    let running = serve_client(ClientInfo::default(), child.take_transport())
+        .await
+        .expect("initialize handshake completes");
+
+    let result = running
+        .call_tool(CallToolRequestParams::new("tools.t6.echo"))
+        .await
+        .expect("visible-but-denied is an Ok(CallToolResult::error)");
+    assert_eq!(
+        result.is_error,
+        Some(true),
+        "is_error set for the spine-owned denial"
+    );
+    let text = result
+        .content
+        .iter()
+        .find_map(|c| c.as_text().map(|t| t.text.clone()))
+        .expect("text content");
+    assert_eq!(
+        text, "forbidden: Forbidden: fs/* tools require an active workspace with defined bounds",
+        "spine-owned denial names the honest spine code ahead of the message"
     );
 
     drop(running);
