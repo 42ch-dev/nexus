@@ -754,7 +754,8 @@ mod tests {
             None,
         )
         .await;
-        let server = start_embedded_mcp_server(state.clone(), true, VisibilityPolicy::absent()).expect("enabled server");
+        let server = start_embedded_mcp_server(state.clone(), true, VisibilityPolicy::absent())
+            .expect("enabled server");
 
         // One LIVE session before shutdown: its server task selects on the
         // same shutdown Notify and holds a budget slot until it fires.

@@ -255,29 +255,30 @@ fn validate_allowlist_entry(entry: &str) -> Result<(), ConnectConfigError> {
 
 /// Validate one operator MCP-visibility entry (V1.180 P1, RN-OGA-2).
 ///
-/// The catalog is heterogeneous — builtin `nexus.*` rows, peer
-/// `tools.<ns>.<id>` rows, and user-capability ids (e.g. `t6.wcap`) — so
-/// the strict `tools.*` allowlist grammar does not apply. The checks here
-/// only reject entries that can NEVER match a catalog id: wildcards,
-/// single-segment ids, and whitespace/control characters. Every rejection
-/// is a named `InvalidVisibility` error; an invalid entry fails the whole
-/// config load (never silently dropped). The reserved `tools.nexus.*`
-/// namespace IS allowed — visibility may hide daemon-owned tools (it
-/// never grants execute, so the allowlist's reserved-ns guard does not
-/// apply).
+/// The catalog is heterogeneous — builtin `nexus.*` rows, slash-separated
+/// builtin family ids (e.g. `fs/read_text_file`), peer `tools.<ns>.<id>`
+/// rows, and user-capability ids (e.g. `t6.wcap`) — so the strict
+/// `tools.*` allowlist grammar does not apply. The checks here only
+/// reject entries that can NEVER match a catalog id: wildcards and
+/// whitespace/control characters. Every rejection is a named
+/// `InvalidVisibility` error; an invalid entry fails the whole config
+/// load (never silently dropped). The reserved `tools.nexus.*` namespace
+/// IS allowed — visibility may hide daemon-owned tools (it never grants
+/// execute, so the allowlist's reserved-ns guard does not apply).
 fn validate_visibility_entry(entry: &str) -> Result<(), ConnectConfigError> {
-    if entry.contains('*') || entry.split('.').count() < 2 {
+    if entry.contains('*') {
         return Err(ConnectConfigError::InvalidVisibility {
             entry: entry.to_owned(),
-            reason: "umbrella entry — visibility must name exact catalog ids (dotted id, no wildcards)"
+            reason: "umbrella entry — visibility must name exact catalog ids (no wildcards)"
                 .to_owned(),
         });
     }
     if entry.chars().any(char::is_whitespace) || entry.chars().any(char::is_control) {
         return Err(ConnectConfigError::InvalidVisibility {
             entry: entry.to_owned(),
-            reason: "malformed tool id (whitespace / control characters can never match a catalog id)"
-                .to_owned(),
+            reason:
+                "malformed tool id (whitespace / control characters can never match a catalog id)"
+                    .to_owned(),
         });
     }
     Ok(())
@@ -741,12 +742,34 @@ mod tests {
             ]
         );
     }
+    #[test]
+    fn mcp_visibility_parses_slash_separated_ids() {
+        // QC W-001: slash-separated builtin family ids (`fs/*`) are exact
+        // catalog ids — the operator config surface must express them
+        // (the `fs/*` family is part of the real spine catalog).
+        let home = isolated_home();
+        fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
+        fs::write(
+            nexus_home_layout::connect_daemon_config_path(home.path()),
+            r#"{"mcp_visibility":["fs/read_text_file","fs/write_text_file"]}"#,
+        )
+        .expect("write");
+        let config = PeerToolsConfig::load(home.path()).expect("slash-separated visibility loads");
+        assert_eq!(
+            config.mcp_visibility,
+            vec![
+                "fs/read_text_file".to_owned(),
+                "fs/write_text_file".to_owned()
+            ]
+        );
+    }
 
     #[test]
     fn mcp_visibility_umbrella_rejected() {
-        // Wildcards and single-segment entries can never match a catalog
-        // id — fail-closed, never silently dropped.
-        for entry in ["tools", "tools.*", "tools.t4.*", "*"] {
+        // Wildcards can never match a catalog id — fail-closed, never
+        // silently dropped. (Single-segment ids like `tools` are accepted:
+        // they can never match a catalog row, so they simply hide nothing.)
+        for entry in ["tools.*", "tools.t4.*", "*"] {
             let home = isolated_home();
             fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
             fs::write(
@@ -763,7 +786,9 @@ mod tests {
                     );
                 }
                 other => {
-                    panic!("umbrella {entry:?} must fail load with InvalidVisibility, got {other:?}")
+                    panic!(
+                        "umbrella {entry:?} must fail load with InvalidVisibility, got {other:?}"
+                    )
                 }
             }
         }

@@ -47,13 +47,13 @@
 use std::future::Future;
 use std::sync::Arc;
 
+use crate::connect::visibility::VisibilityPolicy;
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, Content, ErrorCode, Implementation, ListToolsResult,
     PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
-use crate::connect::visibility::VisibilityPolicy;
 
 /// One catalog row from the spine catalog (wire shape mirrors
 /// `catalog-tool.schema.json`).

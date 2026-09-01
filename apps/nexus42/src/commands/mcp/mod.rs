@@ -34,8 +34,10 @@
 //! handler overrides exist beyond the tools family + server info.
 
 use std::future::Future;
+use std::path::Path;
 use std::time::Duration;
 
+use nexus_daemon_runtime::connect::config::ConnectConfigError;
 use nexus_daemon_runtime::connect::mcp_bridge::{
     is_unroutable, CatalogResponse, CatalogRow, McpBackend, McpBridgeHandler, ToolCallOutcome,
 };
@@ -145,22 +147,45 @@ async fn serve(config: &CliConfig) -> Result<()> {
 /// Model B reads at boot) and derives the per-consumer `tools/list`
 /// visibility subset. The child's consumer IS the parent that spawned it
 /// (one client per child), so child-local config is the per-consumer key.
-/// A malformed config is a hard child-start error (fail-closed parse,
-/// V1.176 pattern); a missing file yields the defaults ⇒ absent policy
-/// (byte-identical current behavior).
+/// A missing file yields the defaults ⇒ absent policy (byte-identical
+/// current behavior).
+///
+/// Error classes (QC W-002, parity with Model B's class-distinguishing
+/// boot path): an `InvalidVisibility` entry is a hard child-start error
+/// (fail-closed — a broken visibility config must not silently widen the
+/// surface to all-visible); every OTHER config error class (malformed
+/// JSON, unrelated semantic errors) warns and falls back to an absent
+/// policy (all visible — byte-identical current behavior), so an
+/// unrelated `daemon.json` typo cannot kill `nexus42 mcp serve` startup.
 ///
 /// # Errors
 ///
 /// Returns a `CliError::Config` when the daemon-local connect config
-/// exists but cannot be parsed.
+/// contains an invalid `mcp_visibility` entry.
 fn load_visibility_policy() -> Result<VisibilityPolicy> {
     let raw_home = dirs::home_dir().ok_or_else(|| {
         CliError::Other("cannot resolve home directory for MCP visibility config".to_owned())
     })?;
-    let config = PeerToolsConfig::load(&raw_home).map_err(|e| {
-        CliError::Config(format!("cannot load connect config for MCP visibility: {e}"))
-    })?;
-    Ok(VisibilityPolicy::from_visible(config.mcp_visibility))
+    load_visibility_policy_from(&raw_home)
+}
+
+/// Testable seam for [`load_visibility_policy`]: derive the policy from a
+/// specific home directory (the production wrapper resolves `$HOME` via
+/// `dirs::home_dir()`).
+fn load_visibility_policy_from(home: &Path) -> Result<VisibilityPolicy> {
+    match PeerToolsConfig::load(home) {
+        Ok(config) => Ok(VisibilityPolicy::from_visible(config.mcp_visibility)),
+        Err(ConnectConfigError::InvalidVisibility { entry, reason }) => Err(CliError::Config(
+            format!("invalid mcp_visibility entry {entry:?}: {reason}"),
+        )),
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "connect config load failed for MCP visibility; continuing with absent policy (all visible)"
+            );
+            Ok(VisibilityPolicy::absent())
+        }
+    }
 }
 
 /// Scope guard that aborts the catalog watcher task on EVERY exit path —
@@ -405,6 +430,43 @@ mod tests {
         // Other codes never classify unroutable regardless of wire code.
         assert!(!is_unroutable("invalid_input", None));
         assert!(!is_unroutable("internal", None));
+    }
+    #[test]
+    fn load_visibility_policy_error_classes_match_model_b() {
+        // QC W-002: the child hard-fails ONLY on `InvalidVisibility`
+        // (parity with Model B's class-distinguishing boot path); every
+        // OTHER config error class warns and falls back to an absent
+        // policy (all visible — byte-identical current behavior), so an
+        // unrelated `daemon.json` typo cannot kill `nexus42 mcp serve`
+        // startup.
+        let home = tempfile::tempdir().expect("tempdir");
+        let connect_dir = nexus_home_layout::connect_dir(home.path());
+        std::fs::create_dir_all(&connect_dir).expect("mkdir connect dir");
+
+        // InvalidVisibility → hard child-start error (CliError::Config).
+        std::fs::write(
+            nexus_home_layout::connect_daemon_config_path(home.path()),
+            r#"{"mcp_visibility":["tools.*"]}"#,
+        )
+        .expect("write daemon.json");
+        let err = load_visibility_policy_from(home.path()).expect_err("InvalidVisibility is hard");
+        assert!(
+            matches!(err, CliError::Config(_)),
+            "InvalidVisibility maps to CliError::Config, got {err:?}"
+        );
+
+        // Other error classes (malformed JSON) → warn + absent policy.
+        std::fs::write(
+            nexus_home_layout::connect_daemon_config_path(home.path()),
+            r#"{"port": "not-a-port"}"#,
+        )
+        .expect("write daemon.json");
+        let policy = load_visibility_policy_from(home.path()).expect("other classes warn + absent");
+        assert_eq!(
+            policy,
+            VisibilityPolicy::absent(),
+            "unrelated config errors must not kill the child (absent policy)"
+        );
     }
 
     #[test]

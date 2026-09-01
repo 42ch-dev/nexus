@@ -89,9 +89,10 @@ mod tests {
 
     #[test]
     fn present_policy_visits_only_the_subset() {
-        let policy = VisibilityPolicy::from_visible(
-            ["nexus.workspace.info".to_owned(), "tools.t5.echo".to_owned()],
-        );
+        let policy = VisibilityPolicy::from_visible([
+            "nexus.workspace.info".to_owned(),
+            "tools.t5.echo".to_owned(),
+        ]);
         assert!(policy.is_visible("nexus.workspace.info"));
         assert!(policy.is_visible("tools.t5.echo"));
         assert!(!policy.is_visible("tools.t6.echo"), "unlisted id hidden");

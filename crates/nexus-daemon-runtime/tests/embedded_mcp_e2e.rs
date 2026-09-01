@@ -86,7 +86,8 @@ async fn boot_server(
 async fn embedded_server_lists_and_calls_builtin_without_child_process() {
     let (_tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    let server = start_embedded_mcp_server(state, true, VisibilityPolicy::absent()).expect("enabled server");
+    let server =
+        start_embedded_mcp_server(state, true, VisibilityPolicy::absent()).expect("enabled server");
     let running = establish_session(&server).await;
     assert!(!running.is_closed(), "client alive after handshake");
 
@@ -130,7 +131,8 @@ async fn embedded_server_lists_and_calls_builtin_without_child_process() {
 async fn embedded_unroutable_id_is_method_not_found() {
     let (_tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    let server = start_embedded_mcp_server(state, true, VisibilityPolicy::absent()).expect("enabled server");
+    let server =
+        start_embedded_mcp_server(state, true, VisibilityPolicy::absent()).expect("enabled server");
     let running = establish_session(&server).await;
 
     // Same exact-id discriminator as the stdio path fixture
@@ -292,14 +294,20 @@ async fn embedded_visible_but_denied_call_is_typed_refusal() {
     // `Ok(CallToolResult::error)` naming the honest spine code ahead of
     // the message. Visibility never grants execute — the spine's denial
     // maps through the existing daemon error mapping, unchanged.
-    let (_tmp, nexus_home, db_path) = create_test_workspace().await;
-    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    let server = start_embedded_mcp_server(
-        state,
-        true,
-        VisibilityPolicy::from_visible(["fs/read_text_file".to_owned()]),
+    //
+    // QC W-001: the policy is configured through the OPERATOR config
+    // surface (`daemon.json` `mcp_visibility` with a slash-separated
+    // `fs/*` catalog id) — the boot path derives the policy from
+    // `PeerToolsConfig::load`, proving the config surface can express
+    // the `fs/*` family (no in-code policy construction).
+    let (_tmp, state) = boot_server(
+        Some(r#"{"embedded_mcp": true, "mcp_visibility": ["fs/read_text_file"]}"#),
+        false,
     )
-    .expect("enabled server");
+    .await;
+    let server = state
+        .embedded_mcp_server()
+        .expect("boot instance stored on WorkspaceState");
     let running = establish_session(&server).await;
 
     // The tool is listed (visible per policy)…

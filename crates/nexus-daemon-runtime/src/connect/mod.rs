@@ -21,9 +21,9 @@ pub mod mcp_bridge;
 pub mod mcp_embedded;
 pub mod session;
 pub mod table;
+pub mod visibility;
 pub mod watch;
 pub mod ws_transport;
-pub mod visibility;
 
 pub use accept::{
     daemon_manifest, spawn_accept_loop, start_peer_tools_lane, PeerResponderOptions,

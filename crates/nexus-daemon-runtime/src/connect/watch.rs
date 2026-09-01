@@ -248,6 +248,9 @@ pub fn reload_peer_config(
     if loaded.embedded_mcp != last_good.config.embedded_mcp {
         restart_required.push("embedded_mcp");
     }
+    if loaded.mcp_visibility != last_good.config.mcp_visibility {
+        restart_required.push("mcp_visibility");
+    }
     // Explicit field listing (no struct-update spread): adding a field to
     // `PeerToolsConfig` breaks this compile, forcing a conscious
     // boot-scoped vs admission-scoped decision (GC #7 discipline).
@@ -878,6 +881,33 @@ mod tests {
         assert_eq!(
             restart_required,
             vec!["port", "max_sessions", "embedded_mcp"]
+        );
+    }
+    #[test]
+    fn reload_visibility_only_edit_signals_restart_required() {
+        // QC F-002/S-001: `mcp_visibility` is boot-scoped — a
+        // visibility-only edit must produce a named `restart_required`
+        // signal (the live MCP policy stays boot-pinned until process
+        // restart), same class as the other boot-scoped fields. Without
+        // the signal an operator who narrows the surface on disk gets a
+        // silent reload while the old (wider) subset stays in force.
+        let home = isolated_home();
+        let last_good = boot_snapshot(PeerToolsConfig::default());
+        write_daemon_config(
+            home.path(),
+            r#"{"mcp_visibility":["nexus.workspace.info"]}"#,
+        );
+        let (snapshot, restart_required) =
+            reload_peer_config(home.path(), &last_good).expect("reload succeeds");
+        // The effective snapshot keeps the boot value (pinned, not adopted).
+        assert!(
+            snapshot.config.mcp_visibility.is_empty(),
+            "boot-scoped mcp_visibility stays pinned to the boot value"
+        );
+        assert_eq!(
+            restart_required,
+            vec!["mcp_visibility"],
+            "visibility-only edit names the restart-required field"
         );
     }
 
