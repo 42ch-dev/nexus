@@ -3999,6 +3999,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-provider-conformance"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "nexus-agent-host",
+ "tokio",
+]
+
+[[package]]
 name = "nexus-spoke-adapter"
 version = "0.1.0"
 dependencies = [
