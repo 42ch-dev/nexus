@@ -803,10 +803,9 @@ async fn visibility_policy_filters_list_and_short_circuits_hidden_call() {
         ErrorCode::METHOD_NOT_FOUND,
         "hidden tool refused with METHOD_NOT_FOUND"
     );
-    assert!(
-        data.message.contains("tool_not_authorized"),
-        "refusal names the visibility class: {}",
-        data.message
+    assert_eq!(
+        data.message, "tool_not_authorized: t6.wcap",
+        "refusal names the exact hidden tool id"
     );
 
     drop(running);

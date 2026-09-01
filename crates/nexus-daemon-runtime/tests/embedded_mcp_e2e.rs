@@ -210,9 +210,17 @@ async fn boot_path_invalid_visibility_refuses_embedded_start() {
     // construction refusal — the embedded server is NOT started (no
     // surface) rather than silently widening the surface to all-visible.
     // Other config error classes keep the W-002 warn-and-continue.
+    //
+    // Pin discipline: the `--embedded-mcp` CLI flag is ON so this test
+    // locks the T2 behavior. `PeerToolsConfig::load` fails with
+    // `InvalidVisibility` before the config key is usable, so a flag-off
+    // variant would be green on the T1 W-002 fallback too (flag off means
+    // no server either way). With the flag on, a W-002 revert
+    // (warn-and-continue all-visible) would create the server and this
+    // assertion fails — the pin locks the fail-closed refusal.
     let (_tmp, state) = boot_server(
         Some(r#"{"embedded_mcp": true, "mcp_visibility": ["tools.*"]}"#),
-        false,
+        true,
     )
     .await;
     assert!(
@@ -268,10 +276,9 @@ async fn embedded_visibility_policy_filters_list_and_short_circuits_hidden_call(
         ErrorCode::METHOD_NOT_FOUND,
         "hidden tool refused with METHOD_NOT_FOUND"
     );
-    assert!(
-        data.message.contains("tool_not_authorized"),
-        "refusal names the visibility class: {}",
-        data.message
+    assert_eq!(
+        data.message, "tool_not_authorized: nexus.workspace.info",
+        "refusal names the exact hidden tool id"
     );
     drop(running);
 }
