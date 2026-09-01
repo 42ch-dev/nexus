@@ -39,6 +39,7 @@ use std::time::Duration;
 use nexus_daemon_runtime::connect::mcp_bridge::{
     is_unroutable, CatalogResponse, CatalogRow, McpBackend, McpBridgeHandler, ToolCallOutcome,
 };
+use nexus_daemon_runtime::connect::{PeerToolsConfig, VisibilityPolicy};
 use rmcp::service::Peer;
 use rmcp::transport::stdio;
 use rmcp::{serve_server, ErrorData as McpError, RoleServer};
@@ -111,6 +112,7 @@ async fn serve(config: &CliConfig) -> Result<()> {
     )?;
     let handler = McpBridgeHandler {
         backend: DaemonClientBackend { client },
+        policy: load_visibility_policy()?,
     };
 
     let service = serve_server(handler, stdio())
@@ -134,6 +136,31 @@ async fn serve(config: &CliConfig) -> Result<()> {
         .await
         .map_err(|e| CliError::Other(format!("mcp server failed: {e}")))?;
     Ok(())
+}
+
+/// Load the child-local MCP visibility policy (V1.180 P1, RN-OGA-2).
+///
+/// The child reads the daemon-local connect config
+/// (`~/.nexus42/connect/daemon.json`, the same `PeerToolsConfig` surface
+/// Model B reads at boot) and derives the per-consumer `tools/list`
+/// visibility subset. The child's consumer IS the parent that spawned it
+/// (one client per child), so child-local config is the per-consumer key.
+/// A malformed config is a hard child-start error (fail-closed parse,
+/// V1.176 pattern); a missing file yields the defaults ⇒ absent policy
+/// (byte-identical current behavior).
+///
+/// # Errors
+///
+/// Returns a `CliError::Config` when the daemon-local connect config
+/// exists but cannot be parsed.
+fn load_visibility_policy() -> Result<VisibilityPolicy> {
+    let raw_home = dirs::home_dir().ok_or_else(|| {
+        CliError::Other("cannot resolve home directory for MCP visibility config".to_owned())
+    })?;
+    let config = PeerToolsConfig::load(&raw_home).map_err(|e| {
+        CliError::Config(format!("cannot load connect config for MCP visibility: {e}"))
+    })?;
+    Ok(VisibilityPolicy::from_visible(config.mcp_visibility))
 }
 
 /// Scope guard that aborts the catalog watcher task on EVERY exit path —
@@ -494,6 +521,7 @@ mod tests {
             backend: DaemonClientBackend {
                 client: DaemonClient::new("http://127.0.0.1:1"),
             },
+            policy: VisibilityPolicy::absent(),
         };
         let info = handler.get_info();
         let tools = info

@@ -74,6 +74,7 @@ use crate::api::handlers::tools::build_catalog;
 use crate::connect::mcp_bridge::{
     is_unroutable, CatalogRow, McpBackend, McpBridgeHandler, ToolCallOutcome,
 };
+use crate::connect::visibility::VisibilityPolicy;
 use crate::workspace::WorkspaceState;
 
 /// Compile-time bound on concurrent embedded MCP sessions (GC #8).
@@ -128,6 +129,11 @@ impl EmbeddedMcpError {
 #[derive(Clone)]
 pub struct EmbeddedMcpServer {
     state: WorkspaceState,
+    /// Per-consumer MCP tool visibility policy (V1.180 P1, RN-OGA-2),
+    /// fixed at server construction (daemon boot) and injected into every
+    /// session's `McpBridgeHandler`. Absent ⇒ byte-identical current
+    /// behavior.
+    policy: VisibilityPolicy,
 }
 
 /// One established embedded session: the client-side transport for
@@ -358,6 +364,7 @@ impl EmbeddedMcpServer {
             backend: EmbeddedMcpBackend {
                 state: self.state.clone(),
             },
+            policy: self.policy.clone(),
         };
         // The server task completes the initialize handshake when the
         // consumer runs `serve_client`, then keeps the service loop alive
@@ -418,6 +425,7 @@ impl EmbeddedMcpServer {
 pub fn start_embedded_mcp_server(
     state: WorkspaceState,
     embedded_enabled: bool,
+    policy: VisibilityPolicy,
 ) -> Option<EmbeddedMcpServer> {
     if !embedded_enabled {
         tracing::info!(
@@ -426,7 +434,7 @@ pub fn start_embedded_mcp_server(
         );
         return None;
     }
-    let server = EmbeddedMcpServer { state };
+    let server = EmbeddedMcpServer { state, policy };
     tracing::info!(
         max_sessions = EMBEDDED_MCP_MAX_SESSIONS,
         "embedded MCP server ready (Model B, in-process sink/stream; exempt from \
@@ -452,8 +460,11 @@ pub async fn boot_embedded_mcp_server(
     raw_home: &std::path::Path,
     cli_embedded_mcp: bool,
 ) {
-    let embedded_enabled = match crate::connect::PeerToolsConfig::load(raw_home) {
-        Ok(cfg) => cfg.embedded_mcp || cli_embedded_mcp,
+    let (embedded_enabled, visibility) = match crate::connect::PeerToolsConfig::load(raw_home) {
+        Ok(cfg) => (
+            cfg.embedded_mcp || cli_embedded_mcp,
+            VisibilityPolicy::from_visible(cfg.mcp_visibility),
+        ),
         Err(e) => {
             // QC W-002: the Err path keeps the CLI flag's enablement (GC #9
             // union — a malformed config must not silently disable a
@@ -473,10 +484,14 @@ pub async fn boot_embedded_mcp_server(
                      (no config key and no --embedded-mcp flag)"
                 );
             }
-            cli_embedded_mcp
+            // V1.180 P1 (RN-OGA-2): on a malformed config the visibility
+            // policy falls back to ABSENT (all visible — byte-identical
+            // current behavior): a config parse failure must not hide
+            // tools from consumers.
+            (cli_embedded_mcp, VisibilityPolicy::absent())
         }
     };
-    if let Some(server) = start_embedded_mcp_server(state.clone(), embedded_enabled) {
+    if let Some(server) = start_embedded_mcp_server(state.clone(), embedded_enabled, visibility) {
         state.set_embedded_mcp_server(Arc::new(server));
         tracing::info!(
             "embedded MCP server started (Model B, in-process sink/stream; boot instance \
@@ -523,6 +538,7 @@ mod tests {
             )
             .await,
             true,
+            VisibilityPolicy::absent(),
         )
         .expect("enabled server");
         let mut running = Vec::new();
@@ -580,6 +596,7 @@ mod tests {
         let server = start_embedded_mcp_server(
             WorkspaceState::new_for_testing(nexus_home, db_path, None).await,
             true,
+            VisibilityPolicy::absent(),
         )
         .expect("enabled server");
         let peer_sessions = PeerSessionManager::new();
@@ -695,7 +712,7 @@ mod tests {
             None,
         )
         .await;
-        let server = start_embedded_mcp_server(state.clone(), true).expect("enabled server");
+        let server = start_embedded_mcp_server(state.clone(), true, VisibilityPolicy::absent()).expect("enabled server");
 
         // One LIVE session before shutdown: its server task selects on the
         // same shutdown Notify and holds a budget slot until it fires.

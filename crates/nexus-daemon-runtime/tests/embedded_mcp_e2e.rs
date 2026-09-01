@@ -38,6 +38,7 @@
 use nexus_daemon_runtime::connect::mcp_embedded::{
     boot_embedded_mcp_server, start_embedded_mcp_server,
 };
+use nexus_daemon_runtime::connect::VisibilityPolicy;
 use nexus_daemon_runtime::test_utils::create_test_workspace;
 use nexus_daemon_runtime::workspace::WorkspaceState;
 use rmcp::model::{CallToolRequestParams, ClientInfo, ErrorCode};
@@ -85,7 +86,7 @@ async fn boot_server(
 async fn embedded_server_lists_and_calls_builtin_without_child_process() {
     let (_tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    let server = start_embedded_mcp_server(state, true).expect("enabled server");
+    let server = start_embedded_mcp_server(state, true, VisibilityPolicy::absent()).expect("enabled server");
     let running = establish_session(&server).await;
     assert!(!running.is_closed(), "client alive after handshake");
 
@@ -129,7 +130,7 @@ async fn embedded_server_lists_and_calls_builtin_without_child_process() {
 async fn embedded_unroutable_id_is_method_not_found() {
     let (_tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    let server = start_embedded_mcp_server(state, true).expect("enabled server");
+    let server = start_embedded_mcp_server(state, true, VisibilityPolicy::absent()).expect("enabled server");
     let running = establish_session(&server).await;
 
     // Same exact-id discriminator as the stdio path fixture
@@ -200,4 +201,59 @@ async fn boot_path_cli_flag_enables_and_no_enablement_leaves_no_server() {
         state2.embedded_mcp_server().is_none(),
         "no enablement ⇒ no boot server stored"
     );
+}
+
+#[tokio::test]
+#[serial]
+async fn embedded_visibility_policy_filters_list_and_short_circuits_hidden_call() {
+    // V1.180 P1 (RN-OGA-2): Model B respects the daemon-side visibility
+    // policy — `tools/list` is filtered to the configured subset and a
+    // hidden-tool `tools/call` is refused at the seam (never dispatched),
+    // while a visible tool still dispatches through the spine.
+    let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let server = start_embedded_mcp_server(
+        state,
+        true,
+        VisibilityPolicy::from_visible(["nexus.context.whoami".to_owned()]),
+    )
+    .expect("enabled server");
+    let running = establish_session(&server).await;
+
+    // tools/list is filtered to the visible subset.
+    let result = running.list_tools(None).await.expect("tools/list succeeds");
+    let listed: Vec<String> = result.tools.iter().map(|t| t.name.to_string()).collect();
+    assert_eq!(
+        listed,
+        vec!["nexus.context.whoami".to_owned()],
+        "only the visible tool is listed"
+    );
+
+    // A visible tool still dispatches through the spine.
+    let call = running
+        .call_tool(CallToolRequestParams::new("nexus.context.whoami"))
+        .await
+        .expect("visible tool call succeeds");
+    assert_ne!(call.is_error, Some(true), "visible call not an error");
+
+    // A hidden tool is refused at the seam with the `hidden_tool`
+    // discriminator (METHOD_NOT_FOUND), never dispatched.
+    let err = running
+        .call_tool(CallToolRequestParams::new("nexus.workspace.info"))
+        .await
+        .expect_err("hidden tool -> protocol error");
+    let ServiceError::McpError(data) = err else {
+        panic!("expected McpError, got {err:?}");
+    };
+    assert_eq!(
+        data.code,
+        ErrorCode::METHOD_NOT_FOUND,
+        "hidden tool refused with METHOD_NOT_FOUND"
+    );
+    assert!(
+        data.message.contains("hidden_tool"),
+        "refusal names the visibility class: {}",
+        data.message
+    );
+    drop(running);
 }

@@ -262,6 +262,12 @@ pub fn reload_peer_config(
         peer_ids: loaded.peer_ids,
         collision_policy: loaded.collision_policy,
         peer_priority: loaded.peer_priority,
+        // V1.180 P1 (RN-OGA-2): `mcp_visibility` is BOOT-SCOPED — the
+        // policy is read at bridge construction (Model A child startup,
+        // Model B daemon boot), not hot-reloaded (DigestPoll watch is a
+        // non-goal this task). The boot snapshot's subset stays in force
+        // for the process lifetime.
+        mcp_visibility: last_good.config.mcp_visibility.clone(),
     };
     Ok((
         PeerConfigSnapshot {
