@@ -39,19 +39,6 @@ pub async fn collect(stream: HostEventStream, config: ConformanceConfig) -> Coll
 
     let mut stream = stream;
     loop {
-        if events.len() >= config.max_events {
-            findings.push(ConformanceFinding {
-                invariant: InvariantId::BoundedStream,
-                message: format!(
-                    "event count {} reached the bound of {}",
-                    events.len(),
-                    config.max_events
-                ),
-                evidence: vec![events.len().saturating_sub(1)],
-            });
-            truncated = true;
-            break;
-        }
         let remaining = config.max_duration.saturating_sub(started_at.elapsed());
         match tokio::time::timeout(remaining, stream.next()).await {
             Err(_elapsed) => {
@@ -67,7 +54,22 @@ pub async fn collect(stream: HostEventStream, config: ConformanceConfig) -> Coll
                 break;
             }
             Ok(None) => break,
-            Ok(Some(Ok(event))) => events.push(event),
+            Ok(Some(Ok(event))) => {
+                if events.len() >= config.max_events {
+                    findings.push(ConformanceFinding {
+                        invariant: InvariantId::BoundedStream,
+                        message: format!(
+                            "event count {} reached the bound of {}",
+                            events.len(),
+                            config.max_events
+                        ),
+                        evidence: vec![events.len().saturating_sub(1)],
+                    });
+                    truncated = true;
+                    break;
+                }
+                events.push(event);
+            }
             Ok(Some(Err(error))) => {
                 stream_error = Some((events.len(), error.to_string()));
                 break;
@@ -125,6 +127,27 @@ mod tests {
             collected.findings
         );
         assert_eq!(collected.findings[0].invariant, InvariantId::BoundedStream);
+    }
+
+    #[tokio::test]
+    async fn exact_limit_stream_ending_naturally_is_conformant() {
+        let events = vec![op_started(), op_started(), op_started()];
+        let config = ConformanceConfig {
+            max_events: 3,
+            ..ConformanceConfig::default()
+        };
+        let collected = collect(stream_of(events), config).await;
+        assert_eq!(collected.events.len(), 3, "all events collected");
+        assert!(
+            !collected.truncated,
+            "stream ended naturally at exactly max_events"
+        );
+        assert!(
+            collected.findings.is_empty(),
+            "expected no findings: {:?}",
+            collected.findings
+        );
+        assert!(collected.stream_error.is_none());
     }
 
     #[tokio::test]
