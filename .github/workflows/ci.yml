@@ -196,6 +196,8 @@ jobs:
           workspaces: .
           cache-all-crates: false
           cache-on-failure: false
+      - name: Run clippy (connect-host)
+        run: cargo clippy -p nexus42 --features connect-host --all-targets -- -D warnings
   # v1.180 P0 (RN-OGA-1): provider stream conformance gate. Runs the neutral
   # runner + scripted fixtures against the REAL native adapters (claude-codes /
   # codex-codes / dsh-native) — a PR that drifts normalized stream lifecycle
