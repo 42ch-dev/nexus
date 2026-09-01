@@ -4064,6 +4064,7 @@ dependencies = [
  "dirs",
  "ed25519-dalek",
  "futures-util",
+ "graph-flow",
  "hex",
  "libp2p",
  "nexus-acp-host",

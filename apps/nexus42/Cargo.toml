@@ -165,6 +165,11 @@ nix = { version = "0.28", features = ["signal", "process"] }
 assert_cmd = "2.0"
 predicates = "3.1"
 wiremock = "0.6"
+# V1.180 P2 T1 (DR-06 ops E2E): the shared LiveDaemon fixture wires a real
+# orchestration engine (graph_flow::SessionStorage) and the preset-run e2e
+# inspects persisted session context — graph-flow 0.2.3 is already in the
+# lockfile via nexus-orchestration; dev-dep only (tests/common + tests/).
+graph-flow = "=0.2.3"
 # `serial_test` serializes tests that mutate process-global state (env vars).
 # Without it, the summary_config_from_env_* tests race on NEXUS_CONTEXT_MAX_FILE_SIZE
 # under cargo's default parallel runner and intermittently fail on CI.
