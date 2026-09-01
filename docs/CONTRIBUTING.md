@@ -12,8 +12,8 @@ Be respectful, constructive, and inclusive.
 
 ## Prerequisites
 
-- **Node.js** 20 or newer (`engines.node` in root `package.json`)
-- **pnpm** 8 or newer (CI uses pnpm 9)
+- **Node.js** 22 or newer (`engines.node` in root `package.json`)
+- **pnpm** 11 or newer (CI uses pnpm 11)
 - **Rust** stable with `clippy` (and `rustfmt` component on stable is not sufficient — see below)
 - **Pinned nightly `rustfmt`** — required so local formatting matches CI. Current pin: **`nightly-2026-06-26`** (see `FMT_NIGHTLY` in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)).
 

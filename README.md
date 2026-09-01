@@ -2,8 +2,8 @@
 
 [![CI](https://github.com/42ch-dev/nexus/actions/workflows/ci.yml/badge.svg)](https://github.com/42ch-dev/nexus/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg?logo=nodedotjs&logoColor=white)](package.json)
-[![pnpm](https://img.shields.io/badge/pnpm-%3E%3D8-F69220.svg?logo=pnpm&logoColor=white)](package.json)
+[![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg?logo=nodedotjs&logoColor=white)](package.json)
+[![pnpm](https://img.shields.io/badge/pnpm-%3E%3D11-F69220.svg?logo=pnpm&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-contracts-3178C6.svg?logo=typescript&logoColor=white)](packages/nexus-contracts)
 [![Rust](https://img.shields.io/badge/Rust-CLI%20%2B%20daemon-DEA584.svg?logo=rust&logoColor=black)](apps/nexus42)
 [![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB.svg?logo=tauri&logoColor=white)](apps/desktop)
@@ -41,7 +41,6 @@ Prerequisites and the full pre-PR checklist: [`docs/CONTRIBUTING.md`](docs/CONTR
 | Command | What it does |
 |---------|----------------|
 | `pnpm run dev` | CLI + web local dev — builds `nexus42`, ensures daemon on 127.0.0.1:8420 (starts detached if not), then Vite dev server in the foreground (desktop excluded; `scripts/dev-cli-web.sh`) |
-| `pnpm run dev:desktop` | Tauri desktop dev — starts web dev automatically via `tauri.conf.json` |
 | `pnpm run dev:desktop` | Tauri desktop dev — starts web dev automatically via `tauri.conf.json` |
 
 ### Build
