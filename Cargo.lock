@@ -3943,6 +3943,7 @@ dependencies = [
  "nexus-knowledge",
  "nexus-narrative",
  "nexus-spoke-adapter",
+ "regex",
  "serde",
  "serde_json",
  "tokio",

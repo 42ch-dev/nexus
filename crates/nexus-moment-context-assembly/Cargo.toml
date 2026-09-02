@@ -16,6 +16,7 @@ nexus-creator-memory = { path = "../nexus-creator-memory" }
 nexus-narrative = { path = "../nexus-narrative" }
 nexus-knowledge = { path = "../nexus-knowledge" }
 nexus-spoke-adapter = { path = "../nexus-spoke-adapter" }
+regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
