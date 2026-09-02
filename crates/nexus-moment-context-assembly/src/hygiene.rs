@@ -149,6 +149,10 @@ fn output_truncated_note() -> String {
     format!("hygiene output over {MAX_HYGIENE_OUTPUT_CHARS} chars truncated")
 }
 
+fn work_bound_note() -> String {
+    format!("hygiene replacement work over {MAX_HYGIENE_OUTPUT_CHARS} pieces truncated")
+}
+
 /// Apply one transform with a running output-char budget. Unmatched spans
 /// and replacements share [`append_capped`] so `out_chars` never exceeds
 /// [`MAX_HYGIENE_OUTPUT_CHARS`] (overflow-checking panic / release wrap).
@@ -177,22 +181,30 @@ fn apply_transform(text: &str, t: &HygieneTransform<'_>) -> TransformPass {
             note: Some("invalid regex".to_string()),
         };
     };
-    // F-2 / R2-1 / R2-5: expand the replacement template one piece at a
-    // time with a char budget. The template is never collected into a
-    // Vec — a persisted `$0`.repeat(N) string cannot allocate N pieces
-    // before the cap runs.
+    // F-2 / R2-1 / R2-5 / R2-7: expand the replacement template one piece
+    // at a time with a char budget and a shared piece-visit budget. Absent
+    // capture refs expand to empty and must still consume the visit budget
+    // or a `$9`.repeat(N) template over many matches is unbounded CPU.
     let mut applied = 0;
     let mut out = String::new();
     let mut out_chars = 0usize;
     let mut last_end = 0usize;
     let mut truncated = false;
+    let mut work_limited = false;
+    let mut piece_budget = MAX_HYGIENE_OUTPUT_CHARS;
     for caps in re.captures_iter(text) {
         let m = caps.get(0).expect("capture 0 always present");
         if !append_capped(&mut out, &mut out_chars, &text[last_end..m.start()]) {
             truncated = true;
             break;
         }
-        match expand_replacement(t.replacement, &caps, &mut out, &mut out_chars) {
+        match expand_replacement(
+            t.replacement,
+            &caps,
+            &mut out,
+            &mut out_chars,
+            &mut piece_budget,
+        ) {
             ExpansionOutcome::Applied => {
                 applied += 1;
                 last_end = m.end();
@@ -206,9 +218,13 @@ fn apply_transform(text: &str, t: &HygieneTransform<'_>) -> TransformPass {
                 truncated = true;
                 break;
             }
+            ExpansionOutcome::WorkLimit => {
+                work_limited = true;
+                break;
+            }
         }
     }
-    if applied == 0 && !truncated {
+    if applied == 0 && !truncated && !work_limited {
         return TransformPass {
             text: text.to_string(),
             applied: 0,
@@ -216,15 +232,28 @@ fn apply_transform(text: &str, t: &HygieneTransform<'_>) -> TransformPass {
             note: None,
         };
     }
+    if work_limited && applied == 0 && out.is_empty() {
+        return TransformPass {
+            text: text.to_string(),
+            applied: 0,
+            skipped: 1,
+            note: Some(work_bound_note()),
+        };
+    }
     if !truncated && !append_capped(&mut out, &mut out_chars, &text[last_end..]) {
         truncated = true;
     }
     let skipped = usize::from(applied == 0);
+    let note = if work_limited {
+        Some(work_bound_note())
+    } else {
+        truncated.then(output_truncated_note)
+    };
     TransformPass {
         text: out,
         applied,
         skipped,
-        note: truncated.then(output_truncated_note),
+        note,
     }
 }
 
@@ -378,8 +407,11 @@ enum ExpansionOutcome {
     /// The output budget ran out mid-expansion; a non-empty prefix of the
     /// expansion was appended (the match is still counted applied).
     Partial,
-    /// No budget remained for this expansion — nothing was appended.
+    /// No output-char budget remained for this expansion — nothing was appended.
     None,
+    /// The shared piece-visit budget for the transform was exhausted
+    /// (absent-group refs still count; they must not scan unbounded).
+    WorkLimit,
 }
 
 /// Append the budget-checked replacement expansion of `caps` from the
@@ -392,20 +424,26 @@ fn expand_replacement(
     caps: &regex::Captures<'_>,
     out: &mut String,
     out_chars: &mut usize,
+    piece_budget: &mut usize,
 ) -> ExpansionOutcome {
     let start = *out_chars;
     for piece in ReplacementCursor::new(template) {
+        if *piece_budget == 0 {
+            return if *out_chars > start {
+                ExpansionOutcome::Partial
+            } else {
+                ExpansionOutcome::WorkLimit
+            };
+        }
+        *piece_budget -= 1;
         let seg = match piece {
             ReplacementPiece::Literal(s) => s,
-            ReplacementPiece::Index(idx) => match caps.get(idx) {
-                Some(gm) => gm.as_str(),
-                None => continue,
-            },
-            ReplacementPiece::Name(name) => match caps.name(name) {
-                Some(gm) => gm.as_str(),
-                None => continue,
-            },
+            ReplacementPiece::Index(idx) => caps.get(idx).map_or("", |gm| gm.as_str()),
+            ReplacementPiece::Name(name) => caps.name(name).map_or("", |gm| gm.as_str()),
         };
+        if seg.is_empty() {
+            continue;
+        }
         if !append_capped(out, out_chars, seg) {
             return if *out_chars > start {
                 ExpansionOutcome::Partial
@@ -830,6 +868,31 @@ mod tests {
         assert_eq!(summary, "a-b tail$");
         assert_eq!(trace[0].applied, 1);
         assert!(trace[0].notes.is_empty());
+    }
+
+    #[test]
+    fn absent_group_refs_over_many_matches_honor_piece_budget() {
+        // R2-7: absent `$N` refs expand to empty and previously did not
+        // consume the output-char budget, so `$9`.repeat(N) over a long
+        // input scanned the whole template per match (unbounded CPU). The
+        // shared piece-visit budget stops the pass; the original text is
+        // kept when nothing was applied.
+        let input = "a".repeat(MAX_HYGIENE_INPUT_CHARS);
+        let template = "$9".repeat(100_000);
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            &input,
+            &serde_json::json!([{ "pattern": "a", "replacement": template }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        assert_eq!(summary, input);
+        assert_eq!(trace[0].applied, 0);
+        assert_eq!(trace[0].skipped, 1);
+        assert!(
+            trace[0].notes.iter().any(|n| n.contains("work over")),
+            "work bound must be noted; got {:#?}",
+            trace[0].notes
+        );
     }
 
     #[test]
