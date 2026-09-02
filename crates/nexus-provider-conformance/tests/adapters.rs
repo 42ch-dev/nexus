@@ -20,6 +20,10 @@
 //! `nexus-agent-host` `PROCESS_ENV_LOCK` (pub(crate), cross-crate
 //! inaccessible) is not needed here.
 
+// Test-only: adapters' execute/cancel return nested Results over async
+// streams; unwrapping in assertions keeps failure modes readable, and the
+// fixture harness (not product code) owns the panics. File-scoped to the
+// integration tests only.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::unwrap_in_result)]
 
 use std::collections::HashMap;
