@@ -1,0 +1,50 @@
+{
+  "name": "Farlandia Worldbook",
+  "entries": [
+    {
+      "uid": 0,
+      "key": "Mossford,town,moss",
+      "keysecondary": ["forest", "river"],
+      "comment": "Mossford",
+      "content": "Mossford is a town of mossy buildings and kind, wealthy people.",
+      "constant": false,
+      "selective": true,
+      "insertion_order": 100,
+      "enabled": true,
+      "position": "before_char",
+      "probability": 100,
+      "useProbability": true,
+      "depth": 4,
+      "scan_depth": 2,
+      "match_whole_words": true,
+      "case_sensitive": false,
+      "group": "locations",
+      "group_weight": 100,
+      "use_group_scoring": false,
+      "folder": "Locations",
+      "extensions": {}
+    },
+    {
+      "uid": 1,
+      "keys": ["slime", "slimes"],
+      "comment": "Slime",
+      "content": "Slimes are gelatinous enemies that bounce to move.",
+      "constant": true,
+      "insertion_order": 200,
+      "enabled": true,
+      "position": "after_char",
+      "sticky": 0,
+      "cooldown": 0,
+      "delay": 0,
+      "min_activations": 1,
+      "max_activations": 0,
+      "exclude_recursion": false,
+      "prevent_recursion": false,
+      "delay_until_recursion": false,
+      "automation_id": "",
+      "role": 0,
+      "extensions": {}
+    }
+  ],
+  "extensions": {}
+}
