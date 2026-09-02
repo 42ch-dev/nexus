@@ -25,6 +25,7 @@
 
 use serde_json::json;
 use serde_json::{Map, Value};
+use std::collections::HashSet;
 use thiserror::Error;
 
 /// Default pack title stamped into `modules.pack.title` when the lorebook
@@ -168,6 +169,7 @@ pub fn parse_st_lorebook(json: &Value) -> Result<ConversionOutcome, StLorebookEr
 
     let mut diagnostics = Vec::new();
     let mut pack_entries = Vec::new();
+    let mut seen_entry_ids = HashSet::new();
 
     for (idx, entry) in entries.iter().enumerate() {
         let Some(obj) = entry.as_object() else {
@@ -196,6 +198,10 @@ pub fn parse_st_lorebook(json: &Value) -> Result<ConversionOutcome, StLorebookEr
             }
         }
 
+        // W-2 / W-3: documented fields whose semantics the locked mapping
+        // cannot honor are flagged, never silently dropped.
+        diagnostics.extend(documented_field_diagnostics(obj, idx, &name));
+
         let content = obj.get("content").and_then(Value::as_str).unwrap_or("");
         let keys = activation_keys(obj);
         let constant = obj
@@ -203,9 +209,17 @@ pub fn parse_st_lorebook(json: &Value) -> Result<ConversionOutcome, StLorebookEr
             .and_then(Value::as_bool)
             .unwrap_or(false);
 
+        // W-4: derive a stable entry id from the lorebook-intrinsic `uid` /
+        // `id` fields (see `stable_entry_id`); the positional fallback is
+        // reported because it is unstable across lorebook edits.
+        let (entry_id, id_diagnostic) = stable_entry_id(obj, idx, &name, &mut seen_entry_ids);
+        if let Some(d) = id_diagnostic {
+            diagnostics.push(d);
+        }
+
         let mut entry_json = Map::new();
         entry_json.insert("schema_version".to_string(), json!(1));
-        entry_json.insert("entry_id".to_string(), json!(format!("kb_st_{idx}")));
+        entry_json.insert("entry_id".to_string(), json!(entry_id));
         entry_json.insert("entry_type".to_string(), json!("info_point"));
         entry_json.insert("canonical_name".to_string(), json!(name));
         entry_json.insert("status".to_string(), json!("confirmed"));
@@ -260,23 +274,28 @@ fn entry_name(obj: &Map<String, Value>, idx: usize) -> String {
 
 /// The first activation key of an entry, if any (`keys` array wins over the
 /// comma-separated `key` string — the activation engine's documented
-/// precedence).
+/// precedence). The `key` field is documented as either a comma-separated
+/// string or a list (array) of strings; both forms are accepted (W-3).
 fn first_key(obj: &Map<String, Value>) -> Option<String> {
     if let Some(keys) = obj.get("keys").and_then(Value::as_array) {
         if let Some(k) = keys.iter().find_map(Value::as_str) {
             return Some(k.to_string());
         }
     }
-    obj.get("key").and_then(Value::as_str).and_then(|s| {
-        s.split(',')
+    match obj.get("key") {
+        Some(Value::String(s)) => s
+            .split(',')
             .map(str::trim)
             .find(|k| !k.is_empty())
-            .map(str::to_string)
-    })
+            .map(str::to_string),
+        Some(Value::Array(items)) => items.iter().find_map(Value::as_str).map(str::to_string),
+        _ => None,
+    }
 }
 
 /// The activation keys of an entry: the `keys` array when present, else the
-/// comma-separated `key` string split on commas (documented plaintext mode).
+/// `key` field — a comma-separated string (documented plaintext mode) or a
+/// list of strings (documented list form, W-3).
 fn activation_keys(obj: &Map<String, Value>) -> Vec<String> {
     if let Some(keys) = obj.get("keys").and_then(Value::as_array) {
         return keys
@@ -285,16 +304,147 @@ fn activation_keys(obj: &Map<String, Value>) -> Vec<String> {
             .map(str::to_string)
             .collect();
     }
-    obj.get("key")
-        .and_then(Value::as_str)
-        .map(|s| {
-            s.split(',')
-                .map(str::trim)
-                .filter(|k| !k.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
+    match obj.get("key") {
+        Some(Value::String(s)) => s
+            .split(',')
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+            .map(str::to_string)
+            .collect(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Per-entry diagnostics for documented fields whose semantics the locked
+/// mapping cannot honor — the import continues, but the author is told.
+///
+/// - **W-2** `enabled: false`: nexus has no "disabled" state — `provisional`
+///   is still live for activation (the KB query excludes only
+///   deleted/merged/deprecated), and those terminal states carry different
+///   semantics (superseded/merged/removed). Importing the entry as live
+///   `confirmed` content would silently invert the author's intent, so a
+///   `Warning` fires; the content is preserved and the author can
+///   deprecate/delete it after import to keep it from firing.
+/// - **W-3** `key` in an unmappable shape: the field is documented as a
+///   comma-separated string or a list (array) of strings; anything else
+///   (and non-string array elements) is flagged instead of silently dropping
+///   activation keys.
+fn documented_field_diagnostics(
+    obj: &Map<String, Value>,
+    idx: usize,
+    name: &str,
+) -> Vec<ConversionDiagnostic> {
+    let mut diagnostics = Vec::new();
+    if obj.get("enabled").and_then(Value::as_bool) == Some(false) {
+        diagnostics.push(ConversionDiagnostic {
+            severity: DiagnosticSeverity::Warning,
+            entry_index: Some(idx),
+            entry_name: Some(name.to_string()),
+            field: Some("enabled".to_string()),
+            message: "enabled=false ignored: nexus has no disabled state; entry imports as live 'confirmed' content — deprecate/delete it after import to keep it from firing".to_string(),
+        });
+    }
+    if let Some(key_val) = obj.get("key") {
+        let mappable = match key_val {
+            Value::String(_) => true,
+            Value::Array(items) => items.iter().all(Value::is_string),
+            _ => false,
+        };
+        if !mappable {
+            diagnostics.push(ConversionDiagnostic {
+                severity: DiagnosticSeverity::Warning,
+                entry_index: Some(idx),
+                entry_name: Some(name.to_string()),
+                field: Some("key".to_string()),
+                message: "key must be a string or an array of strings; unmappable activation keys dropped".to_string(),
+            });
+        }
+    }
+    diagnostics
+}
+
+/// Derive a stable pack `entry_id` for an ST entry.
+///
+/// The documented `uid` (ST-internal unique id) and `id` (UUID) fields are
+/// stable across lorebook edits; the array position is not — an insert or
+/// reorder shifts every positional id, so a re-import under
+/// `ConflictPolicy::Overwrite` would overwrite the wrong entries and under
+/// `Skip` would silently drop edits (W-4). Prefer `uid`, then `id`; fall
+/// back to the positional `kb_st_{idx}` only when neither exists, and report
+/// the fallback (and any duplicate stable id within one lorebook) as a
+/// `Warning` diagnostic.
+fn stable_entry_id(
+    obj: &Map<String, Value>,
+    idx: usize,
+    name: &str,
+    seen: &mut HashSet<String>,
+) -> (String, Option<ConversionDiagnostic>) {
+    let candidate = obj
+        .get("uid")
+        .and_then(uid_id_suffix)
+        .or_else(|| obj.get("id").and_then(Value::as_str).map(id_suffix))
+        .filter(|s| !s.is_empty());
+    let Some(base) = candidate else {
+        let id = format!("kb_st_{idx}");
+        seen.insert(id.clone());
+        return (
+            id.clone(),
+            Some(ConversionDiagnostic {
+                severity: DiagnosticSeverity::Warning,
+                entry_index: Some(idx),
+                entry_name: Some(name.to_string()),
+                field: None,
+                message: format!(
+                    "no stable uid/id field; positional entry id '{id}' is unstable across lorebook edits"
+                ),
+            }),
+        );
+    };
+    let id = format!("kb_st_{base}");
+    if seen.insert(id.clone()) {
+        return (id, None);
+    }
+    // Duplicate stable id within one lorebook cannot anchor re-imports — the
+    // positional id is unique; report the collision instead of letting the
+    // import overwrite/skip the wrong entry.
+    let fallback = format!("kb_st_{idx}");
+    seen.insert(fallback.clone());
+    let diagnostic = ConversionDiagnostic {
+        severity: DiagnosticSeverity::Warning,
+        entry_index: Some(idx),
+        entry_name: Some(name.to_string()),
+        field: None,
+        message: format!(
+            "duplicate stable id '{id}' in lorebook; using positional id '{fallback}'"
+        ),
+    };
+    (fallback, Some(diagnostic))
+}
+
+/// Render the documented `uid` field as a stable id suffix: non-negative
+/// integers (the documented shape) and strings both work; other shapes are
+/// not stable identity and fall through to the next candidate.
+fn uid_id_suffix(v: &Value) -> Option<String> {
+    if let Some(n) = v.as_u64() {
+        return Some(n.to_string());
+    }
+    if let Some(n) = v.as_i64() {
+        return Some(n.to_string());
+    }
+    v.as_str().map(id_suffix)
+}
+
+/// Keep only id-safe characters (`[A-Za-z0-9_-]`) so arbitrary string
+/// uids/ids cannot inject path/URL-hostile characters into the entry id.
+fn id_suffix(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect()
 }
 
 #[cfg(test)]
@@ -442,6 +592,227 @@ mod tests {
         assert_eq!(
             outcome.pack_input["entries"][0]["canonical_name"],
             json!("harbor")
+        );
+    }
+
+    // ── W-2: `enabled: false` must not import silently as live content ──
+
+    #[test]
+    fn disabled_entry_emits_warning_diagnostic() {
+        // W-2: `enabled: false` (documented ST strategy field) is not part
+        // of the locked mapping — importing it as live `confirmed` content
+        // would silently invert the author's intent. A Warning diagnostic
+        // must fire.
+        let lorebook = json!({
+            "entries": [
+                { "uid": 0, "key": "dragon", "content": "Dragon lore.", "comment": "Dragon", "enabled": false }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        assert_eq!(outcome.diagnostics.len(), 1);
+        let d = &outcome.diagnostics[0];
+        assert_eq!(d.severity, DiagnosticSeverity::Warning);
+        assert_eq!(d.field.as_deref(), Some("enabled"));
+        assert_eq!(d.entry_index, Some(0));
+        assert!(d.message.contains("enabled=false"));
+        // The entry still imports (content preserved) as confirmed.
+        let entry = &outcome.pack_input["entries"][0];
+        assert_eq!(entry["status"], json!("confirmed"));
+        let parsed = parse_pack(&outcome.pack_input).expect("pack must parse");
+        assert_eq!(parsed.entries.len(), 1);
+    }
+
+    #[test]
+    fn enabled_true_produces_no_diagnostic() {
+        let lorebook = json!({
+            "entries": [
+                { "uid": 0, "key": "dragon", "content": "Dragon lore.", "comment": "Dragon", "enabled": true }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        assert!(outcome.diagnostics.is_empty());
+    }
+
+    // ── W-3: documented `key` array form must not silently drop ──
+
+    #[test]
+    fn key_array_form_maps_to_activation_keys() {
+        // W-3: the documented `key` list form (array of strings) must map to
+        // `modules.activation.keys` — no silent drop.
+        let lorebook = json!({
+            "entries": [
+                { "uid": 0, "key": ["dragon", "wyrm"], "content": "Dragon lore.", "comment": "Dragon" }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        assert!(
+            outcome.diagnostics.is_empty(),
+            "array key form is documented; got {outcome:#?}"
+        );
+        let entry = &outcome.pack_input["entries"][0];
+        assert_eq!(
+            entry["modules"]["activation"]["keys"],
+            json!(["dragon", "wyrm"])
+        );
+        let parsed = parse_pack(&outcome.pack_input).expect("pack must parse");
+        assert_eq!(parsed.entries.len(), 1);
+    }
+
+    #[test]
+    fn key_array_form_backfills_canonical_name() {
+        // W-3: `first_key` must also accept the array form (canonical-name
+        // backfill for empty comments).
+        let lorebook = json!({
+            "entries": [
+                { "uid": 0, "key": ["harbor", "port"], "content": "The harbor gates.", "comment": "" }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        assert_eq!(
+            outcome.pack_input["entries"][0]["canonical_name"],
+            json!("harbor")
+        );
+    }
+
+    #[test]
+    fn unmappable_key_emits_warning_diagnostic() {
+        // W-3: a `key` that is neither a string nor an array of strings is
+        // unmappable — a Warning diagnostic must fire instead of a silent
+        // drop.
+        let lorebook = json!({
+            "entries": [
+                { "uid": 0, "key": 42, "content": "Dragon lore.", "comment": "Dragon" }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        assert_eq!(outcome.diagnostics.len(), 1);
+        let d = &outcome.diagnostics[0];
+        assert_eq!(d.severity, DiagnosticSeverity::Warning);
+        assert_eq!(d.field.as_deref(), Some("key"));
+        assert!(d.message.contains("key"));
+        // No activation keys are emitted for the unmappable form.
+        let entry = &outcome.pack_input["entries"][0];
+        assert!(
+            entry.get("modules").is_none() || entry["modules"].get("activation").is_none(),
+            "unmappable key must not produce an activation module"
+        );
+    }
+
+    // ── W-4: stable entry ids across lorebook edits ──
+
+    #[test]
+    fn entry_ids_stable_across_middle_insertion() {
+        // W-4: entry ids derive from the stable `uid` field, not the array
+        // position — inserting an entry at the top must not shift the ids of
+        // the unchanged entries.
+        let original = json!({
+            "entries": [
+                { "uid": 0, "key": "alpha", "content": "A", "comment": "Alpha" },
+                { "uid": 1, "key": "beta", "content": "B", "comment": "Beta" }
+            ]
+        });
+        let edited = json!({
+            "entries": [
+                { "uid": 9, "key": "new", "content": "N", "comment": "New" },
+                { "uid": 0, "key": "alpha", "content": "A updated", "comment": "Alpha" },
+                { "uid": 1, "key": "beta", "content": "B", "comment": "Beta" }
+            ]
+        });
+        let original_out = parse_st_lorebook(&original).expect("must convert");
+        let edited_out = parse_st_lorebook(&edited).expect("must convert");
+        let ids = |out: &ConversionOutcome| -> Vec<String> {
+            out.pack_input["entries"]
+                .as_array()
+                .expect("entries array")
+                .iter()
+                .map(|e| e["entry_id"].as_str().expect("entry_id string").to_string())
+                .collect()
+        };
+        assert_eq!(ids(&original_out), vec!["kb_st_0", "kb_st_1"]);
+        assert_eq!(ids(&edited_out), vec!["kb_st_9", "kb_st_0", "kb_st_1"]);
+        // The id set of the unchanged entries is identical across the edit.
+        let unchanged: Vec<String> = ids(&edited_out)
+            .into_iter()
+            .filter(|id| id != "kb_st_9")
+            .collect();
+        assert_eq!(
+            unchanged,
+            vec!["kb_st_0".to_string(), "kb_st_1".to_string()]
+        );
+    }
+
+    #[test]
+    fn id_field_used_when_uid_absent() {
+        // W-4: the documented `id` (UUID) field is a stable identity when
+        // `uid` is absent.
+        let lorebook = json!({
+            "entries": [
+                { "id": "550e8400-e29b-41d4-a716-446655440000", "key": "alpha", "content": "A", "comment": "Alpha" }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        assert!(outcome.diagnostics.is_empty());
+        assert_eq!(
+            outcome.pack_input["entries"][0]["entry_id"],
+            json!("kb_st_550e8400-e29b-41d4-a716-446655440000")
+        );
+    }
+
+    #[test]
+    fn missing_uid_id_falls_back_to_positional_with_diagnostic() {
+        // W-4: without a stable uid/id, the positional id is used and
+        // reported — stability cannot be guaranteed.
+        let lorebook = json!({
+            "entries": [
+                { "key": "alpha", "content": "A", "comment": "Alpha" },
+                { "key": "beta", "content": "B", "comment": "Beta" }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        assert_eq!(
+            outcome
+                .diagnostics
+                .iter()
+                .filter(|d| d.message.contains("positional"))
+                .count(),
+            2,
+            "one diagnostic per positional fallback"
+        );
+        assert_eq!(
+            outcome.pack_input["entries"][0]["entry_id"],
+            json!("kb_st_0")
+        );
+        assert_eq!(
+            outcome.pack_input["entries"][1]["entry_id"],
+            json!("kb_st_1")
+        );
+    }
+
+    #[test]
+    fn duplicate_uid_falls_back_to_positional_with_diagnostic() {
+        // W-4: duplicate stable ids within one lorebook cannot anchor
+        // re-imports — the second entry falls back to a unique positional id
+        // and the collision is reported.
+        let lorebook = json!({
+            "entries": [
+                { "uid": 0, "key": "alpha", "content": "A", "comment": "Alpha" },
+                { "uid": 0, "key": "beta", "content": "B", "comment": "Beta" }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        let ids: Vec<&str> = outcome.pack_input["entries"]
+            .as_array()
+            .expect("entries array")
+            .iter()
+            .map(|e| e["entry_id"].as_str().expect("entry_id string"))
+            .collect();
+        assert_eq!(ids, vec!["kb_st_0", "kb_st_1"]);
+        assert!(
+            outcome
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("duplicate")),
+            "duplicate uid must be reported"
         );
     }
 }
