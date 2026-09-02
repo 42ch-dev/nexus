@@ -170,6 +170,9 @@ wiremock = "0.6"
 # inspects persisted session context — graph-flow 0.2.3 is already in the
 # lockfile via nexus-orchestration; dev-dep only (tests/common + tests/).
 graph-flow = "=0.2.3"
+# V1.180 P2 T2 (BL-04 resume E2E): the counting
+# DaemonToolDispatch impl needs the async-trait macro (dev-only, tests-only).
+async-trait = "0.1"
 # `serial_test` serializes tests that mutate process-global state (env vars).
 # Without it, the summary_config_from_env_* tests race on NEXUS_CONTEXT_MAX_FILE_SIZE
 # under cargo's default parallel runner and intermittently fail on CI.

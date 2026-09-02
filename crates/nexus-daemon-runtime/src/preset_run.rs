@@ -46,7 +46,7 @@ use std::time::Duration;
 
 use graph_flow::SessionStorage;
 use nexus_orchestration::engine::{
-    EngineSignal, OrchestrationEngine, SessionId, SessionStatus, StepOutcome,
+    EngineSignal, OrchestrationEngine, SessionId, SessionStatus, SessionSummary, StepOutcome,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -228,6 +228,169 @@ async fn persist_failure(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Restart resume (BL-04 slice, V1.180 P2 T2)
+// ---------------------------------------------------------------------------
+
+/// The resume re-drive's decision for one recovered session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResumeDecision {
+    /// Re-driven from the persisted position; `outcome` is the drive result.
+    ReDriven {
+        session_id: SessionId,
+        outcome: PresetRunOutcome,
+    },
+    /// Skipped: the persisted context carries a typed failure record
+    /// (`_run_status` / `_run_error`). `SqliteSessionStorage::save` never
+    /// updates the DB `status` column on conflict, so a typed-failed join
+    /// still reads `running` from storage — re-driving it would re-tick the
+    /// failed join. The context keys are the only reliable failure record.
+    SkippedTypedFailed { session_id: SessionId },
+    /// Skipped: not of the converge/merge chain class — the persisted
+    /// context carries no join-tracking key (`_converge_arrivals_*`,
+    /// `_merge_*`, `_join_wait_start_*`). Such sessions behave
+    /// byte-identically to pre-T2 boot (tracked-but-not-driven).
+    SkippedNotConvergeMergeClass { session_id: SessionId },
+    /// Skipped: no `FlowRunner` exists for the session (reconstruction
+    /// failed — e.g. a user preset that is not embedded). It stays
+    /// tracked-but-not-driven; driving it would fail with `NoGraphLoaded`
+    /// and the driver would mark it failed.
+    SkippedNoRunner { session_id: SessionId },
+    /// Skipped: the persisted session could not be loaded from storage.
+    SkippedUnreadable {
+        session_id: SessionId,
+        error: String,
+    },
+}
+
+/// Resume re-drive for recovered non-terminal sessions (BL-04 slice, T2).
+///
+/// After a daemon restart, boot recovery reconstructs `FlowRunner`s for
+/// recovered sessions (`recover_sessions` → `reconstruct_runner`). This
+/// function re-drives the converge/merge chain class of those sessions
+/// from their persisted position via [`drive_preset_run`] — completed
+/// edges are not re-executed because the persisted `current_task_id` +
+/// `context_json` have advanced past them.
+///
+/// # Scoped rule (declared)
+///
+/// A recovered session is re-driven only when ALL of:
+/// 1. It is non-terminal (the caller passes `list_non_terminal_sessions`
+///    output — boot already filters).
+/// 2. Its persisted context carries NO typed-failure record
+///    (`_run_status` / `_run_error`).
+/// 3. Its persisted context carries a join-tracking key
+///    (`_converge_arrivals_*`, `_merge_*`, or `_join_wait_start_*`) —
+///    written ONLY by merge/converge gate states. This is the
+///    converge/merge chain class: a `manual`/`llm_judge` wait (no join
+///    keys) is never auto-advanced, and sessions without the class behave
+///    byte-identically to pre-T2 boot.
+/// 4. A `FlowRunner` exists for the session (`engine.has_runner`) — the
+///    caller must have reconstructed it (boot does via `recover_sessions`).
+///
+/// # `_join_wait_start_*` across downtime (pinned)
+///
+/// The wait-start timestamp is a wall-clock value persisted in
+/// `context_json`; `join_timeout_tick` compares it against the wall clock
+/// on every re-step. Elapsed therefore INCLUDES downtime — a join whose
+/// deadline passed while the daemon was down fires on the first re-step
+/// (no re-baseline). Pinned by the restart-resume test.
+///
+/// # Caveat (declared in this slice's Done)
+///
+/// Runner reconstruction covers embedded presets only
+/// (`load_embedded_preset` in `recover_sessions`). A user-preset session
+/// that fails reconstruction stays tracked-but-not-driven (warn) — the
+/// resume re-drive skips it ([`ResumeDecision::SkippedNoRunner`]) and never
+/// marks it failed. Operator-visible resume for such sessions is the
+/// BL-04 remainder (out of scope).
+///
+/// The caller passes `config`; the resume posture requires
+/// `resume_waiting: true` so a parked join re-checks its `timeout_ms`
+/// deadline on the first re-step (the DR-06 recovery seam).
+pub async fn resume_driven_sessions(
+    engine: &dyn OrchestrationEngine,
+    storage: &Arc<dyn SessionStorage>,
+    summaries: &[SessionSummary],
+    config: &PresetRunConfig,
+    cancel: Option<&CancellationToken>,
+) -> Vec<ResumeDecision> {
+    let mut decisions = Vec::with_capacity(summaries.len());
+    for summary in summaries {
+        let session_id = summary.session_id.clone();
+
+        // Load the persisted session (position + context).
+        let session = match storage.get(&session_id.0).await {
+            Ok(Some(session)) => session,
+            Ok(None) => {
+                decisions.push(ResumeDecision::SkippedUnreadable {
+                    session_id,
+                    error: "session not found in storage".to_string(),
+                });
+                continue;
+            }
+            Err(e) => {
+                decisions.push(ResumeDecision::SkippedUnreadable {
+                    session_id,
+                    error: e.to_string(),
+                });
+                continue;
+            }
+        };
+
+        // 1. Typed-failure filter (T1 review constraint): never re-tick a
+        //    typed-failed join. The DB `status` column stays `running`
+        //    after a typed failure (save ON CONFLICT does not update it),
+        //    so the context keys are the only reliable failure record.
+        let run_status: Option<String> = session.context.get("_run_status").await;
+        let run_error: Option<String> = session.context.get("_run_error").await;
+        if run_status.is_some() || run_error.is_some() {
+            decisions.push(ResumeDecision::SkippedTypedFailed { session_id });
+            continue;
+        }
+
+        // 2. Converge/merge chain class filter (no-checkpoint default
+        //    equivalence): only sessions provably inside a converge/merge
+        //    chain are re-driven.
+        if !is_converge_merge_chain(&session.context) {
+            decisions.push(ResumeDecision::SkippedNotConvergeMergeClass { session_id });
+            continue;
+        }
+
+        // 3. Runner-existence filter: a session whose runner failed
+        //    reconstruction stays tracked-but-not-driven.
+        if !engine.has_runner(&session_id).await {
+            decisions.push(ResumeDecision::SkippedNoRunner { session_id });
+            continue;
+        }
+
+        // 4. Re-drive from the persisted position.
+        let outcome = drive_preset_run(engine, Some(storage), &session_id, config, cancel).await;
+        decisions.push(ResumeDecision::ReDriven {
+            session_id,
+            outcome,
+        });
+    }
+    decisions
+}
+
+/// True when the context carries a join-tracking key — written only by
+/// merge/converge gate states (`_converge_arrivals_<id>`, `_merge_<id>`,
+/// `_join_wait_start_<id>`).
+fn is_converge_merge_chain(context: &graph_flow::Context) -> bool {
+    let Ok(serde_json::Value::Object(root)) = serde_json::to_value(context) else {
+        return false;
+    };
+    let Some(serde_json::Value::Object(data)) = root.get("data") else {
+        return false;
+    };
+    data.keys().any(|k| {
+        k.starts_with("_converge_arrivals_")
+            || k.starts_with("_merge_")
+            || k.starts_with("_join_wait_start_")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,6 +408,9 @@ mod tests {
         script: parking_lot::Mutex<VecDeque<Result<StepOutcome, EngineError>>>,
         status: parking_lot::Mutex<SessionStatus>,
         signals: parking_lot::Mutex<Vec<EngineSignal>>,
+        /// `has_runner` answer (default `true`; set `false` to exercise the
+        /// resume no-runner skip).
+        runner_present: parking_lot::Mutex<bool>,
     }
 
     impl ScriptedEngine {
@@ -253,6 +419,7 @@ mod tests {
                 script: parking_lot::Mutex::new(VecDeque::from(script)),
                 status: parking_lot::Mutex::new(SessionStatus::Running),
                 signals: parking_lot::Mutex::new(Vec::new()),
+                runner_present: parking_lot::Mutex::new(true),
             }
         }
     }
@@ -283,6 +450,10 @@ mod tests {
 
         async fn get_status(&self, _session_id: &SessionId) -> Result<SessionStatus, EngineError> {
             Ok(self.status.lock().clone())
+        }
+
+        async fn has_runner(&self, _session_id: &SessionId) -> bool {
+            *self.runner_present.lock()
         }
 
         async fn signal(
@@ -518,6 +689,207 @@ mod tests {
             outcome,
             PresetRunOutcome::Cancelled { steps: 0 },
             "a session already flipped to Failed (cancel signal / prior failure) is not stepped"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Resume re-drive (BL-04 slice, T2)
+    // -----------------------------------------------------------------------
+
+    /// Seed a persisted session with the given context keys.
+    async fn seed_session(
+        storage: &Arc<dyn SessionStorage>,
+        id: &str,
+        current_task: &str,
+        keys: &[(&str, serde_json::Value)],
+    ) {
+        let session = graph_flow::Session::new_from_task(id.to_string(), current_task);
+        for (k, v) in keys {
+            session.context.set(*k, v.clone()).await;
+        }
+        storage.save(session).await.unwrap();
+    }
+
+    fn summary(id: &str) -> SessionSummary {
+        SessionSummary {
+            session_id: SessionId(id.to_string()),
+            creator_id: "test-creator".to_string(),
+            preset_id: "e2e-converge".to_string(),
+            status: SessionStatus::WaitingForInput,
+            current_task_id: Some("join".to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn resume_skips_typed_failed_session() {
+        let storage: Arc<dyn SessionStorage> = Arc::new(graph_flow::InMemorySessionStorage::new());
+        // A typed-failed join: DB status would read `running` (save ON
+        // CONFLICT never updates status), but the context carries the
+        // failure record — the resume must NOT re-tick it.
+        seed_session(
+            &storage,
+            "test:typed-failed",
+            "join",
+            &[
+                ("_converge_arrivals_join", serde_json::json!(["branch_a"])),
+                ("_join_wait_start_join", serde_json::json!(1000u64)),
+                ("_run_status", serde_json::json!("failed")),
+                (
+                    "_run_error",
+                    serde_json::json!("converge_timeout: gate=converge"),
+                ),
+            ],
+        )
+        .await;
+        let engine =
+            ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
+        let decisions = resume_driven_sessions(
+            &engine,
+            &storage,
+            &[summary("test:typed-failed")],
+            &PresetRunConfig::default(),
+            None,
+        )
+        .await;
+        assert_eq!(
+            decisions,
+            vec![ResumeDecision::SkippedTypedFailed {
+                session_id: SessionId("test:typed-failed".to_string())
+            }],
+            "a typed-failed session must never be re-driven"
+        );
+        assert!(
+            engine.script.lock().len() == 1,
+            "no run_step may be consumed for a typed-failed session"
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_skips_non_converge_merge_class_session() {
+        let storage: Arc<dyn SessionStorage> = Arc::new(graph_flow::InMemorySessionStorage::new());
+        // No join-tracking keys: not of the converge/merge chain class —
+        // byte-identical to pre-T2 boot (tracked-but-not-driven).
+        seed_session(&storage, "test:linear", "mid", &[]).await;
+        let engine =
+            ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
+        let decisions = resume_driven_sessions(
+            &engine,
+            &storage,
+            &[summary("test:linear")],
+            &PresetRunConfig::default(),
+            None,
+        )
+        .await;
+        assert_eq!(
+            decisions,
+            vec![ResumeDecision::SkippedNotConvergeMergeClass {
+                session_id: SessionId("test:linear".to_string())
+            }],
+            "a session without join-tracking keys must not be re-driven"
+        );
+        assert!(
+            engine.script.lock().len() == 1,
+            "no run_step may be consumed for a non-class session"
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_skips_session_without_runner() {
+        let storage: Arc<dyn SessionStorage> = Arc::new(graph_flow::InMemorySessionStorage::new());
+        seed_session(
+            &storage,
+            "test:no-runner",
+            "join",
+            &[("_join_wait_start_join", serde_json::json!(1000u64))],
+        )
+        .await;
+        let engine =
+            ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
+        *engine.runner_present.lock() = false;
+        let decisions = resume_driven_sessions(
+            &engine,
+            &storage,
+            &[summary("test:no-runner")],
+            &PresetRunConfig::default(),
+            None,
+        )
+        .await;
+        assert_eq!(
+            decisions,
+            vec![ResumeDecision::SkippedNoRunner {
+                session_id: SessionId("test:no-runner".to_string())
+            }],
+            "a session whose runner failed reconstruction stays tracked-but-not-driven"
+        );
+        assert!(
+            engine.script.lock().len() == 1,
+            "no run_step may be consumed for a runner-less session"
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_skips_unreadable_session() {
+        let storage: Arc<dyn SessionStorage> = Arc::new(graph_flow::InMemorySessionStorage::new());
+        let engine =
+            ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
+        let decisions = resume_driven_sessions(
+            &engine,
+            &storage,
+            &[summary("test:missing")],
+            &PresetRunConfig::default(),
+            None,
+        )
+        .await;
+        assert_eq!(decisions.len(), 1);
+        match &decisions[0] {
+            ResumeDecision::SkippedUnreadable { session_id, .. } => {
+                assert_eq!(session_id, &SessionId("test:missing".to_string()));
+            }
+            other => panic!("expected SkippedUnreadable, got {other:?}"),
+        }
+        assert!(
+            engine.script.lock().len() == 1,
+            "no run_step may be consumed for an unreadable session"
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_re_drives_converge_merge_chain_session() {
+        let storage: Arc<dyn SessionStorage> = Arc::new(graph_flow::InMemorySessionStorage::new());
+        // Parked at the join with the arrival set + wait-start persisted:
+        // the resume re-drives from THIS position (completed edges are not
+        // re-executed because current_task_id has advanced past them).
+        seed_session(
+            &storage,
+            "test:parked-join",
+            "join",
+            &[
+                ("_converge_arrivals_join", serde_json::json!(["branch_a"])),
+                ("_join_wait_start_join", serde_json::json!(1000u64)),
+            ],
+        )
+        .await;
+        let engine =
+            ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
+        let config = PresetRunConfig {
+            resume_waiting: true,
+            ..PresetRunConfig::default()
+        };
+        let decisions = resume_driven_sessions(
+            &engine,
+            &storage,
+            &[summary("test:parked-join")],
+            &config,
+            None,
+        )
+        .await;
+        assert_eq!(
+            decisions,
+            vec![ResumeDecision::ReDriven {
+                session_id: SessionId("test:parked-join".to_string()),
+                outcome: PresetRunOutcome::Completed { steps: 1 },
+            }],
+            "a parked converge/merge chain session is re-driven from its persisted position"
         );
     }
 }
