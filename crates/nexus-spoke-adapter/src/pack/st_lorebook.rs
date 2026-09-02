@@ -54,9 +54,9 @@ const DEFAULT_PACK_CREATOR: &str = "nexus42";
 ///
 /// Of the documented fields, the locked mapping honors `key`/`keys`,
 /// `content`, `comment`, `constant`, `uid`/`id` (see the mapping table) and
-/// reports `enabled`/unmappable `key` shapes (W-2/W-3). Mapped booleans
-/// (`constant`, `enabled`) in an unsupported JSON shape also fire a
-/// `Warning` — they must not silently default (R2-3). The remaining
+/// reports `enabled`/unmappable `key` shapes (W-2/W-3). Mapped fields
+/// (`constant`, `enabled`, `content`) in an unsupported JSON shape also
+/// fire a `Warning` — they must not silently default (R2-3). The remaining
 /// documented-but-unmapped fields split into two classes (F-3/F-4):
 ///
 /// - **Behavior-affecting** (activation/placement semantics the pack shape
@@ -231,14 +231,18 @@ pub fn parse_st_lorebook(json: &Value) -> Result<ConversionOutcome, StLorebookEr
         // cannot honor are flagged, never silently dropped.
         diagnostics.extend(documented_field_diagnostics(obj, idx, &name));
 
-        let content = obj.get("content").and_then(Value::as_str).unwrap_or("");
+        // Mapped `content` in an unsupported shape warns (see `entry_content`).
+        let (content, content_diag) = entry_content(obj, idx, &name);
+        if let Some(d) = content_diag {
+            diagnostics.push(d);
+        }
         let keys = activation_keys(obj);
         let (constant, constant_diag) = match obj.get("constant") {
             None => (false, None),
             Some(Value::Bool(b)) => (*b, None),
             Some(v) => (
                 false,
-                Some(mapped_bool_shape_diagnostic(
+                Some(mapped_field_shape_diagnostic(
                     "constant",
                     v,
                     idx,
@@ -312,6 +316,33 @@ fn entry_name(obj: &Map<String, Value>, idx: usize) -> String {
         .map(str::to_string)
         .or_else(|| first_key(obj))
         .unwrap_or_else(|| format!("entry-{idx}"))
+}
+
+/// The entry `content` mapped to `body.summary`: the documented string when
+/// present. A present-but-non-string `content` (number, object, array,
+/// bool) fires a shape-mismatch Warning — the author's text is lost, so the
+/// empty-summary import must not be silent (R2-3-style guard for the mapped
+/// string field). Absent `content` is the documented-optional case and stays
+/// diagnostic-free.
+fn entry_content<'a>(
+    obj: &'a Map<String, Value>,
+    idx: usize,
+    name: &'a str,
+) -> (&'a str, Option<ConversionDiagnostic>) {
+    match obj.get("content") {
+        None => ("", None),
+        Some(Value::String(s)) => (s.as_str(), None),
+        Some(v) => (
+            "",
+            Some(mapped_field_shape_diagnostic(
+                "content",
+                v,
+                idx,
+                name,
+                "imported with empty summary",
+            )),
+        ),
+    }
 }
 
 /// The first activation key of an entry, if any (`keys` array wins over the
@@ -674,7 +705,7 @@ fn documented_field_diagnostics(
         }
         Some(Value::Bool(true)) | None => {}
         Some(v) => {
-            diagnostics.push(mapped_bool_shape_diagnostic(
+            diagnostics.push(mapped_field_shape_diagnostic(
                 "enabled",
                 v,
                 idx,
@@ -745,10 +776,10 @@ fn keys_field_mappable(v: &Value) -> bool {
     }
 }
 
-/// Shape-mismatch diagnostic for a mapped boolean (`constant`, `enabled`).
-/// The documented boolean is used as-is; any other JSON shape must not
-/// silently default (R2-3).
-fn mapped_bool_shape_diagnostic(
+/// Shape-mismatch diagnostic for a mapped field (`constant`, `enabled`,
+/// `content`). The documented value is used as-is; any other JSON shape
+/// must not silently default (R2-3).
+fn mapped_field_shape_diagnostic(
     field: &str,
     v: &Value,
     idx: usize,
@@ -1177,6 +1208,57 @@ mod tests {
         assert!(d.message.contains("string"));
         let entry = &outcome.pack_input["entries"][0];
         assert_eq!(entry["status"], json!("confirmed"));
+        let parsed = parse_pack(&outcome.pack_input).expect("pack must parse");
+        assert_eq!(parsed.entries.len(), 1);
+    }
+
+    // ── Mapped `content` in an unsupported shape must not silently
+    //    import as an empty summary (R2-3-style guard for the mapped
+    //    string field) ──
+
+    #[test]
+    fn malformed_content_emits_warning_and_imports_empty_summary() {
+        // A present-but-non-string `content` (number, object, array, bool)
+        // loses the author's text — the drop must not be silent. Each
+        // unsupported shape fires a Warning naming the shape; the entry
+        // still imports with an empty summary.
+        for (content, shape) in [(json!(42), "integer"), (json!({}), "object")] {
+            let lorebook = json!({
+                "entries": [
+                    { "uid": 0, "key": "dragon", "content": content, "comment": "Dragon" }
+                ]
+            });
+            let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+            assert_eq!(outcome.diagnostics.len(), 1);
+            let d = &outcome.diagnostics[0];
+            assert_eq!(d.severity, DiagnosticSeverity::Warning);
+            assert_eq!(d.field.as_deref(), Some("content"));
+            assert!(d.message.contains("unsupported JSON shape"));
+            assert!(d.message.contains(shape));
+            assert!(d.message.contains("imported with empty summary"));
+            let entry = &outcome.pack_input["entries"][0];
+            assert_eq!(entry["body"]["summary"], json!(""));
+            let parsed = parse_pack(&outcome.pack_input).expect("pack must parse");
+            assert_eq!(parsed.entries.len(), 1);
+        }
+    }
+
+    #[test]
+    fn absent_content_imports_empty_summary_without_diagnostic() {
+        // Absent `content` is the documented-optional case: empty summary,
+        // no diagnostic.
+        let lorebook = json!({
+            "entries": [
+                { "uid": 0, "key": "dragon", "comment": "Dragon" }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        assert!(
+            outcome.diagnostics.is_empty(),
+            "absent content must not diagnose; got {outcome:#?}"
+        );
+        let entry = &outcome.pack_input["entries"][0];
+        assert_eq!(entry["body"]["summary"], json!(""));
         let parsed = parse_pack(&outcome.pack_input).expect("pack must parse");
         assert_eq!(parsed.entries.len(), 1);
     }
