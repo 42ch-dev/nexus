@@ -377,7 +377,9 @@ fn documented_field_diagnostics(
 /// `Skip` would silently drop edits (W-4). Prefer `uid`, then `id`; fall
 /// back to the positional `kb_st_{idx}` only when neither exists, and report
 /// the fallback (and any duplicate stable id within one lorebook) as a
-/// `Warning` diagnostic.
+/// `Warning` diagnostic. Fallback ids are claimed uniquely: a positional id
+/// that collides with an already-claimed id is suffixed (`_1`, `_2`, …) so no
+/// two entries ever share an `entry_id` (W-4a).
 fn stable_entry_id(
     obj: &Map<String, Value>,
     idx: usize,
@@ -390,8 +392,7 @@ fn stable_entry_id(
         .or_else(|| obj.get("id").and_then(Value::as_str).map(id_suffix))
         .filter(|s| !s.is_empty());
     let Some(base) = candidate else {
-        let id = format!("kb_st_{idx}");
-        seen.insert(id.clone());
+        let id = claim_unique_id(format!("kb_st_{idx}"), seen);
         return (
             id.clone(),
             Some(ConversionDiagnostic {
@@ -409,21 +410,36 @@ fn stable_entry_id(
     if seen.insert(id.clone()) {
         return (id, None);
     }
-    // Duplicate stable id within one lorebook cannot anchor re-imports — the
-    // positional id is unique; report the collision instead of letting the
-    // import overwrite/skip the wrong entry.
-    let fallback = format!("kb_st_{idx}");
-    seen.insert(fallback.clone());
+    // Duplicate stable id within one lorebook cannot anchor re-imports —
+    // fall back to a uniquely claimed positional id; report the collision
+    // instead of letting the import overwrite/skip the wrong entry.
+    let fallback = claim_unique_id(format!("kb_st_{idx}"), seen);
     let diagnostic = ConversionDiagnostic {
         severity: DiagnosticSeverity::Warning,
         entry_index: Some(idx),
         entry_name: Some(name.to_string()),
         field: None,
-        message: format!(
-            "duplicate stable id '{id}' in lorebook; using positional id '{fallback}'"
-        ),
+        message: format!("duplicate stable id '{id}' in lorebook; using unique id '{fallback}'"),
     };
     (fallback, Some(diagnostic))
+}
+
+/// Claim `base` in the seen set, appending `_1`, `_2`, … until a unique id
+/// is found. Every fallback id must stay unique within the lorebook — a
+/// positional fallback can otherwise collide with an id already claimed by
+/// a stable uid/id, silently producing a duplicate overwrite anchor (W-4a).
+fn claim_unique_id(base: String, seen: &mut HashSet<String>) -> String {
+    if seen.insert(base.clone()) {
+        return base;
+    }
+    let mut n = 1usize;
+    loop {
+        let candidate = format!("{base}_{n}");
+        if seen.insert(candidate.clone()) {
+            return candidate;
+        }
+        n += 1;
+    }
 }
 
 /// Render the documented `uid` field as a stable id suffix: non-negative
@@ -814,5 +830,75 @@ mod tests {
                 .any(|d| d.message.contains("duplicate")),
             "duplicate uid must be reported"
         );
+    }
+
+    // ── W-4a: fallback ids must claim uniquely, never collide ──
+
+    #[test]
+    fn positional_fallback_colliding_with_stable_id_is_suffixed_unique() {
+        // W-4a: the positional fallback must not collide with an id already
+        // claimed by a stable uid — entry0 claims `kb_st_1` via uid 1, so
+        // entry1's positional fallback (idx 1) must suffix to a distinct id
+        // instead of silently sharing the overwrite anchor.
+        let lorebook = json!({
+            "entries": [
+                { "uid": 1, "key": "alpha", "content": "A", "comment": "Alpha" },
+                { "key": "beta", "content": "B", "comment": "Beta" }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        let ids: Vec<&str> = outcome.pack_input["entries"]
+            .as_array()
+            .expect("entries array")
+            .iter()
+            .map(|e| e["entry_id"].as_str().expect("entry_id string"))
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["kb_st_1", "kb_st_1_1"],
+            "fallback id must be unique"
+        );
+        // The collided fallback is reported as a Warning (duplicate-case
+        // semantics) and both entries remain importable.
+        assert!(
+            outcome
+                .diagnostics
+                .iter()
+                .any(|d| d.severity == DiagnosticSeverity::Warning && d.entry_index == Some(1)),
+            "collided positional fallback must be reported"
+        );
+        let parsed = parse_pack(&outcome.pack_input).expect("converted pack must parse");
+        assert_eq!(parsed.entries.len(), 2);
+    }
+
+    #[test]
+    fn duplicate_uid_fallback_colliding_with_stable_id_is_suffixed_unique() {
+        // W-4a: the duplicate-stable-id fallback must also claim uniquely —
+        // entry0 claims `kb_st_1` via uid 1 and entry1 (duplicate uid 1 at
+        // idx 1) would fall back to the same positional id; it must suffix
+        // instead of duplicating the anchor.
+        let lorebook = json!({
+            "entries": [
+                { "uid": 1, "key": "alpha", "content": "A", "comment": "Alpha" },
+                { "uid": 1, "key": "beta", "content": "B", "comment": "Beta" }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        let ids: Vec<&str> = outcome.pack_input["entries"]
+            .as_array()
+            .expect("entries array")
+            .iter()
+            .map(|e| e["entry_id"].as_str().expect("entry_id string"))
+            .collect();
+        assert_eq!(ids, vec!["kb_st_1", "kb_st_1_1"]);
+        assert!(
+            outcome
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("duplicate")),
+            "duplicate uid must still be reported"
+        );
+        let parsed = parse_pack(&outcome.pack_input).expect("converted pack must parse");
+        assert_eq!(parsed.entries.len(), 2);
     }
 }
