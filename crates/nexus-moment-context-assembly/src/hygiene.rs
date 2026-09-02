@@ -48,7 +48,12 @@
 //! by a literal tail), the match degrades to "left as-is" (R10-1): the
 //! original matched text is re-emitted verbatim by the tail append instead
 //! of being consumed and lost — the authored literal tail is beyond the
-//! bounded budget, and the work-limit note still fires.
+//! bounded budget, and the work-limit note still fires. The same holds at
+//! the exact boundary (R11-1): a template ending precisely at 65,536
+//! absent-group refs consumes the entire piece budget with nothing emitted,
+//! so it reports [`ExpansionOutcome::WorkLimit`] too and the match is kept
+//! verbatim — never a silent zero-output deletion that starves every later
+//! match.
 //!
 //! [`WorldKbBody`]: nexus_knowledge::world_kb::knowledge_entry::WorldKbBody
 
@@ -586,7 +591,7 @@ enum ExpansionOutcome {
     /// The shared piece-visit budget for the transform was exhausted
     /// (absent-group refs still count; they must not scan unbounded).
     /// Reported only when nothing was appended for this match — the caller
-    /// degrades to "match left as-is" (R10-1).
+    /// degrades to "match left as-is" (R10-1, R11-1).
     WorkLimit,
 }
 
@@ -628,7 +633,20 @@ fn expand_replacement(
             };
         }
     }
-    ExpansionOutcome::Applied
+    // R11-1: the in-loop budget check above reports WorkLimit only when a
+    // piece is still pending at budget 0. When the template ends EXACTLY at
+    // the boundary (e.g. 65,536 absent-group refs), the whole template was
+    // processed — plain Applied — but no replacement content was emitted
+    // AND the shared piece budget is now fully consumed: the caller would
+    // consume the match's text with nothing in its place while every later
+    // match degrades to "left as-is". Report WorkLimit so the R10-1 revert
+    // applies (the match is re-emitted verbatim); the pass is work-truncated
+    // either way and the work note still fires.
+    if *piece_budget == 0 && *out_chars == start {
+        ExpansionOutcome::WorkLimit
+    } else {
+        ExpansionOutcome::Applied
+    }
 }
 
 /// Append `seg` while the output char budget holds. Returns `false` when
@@ -683,6 +701,59 @@ mod tests {
             ..WorldKbBody::default()
         });
         entry
+    }
+
+    #[test]
+    fn exact_budget_absent_refs_keep_all_matches_verbatim() {
+        // R11-1 regression (PR #237 re-review): with a replacement of
+        // EXACTLY 65,536 absent-group refs over text with >= 2 matches, the
+        // first match's expansion consumed the whole piece budget with zero
+        // output characters and completed as plain Applied — the matched
+        // text was silently consumed and lost (`MX...MXtail` → `...MXtail`)
+        // even though the output-char budget had plenty of capacity, while
+        // the R10-1 "no replacement output → left as-is" guard only handled
+        // the WorkLimit outcome (65,537 pieces). The exact boundary now
+        // reports WorkLimit too, so every match is re-emitted verbatim and
+        // the whole input is preserved, with the work-limit note firing.
+        let input = "MX...MXtail";
+        let template = "$9".repeat(MAX_HYGIENE_OUTPUT_CHARS);
+        assert_eq!(template.matches('$').count(), MAX_HYGIENE_OUTPUT_CHARS);
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            input,
+            &serde_json::json!([{ "pattern": "MX", "replacement": template }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        assert_eq!(
+            summary, input,
+            "all matched text must be preserved verbatim; got {summary:?}"
+        );
+        assert_eq!(summary.matches("MX").count(), 2, "both matches kept");
+        assert_eq!(trace[0].applied, 0);
+        assert_eq!(trace[0].skipped, 1);
+        assert!(
+            trace[0].notes.iter().any(|n| n.contains("work over")),
+            "work bound must be noted; got {:#?}",
+            trace[0].notes
+        );
+        // The braced spelling of the same template lands identically.
+        let braced = "${9}".repeat(MAX_HYGIENE_OUTPUT_CHARS);
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            input,
+            &serde_json::json!([{ "pattern": "MX", "replacement": braced }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        assert_eq!(
+            summary, input,
+            "braced refs must also preserve all matched text; got {summary:?}"
+        );
+        assert_eq!(trace[0].applied, 0);
+        assert!(
+            trace[0].notes.iter().any(|n| n.contains("work over")),
+            "work bound must be noted; got {:#?}",
+            trace[0].notes
+        );
     }
 
     #[test]
