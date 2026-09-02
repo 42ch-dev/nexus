@@ -21,10 +21,12 @@
 //! never changes silently). Caps mirror the Q6 activation engine
 //! (`adapter/activation.rs`): 256 pattern chars / 64 KiB input / 64 KiB
 //! output — guardrails, not features. A carrier with more than
-//! [`MAX_HYGIENE_TRANSFORMS`] transforms is also bounded: the transforms
-//! beyond the cap are not executed, each counts toward the entry's trace
-//! `skipped`, and one note records the degradation — CPU per assembly
-//! never scales with an unrestricted carrier array length.
+//! [`MAX_HYGIENE_TRANSFORMS`] transforms is also bounded, at the PARSE
+//! site: the carrier loop stops after the cap's worth of transforms are
+//! collected, elements beyond are never read, each counts toward the
+//! entry's trace `skipped` (via the serde-known array length), and one
+//! note records the degradation — CPU per assembly never scales with an
+//! unrestricted carrier array length.
 //!
 //! [`WorldKbBody`]: nexus_knowledge::world_kb::knowledge_entry::WorldKbBody
 
@@ -37,13 +39,15 @@ pub const MAX_HYGIENE_PATTERN_CHARS: usize = 256;
 pub const MAX_HYGIENE_INPUT_CHARS: usize = 64 * 1024;
 /// Output text cap after a hygiene pass (Q6-mirror) — chars.
 pub const MAX_HYGIENE_OUTPUT_CHARS: usize = 64 * 1024;
-/// Maximum transforms applied per entry (Q6-guardrail family).
+/// Maximum transforms parsed and applied per entry (Q6-guardrail family).
 ///
-/// A persisted carrier with an unbounded array would run a fresh regex
-/// pass per transform over up to 64 KiB of text, so CPU per assembly
-/// scales with the array length. Transforms beyond the cap are not
-/// executed; each counts toward the entry's trace `skipped` with one
-/// degradation note.
+/// A persisted carrier with an unbounded array would parse, allocate, and
+/// run a fresh regex pass per transform over up to 64 KiB of text, so CPU
+/// per assembly scales with the array length. The cap bounds the PARSE
+/// loop: parsing stops once this many transforms are collected, elements
+/// beyond are never read, each counts toward the entry's trace `skipped`
+/// (via the serde-known array length), and one degradation note records
+/// the cap.
 pub const MAX_HYGIENE_TRANSFORMS: usize = 32;
 
 /// One author-defined find/replace transform, parsed from
@@ -105,6 +109,12 @@ pub fn apply_hygiene(entries: Vec<WorldKbEntry>) -> (Vec<WorldKbEntry>, Vec<Hygi
                 out.push(entry);
                 continue;
             };
+            // G-1: `parse_carrier` already bounds parsing at
+            // MAX_HYGIENE_TRANSFORMS (elements beyond the cap are never
+            // read; the unread tail is counted into `skipped` with one
+            // degradation note at the parse site), so the apply loop below
+            // never sees more than the cap — no apply-time truncation
+            // needed, and the regex work per transform is bounded too.
             let (transforms, parse_notes, malformed) = parse_carrier(carrier);
             let mut row = HygieneTraceEntry {
                 entry_id: entry.entry_id.clone(),
@@ -112,20 +122,6 @@ pub fn apply_hygiene(entries: Vec<WorldKbEntry>) -> (Vec<WorldKbEntry>, Vec<Hygi
                 skipped: malformed,
                 notes: parse_notes,
             };
-            // G-1: bound the number of executed transforms. A persisted
-            // carrier with an unrestricted array would run a fresh regex
-            // pass per transform over up to 64 KiB of text — CPU per
-            // assembly scales with the array length. Transforms beyond the
-            // cap are not executed; each counts toward `skipped` and one
-            // note records the degradation.
-            let beyond = transforms.len().saturating_sub(MAX_HYGIENE_TRANSFORMS);
-            if beyond > 0 {
-                row.skipped += beyond;
-                row.notes.push(format!(
-                    "hygiene transforms beyond {MAX_HYGIENE_TRANSFORMS} not applied"
-                ));
-            }
-            let transforms = &transforms[..transforms.len() - beyond];
             if let Some(summary) = summary {
                 let mut text = summary;
                 // Input cap (Q6 mirror): the scan text is truncated before
@@ -140,7 +136,7 @@ pub fn apply_hygiene(entries: Vec<WorldKbEntry>) -> (Vec<WorldKbEntry>, Vec<Hygi
                     ));
                     text = truncate_chars(&text, MAX_HYGIENE_INPUT_CHARS).to_string();
                 }
-                for t in transforms {
+                for t in &transforms {
                     let pass = apply_transform(&text, t);
                     row.applied += pass.applied;
                     row.skipped += pass.skipped;
@@ -292,7 +288,10 @@ fn apply_transform(text: &str, t: &HygieneTransform<'_>) -> TransformPass {
 /// Parse the `body.attributes.hygiene` carrier — a JSON array of
 /// `{"pattern": string, "replacement": string, "description"?: string}`
 /// objects. Malformed elements are skipped and reported in `notes`; the
-/// returned count is the number of malformed elements (degraded transforms).
+/// returned count is the number of elements that did not yield an
+/// executable transform: malformed elements before the cap plus every
+/// element beyond the cap (never read, counted via the serde-known array
+/// length — G-1).
 fn parse_carrier(carrier: &serde_json::Value) -> (Vec<HygieneTransform<'_>>, Vec<String>, usize) {
     let Some(items) = carrier.as_array() else {
         return (
@@ -301,10 +300,19 @@ fn parse_carrier(carrier: &serde_json::Value) -> (Vec<HygieneTransform<'_>>, Vec
             0,
         );
     };
-    let mut transforms = Vec::new();
+    // G-1: the cap bounds the PARSE loop. Elements beyond the first
+    // MAX_HYGIENE_TRANSFORMS successfully-parsed transforms are never read
+    // (no object/field visit, no diagnostic, no allocation) — a persisted
+    // carrier with a huge array costs bounded parse work per assembly.
+    let mut transforms = Vec::with_capacity(MAX_HYGIENE_TRANSFORMS.min(items.len()));
     let mut notes = Vec::new();
     let mut malformed = 0;
+    let mut scanned = 0usize;
     for item in items {
+        if transforms.len() == MAX_HYGIENE_TRANSFORMS {
+            break;
+        }
+        scanned += 1;
         let Some(obj) = item.as_object() else {
             malformed += 1;
             notes.push(
@@ -335,6 +343,16 @@ fn parse_carrier(carrier: &serde_json::Value) -> (Vec<HygieneTransform<'_>>, Vec
             replacement,
             description,
         });
+    }
+    // The unread tail beyond the cap counts toward the entry's `skipped`
+    // total and one note records the degradation — the array length is
+    // already known from serde, so the count needs no further iteration.
+    let beyond = items.len().saturating_sub(scanned);
+    if beyond > 0 {
+        malformed += beyond;
+        notes.push(format!(
+            "hygiene transforms beyond {MAX_HYGIENE_TRANSFORMS} not applied"
+        ));
     }
     (transforms, notes, malformed)
 }
@@ -761,12 +779,15 @@ mod tests {
 
     #[test]
     fn transforms_beyond_cap_skipped_with_note() {
-        // G-1: a persisted carrier with an unbounded transform array would
-        // run a fresh regex pass per transform over up to 64 KiB of text —
-        // CPU per assembly scales with the array length. Only the first
-        // MAX_HYGIENE_TRANSFORMS execute; the rest are not run, each counts
-        // toward `skipped`, and one note records the degradation.
-        let total = MAX_HYGIENE_TRANSFORMS + 4;
+        // G-1: the transform-count cap now bounds the PARSE loop (round-7
+        // fix). A persisted carrier with an unrestricted transform array
+        // used to parse/diagnose every element before the apply-time slice
+        // — CPU per assembly scaled with the array length even though only
+        // MAX_HYGIENE_TRANSFORMS ever executed. Parsing stops at the cap:
+        // elements beyond are never read, each counts toward `skipped` (via
+        // the serde-known array length), and one note records the
+        // degradation — a large array stays cheap per assembly.
+        let total = MAX_HYGIENE_TRANSFORMS * 128 + 4;
         let summary = (0..total)
             .map(|i| format!("a{i}"))
             .collect::<Vec<_>>()
@@ -786,7 +807,7 @@ mod tests {
         )]);
         let out_summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
         // The first cap transforms applied; the tail beyond the cap is
-        // untouched (its transforms were not executed).
+        // untouched (its transforms were never parsed or executed).
         let expected = (0..total)
             .map(|i| {
                 if i < MAX_HYGIENE_TRANSFORMS {
@@ -803,6 +824,139 @@ mod tests {
         assert_eq!(trace[0].notes.len(), 1);
         assert!(trace[0].notes[0].contains("transforms beyond"));
         assert!(trace[0].notes[0].contains(&MAX_HYGIENE_TRANSFORMS.to_string()));
+    }
+
+    #[test]
+    fn parse_carrier_stops_collecting_at_cap() {
+        // G-1 (round-7): the cap bounds the parse loop itself. Elements
+        // beyond the first MAX_HYGIENE_TRANSFORMS successfully-parsed
+        // transforms are never read — no per-element diagnostic. The
+        // serde-known array length accounts for the unread tail in the
+        // returned degraded count, and one collective note records the
+        // degradation.
+        let carrier: Vec<serde_json::Value> = (0..MAX_HYGIENE_TRANSFORMS)
+            .map(|i| {
+                serde_json::json!({
+                    "pattern": format!("a{i}"),
+                    "replacement": format!("b{i}"),
+                })
+            })
+            .chain(
+                // Malformed tail (missing replacement): never read.
+                (0..8).map(|i| serde_json::json!({ "pattern": format!("m{i}") })),
+            )
+            .collect();
+        let parsed = serde_json::json!(carrier);
+        let (transforms, notes, malformed) = parse_carrier(&parsed);
+        assert_eq!(transforms.len(), MAX_HYGIENE_TRANSFORMS);
+        // The whole tail is degraded without being read: skipped counted via
+        // length arithmetic, exactly one collective note, no per-element
+        // malformed diagnostics.
+        assert_eq!(malformed, 8);
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].contains("transforms beyond"));
+    }
+
+    #[test]
+    fn malformed_elements_beyond_cap_count_once_without_per_element_notes() {
+        // G-1 (round-7): a malformed element beyond the cap must not be
+        // individually diagnosed — parsing stops at the cap and the unread
+        // tail is counted into `skipped` via the array length. The old
+        // parse-everything behavior emitted one diagnostic note per
+        // malformed element beyond the cap.
+        let carrier: Vec<serde_json::Value> = (0..MAX_HYGIENE_TRANSFORMS)
+            .map(|i| {
+                serde_json::json!({
+                    "pattern": format!(r"\ba{i}\b"),
+                    "replacement": format!("b{i}"),
+                })
+            })
+            .chain(
+                // Malformed tail (missing replacement): counted into
+                // `skipped` collectively, never read.
+                (0..4).map(|i| serde_json::json!({ "pattern": format!("a{i}") })),
+            )
+            .collect();
+        let summary = (0..MAX_HYGIENE_TRANSFORMS)
+            .map(|i| format!("a{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            &summary,
+            &serde_json::json!(carrier),
+        )]);
+        let out_summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        let expected = (0..MAX_HYGIENE_TRANSFORMS)
+            .map(|i| format!("b{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(out_summary, expected);
+        assert_eq!(trace[0].applied, MAX_HYGIENE_TRANSFORMS);
+        // 4 unread tail elements, no per-element parse note: exactly one
+        // collective degradation note.
+        assert_eq!(trace[0].skipped, 4);
+        assert_eq!(
+            trace[0].notes.len(),
+            1,
+            "beyond-cap tail must yield one collective note, got {:#?}",
+            trace[0].notes
+        );
+        assert!(trace[0].notes[0].contains("transforms beyond"));
+    }
+
+    #[test]
+    fn malformed_before_cap_and_beyond_tail_account_together() {
+        // G-1 (round-7): malformed elements before the cap keep their
+        // per-element notes and skipped slots (they were never executable);
+        // the unread tail beyond the cap is counted into `skipped` via
+        // length arithmetic. Total skipped stays malformed + beyond —
+        // identical accounting to the old apply-time slice, now computed
+        // from the parse site.
+        let summary = (0..MAX_HYGIENE_TRANSFORMS + 2)
+            .map(|i| format!("a{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let mut carrier: Vec<serde_json::Value> = (0..2)
+            .map(|i| serde_json::json!({ "pattern": format!("a{i}") })) // malformed: no replacement
+            .collect();
+        carrier.extend((0..MAX_HYGIENE_TRANSFORMS + 2).map(|i| {
+            serde_json::json!({
+                "pattern": format!(r"\ba{i}\b"),
+                "replacement": format!("b{i}"),
+            })
+        }));
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            &summary,
+            &serde_json::json!(carrier),
+        )]);
+        let out_summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        // First 32 valid transforms (carrier indices 2..34) applied; the
+        // last two valid transforms sit beyond the cap and never ran.
+        let expected = (0..MAX_HYGIENE_TRANSFORMS)
+            .map(|i| format!("b{i}"))
+            .chain((MAX_HYGIENE_TRANSFORMS..MAX_HYGIENE_TRANSFORMS + 2).map(|i| format!("a{i}")))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(out_summary, expected);
+        assert_eq!(trace[0].applied, MAX_HYGIENE_TRANSFORMS);
+        // 2 malformed before the cap + 2 valid beyond the cap.
+        assert_eq!(trace[0].skipped, 4);
+        // 2 per-element malformed notes + 1 collective beyond note.
+        assert_eq!(trace[0].notes.len(), 3);
+        assert_eq!(
+            trace[0]
+                .notes
+                .iter()
+                .filter(|n| n.contains("object with string"))
+                .count(),
+            2
+        );
+        assert!(trace[0]
+            .notes
+            .iter()
+            .any(|n| n.contains("transforms beyond")));
     }
 
     #[test]
