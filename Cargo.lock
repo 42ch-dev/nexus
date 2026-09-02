@@ -3866,6 +3866,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-embedding"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "nexus-home-layout"
 version = "0.1.0"
 dependencies = [
