@@ -13,10 +13,14 @@
 //!
 //! A bad transform never fails the assembly: an invalid regex emits the
 //! entry untransformed with an `"invalid regex"` trace note; an oversized
-//! pattern is skipped with a note; an oversized output is truncated with a
-//! note. Caps mirror the Q6 activation engine (`adapter/activation.rs`):
-//! 256 pattern chars / 64 KiB input / 64 KiB output — guardrails, not
-//! features.
+//! pattern is skipped with a note; an oversized input or output is
+//! truncated with a note. Unlike the Q6 activation engine's scan cap —
+//! which truncates only the `is_match` haystack and never alters emitted
+//! content — these caps truncate the emitted summary itself, so every
+//! truncation is observable via a per-entry trace note (the emitted text
+//! never changes silently). Caps mirror the Q6 activation engine
+//! (`adapter/activation.rs`): 256 pattern chars / 64 KiB input / 64 KiB
+//! output — guardrails, not features.
 //!
 //! [`WorldKbBody`]: nexus_knowledge::world_kb::knowledge_entry::WorldKbBody
 
@@ -89,8 +93,14 @@ pub fn apply_hygiene(entries: Vec<WorldKbEntry>) -> (Vec<WorldKbEntry>, Vec<Hygi
         if let Some(summary) = body.summary.take() {
             let mut text = summary;
             // Input cap (Q6 mirror): the scan text is truncated before the
-            // first pass — silent, like the activation engine's scan cap.
+            // first pass. Unlike the activation engine's match-only scan cap,
+            // this cap alters the emitted text, so the truncation is
+            // recorded as a per-entry trace note (mirroring the output-cap
+            // note below) — the emitted text never changes silently.
             if text.chars().count() > MAX_HYGIENE_INPUT_CHARS {
+                row.notes.push(format!(
+                    "hygiene input over {MAX_HYGIENE_INPUT_CHARS} chars truncated"
+                ));
                 text = truncate_chars(&text, MAX_HYGIENE_INPUT_CHARS).to_string();
             }
             for t in &transforms {
@@ -309,6 +319,48 @@ mod tests {
         assert_eq!(trace[0].skipped, 0);
         assert_eq!(trace[0].notes.len(), 1);
         assert!(trace[0].notes[0].contains("truncated"));
+    }
+
+    #[test]
+    fn oversized_input_truncated_with_note() {
+        // W-1: an input over the cap is truncated before the first pass AND
+        // a per-entry trace note records the degradation — the emitted text
+        // must never change silently (mirrors the output-cap note).
+        let mut big_input = "x".repeat(MAX_HYGIENE_INPUT_CHARS);
+        big_input.push_str(" dragon"); // tail beyond the cap
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            &big_input,
+            &serde_json::json!([{ "pattern": "dragon", "replacement": "wyrm" }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        // The tail is beyond the cap, so the transform no-matches on the
+        // truncated text and the summary is capped.
+        assert_eq!(summary.chars().count(), MAX_HYGIENE_INPUT_CHARS);
+        assert_eq!(trace[0].applied, 0);
+        assert_eq!(trace[0].skipped, 1); // no-match on the capped text
+        assert_eq!(trace[0].notes.len(), 1);
+        assert!(trace[0].notes[0].contains("input over"));
+        assert!(trace[0].notes[0].contains("truncated"));
+    }
+
+    #[test]
+    fn oversized_input_transform_matching_prefix_still_applies() {
+        // W-1: transforms still run on the capped prefix; the input-cap note
+        // is recorded alongside the applied replacements.
+        let mut big_input = "dragon".to_string();
+        big_input.push_str(&"x".repeat(MAX_HYGIENE_INPUT_CHARS));
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            &big_input,
+            &serde_json::json!([{ "pattern": "dragon", "replacement": "wyrm" }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        assert!(summary.starts_with("wyrm"));
+        assert_eq!(trace[0].applied, 1);
+        assert_eq!(trace[0].skipped, 0);
+        assert_eq!(trace[0].notes.len(), 1);
+        assert!(trace[0].notes[0].contains("input over"));
     }
 
     #[test]
