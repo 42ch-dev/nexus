@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.31.1] - 2026-09-02
+
+### Added
+
+- **Moment inspector `hygiene` trace (V1.181 P1 DF-79 wire-drift fix):** `MomentInspectResponse` gains an additive-optional `hygiene` field — per-entry regex-hygiene transform trace (`entry_id`, `applied`, `skipped`, `notes[]`), absent when no entry carried `body.attributes.hygiene`. Refreshed `schemas/daemon-api/inspector/moment-inspect-response.schema.json` + generated Rust/TypeScript; root `additionalProperties: false` retained, so the handler's packet round-trip now accepts the emitted `hygiene` section instead of 500ing.
+
+### Consumer Impact
+
+- **Additive only** — no existing schemas modified; generated types for existing consumers are unchanged.
+- TypeScript: `MomentInspectResponse` gains optional `hygiene?: { entry_id: string; applied: number; skipped: number; notes: string[] }[]`.
+- Rust: `nexus_contracts::generated::daemon_api::inspector::MomentInspectResponse` gains `hygiene: Vec<MomentInspectResponseHygieneItem>` (defaults empty, skipped on the wire when empty).
+- **Daemon-only route:** still `POST /v1/daemon/inspector/moment`; no route or semantics change.
+
 ## [0.29.0] - 2026-08-06
 
 ### Added
