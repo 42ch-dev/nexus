@@ -647,10 +647,10 @@ fn value_shape(v: &Value) -> &'static str {
 ///   silent invert and fires a shape-mismatch Warning (R2-3). Mapped
 ///   `constant` in an unsupported shape is diagnosed the same way instead
 ///   of silently defaulting to `false`.
-/// - **W-3** `key` in an unmappable shape: the field is documented as a
-///   comma-separated string or a list (array) of strings; anything else
-///   (and non-string array elements) is flagged instead of silently dropping
-///   activation keys.
+/// - **W-3** `key` / `keys` in an unmappable shape: `key` is documented as a
+///   comma-separated string or a list of strings; `keys` is documented as a
+///   list of strings. Anything else (including non-string array elements) is
+///   flagged instead of silently dropping activation keys.
 /// - **F-3/F-4** documented-but-unmapped behavior-affecting fields
 ///   (`BEHAVIORAL_UNMAPPED_FIELDS`) with a non-default value: each fires a
 ///   `Warning` naming the field and its consequence — no silent drop.
@@ -684,18 +684,25 @@ fn documented_field_diagnostics(
         }
     }
     if let Some(key_val) = obj.get("key") {
-        let mappable = match key_val {
-            Value::String(_) => true,
-            Value::Array(items) => items.iter().all(Value::is_string),
-            _ => false,
-        };
-        if !mappable {
+        if !key_field_mappable(key_val) {
             diagnostics.push(ConversionDiagnostic {
                 severity: DiagnosticSeverity::Warning,
                 entry_index: Some(idx),
                 entry_name: Some(name.to_string()),
                 field: Some("key".to_string()),
                 message: "key must be a string or an array of strings; unmappable activation keys dropped".to_string(),
+            });
+        }
+    }
+    if let Some(keys_val) = obj.get("keys") {
+        if !keys_field_mappable(keys_val) {
+            diagnostics.push(ConversionDiagnostic {
+                severity: DiagnosticSeverity::Warning,
+                entry_index: Some(idx),
+                entry_name: Some(name.to_string()),
+                field: Some("keys".to_string()),
+                message: "keys must be an array of strings; unmappable activation keys dropped"
+                    .to_string(),
             });
         }
     }
@@ -719,6 +726,23 @@ fn documented_field_diagnostics(
         }
     }
     diagnostics
+}
+
+/// Documented `key` shape: a comma-separated string or an array of strings.
+fn key_field_mappable(v: &Value) -> bool {
+    match v {
+        Value::String(_) => true,
+        Value::Array(items) => items.iter().all(Value::is_string),
+        _ => false,
+    }
+}
+
+/// Documented `keys` shape: an array of strings (the plural activation list).
+fn keys_field_mappable(v: &Value) -> bool {
+    match v {
+        Value::Array(items) => items.iter().all(Value::is_string),
+        _ => false,
+    }
 }
 
 /// Shape-mismatch diagnostic for a mapped boolean (`constant`, `enabled`).
@@ -1220,6 +1244,56 @@ mod tests {
             entry.get("modules").is_none() || entry["modules"].get("activation").is_none(),
             "unmappable key must not produce an activation module"
         );
+    }
+
+    #[test]
+    fn mixed_keys_array_emits_warning_and_keeps_string_elements() {
+        // W-3: the documented plural `keys` list must not silently drop
+        // non-string elements — a Warning fires; remaining strings still map.
+        let lorebook = json!({
+            "entries": [
+                {
+                    "uid": 0,
+                    "keys": ["dragon", 42, "wyrm"],
+                    "content": "Dragon lore.",
+                    "comment": "Dragon"
+                }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        assert_eq!(outcome.diagnostics.len(), 1);
+        let d = &outcome.diagnostics[0];
+        assert_eq!(d.severity, DiagnosticSeverity::Warning);
+        assert_eq!(d.field.as_deref(), Some("keys"));
+        assert!(d.message.contains("keys"));
+        let entry = &outcome.pack_input["entries"][0];
+        assert_eq!(
+            entry["modules"]["activation"]["keys"],
+            json!(["dragon", "wyrm"])
+        );
+        let parsed = parse_pack(&outcome.pack_input).expect("pack must parse");
+        assert_eq!(parsed.entries.len(), 1);
+    }
+
+    #[test]
+    fn non_array_keys_emits_warning_and_falls_through_to_key() {
+        let lorebook = json!({
+            "entries": [
+                {
+                    "uid": 0,
+                    "keys": "dragon",
+                    "key": "wyrm",
+                    "content": "Dragon lore.",
+                    "comment": "Dragon"
+                }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        assert_eq!(outcome.diagnostics.len(), 1);
+        let d = &outcome.diagnostics[0];
+        assert_eq!(d.field.as_deref(), Some("keys"));
+        let entry = &outcome.pack_input["entries"][0];
+        assert_eq!(entry["modules"]["activation"]["keys"], json!(["wyrm"]));
     }
 
     // ── F-3/F-4: documented-but-unmapped activation fields must not be
