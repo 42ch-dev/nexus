@@ -57,6 +57,7 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 | `crates/nexus-agent-host/` | Agent host adapter | [`crates/nexus-agent-host/AGENTS.md`](crates/nexus-agent-host/AGENTS.md) |
 | `crates/nexus-contracts/` | Generated Rust wire types | [`crates/nexus-contracts/AGENTS.md`](crates/nexus-contracts/AGENTS.md) |
 | `crates/nexus-daemon-runtime/` | Daemon runtime (local-only) | [`crates/nexus-daemon-runtime/AGENTS.md`](crates/nexus-daemon-runtime/AGENTS.md) |
+| `crates/nexus-embedding/` | Embedding readiness contract (RN-OGA-3) — provider trait seam, identity tuple, fail-closed derived-index protocol; no OSS execution | [`crates/nexus-embedding/AGENTS.md`](crates/nexus-embedding/AGENTS.md) |
 | `crates/nexus-home-layout/` | `~/.nexus42/` path layout | [`crates/nexus-home-layout/AGENTS.md`](crates/nexus-home-layout/AGENTS.md) |
 | `crates/nexus-local-db/` | Local database layer | [`crates/nexus-local-db/AGENTS.md`](crates/nexus-local-db/AGENTS.md) |
 | `crates/nexus-orchestration/` | Orchestration engine | [`crates/nexus-orchestration/AGENTS.md`](crates/nexus-orchestration/AGENTS.md) |

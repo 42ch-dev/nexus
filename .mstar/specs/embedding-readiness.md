@@ -61,6 +61,7 @@ A derived vector index is **rebuildable data**; the authoritative store is the W
    - `RebuildRequired(IdentityMismatch(..))` — any identity component differs; evidence names the changed component(s). **Fail-closed: no vector read is served from a stale index.**
    - `RebuildRequired(IncompleteScope)` — the populate stamp matches but the scope is incomplete (populate interrupted or partial).
    - `Unavailable` — no provider, or **no populate stamp at all** (index never built).
+   - An absent expected identity (`None` — no provider in the composition root, e.g. `NoEmbeddings`) yields `Unavailable` regardless of the index state: an unverified store is never served.
 
 3. **Rebuild**: explicit, consumer-driven re-embed after `RebuildRequired`. Never automatic on the read path.
 4. **Lexical fallback is explicit**: when the verdict is not `Usable`, the caller decides keyword-only operation and must be able to *state* it (trace/inspector note). The protocol never silently degrades.
