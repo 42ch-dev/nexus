@@ -66,6 +66,12 @@ pub struct HygieneTraceEntry {
 /// Read-path only: the returned entries are the caller's owned copies; the
 /// stored World-KB rows are never touched. Entries without a `hygiene`
 /// carrier pass through unchanged and produce no trace rows.
+///
+/// # Panics
+///
+/// Never panics on well-formed input. The only `expect` is on regex
+/// capture group 0, which the `regex` crate guarantees to exist for every
+/// match of a compiled pattern.
 #[must_use]
 pub fn apply_hygiene(entries: Vec<WorldKbEntry>) -> (Vec<WorldKbEntry>, Vec<HygieneTraceEntry>) {
     let mut trace = Vec::new();
@@ -116,28 +122,55 @@ pub fn apply_hygiene(entries: Vec<WorldKbEntry>) -> (Vec<WorldKbEntry>, Vec<Hygi
                     row.notes.push("invalid regex".to_string());
                     continue;
                 };
+                // F-2: build the replacement incrementally with a char
+                // budget instead of materializing the complete uncapped
+                // expansion first. Each match's expansion is appended only
+                // while the running total stays under the output cap; on
+                // breach the pass stops transforming, records the truncation
+                // note, and keeps what was built — a pattern matching many
+                // positions with a large replacement can no longer exhaust
+                // memory before the cap runs.
                 let mut applied = 0;
-                let replaced = re.replace_all(&text, |caps: &regex::Captures<'_>| {
-                    applied += 1;
+                let mut out = String::new();
+                let mut out_chars = 0usize;
+                let mut last_end = 0usize;
+                let mut truncated = false;
+                for caps in re.captures_iter(&text) {
+                    let m = caps.get(0).expect("capture 0 always present");
+                    out.push_str(&text[last_end..m.start()]);
+                    out_chars += text[last_end..m.start()].chars().count();
                     let mut dst = String::new();
                     caps.expand(&t.replacement, &mut dst);
-                    dst
-                });
+                    if out_chars + dst.chars().count() > MAX_HYGIENE_OUTPUT_CHARS {
+                        // Fill the remaining budget with a prefix of this
+                        // match's expansion, then stop transforming.
+                        let remaining = MAX_HYGIENE_OUTPUT_CHARS - out_chars;
+                        if remaining > 0 {
+                            out.push_str(truncate_chars(&dst, remaining));
+                            applied += 1;
+                        }
+                        truncated = true;
+                        break;
+                    }
+                    out.push_str(&dst);
+                    out_chars += dst.chars().count();
+                    applied += 1;
+                    last_end = m.end();
+                }
                 if applied == 0 {
                     // No-match — silent skip (Q6 mirror).
                     row.skipped += 1;
                     continue;
                 }
                 row.applied += applied;
-                let replaced = replaced.into_owned();
-                if replaced.chars().count() > MAX_HYGIENE_OUTPUT_CHARS {
+                if truncated {
                     row.notes.push(format!(
                         "hygiene output over {MAX_HYGIENE_OUTPUT_CHARS} chars truncated"
                     ));
-                    text = truncate_chars(&replaced, MAX_HYGIENE_OUTPUT_CHARS).to_string();
                 } else {
-                    text = replaced;
+                    out.push_str(&text[last_end..]);
                 }
+                text = out;
             }
             body.summary = Some(text);
         } else {
@@ -316,6 +349,53 @@ mod tests {
         let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
         assert_eq!(summary.chars().count(), MAX_HYGIENE_OUTPUT_CHARS);
         assert_eq!(trace[0].applied, 1);
+        assert_eq!(trace[0].skipped, 0);
+        assert_eq!(trace[0].notes.len(), 1);
+        assert!(trace[0].notes[0].contains("truncated"));
+    }
+
+    #[test]
+    fn many_matches_large_replacement_bounded_by_output_cap() {
+        // F-2: the old `replace_all` materialized the complete uncapped
+        // expansion before the output-cap check — a pattern matching many
+        // positions with a large replacement could exhaust memory. The
+        // expansion must be built incrementally with a char budget: the
+        // pass stops at the cap, records the truncation note, and keeps
+        // what was built (bounded, no OOM).
+        let input = "a".repeat(MAX_HYGIENE_INPUT_CHARS);
+        let big_replacement = "b".repeat(MAX_HYGIENE_OUTPUT_CHARS);
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            &input,
+            &serde_json::json!([{ "pattern": "a", "replacement": big_replacement }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        // The first match's expansion already fills the whole budget; the
+        // pass stops there instead of expanding every match.
+        assert_eq!(summary.chars().count(), MAX_HYGIENE_OUTPUT_CHARS);
+        assert_eq!(trace[0].applied, 1);
+        assert_eq!(trace[0].skipped, 0);
+        assert_eq!(trace[0].notes.len(), 1);
+        assert!(trace[0].notes[0].contains("truncated"));
+    }
+
+    #[test]
+    fn many_small_matches_stop_at_output_cap() {
+        // F-2: with a small replacement over a long input, the incremental
+        // builder applies matches until the running total reaches the cap,
+        // then stops — the emitted text is capped and the truncation is
+        // recorded (never silently changed).
+        let input = "a".repeat(MAX_HYGIENE_INPUT_CHARS);
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            &input,
+            &serde_json::json!([{ "pattern": "a", "replacement": "bb" }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        assert_eq!(summary.chars().count(), MAX_HYGIENE_OUTPUT_CHARS);
+        // Each "a" → "bb" adds one char; the cap is hit after half the
+        // matches, and the remaining matches are not expanded.
+        assert_eq!(trace[0].applied, MAX_HYGIENE_OUTPUT_CHARS / 2);
         assert_eq!(trace[0].skipped, 0);
         assert_eq!(trace[0].notes.len(), 1);
         assert!(trace[0].notes[0].contains("truncated"));

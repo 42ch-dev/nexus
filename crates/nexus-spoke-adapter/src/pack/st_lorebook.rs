@@ -12,7 +12,8 @@
 //! The converter is tolerant-with-diagnostics: unknown/undocumented entry
 //! fields are reported as [`ConversionDiagnostic`]s and the import continues;
 //! only file-level malformation (not JSON / not an object / `entries` not an
-//! array) aborts with a structured [`StLorebookError`] before any write.
+//! array or object) aborts with a structured [`StLorebookError`] before any
+//! write.
 //!
 //! ## Mapping (locked)
 //!
@@ -50,6 +51,19 @@ const DEFAULT_PACK_CREATOR: &str = "nexus42";
 /// `selective*`, `use_regex`, `addMemo`, `order`, `probabilityRaw`,
 /// `original_content`, `extensions`). Fields outside this set are reported as
 /// conversion diagnostics — never silently dropped.
+///
+/// Of the documented fields, the locked mapping honors `key`/`keys`,
+/// `content`, `comment`, `constant`, `uid`/`id` (see the mapping table) and
+/// reports `enabled`/unmappable `key` shapes (W-2/W-3). The remaining
+/// documented-but-unmapped fields split into two classes (F-3/F-4):
+///
+/// - **Behavior-affecting** (activation/placement semantics the pack shape
+///   cannot represent) — each non-default value fires a `Warning` diagnostic
+///   via [`documented_field_diagnostics`]; see `BEHAVIORAL_UNMAPPED_FIELDS`.
+/// - **Cosmetic / bookkeeping** (`uid`, `id`, `display_index`, `role`,
+///   `extensions`, `original_content`, `addMemo`, `folder`) — no diagnostic:
+///   they carry no activation semantics and are not representable in the
+///   pack shape.
 const DOCUMENTED_ENTRY_FIELDS: &[&str] = &[
     // Identity / bookkeeping
     "uid",
@@ -146,8 +160,8 @@ pub enum StLorebookError {
     /// The root value is not a JSON object.
     #[error("lorebook root must be a JSON object")]
     NotObject,
-    /// `entries` is missing or not an array.
-    #[error("lorebook 'entries' must be an array")]
+    /// `entries` is missing, not an array, and not an object.
+    #[error("lorebook 'entries' must be an array or object")]
     EntriesNotArray,
 }
 
@@ -157,21 +171,30 @@ pub enum StLorebookError {
 /// # Errors
 ///
 /// Returns [`StLorebookError`] for file-level malformation only: the root is
-/// not a JSON object, or `entries` is missing / not an array. Per-entry
-/// issues (unknown/undocumented fields, non-object entries) are collected as
-/// [`ConversionDiagnostic`]s and the conversion continues.
+/// not a JSON object, or `entries` is missing / neither an array nor an
+/// object. Per-entry issues (unknown/undocumented fields, non-object
+/// entries) are collected as [`ConversionDiagnostic`]s and the conversion
+/// continues.
 pub fn parse_st_lorebook(json: &Value) -> Result<ConversionOutcome, StLorebookError> {
     let root = json.as_object().ok_or(StLorebookError::NotObject)?;
-    let entries = root
-        .get("entries")
-        .and_then(Value::as_array)
-        .ok_or(StLorebookError::EntriesNotArray)?;
+    // F-1: `entries` is either the array form (older exports / hand-written
+    // files) or the native uid-keyed object form (`{"0": {...}, "1": ...}`)
+    // documented by the public World Info docs. serde_json's
+    // `preserve_order` feature (enabled in this workspace) keeps `Map`
+    // iteration in insertion order, so object-form entries convert in file
+    // order; without it the Map is a BTreeMap and iteration is sorted-key
+    // order — deterministic either way.
+    let entry_values: Vec<&Value> = match root.get("entries") {
+        Some(Value::Array(items)) => items.iter().collect(),
+        Some(Value::Object(map)) => map.values().collect(),
+        _ => return Err(StLorebookError::EntriesNotArray),
+    };
 
     let mut diagnostics = Vec::new();
     let mut pack_entries = Vec::new();
     let mut seen_entry_ids = HashSet::new();
 
-    for (idx, entry) in entries.iter().enumerate() {
+    for (idx, entry) in entry_values.iter().enumerate() {
         let Some(obj) = entry.as_object() else {
             diagnostics.push(ConversionDiagnostic {
                 severity: DiagnosticSeverity::Warning,
@@ -320,6 +343,192 @@ fn activation_keys(obj: &Map<String, Value>) -> Vec<String> {
     }
 }
 
+/// Documented-but-unmapped entry fields with behavioral consequence (F-3/F-4).
+///
+/// Each field is classified documented (so no unknown-field warning fires)
+/// but the locked mapping cannot honor it; a non-default value therefore
+/// fires a `Warning` diagnostic naming the field and its consequence —
+/// never a silent drop. The consequence text is the second tuple element.
+const BEHAVIORAL_UNMAPPED_FIELDS: &[(&str, &str)] = &[
+    (
+        "keysecondary",
+        "secondary activation keys not mapped — entry may fire on fewer contexts",
+    ),
+    (
+        "selective",
+        "selective activation not mapped — entry fires on primary keys only",
+    ),
+    (
+        "selectiveLogic",
+        "selective logic (AND/OR) not mapped — entry fires on primary keys only",
+    ),
+    (
+        "use_regex",
+        "regex key matching not mapped — keys match by the nexus keyword rules",
+    ),
+    (
+        "match_whole_words",
+        "whole-word matching not mapped — keys match by the nexus keyword rules",
+    ),
+    (
+        "case_sensitive",
+        "case sensitivity not mapped — keys match by the nexus keyword rules",
+    ),
+    (
+        "scan_depth",
+        "scan depth not mapped — activation scans the nexus context window",
+    ),
+    (
+        "probability",
+        "probability <100 not honored — entry always fires",
+    ),
+    (
+        "useProbability",
+        "probability toggle not mapped — entry always fires",
+    ),
+    (
+        "probabilityRaw",
+        "raw probability not honored — entry always fires",
+    ),
+    (
+        "exclude_recursion",
+        "recursion exclusion not mapped — entry may fire in recursive contexts",
+    ),
+    (
+        "prevent_recursion",
+        "recursion prevention not mapped — entry may fire in recursive contexts",
+    ),
+    (
+        "delay_until_recursion",
+        "recursion delay not mapped — entry may fire in recursive contexts",
+    ),
+    (
+        "min_activations",
+        "minimum activation count not mapped — entry fires on first match",
+    ),
+    (
+        "max_activations",
+        "maximum activation count not mapped — entry fires on every match",
+    ),
+    (
+        "sticky",
+        "sticky/timed effect not mapped — entry fires on every match",
+    ),
+    (
+        "cooldown",
+        "cooldown not mapped — entry fires on every match",
+    ),
+    ("delay", "delay not mapped — entry fires immediately"),
+    (
+        "group",
+        "inclusion group not mapped — entry fires independently of groups",
+    ),
+    (
+        "group_override",
+        "group override not mapped — entry fires independently of groups",
+    ),
+    (
+        "group_weight",
+        "group weight not mapped — entry fires independently of groups",
+    ),
+    (
+        "group_priority",
+        "group priority not mapped — entry fires independently of groups",
+    ),
+    (
+        "use_group_scoring",
+        "group scoring not mapped — entry fires independently of groups",
+    ),
+    (
+        "automation_id",
+        "automation id not mapped — entry fires without automation",
+    ),
+    (
+        "exclude_alternate_scenarios",
+        "alternate-scenario exclusion not mapped — entry may fire in alternate scenarios",
+    ),
+    (
+        "exclude_alternate_scenarios_override",
+        "alternate-scenario exclusion override not mapped — entry may fire in alternate scenarios",
+    ),
+    (
+        "exclude_alternate_scenarios_priority",
+        "alternate-scenario exclusion priority not mapped — entry may fire in alternate scenarios",
+    ),
+    (
+        "insertion_order",
+        "insertion order not mapped — pack entries have no placement semantics",
+    ),
+    (
+        "order",
+        "order not mapped — pack entries have no placement semantics",
+    ),
+    (
+        "position",
+        "position not mapped — pack entries have no placement semantics",
+    ),
+    (
+        "depth",
+        "depth not mapped — pack entries have no placement semantics",
+    ),
+];
+
+/// Whether a documented-but-unmapped field carries a non-default value —
+/// only non-default values have behavioral consequence worth reporting.
+/// Defaults mirror the documented ST defaults (docs.sillytavern.app); the
+/// numeric fields are documented as integers, so comparisons are integer
+/// comparisons (a float value is not a documented shape and is treated as
+/// default — no diagnostic).
+fn is_non_default(field: &str, v: &Value) -> bool {
+    match field {
+        // Boolean toggles: default false.
+        "selective"
+        | "use_regex"
+        | "match_whole_words"
+        | "case_sensitive"
+        | "useProbability"
+        | "exclude_recursion"
+        | "prevent_recursion"
+        | "delay_until_recursion"
+        | "group_override"
+        | "use_group_scoring"
+        | "exclude_alternate_scenarios"
+        | "exclude_alternate_scenarios_override" => v.as_bool() == Some(true),
+        // Integer selectors: default 0 (AND logic / no depth cap / no count).
+        "selectiveLogic"
+        | "scan_depth"
+        | "max_activations"
+        | "sticky"
+        | "cooldown"
+        | "delay"
+        | "group_priority"
+        | "exclude_alternate_scenarios_priority" => int_val(v).is_some_and(|n| n != 0),
+        // Probability: default 100 (always fire).
+        "probability" | "probabilityRaw" => int_val(v).is_some_and(|n| n < 100),
+        // Minimum activations: default 1.
+        "min_activations" => int_val(v).is_some_and(|n| n > 1),
+        // Group weight: default 100.
+        "group_weight" => int_val(v).is_some_and(|n| n != 100),
+        // Placement: default 100 / "after_char" / 4.
+        "insertion_order" | "order" => int_val(v).is_some_and(|n| n != 100),
+        "position" => v.as_str().is_some_and(|s| s != "after_char"),
+        "depth" => int_val(v).is_some_and(|n| n != 4),
+        // String carriers: default empty.
+        "group" | "automation_id" => v.as_str().is_some_and(|s| !s.trim().is_empty()),
+        // Secondary keys: default empty array.
+        "keysecondary" => v.as_array().is_some_and(|a| !a.is_empty()),
+        _ => true,
+    }
+}
+
+/// The non-negative integer value of a JSON number, if it is one (the
+/// documented shape of the numeric ST fields — all documented defaults are
+/// non-negative). Negative or float values are not documented shapes and are
+/// treated as default — no diagnostic.
+fn int_val(v: &Value) -> Option<u64> {
+    v.as_u64()
+}
+
 /// Per-entry diagnostics for documented fields whose semantics the locked
 /// mapping cannot honor — the import continues, but the author is told.
 ///
@@ -334,6 +543,9 @@ fn activation_keys(obj: &Map<String, Value>) -> Vec<String> {
 ///   comma-separated string or a list (array) of strings; anything else
 ///   (and non-string array elements) is flagged instead of silently dropping
 ///   activation keys.
+/// - **F-3/F-4** documented-but-unmapped behavior-affecting fields
+///   (`BEHAVIORAL_UNMAPPED_FIELDS`) with a non-default value: each fires a
+///   `Warning` naming the field and its consequence — no silent drop.
 fn documented_field_diagnostics(
     obj: &Map<String, Value>,
     idx: usize,
@@ -363,6 +575,19 @@ fn documented_field_diagnostics(
                 field: Some("key".to_string()),
                 message: "key must be a string or an array of strings; unmappable activation keys dropped".to_string(),
             });
+        }
+    }
+    for (field, consequence) in BEHAVIORAL_UNMAPPED_FIELDS {
+        if let Some(v) = obj.get(*field) {
+            if is_non_default(field, v) {
+                diagnostics.push(ConversionDiagnostic {
+                    severity: DiagnosticSeverity::Warning,
+                    entry_index: Some(idx),
+                    entry_name: Some(name.to_string()),
+                    field: Some((*field).to_string()),
+                    message: format!("{field} {consequence}"),
+                });
+            }
         }
     }
     diagnostics
@@ -501,10 +726,32 @@ mod tests {
     fn multi_entry_maps_keys_constant_and_metadata() {
         let outcome =
             parse_st_lorebook(&fixture("multi_entry")).expect("multi-entry lorebook must convert");
-        assert!(
-            outcome.diagnostics.is_empty(),
-            "multi-entry fixture uses only documented fields; got {outcome:#?}"
+        // F-3/F-4: the fixture's non-default documented-but-unmapped
+        // activation/placement fields fire honest diagnostics — no silent
+        // drop (the fields are documented, so no unknown-field warning, but
+        // the locked mapping cannot honor them).
+        let mut fields: Vec<&str> = outcome
+            .diagnostics
+            .iter()
+            .filter_map(|d| d.field.as_deref())
+            .collect();
+        fields.sort_unstable();
+        assert_eq!(
+            fields,
+            vec![
+                "group",
+                "insertion_order",
+                "keysecondary",
+                "match_whole_words",
+                "position",
+                "scan_depth",
+                "selective",
+                "useProbability",
+            ]
         );
+        for d in &outcome.diagnostics {
+            assert_eq!(d.severity, DiagnosticSeverity::Warning);
+        }
         let pack = &outcome.pack_input;
         assert_eq!(
             pack["modules"]["pack"]["title"],
@@ -568,8 +815,10 @@ mod tests {
     }
 
     #[test]
-    fn entries_not_array_is_structured_error() {
-        let err = parse_st_lorebook(&json!({ "entries": { "0": {} } })).unwrap_err();
+    fn entries_not_array_or_object_is_structured_error() {
+        // F-1: the uid-keyed object form is the native ST export shape and
+        // must convert; only non-array/non-object `entries` values abort.
+        let err = parse_st_lorebook(&json!({ "entries": 42 })).unwrap_err();
         assert!(matches!(err, StLorebookError::EntriesNotArray));
     }
 
@@ -594,6 +843,60 @@ mod tests {
         assert_eq!(outcome.diagnostics.len(), 1);
         let d = &outcome.diagnostics[0];
         assert_eq!(d.entry_index, Some(1));
+        assert!(d.message.contains("not a JSON object"));
+    }
+
+    // ── F-1: uid-keyed `entries` object (native ST export shape) ──
+
+    #[test]
+    fn object_form_entries_convert_in_file_order() {
+        // F-1: the native SillyTavern World Info export shape is a
+        // uid-keyed `entries` object (`{"0": {...}, "1": {...}}`) — the
+        // converter must accept it and import every entry in file order.
+        let outcome = parse_st_lorebook(&fixture("object_entries"))
+            .expect("object-form entries must convert");
+        assert!(
+            outcome.diagnostics.is_empty(),
+            "object fixture uses only documented fields; got {outcome:#?}"
+        );
+        let pack = &outcome.pack_input;
+        assert_eq!(
+            pack["modules"]["pack"]["title"],
+            json!("Object Entries Worldbook")
+        );
+        let entries = pack["entries"].as_array().expect("entries array");
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0]["canonical_name"], json!("Dragon lore"));
+        assert_eq!(
+            entries[0]["modules"]["activation"]["keys"],
+            json!(["dragon"])
+        );
+        assert_eq!(entries[1]["canonical_name"], json!("Slime"));
+        assert_eq!(
+            entries[1]["modules"]["activation"]["keys"],
+            json!(["slime", "slimes"])
+        );
+        assert_eq!(entries[1]["modules"]["activation"]["constant"], json!(true));
+        let parsed = parse_pack(pack).expect("converted pack must parse");
+        assert_eq!(parsed.entries.len(), 2);
+    }
+
+    #[test]
+    fn object_form_non_object_entry_is_diagnostic_and_skipped() {
+        // F-1: non-object values inside the object form are per-entry
+        // issues — Warning + skip, never a file-level abort.
+        let lorebook = json!({
+            "entries": {
+                "0": { "uid": 0, "key": "ok", "content": "fine", "comment": "OK" },
+                "1": "not-an-object",
+                "2": { "uid": 2, "key": "also-ok", "content": "also fine", "comment": "Also OK" }
+            }
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        let parsed = parse_pack(&outcome.pack_input).expect("pack must parse");
+        assert_eq!(parsed.entries.len(), 2, "non-object entry is skipped");
+        assert_eq!(outcome.diagnostics.len(), 1);
+        let d = &outcome.diagnostics[0];
         assert!(d.message.contains("not a JSON object"));
     }
 
@@ -711,6 +1014,160 @@ mod tests {
         assert!(
             entry.get("modules").is_none() || entry["modules"].get("activation").is_none(),
             "unmappable key must not produce an activation module"
+        );
+    }
+
+    // ── F-3/F-4: documented-but-unmapped activation fields must not be
+    //    silently dropped — each non-default value fires a Warning ──
+
+    #[test]
+    fn unmapped_activation_fields_emit_warning_diagnostics() {
+        // F-3/F-4: `keysecondary`, `probability`, `probabilityRaw`,
+        // `use_regex`, `case_sensitive`, `selective`, `selectiveLogic` and
+        // the other documented-but-unmapped activation/placement fields are
+        // classified documented (no unknown-field warning) but the locked
+        // mapping cannot honor them — a Warning diagnostic must fire per
+        // non-default value, never a silent drop.
+        let lorebook = json!({
+            "entries": [
+                {
+                    "uid": 0,
+                    "key": "dragon",
+                    "content": "Dragon lore.",
+                    "comment": "Dragon",
+                    "keysecondary": ["wyrm", "drake"],
+                    "selective": true,
+                    "selectiveLogic": 1,
+                    "use_regex": true,
+                    "match_whole_words": true,
+                    "case_sensitive": true,
+                    "scan_depth": 2,
+                    "probability": 50,
+                    "useProbability": true,
+                    "probabilityRaw": 50,
+                    "exclude_recursion": true,
+                    "prevent_recursion": true,
+                    "delay_until_recursion": true,
+                    "min_activations": 2,
+                    "max_activations": 3,
+                    "sticky": 1,
+                    "cooldown": 5,
+                    "delay": 2,
+                    "group": "dragons",
+                    "group_override": true,
+                    "group_weight": 50,
+                    "group_priority": 1,
+                    "use_group_scoring": true,
+                    "automation_id": "auto-1",
+                    "exclude_alternate_scenarios": true,
+                    "exclude_alternate_scenarios_override": true,
+                    "exclude_alternate_scenarios_priority": 1,
+                    "insertion_order": 50,
+                    "order": 50,
+                    "position": "before_char",
+                    "depth": 2
+                }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        let fields: Vec<&str> = outcome
+            .diagnostics
+            .iter()
+            .filter_map(|d| d.field.as_deref())
+            .collect();
+        for f in [
+            "keysecondary",
+            "selective",
+            "selectiveLogic",
+            "use_regex",
+            "match_whole_words",
+            "case_sensitive",
+            "scan_depth",
+            "probability",
+            "useProbability",
+            "probabilityRaw",
+            "exclude_recursion",
+            "prevent_recursion",
+            "delay_until_recursion",
+            "min_activations",
+            "max_activations",
+            "sticky",
+            "cooldown",
+            "delay",
+            "group",
+            "group_override",
+            "group_weight",
+            "group_priority",
+            "use_group_scoring",
+            "automation_id",
+            "exclude_alternate_scenarios",
+            "exclude_alternate_scenarios_override",
+            "exclude_alternate_scenarios_priority",
+            "insertion_order",
+            "order",
+            "position",
+            "depth",
+        ] {
+            assert!(fields.contains(&f), "missing diagnostic for field '{f}'");
+        }
+        for d in &outcome.diagnostics {
+            assert_eq!(d.severity, DiagnosticSeverity::Warning);
+            assert!(d.message.contains(d.field.as_deref().unwrap_or("")));
+        }
+        // The entry still imports — diagnostics degrade, never drop.
+        let parsed = parse_pack(&outcome.pack_input).expect("pack must parse");
+        assert_eq!(parsed.entries.len(), 1);
+    }
+
+    #[test]
+    fn default_values_of_unmapped_fields_produce_no_diagnostics() {
+        // F-3/F-4: the documented defaults of the unmapped fields carry no
+        // behavioral consequence — no diagnostics fire for them.
+        let lorebook = json!({
+            "entries": [
+                {
+                    "uid": 0,
+                    "key": "dragon",
+                    "content": "Dragon lore.",
+                    "comment": "Dragon",
+                    "keysecondary": [],
+                    "selective": false,
+                    "selectiveLogic": 0,
+                    "use_regex": false,
+                    "match_whole_words": false,
+                    "case_sensitive": false,
+                    "scan_depth": 0,
+                    "probability": 100,
+                    "useProbability": false,
+                    "probabilityRaw": 100,
+                    "exclude_recursion": false,
+                    "prevent_recursion": false,
+                    "delay_until_recursion": false,
+                    "min_activations": 1,
+                    "max_activations": 0,
+                    "sticky": 0,
+                    "cooldown": 0,
+                    "delay": 0,
+                    "group": "",
+                    "group_override": false,
+                    "group_weight": 100,
+                    "group_priority": 0,
+                    "use_group_scoring": false,
+                    "automation_id": "",
+                    "exclude_alternate_scenarios": false,
+                    "exclude_alternate_scenarios_override": false,
+                    "exclude_alternate_scenarios_priority": 0,
+                    "insertion_order": 100,
+                    "order": 100,
+                    "position": "after_char",
+                    "depth": 4
+                }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        assert!(
+            outcome.diagnostics.is_empty(),
+            "default values must not fire diagnostics; got {outcome:#?}"
         );
     }
 

@@ -2600,8 +2600,9 @@ mod tests {
         let (pool, _dir) = empty_world_pool().await;
         let dir = tempfile::tempdir().unwrap();
         let st_path = dir.path().join("lorebook.json");
-        // Valid JSON but `entries` is an object, not an array.
-        std::fs::write(&st_path, r#"{ "entries": { "0": {} } }"#).unwrap();
+        // Valid JSON but `entries` is neither an array nor an object (the
+        // uid-keyed object form is the native ST export shape and converts).
+        std::fs::write(&st_path, r#"{ "entries": "not-an-array-or-object" }"#).unwrap();
 
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
