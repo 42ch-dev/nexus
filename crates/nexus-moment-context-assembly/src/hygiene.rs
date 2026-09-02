@@ -39,7 +39,11 @@
 //! is bounded the same way: each `next()` searches at most
 //! [`REPLACEMENT_SCAN_WINDOW_CHARS`] chars of the template (a
 //! char-boundary-safe window), so a huge literal template costs O(budget)
-//! scan work per piece, not O(authored length) (R8-3).
+//! scan work per piece, not O(authored length) (R8-3). The two scans on
+//! the `$`-at-0 path are bounded the same way (R9b): `reference_piece`'s
+//! `}` search and name-run scan never walk the whole remaining template,
+//! so a `$` followed by a huge run costs O(budget) work per piece, not
+//! O(authored length).
 //!
 //! [`WorldKbBody`]: nexus_knowledge::world_kb::knowledge_entry::WorldKbBody
 
@@ -63,13 +67,14 @@ pub const MAX_HYGIENE_OUTPUT_CHARS: usize = 64 * 1024;
 /// the cap.
 pub const MAX_HYGIENE_TRANSFORMS: usize = 32;
 
-/// Replacement-cursor `$`-scan window — chars.
+/// Replacement-cursor scan window — chars.
 ///
 /// [`ReplacementCursor::next`] searches at most this many chars of the
-/// authored replacement template for the next `$` (R8-3). `MAX + 1` so a
-/// `$` exactly at the output-budget boundary is still found; a huge
-/// literal template (no `$`) costs O(budget) scan work per piece, never
-/// O(authored length).
+/// authored replacement template for the next `$` (R8-3), and
+/// [`ReplacementCursor::reference_piece`] bounds its `}` search and
+/// name-run scan to the same window (R9b). `MAX + 1` so a `$` exactly at
+/// the output-budget boundary is still found; a huge literal template (no
+/// `$`) costs O(budget) scan work per piece, never O(authored length).
 const REPLACEMENT_SCAN_WINDOW_CHARS: usize = MAX_HYGIENE_OUTPUT_CHARS + 1;
 
 /// One author-defined find/replace transform, parsed from
@@ -421,7 +426,9 @@ enum ReplacementPiece<'a> {
 ///
 /// Each `next()` scans at most [`REPLACEMENT_SCAN_WINDOW_CHARS`] chars
 /// (R8-3): a huge literal template costs O(budget) work per piece, never
-/// O(authored length).
+/// O(authored length). The `$`-at-0 path is bounded the same way (R9b):
+/// [`Self::reference_piece`]'s `}` search and name-run scan never walk
+/// the whole remaining template.
 struct ReplacementCursor<'a> {
     rest: &'a str,
 }
@@ -434,6 +441,11 @@ impl<'a> ReplacementCursor<'a> {
     /// Parse the reference starting at the current `$` (position 0 of
     /// `self.rest`) and advance `rest` past it. Mirrors the `regex` crate's
     /// `expand` syntax; a `$` that starts no valid reference is literal.
+    ///
+    /// Both scans are bounded to [`REPLACEMENT_SCAN_WINDOW_CHARS`] chars
+    /// (R9b): the `}` search and the name-run scan never walk the whole
+    /// remaining template, so a `$` followed by a huge run costs O(budget)
+    /// work per piece, not O(authored length).
     fn reference_piece(&mut self) -> ReplacementPiece<'a> {
         let after = &self.rest[1..];
         if after.as_bytes().first() == Some(&b'$') {
@@ -441,15 +453,39 @@ impl<'a> ReplacementCursor<'a> {
             return ReplacementPiece::Literal("$");
         }
         if after.as_bytes().first() == Some(&b'{') {
-            if let Some(end) = after.find('}') {
+            // R9b: bound the `}` search to a char-boundary-safe window of
+            // REPLACEMENT_SCAN_WINDOW_CHARS chars — a `${name` whose closing
+            // `}` sits beyond the window is a literal `$` (the name can
+            // never resolve: the pattern is capped at
+            // MAX_HYGIENE_PATTERN_CHARS, far below the window), and the tail
+            // is emitted as literal pieces, truncated by append_capped —
+            // never a whole-rest scan per match. A `}` in-window is found
+            // at the same index as the old whole-rest `find`, so the slices
+            // are byte-identical.
+            let mut end = None;
+            for (idx, ch) in after.char_indices().take(REPLACEMENT_SCAN_WINDOW_CHARS) {
+                if ch == '}' {
+                    end = Some(idx);
+                    break;
+                }
+            }
+            if let Some(end) = end {
                 self.rest = &after[end + 1..];
                 return replacement_piece(&after[1..end]);
             }
             self.rest = after;
             return ReplacementPiece::Literal("$");
         }
+        // R9b: bound the name-run scan to the window — the run is ASCII
+        // (`[0-9A-Za-z_]`), so `take` on `bytes()` is a char-boundary-safe
+        // window. A run that exceeds the window is truncated to it: the
+        // truncated name can never resolve (the pattern is capped at
+        // MAX_HYGIENE_PATTERN_CHARS, far below the window), so it expands
+        // to empty and the tail is emitted as literal pieces, truncated by
+        // append_capped — never a whole-rest scan per match.
         let run = after
             .bytes()
+            .take(REPLACEMENT_SCAN_WINDOW_CHARS)
             .take_while(|&b| b.is_ascii_alphanumeric() || b == b'_')
             .count();
         if run == 0 {
@@ -868,6 +904,147 @@ mod tests {
         let mut template = "a".repeat(MAX_HYGIENE_OUTPUT_CHARS);
         template.push('é'); // 2-byte char: the last char of the window
         template.push_str(&"b".repeat(100));
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            "x",
+            &serde_json::json!([{ "pattern": "x", "replacement": template }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        assert_eq!(summary.chars().count(), MAX_HYGIENE_OUTPUT_CHARS);
+        assert_eq!(summary, &"a".repeat(MAX_HYGIENE_OUTPUT_CHARS));
+        assert_eq!(trace[0].applied, 1);
+        assert_eq!(trace[0].skipped, 0);
+        assert_eq!(trace[0].notes.len(), 1);
+        assert!(trace[0].notes[0].contains("truncated"));
+    }
+
+    // ── R9b: bounded reference_piece scans (the `$`-at-0 path) ──
+
+    #[test]
+    fn reference_piece_braced_scan_window_bounded() {
+        // R9b: `reference_piece`'s `}` search used to scan the ENTIRE
+        // remaining template for the closing brace — a `$` followed by `{`
+        // and a huge non-`}` run cost O(authored length) scan work per
+        // match. The search is now bounded to the char-safe window: a `$`
+        // whose closing `}` sits beyond the window is a literal `$` (the
+        // name can never resolve — the pattern is capped at
+        // MAX_HYGIENE_PATTERN_CHARS, far below the window) and the tail is
+        // emitted as window-sized literal pieces, never one piece spanning
+        // the whole template.
+        let mut template = "${".to_string();
+        template.push_str(&"a".repeat(1_000_000));
+        template.push('}'); // closing brace beyond the scan window
+        let mut cursor = ReplacementCursor::new(&template);
+        let first = cursor.next().expect("non-empty template");
+        assert_eq!(first, ReplacementPiece::Literal("$"));
+        for _ in 0..2 {
+            let piece = cursor.next().expect("tail must stay reachable");
+            match piece {
+                ReplacementPiece::Literal(s) => assert_eq!(
+                    s.chars().count(),
+                    REPLACEMENT_SCAN_WINDOW_CHARS,
+                    "literal piece must be window-sized, not the whole template"
+                ),
+                other => panic!("expected literal piece, got {other:?}"),
+            }
+        }
+        let mut total = 1usize; // the leading literal "$"
+        for piece in &mut cursor {
+            match piece {
+                ReplacementPiece::Literal(s) => total += s.chars().count(),
+                other => panic!("expected literal piece, got {other:?}"),
+            }
+        }
+        assert_eq!(
+            total + 2 * REPLACEMENT_SCAN_WINDOW_CHARS,
+            template.chars().count(),
+            "the windowed scan must cover the whole template"
+        );
+    }
+
+    #[test]
+    fn reference_piece_name_run_scan_window_bounded() {
+        // R9b: `reference_piece`'s name-run scan used to scan the ENTIRE
+        // remaining template for the `[0-9A-Za-z_]` run — a `$` followed by
+        // a huge name run cost O(authored length) scan work per match. The
+        // scan is now bounded to the char-safe window: the name is truncated
+        // to the window (a name that long can never resolve — the pattern
+        // is capped at MAX_HYGIENE_PATTERN_CHARS, far below the window) and
+        // the tail is emitted as window-sized literal pieces, never one
+        // piece spanning the whole template.
+        let mut template = "$".to_string();
+        template.push_str(&"a".repeat(1_000_000));
+        let mut cursor = ReplacementCursor::new(&template);
+        let first = cursor.next().expect("non-empty template");
+        match first {
+            ReplacementPiece::Name(s) => assert_eq!(
+                s.chars().count(),
+                REPLACEMENT_SCAN_WINDOW_CHARS,
+                "name piece must be window-sized, not the whole run"
+            ),
+            other => panic!("expected name piece, got {other:?}"),
+        }
+        for _ in 0..2 {
+            let piece = cursor.next().expect("tail must stay reachable");
+            match piece {
+                ReplacementPiece::Literal(s) => assert_eq!(
+                    s.chars().count(),
+                    REPLACEMENT_SCAN_WINDOW_CHARS,
+                    "literal piece must be window-sized, not the whole template"
+                ),
+                other => panic!("expected literal piece, got {other:?}"),
+            }
+        }
+        let mut total = 0usize;
+        for piece in &mut cursor {
+            match piece {
+                ReplacementPiece::Literal(s) => total += s.chars().count(),
+                other => panic!("expected literal piece, got {other:?}"),
+            }
+        }
+        // The leading `$` is consumed by the reference (not a piece), so
+        // the covered chars are the name piece + the literal tail.
+        assert_eq!(
+            total + 3 * REPLACEMENT_SCAN_WINDOW_CHARS + 1,
+            template.chars().count(),
+            "the windowed scan must cover the whole template"
+        );
+    }
+
+    #[test]
+    fn braced_name_without_closing_brace_bounded() {
+        // R9b end-to-end: a `${name` with no `}` in-window is a literal `$`
+        // and the `{aaa…` tail is emitted as literal pieces, truncated at
+        // the output budget — no panic, bounded pieces, and the emitted
+        // output is identical to the pre-bound behavior (the `$` was
+        // already literal when no `}` exists anywhere).
+        let mut template = "${".to_string();
+        template.push_str(&"a".repeat(1_000_000));
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            "x",
+            &serde_json::json!([{ "pattern": "x", "replacement": template }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        let mut expected = "${".to_string();
+        expected.push_str(&"a".repeat(MAX_HYGIENE_OUTPUT_CHARS - 2));
+        assert_eq!(summary, expected);
+        assert_eq!(summary.chars().count(), MAX_HYGIENE_OUTPUT_CHARS);
+        assert_eq!(trace[0].applied, 1);
+        assert_eq!(trace[0].skipped, 0);
+        assert_eq!(trace[0].notes.len(), 1);
+        assert!(trace[0].notes[0].contains("truncated"));
+    }
+
+    #[test]
+    fn huge_bare_name_run_bounded() {
+        // R9b end-to-end: a `$` followed by a huge `[0-9A-Za-z_]` run — the
+        // name is truncated to the window (it can never resolve: the
+        // pattern is capped at MAX_HYGIENE_PATTERN_CHARS, far below the
+        // window) and the tail is emitted as literal pieces, truncated at
+        // the output budget — no panic, bounded pieces.
+        let mut template = "$".to_string();
+        template.push_str(&"a".repeat(1_000_000));
         let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
             "kb_1",
             "x",
