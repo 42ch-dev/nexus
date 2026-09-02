@@ -1,6 +1,7 @@
 ---
 module: nexus-daemon-runtime, nexus-acp-host, apps/nexus42, spoke-connect
 date: 2026-08-25
+last_updated: 2026-09-02
 problem_type: architecture_pattern
 category: architecture-patterns
 severity: high
@@ -204,6 +205,19 @@ chain keeps all policy daemon-side.
   semantics — keep reserve-at-accept and same-tick eviction.
 - Routing/refusal work on any tool id: consult the typed discriminator table
   before writing message-text matches.
+- **Visibility ≠ authorization split (V1.180 RN-OGA-2)**: `tools/list`
+  visibility (`VisibilityPolicy`, per-consumer subset in `daemon.json`
+  `mcp_visibility`, fail-closed parse, slash ids allowed for `fs/*`)
+  is an additive layer evaluated at the two MCP construction sites
+  (Model A `load_visibility_policy()` in `apps/nexus42/src/commands/mcp/mod.rs`;
+  Model B `EmbeddedMcpServer.policy` injected at `establish()`). Execution
+  authz stays spine-owned (L0–L3 unchanged). Two refusal classes: a
+  **hidden-tool** call is seam-minted `ToolCallOutcome::NotAuthorized` →
+  MCP `METHOD_NOT_FOUND` + `tool_not_authorized: {id}` discriminator before
+  the backend; a **visible-but-denied** call keeps the spine-shaped
+  `ExecutedError`/`DaemonRefused` mapping (wire codes unchanged). Absent
+  policy ⇒ byte-identical behavior. `mcp_visibility` is boot-scoped —
+  edits surface in `restart_required` (`connect/watch.rs`).
 
 ## Examples
 
