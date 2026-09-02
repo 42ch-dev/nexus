@@ -26,7 +26,16 @@
 //! collected, elements beyond are never read, each counts toward the
 //! entry's trace `skipped` (via the serde-known array length), and one
 //! note records the degradation — CPU per assembly never scales with an
-//! unrestricted carrier array length.
+//! unrestricted carrier array length. Malformed diagnostics never
+//! allocate per element either: they aggregate into a single count note,
+//! and the scan halts once more than 8 × [`MAX_HYGIENE_TRANSFORMS`]
+//! elements have been visited without filling the valid cap, so a
+//! persisted carrier with a huge malformed prefix costs bounded parse
+//! work and note storage per assembly (R8-1). Replacement-append work is
+//! bounded the same way: the output-cap decision scans at most
+//! `remaining + 1` chars of an authored replacement literal, never the
+//! whole literal, so one match against a huge replacement costs O(budget)
+//! work, not O(authored length) (R8-2).
 //!
 //! [`WorldKbBody`]: nexus_knowledge::world_kb::knowledge_entry::WorldKbBody
 
@@ -287,12 +296,17 @@ fn apply_transform(text: &str, t: &HygieneTransform<'_>) -> TransformPass {
 
 /// Parse the `body.attributes.hygiene` carrier — a JSON array of
 /// `{"pattern": string, "replacement": string, "description"?: string}`
-/// objects. Malformed elements are skipped and reported in `notes`; the
-/// returned count is the number of elements that did not yield an
-/// executable transform: malformed elements before the cap plus every
-/// element beyond the cap (never read, counted via the serde-known array
-/// length — G-1).
+/// objects. Malformed elements are skipped and reported as ONE aggregated
+/// note with a count (R8-1 — never one note per element); the scan itself
+/// is hard-bounded by a visited-element budget. The returned count is the
+/// number of elements that did not yield an executable transform:
+/// malformed elements before the halt point plus every element beyond it
+/// (never read, counted via the serde-known array length — G-1).
 fn parse_carrier(carrier: &serde_json::Value) -> (Vec<HygieneTransform<'_>>, Vec<String>, usize) {
+    // R8-1: the scan halts once this many elements have been visited
+    // without filling the valid cap — a persisted carrier with a huge
+    // malformed prefix costs bounded parse work per assembly.
+    const SCAN_BUDGET: usize = MAX_HYGIENE_TRANSFORMS * 8;
     let Some(items) = carrier.as_array() else {
         return (
             Vec::new(),
@@ -300,41 +314,36 @@ fn parse_carrier(carrier: &serde_json::Value) -> (Vec<HygieneTransform<'_>>, Vec
             0,
         );
     };
-    // G-1: the cap bounds the PARSE loop. Elements beyond the first
+    // G-1 / R8-1: the cap bounds the PARSE loop. Elements beyond the first
     // MAX_HYGIENE_TRANSFORMS successfully-parsed transforms are never read
-    // (no object/field visit, no diagnostic, no allocation) — a persisted
-    // carrier with a huge array costs bounded parse work per assembly.
+    // (no object/field visit, no diagnostic, no allocation), and the scan
+    // itself halts after a fixed visited-element budget — a persisted
+    // carrier with a huge malformed prefix neither scans the whole array
+    // nor allocates one note per malformed element.
     let mut transforms = Vec::with_capacity(MAX_HYGIENE_TRANSFORMS.min(items.len()));
     let mut notes = Vec::new();
     let mut malformed = 0;
     let mut scanned = 0usize;
+    let mut scan_budget_hit = false;
     for item in items {
         if transforms.len() == MAX_HYGIENE_TRANSFORMS {
+            break;
+        }
+        if scanned == SCAN_BUDGET {
+            scan_budget_hit = true;
             break;
         }
         scanned += 1;
         let Some(obj) = item.as_object() else {
             malformed += 1;
-            notes.push(
-                "hygiene transform must be an object with string pattern and replacement"
-                    .to_string(),
-            );
             continue;
         };
         let Some(pattern) = obj.get("pattern").and_then(serde_json::Value::as_str) else {
             malformed += 1;
-            notes.push(
-                "hygiene transform must be an object with string pattern and replacement"
-                    .to_string(),
-            );
             continue;
         };
         let Some(replacement) = obj.get("replacement").and_then(serde_json::Value::as_str) else {
             malformed += 1;
-            notes.push(
-                "hygiene transform must be an object with string pattern and replacement"
-                    .to_string(),
-            );
             continue;
         };
         let description = obj.get("description").and_then(serde_json::Value::as_str);
@@ -344,12 +353,23 @@ fn parse_carrier(carrier: &serde_json::Value) -> (Vec<HygieneTransform<'_>>, Vec
             description,
         });
     }
-    // The unread tail beyond the cap counts toward the entry's `skipped`
-    // total and one note records the degradation — the array length is
-    // already known from serde, so the count needs no further iteration.
+    // The unread tail beyond the halt point counts toward the entry's
+    // `skipped` total — the array length is already known from serde, so
+    // the count needs no further iteration. Malformed diagnostics
+    // aggregate into ONE note carrying the count of SCANNED malformed
+    // elements (the unread tail is the halt note's subject, never a
+    // per-element diagnostic).
     let beyond = items.len().saturating_sub(scanned);
-    if beyond > 0 {
-        malformed += beyond;
+    let scanned_malformed = malformed;
+    malformed += beyond;
+    if scanned_malformed > 0 {
+        notes.push(format!(
+            "{scanned_malformed} malformed hygiene transforms skipped"
+        ));
+    }
+    if scan_budget_hit {
+        notes.push("hygiene carrier scan budget exceeded; remaining elements ignored".to_string());
+    } else if beyond > 0 {
         notes.push(format!(
             "hygiene transforms beyond {MAX_HYGIENE_TRANSFORMS} not applied"
         ));
@@ -513,7 +533,11 @@ fn append_capped(out: &mut String, out_chars: &mut usize, seg: &str) -> bool {
         return false;
     }
     let remaining = MAX_HYGIENE_OUTPUT_CHARS - *out_chars;
-    let seg_chars = seg.chars().count();
+    // R8-2: the cap decision scans at most `remaining + 1` chars — never
+    // the whole authored segment — so a huge replacement literal costs
+    // O(budget) work per append, not O(authored length). `chars()` is
+    // lazy: nothing beyond the take-bound is visited or materialized.
+    let seg_chars = seg.chars().take(remaining + 1).count();
     if seg_chars > remaining {
         out.push_str(truncate_chars(seg, remaining));
         *out_chars = MAX_HYGIENE_OUTPUT_CHARS;
@@ -676,6 +700,30 @@ mod tests {
         // Each "a" → "bb" adds one char; the cap is hit after half the
         // matches, and the remaining matches are not expanded.
         assert_eq!(trace[0].applied, MAX_HYGIENE_OUTPUT_CHARS / 2);
+        assert_eq!(trace[0].skipped, 0);
+        assert_eq!(trace[0].notes.len(), 1);
+        assert!(trace[0].notes[0].contains("truncated"));
+    }
+
+    #[test]
+    fn huge_replacement_literal_append_capped_by_output_budget() {
+        // R8-2: `append_capped` used to call `seg.chars().count()` — a
+        // FULL scan of the authored replacement before the cap decision, so
+        // one match against a huge literal cost O(authored length) per
+        // assembly. The cap decision must scan only up to `remaining + 1`
+        // chars. The observable contract is unchanged: the output is capped
+        // at the budget, the kept prefix is the literal's head, and the
+        // truncation is recorded.
+        let big_replacement = "x".repeat(1_000_000);
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            "a",
+            &serde_json::json!([{ "pattern": "a", "replacement": big_replacement }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        assert_eq!(summary.chars().count(), MAX_HYGIENE_OUTPUT_CHARS);
+        assert_eq!(summary, &"x".repeat(MAX_HYGIENE_OUTPUT_CHARS));
+        assert_eq!(trace[0].applied, 1);
         assert_eq!(trace[0].skipped, 0);
         assert_eq!(trace[0].notes.len(), 1);
         assert!(trace[0].notes[0].contains("truncated"));
@@ -907,12 +955,12 @@ mod tests {
 
     #[test]
     fn malformed_before_cap_and_beyond_tail_account_together() {
-        // G-1 (round-7): malformed elements before the cap keep their
-        // per-element notes and skipped slots (they were never executable);
-        // the unread tail beyond the cap is counted into `skipped` via
-        // length arithmetic. Total skipped stays malformed + beyond —
-        // identical accounting to the old apply-time slice, now computed
-        // from the parse site.
+        // G-1 (round-7) + R8-1: malformed elements before the cap keep
+        // their skipped slots (they were never executable) but their
+        // diagnostics aggregate into a single count note; the unread tail
+        // beyond the cap is counted into `skipped` via length arithmetic.
+        // Total skipped stays malformed + beyond — identical accounting to
+        // the old apply-time slice, now computed from the parse site.
         let summary = (0..MAX_HYGIENE_TRANSFORMS + 2)
             .map(|i| format!("a{i}"))
             .collect::<Vec<_>>()
@@ -943,20 +991,102 @@ mod tests {
         assert_eq!(trace[0].applied, MAX_HYGIENE_TRANSFORMS);
         // 2 malformed before the cap + 2 valid beyond the cap.
         assert_eq!(trace[0].skipped, 4);
-        // 2 per-element malformed notes + 1 collective beyond note.
-        assert_eq!(trace[0].notes.len(), 3);
-        assert_eq!(
-            trace[0]
-                .notes
-                .iter()
-                .filter(|n| n.contains("object with string"))
-                .count(),
-            2
-        );
+        // 1 aggregated malformed note + 1 collective beyond note.
+        assert_eq!(trace[0].notes.len(), 2);
+        assert!(trace[0]
+            .notes
+            .iter()
+            .any(|n| n.contains("2 malformed hygiene transforms skipped")));
         assert!(trace[0]
             .notes
             .iter()
             .any(|n| n.contains("transforms beyond")));
+    }
+
+    #[test]
+    fn huge_malformed_prefix_aggregates_notes_and_hard_stops() {
+        // R8-1: a persisted carrier with a large malformed prefix used to
+        // push ONE note string per malformed element (unbounded allocation)
+        // and scan the whole array (CPU O(len)) when fewer than
+        // MAX_HYGIENE_TRANSFORMS transforms ever parse. Diagnostics now
+        // aggregate into a single count note and the scan halts after
+        // 8 x MAX_HYGIENE_TRANSFORMS visited elements; the unread tail
+        // counts into `skipped` via the serde-known array length.
+        let total = 100_000;
+        let carrier: Vec<serde_json::Value> = (0..total).map(|_| serde_json::json!(17)).collect();
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            "The hero fights the dragon",
+            &serde_json::json!(carrier),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        assert_eq!(summary, "The hero fights the dragon");
+        assert_eq!(trace[0].applied, 0);
+        assert_eq!(trace[0].skipped, total);
+        assert_eq!(
+            trace[0].notes.len(),
+            2,
+            "exactly two notes regardless of carrier size, got {:#?}",
+            trace[0].notes
+        );
+        assert!(trace[0].notes.iter().any(|n| {
+            n.contains(&format!(
+                "{} malformed hygiene transforms skipped",
+                MAX_HYGIENE_TRANSFORMS * 8
+            ))
+        }));
+        assert!(trace[0]
+            .notes
+            .iter()
+            .any(|n| n.contains("scan budget exceeded")));
+    }
+
+    #[test]
+    fn malformed_before_cap_aggregates_into_one_note() {
+        // R8-1: malformed elements inside the scan budget produce ONE
+        // aggregated note with a count — never one note per element. Their
+        // skipped slots are unchanged.
+        let carrier: Vec<serde_json::Value> = (0..5)
+            .map(|i| serde_json::json!({ "pattern": format!("a{i}") })) // malformed: no replacement
+            .collect();
+        let parsed = serde_json::json!(carrier);
+        let (transforms, notes, malformed) = parse_carrier(&parsed);
+        assert!(transforms.is_empty());
+        assert_eq!(malformed, 5);
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].contains("5 malformed hygiene transforms skipped"));
+        assert!(!notes[0].contains("transforms beyond"));
+    }
+
+    #[test]
+    fn scan_budget_boundary_is_exactly_scan_budget_elements() {
+        // R8-1 boundary: the halt fires only when the visited-element
+        // budget is EXCEEDED. Exactly 8 x MAX_HYGIENE_TRANSFORMS malformed
+        // elements is still in budget (scanned fully, one aggregated note);
+        // one more element trips the scan-budget note and the unread tail
+        // still counts toward `skipped`.
+        let in_budget: Vec<serde_json::Value> = (0..MAX_HYGIENE_TRANSFORMS * 8)
+            .map(|_| serde_json::json!(17))
+            .collect();
+        let parsed = serde_json::json!(in_budget);
+        let (transforms, notes, malformed) = parse_carrier(&parsed);
+        assert!(transforms.is_empty());
+        assert_eq!(malformed, MAX_HYGIENE_TRANSFORMS * 8);
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].contains("malformed hygiene transforms skipped"));
+        assert!(!notes.iter().any(|n| n.contains("scan budget exceeded")));
+
+        let over: Vec<serde_json::Value> = (0..=(MAX_HYGIENE_TRANSFORMS * 8))
+            .map(|_| serde_json::json!(17))
+            .collect();
+        let parsed = serde_json::json!(over);
+        let (_, notes, malformed) = parse_carrier(&parsed);
+        assert_eq!(malformed, MAX_HYGIENE_TRANSFORMS * 8 + 1);
+        assert_eq!(notes.len(), 2);
+        assert!(notes.iter().any(|n| n.contains("scan budget exceeded")));
+        assert!(notes
+            .iter()
+            .any(|n| n.contains("malformed hygiene transforms skipped")));
     }
 
     #[test]
