@@ -164,10 +164,10 @@ fn apply_transform(text: &str, t: &HygieneTransform) -> TransformPass {
             note: Some("invalid regex".to_string()),
         };
     };
-    // F-2 / R2-1: each match's expansion is built piece by piece with a
-    // char budget ([`expand_pieces`]) instead of materializing the complete
-    // uncapped expansion first.
-    let pieces = parse_replacement(&t.replacement);
+    // F-2 / R2-1 / R2-5: expand the replacement template one piece at a
+    // time with a char budget. The template is never collected into a
+    // Vec — a persisted `$0`.repeat(N) string cannot allocate N pieces
+    // before the cap runs.
     let mut applied = 0;
     let mut out = String::new();
     let mut out_chars = 0usize;
@@ -179,7 +179,7 @@ fn apply_transform(text: &str, t: &HygieneTransform) -> TransformPass {
             truncated = true;
             break;
         }
-        match expand_pieces(&pieces, &caps, &mut out, &mut out_chars) {
+        match expand_replacement(&t.replacement, &caps, &mut out, &mut out_chars) {
             ExpansionOutcome::Applied => {
                 applied += 1;
                 last_end = m.end();
@@ -287,56 +287,70 @@ enum ReplacementPiece<'a> {
     Name(&'a str),
 }
 
-/// Parse a replacement template into literal / capture-reference pieces,
-/// mirroring the `regex` crate's `expand` syntax: `$$` is a literal `$`,
+/// Streaming cursor over a replacement template. Yields one
+/// [`ReplacementPiece`] at a time so a long `$0$0…` template never
+/// materializes a piece vector before the output budget is applied.
+///
+/// Syntax mirrors the `regex` crate's `expand`: `$$` is a literal `$`,
 /// `$name` / `${name}` reference capture groups by name (`$N` / `${N}` by
 /// index; an all-digit unbraced run is an index), unbraced names are the
 /// longest `[0-9A-Za-z_]` run, braced names may contain any byte except
 /// `}`, and a `$` that starts no valid reference is literal.
-fn parse_replacement(replacement: &str) -> Vec<ReplacementPiece<'_>> {
-    let mut pieces = Vec::new();
-    let mut rest = replacement;
-    while let Some(i) = rest.find('$') {
-        if i > 0 {
-            pieces.push(ReplacementPiece::Literal(&rest[..i]));
+struct ReplacementCursor<'a> {
+    rest: &'a str,
+}
+
+impl<'a> ReplacementCursor<'a> {
+    const fn new(replacement: &'a str) -> Self {
+        Self { rest: replacement }
+    }
+}
+
+impl<'a> Iterator for ReplacementCursor<'a> {
+    type Item = ReplacementPiece<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.rest.is_empty() {
+            return None;
         }
-        let after = &rest[i + 1..];
-        // `$$` → literal `$`.
-        if after.as_bytes().first() == Some(&b'$') {
-            pieces.push(ReplacementPiece::Literal("$"));
-            rest = &after[1..];
-            continue;
-        }
-        // `${name}` — braced form; an unclosed brace is not a reference
-        // (the `$` is literal, like `regex`).
-        if after.as_bytes().first() == Some(&b'{') {
-            if let Some(end) = after.find('}') {
-                pieces.push(replacement_piece(&after[1..end]));
-                rest = &after[end + 1..];
-            } else {
-                pieces.push(ReplacementPiece::Literal("$"));
-                rest = after;
+        match self.rest.find('$') {
+            None => {
+                let lit = self.rest;
+                self.rest = "";
+                Some(ReplacementPiece::Literal(lit))
             }
-            continue;
+            Some(0) => {
+                let after = &self.rest[1..];
+                if after.as_bytes().first() == Some(&b'$') {
+                    self.rest = &after[1..];
+                    return Some(ReplacementPiece::Literal("$"));
+                }
+                if after.as_bytes().first() == Some(&b'{') {
+                    if let Some(end) = after.find('}') {
+                        self.rest = &after[end + 1..];
+                        return Some(replacement_piece(&after[1..end]));
+                    }
+                    self.rest = after;
+                    return Some(ReplacementPiece::Literal("$"));
+                }
+                let run = after
+                    .bytes()
+                    .take_while(|&b| b.is_ascii_alphanumeric() || b == b'_')
+                    .count();
+                if run == 0 {
+                    self.rest = after;
+                    return Some(ReplacementPiece::Literal("$"));
+                }
+                self.rest = &after[run..];
+                Some(replacement_piece(&after[..run]))
+            }
+            Some(i) => {
+                let lit = &self.rest[..i];
+                self.rest = &self.rest[i..];
+                Some(ReplacementPiece::Literal(lit))
+            }
         }
-        // Unbraced form: the longest `[0-9A-Za-z_]` run; a `$` followed by
-        // nothing valid is a literal `$`.
-        let run = after
-            .bytes()
-            .take_while(|&b| b.is_ascii_alphanumeric() || b == b'_')
-            .count();
-        if run == 0 {
-            pieces.push(ReplacementPiece::Literal("$"));
-            rest = after;
-            continue;
-        }
-        pieces.push(replacement_piece(&after[..run]));
-        rest = &after[run..];
     }
-    if !rest.is_empty() {
-        pieces.push(ReplacementPiece::Literal(rest));
-    }
-    pieces
 }
 
 /// The piece for a template reference name: an all-digit name is a group
@@ -358,33 +372,27 @@ enum ExpansionOutcome {
     None,
 }
 
-/// Append the budget-checked replacement expansion of `caps` — per the
-/// pre-parsed template `pieces` — to `out`, tracking the running char
-/// total in `out_chars` (R2-1). Each piece, literal text or a capture
-/// slice, is appended only while the remaining budget holds; a single
-/// capture group larger than the whole budget is truncated to the
-/// remaining budget. The complete expansion is never materialized, so the
-/// cost of a match is bounded by the budget even when the authored
-/// replacement has many backreferences into a large capture — no
-/// refs × capture multiplication before the check.
-fn expand_pieces(
-    pieces: &[ReplacementPiece<'_>],
+/// Append the budget-checked replacement expansion of `caps` from the
+/// authored template, streaming one [`ReplacementPiece`] at a time (R2-5).
+/// Parsing stops when the output budget is exhausted, so a template with
+/// many backreferences never allocates a piece vector (or scans the unused
+/// tail) before the cap runs.
+fn expand_replacement(
+    template: &str,
     caps: &regex::Captures<'_>,
     out: &mut String,
     out_chars: &mut usize,
 ) -> ExpansionOutcome {
     let start = *out_chars;
-    for piece in pieces {
+    for piece in ReplacementCursor::new(template) {
         let seg = match piece {
-            ReplacementPiece::Literal(s) => *s,
-            ReplacementPiece::Index(idx) => match caps.get(*idx) {
+            ReplacementPiece::Literal(s) => s,
+            ReplacementPiece::Index(idx) => match caps.get(idx) {
                 Some(gm) => gm.as_str(),
-                // Absent group → empty (regex mirror).
                 None => continue,
             },
             ReplacementPiece::Name(name) => match caps.name(name) {
                 Some(gm) => gm.as_str(),
-                // Absent group → empty (regex mirror).
                 None => continue,
             },
         };
@@ -737,14 +745,12 @@ mod tests {
 
     #[test]
     fn many_backrefs_into_large_capture_stay_bounded() {
-        // R2-1: a template authored with many `$0` backrefs into a capture
-        // spanning most of the input would materialize
-        // refs × capture-chars per match before the budget check
-        // (2_048 refs × 64KiC ≈ 128 MiB per match); the budget-checked
-        // segment expansion stops at the cap instead of ever building the
-        // full expansion.
+        // R2-1 / R2-5: a template authored with many `$0` backrefs into a
+        // capture spanning most of the input must not materialize a piece
+        // vector (or the full expansion) before the budget check. Streaming
+        // parse stops after the first `$0` fills the cap.
         let input = "a".repeat(MAX_HYGIENE_INPUT_CHARS);
-        let template = "$0".repeat(2_048);
+        let template = "$0".repeat(100_000);
         let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
             "kb_1",
             &input,
