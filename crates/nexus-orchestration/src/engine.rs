@@ -223,6 +223,14 @@ pub trait OrchestrationEngine: Send + Sync {
     async fn get_context(&self, session_id: &SessionId)
         -> Result<graph_flow::Context, EngineError>;
 
+    /// Returns `true` when a `FlowRunner` exists for the session (started
+    /// in-process or reconstructed at boot via `recover_sessions`).
+    ///
+    /// A recovered session whose runner failed reconstruction (e.g. a user
+    /// preset that is not embedded) returns `false` — it stays
+    /// tracked-but-not-driven and must not be stepped.
+    async fn has_runner(&self, session_id: &SessionId) -> bool;
+
     /// Start a session using a loaded preset (outer graph + inner graphs wired).
     async fn start_session_with_preset(
         &self,
@@ -492,6 +500,10 @@ impl OrchestrationEngine for EngineProxy {
             .map_err(EngineError::GraphFlow)?
             .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
         Ok(session.context)
+    }
+
+    async fn has_runner(&self, session_id: &SessionId) -> bool {
+        self.state.runners.read().await.contains_key(&session_id.0)
     }
 
     async fn start_session_with_preset(
@@ -898,6 +910,10 @@ impl OrchestrationEngine for GraphFlowEngine {
         Ok(session.context)
     }
 
+    async fn has_runner(&self, session_id: &SessionId) -> bool {
+        self.state.runners.read().await.contains_key(&session_id.0)
+    }
+
     async fn start_session_with_preset(
         &self,
         loaded: &crate::preset::LoadedPreset,
@@ -1075,6 +1091,51 @@ mod tests {
         assert!(
             !matches!(result, Err(EngineError::NoGraphLoaded)),
             "R6 regression: run_step returned NoGraphLoaded for recovered session with known preset"
+        );
+    }
+
+    #[tokio::test]
+    async fn has_runner_reflects_reconstruction_success() {
+        // BL-04 slice (T2): the resume re-drive must not step a session
+        // whose runner failed reconstruction (user presets stay
+        // tracked-but-not-driven). `has_runner` is the seam.
+        let storage: Arc<dyn SessionStorage> = Arc::new(InMemorySessionStorage::new());
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let engine = GraphFlowEngine::new_with_storage(storage.clone(), caps);
+
+        // Unknown preset: reconstruction fails -> no runner.
+        let unknown = SessionSummary {
+            session_id: SessionId("test:unknown".to_string()),
+            creator_id: "test-creator".to_string(),
+            preset_id: "nonexistent-preset".to_string(),
+            status: SessionStatus::Paused,
+            current_task_id: Some("gathering".to_string()),
+        };
+        engine.recover_sessions(vec![unknown.clone()]).await;
+        assert!(
+            !engine.has_runner(&unknown.session_id).await,
+            "a session whose runner failed reconstruction has no runner"
+        );
+
+        // Known embedded preset: reconstruction succeeds -> runner present.
+        let known = SessionSummary {
+            session_id: SessionId("novel-writing:1234567890".to_string()),
+            creator_id: "test-creator".to_string(),
+            preset_id: "novel-writing".to_string(),
+            status: SessionStatus::Paused,
+            current_task_id: Some("gathering".to_string()),
+        };
+        let session = graph_flow::Session::new_from_task(
+            known.session_id.0.clone(),
+            known.current_task_id.as_deref().unwrap_or(""),
+        );
+        storage.save(session).await.unwrap();
+        engine.recover_sessions(vec![known.clone()]).await;
+        assert!(
+            engine.has_runner(&known.session_id).await,
+            "a session whose runner was reconstructed has a runner"
         );
     }
 

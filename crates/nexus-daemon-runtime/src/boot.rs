@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use crate::api;
 use crate::lifecycle::{Event, Lifecycle, StatigLifecycle, SubsystemKind};
+use crate::preset_run::{resume_driven_sessions, PresetRunConfig};
 use crate::tls;
 use crate::worker_provider::ProductionWorkerProvider;
 use crate::workspace::WorkspaceState;
@@ -656,7 +657,59 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                         "recovering {} persisted session(s) into in-memory tracker",
                         summaries.len()
                     );
-                    concrete_engine.recover_sessions(summaries).await;
+                    concrete_engine.recover_sessions(summaries.clone()).await;
+
+                    // BL-04 slice (T2): resume re-drive — recovered
+                    // converge/merge chain sessions are re-driven from
+                    // their persisted position (completed edges are not
+                    // re-executed). Bounded by `max_steps` and cancellable
+                    // via a token aborted on `request_shutdown` (QC fix
+                    // wave 1, qc2 F-002 / qc3 F-001); runs in the
+                    // background so boot does not block on a long
+                    // re-drive. Only sessions whose runner was
+                    // reconstructed (embedded presets) are re-driven;
+                    // user-preset sessions that failed reconstruction
+                    // stay tracked-but-not-driven.
+                    let mut drivable = Vec::new();
+                    for s in &summaries {
+                        if concrete_engine.has_runner(&s.session_id).await {
+                            drivable.push(s.clone());
+                        }
+                    }
+                    if !drivable.is_empty() {
+                        let resume_engine = concrete_engine.clone();
+                        let resume_storage: Arc<dyn SessionStorage> = sqlite_storage.clone();
+                        // Abort the resume re-drive when the daemon shuts
+                        // down: `request_shutdown` broadcasts on
+                        // `shutdown_notify`, and `drive_preset_run` checks
+                        // the token before every step.
+                        let resume_cancel = tokio_util::sync::CancellationToken::new();
+                        {
+                            let resume_cancel = resume_cancel.clone();
+                            let shutdown_notify = state.shutdown_notify();
+                            tokio::spawn(async move {
+                                shutdown_notify.notified().await;
+                                resume_cancel.cancel();
+                            });
+                        }
+                        tokio::spawn(async move {
+                            let config = PresetRunConfig {
+                                resume_waiting: true,
+                                ..PresetRunConfig::default()
+                            };
+                            let decisions = resume_driven_sessions(
+                                &resume_engine,
+                                &resume_storage,
+                                &drivable,
+                                &config,
+                                Some(&resume_cancel),
+                            )
+                            .await;
+                            for d in &decisions {
+                                tracing::info!(decision = ?d, "resume re-drive decision");
+                            }
+                        });
+                    }
                 }
             }
             Err(e) => {
