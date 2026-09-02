@@ -35,15 +35,14 @@ pub const MAX_HYGIENE_INPUT_CHARS: usize = 64 * 1024;
 pub const MAX_HYGIENE_OUTPUT_CHARS: usize = 64 * 1024;
 
 /// One author-defined find/replace transform, parsed from
-/// `body.attributes.hygiene`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HygieneTransform {
-    /// Regex pattern matched against the emitted summary.
-    pub pattern: String,
-    /// Replacement text (`$1` / `${name}` backrefs supported).
-    pub replacement: String,
-    /// Optional author note — parsed but never actioned.
-    pub description: Option<String>,
+/// `body.attributes.hygiene`. Pattern and replacement borrow the JSON
+/// carrier — they are never cloned into an owned buffer before the
+/// output budget runs (R2-6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct HygieneTransform<'a> {
+    pattern: &'a str,
+    replacement: &'a str,
+    description: Option<&'a str>,
 }
 
 /// Per-entry hygiene trace row (inspector `hygiene` section).
@@ -75,49 +74,63 @@ pub fn apply_hygiene(entries: Vec<WorldKbEntry>) -> (Vec<WorldKbEntry>, Vec<Hygi
             out.push(entry);
             continue;
         };
-        let Some(attributes) = body.attributes.as_ref() else {
+        if body
+            .attributes
+            .as_ref()
+            .and_then(|a| a.get("hygiene"))
+            .is_none()
+        {
             out.push(entry);
             continue;
-        };
-        let Some(carrier) = attributes.get("hygiene") else {
-            out.push(entry);
-            continue;
-        };
-        let (transforms, parse_notes, malformed) = parse_carrier(carrier);
-        let mut row = HygieneTraceEntry {
-            entry_id: entry.entry_id.clone(),
-            applied: 0,
-            skipped: malformed,
-            notes: parse_notes,
-        };
-        if let Some(summary) = body.summary.take() {
-            let mut text = summary;
-            // Input cap (Q6 mirror): the scan text is truncated before the
-            // first pass. Unlike the activation engine's match-only scan cap,
-            // this cap alters the emitted text, so the truncation is
-            // recorded as a per-entry trace note (mirroring the output-cap
-            // note below) — the emitted text never changes silently.
-            if text.chars().count() > MAX_HYGIENE_INPUT_CHARS {
-                row.notes.push(format!(
-                    "hygiene input over {MAX_HYGIENE_INPUT_CHARS} chars truncated"
-                ));
-                text = truncate_chars(&text, MAX_HYGIENE_INPUT_CHARS).to_string();
-            }
-            for t in &transforms {
-                let pass = apply_transform(&text, t);
-                row.applied += pass.applied;
-                row.skipped += pass.skipped;
-                if let Some(note) = pass.note {
-                    row.notes.push(note);
-                }
-                text = pass.text;
-            }
-            body.summary = Some(text);
-        } else {
-            // Carrier present but no summary text — every transform is a
-            // no-match (nothing to scan).
-            row.skipped += transforms.len();
         }
+        let row = {
+            // Take the summary first so the attributes JSON can be borrowed
+            // for the rest of the pass — `parse_carrier` must not clone
+            // replacement templates out of the carrier (R2-6).
+            let summary = body.summary.take();
+            let Some(carrier) = body.attributes.as_ref().and_then(|a| a.get("hygiene")) else {
+                body.summary = summary;
+                out.push(entry);
+                continue;
+            };
+            let (transforms, parse_notes, malformed) = parse_carrier(carrier);
+            let mut row = HygieneTraceEntry {
+                entry_id: entry.entry_id.clone(),
+                applied: 0,
+                skipped: malformed,
+                notes: parse_notes,
+            };
+            if let Some(summary) = summary {
+                let mut text = summary;
+                // Input cap (Q6 mirror): the scan text is truncated before
+                // the first pass. Unlike the activation engine's match-only
+                // scan cap, this cap alters the emitted text, so the
+                // truncation is recorded as a per-entry trace note
+                // (mirroring the output-cap note below) — the emitted text
+                // never changes silently.
+                if text.chars().count() > MAX_HYGIENE_INPUT_CHARS {
+                    row.notes.push(format!(
+                        "hygiene input over {MAX_HYGIENE_INPUT_CHARS} chars truncated"
+                    ));
+                    text = truncate_chars(&text, MAX_HYGIENE_INPUT_CHARS).to_string();
+                }
+                for t in &transforms {
+                    let pass = apply_transform(&text, t);
+                    row.applied += pass.applied;
+                    row.skipped += pass.skipped;
+                    if let Some(note) = pass.note {
+                        row.notes.push(note);
+                    }
+                    text = pass.text;
+                }
+                body.summary = Some(text);
+            } else {
+                // Carrier present but no summary text — every transform is a
+                // no-match (nothing to scan).
+                row.skipped += transforms.len();
+            }
+            row
+        };
         trace.push(row);
         out.push(entry);
     }
@@ -145,7 +158,7 @@ fn output_truncated_note() -> String {
 /// Never panics on well-formed input. The only `expect` is on regex
 /// capture group 0, which the `regex` crate guarantees to exist for every
 /// match of a compiled pattern.
-fn apply_transform(text: &str, t: &HygieneTransform) -> TransformPass {
+fn apply_transform(text: &str, t: &HygieneTransform<'_>) -> TransformPass {
     if t.pattern.chars().count() > MAX_HYGIENE_PATTERN_CHARS {
         return TransformPass {
             text: text.to_string(),
@@ -156,7 +169,7 @@ fn apply_transform(text: &str, t: &HygieneTransform) -> TransformPass {
             )),
         };
     }
-    let Ok(re) = Regex::new(&t.pattern) else {
+    let Ok(re) = Regex::new(t.pattern) else {
         return TransformPass {
             text: text.to_string(),
             applied: 0,
@@ -179,7 +192,7 @@ fn apply_transform(text: &str, t: &HygieneTransform) -> TransformPass {
             truncated = true;
             break;
         }
-        match expand_replacement(&t.replacement, &caps, &mut out, &mut out_chars) {
+        match expand_replacement(t.replacement, &caps, &mut out, &mut out_chars) {
             ExpansionOutcome::Applied => {
                 applied += 1;
                 last_end = m.end();
@@ -219,7 +232,7 @@ fn apply_transform(text: &str, t: &HygieneTransform) -> TransformPass {
 /// `{"pattern": string, "replacement": string, "description"?: string}`
 /// objects. Malformed elements are skipped and reported in `notes`; the
 /// returned count is the number of malformed elements (degraded transforms).
-fn parse_carrier(carrier: &serde_json::Value) -> (Vec<HygieneTransform>, Vec<String>, usize) {
+fn parse_carrier(carrier: &serde_json::Value) -> (Vec<HygieneTransform<'_>>, Vec<String>, usize) {
     let Some(items) = carrier.as_array() else {
         return (
             Vec::new(),
@@ -255,13 +268,10 @@ fn parse_carrier(carrier: &serde_json::Value) -> (Vec<HygieneTransform>, Vec<Str
             );
             continue;
         };
-        let description = obj
-            .get("description")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string);
+        let description = obj.get("description").and_then(serde_json::Value::as_str);
         transforms.push(HygieneTransform {
-            pattern: pattern.to_string(),
-            replacement: replacement.to_string(),
+            pattern,
+            replacement,
             description,
         });
     }
@@ -699,14 +709,15 @@ mod tests {
 
     #[test]
     fn carrier_parses_description() {
-        let (transforms, notes, malformed) = parse_carrier(&serde_json::json!([
+        let carrier = serde_json::json!([
             { "pattern": "a", "replacement": "b", "description": "fix a" },
             { "pattern": "c", "replacement": "d" },
-        ]));
+        ]);
+        let (transforms, notes, malformed) = parse_carrier(&carrier);
         assert!(notes.is_empty());
         assert_eq!(malformed, 0);
         assert_eq!(transforms.len(), 2);
-        assert_eq!(transforms[0].description.as_deref(), Some("fix a"));
+        assert_eq!(transforms[0].description, Some("fix a"));
         assert_eq!(transforms[1].description, None);
     }
 
