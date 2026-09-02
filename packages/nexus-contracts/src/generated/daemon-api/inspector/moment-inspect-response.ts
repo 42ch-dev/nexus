@@ -5,7 +5,7 @@
  */
 
 /**
- * Response for POST /v1/daemon/inspector/moment (V1.151 P0 DF-76). Mirrors the enriched inspector packet emitted by nexus-moment-context-assembly::inspector::build_inspector_packet 1:1: spoke `modules` (placement + activation_trace), plus three additive product-local sections — `slot_map`, `budget`, `moment_directive` (status/metadata only; the directive body is NEVER on the wire — AC-I3). All sections are always present with nullable/empty values. Root `additionalProperties: false` per the H1 locked pattern: the schema is the SSOT — product-local sections grow by extending schema + codegen together, and the handler's packet round-trip fails loudly (500) on unknown root sections instead of silently dropping them.
+ * Response for POST /v1/daemon/inspector/moment (V1.151 P0 DF-76). Mirrors the enriched inspector packet emitted by nexus-moment-context-assembly::inspector::build_inspector_packet 1:1: spoke `modules` (placement + activation_trace), plus four additive product-local sections — `slot_map`, `budget`, `moment_directive` (status/metadata only; the directive body is NEVER on the wire — AC-I3) and `hygiene` (per-entry regex-transform trace, DF-79; optional on the wire — absent when no carrier-bearing entries). Three sections are always present with nullable/empty values; `hygiene` is additive-optional. Root `additionalProperties: false` per the H1 locked pattern: the schema is the SSOT — product-local sections grow by extending schema + codegen together, and the handler's packet round-trip fails loudly (500) on unknown root sections instead of silently dropping them.
  */
 export interface MomentInspectResponse {
   /**
@@ -118,4 +118,25 @@ export interface MomentInspectResponse {
      */
     status: string;
   };
+  /**
+   * Per-entry regex-hygiene transform trace (DF-79), one row per carrier-bearing entry; absent when no entry carried `body.attributes.hygiene`. Each row reports the transform outcome for that entry.
+   */
+  hygiene?: {
+    /**
+     * The carrier-bearing entry's stable id.
+     */
+    entry_id: string;
+    /**
+     * Performed replacements (total across all applied transforms).
+     */
+    applied: number;
+    /**
+     * No-match and degraded (invalid/capped) transforms.
+     */
+    skipped: number;
+    /**
+     * Diagnostics ("invalid regex" / truncation / malformed carrier); no-match is silent.
+     */
+    notes: string[];
+  }[];
 }

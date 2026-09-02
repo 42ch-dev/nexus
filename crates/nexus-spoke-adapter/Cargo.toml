@@ -55,6 +55,10 @@ tokio.workspace = true
 # `match_key`. (The workspace ECMA262-fidelity regexp crate for codegen stays
 # in root `Cargo.toml`; this crate does not consume it.)
 regex = { workspace = true }
+# DF-80 (V1.181 P1): `StLorebookError` for file-level ST lorebook
+# malformation (thiserror, workspace-pinned — already in the lockfile via
+# nexus-daemon-runtime).
+thiserror = { workspace = true }
 
 [dev-dependencies]
 spoke-schemas.workspace = true

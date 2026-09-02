@@ -3943,6 +3943,7 @@ dependencies = [
  "nexus-knowledge",
  "nexus-narrative",
  "nexus-spoke-adapter",
+ "regex",
  "serde",
  "serde_json",
  "tokio",
@@ -4035,6 +4036,7 @@ dependencies = [
  "spoke-schemas",
  "sqlx",
  "tempfile",
+ "thiserror 1.0.69",
  "tokio",
 ]
 
