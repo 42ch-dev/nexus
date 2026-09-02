@@ -237,6 +237,9 @@ fn apply_transform(text: &str, t: &HygieneTransform<'_>) -> TransformPass {
             }
             ExpansionOutcome::Partial => {
                 applied += 1;
+                // The match is consumed (partially replaced): the tail
+                // append must resume after it, never re-emit the prefix.
+                last_end = m.end();
                 truncated = true;
                 break;
             }
@@ -245,6 +248,9 @@ fn apply_transform(text: &str, t: &HygieneTransform<'_>) -> TransformPass {
                 break;
             }
             ExpansionOutcome::WorkLimit => {
+                // The match is consumed (replacement abandoned): the tail
+                // append must resume after it, never re-emit the prefix.
+                last_end = m.end();
                 work_limited = true;
                 break;
             }
@@ -996,6 +1002,58 @@ mod tests {
         assert!(
             trace[0].notes.iter().any(|n| n.contains("work over")),
             "work bound must be noted; got {:#?}",
+            trace[0].notes
+        );
+    }
+
+    #[test]
+    fn work_limit_after_unmatched_prefix_does_not_duplicate_prefix() {
+        // G-2 regression (PR #237 re-review): when the shared piece-visit
+        // budget is exhausted mid-pass after a non-empty unmatched prefix
+        // was appended, the WorkLimit break must still advance `last_end`
+        // past the match — otherwise the final tail append re-emits the
+        // already-appended prefix (`prefixprefixX`). The match is consumed
+        // (replacement abandoned), so the tail resumes after it.
+        let template = "$9".repeat(MAX_HYGIENE_OUTPUT_CHARS + 1);
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            "prefixMX",
+            &serde_json::json!([{ "pattern": "M", "replacement": template }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        assert_eq!(summary, "prefixX", "no duplicated prefix; got {summary:?}");
+        assert_eq!(summary.matches("prefix").count(), 1);
+        assert_eq!(trace[0].applied, 0);
+        assert_eq!(trace[0].skipped, 1);
+        assert!(
+            trace[0].notes.iter().any(|n| n.contains("work over")),
+            "work bound must be noted; got {:#?}",
+            trace[0].notes
+        );
+    }
+
+    #[test]
+    fn partial_expansion_after_unmatched_prefix_does_not_duplicate_prefix() {
+        // G-2 regression: when the output budget runs out mid-expansion
+        // after a non-empty unmatched prefix was appended, the Partial
+        // break must not re-emit the prefix. The match is consumed
+        // (partially replaced), so the emitted text is the prefix plus the
+        // partial expansion — exactly once.
+        let big_replacement = "y".repeat(MAX_HYGIENE_OUTPUT_CHARS);
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            "prefixMX",
+            &serde_json::json!([{ "pattern": "M", "replacement": big_replacement }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        assert_eq!(summary.chars().count(), MAX_HYGIENE_OUTPUT_CHARS);
+        assert!(summary.starts_with("prefix"));
+        assert_eq!(summary.matches("prefix").count(), 1);
+        assert_eq!(trace[0].applied, 1);
+        assert_eq!(trace[0].skipped, 0);
+        assert!(
+            trace[0].notes.iter().any(|n| n.contains("truncated")),
+            "truncation must be noted; got {:#?}",
             trace[0].notes
         );
     }
