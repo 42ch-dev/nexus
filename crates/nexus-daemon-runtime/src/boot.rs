@@ -662,7 +662,9 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                     // BL-04 slice (T2): resume re-drive — recovered
                     // converge/merge chain sessions are re-driven from
                     // their persisted position (completed edges are not
-                    // re-executed). Bounded + cancellable; runs in the
+                    // re-executed). Bounded by `max_steps` and cancellable
+                    // via a token aborted on `request_shutdown` (QC fix
+                    // wave 1, qc2 F-002 / qc3 F-001); runs in the
                     // background so boot does not block on a long
                     // re-drive. Only sessions whose runner was
                     // reconstructed (embedded presets) are re-driven;
@@ -677,6 +679,19 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                     if !drivable.is_empty() {
                         let resume_engine = concrete_engine.clone();
                         let resume_storage: Arc<dyn SessionStorage> = sqlite_storage.clone();
+                        // Abort the resume re-drive when the daemon shuts
+                        // down: `request_shutdown` broadcasts on
+                        // `shutdown_notify`, and `drive_preset_run` checks
+                        // the token before every step.
+                        let resume_cancel = tokio_util::sync::CancellationToken::new();
+                        {
+                            let resume_cancel = resume_cancel.clone();
+                            let shutdown_notify = state.shutdown_notify();
+                            tokio::spawn(async move {
+                                shutdown_notify.notified().await;
+                                resume_cancel.cancel();
+                            });
+                        }
                         tokio::spawn(async move {
                             let config = PresetRunConfig {
                                 resume_waiting: true,
@@ -687,7 +702,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                                 &resume_storage,
                                 &drivable,
                                 &config,
-                                None,
+                                Some(&resume_cancel),
                             )
                             .await;
                             for d in &decisions {

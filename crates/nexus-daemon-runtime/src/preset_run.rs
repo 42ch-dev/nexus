@@ -247,9 +247,10 @@ pub enum ResumeDecision {
     /// failed join. The context keys are the only reliable failure record.
     SkippedTypedFailed { session_id: SessionId },
     /// Skipped: not of the converge/merge chain class — the persisted
-    /// context carries no join-tracking key (`_converge_arrivals_*`,
-    /// `_merge_*`, `_join_wait_start_*`). Such sessions behave
-    /// byte-identically to pre-T2 boot (tracked-but-not-driven).
+    /// context carries no LIVE join-tracking key (all `_converge_arrivals_*`,
+    /// `_merge_*`, `_join_wait_start_*` keys are absent or `Value::Null`).
+    /// Such sessions behave byte-identically to pre-T2 boot
+    /// (tracked-but-not-driven).
     SkippedNotConvergeMergeClass { session_id: SessionId },
     /// Skipped: no `FlowRunner` exists for the session (reconstruction
     /// failed — e.g. a user preset that is not embedded). It stays
@@ -279,11 +280,14 @@ pub enum ResumeDecision {
 ///    output — boot already filters).
 /// 2. Its persisted context carries NO typed-failure record
 ///    (`_run_status` / `_run_error`).
-/// 3. Its persisted context carries a join-tracking key
-///    (`_converge_arrivals_*`, `_merge_*`, or `_join_wait_start_*`) —
-///    written ONLY by merge/converge gate states. This is the
-///    converge/merge chain class: a `manual`/`llm_judge` wait (no join
-///    keys) is never auto-advanced, and sessions without the class behave
+/// 3. Its persisted context carries a LIVE join-tracking key
+///    (`_converge_arrivals_*`, `_merge_*`, or `_join_wait_start_*`) with a
+///    non-Null value — written ONLY by merge/converge gate states. The
+///    gates clear their keys by writing `Value::Null` (deadline exceeded /
+///    success-leave), so a session whose join keys are all Null has LEFT
+///    the chain and is not re-driven. This is the converge/merge chain
+///    class: a `manual`/`llm_judge` wait (no live join keys) is never
+///    auto-advanced, and sessions without the class behave
 ///    byte-identically to pre-T2 boot.
 /// 4. A `FlowRunner` exists for the session (`engine.has_runner`) — the
 ///    caller must have reconstructed it (boot does via `recover_sessions`).
@@ -374,9 +378,17 @@ pub async fn resume_driven_sessions(
     decisions
 }
 
-/// True when the context carries a join-tracking key — written only by
+/// True when the context carries a LIVE join-tracking key — written only by
 /// merge/converge gate states (`_converge_arrivals_<id>`, `_merge_<id>`,
 /// `_join_wait_start_<id>`).
+///
+/// Key PRESENCE alone is not enough: `Context::set` never removes keys, and
+/// the join gates clear their tracking keys by writing `Value::Null`
+/// (deadline exceeded in `join_timeout_tick`; success-leave in the join
+/// task). A session whose join keys are all Null has LEFT the chain — it is
+/// class-negative and must not be re-driven (a completed session would
+/// otherwise re-execute, and a post-join `llm_judge`/`manual` wait would be
+/// auto-advanced by the resume re-drive).
 fn is_converge_merge_chain(context: &graph_flow::Context) -> bool {
     let Ok(serde_json::Value::Object(root)) = serde_json::to_value(context) else {
         return false;
@@ -384,10 +396,11 @@ fn is_converge_merge_chain(context: &graph_flow::Context) -> bool {
     let Some(serde_json::Value::Object(data)) = root.get("data") else {
         return false;
     };
-    data.keys().any(|k| {
-        k.starts_with("_converge_arrivals_")
-            || k.starts_with("_merge_")
-            || k.starts_with("_join_wait_start_")
+    data.iter().any(|(k, v)| {
+        !v.is_null()
+            && (k.starts_with("_converge_arrivals_")
+                || k.starts_with("_merge_")
+                || k.starts_with("_join_wait_start_"))
     })
 }
 
@@ -890,6 +903,156 @@ mod tests {
                 outcome: PresetRunOutcome::Completed { steps: 1 },
             }],
             "a parked converge/merge chain session is re-driven from its persisted position"
+        );
+    }
+
+    // QC fix wave 1 (qc2 F-001 + qc3 F-002): key PRESENCE misclassifies
+    // completed / post-join sessions as live. `Context::set` never removes
+    // keys; the join gates clear them by writing `Value::Null` (deadline
+    // exceeded in `join_timeout_tick`; success-leave in the join task). A
+    // session whose join keys are all Null has LEFT the chain and must be
+    // class-negative — otherwise the resume re-drive re-executes completed
+    // sessions and auto-advances post-join `llm_judge`/`manual` waits.
+    #[tokio::test]
+    async fn resume_skips_completed_session_with_null_join_keys() {
+        let storage: Arc<dyn SessionStorage> = Arc::new(graph_flow::InMemorySessionStorage::new());
+        // The join completed and LEFT the chain: the gates cleared their
+        // tracking keys by writing `Value::Null` (success-leave). Key
+        // presence alone would misclassify this session as live and
+        // re-drive it.
+        seed_session(
+            &storage,
+            "test:completed",
+            "post_join",
+            &[
+                ("_converge_arrivals_join", serde_json::Value::Null),
+                ("_join_wait_start_join", serde_json::Value::Null),
+            ],
+        )
+        .await;
+        let engine =
+            ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
+        let config = PresetRunConfig {
+            resume_waiting: true,
+            ..PresetRunConfig::default()
+        };
+        let decisions = resume_driven_sessions(
+            &engine,
+            &storage,
+            &[summary("test:completed")],
+            &config,
+            None,
+        )
+        .await;
+        assert_eq!(
+            decisions,
+            vec![ResumeDecision::SkippedNotConvergeMergeClass {
+                session_id: SessionId("test:completed".to_string())
+            }],
+            "a session whose join keys are all Null has left the chain and must not be re-driven"
+        );
+        assert!(
+            engine.script.lock().len() == 1,
+            "no run_step may be consumed for a completed session"
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_does_not_auto_advance_post_join_llm_judge_wait() {
+        let storage: Arc<dyn SessionStorage> = Arc::new(graph_flow::InMemorySessionStorage::new());
+        // The session passed the join (keys cleared to Null) and now waits
+        // at an llm_judge/manual state. It must NOT be auto-advanced by the
+        // resume re-drive — only a LIVE join key makes a session
+        // class-positive.
+        seed_session(
+            &storage,
+            "test:post-join-wait",
+            "llm_judge",
+            &[("_join_wait_start_join", serde_json::Value::Null)],
+        )
+        .await;
+        let engine =
+            ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
+        let config = PresetRunConfig {
+            resume_waiting: true,
+            ..PresetRunConfig::default()
+        };
+        let decisions = resume_driven_sessions(
+            &engine,
+            &storage,
+            &[summary("test:post-join-wait")],
+            &config,
+            None,
+        )
+        .await;
+        assert_eq!(
+            decisions,
+            vec![ResumeDecision::SkippedNotConvergeMergeClass {
+                session_id: SessionId("test:post-join-wait".to_string())
+            }],
+            "a post-join llm_judge/manual wait (Null join key) must not be auto-advanced"
+        );
+        assert!(
+            engine.script.lock().len() == 1,
+            "no run_step may be consumed for a post-join wait"
+        );
+    }
+
+    // QC fix wave 1 (qc2 F-002 + qc3 F-001): the boot resume spawn must be
+    // cancellable — `drive_preset_run` checks the token before every step,
+    // so cancelling mid-drive stops the re-drive without exhausting the
+    // step budget.
+    #[tokio::test]
+    async fn resume_stops_stepping_after_cancel_fires() {
+        let storage: Arc<dyn SessionStorage> = Arc::new(graph_flow::InMemorySessionStorage::new());
+        seed_session(
+            &storage,
+            "test:cancel",
+            "join",
+            &[("_join_wait_start_join", serde_json::json!(1000u64))],
+        )
+        .await;
+        // A long Paused script: without cancellation the drive would consume
+        // every step; with the token it must stop at the first check after
+        // cancel fires. Shared via `Arc` so the spawned task and the
+        // assertion below can both reach the script queue.
+        let engine = Arc::new(ScriptedEngine::with_script(
+            (0..1000).map(|_| Ok(paused())).collect(),
+        ));
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let cancel_for_task = cancel.clone();
+        let engine_for_task = Arc::clone(&engine);
+        let handle = tokio::spawn(async move {
+            let config = PresetRunConfig {
+                resume_waiting: true,
+                ..PresetRunConfig::default()
+            };
+            resume_driven_sessions(
+                &*engine_for_task,
+                &storage,
+                &[summary("test:cancel")],
+                &config,
+                Some(&cancel_for_task),
+            )
+            .await
+        });
+        // Let the drive start stepping, then cancel.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        cancel.cancel();
+        let decisions = handle.await.expect("resume task joins");
+        assert_eq!(decisions.len(), 1);
+        match &decisions[0] {
+            ResumeDecision::ReDriven { outcome, .. } => {
+                assert!(
+                    matches!(outcome, PresetRunOutcome::Cancelled { .. }),
+                    "resume must stop stepping after cancel fires, got {outcome:?}"
+                );
+            }
+            other => panic!("expected ReDriven, got {other:?}"),
+        }
+        assert!(
+            !engine.script.lock().is_empty(),
+            "the drive must stop stepping after cancel, not exhaust the script"
         );
     }
 }
