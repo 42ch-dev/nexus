@@ -1,0 +1,16 @@
+[package]
+name = "nexus-provider-conformance"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Neutral provider stream conformance runner: asserts normalized HostEvent invariants."
+
+[lints]
+workspace = true
+
+[dependencies]
+nexus-agent-host = { path = "../nexus-agent-host" }
+futures-util = { workspace = true }
+tokio = { workspace = true }

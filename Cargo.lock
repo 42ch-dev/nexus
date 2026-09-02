@@ -3999,6 +3999,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-provider-conformance"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "nexus-agent-host",
+ "tokio",
+]
+
+[[package]]
 name = "nexus-spoke-adapter"
 version = "0.1.0"
 dependencies = [
@@ -4044,6 +4053,7 @@ dependencies = [
  "agent-client-protocol",
  "anyhow",
  "assert_cmd",
+ "async-trait",
  "axum",
  "base64",
  "chrono",
@@ -4055,6 +4065,7 @@ dependencies = [
  "dirs",
  "ed25519-dalek",
  "futures-util",
+ "graph-flow",
  "hex",
  "libp2p",
  "nexus-acp-host",

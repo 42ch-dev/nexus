@@ -128,6 +128,19 @@ pub struct PeerToolsConfig {
     /// below all listed peers.
     #[serde(default)]
     pub peer_priority: Vec<String>,
+    /// Per-consumer MCP tool visibility subset (V1.180 P1, RN-OGA-2): the
+    /// exact catalog ids a consumer may SEE on the MCP `tools/list`
+    /// surface. Missing/empty = absent policy (all tools visible —
+    /// byte-identical current behavior). Present = `tools/list` is
+    /// filtered to this subset and a hidden-tool `tools/call`
+    /// short-circuits at the bridge seam. Validated at load (umbrella /
+    /// malformed entries fail config load with a named error — never
+    /// silently dropped). Unlike `tool_allowlist`, the reserved
+    /// `tools.nexus.*` namespace IS allowed here: hiding a daemon-owned
+    /// tool from a consumer is a legitimate visibility action (visibility
+    /// never grants execute).
+    #[serde(default)]
+    pub mcp_visibility: Vec<String>,
 }
 
 impl Default for PeerToolsConfig {
@@ -143,6 +156,7 @@ impl Default for PeerToolsConfig {
             embedded_mcp: false,
             collision_policy: CollisionPolicy::FirstStays,
             peer_priority: Vec::new(),
+            mcp_visibility: Vec::new(),
         }
     }
 }
@@ -187,6 +201,12 @@ impl PeerToolsConfig {
                         )));
                     }
                 }
+                // V1.180 P1 (RN-OGA-2): visibility entries are exact
+                // catalog ids — umbrella / malformed entries fail the
+                // whole load (fail-closed, never silently dropped).
+                for entry in &parsed.mcp_visibility {
+                    validate_visibility_entry(entry)?;
+                }
                 Ok(parsed)
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
@@ -227,6 +247,37 @@ fn validate_allowlist_entry(entry: &str) -> Result<(), ConnectConfigError> {
             entry: entry.to_owned(),
             reason:
                 "malformed tool id (expected tools.<ns>.<id> with ns ^[a-z][a-z0-9_-]*$ and id ^[a-z0-9][a-z0-9_-]*$)"
+                    .to_owned(),
+        });
+    }
+    Ok(())
+}
+
+/// Validate one operator MCP-visibility entry (V1.180 P1, RN-OGA-2).
+///
+/// The catalog is heterogeneous — builtin `nexus.*` rows, slash-separated
+/// builtin family ids (e.g. `fs/read_text_file`), peer `tools.<ns>.<id>`
+/// rows, and user-capability ids (e.g. `t6.wcap`) — so the strict
+/// `tools.*` allowlist grammar does not apply. The checks here only
+/// reject entries that can NEVER match a catalog id: wildcards and
+/// whitespace/control characters. Every rejection is a named
+/// `InvalidVisibility` error; an invalid entry fails the whole config
+/// load (never silently dropped). The reserved `tools.nexus.*` namespace
+/// IS allowed — visibility may hide daemon-owned tools (it never grants
+/// execute, so the allowlist's reserved-ns guard does not apply).
+fn validate_visibility_entry(entry: &str) -> Result<(), ConnectConfigError> {
+    if entry.contains('*') {
+        return Err(ConnectConfigError::InvalidVisibility {
+            entry: entry.to_owned(),
+            reason: "umbrella entry — visibility must name exact catalog ids (no wildcards)"
+                .to_owned(),
+        });
+    }
+    if entry.chars().any(char::is_whitespace) || entry.chars().any(char::is_control) {
+        return Err(ConnectConfigError::InvalidVisibility {
+            entry: entry.to_owned(),
+            reason:
+                "malformed tool id (whitespace / control characters can never match a catalog id)"
                     .to_owned(),
         });
     }
@@ -323,6 +374,11 @@ pub enum ConnectConfigError {
     /// load fails — invalid entries are never silently dropped.
     #[error("invalid tool_allowlist entry {entry:?}: {reason}")]
     InvalidAllowlist { entry: String, reason: String },
+    /// An operator MCP-visibility entry failed validation (umbrella /
+    /// malformed — V1.180 P1, RN-OGA-2). The whole config load fails —
+    /// invalid entries are never silently dropped.
+    #[error("invalid mcp_visibility entry {entry:?}: {reason}")]
+    InvalidVisibility { entry: String, reason: String },
     /// `peer_keys.json` exists but is malformed / has unknown fields / a
     /// key is not 64 hex chars.
     #[error("invalid peer_keys.json: {0}")]
@@ -648,5 +704,151 @@ mod tests {
             load_peer_keys(home.path()),
             Err(ConnectConfigError::InvalidPeerKeys(_))
         ));
+    }
+
+    // ── V1.180 P1 (RN-OGA-2): MCP visibility subset ─────────────────────
+
+    #[test]
+    fn absent_mcp_visibility_defaults_to_empty() {
+        // The additive default: a `daemon.json` without the new key parses
+        // as an empty subset ⇒ absent policy (all tools visible —
+        // byte-identical current behavior).
+        let home = isolated_home();
+        let config = PeerToolsConfig::load(home.path()).expect("default load");
+        assert!(
+            config.mcp_visibility.is_empty(),
+            "absent mcp_visibility ⇒ empty subset (absent policy)"
+        );
+    }
+
+    #[test]
+    fn mcp_visibility_parses_exact_ids() {
+        // Heterogeneous catalog ids all load: builtin `nexus.*`, peer
+        // `tools.*`, and user-capability ids.
+        let home = isolated_home();
+        fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
+        fs::write(
+            nexus_home_layout::connect_daemon_config_path(home.path()),
+            r#"{"mcp_visibility":["nexus.workspace.info","tools.t5.echo","t6.wcap"]}"#,
+        )
+        .expect("write");
+        let config = PeerToolsConfig::load(home.path()).expect("valid visibility loads");
+        assert_eq!(
+            config.mcp_visibility,
+            vec![
+                "nexus.workspace.info".to_owned(),
+                "tools.t5.echo".to_owned(),
+                "t6.wcap".to_owned()
+            ]
+        );
+    }
+    #[test]
+    fn mcp_visibility_parses_slash_separated_ids() {
+        // QC W-001: slash-separated builtin family ids (`fs/*`) are exact
+        // catalog ids — the operator config surface must express them
+        // (the `fs/*` family is part of the real spine catalog).
+        let home = isolated_home();
+        fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
+        fs::write(
+            nexus_home_layout::connect_daemon_config_path(home.path()),
+            r#"{"mcp_visibility":["fs/read_text_file","fs/write_text_file"]}"#,
+        )
+        .expect("write");
+        let config = PeerToolsConfig::load(home.path()).expect("slash-separated visibility loads");
+        assert_eq!(
+            config.mcp_visibility,
+            vec![
+                "fs/read_text_file".to_owned(),
+                "fs/write_text_file".to_owned()
+            ]
+        );
+    }
+
+    #[test]
+    fn mcp_visibility_umbrella_rejected() {
+        // Wildcards can never match a catalog id — fail-closed, never
+        // silently dropped. (Single-segment ids like `tools` are accepted:
+        // they can never match a catalog row, so they simply hide nothing.)
+        for entry in ["tools.*", "tools.t4.*", "*"] {
+            let home = isolated_home();
+            fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
+            fs::write(
+                nexus_home_layout::connect_daemon_config_path(home.path()),
+                format!(r#"{{"mcp_visibility":["{entry}"]}}"#),
+            )
+            .expect("write");
+            match PeerToolsConfig::load(home.path()) {
+                Err(ConnectConfigError::InvalidVisibility { entry: e, reason }) => {
+                    assert_eq!(e, entry, "named entry preserved");
+                    assert!(
+                        reason.contains("umbrella"),
+                        "umbrella reason for {entry:?}: {reason}"
+                    );
+                }
+                other => {
+                    panic!(
+                        "umbrella {entry:?} must fail load with InvalidVisibility, got {other:?}"
+                    )
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn mcp_visibility_malformed_rejected() {
+        // Whitespace can never match a catalog id — the entry passes JSON
+        // parsing (so the named validator catches it) and fails the whole
+        // load with `InvalidVisibility`.
+        let home = isolated_home();
+        fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
+        fs::write(
+            nexus_home_layout::connect_daemon_config_path(home.path()),
+            r#"{"mcp_visibility":["tools.t4.echo "]}"#,
+        )
+        .expect("write");
+        match PeerToolsConfig::load(home.path()) {
+            Err(ConnectConfigError::InvalidVisibility { entry, reason }) => {
+                assert_eq!(entry, "tools.t4.echo ", "named entry preserved");
+                assert!(reason.contains("malformed"), "malformed reason: {reason}");
+            }
+            other => panic!("whitespace entry must fail with InvalidVisibility, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mcp_visibility_json_hostile_entries_fail_closed() {
+        // Control characters are rejected by the JSON parser itself
+        // (serde) — still a hard load failure, just at the parse layer.
+        // Both layers fail closed; the named validator only sees entries
+        // that survive JSON parsing.
+        for entry in ["tools\tt4.echo", "tools.t4.e\u{1}cho"] {
+            let home = isolated_home();
+            fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
+            fs::write(
+                nexus_home_layout::connect_daemon_config_path(home.path()),
+                format!(r#"{{"mcp_visibility":["{entry}"]}}"#),
+            )
+            .expect("write");
+            assert!(
+                PeerToolsConfig::load(home.path()).is_err(),
+                "control-char entry {entry:?} must fail load (fail-closed)"
+            );
+        }
+    }
+
+    #[test]
+    fn mcp_visibility_allows_reserved_namespace() {
+        // Unlike `tool_allowlist`, the reserved `tools.nexus.*` namespace
+        // IS a valid visibility entry: hiding a daemon-owned tool from a
+        // consumer is legitimate (visibility never grants execute).
+        let home = isolated_home();
+        fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
+        fs::write(
+            nexus_home_layout::connect_daemon_config_path(home.path()),
+            r#"{"mcp_visibility":["tools.nexus.evil"]}"#,
+        )
+        .expect("write");
+        let config = PeerToolsConfig::load(home.path()).expect("reserved-ns visibility loads");
+        assert_eq!(config.mcp_visibility, vec!["tools.nexus.evil".to_owned()]);
     }
 }

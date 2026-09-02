@@ -48,6 +48,14 @@ struct McpChild {
 
 impl McpChild {
     fn spawn(mock: &MockServer) -> Self {
+        Self::spawn_with(mock, None)
+    }
+
+    /// Spawn the child with an optional `~/.nexus42/connect/daemon.json`
+    /// body (V1.180 P1, RN-OGA-2): the child reads the daemon-local
+    /// `mcp_visibility` subset from it. `None` = no file ⇒ absent policy
+    /// (byte-identical current behavior).
+    fn spawn_with(mock: &MockServer, daemon_json: Option<&str>) -> Self {
         let home = tempfile::tempdir().expect("temp home");
         let nexus_dir = home.path().join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("nexus dir");
@@ -56,6 +64,11 @@ impl McpChild {
             format!("daemon_url = \"{}\"\n", mock.uri()),
         )
         .expect("config.toml");
+        if let Some(body) = daemon_json {
+            std::fs::create_dir_all(nexus_dir.join("connect")).expect("connect dir");
+            std::fs::write(nexus_dir.join("connect").join("daemon.json"), body)
+                .expect("daemon.json");
+        }
 
         let child = tokio::process::Command::new(env!("CARGO_BIN_EXE_nexus42"))
             .args(["mcp", "serve"])
@@ -731,6 +744,122 @@ async fn no_list_changed_when_catalog_unchanged() {
         counter.count(),
         0,
         "zero notifications when the catalog is unchanged"
+    );
+
+    drop(running);
+    child.kill();
+}
+
+#[tokio::test]
+async fn visibility_policy_filters_list_and_short_circuits_hidden_call() {
+    // V1.180 P1 (RN-OGA-2): the child reads the daemon-local
+    // `mcp_visibility` subset and applies it at the bridge seam —
+    // `tools/list` is filtered to the configured subset and a hidden-tool
+    // `tools/call` is refused with the `tool_not_authorized` discriminator (never
+    // dispatched to the daemon), while a visible tool still dispatches.
+    let mock = MockServer::start().await;
+    mount_catalog(&mock).await;
+    mount_execution(
+        &mock,
+        "tools.t6.echo",
+        ResponseTemplate::new(200).set_body_json(json!({
+            "success": true,
+            "result": { "echo": "ok" }
+        })),
+    )
+    .await;
+    let mut child = McpChild::spawn_with(&mock, Some(r#"{"mcp_visibility":["tools.t6.echo"]}"#));
+    let transport = child.take_transport();
+    let running = serve_client(ClientInfo::default(), transport)
+        .await
+        .expect("initialize handshake completes");
+
+    // tools/list is filtered to the visible subset.
+    let result = running.list_tools(None).await.expect("tools/list succeeds");
+    let listed: Vec<String> = result.tools.iter().map(|t| t.name.to_string()).collect();
+    assert_eq!(
+        listed,
+        vec!["tools.t6.echo".to_owned()],
+        "only the visible tool is listed"
+    );
+
+    // A visible tool still dispatches through the daemon.
+    let call = running
+        .call_tool(CallToolRequestParams::new("tools.t6.echo"))
+        .await
+        .expect("visible tool call succeeds");
+    assert_ne!(call.is_error, Some(true), "visible call not an error");
+
+    // A hidden tool is refused at the seam (never reaches the daemon).
+    let err = running
+        .call_tool(CallToolRequestParams::new("t6.wcap"))
+        .await
+        .expect_err("hidden tool -> protocol error");
+    let ServiceError::McpError(data) = err else {
+        panic!("expected McpError, got {err:?}");
+    };
+    assert_eq!(
+        data.code,
+        ErrorCode::METHOD_NOT_FOUND,
+        "hidden tool refused with METHOD_NOT_FOUND"
+    );
+    assert_eq!(
+        data.message, "tool_not_authorized: t6.wcap",
+        "refusal names the exact hidden tool id"
+    );
+
+    drop(running);
+    child.kill();
+}
+
+#[tokio::test]
+async fn visible_but_denied_call_is_typed_refusal() {
+    // V1.180 P1 (RN-OGA-2): a tool VISIBLE per policy but denied by
+    // the authz spine (admission_pipeline Forbidden) is a typed
+    // refusal — `Ok(CallToolResult::error)` naming the honest spine
+    // code ahead of the message. Visibility never grants execute:
+    // the spine's denial maps through the existing daemon error
+    // mapping, unchanged.
+    let mock = MockServer::start().await;
+    mount_catalog(&mock).await;
+    mount_execution(
+        &mock,
+        "tools.t6.echo",
+        ResponseTemplate::new(403).set_body_json(json!({
+            "success": false,
+            "error": {
+                "code": "forbidden",
+                "message": "Forbidden: fs/* tools require an active workspace with defined bounds",
+                "details": {
+                    "resource": "tool_execution",
+                    "reason": "fs/* tools require an active workspace with defined bounds"
+                }
+            }
+        })),
+    )
+    .await;
+    let mut child = McpChild::spawn_with(&mock, Some(r#"{"mcp_visibility":["tools.t6.echo"]}"#));
+    let running = serve_client(ClientInfo::default(), child.take_transport())
+        .await
+        .expect("initialize handshake completes");
+
+    let result = running
+        .call_tool(CallToolRequestParams::new("tools.t6.echo"))
+        .await
+        .expect("visible-but-denied is an Ok(CallToolResult::error)");
+    assert_eq!(
+        result.is_error,
+        Some(true),
+        "is_error set for the spine-owned denial"
+    );
+    let text = result
+        .content
+        .iter()
+        .find_map(|c| c.as_text().map(|t| t.text.clone()))
+        .expect("text content");
+    assert_eq!(
+        text, "forbidden: Forbidden: fs/* tools require an active workspace with defined bounds",
+        "spine-owned denial names the honest spine code ahead of the message"
     );
 
     drop(running);

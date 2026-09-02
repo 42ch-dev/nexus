@@ -1725,6 +1725,9 @@ states:
         ) -> Result<graph_flow::Context, crate::engine::EngineError> {
             unimplemented!()
         }
+        async fn has_runner(&self, _: &crate::engine::SessionId) -> bool {
+            unimplemented!("wiring test must not query runner existence")
+        }
         async fn start_session_with_preset_for_creator(
             &self,
             _: &LoadedPreset,

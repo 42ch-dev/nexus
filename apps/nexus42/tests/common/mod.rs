@@ -17,6 +17,7 @@ use nexus_daemon_runtime::test_utils::TestTempRoot;
 use nexus_daemon_runtime::workspace::WorkspaceState;
 use std::path::Path;
 use std::process::Output;
+use std::sync::Arc;
 use tokio::net::TcpListener;
 
 /// A live in-process daemon + hermetic HOME pair.
@@ -31,7 +32,41 @@ pub struct LiveDaemon {
     pub pool: sqlx::SqlitePool,
     /// A clone of the daemon `WorkspaceState` (for handler-level seeding).
     pub state: WorkspaceState,
+    /// Bound HTTP base URL of the live router (for HTTP-observability tests,
+    /// e.g. `GET /v1/daemon/orchestration/sessions/:id`).
+    pub http_url: String,
+    /// The daemon engine (wired BEFORE `create_router`, like boot does), so
+    /// orchestration routes serve the SAME engine a test drives.
+    pub engine: Arc<dyn nexus_orchestration::OrchestrationEngine>,
+    /// The engine's session storage over `pool` — the daemon's real
+    /// `orchestration_sessions` persistence (e.g. for failure records).
+    pub session_storage: Arc<dyn graph_flow::SessionStorage>,
     http_task: tokio::task::JoinHandle<()>,
+}
+
+/// Wire a production-shaped orchestration engine into the daemon state
+/// (mirrors `boot.rs`: `SqliteSessionStorage` over the daemon pool +
+/// `GraphFlowEngine`). MUST run before `create_router` so the router's
+/// `WorkspaceState` clone shares the engine slot.
+fn wire_orchestration_engine(
+    state: &mut WorkspaceState,
+    pool: &sqlx::SqlitePool,
+) -> (
+    Arc<dyn nexus_orchestration::OrchestrationEngine>,
+    Arc<dyn graph_flow::SessionStorage>,
+) {
+    let storage: Arc<dyn graph_flow::SessionStorage> = Arc::new(
+        nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(pool.clone())),
+    );
+    let holder = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_orchestration::CapabilityRegistry::with_builtins(),
+    ));
+    let engine = Arc::new(nexus_orchestration::GraphFlowEngine::new_with_storage(
+        storage.clone(),
+        holder,
+    ));
+    state.set_engine(engine.clone() as Arc<dyn nexus_orchestration::OrchestrationEngine>);
+    (engine, storage)
 }
 
 #[allow(dead_code)]
@@ -61,9 +96,10 @@ impl LiveDaemon {
         );
         std::fs::write(&config_path, config).expect("write config.toml");
 
-        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         let pool = state.pool().expect("pool").clone();
         test_utils::seed_test_creator_and_world(&pool).await;
+        let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool);
 
         let app = api::create_router(
             state.clone(),
@@ -77,6 +113,9 @@ impl LiveDaemon {
             home: tmp,
             pool,
             state,
+            http_url,
+            engine,
+            session_storage,
             http_task,
         }
     }
@@ -105,7 +144,7 @@ impl LiveDaemon {
         );
         std::fs::write(&config_path, config).expect("write config.toml");
 
-        let state = WorkspaceState::new_for_testing(
+        let mut state = WorkspaceState::new_for_testing(
             nexus_home,
             db_path,
             Some(workspace_dir.to_string_lossy().to_string()),
@@ -113,6 +152,7 @@ impl LiveDaemon {
         .await;
         let pool = state.pool().expect("pool").clone();
         test_utils::seed_test_creator_and_world(&pool).await;
+        let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool);
 
         let app = api::create_router(
             state.clone(),
@@ -126,6 +166,9 @@ impl LiveDaemon {
             home: tmp,
             pool,
             state,
+            http_url,
+            engine,
+            session_storage,
             http_task,
         }
     }

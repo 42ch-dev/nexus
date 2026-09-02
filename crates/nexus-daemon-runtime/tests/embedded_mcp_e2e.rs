@@ -38,6 +38,7 @@
 use nexus_daemon_runtime::connect::mcp_embedded::{
     boot_embedded_mcp_server, start_embedded_mcp_server,
 };
+use nexus_daemon_runtime::connect::VisibilityPolicy;
 use nexus_daemon_runtime::test_utils::create_test_workspace;
 use nexus_daemon_runtime::workspace::WorkspaceState;
 use rmcp::model::{CallToolRequestParams, ClientInfo, ErrorCode};
@@ -85,7 +86,8 @@ async fn boot_server(
 async fn embedded_server_lists_and_calls_builtin_without_child_process() {
     let (_tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    let server = start_embedded_mcp_server(state, true).expect("enabled server");
+    let server =
+        start_embedded_mcp_server(state, true, VisibilityPolicy::absent()).expect("enabled server");
     let running = establish_session(&server).await;
     assert!(!running.is_closed(), "client alive after handshake");
 
@@ -129,7 +131,8 @@ async fn embedded_server_lists_and_calls_builtin_without_child_process() {
 async fn embedded_unroutable_id_is_method_not_found() {
     let (_tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    let server = start_embedded_mcp_server(state, true).expect("enabled server");
+    let server =
+        start_embedded_mcp_server(state, true, VisibilityPolicy::absent()).expect("enabled server");
     let running = establish_session(&server).await;
 
     // Same exact-id discriminator as the stdio path fixture
@@ -200,4 +203,141 @@ async fn boot_path_cli_flag_enables_and_no_enablement_leaves_no_server() {
         state2.embedded_mcp_server().is_none(),
         "no enablement ⇒ no boot server stored"
     );
+}
+
+#[tokio::test]
+async fn boot_path_invalid_visibility_refuses_embedded_start() {
+    // V1.180 P1 (RN-OGA-2) T1-minor decision: a semantically invalid
+    // `mcp_visibility` entry (umbrella / malformed) is a fail-closed
+    // construction refusal — the embedded server is NOT started (no
+    // surface) rather than silently widening the surface to all-visible.
+    // Other config error classes keep the W-002 warn-and-continue.
+    //
+    // Pin discipline: the `--embedded-mcp` CLI flag is ON so this test
+    // locks the T2 behavior. `PeerToolsConfig::load` fails with
+    // `InvalidVisibility` before the config key is usable, so a flag-off
+    // variant would be green on the T1 W-002 fallback too (flag off means
+    // no server either way). With the flag on, a W-002 revert
+    // (warn-and-continue all-visible) would create the server and this
+    // assertion fails — the pin locks the fail-closed refusal.
+    let (_tmp, state) = boot_server(
+        Some(r#"{"embedded_mcp": true, "mcp_visibility": ["tools.*"]}"#),
+        true,
+    )
+    .await;
+    assert!(
+        state.embedded_mcp_server().is_none(),
+        "InvalidVisibility refuses embedded start (no surface, never all-visible)"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn embedded_visibility_policy_filters_list_and_short_circuits_hidden_call() {
+    // V1.180 P1 (RN-OGA-2): Model B respects the daemon-side visibility
+    // policy — `tools/list` is filtered to the configured subset and a
+    // hidden-tool `tools/call` is refused at the seam (never dispatched),
+    // while a visible tool still dispatches through the spine.
+    let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let server = start_embedded_mcp_server(
+        state,
+        true,
+        VisibilityPolicy::from_visible(["nexus.context.whoami".to_owned()]),
+    )
+    .expect("enabled server");
+    let running = establish_session(&server).await;
+
+    // tools/list is filtered to the visible subset.
+    let result = running.list_tools(None).await.expect("tools/list succeeds");
+    let listed: Vec<String> = result.tools.iter().map(|t| t.name.to_string()).collect();
+    assert_eq!(
+        listed,
+        vec!["nexus.context.whoami".to_owned()],
+        "only the visible tool is listed"
+    );
+
+    // A visible tool still dispatches through the spine.
+    let call = running
+        .call_tool(CallToolRequestParams::new("nexus.context.whoami"))
+        .await
+        .expect("visible tool call succeeds");
+    assert_ne!(call.is_error, Some(true), "visible call not an error");
+
+    // A hidden tool is refused at the seam with the `tool_not_authorized`
+    // discriminator (METHOD_NOT_FOUND), never dispatched.
+    let err = running
+        .call_tool(CallToolRequestParams::new("nexus.workspace.info"))
+        .await
+        .expect_err("hidden tool -> protocol error");
+    let ServiceError::McpError(data) = err else {
+        panic!("expected McpError, got {err:?}");
+    };
+    assert_eq!(
+        data.code,
+        ErrorCode::METHOD_NOT_FOUND,
+        "hidden tool refused with METHOD_NOT_FOUND"
+    );
+    assert_eq!(
+        data.message, "tool_not_authorized: nexus.workspace.info",
+        "refusal names the exact hidden tool id"
+    );
+    drop(running);
+}
+
+#[tokio::test]
+#[serial]
+async fn embedded_visible_but_denied_call_is_typed_refusal() {
+    // V1.180 P1 (RN-OGA-2): a tool VISIBLE per policy but denied by the
+    // authz spine (admission_pipeline Forbidden — `fs/*` requires an
+    // active workspace, and the test state has none) is a typed refusal:
+    // `Ok(CallToolResult::error)` naming the honest spine code ahead of
+    // the message. Visibility never grants execute — the spine's denial
+    // maps through the existing daemon error mapping, unchanged.
+    //
+    // QC W-001: the policy is configured through the OPERATOR config
+    // surface (`daemon.json` `mcp_visibility` with a slash-separated
+    // `fs/*` catalog id) — the boot path derives the policy from
+    // `PeerToolsConfig::load`, proving the config surface can express
+    // the `fs/*` family (no in-code policy construction).
+    let (_tmp, state) = boot_server(
+        Some(r#"{"embedded_mcp": true, "mcp_visibility": ["fs/read_text_file"]}"#),
+        false,
+    )
+    .await;
+    let server = state
+        .embedded_mcp_server()
+        .expect("boot instance stored on WorkspaceState");
+    let running = establish_session(&server).await;
+
+    // The tool is listed (visible per policy)…
+    let result = running.list_tools(None).await.expect("tools/list succeeds");
+    let listed: Vec<String> = result.tools.iter().map(|t| t.name.to_string()).collect();
+    assert_eq!(
+        listed,
+        vec!["fs/read_text_file".to_owned()],
+        "only the visible tool is listed"
+    );
+
+    // …but the spine denies the execution — a typed refusal, not a
+    // silent drop, not a 500.
+    let call = running
+        .call_tool(CallToolRequestParams::new("fs/read_text_file"))
+        .await
+        .expect("visible-but-denied is an Ok(CallToolResult::error)");
+    assert_eq!(
+        call.is_error,
+        Some(true),
+        "is_error set for the spine-owned denial"
+    );
+    let text = call
+        .content
+        .iter()
+        .find_map(|c| c.as_text().map(|t| t.text.clone()))
+        .expect("text content");
+    assert_eq!(
+        text, "forbidden: Forbidden: fs/* tools require an active workspace with defined bounds",
+        "spine-owned denial names the honest spine code ahead of the message"
+    );
+    drop(running);
 }

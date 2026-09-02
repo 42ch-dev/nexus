@@ -21,6 +21,7 @@ pub mod mcp_bridge;
 pub mod mcp_embedded;
 pub mod session;
 pub mod table;
+pub mod visibility;
 pub mod watch;
 pub mod ws_transport;
 
@@ -49,4 +50,6 @@ pub use table::{
     mcp_catalog_admission, mcp_catalog_output_root_object, peer_tool_table, AdmissionOutcome,
     McpCatalogRefusal, PeerSessionTools, PeerToolEntry, PeerToolTable, ToolRefusal,
 };
+// V1.180 P1 (RN-OGA-2): per-consumer MCP tool visibility policy.
+pub use visibility::VisibilityPolicy;
 pub use ws_transport::{ws_config, WsTransport, DEFAULT_MAX_ENVELOPE_BYTES};
