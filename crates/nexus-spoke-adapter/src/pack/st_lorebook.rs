@@ -62,8 +62,9 @@ const DEFAULT_PACK_CREATOR: &str = "nexus42";
 /// Of the documented fields, the locked mapping honors `key`/`keys`,
 /// `content`, `comment`, `constant`, `uid`/`id` (see the mapping table) and
 /// reports `enabled`/unmappable `key` shapes (W-2/W-3). Mapped fields
-/// (`constant`, `enabled`, `content`) in an unsupported JSON shape also
-/// fire a `Warning` — they must not silently default (R2-3). The remaining
+/// (`constant`, `enabled`, `content`, `comment`) in an unsupported JSON
+/// shape also fire a `Warning` — they must not silently default (R2-3;
+/// `comment`'s fallback name is reported too, R10-2). The remaining
 /// documented-but-unmapped fields split into two classes (F-3/F-4):
 ///
 /// - **Behavior-affecting** (activation/placement semantics the pack shape
@@ -188,6 +189,11 @@ pub enum StLorebookError {
 /// object. Per-entry issues (unknown/undocumented fields, non-object
 /// entries) are collected as [`ConversionDiagnostic`]s and the conversion
 /// continues.
+// `too_many_lines`: the per-entry walk (name → unknown fields → mapped
+// guards → keys → constant → stable id → pack row) is one linear
+// diagnostic chain; splitting it would obscure the diagnostic order it
+// documents (works.rs create_work precedent).
+#[allow(clippy::too_many_lines)]
 pub fn parse_st_lorebook(json: &Value) -> Result<ConversionOutcome, StLorebookError> {
     let root = json.as_object().ok_or(StLorebookError::NotObject)?;
     // F-1: `entries` is either the array form (older exports / hand-written
@@ -219,7 +225,7 @@ pub fn parse_st_lorebook(json: &Value) -> Result<ConversionOutcome, StLorebookEr
             continue;
         };
 
-        let name = entry_name(obj, idx);
+        let (name, name_diag) = entry_name(obj, idx);
 
         // Unknown/undocumented fields → diagnostics; the import continues.
         for key in obj.keys() {
@@ -237,6 +243,12 @@ pub fn parse_st_lorebook(json: &Value) -> Result<ConversionOutcome, StLorebookEr
         // W-2 / W-3: documented fields whose semantics the locked mapping
         // cannot honor are flagged, never silently dropped.
         diagnostics.extend(documented_field_diagnostics(obj, idx, &name));
+
+        // R10-2: a present-but-non-string `comment` loses the authored
+        // title/memo — the fallback name is reported, never silent.
+        if let Some(d) = name_diag {
+            diagnostics.push(d);
+        }
 
         // Mapped `content` in an unsupported shape warns (see `entry_content`).
         let (content, content_diag) = entry_content(obj, idx, &name);
@@ -318,14 +330,33 @@ pub fn parse_st_lorebook(json: &Value) -> Result<ConversionOutcome, StLorebookEr
 /// Resolve the pack `canonical_name` for an ST entry: the `comment`
 /// (title/memo) when non-empty, else the first activation key (the
 /// documented "fill empty memos" backfill), else a positional fallback.
-fn entry_name(obj: &Map<String, Value>, idx: usize) -> String {
-    obj.get("comment")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .or_else(|| first_key(obj))
-        .unwrap_or_else(|| format!("entry-{idx}"))
+/// A present-but-non-string `comment` (number, bool, object) loses the
+/// authored title/memo — the fallback name is reported with a Warning
+/// (R10-2), never a silent drop.
+fn entry_name(obj: &Map<String, Value>, idx: usize) -> (String, Option<ConversionDiagnostic>) {
+    let fallback = || first_key(obj).unwrap_or_else(|| format!("entry-{idx}"));
+    match obj.get("comment") {
+        Some(Value::String(s)) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                (fallback(), None)
+            } else {
+                (trimmed.to_string(), None)
+            }
+        }
+        Some(v) => {
+            let name = fallback();
+            let diag = mapped_field_shape_diagnostic(
+                "comment",
+                v,
+                idx,
+                &name,
+                &format!("entry named '{name}' instead of the authored comment"),
+            );
+            (name, Some(diag))
+        }
+        None => (fallback(), None),
+    }
 }
 
 /// The entry `content` mapped to `body.summary`: the documented string when
@@ -835,8 +866,8 @@ fn keys_field_mappable(v: &Value) -> bool {
 }
 
 /// Shape-mismatch diagnostic for a mapped field (`constant`, `enabled`,
-/// `content`). The documented value is used as-is; any other JSON shape
-/// must not silently default (R2-3).
+/// `content`, `comment`). The documented value is used as-is; any other
+/// JSON shape must not silently default (R2-3).
 fn mapped_field_shape_diagnostic(
     field: &str,
     v: &Value,
@@ -1174,6 +1205,90 @@ mod tests {
         assert_eq!(
             outcome.pack_input["entries"][0]["canonical_name"],
             json!("harbor")
+        );
+    }
+
+    // ── R10-2: a present-but-non-string `comment` must not silently
+    //    fall back — the authored title/memo drop is reported ──
+
+    #[test]
+    fn non_string_comment_emits_warning_and_falls_back() {
+        // R10-2: a present-but-non-string `comment` (number, bool, object)
+        // loses the authored title/memo — the name silently fell back to
+        // the activation key without a diagnostic. The fallback must now be
+        // reported: a Warning naming the field, the unsupported shape, and
+        // the resulting fallback name.
+        for (comment, shape) in [
+            (json!(42), "integer"),
+            (json!(true), "boolean"),
+            (json!({}), "object"),
+        ] {
+            let lorebook = json!({
+                "entries": [
+                    { "uid": 0, "key": "dragon", "content": "Dragon lore.", "comment": comment }
+                ]
+            });
+            let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+            assert_eq!(outcome.diagnostics.len(), 1);
+            let d = &outcome.diagnostics[0];
+            assert_eq!(d.severity, DiagnosticSeverity::Warning);
+            assert_eq!(d.field.as_deref(), Some("comment"));
+            assert!(d.message.contains("unsupported JSON shape"));
+            assert!(d.message.contains(shape));
+            assert!(
+                d.message.contains("dragon"),
+                "fallback name must be noted; got: {}",
+                d.message
+            );
+            let entry = &outcome.pack_input["entries"][0];
+            assert_eq!(entry["canonical_name"], json!("dragon"));
+            let parsed = parse_pack(&outcome.pack_input).expect("pack must parse");
+            assert_eq!(parsed.entries.len(), 1);
+        }
+    }
+
+    #[test]
+    fn non_string_comment_without_key_falls_back_to_positional_with_warning() {
+        // R10-2: without an activation key the fallback is the positional
+        // name — still reported, never silent.
+        let lorebook = json!({
+            "entries": [
+                { "uid": 0, "content": "Dragon lore.", "comment": 42 }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        assert_eq!(outcome.diagnostics.len(), 1);
+        let d = &outcome.diagnostics[0];
+        assert_eq!(d.severity, DiagnosticSeverity::Warning);
+        assert_eq!(d.field.as_deref(), Some("comment"));
+        assert!(
+            d.message.contains("entry-0"),
+            "positional fallback must be noted; got: {}",
+            d.message
+        );
+        assert_eq!(
+            outcome.pack_input["entries"][0]["canonical_name"],
+            json!("entry-0")
+        );
+    }
+
+    #[test]
+    fn string_comment_unchanged_without_diagnostic() {
+        // R10-2: a string `comment` keeps the existing behavior — it names
+        // the entry and fires no diagnostic.
+        let lorebook = json!({
+            "entries": [
+                { "uid": 0, "key": "dragon", "content": "Dragon lore.", "comment": "Dragon lore title" }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        assert!(
+            outcome.diagnostics.is_empty(),
+            "string comment must not diagnose; got {outcome:#?}"
+        );
+        assert_eq!(
+            outcome.pack_input["entries"][0]["canonical_name"],
+            json!("Dragon lore title")
         );
     }
 

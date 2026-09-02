@@ -43,7 +43,12 @@
 //! the `$`-at-0 path are bounded the same way (R9b): `reference_piece`'s
 //! `}` search and name-run scan never walk the whole remaining template,
 //! so a `$` followed by a huge run costs O(budget) work per piece, not
-//! O(authored length).
+//! O(authored length). When the piece budget exhausts BEFORE any
+//! replacement content is emitted (e.g. 65,536 absent-group refs followed
+//! by a literal tail), the match degrades to "left as-is" (R10-1): the
+//! original matched text is re-emitted verbatim by the tail append instead
+//! of being consumed and lost — the authored literal tail is beyond the
+//! bounded budget, and the work-limit note still fires.
 //!
 //! [`WorldKbBody`]: nexus_knowledge::world_kb::knowledge_entry::WorldKbBody
 
@@ -243,10 +248,20 @@ fn apply_transform(text: &str, t: &HygieneTransform<'_>) -> TransformPass {
     let mut piece_budget = MAX_HYGIENE_OUTPUT_CHARS;
     for caps in re.captures_iter(text) {
         let m = caps.get(0).expect("capture 0 always present");
+        // R10-1: snapshot the state before the unmatched prefix is appended
+        // so a WorkLimit with no replacement output can revert to "match
+        // left as-is" — the tail append then re-emits the prefix and the
+        // original matched text verbatim.
+        let prefix_len = out.len();
+        let prefix_chars = out_chars;
         if !append_capped(&mut out, &mut out_chars, &text[last_end..m.start()]) {
             truncated = true;
             break;
         }
+        // The char count at match start (after the unmatched prefix): if
+        // the expansion produced no output, `out_chars` is unchanged from
+        // here.
+        let match_start_chars = out_chars;
         match expand_replacement(
             t.replacement,
             &caps,
@@ -271,9 +286,20 @@ fn apply_transform(text: &str, t: &HygieneTransform<'_>) -> TransformPass {
                 break;
             }
             ExpansionOutcome::WorkLimit => {
-                // The match is consumed (replacement abandoned): the tail
-                // append must resume after it, never re-emit the prefix.
-                last_end = m.end();
+                if out_chars == match_start_chars {
+                    // No replacement output was produced for this match:
+                    // degrade to "match left as-is" — revert to the state
+                    // before the unmatched prefix and do not advance
+                    // `last_end`, so the tail append re-emits the original
+                    // matched text (and any trailing literal) verbatim.
+                    out.truncate(prefix_len);
+                    out_chars = prefix_chars;
+                } else {
+                    // Some replacement output was produced (budget
+                    // exhausted mid-expansion): the partially-replaced
+                    // text stands in, and the match is consumed.
+                    last_end = m.end();
+                }
                 work_limited = true;
                 break;
             }
@@ -559,6 +585,8 @@ enum ExpansionOutcome {
     None,
     /// The shared piece-visit budget for the transform was exhausted
     /// (absent-group refs still count; they must not scan unbounded).
+    /// Reported only when nothing was appended for this match — the caller
+    /// degrades to "match left as-is" (R10-1).
     WorkLimit,
 }
 
@@ -1622,12 +1650,14 @@ mod tests {
 
     #[test]
     fn work_limit_after_unmatched_prefix_does_not_duplicate_prefix() {
-        // G-2 regression (PR #237 re-review): when the shared piece-visit
-        // budget is exhausted mid-pass after a non-empty unmatched prefix
-        // was appended, the WorkLimit break must still advance `last_end`
-        // past the match — otherwise the final tail append re-emits the
-        // already-appended prefix (`prefixprefixX`). The match is consumed
-        // (replacement abandoned), so the tail resumes after it.
+        // G-2 regression (PR #237 re-review) + R10-1: when the shared
+        // piece-visit budget is exhausted mid-pass after a non-empty
+        // unmatched prefix was appended, the WorkLimit break must not
+        // re-emit the already-appended prefix (`prefixprefixMX`). R10-1
+        // repairs the G-2 behavior: with NO replacement output produced for
+        // the match, the match is left as-is — the tail append re-emits the
+        // original matched text verbatim (`prefixMX`), so the prefix is
+        // emitted exactly once and the matched input text is not lost.
         let template = "$9".repeat(MAX_HYGIENE_OUTPUT_CHARS + 1);
         let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
             "kb_1",
@@ -1635,7 +1665,10 @@ mod tests {
             &serde_json::json!([{ "pattern": "M", "replacement": template }]),
         )]);
         let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
-        assert_eq!(summary, "prefixX", "no duplicated prefix; got {summary:?}");
+        assert_eq!(
+            summary, "prefixMX",
+            "no duplicated prefix, match kept; got {summary:?}"
+        );
         assert_eq!(summary.matches("prefix").count(), 1);
         assert_eq!(trace[0].applied, 0);
         assert_eq!(trace[0].skipped, 1);
@@ -1668,6 +1701,95 @@ mod tests {
         assert!(
             trace[0].notes.iter().any(|n| n.contains("truncated")),
             "truncation must be noted; got {:#?}",
+            trace[0].notes
+        );
+    }
+
+    #[test]
+    fn work_limit_with_no_replacement_output_keeps_match_verbatim() {
+        // R10-1: when the shared piece-visit budget exhausts BEFORE any
+        // replacement content is emitted (65,536 absent-group refs followed
+        // by a literal tail), the old WorkLimit break advanced `last_end`
+        // past the match — the matched input text AND the trailing literal
+        // were lost (`prefixMX` → `prefixX`). The fix degrades to "match
+        // left as-is": the tail append re-emits the original matched text
+        // verbatim (`prefixMX`), the authored literal tail is beyond the
+        // bounded budget, and the work-limit note still fires. Braced refs
+        // keep the literal a separate piece (an unbraced `$9` would absorb
+        // the adjacent `LITERAL` into its name run).
+        let template = format!("{}LITERAL", "${9}".repeat(MAX_HYGIENE_OUTPUT_CHARS));
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            "prefixMX",
+            &serde_json::json!([{ "pattern": "M", "replacement": template }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        assert_eq!(
+            summary, "prefixMX",
+            "match must be preserved verbatim; got {summary:?}"
+        );
+        assert_eq!(summary.matches("prefix").count(), 1, "no duplicated prefix");
+        assert_eq!(trace[0].applied, 0);
+        assert_eq!(trace[0].skipped, 1);
+        assert!(
+            trace[0].notes.iter().any(|n| n.contains("work over")),
+            "work bound must be noted; got {:#?}",
+            trace[0].notes
+        );
+    }
+
+    #[test]
+    fn piece_budget_exhausted_after_output_keeps_partial_text() {
+        // R10-1 guard: when the piece budget exhausts AFTER some
+        // replacement output was produced (a literal piece followed by
+        // 65,536 absent-group refs and a literal tail), `expand_replacement`
+        // reports Partial — the partially-replaced text stands in, the
+        // match is consumed, and the tail is dropped with the truncation
+        // note (the existing Partial contract, unchanged by R10-1).
+        let template = format!("Y{}LITERAL", "${9}".repeat(MAX_HYGIENE_OUTPUT_CHARS));
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            "prefixMX",
+            &serde_json::json!([{ "pattern": "M", "replacement": template }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        assert_eq!(
+            summary, "prefixY",
+            "partial replacement must stand in; got {summary:?}"
+        );
+        assert_eq!(summary.matches("prefix").count(), 1, "no duplicated prefix");
+        assert_eq!(trace[0].applied, 1);
+        assert_eq!(trace[0].skipped, 0);
+        assert!(
+            trace[0].notes.iter().any(|n| n.contains("truncated")),
+            "truncation must be noted; got {:#?}",
+            trace[0].notes
+        );
+    }
+
+    #[test]
+    fn work_limit_after_applied_match_keeps_later_match_verbatim() {
+        // R10-1: the revert path must also hold when earlier matches were
+        // already applied — the WorkLimit match is left as-is (re-emitted
+        // verbatim by the tail append) while the applied matches stand.
+        // The old code advanced `last_end` past the WorkLimit match and
+        // dropped its text (`Aa` → `A`).
+        let template = format!("A{}", "$9".repeat(MAX_HYGIENE_OUTPUT_CHARS - 1));
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            "aa",
+            &serde_json::json!([{ "pattern": "a", "replacement": template }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        assert_eq!(
+            summary, "Aa",
+            "applied match stands, WorkLimit match kept; got {summary:?}"
+        );
+        assert_eq!(trace[0].applied, 1);
+        assert_eq!(trace[0].skipped, 0);
+        assert!(
+            trace[0].notes.iter().any(|n| n.contains("work over")),
+            "work bound must be noted; got {:#?}",
             trace[0].notes
         );
     }
