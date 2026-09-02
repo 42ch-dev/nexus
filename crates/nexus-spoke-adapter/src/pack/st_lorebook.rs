@@ -23,6 +23,13 @@
 //! | `content`               | `body.summary`   |
 //! | `key` / `keys`          | `modules.activation.keys` |
 //! | `constant`              | `modules.activation.constant` |
+//!
+//! When an entry carries BOTH a non-empty `key` and a non-empty `keys`
+//! array, the two are merged into one flat activation list (`key` tokens
+//! first, then `keys` entries, deduped case-insensitively) and one
+//! `Warning` diagnostic fires — the ST primary/secondary distinction is not
+//! representable in the nexus any-match activation, so the entry may fire
+//! more often than ST would (G-2).
 
 use serde_json::json;
 use serde_json::{Map, Value};
@@ -236,7 +243,10 @@ pub fn parse_st_lorebook(json: &Value) -> Result<ConversionOutcome, StLorebookEr
         if let Some(d) = content_diag {
             diagnostics.push(d);
         }
-        let keys = activation_keys(obj);
+        let (keys, keys_merged) = activation_keys(obj);
+        if keys_merged {
+            diagnostics.push(merged_keys_diagnostic(idx, &name));
+        }
         let (constant, constant_diag) = match obj.get("constant") {
             None => (false, None),
             Some(Value::Bool(b)) => (*b, None),
@@ -366,17 +376,24 @@ fn first_key(obj: &Map<String, Value>) -> Option<String> {
     }
 }
 
-/// The activation keys of an entry: the `keys` array when present, else the
-/// `key` field — a comma-separated string (documented plaintext mode) or a
-/// list of strings (documented list form, W-3).
-fn activation_keys(obj: &Map<String, Value>) -> Vec<String> {
-    if let Some(keys) = obj.get("keys").and_then(Value::as_array) {
-        return keys
-            .iter()
-            .filter_map(Value::as_str)
-            .map(str::to_string)
-            .collect();
+/// G-2: both `key` and `keys` present — the ST primary/secondary
+/// distinction is not representable in the flat nexus any-match activation
+/// list, so the merge is reported instead of silently dropping either form.
+fn merged_keys_diagnostic(idx: usize, name: &str) -> ConversionDiagnostic {
+    ConversionDiagnostic {
+        severity: DiagnosticSeverity::Warning,
+        entry_index: Some(idx),
+        entry_name: Some(name.to_string()),
+        field: None,
+        message: "key and keys both present: the ST primary/secondary distinction is not represented in nexus activation — merged into a flat any-match list, so the entry may fire more often than ST would".to_string(),
     }
+}
+
+/// The `key` field's activation tokens: a comma-separated string
+/// (documented plaintext mode) or a list of strings (documented list form,
+/// W-3). An unmappable shape contributes nothing — the W-3 shape
+/// diagnostic fires separately.
+fn key_tokens(obj: &Map<String, Value>) -> Vec<String> {
     match obj.get("key") {
         Some(Value::String(s)) => s
             .split(',')
@@ -391,6 +408,47 @@ fn activation_keys(obj: &Map<String, Value>) -> Vec<String> {
             .collect(),
         _ => Vec::new(),
     }
+}
+
+/// The `keys` array's activation entries (documented plural list). A
+/// non-array shape contributes nothing — the W-3 shape diagnostic fires
+/// separately; non-string elements are filtered out (also W-3).
+fn keys_entries(obj: &Map<String, Value>) -> Vec<String> {
+    obj.get("keys")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The activation keys of an entry: the `keys` array when present, else the
+/// `key` field — a comma-separated string (documented plaintext mode) or a
+/// list of strings (documented list form, W-3). When BOTH forms are present
+/// and non-empty they are merged — `key` tokens first, then `keys` entries,
+/// deduped case-insensitively (the original text of the first occurrence is
+/// kept) — because nexus activation is a flat any-match list and cannot
+/// represent the ST primary/secondary distinction (G-2). The returned
+/// `bool` is true when a merge happened so the caller emits one Warning
+/// diagnostic.
+fn activation_keys(obj: &Map<String, Value>) -> (Vec<String>, bool) {
+    let key_tokens = key_tokens(obj);
+    let keys_entries = keys_entries(obj);
+    if !key_tokens.is_empty() && !keys_entries.is_empty() {
+        let mut merged: Vec<String> = Vec::with_capacity(key_tokens.len() + keys_entries.len());
+        let mut seen: HashSet<String> = HashSet::new();
+        for token in key_tokens.into_iter().chain(keys_entries) {
+            if seen.insert(token.to_lowercase()) {
+                merged.push(token);
+            }
+        }
+        return (merged, true);
+    }
+    (key_tokens.into_iter().chain(keys_entries).collect(), false)
 }
 
 /// Documented-but-unmapped entry fields with behavioral consequence (F-3/F-4).
@@ -1376,6 +1434,69 @@ mod tests {
         assert_eq!(d.field.as_deref(), Some("keys"));
         let entry = &outcome.pack_input["entries"][0];
         assert_eq!(entry["modules"]["activation"]["keys"], json!(["wyrm"]));
+    }
+
+    // ── G-2: both `key` and `keys` present must merge, not drop `key` ──
+
+    #[test]
+    fn both_key_and_keys_merge_with_diagnostic() {
+        // G-2: an entry with BOTH a valid `key` and a valid `keys` array
+        // must not silently drop the `key` triggers. The two are merged —
+        // `key` tokens first, then `keys` entries — deduped
+        // case-insensitively (the original text of the first occurrence is
+        // kept), and one Warning diagnostic records that the ST
+        // primary/secondary distinction is lost in the flat nexus
+        // any-match list.
+        let lorebook = json!({
+            "entries": [
+                {
+                    "uid": 0,
+                    "key": "Dragon,wyrm",
+                    "keys": ["dragon", "drake"],
+                    "content": "Dragon lore.",
+                    "comment": "Dragon"
+                }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        assert_eq!(outcome.diagnostics.len(), 1);
+        let d = &outcome.diagnostics[0];
+        assert_eq!(d.severity, DiagnosticSeverity::Warning);
+        assert!(d.message.contains("key"), "got: {}", d.message);
+        assert!(d.message.contains("keys"), "got: {}", d.message);
+        let entry = &outcome.pack_input["entries"][0];
+        assert_eq!(
+            entry["modules"]["activation"]["keys"],
+            json!(["Dragon", "wyrm", "drake"])
+        );
+        let parsed = parse_pack(&outcome.pack_input).expect("pack must parse");
+        assert_eq!(parsed.entries.len(), 1);
+    }
+
+    #[test]
+    fn both_key_and_keys_merge_keeps_key_order_and_dedupes() {
+        // G-2: merge order is `key` tokens first, then `keys` entries;
+        // case-insensitive duplicates are dropped keeping the first
+        // occurrence's original text.
+        let lorebook = json!({
+            "entries": [
+                {
+                    "uid": 0,
+                    "key": "alpha,beta",
+                    "keys": ["ALPHA", "gamma", "beta"],
+                    "content": "Lore.",
+                    "comment": "Entry"
+                }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        assert_eq!(outcome.diagnostics.len(), 1);
+        let entry = &outcome.pack_input["entries"][0];
+        assert_eq!(
+            entry["modules"]["activation"]["keys"],
+            json!(["alpha", "beta", "gamma"]),
+            "key tokens first, then keys entries; dupes dropped keeping first text"
+        );
     }
 
     // ── F-3/F-4: documented-but-unmapped activation fields must not be

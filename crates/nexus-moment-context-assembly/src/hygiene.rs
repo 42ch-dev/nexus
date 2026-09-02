@@ -20,7 +20,11 @@
 //! truncation is observable via a per-entry trace note (the emitted text
 //! never changes silently). Caps mirror the Q6 activation engine
 //! (`adapter/activation.rs`): 256 pattern chars / 64 KiB input / 64 KiB
-//! output — guardrails, not features.
+//! output — guardrails, not features. A carrier with more than
+//! [`MAX_HYGIENE_TRANSFORMS`] transforms is also bounded: the transforms
+//! beyond the cap are not executed, each counts toward the entry's trace
+//! `skipped`, and one note records the degradation — CPU per assembly
+//! never scales with an unrestricted carrier array length.
 //!
 //! [`WorldKbBody`]: nexus_knowledge::world_kb::knowledge_entry::WorldKbBody
 
@@ -33,6 +37,14 @@ pub const MAX_HYGIENE_PATTERN_CHARS: usize = 256;
 pub const MAX_HYGIENE_INPUT_CHARS: usize = 64 * 1024;
 /// Output text cap after a hygiene pass (Q6-mirror) — chars.
 pub const MAX_HYGIENE_OUTPUT_CHARS: usize = 64 * 1024;
+/// Maximum transforms applied per entry (Q6-guardrail family).
+///
+/// A persisted carrier with an unbounded array would run a fresh regex
+/// pass per transform over up to 64 KiB of text, so CPU per assembly
+/// scales with the array length. Transforms beyond the cap are not
+/// executed; each counts toward the entry's trace `skipped` with one
+/// degradation note.
+pub const MAX_HYGIENE_TRANSFORMS: usize = 32;
 
 /// One author-defined find/replace transform, parsed from
 /// `body.attributes.hygiene`. Pattern and replacement borrow the JSON
@@ -100,6 +112,20 @@ pub fn apply_hygiene(entries: Vec<WorldKbEntry>) -> (Vec<WorldKbEntry>, Vec<Hygi
                 skipped: malformed,
                 notes: parse_notes,
             };
+            // G-1: bound the number of executed transforms. A persisted
+            // carrier with an unrestricted array would run a fresh regex
+            // pass per transform over up to 64 KiB of text — CPU per
+            // assembly scales with the array length. Transforms beyond the
+            // cap are not executed; each counts toward `skipped` and one
+            // note records the degradation.
+            let beyond = transforms.len().saturating_sub(MAX_HYGIENE_TRANSFORMS);
+            if beyond > 0 {
+                row.skipped += beyond;
+                row.notes.push(format!(
+                    "hygiene transforms beyond {MAX_HYGIENE_TRANSFORMS} not applied"
+                ));
+            }
+            let transforms = &transforms[..transforms.len() - beyond];
             if let Some(summary) = summary {
                 let mut text = summary;
                 // Input cap (Q6 mirror): the scan text is truncated before
@@ -114,7 +140,7 @@ pub fn apply_hygiene(entries: Vec<WorldKbEntry>) -> (Vec<WorldKbEntry>, Vec<Hygi
                     ));
                     text = truncate_chars(&text, MAX_HYGIENE_INPUT_CHARS).to_string();
                 }
-                for t in &transforms {
+                for t in transforms {
                     let pass = apply_transform(&text, t);
                     row.applied += pass.applied;
                     row.skipped += pass.skipped;
@@ -725,6 +751,85 @@ mod tests {
         assert_eq!(summary, "The hero fights the dragon");
         assert_eq!(trace[0].skipped, 1);
         assert_eq!(trace[0].notes.len(), 1);
+    }
+
+    #[test]
+    fn transforms_beyond_cap_skipped_with_note() {
+        // G-1: a persisted carrier with an unbounded transform array would
+        // run a fresh regex pass per transform over up to 64 KiB of text —
+        // CPU per assembly scales with the array length. Only the first
+        // MAX_HYGIENE_TRANSFORMS execute; the rest are not run, each counts
+        // toward `skipped`, and one note records the degradation.
+        let total = MAX_HYGIENE_TRANSFORMS + 4;
+        let summary = (0..total)
+            .map(|i| format!("a{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let carrier: Vec<serde_json::Value> = (0..total)
+            .map(|i| {
+                serde_json::json!({
+                    "pattern": format!(r"\ba{i}\b"),
+                    "replacement": format!("b{i}"),
+                })
+            })
+            .collect();
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            &summary,
+            &serde_json::json!(carrier),
+        )]);
+        let out_summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        // The first cap transforms applied; the tail beyond the cap is
+        // untouched (its transforms were not executed).
+        let expected = (0..total)
+            .map(|i| {
+                if i < MAX_HYGIENE_TRANSFORMS {
+                    format!("b{i}")
+                } else {
+                    format!("a{i}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(out_summary, expected);
+        assert_eq!(trace[0].applied, MAX_HYGIENE_TRANSFORMS);
+        assert_eq!(trace[0].skipped, total - MAX_HYGIENE_TRANSFORMS);
+        assert_eq!(trace[0].notes.len(), 1);
+        assert!(trace[0].notes[0].contains("transforms beyond"));
+        assert!(trace[0].notes[0].contains(&MAX_HYGIENE_TRANSFORMS.to_string()));
+    }
+
+    #[test]
+    fn transforms_at_cap_apply_without_note() {
+        // G-1 boundary: exactly MAX_HYGIENE_TRANSFORMS transforms is not a
+        // degradation — all apply, no cap note.
+        let total = MAX_HYGIENE_TRANSFORMS;
+        let summary = (0..total)
+            .map(|i| format!("a{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let carrier: Vec<serde_json::Value> = (0..total)
+            .map(|i| {
+                serde_json::json!({
+                    "pattern": format!(r"\ba{i}\b"),
+                    "replacement": format!("b{i}"),
+                })
+            })
+            .collect();
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            &summary,
+            &serde_json::json!(carrier),
+        )]);
+        let out_summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        let expected = (0..total)
+            .map(|i| format!("b{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(out_summary, expected);
+        assert_eq!(trace[0].applied, total);
+        assert_eq!(trace[0].skipped, 0);
+        assert!(trace[0].notes.is_empty());
     }
 
     #[test]
