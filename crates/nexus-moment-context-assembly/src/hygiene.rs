@@ -66,12 +66,6 @@ pub struct HygieneTraceEntry {
 /// Read-path only: the returned entries are the caller's owned copies; the
 /// stored World-KB rows are never touched. Entries without a `hygiene`
 /// carrier pass through unchanged and produce no trace rows.
-///
-/// # Panics
-///
-/// Never panics on well-formed input. The only `expect` is on regex
-/// capture group 0, which the `regex` crate guarantees to exist for every
-/// match of a compiled pattern.
 #[must_use]
 pub fn apply_hygiene(entries: Vec<WorldKbEntry>) -> (Vec<WorldKbEntry>, Vec<HygieneTraceEntry>) {
     let mut trace = Vec::new();
@@ -110,65 +104,13 @@ pub fn apply_hygiene(entries: Vec<WorldKbEntry>) -> (Vec<WorldKbEntry>, Vec<Hygi
                 text = truncate_chars(&text, MAX_HYGIENE_INPUT_CHARS).to_string();
             }
             for t in &transforms {
-                if t.pattern.chars().count() > MAX_HYGIENE_PATTERN_CHARS {
-                    row.skipped += 1;
-                    row.notes.push(format!(
-                        "hygiene pattern over {MAX_HYGIENE_PATTERN_CHARS} chars skipped"
-                    ));
-                    continue;
+                let pass = apply_transform(&text, t);
+                row.applied += pass.applied;
+                row.skipped += pass.skipped;
+                if let Some(note) = pass.note {
+                    row.notes.push(note);
                 }
-                let Ok(re) = Regex::new(&t.pattern) else {
-                    row.skipped += 1;
-                    row.notes.push("invalid regex".to_string());
-                    continue;
-                };
-                // F-2 / R2-1: each match's expansion is built piece by piece
-                // with a char budget ([`expand_pieces`]) instead of
-                // materializing the complete uncapped expansion first — a
-                // template with many backreferences into a large capture
-                // cannot exhaust memory before the cap runs. On breach the
-                // pass stops transforming, records the truncation note, and
-                // keeps what was built.
-                let pieces = parse_replacement(&t.replacement);
-                let mut applied = 0;
-                let mut out = String::new();
-                let mut out_chars = 0usize;
-                let mut last_end = 0usize;
-                let mut truncated = false;
-                for caps in re.captures_iter(&text) {
-                    let m = caps.get(0).expect("capture 0 always present");
-                    out.push_str(&text[last_end..m.start()]);
-                    out_chars += text[last_end..m.start()].chars().count();
-                    match expand_pieces(&pieces, &caps, &mut out, &mut out_chars) {
-                        ExpansionOutcome::Applied => {
-                            applied += 1;
-                            last_end = m.end();
-                        }
-                        ExpansionOutcome::Partial => {
-                            applied += 1;
-                            truncated = true;
-                            break;
-                        }
-                        ExpansionOutcome::None => {
-                            truncated = true;
-                            break;
-                        }
-                    }
-                }
-                if applied == 0 {
-                    // No-match — silent skip (Q6 mirror).
-                    row.skipped += 1;
-                    continue;
-                }
-                row.applied += applied;
-                if truncated {
-                    row.notes.push(format!(
-                        "hygiene output over {MAX_HYGIENE_OUTPUT_CHARS} chars truncated"
-                    ));
-                } else {
-                    out.push_str(&text[last_end..]);
-                }
-                text = out;
+                text = pass.text;
             }
             body.summary = Some(text);
         } else {
@@ -180,6 +122,97 @@ pub fn apply_hygiene(entries: Vec<WorldKbEntry>) -> (Vec<WorldKbEntry>, Vec<Hygi
         out.push(entry);
     }
     (out, trace)
+}
+
+/// Result of one authored transform pass over the current emitted text.
+struct TransformPass {
+    text: String,
+    applied: usize,
+    skipped: usize,
+    note: Option<String>,
+}
+
+fn output_truncated_note() -> String {
+    format!("hygiene output over {MAX_HYGIENE_OUTPUT_CHARS} chars truncated")
+}
+
+/// Apply one transform with a running output-char budget. Unmatched spans
+/// and replacements share [`append_capped`] so `out_chars` never exceeds
+/// [`MAX_HYGIENE_OUTPUT_CHARS`] (overflow-checking panic / release wrap).
+///
+/// # Panics
+///
+/// Never panics on well-formed input. The only `expect` is on regex
+/// capture group 0, which the `regex` crate guarantees to exist for every
+/// match of a compiled pattern.
+fn apply_transform(text: &str, t: &HygieneTransform) -> TransformPass {
+    if t.pattern.chars().count() > MAX_HYGIENE_PATTERN_CHARS {
+        return TransformPass {
+            text: text.to_string(),
+            applied: 0,
+            skipped: 1,
+            note: Some(format!(
+                "hygiene pattern over {MAX_HYGIENE_PATTERN_CHARS} chars skipped"
+            )),
+        };
+    }
+    let Ok(re) = Regex::new(&t.pattern) else {
+        return TransformPass {
+            text: text.to_string(),
+            applied: 0,
+            skipped: 1,
+            note: Some("invalid regex".to_string()),
+        };
+    };
+    // F-2 / R2-1: each match's expansion is built piece by piece with a
+    // char budget ([`expand_pieces`]) instead of materializing the complete
+    // uncapped expansion first.
+    let pieces = parse_replacement(&t.replacement);
+    let mut applied = 0;
+    let mut out = String::new();
+    let mut out_chars = 0usize;
+    let mut last_end = 0usize;
+    let mut truncated = false;
+    for caps in re.captures_iter(text) {
+        let m = caps.get(0).expect("capture 0 always present");
+        if !append_capped(&mut out, &mut out_chars, &text[last_end..m.start()]) {
+            truncated = true;
+            break;
+        }
+        match expand_pieces(&pieces, &caps, &mut out, &mut out_chars) {
+            ExpansionOutcome::Applied => {
+                applied += 1;
+                last_end = m.end();
+            }
+            ExpansionOutcome::Partial => {
+                applied += 1;
+                truncated = true;
+                break;
+            }
+            ExpansionOutcome::None => {
+                truncated = true;
+                break;
+            }
+        }
+    }
+    if applied == 0 && !truncated {
+        return TransformPass {
+            text: text.to_string(),
+            applied: 0,
+            skipped: 1,
+            note: None,
+        };
+    }
+    if !truncated && !append_capped(&mut out, &mut out_chars, &text[last_end..]) {
+        truncated = true;
+    }
+    let skipped = usize::from(applied == 0);
+    TransformPass {
+        text: out,
+        applied,
+        skipped,
+        note: truncated.then(output_truncated_note),
+    }
 }
 
 /// Parse the `body.attributes.hygiene` carrier — a JSON array of
@@ -355,25 +388,34 @@ fn expand_pieces(
                 None => continue,
             },
         };
-        let seg_chars = seg.chars().count();
-        if *out_chars + seg_chars > MAX_HYGIENE_OUTPUT_CHARS {
-            // Fill the remaining budget with a prefix of this piece, then
-            // stop expanding this replacement (and the pass).
-            let remaining = MAX_HYGIENE_OUTPUT_CHARS - *out_chars;
-            if remaining > 0 {
-                out.push_str(truncate_chars(seg, remaining));
-                *out_chars += remaining;
-            }
+        if !append_capped(out, out_chars, seg) {
             return if *out_chars > start {
                 ExpansionOutcome::Partial
             } else {
                 ExpansionOutcome::None
             };
         }
-        out.push_str(seg);
-        *out_chars += seg_chars;
     }
     ExpansionOutcome::Applied
+}
+
+/// Append `seg` while the output char budget holds. Returns `false` when
+/// the budget was exhausted (a prefix of `seg` is kept). `out_chars` never
+/// exceeds [`MAX_HYGIENE_OUTPUT_CHARS`].
+fn append_capped(out: &mut String, out_chars: &mut usize, seg: &str) -> bool {
+    if *out_chars >= MAX_HYGIENE_OUTPUT_CHARS {
+        return false;
+    }
+    let remaining = MAX_HYGIENE_OUTPUT_CHARS - *out_chars;
+    let seg_chars = seg.chars().count();
+    if seg_chars > remaining {
+        out.push_str(truncate_chars(seg, remaining));
+        *out_chars = MAX_HYGIENE_OUTPUT_CHARS;
+        return false;
+    }
+    out.push_str(seg);
+    *out_chars += seg_chars;
+    true
 }
 
 #[cfg(test)]
@@ -771,5 +813,47 @@ mod tests {
         assert_eq!(summary, "a-b tail$");
         assert_eq!(trace[0].applied, 1);
         assert!(trace[0].notes.is_empty());
+    }
+
+    #[test]
+    fn unmatched_span_after_near_cap_replacement_does_not_overflow() {
+        // A first match can nearly fill the output budget; the unmatched
+        // span before a later match must still honor the cap. Growing
+        // `out_chars` past the cap and subtracting later panics in
+        // overflow-checking builds and wraps (over-cap emit) in release.
+        let nearly_full = "b".repeat(MAX_HYGIENE_OUTPUT_CHARS - 8);
+        let unmatched = "c".repeat(64);
+        let input = format!("X{unmatched}X");
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            &input,
+            &serde_json::json!([{ "pattern": "X", "replacement": nearly_full }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        assert_eq!(summary.chars().count(), MAX_HYGIENE_OUTPUT_CHARS);
+        assert_eq!(trace[0].applied, 1);
+        assert!(
+            trace[0].notes.iter().any(|n| n.contains("truncated")),
+            "truncation must be noted; got {:#?}",
+            trace[0].notes
+        );
+    }
+
+    #[test]
+    fn unmatched_tail_after_expanding_replacement_is_capped() {
+        // Replacing a short prefix with a longer string leaves an unmatched
+        // tail that would otherwise push the emit one char over the cap.
+        let tail = "a".repeat(MAX_HYGIENE_INPUT_CHARS - 1);
+        let input = format!("X{tail}");
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            &input,
+            &serde_json::json!([{ "pattern": "X", "replacement": "YY" }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        assert_eq!(summary.chars().count(), MAX_HYGIENE_OUTPUT_CHARS);
+        assert_eq!(trace[0].applied, 1);
+        assert_eq!(trace[0].notes.len(), 1);
+        assert!(trace[0].notes[0].contains("truncated"));
     }
 }

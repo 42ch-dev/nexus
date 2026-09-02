@@ -54,7 +54,9 @@ const DEFAULT_PACK_CREATOR: &str = "nexus42";
 ///
 /// Of the documented fields, the locked mapping honors `key`/`keys`,
 /// `content`, `comment`, `constant`, `uid`/`id` (see the mapping table) and
-/// reports `enabled`/unmappable `key` shapes (W-2/W-3). The remaining
+/// reports `enabled`/unmappable `key` shapes (W-2/W-3). Mapped booleans
+/// (`constant`, `enabled`) in an unsupported JSON shape also fire a
+/// `Warning` — they must not silently default (R2-3). The remaining
 /// documented-but-unmapped fields split into two classes (F-3/F-4):
 ///
 /// - **Behavior-affecting** (activation/placement semantics the pack shape
@@ -231,10 +233,23 @@ pub fn parse_st_lorebook(json: &Value) -> Result<ConversionOutcome, StLorebookEr
 
         let content = obj.get("content").and_then(Value::as_str).unwrap_or("");
         let keys = activation_keys(obj);
-        let constant = obj
-            .get("constant")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+        let (constant, constant_diag) = match obj.get("constant") {
+            None => (false, None),
+            Some(Value::Bool(b)) => (*b, None),
+            Some(v) => (
+                false,
+                Some(mapped_bool_shape_diagnostic(
+                    "constant",
+                    v,
+                    idx,
+                    &name,
+                    "not mapped as always-on — entry uses key activation only",
+                )),
+            ),
+        };
+        if let Some(d) = constant_diag {
+            diagnostics.push(d);
+        }
 
         // W-4: derive a stable entry id from the lorebook-intrinsic `uid` /
         // `id` fields (see `stable_entry_id`); the positional fallback is
@@ -627,7 +642,11 @@ fn value_shape(v: &Value) -> &'static str {
 ///   semantics (superseded/merged/removed). Importing the entry as live
 ///   `confirmed` content would silently invert the author's intent, so a
 ///   `Warning` fires; the content is preserved and the author can
-///   deprecate/delete it after import to keep it from firing.
+///   deprecate/delete it after import to keep it from firing. A value in
+///   an unsupported JSON shape (`"enabled": "false"`) is the same class of
+///   silent invert and fires a shape-mismatch Warning (R2-3). Mapped
+///   `constant` in an unsupported shape is diagnosed the same way instead
+///   of silently defaulting to `false`.
 /// - **W-3** `key` in an unmappable shape: the field is documented as a
 ///   comma-separated string or a list (array) of strings; anything else
 ///   (and non-string array elements) is flagged instead of silently dropping
@@ -643,14 +662,26 @@ fn documented_field_diagnostics(
     name: &str,
 ) -> Vec<ConversionDiagnostic> {
     let mut diagnostics = Vec::new();
-    if obj.get("enabled").and_then(Value::as_bool) == Some(false) {
-        diagnostics.push(ConversionDiagnostic {
-            severity: DiagnosticSeverity::Warning,
-            entry_index: Some(idx),
-            entry_name: Some(name.to_string()),
-            field: Some("enabled".to_string()),
-            message: "enabled=false ignored: nexus has no disabled state; entry imports as live 'confirmed' content — deprecate/delete it after import to keep it from firing".to_string(),
-        });
+    match obj.get("enabled") {
+        Some(Value::Bool(false)) => {
+            diagnostics.push(ConversionDiagnostic {
+                severity: DiagnosticSeverity::Warning,
+                entry_index: Some(idx),
+                entry_name: Some(name.to_string()),
+                field: Some("enabled".to_string()),
+                message: "enabled=false ignored: nexus has no disabled state; entry imports as live 'confirmed' content — deprecate/delete it after import to keep it from firing".to_string(),
+            });
+        }
+        Some(Value::Bool(true)) | None => {}
+        Some(v) => {
+            diagnostics.push(mapped_bool_shape_diagnostic(
+                "enabled",
+                v,
+                idx,
+                name,
+                "nexus has no disabled state; entry imports as live 'confirmed' content",
+            ));
+        }
     }
     if let Some(key_val) = obj.get("key") {
         let mappable = match key_val {
@@ -688,6 +719,28 @@ fn documented_field_diagnostics(
         }
     }
     diagnostics
+}
+
+/// Shape-mismatch diagnostic for a mapped boolean (`constant`, `enabled`).
+/// The documented boolean is used as-is; any other JSON shape must not
+/// silently default (R2-3).
+fn mapped_bool_shape_diagnostic(
+    field: &str,
+    v: &Value,
+    idx: usize,
+    name: &str,
+    consequence: &str,
+) -> ConversionDiagnostic {
+    ConversionDiagnostic {
+        severity: DiagnosticSeverity::Warning,
+        entry_index: Some(idx),
+        entry_name: Some(name.to_string()),
+        field: Some(field.to_string()),
+        message: format!(
+            "{field} has unsupported JSON shape ({shape}); {consequence}",
+            shape = value_shape(v)
+        ),
+    }
 }
 
 /// Derive a stable pack `entry_id` for an ST entry.
@@ -1047,6 +1100,61 @@ mod tests {
         });
         let outcome = parse_st_lorebook(&lorebook).expect("must convert");
         assert!(outcome.diagnostics.is_empty());
+    }
+
+    // ── R2-3: mapped booleans in an unsupported shape must not silently
+    //    default (constant → false / enabled → live confirmed) ──
+
+    #[test]
+    fn malformed_constant_emits_warning_and_defaults_false() {
+        let lorebook = json!({
+            "entries": [
+                {
+                    "uid": 0,
+                    "key": "dragon",
+                    "content": "Dragon lore.",
+                    "comment": "Dragon",
+                    "constant": "true"
+                }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        assert_eq!(outcome.diagnostics.len(), 1);
+        let d = &outcome.diagnostics[0];
+        assert_eq!(d.severity, DiagnosticSeverity::Warning);
+        assert_eq!(d.field.as_deref(), Some("constant"));
+        assert!(d.message.contains("unsupported JSON shape"));
+        assert!(d.message.contains("string"));
+        let entry = &outcome.pack_input["entries"][0];
+        assert_eq!(entry["modules"]["activation"]["constant"], json!(false));
+        let parsed = parse_pack(&outcome.pack_input).expect("pack must parse");
+        assert_eq!(parsed.entries.len(), 1);
+    }
+
+    #[test]
+    fn malformed_enabled_emits_warning_and_imports_as_confirmed() {
+        let lorebook = json!({
+            "entries": [
+                {
+                    "uid": 0,
+                    "key": "dragon",
+                    "content": "Dragon lore.",
+                    "comment": "Dragon",
+                    "enabled": "false"
+                }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        assert_eq!(outcome.diagnostics.len(), 1);
+        let d = &outcome.diagnostics[0];
+        assert_eq!(d.severity, DiagnosticSeverity::Warning);
+        assert_eq!(d.field.as_deref(), Some("enabled"));
+        assert!(d.message.contains("unsupported JSON shape"));
+        assert!(d.message.contains("string"));
+        let entry = &outcome.pack_input["entries"][0];
+        assert_eq!(entry["status"], json!("confirmed"));
+        let parsed = parse_pack(&outcome.pack_input).expect("pack must parse");
+        assert_eq!(parsed.entries.len(), 1);
     }
 
     // ── W-3: documented `key` array form must not silently drop ──
