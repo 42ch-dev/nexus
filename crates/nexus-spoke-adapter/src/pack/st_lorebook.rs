@@ -60,6 +60,10 @@ const DEFAULT_PACK_CREATOR: &str = "nexus42";
 /// - **Behavior-affecting** (activation/placement semantics the pack shape
 ///   cannot represent) — each non-default value fires a `Warning` diagnostic
 ///   via [`documented_field_diagnostics`]; see `BEHAVIORAL_UNMAPPED_FIELDS`.
+///   A value whose JSON shape the field does not document (a string where a
+///   bool is documented, `"probability": "50"`, …) is treated as non-default
+///   too — the semantics it carries must not be silently classified away
+///   (R2-2).
 /// - **Cosmetic / bookkeeping** (`uid`, `id`, `display_index`, `role`,
 ///   `extensions`, `original_content`, `addMemo`, `folder`) — no diagnostic:
 ///   they carry no activation semantics and are not representable in the
@@ -473,15 +477,32 @@ const BEHAVIORAL_UNMAPPED_FIELDS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Whether a documented-but-unmapped field carries a non-default value —
-/// only non-default values have behavioral consequence worth reporting.
-/// Defaults mirror the documented ST defaults (docs.sillytavern.app); the
-/// numeric fields are documented as integers, so comparisons are integer
-/// comparisons (a float value is not a documented shape and is treated as
-/// default — no diagnostic).
-fn is_non_default(field: &str, v: &Value) -> bool {
+/// Classification of a documented-but-unmapped field's value against the
+/// documented default. A value whose JSON shape the field does not document
+/// must never be silently classified as default — it carries
+/// activation-relevant semantics in a shape the converter cannot honor, so
+/// it is reported like any other non-default value (R2-2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ValueClass {
+    /// The documented default — no behavioral consequence, no diagnostic.
+    Default,
+    /// A documented-shape value that differs from the default — Warning.
+    NonDefault,
+    /// A value in a shape the field does not document — Warning, with the
+    /// unsupported shape named in the message.
+    ShapeMismatch,
+}
+
+/// Classify a documented-but-unmapped field's value against its documented
+/// default (defaults mirror the documented ST defaults,
+/// docs.sillytavern.app). A value in an unsupported JSON shape — a string
+/// where a bool is documented, an integer where a string is documented, a
+/// float where the numeric fields document non-negative integers — is
+/// `ShapeMismatch` (a diagnostic fires; only true documented defaults stay
+/// silent).
+fn classify_value(field: &str, v: &Value) -> ValueClass {
     match field {
-        // Boolean toggles: default false.
+        // Boolean toggles: documented shape boolean, default false.
         "selective"
         | "use_regex"
         | "match_whole_words"
@@ -493,8 +514,9 @@ fn is_non_default(field: &str, v: &Value) -> bool {
         | "group_override"
         | "use_group_scoring"
         | "exclude_alternate_scenarios"
-        | "exclude_alternate_scenarios_override" => v.as_bool() == Some(true),
-        // Integer selectors: default 0 (AND logic / no depth cap / no count).
+        | "exclude_alternate_scenarios_override" => bool_class(v),
+        // Integer selectors: documented shape non-negative integer, default
+        // 0 (AND logic / no depth cap / no count).
         "selectiveLogic"
         | "scan_depth"
         | "max_activations"
@@ -502,31 +524,98 @@ fn is_non_default(field: &str, v: &Value) -> bool {
         | "cooldown"
         | "delay"
         | "group_priority"
-        | "exclude_alternate_scenarios_priority" => int_val(v).is_some_and(|n| n != 0),
+        | "exclude_alternate_scenarios_priority" => int_class(v, |n| n != 0),
         // Probability: default 100 (always fire).
-        "probability" | "probabilityRaw" => int_val(v).is_some_and(|n| n < 100),
+        "probability" => int_class(v, |n| n < 100),
+        "probabilityRaw" => probability_raw_class(v),
         // Minimum activations: default 1.
-        "min_activations" => int_val(v).is_some_and(|n| n > 1),
+        "min_activations" => int_class(v, |n| n > 1),
         // Group weight: default 100.
-        "group_weight" => int_val(v).is_some_and(|n| n != 100),
+        "group_weight" => int_class(v, |n| n != 100),
         // Placement: default 100 / "after_char" / 4.
-        "insertion_order" | "order" => int_val(v).is_some_and(|n| n != 100),
-        "position" => v.as_str().is_some_and(|s| s != "after_char"),
-        "depth" => int_val(v).is_some_and(|n| n != 4),
+        "insertion_order" | "order" => int_class(v, |n| n != 100),
+        "position" => str_class(v, |s| s != "after_char"),
+        "depth" => int_class(v, |n| n != 4),
         // String carriers: default empty.
-        "group" | "automation_id" => v.as_str().is_some_and(|s| !s.trim().is_empty()),
+        "group" | "automation_id" => str_class(v, |s| !s.trim().is_empty()),
         // Secondary keys: default empty array.
-        "keysecondary" => v.as_array().is_some_and(|a| !a.is_empty()),
-        _ => true,
+        "keysecondary" => match v {
+            Value::Array(a) if !a.is_empty() => ValueClass::NonDefault,
+            Value::Array(_) => ValueClass::Default,
+            _ => ValueClass::ShapeMismatch,
+        },
+        // All `BEHAVIORAL_UNMAPPED_FIELDS` are classified above; a field
+        // added to the list without a classification below must not pass as
+        // default — report it rather than silently drop its semantics.
+        _ => ValueClass::NonDefault,
     }
 }
 
-/// The non-negative integer value of a JSON number, if it is one (the
-/// documented shape of the numeric ST fields — all documented defaults are
-/// non-negative). Negative or float values are not documented shapes and are
-/// treated as default — no diagnostic.
+/// Classify a documented non-negative-integer field; any other value shape
+/// is a mismatch.
+fn int_class(v: &Value, non_default: impl Fn(u64) -> bool) -> ValueClass {
+    match int_val(v) {
+        Some(n) if non_default(n) => ValueClass::NonDefault,
+        Some(_) => ValueClass::Default,
+        None => ValueClass::ShapeMismatch,
+    }
+}
+
+/// Classify a documented boolean field; any other value shape is a mismatch.
+const fn bool_class(v: &Value) -> ValueClass {
+    match v {
+        Value::Bool(true) => ValueClass::NonDefault,
+        Value::Bool(false) => ValueClass::Default,
+        _ => ValueClass::ShapeMismatch,
+    }
+}
+
+/// Classify a documented string field; any other value shape is a mismatch.
+fn str_class(v: &Value, non_default: impl Fn(&str) -> bool) -> ValueClass {
+    match v {
+        Value::String(s) if non_default(s) => ValueClass::NonDefault,
+        Value::String(_) => ValueClass::Default,
+        _ => ValueClass::ShapeMismatch,
+    }
+}
+
+/// The non-negative integer value of a JSON number, if it has the documented
+/// shape of the numeric ST fields (all documented defaults are non-negative).
+/// Negative, float, and non-number values are not the documented shape —
+/// [`classify_value`] reports them as a shape mismatch.
 fn int_val(v: &Value) -> Option<u64> {
     v.as_u64()
+}
+
+/// `probabilityRaw` documents both the serialized fraction string (the ST
+/// export shape; default `"1.00"` = 100%) and the integer-percent number
+/// form (default 100). A non-default fraction fires the Warning; a value in
+/// any other shape is a mismatch.
+fn probability_raw_class(v: &Value) -> ValueClass {
+    match v {
+        Value::Number(_) => int_class(v, |n| n < 100),
+        Value::String(s) => match s.trim().parse::<f64>() {
+            // Exactly the 100% fraction is the default; any other fraction
+            // (or an unparseable string, which is certainly not the 100%
+            // default) is a non-default probability.
+            Ok(1.0) => ValueClass::Default,
+            _ => ValueClass::NonDefault,
+        },
+        _ => ValueClass::ShapeMismatch,
+    }
+}
+
+/// The JSON shape of a value, for the type-mismatch diagnostic message.
+fn value_shape(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(n) if n.is_u64() => "integer",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
 }
 
 /// Per-entry diagnostics for documented fields whose semantics the locked
@@ -546,6 +635,8 @@ fn int_val(v: &Value) -> Option<u64> {
 /// - **F-3/F-4** documented-but-unmapped behavior-affecting fields
 ///   (`BEHAVIORAL_UNMAPPED_FIELDS`) with a non-default value: each fires a
 ///   `Warning` naming the field and its consequence — no silent drop.
+///   Values in an unsupported JSON shape fire as well, with the shape named
+///   in the message (R2-2) — only true documented defaults stay silent.
 fn documented_field_diagnostics(
     obj: &Map<String, Value>,
     idx: usize,
@@ -579,15 +670,21 @@ fn documented_field_diagnostics(
     }
     for (field, consequence) in BEHAVIORAL_UNMAPPED_FIELDS {
         if let Some(v) = obj.get(*field) {
-            if is_non_default(field, v) {
-                diagnostics.push(ConversionDiagnostic {
-                    severity: DiagnosticSeverity::Warning,
-                    entry_index: Some(idx),
-                    entry_name: Some(name.to_string()),
-                    field: Some((*field).to_string()),
-                    message: format!("{field} {consequence}"),
-                });
-            }
+            let message = match classify_value(field, v) {
+                ValueClass::Default => continue,
+                ValueClass::NonDefault => format!("{field} {consequence}"),
+                ValueClass::ShapeMismatch => format!(
+                    "{field} has unsupported JSON shape ({shape}); {consequence}",
+                    shape = value_shape(v)
+                ),
+            };
+            diagnostics.push(ConversionDiagnostic {
+                severity: DiagnosticSeverity::Warning,
+                entry_index: Some(idx),
+                entry_name: Some(name.to_string()),
+                field: Some((*field).to_string()),
+                message,
+            });
         }
     }
     diagnostics
@@ -1139,7 +1236,7 @@ mod tests {
                     "scan_depth": 0,
                     "probability": 100,
                     "useProbability": false,
-                    "probabilityRaw": 100,
+                    "probabilityRaw": "1.00",
                     "exclude_recursion": false,
                     "prevent_recursion": false,
                     "delay_until_recursion": false,
@@ -1169,6 +1266,163 @@ mod tests {
             outcome.diagnostics.is_empty(),
             "default values must not fire diagnostics; got {outcome:#?}"
         );
+    }
+
+    // ── R2-2: type-mismatched values must not be classified as default ──
+
+    #[test]
+    fn type_mismatched_values_emit_warning_diagnostics() {
+        // R2-2: `"probability": "50"` (string where a number is
+        // documented), `"use_regex": 1` (integer where a bool is
+        // documented) etc. carry activation-relevant semantics in an
+        // unsupported JSON shape — they must fire the field's Warning
+        // diagnostic (each message noting the unsupported shape), never a
+        // silent default classification.
+        let lorebook = json!({
+            "entries": [
+                {
+                    "uid": 0,
+                    "key": "dragon",
+                    "content": "Dragon lore.",
+                    "comment": "Dragon",
+                    "keysecondary": "wyrm",
+                    "selective": 1,
+                    "selectiveLogic": "1",
+                    "use_regex": 1,
+                    "match_whole_words": 0,
+                    "case_sensitive": "yes",
+                    "scan_depth": "2",
+                    "probability": "50",
+                    "useProbability": "true",
+                    "probabilityRaw": 0.5,
+                    "exclude_recursion": 1,
+                    "prevent_recursion": "yes",
+                    "delay_until_recursion": 1,
+                    "min_activations": true,
+                    "max_activations": "3",
+                    "sticky": "1",
+                    "cooldown": true,
+                    "delay": [0],
+                    "group": ["dragons"],
+                    "group_override": 1,
+                    "group_weight": "100",
+                    "group_priority": "1",
+                    "use_group_scoring": 1,
+                    "automation_id": null,
+                    "exclude_alternate_scenarios": "false",
+                    "exclude_alternate_scenarios_override": 1,
+                    "exclude_alternate_scenarios_priority": "1",
+                    "insertion_order": 50.0,
+                    "order": false,
+                    "position": 1,
+                    "depth": "4"
+                }
+            ]
+        });
+        let outcome = parse_st_lorebook(&lorebook).expect("must convert");
+        let fields: Vec<&str> = outcome
+            .diagnostics
+            .iter()
+            .filter_map(|d| d.field.as_deref())
+            .collect();
+        for f in [
+            "keysecondary",
+            "selective",
+            "selectiveLogic",
+            "use_regex",
+            "match_whole_words",
+            "case_sensitive",
+            "scan_depth",
+            "probability",
+            "useProbability",
+            "probabilityRaw",
+            "exclude_recursion",
+            "prevent_recursion",
+            "delay_until_recursion",
+            "min_activations",
+            "max_activations",
+            "sticky",
+            "cooldown",
+            "delay",
+            "group",
+            "group_override",
+            "group_weight",
+            "group_priority",
+            "use_group_scoring",
+            "automation_id",
+            "exclude_alternate_scenarios",
+            "exclude_alternate_scenarios_override",
+            "exclude_alternate_scenarios_priority",
+            "insertion_order",
+            "order",
+            "position",
+            "depth",
+        ] {
+            assert!(
+                fields.contains(&f),
+                "missing type-mismatch diagnostic for '{f}'"
+            );
+        }
+        for d in &outcome.diagnostics {
+            assert_eq!(d.severity, DiagnosticSeverity::Warning);
+            assert!(
+                d.message.contains("unsupported JSON shape"),
+                "shape mismatch must be noted; got: {}",
+                d.message
+            );
+            assert!(d.message.contains(d.field.as_deref().unwrap_or("")));
+        }
+        // The entry still imports — diagnostics degrade, never drop.
+        let parsed = parse_pack(&outcome.pack_input).expect("pack must parse");
+        assert_eq!(parsed.entries.len(), 1);
+    }
+
+    #[test]
+    fn probability_raw_documented_shapes_and_defaults() {
+        // R2-2: `probabilityRaw` documents the serialized fraction string
+        // (default "1.00") and the integer-percent number form (default
+        // 100); both documented default shapes stay diagnostic-free, while
+        // a non-default fraction ("0.5" → 50%) fires the Warning.
+        let defaults = json!({
+            "entries": [
+                {
+                    "uid": 0,
+                    "key": "dragon",
+                    "content": "Dragon lore.",
+                    "comment": "Dragon",
+                    "probabilityRaw": "1.00"
+                },
+                {
+                    "uid": 1,
+                    "key": "slime",
+                    "content": "Slime lore.",
+                    "comment": "Slime",
+                    "probabilityRaw": 100
+                }
+            ]
+        });
+        let outcome = parse_st_lorebook(&defaults).expect("must convert");
+        assert!(
+            outcome.diagnostics.is_empty(),
+            "documented default shapes must not fire diagnostics; got {outcome:#?}"
+        );
+
+        let reduced = json!({
+            "entries": [
+                {
+                    "uid": 0,
+                    "key": "dragon",
+                    "content": "Dragon lore.",
+                    "comment": "Dragon",
+                    "probabilityRaw": "0.5"
+                }
+            ]
+        });
+        let outcome = parse_st_lorebook(&reduced).expect("must convert");
+        assert_eq!(outcome.diagnostics.len(), 1);
+        let d = &outcome.diagnostics[0];
+        assert_eq!(d.field.as_deref(), Some("probabilityRaw"));
+        assert_eq!(d.severity, DiagnosticSeverity::Warning);
     }
 
     // ── W-4: stable entry ids across lorebook edits ──

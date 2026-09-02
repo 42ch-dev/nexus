@@ -122,14 +122,14 @@ pub fn apply_hygiene(entries: Vec<WorldKbEntry>) -> (Vec<WorldKbEntry>, Vec<Hygi
                     row.notes.push("invalid regex".to_string());
                     continue;
                 };
-                // F-2: build the replacement incrementally with a char
-                // budget instead of materializing the complete uncapped
-                // expansion first. Each match's expansion is appended only
-                // while the running total stays under the output cap; on
-                // breach the pass stops transforming, records the truncation
-                // note, and keeps what was built — a pattern matching many
-                // positions with a large replacement can no longer exhaust
-                // memory before the cap runs.
+                // F-2 / R2-1: each match's expansion is built piece by piece
+                // with a char budget ([`expand_pieces`]) instead of
+                // materializing the complete uncapped expansion first — a
+                // template with many backreferences into a large capture
+                // cannot exhaust memory before the cap runs. On breach the
+                // pass stops transforming, records the truncation note, and
+                // keeps what was built.
+                let pieces = parse_replacement(&t.replacement);
                 let mut applied = 0;
                 let mut out = String::new();
                 let mut out_chars = 0usize;
@@ -139,23 +139,21 @@ pub fn apply_hygiene(entries: Vec<WorldKbEntry>) -> (Vec<WorldKbEntry>, Vec<Hygi
                     let m = caps.get(0).expect("capture 0 always present");
                     out.push_str(&text[last_end..m.start()]);
                     out_chars += text[last_end..m.start()].chars().count();
-                    let mut dst = String::new();
-                    caps.expand(&t.replacement, &mut dst);
-                    if out_chars + dst.chars().count() > MAX_HYGIENE_OUTPUT_CHARS {
-                        // Fill the remaining budget with a prefix of this
-                        // match's expansion, then stop transforming.
-                        let remaining = MAX_HYGIENE_OUTPUT_CHARS - out_chars;
-                        if remaining > 0 {
-                            out.push_str(truncate_chars(&dst, remaining));
+                    match expand_pieces(&pieces, &caps, &mut out, &mut out_chars) {
+                        ExpansionOutcome::Applied => {
                             applied += 1;
+                            last_end = m.end();
                         }
-                        truncated = true;
-                        break;
+                        ExpansionOutcome::Partial => {
+                            applied += 1;
+                            truncated = true;
+                            break;
+                        }
+                        ExpansionOutcome::None => {
+                            truncated = true;
+                            break;
+                        }
                     }
-                    out.push_str(&dst);
-                    out_chars += dst.chars().count();
-                    applied += 1;
-                    last_end = m.end();
                 }
                 if applied == 0 {
                     // No-match — silent skip (Q6 mirror).
@@ -242,6 +240,140 @@ fn truncate_chars(text: &str, max_chars: usize) -> &str {
     text.char_indices()
         .nth(max_chars)
         .map_or(text, |(idx, _)| &text[..idx])
+}
+
+/// One piece of a parsed replacement template: literal text or a capture
+/// group reference. Group references that do not resolve to a live capture
+/// expand to the empty string (mirrors `regex`'s expand).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReplacementPiece<'a> {
+    Literal(&'a str),
+    /// `$N` — capture group by index.
+    Index(usize),
+    /// `$name` / `${name}` — capture group by name.
+    Name(&'a str),
+}
+
+/// Parse a replacement template into literal / capture-reference pieces,
+/// mirroring the `regex` crate's `expand` syntax: `$$` is a literal `$`,
+/// `$name` / `${name}` reference capture groups by name (`$N` / `${N}` by
+/// index; an all-digit unbraced run is an index), unbraced names are the
+/// longest `[0-9A-Za-z_]` run, braced names may contain any byte except
+/// `}`, and a `$` that starts no valid reference is literal.
+fn parse_replacement(replacement: &str) -> Vec<ReplacementPiece<'_>> {
+    let mut pieces = Vec::new();
+    let mut rest = replacement;
+    while let Some(i) = rest.find('$') {
+        if i > 0 {
+            pieces.push(ReplacementPiece::Literal(&rest[..i]));
+        }
+        let after = &rest[i + 1..];
+        // `$$` → literal `$`.
+        if after.as_bytes().first() == Some(&b'$') {
+            pieces.push(ReplacementPiece::Literal("$"));
+            rest = &after[1..];
+            continue;
+        }
+        // `${name}` — braced form; an unclosed brace is not a reference
+        // (the `$` is literal, like `regex`).
+        if after.as_bytes().first() == Some(&b'{') {
+            if let Some(end) = after.find('}') {
+                pieces.push(replacement_piece(&after[1..end]));
+                rest = &after[end + 1..];
+            } else {
+                pieces.push(ReplacementPiece::Literal("$"));
+                rest = after;
+            }
+            continue;
+        }
+        // Unbraced form: the longest `[0-9A-Za-z_]` run; a `$` followed by
+        // nothing valid is a literal `$`.
+        let run = after
+            .bytes()
+            .take_while(|&b| b.is_ascii_alphanumeric() || b == b'_')
+            .count();
+        if run == 0 {
+            pieces.push(ReplacementPiece::Literal("$"));
+            rest = after;
+            continue;
+        }
+        pieces.push(replacement_piece(&after[..run]));
+        rest = &after[run..];
+    }
+    if !rest.is_empty() {
+        pieces.push(ReplacementPiece::Literal(rest));
+    }
+    pieces
+}
+
+/// The piece for a template reference name: an all-digit name is a group
+/// index.
+fn replacement_piece(name: &str) -> ReplacementPiece<'_> {
+    name.parse::<usize>()
+        .map_or(ReplacementPiece::Name(name), ReplacementPiece::Index)
+}
+
+/// How a match's budget-checked replacement expansion landed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExpansionOutcome {
+    /// The whole expansion fit — the match is applied and consumes it.
+    Applied,
+    /// The output budget ran out mid-expansion; a non-empty prefix of the
+    /// expansion was appended (the match is still counted applied).
+    Partial,
+    /// No budget remained for this expansion — nothing was appended.
+    None,
+}
+
+/// Append the budget-checked replacement expansion of `caps` — per the
+/// pre-parsed template `pieces` — to `out`, tracking the running char
+/// total in `out_chars` (R2-1). Each piece, literal text or a capture
+/// slice, is appended only while the remaining budget holds; a single
+/// capture group larger than the whole budget is truncated to the
+/// remaining budget. The complete expansion is never materialized, so the
+/// cost of a match is bounded by the budget even when the authored
+/// replacement has many backreferences into a large capture — no
+/// refs × capture multiplication before the check.
+fn expand_pieces(
+    pieces: &[ReplacementPiece<'_>],
+    caps: &regex::Captures<'_>,
+    out: &mut String,
+    out_chars: &mut usize,
+) -> ExpansionOutcome {
+    let start = *out_chars;
+    for piece in pieces {
+        let seg = match piece {
+            ReplacementPiece::Literal(s) => *s,
+            ReplacementPiece::Index(idx) => match caps.get(*idx) {
+                Some(gm) => gm.as_str(),
+                // Absent group → empty (regex mirror).
+                None => continue,
+            },
+            ReplacementPiece::Name(name) => match caps.name(name) {
+                Some(gm) => gm.as_str(),
+                // Absent group → empty (regex mirror).
+                None => continue,
+            },
+        };
+        let seg_chars = seg.chars().count();
+        if *out_chars + seg_chars > MAX_HYGIENE_OUTPUT_CHARS {
+            // Fill the remaining budget with a prefix of this piece, then
+            // stop expanding this replacement (and the pass).
+            let remaining = MAX_HYGIENE_OUTPUT_CHARS - *out_chars;
+            if remaining > 0 {
+                out.push_str(truncate_chars(seg, remaining));
+                *out_chars += remaining;
+            }
+            return if *out_chars > start {
+                ExpansionOutcome::Partial
+            } else {
+                ExpansionOutcome::None
+            };
+        }
+        out.push_str(seg);
+        *out_chars += seg_chars;
+    }
+    ExpansionOutcome::Applied
 }
 
 #[cfg(test)]
@@ -526,5 +658,118 @@ mod tests {
         assert_eq!(transforms.len(), 2);
         assert_eq!(transforms[0].description.as_deref(), Some("fix a"));
         assert_eq!(transforms[1].description, None);
+    }
+
+    // ── R2-1: budget-checked segment expansion (no per-match
+    //    materialization) ──
+
+    #[test]
+    fn single_match_pathological_backref_expansion_bounded() {
+        // R2-1: the round-1 pass still called `caps.expand`, which
+        // materializes the match's COMPLETE expansion before the budget
+        // check — a replacement with backrefs into a large capture
+        // multiplies the capture by the ref count, unbounded. The
+        // expansion must be applied segment-by-segment with a
+        // remaining-budget check before each append: a single capture
+        // spanning most of a >64KiC input with a doubled `$0` replacement
+        // completes bounded at the output cap and emits the truncation
+        // note (never an OOM, never an over-cap emit).
+        let input = "a".repeat(MAX_HYGIENE_INPUT_CHARS + 1024);
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            &input,
+            &serde_json::json!([{ "pattern": "^(a+)$", "replacement": "$0$0" }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        // The doubled `$0` expansion would be ~2 × 64KiC; the pass stops
+        // at the cap with the full first copy (the second copy would
+        // breach the budget).
+        assert_eq!(summary.chars().count(), MAX_HYGIENE_OUTPUT_CHARS);
+        assert_eq!(trace[0].applied, 1);
+        assert!(
+            trace[0].notes.iter().any(|n| n.contains("truncated")),
+            "truncation must be noted; got {:#?}",
+            trace[0].notes
+        );
+    }
+
+    #[test]
+    fn many_backrefs_into_large_capture_stay_bounded() {
+        // R2-1: a template authored with many `$0` backrefs into a capture
+        // spanning most of the input would materialize
+        // refs × capture-chars per match before the budget check
+        // (2_048 refs × 64KiC ≈ 128 MiB per match); the budget-checked
+        // segment expansion stops at the cap instead of ever building the
+        // full expansion.
+        let input = "a".repeat(MAX_HYGIENE_INPUT_CHARS);
+        let template = "$0".repeat(2_048);
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            &input,
+            &serde_json::json!([{ "pattern": "^(a+)$", "replacement": template }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        assert_eq!(summary.chars().count(), MAX_HYGIENE_OUTPUT_CHARS);
+        assert_eq!(trace[0].applied, 1);
+        assert!(
+            trace[0].notes.iter().any(|n| n.contains("truncated")),
+            "truncation must be noted; got {:#?}",
+            trace[0].notes
+        );
+    }
+
+    #[test]
+    fn multi_match_backrefs_stop_at_output_cap() {
+        // R2-1: multi-match passes with backrefs still stop at the output
+        // cap and record the truncation (the many-small-matches contract,
+        // now with `$0` substitution). Each "a" → "aa" adds one char, so
+        // the cap is hit after half the matches.
+        let input = "a".repeat(MAX_HYGIENE_INPUT_CHARS);
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            &input,
+            &serde_json::json!([{ "pattern": "a", "replacement": "$0$0" }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        assert_eq!(summary.chars().count(), MAX_HYGIENE_OUTPUT_CHARS);
+        assert_eq!(trace[0].applied, MAX_HYGIENE_OUTPUT_CHARS / 2);
+        assert_eq!(trace[0].skipped, 0);
+        assert_eq!(trace[0].notes.len(), 1);
+        assert!(trace[0].notes[0].contains("truncated"));
+    }
+
+    #[test]
+    fn backrefs_substitute_like_regex_expand() {
+        // R2-1: normal `$N` / `${name}` / `$$` substitution is unchanged —
+        // the segment expansion must produce the same output the regex
+        // crate's `expand` produced.
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            "the hero slays the dragon",
+            &serde_json::json!([{
+                "pattern": r"^(\w+) (\w+) slays the (\w+)$",
+                "replacement": r"$3 ${1} $2 $$"
+            }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        assert_eq!(summary, "dragon the hero $");
+        assert_eq!(trace[0].applied, 1);
+        assert_eq!(trace[0].skipped, 0);
+        assert!(trace[0].notes.is_empty());
+    }
+
+    #[test]
+    fn absent_group_refs_expand_to_empty() {
+        // Mirrors `regex`'s expand: `$N` / `${name}` referencing absent
+        // groups expand to the empty string, and a lone `$` is literal.
+        let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
+            "kb_1",
+            "x",
+            &serde_json::json!([{ "pattern": "x", "replacement": "a$5-${nope}b tail$" }]),
+        )]);
+        let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
+        assert_eq!(summary, "a-b tail$");
+        assert_eq!(trace[0].applied, 1);
+        assert!(trace[0].notes.is_empty());
     }
 }
