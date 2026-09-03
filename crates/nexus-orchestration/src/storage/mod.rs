@@ -8,4 +8,4 @@
 
 pub mod sqlite;
 
-pub use sqlite::SqliteSessionStorage;
+pub use sqlite::{CheckpointRow, SqliteSessionStorage};

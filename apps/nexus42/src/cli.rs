@@ -11,7 +11,7 @@ use crate::commands::mcp::McpCommand;
 use crate::commands::{
     acp::AcpCommand, acp_worker::AcpWorkerArgs, capability::CapabilityCommand,
     compute::ComputeCommand, creator::CreatorCommand, daemon::DaemonCommand,
-    daemon_run::DaemonRunArgs, desktop::DesktopCommand, host_call::HostCallArgs,
+    daemon_run::DaemonRunArgs, desktop::DesktopCommand, host_call::HostCallArgs, ops::OpsCommand,
     platform::PlatformCommand, preset::PresetCommand, sync::SyncCommand, system::SystemCommand,
 };
 use clap::{Parser, Subcommand};
@@ -238,6 +238,15 @@ pub enum Commands {
     /// --args accepts a `JSON` string (e.g. `'{"work_id":"wrk_abc"}'`).
     /// Exit codes: 0=success, 1=admission denied, 2=tool error/failure.
     HostCall(HostCallArgs),
+
+    /// Hidden: operator daemon-free inspection (V1.182 P1 BL-04) — `ops inspect`
+    /// reads the workspace checkpoint store read-only; the V1.35 cli-spec §6
+    /// visible-group lock forces hiding (same posture as `preset`).
+    #[command(hide = true)]
+    Ops {
+        #[command(subcommand)]
+        command: OpsCommand,
+    },
 }
 
 /// Build the full `nexus42` clap `Command` for completion generation.

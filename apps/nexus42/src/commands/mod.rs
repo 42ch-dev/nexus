@@ -93,6 +93,12 @@ pub mod mcp;
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
+pub mod ops;
+#[deny(clippy::unwrap_used)]
+#[cfg_attr(
+    test,
+    allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
+)]
 pub mod platform;
 #[deny(clippy::unwrap_used)]
 #[cfg_attr(
