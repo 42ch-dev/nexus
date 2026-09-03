@@ -147,6 +147,10 @@
   --color-info-surface: color-mix(in srgb, var(--color-blue-700) 6%, transparent);
   --color-info-surface-border: color-mix(in srgb, var(--color-blue-700) 30%, transparent);
 
+  /* Data table + main banner — DESIGN.md components.data-table / main-banner */
+  --color-data-table-row-protected: color-mix(in srgb, var(--color-purple-700) 6%, transparent);
+  --color-main-banner-background: color-mix(in srgb, var(--color-amber-700) 10%, transparent);
+
   /* Accent scales — Chronos cyan signal (DESIGN.md §Brand Colors dual-role) */
   --color-blue-700: #25d1e0;
   --color-blue-800: #1fb8c6;
@@ -605,6 +609,10 @@
   --color-warning-surface-border: color-mix(in srgb, var(--color-amber-700) 35%, transparent);
   --color-info-surface: color-mix(in srgb, var(--color-blue-700) 8%, transparent);
   --color-info-surface-border: color-mix(in srgb, var(--color-blue-700) 35%, transparent);
+
+  /* Data table + main banner — DESIGN.dark.md components.data-table / main-banner */
+  --color-data-table-row-protected: color-mix(in srgb, var(--color-purple-700) 12%, transparent);
+  --color-main-banner-background: color-mix(in srgb, var(--color-amber-700) 14%, transparent);
 
   /* Accent scales — brand-cyan interactive scale (DESIGN.dark.md) */
   --color-blue-700: #25d1e0;

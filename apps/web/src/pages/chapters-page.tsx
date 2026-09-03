@@ -178,7 +178,7 @@ export function ChaptersPage() {
                         // purple-700 low-alpha wash). Was a raw color-mix
                         // arbitrary class; now a Tailwind opacity modifier on
                         // the registered --color-purple-700 token (no new hue).
-                        className={isProtected ? 'bg-purple-700/10' : undefined}
+                        className={isProtected ? 'bg-data-table-row-protected' : undefined}
                         data-testid={`chapter-row-${row.chapter}`}
                       >
                         <TableCell className="text-right tabular-nums">{row.chapter}</TableCell>

@@ -94,7 +94,7 @@ export function MainBanner() {
   };
 
   return (
-    <div className="border-b border-gray-alpha-400 bg-amber-700/10 px-6 py-3">
+    <div className="border-b border-gray-alpha-400 bg-main-banner-background px-6 py-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col">
           <span className="text-copy-14 font-semibold text-gray-1000">{title}</span>
