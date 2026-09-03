@@ -74,7 +74,13 @@ pub enum WorldKbCommand {
         world_ref: String,
         /// `WorldKbEntry` ID (e.g. `kb_...`)
         block_id: String,
-        /// New body as JSON (`{"summary":...,"attributes":...,"tags":...}`)
+        /// New body as JSON (`{"summary":...,"attributes":...,"tags":...}`).
+        /// `attributes.hygiene` (DF-79) is an optional array of
+        /// `{"pattern":...,"replacement":...,"description"?...}` regex
+        /// find/replace transforms applied to the emitted summary at
+        /// assembly time — read-path only, the stored body is never mutated.
+        /// At most 32 transforms per entry are applied; the rest are
+        /// skipped and reported in the assembly trace.
         #[arg(long)]
         body: String,
         /// Emit machine-readable JSON confirmation

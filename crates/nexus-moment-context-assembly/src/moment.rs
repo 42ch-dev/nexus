@@ -317,6 +317,11 @@ pub struct MomentContext {
     /// construction — the packet builder reads only this field). `None` when
     /// no directive is active. Additive — never part of `to_full_context()`.
     pub moment_directive_meta: Option<MomentDirectiveStatus>,
+    /// Hygiene trace (DF-79): per-entry rows for carrier-bearing entries —
+    /// `{entry_id, applied, skipped, notes}`. `None` when no hygiene pass
+    /// ran (no World-KB, activation off, or all entries gated off).
+    /// Additive — never part of `to_full_context()` (AC-I6).
+    pub hygiene_trace: Option<Vec<crate::hygiene::HygieneTraceEntry>>,
 }
 
 impl MomentContext {
@@ -648,6 +653,9 @@ where
     // V1.151 P0 (spec §2 H2): capture the post stage-gate slot map (which
     // accepted entry landed in which slot) for the inspector packet.
     let mut slot_map: Option<Vec<SlotMapEntry>> = None;
+    // DF-79: capture the per-entry hygiene trace (applied/skipped/notes)
+    // for the inspector packet — `Some` whenever the hygiene pass ran.
+    let mut hygiene_trace: Option<Vec<crate::hygiene::HygieneTraceEntry>> = None;
     let world_kb = if let Some(ref world_id) = request.world_id {
         match fetch_world_kb_entries(kb_store, world_id, request).await {
             Ok(entries) if !entries.is_empty() => {
@@ -710,8 +718,12 @@ where
                     // unchanged); `None` stage ⇒ all slots on.
                     // V1.151 P0 (spec §2 H2): capture the slot map post
                     // stage-gate — it reflects what actually rendered.
-                    let (rendered, map) = render_gated_slots(entries, request.generation_stage);
+                    // DF-79: the hygiene pass runs inside `render_gated_slots`
+                    // (between stage gate and slot routing); capture its trace.
+                    let (rendered, map, hygiene) =
+                        render_gated_slots(entries, request.generation_stage);
                     slot_map = Some(map);
+                    hygiene_trace = Some(hygiene);
                     rendered
                 } else {
                     // Off-switch (V1.149 escape hatch, lock #1 — "off ⇒ every
@@ -777,6 +789,7 @@ where
         slot_map,
         activation_budget,
         moment_directive_meta: directive.as_ref().map(MomentDirectiveStatus::from),
+        hygiene_trace,
     };
 
     // 6. Cross-domain truncation if max_tokens set (the directive section is
@@ -836,14 +849,24 @@ async fn apply_directive<D: DirectiveStore>(
 ///
 /// Returns the rendered body plus the post-gate slot map (V1.151 P0, spec
 /// §2 H2): which entry landed in which slot **after** the gate ran — the
-/// map reflects what actually rendered, not what activation matched.
+/// map reflects what actually rendered, not what activation matched — plus
+/// the DF-79 hygiene trace (per-entry applied/skipped/notes).
 fn render_gated_slots(
     entries: Vec<WorldKbEntry>,
     stage: Option<GenerationStage>,
-) -> (Option<String>, Vec<SlotMapEntry>) {
-    let routing = slots::route_slots(slots::apply_stage_gate(entries, stage));
+) -> (
+    Option<String>,
+    Vec<SlotMapEntry>,
+    Vec<crate::hygiene::HygieneTraceEntry>,
+) {
+    // DF-79: the hygiene pass runs between the generation-stage gate and
+    // slot routing — transforms shape the emitted `body.summary` text on
+    // the owned assembly-local copies (read-path only).
+    let gated = slots::apply_stage_gate(entries, stage);
+    let (hygiened, trace) = crate::hygiene::apply_hygiene(gated);
+    let routing = slots::route_slots(hygiened);
     let map = routing.to_slot_map();
-    (slots::render_slots(&routing), map)
+    (slots::render_slots(&routing), map, trace)
 }
 
 /// Fetch narrative context (world state + timeline) from the gateway.
@@ -1707,6 +1730,7 @@ mod tests {
             slot_map: None,
             activation_budget: None,
             moment_directive_meta: None,
+            hygiene_trace: None,
         };
 
         let (personality, rest) = ctx.split_stage0_personality();
@@ -1749,6 +1773,7 @@ mod tests {
             slot_map: None,
             activation_budget: None,
             moment_directive_meta: None,
+            hygiene_trace: None,
         };
 
         // apply_cross_domain_truncation uses split_stage0_personality internally
@@ -2025,6 +2050,144 @@ mod tests {
         assert!(
             kb_text.contains("Forest"),
             "Forest (neutral, no modules) should survive activation"
+        );
+    }
+    // ── DF-79: hygiene transforms (read-path only) ───────────────────
+
+    #[tokio::test]
+    async fn hygiene_transform_applies_at_emission_and_stored_body_unchanged() {
+        // The transform applies to the emitted `body.summary` text; the
+        // stored World-KB body stays byte-identical (read-path invariant).
+        let stores = TestStores::new();
+        let mut kb = WorldKbEntry::new("wld_1", nexus_contracts::BlockType::Character, "Hero");
+        kb.entry_id = "kb_hygiene".to_string();
+        kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::WorldKbBody {
+            summary: Some("The hero fights the dragon".to_string()),
+            attributes: Some(serde_json::json!({
+                "hygiene": [{ "pattern": "dragon", "replacement": "wyrm" }]
+            })),
+            ..Default::default()
+        });
+        kb.modules =
+            Some(serde_json::json!({"activation": {"keys": ["hero"], "logic": "and_any"}}));
+        stores.kb.insert_knowledge_entry(kb).await.unwrap();
+
+        let stage0 = Stage0Assembly {
+            personality: "A hero rises.".to_string(),
+            experience: "10 years.".to_string(),
+            user_prompt: "Write chapter 3.".to_string(),
+            ..Stage0Assembly::default()
+        };
+        let request = MomentRequest::new(stage0).with_world("wld_1");
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+
+        let kb_text = ctx.world_kb.expect("world_kb must render");
+        assert!(
+            kb_text.contains("wyrm"),
+            "emitted summary must carry the transform"
+        );
+        assert!(
+            !kb_text.contains("dragon"),
+            "emitted summary must not carry the raw text"
+        );
+
+        // Trace row captured on the context.
+        let trace = ctx.hygiene_trace.expect("hygiene trace must be captured");
+        assert_eq!(trace.len(), 1);
+        assert_eq!(trace[0].entry_id, "kb_hygiene");
+        assert_eq!(trace[0].applied, 1);
+        assert_eq!(trace[0].skipped, 0);
+
+        // Read-path invariant: the stored body is byte-identical.
+        let stored_entry = stores.kb.get_knowledge_entry("kb_hygiene").await.unwrap();
+        let stored_summary = stored_entry
+            .body
+            .expect("stored body")
+            .summary
+            .expect("stored summary");
+        assert_eq!(stored_summary, "The hero fights the dragon");
+    }
+
+    #[tokio::test]
+    async fn hygiene_neutral_entries_byte_identical_and_no_trace_rows() {
+        // No carrier → no trace rows; assembly output is the plain flat
+        // block (byte-identical to the no-hygiene path).
+        let stores = TestStores::new();
+        for (id, name) in [("kb_a", "Hero"), ("kb_b", "Castle")] {
+            let mut kb = WorldKbEntry::new("wld_1", nexus_contracts::BlockType::Character, name);
+            kb.entry_id = id.to_string();
+            kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::WorldKbBody {
+                summary: Some(format!("{name} summary")),
+                ..Default::default()
+            });
+            stores.kb.insert_knowledge_entry(kb).await.unwrap();
+        }
+
+        let request = MomentRequest::new(minimal_stage0()).with_world("wld_1");
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let kb_text = ctx.world_kb.expect("world_kb must render");
+        assert!(kb_text.contains("Hero summary"));
+        assert!(kb_text.contains("Castle summary"));
+        // The pass ran (activation-on path) but no carrier → empty trace.
+        let trace = ctx
+            .hygiene_trace
+            .expect("hygiene pass ran on the activation-on path");
+        assert!(trace.is_empty());
+    }
+
+    #[tokio::test]
+    async fn hygiene_carrier_survives_edit_patch_round_trip() {
+        // Simulates `creator world kb edit --body`: JSON round-trip through
+        // `WorldKbBody` + `update_knowledge_entry` (the kb_edit code path).
+        // The `attributes.hygiene` carrier must survive the store round-trip
+        // and drive the emission transform.
+        let stores = TestStores::new();
+        let mut kb = WorldKbEntry::new("wld_1", nexus_contracts::BlockType::Character, "Hero");
+        kb.entry_id = "kb_hygiene".to_string();
+        kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::WorldKbBody {
+            summary: Some("The hero fights the dragon".to_string()),
+            ..Default::default()
+        });
+        kb.modules =
+            Some(serde_json::json!({"activation": {"keys": ["hero"], "logic": "and_any"}}));
+        stores.kb.insert_knowledge_entry(kb).await.unwrap();
+
+        // Author patches the body with a hygiene carrier (kb_edit flow).
+        let patched: nexus_knowledge::world_kb::knowledge_entry::WorldKbBody =
+            serde_json::from_str(
+                r#"{"summary":"The hero fights the dragon","attributes":{"hygiene":[{"pattern":"dragon","replacement":"wyrm"}]}}"#,
+            )
+            .expect("patch body must parse");
+        let mut stored_entry = stores.kb.get_knowledge_entry("kb_hygiene").await.unwrap();
+        stored_entry.body = Some(patched);
+        stores
+            .kb
+            .update_knowledge_entry(stored_entry)
+            .await
+            .unwrap();
+
+        // Re-read: the carrier survived the store round-trip.
+        let re_read = stores.kb.get_knowledge_entry("kb_hygiene").await.unwrap();
+        let attrs = re_read
+            .body
+            .expect("stored body")
+            .attributes
+            .expect("stored attributes");
+        assert_eq!(attrs["hygiene"][0]["pattern"], "dragon");
+
+        // Assembly applies the transform.
+        let stage0 = Stage0Assembly {
+            personality: "A hero rises.".to_string(),
+            experience: "10 years.".to_string(),
+            user_prompt: "Write chapter 3.".to_string(),
+            ..Stage0Assembly::default()
+        };
+        let request = MomentRequest::new(stage0).with_world("wld_1");
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let kb_text = ctx.world_kb.expect("world_kb must render");
+        assert!(
+            kb_text.contains("wyrm"),
+            "patched carrier must drive the transform"
         );
     }
 

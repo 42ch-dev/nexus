@@ -47,6 +47,7 @@
 
 use serde_json::{Map, Value};
 use spoke_schemas::{KnowledgeEntry, Relation, SourceAnchor};
+pub mod st_lorebook;
 
 // ── Error type ────────────────────────────────────────────────────────────────
 

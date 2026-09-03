@@ -19,6 +19,8 @@
 //!   `status`). The directive **body never appears**: the builder reads
 //!   only `ctx.moment_directive_meta`, never `ctx.moment_directive` — body
 //!   exclusion is **by construction** (AC-I3).
+//! - `hygiene` (DF-79) — per-entry transform trace (`entry_id`, `applied`,
+//!   `skipped`, `notes`) for carrier-bearing entries.
 //!
 //! The packet is a **separate emission path** from `to_full_context()` — it
 //! never changes assembled bytes (AC-I6).
@@ -89,7 +91,6 @@ pub fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value {
         "cap": ctx.activation_budget.as_ref().and_then(|b| b.cap),
         "remaining": ctx.activation_budget.as_ref().and_then(|b| b.remaining),
     });
-
     // moment_directive: status/metadata only (spec §2 H6). Reads ONLY
     // `ctx.moment_directive_meta` — the directive body is excluded **by
     // construction** (AC-I3). `"none"` + nulls when no directive injected.
@@ -114,6 +115,23 @@ pub fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value {
         }),
     };
 
+    // hygiene: per-entry transform trace (DF-79) — always present, empty
+    // array when no hygiene pass ran or no carrier-bearing entries.
+    let hygiene: Vec<serde_json::Value> = ctx
+        .hygiene_trace
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "entry_id": t.entry_id,
+                "applied": t.applied,
+                "skipped": t.skipped,
+                "notes": t.notes,
+            })
+        })
+        .collect();
+
     serde_json::json!({
         "modules": {
             "placement": placement,
@@ -122,6 +140,7 @@ pub fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value {
         "slot_map": slot_map,
         "budget": budget,
         "moment_directive": moment_directive,
+        "hygiene": hygiene,
     })
 }
 
@@ -149,6 +168,9 @@ mod tests {
     /// `MomentContext` (slots + hops budget + active directive) carries the
     /// three product-local sections with the exact captured values, and
     /// `modules.*` is unchanged from the trace-derived shape.
+    // One seeded-context assertion block per section — splitting would
+    // scatter one packet's shape across helpers.
+    #[allow(clippy::too_many_lines)]
     #[test]
     fn enriched_packet_carries_slot_map_budget_and_directive_meta() {
         let trace = vec![
@@ -190,6 +212,12 @@ mod tests {
                 clear_on_scene_change: true,
                 status: "active".to_string(),
             }),
+            hygiene_trace: Some(vec![crate::hygiene::HygieneTraceEntry {
+                entry_id: "kb_hero".to_string(),
+                applied: 2,
+                skipped: 1,
+                notes: vec!["invalid regex".to_string()],
+            }]),
             ..MomentContext::default()
         };
 
@@ -231,6 +259,14 @@ mod tests {
                 "status": "active",
             }),
             "moment_directive must carry status/metadata only"
+        );
+        // hygiene section: per-entry transform trace (DF-79).
+        assert_eq!(
+            packet["hygiene"],
+            serde_json::json!([
+                { "entry_id": "kb_hero", "applied": 2, "skipped": 1, "notes": ["invalid regex"] },
+            ]),
+            "hygiene must carry the per-entry transform trace"
         );
 
         // modules.* unchanged: derived solely from the activation trace.
@@ -286,6 +322,11 @@ mod tests {
         assert_eq!(
             packet["modules"],
             serde_json::json!({ "placement": [], "activation_trace": [] })
+        );
+        assert_eq!(
+            packet["hygiene"],
+            serde_json::json!([]),
+            "hygiene must be always-present (empty when no pass ran)"
         );
     }
 }

@@ -1,0 +1,20 @@
+{
+  "name": "Lorebook with unknown fields",
+  "entries": [
+    {
+      "uid": 0,
+      "key": "harbor",
+      "content": "The harbor gates open at dawn.",
+      "comment": "Harbor",
+      "favorite_color": "blue",
+      "custom_metadata": { "source": "hand-written" }
+    },
+    {
+      "uid": 1,
+      "keys": ["lighthouse"],
+      "content": "The lighthouse beam sweeps the bay.",
+      "comment": "Lighthouse",
+      "unknown_knob": 42
+    }
+  ]
+}

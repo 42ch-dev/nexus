@@ -67,11 +67,13 @@
 66:| [local-runtime-boundary.md](local-runtime-boundary.md) | Master | Normative |
 67:| [schemas-directory-layout.md](schemas-directory-layout.md) | Master | Normative — V1.64 Shipped (local-api common + findings list-response) |
 68:| [local-api-surface-conventions.md](local-api-surface-conventions.md) | Master | Normative — **V1.67 amended** (§3.2 casing ratification, §4 `items` enforcement, §5 sort-param contract; 0.5.0→0.6.0) |
-69:| [outbox-consolidation.md](outbox-consolidation.md) | Master | Normative — V1.59 P-last promote (single-writer contract + schema ownership); **V1.177 revision** (daemon `outbox` table dropped at V1.163 — §2.3/§6 closed history) |
+69:| [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) | Master | Normative — V1.77 amendment (§11 findings PATCH as non-OCC resource PATCH); cross-resource Daemon API response/query conventions for `schemas/daemon-api/` + `nexus-daemon-runtime` handlers |
+| [outbox-consolidation.md](outbox-consolidation.md) | Master | Normative — V1.59 P-last promote (single-writer contract + schema ownership); **V1.177 revision** (daemon `outbox` table dropped at V1.163 — §2.3/§6 closed history) |
 70:| [reference-knowledge.md](reference-knowledge.md) | Master | Normative — V1.58 P-last promote (reference body refreshable scan pipeline) |
 71:| [spoke-adapter-architecture.md](spoke-adapter-architecture.md) | Master | **Normative (v0.19 — V1.155 P1 capability-token production + tenant isolation: `nexus42 connect token issue` CLI (issuer.key Ed25519 create-once 0600, `claims.iss` MUST equal issuer-derived peer id), operator config `~/.nexus42/connect/config.json` (`trusted_issuers` / `require_capability_token` / `capability_token_provider{enabled, issuer_key_path}`, deny-unknown-fields, absent ⇒ pre-V1.155 defaults, malformed ⇒ fail-closed boot error, require-without-issuers ⇒ boot error); enforcement spoke-side fail-closed (`evaluate_invoke_token_gate` ⇒ `auth_failed` before the nexus handler, zero side effects) + nexus `PeerScope` intersection — token can never widen allowlist scope; all opt-in, …
 72:| [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md) | Master | Normative — external-consumer boundary rule for `schemas/` (platform wire + external Local API clients incl. bundled web UI); moved from knowledge root 2026-08-17 |
 73:| [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md) | Master | Normative — World KB implementation SSOT (crate responsibilities, loops, taxonomy; V1.139 SPOKE alignment); moved from knowledge root 2026-08-17 |
+| [embedding-readiness.md](embedding-readiness.md) | Master | Normative — V1.181 P0 (RN-OGA-3 readiness-contract form): platform-provided embeddings, OSS ships no execution; `EmbeddingIdentity` tuple + fail-closed derived-index protocol + explicit lexical fallback; governs `crates/nexus-embedding/` |
 74:
 75:### Runtime and persistence
 76:

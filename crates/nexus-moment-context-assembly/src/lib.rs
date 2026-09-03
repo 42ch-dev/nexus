@@ -27,6 +27,7 @@
 
 pub mod directive;
 pub mod generation;
+pub mod hygiene;
 pub mod inspector;
 pub mod moment;
 pub mod slots;

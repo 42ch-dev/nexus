@@ -36,6 +36,9 @@ use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_relationships::list_relationships_for_world;
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_spoke_adapter::conversion::{kb_relationship_row_to_spoke, world_kb_to_spoke};
+use nexus_spoke_adapter::pack::st_lorebook::{
+    parse_st_lorebook, ConversionDiagnostic, DiagnosticSeverity, StLorebookError,
+};
 use nexus_spoke_adapter::pack::{build_pack, parse_pack};
 use sqlx::SqlitePool;
 use std::collections::HashSet;
@@ -127,9 +130,14 @@ pub struct ImportArgs {
     /// World reference — the world ID (e.g. `wld_abc123`).
     pub world_ref: String,
 
-    /// Input path for the pack JSON file (required).
-    #[arg(long)]
-    pub r#in: PathBuf,
+    /// Input path for the pack JSON file (required unless `--from-st`).
+    #[arg(long, conflicts_with = "from_st", required_unless_present = "from_st")]
+    pub r#in: Option<PathBuf>,
+
+    /// Import a `SillyTavern` lorebook JSON file (documented format) instead
+    /// of a pack — converted to a pack before the standard import path.
+    #[arg(long, conflicts_with = "in", required_unless_present = "in")]
+    pub from_st: Option<PathBuf>,
 
     /// Print the create/skip plan without performing any writes.
     #[arg(long)]
@@ -268,32 +276,72 @@ async fn export(args: ExportArgs, config: &CliConfig, pool: &SqlitePool) -> Resu
 ///
 /// Returns `CliError` if the world cannot be resolved, the pack file cannot be
 /// read or parsed, or any atom upsert/relate was rejected.
+// The function is a linear CLI pipeline (owner gate → source read → convert →
+// parse → import → report); splitting it would fragment the flow without
+// reducing complexity.
+#[allow(clippy::too_many_lines)]
 async fn import(args: ImportArgs, config: &CliConfig, pool: &SqlitePool) -> Result<()> {
     let world_id = args.world_ref.as_str();
 
     let creator_id = super::super::active_creator_id(config)?;
     super::require_world_owner(pool, world_id, &creator_id).await?;
 
-    let _title = resolve_world_title(pool, world_id).await?;
+    // Source selection: pack JSON (`--in`) or SillyTavern lorebook
+    // (`--from-st`). clap enforces exactly one. The ST converter runs before
+    // `parse_pack`; its diagnostics are printed before the import summary
+    // (also under `--dry-run`).
+    let (value, diagnostics, source_display) = if let Some(st_path) = &args.from_st {
+        let text = std::fs::read_to_string(st_path).map_err(|e| {
+            CliError::Other(format!(
+                "Failed to read ST lorebook file {}: {e}",
+                st_path.display()
+            ))
+        })?;
+        let json: serde_json::Value = serde_json::from_str(&text)
+            .map_err(StLorebookError::NotJson)
+            .map_err(|e| {
+                CliError::Other(format!(
+                    "Invalid ST lorebook format in {}: {e}",
+                    st_path.display()
+                ))
+            })?;
+        let outcome = parse_st_lorebook(&json).map_err(|e| {
+            CliError::Other(format!(
+                "Invalid ST lorebook format in {}: {e}",
+                st_path.display()
+            ))
+        })?;
+        (
+            outcome.pack_input,
+            outcome.diagnostics,
+            st_path.display().to_string(),
+        )
+    } else {
+        let pack_path = args
+            .r#in
+            .as_ref()
+            .expect("clap enforces exactly one of --in / --from-st");
+        let text = std::fs::read_to_string(pack_path).map_err(|e| {
+            CliError::Other(format!(
+                "Failed to read pack file {}: {e}",
+                pack_path.display()
+            ))
+        })?;
+        let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+            CliError::Other(format!(
+                "Invalid JSON in pack file {}: {e}",
+                pack_path.display()
+            ))
+        })?;
+        (value, Vec::new(), pack_path.display().to_string())
+    };
 
-    let text = std::fs::read_to_string(&args.r#in).map_err(|e| {
-        CliError::Other(format!(
-            "Failed to read pack file {}: {e}",
-            args.r#in.display()
-        ))
-    })?;
-    let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
-        CliError::Other(format!(
-            "Invalid JSON in pack file {}: {e}",
-            args.r#in.display()
-        ))
-    })?;
-    let parsed = parse_pack(&value).map_err(|e| {
-        CliError::Other(format!(
-            "Invalid pack format in {}: {e}",
-            args.r#in.display()
-        ))
-    })?;
+    if !diagnostics.is_empty() {
+        print!("{}", render_st_diagnostics(&diagnostics));
+    }
+
+    let parsed = parse_pack(&value)
+        .map_err(|e| CliError::Other(format!("Invalid pack format in {source_display}: {e}")))?;
 
     let conflict = match args.conflict {
         ConflictStrategy::Skip => ConflictPolicy::Skip,
@@ -350,6 +398,38 @@ async fn import(args: ImportArgs, config: &CliConfig, pool: &SqlitePool) -> Resu
     }
 
     Ok(())
+}
+
+/// Render the ST lorebook conversion diagnostics summary (printed before the
+/// import summary, also under `--dry-run`).
+fn render_st_diagnostics(diagnostics: &[ConversionDiagnostic]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::from("ST lorebook conversion notes:\n");
+    for d in diagnostics {
+        let severity = match d.severity {
+            DiagnosticSeverity::Warning => "warning",
+            DiagnosticSeverity::Info => "info",
+        };
+        let location = match (&d.entry_name, d.entry_index) {
+            (Some(name), Some(idx)) => format!("entry {idx} '{name}'"),
+            (Some(name), None) => format!("entry '{name}'"),
+            (None, Some(idx)) => format!("entry {idx}"),
+            (None, None) => "lorebook".to_string(),
+        };
+        match &d.field {
+            Some(field) => {
+                let _ = writeln!(
+                    out,
+                    "  {severity}: {location} field '{field}': {}",
+                    d.message
+                );
+            }
+            None => {
+                let _ = writeln!(out, "  {severity}: {location}: {}", d.message);
+            }
+        }
+    }
+    out
 }
 
 /// Resolve a world's human title from `narrative_worlds`.
@@ -742,7 +822,8 @@ mod tests {
 
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
-            r#in: pack_path,
+            r#in: Some(pack_path),
+            from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
@@ -763,7 +844,8 @@ mod tests {
         let (pool2, _dir2) = empty_world_pool().await;
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
-            r#in: pack_path.clone(),
+            r#in: Some(pack_path.clone()),
+            from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
@@ -776,7 +858,8 @@ mod tests {
         // Second import (idempotent).
         let args2 = ImportArgs {
             world_ref: WORLD.to_string(),
-            r#in: pack_path,
+            r#in: Some(pack_path),
+            from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
@@ -807,7 +890,8 @@ mod tests {
 
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
-            r#in: pack_path,
+            r#in: Some(pack_path),
+            from_st: None,
             dry_run: true,
             conflict: ConflictStrategy::Skip,
         };
@@ -854,7 +938,8 @@ mod tests {
 
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
-            r#in: pack_path,
+            r#in: Some(pack_path),
+            from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
@@ -889,7 +974,8 @@ mod tests {
         let (pool2, _dir2) = empty_world_pool().await;
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
-            r#in: pack_path,
+            r#in: Some(pack_path),
+            from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
@@ -949,7 +1035,8 @@ mod tests {
 
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
-            r#in: pack_path,
+            r#in: Some(pack_path),
+            from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Rename,
         };
@@ -1004,7 +1091,8 @@ mod tests {
 
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
-            r#in: pack_path,
+            r#in: Some(pack_path),
+            from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Overwrite,
         };
@@ -1058,7 +1146,8 @@ mod tests {
 
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
-            r#in: pack_path,
+            r#in: Some(pack_path),
+            from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Overwrite,
         };
@@ -1092,7 +1181,8 @@ mod tests {
 
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
-            r#in: pack_path,
+            r#in: Some(pack_path),
+            from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Rename,
         };
@@ -1143,7 +1233,8 @@ mod tests {
 
         let args = ImportArgs {
             world_ref: WORLD_B.to_string(),
-            r#in: pack_path,
+            r#in: Some(pack_path),
+            from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
@@ -1197,7 +1288,8 @@ mod tests {
 
         let args = ImportArgs {
             world_ref: WORLD_B.to_string(),
-            r#in: pack_path,
+            r#in: Some(pack_path),
+            from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
@@ -1284,7 +1376,8 @@ mod tests {
         // ── Phase 3: Import pack into World B ─────────────────────────
         let args = ImportArgs {
             world_ref: WORLD_B.to_string(),
-            r#in: pack_path.clone(),
+            r#in: Some(pack_path.clone()),
+            from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
@@ -1330,7 +1423,8 @@ mod tests {
         // ── Phase 6: Re-import → idempotent (created: 0, all skipped) ─
         let args2 = ImportArgs {
             world_ref: WORLD_B.to_string(),
-            r#in: pack_path,
+            r#in: Some(pack_path),
+            from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
@@ -1551,7 +1645,8 @@ mod tests {
 
         let args = ImportArgs {
             world_ref: "wld_nonexistent".to_string(),
-            r#in: pack_path,
+            r#in: Some(pack_path),
+            from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
@@ -1594,7 +1689,8 @@ mod tests {
         let (pool2, _dir2) = empty_world_pool().await;
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
-            r#in: pack_path,
+            r#in: Some(pack_path),
+            from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
@@ -1704,7 +1800,8 @@ mod tests {
         // ── Import ─────────────────────────────────────────────────────
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
-            r#in: pack_path,
+            r#in: Some(pack_path),
+            from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
@@ -1739,7 +1836,8 @@ mod tests {
         let (pool, _dir) = empty_world_pool().await;
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
-            r#in: PathBuf::from("/nonexistent/pack.json"),
+            r#in: Some(PathBuf::from("/nonexistent/pack.json")),
+            from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
@@ -1762,7 +1860,8 @@ mod tests {
 
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
-            r#in: pack_path,
+            r#in: Some(pack_path),
+            from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
@@ -1879,7 +1978,8 @@ mod tests {
 
         let import_args = ImportArgs {
             world_ref: WORLD_B.to_string(),
-            r#in: pack_path,
+            r#in: Some(pack_path),
+            from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
@@ -2067,7 +2167,8 @@ mod tests {
 
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
-            r#in: pack_path,
+            r#in: Some(pack_path),
+            from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
@@ -2343,7 +2444,8 @@ mod tests {
 
         let args = ImportArgs {
             world_ref: WORLD.to_string(),
-            r#in: pack_path,
+            r#in: Some(pack_path),
+            from_st: None,
             dry_run: false,
             conflict: ConflictStrategy::Skip,
         };
@@ -2354,6 +2456,212 @@ mod tests {
         assert!(
             msg.contains("Invalid pack format"),
             "error must mention Invalid pack format; got: {msg}"
+        );
+    }
+
+    // ── DF-80: ST lorebook import (`--from-st`) ────────────────────────
+
+    /// `--from-st` and `--in` are mutually exclusive at the clap level;
+    /// exactly one source is required.
+    #[test]
+    fn import_from_st_conflicts_with_in_at_clap() {
+        use crate::cli::Cli;
+        use clap::Parser;
+
+        let from_st_only = Cli::try_parse_from([
+            "nexus42",
+            "creator",
+            "world",
+            "kb",
+            "pack",
+            "import",
+            "wld_1",
+            "--from-st",
+            "lorebook.json",
+        ]);
+        assert!(from_st_only.is_ok(), "--from-st alone must parse");
+
+        let both = Cli::try_parse_from([
+            "nexus42",
+            "creator",
+            "world",
+            "kb",
+            "pack",
+            "import",
+            "wld_1",
+            "--in",
+            "pack.json",
+            "--from-st",
+            "lorebook.json",
+        ]);
+        assert!(both.is_err(), "--in + --from-st must be rejected by clap");
+
+        let neither = Cli::try_parse_from([
+            "nexus42", "creator", "world", "kb", "pack", "import", "wld_1",
+        ]);
+        assert!(neither.is_err(), "import without a source must fail");
+    }
+
+    /// A documented-format ST lorebook imports through the standard pack
+    /// path: entries land with `canonical_name` from `comment`, `body.summary`
+    /// from `content`, and `modules.activation` from keys/constant.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn import_from_st_creates_entries_with_activation() {
+        let (pool, _dir) = empty_world_pool().await;
+        let dir = tempfile::tempdir().unwrap();
+        let st_path = dir.path().join("lorebook.json");
+        std::fs::write(
+            &st_path,
+            r#"{
+                "name": "ST World",
+                "entries": [
+                    { "uid": 0, "key": "dragon", "content": "Dragons are ancient.", "comment": "Dragon lore" },
+                    { "uid": 1, "keys": ["slime", "slimes"], "content": "Slimes bounce.", "comment": "Slime", "constant": true }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let args = ImportArgs {
+            world_ref: WORLD.to_string(),
+            r#in: None,
+            from_st: Some(st_path),
+            dry_run: false,
+            conflict: ConflictStrategy::Skip,
+        };
+        import(args, &config_with_active_creator(), &pool)
+            .await
+            .expect("ST lorebook import must succeed");
+
+        let store = SqliteKbStore::new(pool.clone());
+        let entries = store.list_by_world(WORLD).await.unwrap();
+        assert_eq!(entries.len(), 2);
+        let dragon = entries
+            .iter()
+            .find(|e| e.canonical_name == "Dragon lore")
+            .expect("dragon entry");
+        assert_eq!(
+            dragon.body.as_ref().and_then(|b| b.summary.as_deref()),
+            Some("Dragons are ancient.")
+        );
+        let activation = dragon
+            .modules
+            .as_ref()
+            .and_then(|m| m.get("activation"))
+            .expect("activation module");
+        assert_eq!(activation["keys"], serde_json::json!(["dragon"]));
+        assert_eq!(activation["constant"], serde_json::json!(false));
+        let slime = entries
+            .iter()
+            .find(|e| e.canonical_name == "Slime")
+            .expect("slime entry");
+        let activation = slime
+            .modules
+            .as_ref()
+            .and_then(|m| m.get("activation"))
+            .expect("activation module");
+        assert_eq!(activation["keys"], serde_json::json!(["slime", "slimes"]));
+        assert_eq!(activation["constant"], serde_json::json!(true));
+    }
+
+    /// Unknown/undocumented ST fields produce diagnostics but do not abort
+    /// the import — all entries still land.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn import_from_st_unknown_fields_import_continues() {
+        let (pool, _dir) = empty_world_pool().await;
+        let dir = tempfile::tempdir().unwrap();
+        let st_path = dir.path().join("lorebook.json");
+        std::fs::write(
+            &st_path,
+            r#"{
+                "entries": [
+                    { "uid": 0, "key": "harbor", "content": "The harbor gates.", "comment": "Harbor", "favorite_color": "blue" }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let args = ImportArgs {
+            world_ref: WORLD.to_string(),
+            r#in: None,
+            from_st: Some(st_path),
+            dry_run: false,
+            conflict: ConflictStrategy::Skip,
+        };
+        import(args, &config_with_active_creator(), &pool)
+            .await
+            .expect("unknown fields must not abort the import");
+        assert_eq!(count_entries(&pool, WORLD).await, 1);
+    }
+
+    /// Malformed ST lorebook files abort before any write (no partial import).
+    #[tokio::test]
+    async fn import_from_st_malformed_file_aborts_before_write() {
+        let (pool, _dir) = empty_world_pool().await;
+        let dir = tempfile::tempdir().unwrap();
+        let st_path = dir.path().join("lorebook.json");
+        // Valid JSON but `entries` is neither an array nor an object (the
+        // uid-keyed object form is the native ST export shape and converts).
+        std::fs::write(&st_path, r#"{ "entries": "not-an-array-or-object" }"#).unwrap();
+
+        let args = ImportArgs {
+            world_ref: WORLD.to_string(),
+            r#in: None,
+            from_st: Some(st_path),
+            dry_run: false,
+            conflict: ConflictStrategy::Skip,
+        };
+        let err = import(args, &config_with_active_creator(), &pool)
+            .await
+            .expect_err("malformed ST lorebook must fail");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("Invalid ST lorebook format"),
+            "error must mention ST lorebook format; got: {msg}"
+        );
+        assert_eq!(count_entries(&pool, WORLD).await, 0, "no partial import");
+    }
+
+    /// `--conflict` passes through to `import_pack` unchanged on the ST path:
+    /// a rename policy disambiguates a canonical-name collision.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn import_from_st_conflict_rename_passthrough() {
+        let (pool, _dir) = empty_world_pool().await;
+        let store = SqliteKbStore::new(pool.clone());
+        let mut existing = WorldKbEntry::new(WORLD, BlockType::InfoPoint, "Dragon lore");
+        existing.body = Some(WorldKbBody {
+            summary: Some("Pre-existing dragon lore.".to_string()),
+            ..Default::default()
+        });
+        store.insert_knowledge_entry(existing).await.unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let st_path = dir.path().join("lorebook.json");
+        std::fs::write(
+            &st_path,
+            r#"{
+                "entries": [
+                    { "uid": 0, "key": "dragon", "content": "Dragons are ancient.", "comment": "Dragon lore" }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let args = ImportArgs {
+            world_ref: WORLD.to_string(),
+            r#in: None,
+            from_st: Some(st_path),
+            dry_run: false,
+            conflict: ConflictStrategy::Rename,
+        };
+        import(args, &config_with_active_creator(), &pool)
+            .await
+            .expect("rename policy must apply on the ST path");
+        let entries = store.list_by_world(WORLD).await.unwrap();
+        assert_eq!(entries.len(), 2, "rename must create a disambiguated entry");
+        assert!(
+            entries.iter().any(|e| e.canonical_name != "Dragon lore"),
+            "renamed entry must carry a disambiguated canonical name"
         );
     }
 }

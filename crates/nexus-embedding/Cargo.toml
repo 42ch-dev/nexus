@@ -1,0 +1,26 @@
+[package]
+name = "nexus-embedding"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Embedding readiness contract (RN-OGA-3): EmbeddingProvider seam, embedding identity tuple, fail-closed derived-index protocol — no OSS execution"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# v1.181 P0 (RN-OGA-3): the only runtime deps of this contract crate. Both are
+# workspace-pinned — no new external dependency; no serde this iteration
+# (plain Rust types; additive when a storage/wire consumer lands).
+async-trait.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+# `#[tokio::test]` runtime for the async `EmbeddingProvider` contract tests
+# (mirrors nexus-creator-memory). Dev-only; no consumer graph impact.
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
