@@ -17,7 +17,10 @@
 //!   authoritative run state (every save writes `'running'`; ON CONFLICT
 //!   never updates it).
 //! - Corrupt `context_json` → `verdict: "unknown"` / `context_unreadable`;
-//!   no verdict is fabricated from unreadable data.
+//!   no verdict is fabricated from unreadable data. `context_readable` is a
+//!   two-class flag: `false` ONLY for corrupt bytes; valid-JSON-unexpected-
+//!   shape is byte-readable → `true`, with the shape anomaly carried in the
+//!   classification/explanation.
 //! - The checkpoint stores POSITION ONLY — there is no completed-stages
 //!   ledger, so the output never claims one.
 //! - Slice boundary: read-only inspect; the CLI never implies resume can be
@@ -62,7 +65,10 @@ struct InspectDto {
     run_failure: Option<RunFailure>,
     live_join_keys: Vec<String>,
     resumable: ResumableVerdict,
-    /// Present as `false` only when `context_json` failed to parse.
+    /// Two-class readability flag (contract §3): `Some(false)` only when
+    /// `context_json` failed to parse (corrupt bytes); `Some(true)` when the
+    /// JSON parses but `data` is missing/not an object (byte-readable, shape
+    /// anomaly carried in `resumable`); `None` on fully readable rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     context_readable: Option<bool>,
 }
@@ -268,7 +274,10 @@ fn project(row: &CheckpointRow) -> InspectDto {
             ),
         ),
         Err(kind) => (
-            Some(false),
+            // Two-class flag (contract §3): `false` ONLY for corrupt bytes;
+            // valid-JSON-unexpected-shape is byte-readable → `true`, with
+            // the shape anomaly carried in the classification/explanation.
+            Some(matches!(*kind, UnreadableKind::UnexpectedShape)),
             None,
             Vec::new(),
             verdict_for(
@@ -318,7 +327,12 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
     } else {
         None
     };
+    // Two-class flag (contract §3): `false` ONLY for corrupt bytes;
+    // valid-JSON-unexpected-shape is byte-readable → `true`, with the
+    // shape anomaly carried in the classification/explanation.
     let context_unreadable = unreadable_kind.is_some();
+    let context_readable =
+        unreadable_kind.map(|kind| matches!(kind, UnreadableKind::UnexpectedShape));
 
     InspectDto {
         session_id: row.session_id.clone(),
@@ -341,7 +355,7 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
             ),
             unreadable_kind,
         ),
-        context_readable: context_unreadable.then_some(false),
+        context_readable,
     }
 }
 
@@ -610,11 +624,12 @@ mod tests {
     }
 
     #[test]
-    fn shape_anomaly_wording_is_distinct_from_corrupt() {
+    fn shape_anomaly_is_readable_but_unexpected_shape() {
         // Parseable JSON, `data` not an object — schema-shape anomaly, not
-        // byte corruption (qc3 S1).
+        // byte corruption (qc3 S1). Byte-readable → `context_readable: true`;
+        // the shape anomaly is carried in the classification/explanation.
         let dto = project(&row(br#"{"data": "not-an-object"}"#));
-        assert_eq!(dto.context_readable, Some(false));
+        assert_eq!(dto.context_readable, Some(true));
         assert_eq!(dto.resumable.verdict, Verdict::Unknown);
         assert_eq!(dto.resumable.rule, ResumeRule::ContextUnreadable);
         assert!(
@@ -630,7 +645,8 @@ mod tests {
     }
 
     #[test]
-    fn context_readable_field_serializes_only_when_false() {
+    fn context_readable_serializes_two_class_flag() {
+        // Fully readable row → field absent.
         let ctx = serde_json::json!({"data": {"_merge_j1": ["x"]}}).to_string();
         let readable = serde_json::to_value(project(&row(ctx.as_bytes()))).unwrap();
         assert!(readable.get("context_readable").is_none());
@@ -644,20 +660,95 @@ mod tests {
             serde_json::json!("boot_time")
         );
 
-        let unreadable = serde_json::to_value(project(&row(b"\xff"))).unwrap();
-        assert_eq!(unreadable["context_readable"], serde_json::json!(false));
+        // Corrupt bytes → `false` (bytes-level unreadable).
+        let corrupt = serde_json::to_value(project(&row(b"\xff"))).unwrap();
+        assert_eq!(corrupt["context_readable"], serde_json::json!(false));
         assert_eq!(
-            unreadable["resumable"]["verdict"],
+            corrupt["resumable"]["verdict"],
             serde_json::json!("unknown")
         );
         assert_eq!(
-            unreadable["resumable"]["rule"],
+            corrupt["resumable"]["rule"],
             serde_json::json!("context_unreadable")
         );
         assert_eq!(
-            unreadable["resumable"]["runner_check"],
+            corrupt["resumable"]["runner_check"],
             serde_json::json!("not_applicable")
         );
+
+        // Valid JSON, unexpected `data` shape → `true` (byte-readable; the
+        // shape anomaly lives in the classification/explanation).
+        let shape = serde_json::to_value(project(&row(br#"{"data": "not-an-object"}"#))).unwrap();
+        assert_eq!(shape["context_readable"], serde_json::json!(true));
+        assert_eq!(shape["resumable"]["verdict"], serde_json::json!("unknown"));
+        assert_eq!(
+            shape["resumable"]["rule"],
+            serde_json::json!("context_unreadable")
+        );
+        assert_eq!(
+            shape["resumable"]["runner_check"],
+            serde_json::json!("not_applicable")
+        );
+    }
+
+    #[test]
+    fn summary_shape_anomaly_is_readable_but_unexpected_shape() {
+        // List-mode projection: same two-class flag from the SQL flags —
+        // valid JSON with non-object `data` → `context_readable: true`.
+        let summary = CheckpointSummary {
+            session_id: "ses_t".to_string(),
+            creator_id: "cr_t".to_string(),
+            preset_id: "preset_t".to_string(),
+            preset_version: 3,
+            current_task_id: Some("task_9".to_string()),
+            status: "running".to_string(),
+            created_at: 1_756_990_000,
+            updated_at: 1_756_990_300,
+            context_valid_json: true,
+            context_data_is_object: false,
+            run_status: None,
+            run_error: None,
+            live_join_keys: None,
+        };
+        let dto = project_summary(&summary);
+        assert_eq!(dto.context_readable, Some(true));
+        assert_eq!(dto.resumable.verdict, Verdict::Unknown);
+        assert_eq!(dto.resumable.rule, ResumeRule::ContextUnreadable);
+        assert!(
+            dto.resumable.explanation.contains("shape"),
+            "shape wording: {}",
+            dto.resumable.explanation
+        );
+        assert!(
+            !dto.resumable.explanation.contains("corrupt"),
+            "shape anomaly must not be labelled corrupt: {}",
+            dto.resumable.explanation
+        );
+    }
+
+    #[test]
+    fn summary_corrupt_context_is_bytes_unreadable() {
+        // List-mode projection: corrupt bytes → `context_readable: false`.
+        let summary = CheckpointSummary {
+            session_id: "ses_t".to_string(),
+            creator_id: "cr_t".to_string(),
+            preset_id: "preset_t".to_string(),
+            preset_version: 3,
+            current_task_id: Some("task_9".to_string()),
+            status: "running".to_string(),
+            created_at: 1_756_990_000,
+            updated_at: 1_756_990_300,
+            context_valid_json: false,
+            context_data_is_object: false,
+            run_status: None,
+            run_error: None,
+            live_join_keys: None,
+        };
+        let dto = project_summary(&summary);
+        assert_eq!(dto.context_readable, Some(false));
+        assert_eq!(dto.resumable.verdict, Verdict::Unknown);
+        assert_eq!(dto.resumable.rule, ResumeRule::ContextUnreadable);
+        assert!(dto.resumable.explanation.contains("corrupt"));
     }
 
     #[test]

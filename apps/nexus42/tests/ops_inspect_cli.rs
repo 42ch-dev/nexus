@@ -836,8 +836,9 @@ fn inspect_detail_shape_anomaly_wording_is_distinct_from_corrupt() {
     let parsed: Value = serde_json::from_slice(&output).expect("valid json");
     let obj = parsed.as_object().unwrap();
     // Verdict behavior matches corrupt-context (unknown, never fabricated) —
-    // only the explanation wording differs.
-    assert_eq!(obj["context_readable"], json!(false));
+    // but the machine flag differs: valid JSON is byte-readable, so
+    // `context_readable: true` with the shape anomaly in the explanation.
+    assert_eq!(obj["context_readable"], json!(true));
     assert_eq!(obj["resumable"]["verdict"], json!("unknown"));
     assert_eq!(obj["resumable"]["rule"], json!("context_unreadable"));
     let explanation = obj["resumable"]["explanation"].as_str().unwrap();
@@ -871,5 +872,62 @@ fn inspect_detail_shape_anomaly_wording_is_distinct_from_corrupt() {
     assert!(
         !resumable.contains("corrupt"),
         "human resumable line must not claim corrupt context_json: {resumable}"
+    );
+}
+#[test]
+fn inspect_list_shape_anomaly_and_corrupt_pin_context_readable_flag() {
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    // Valid JSON, `data` not an object — byte-readable, shape anomaly.
+    let shape = b"{\"data\": \"not-an-object\"}";
+    // Corrupt bytes — bytes-level unreadable.
+    let corrupt = b"not-json-at-all";
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        seed_session(
+            &pool,
+            &SeedRow::new("ses_shape", "preset_x", "running", None, shape),
+        )
+        .await;
+        seed_session(
+            &pool,
+            &SeedRow::new("ses_corrupt", "preset_x", "running", None, corrupt),
+        )
+        .await;
+        pool.close().await;
+    });
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    let rows = parsed["rows"].as_array().expect("rows array");
+    let shape_row = rows
+        .iter()
+        .find(|r| r["session_id"] == "ses_shape")
+        .expect("shape row listed");
+    assert_eq!(
+        shape_row["context_readable"],
+        json!(true),
+        "valid-JSON unexpected shape is byte-readable in list mode"
+    );
+    assert_eq!(shape_row["resumable"]["verdict"], json!("unknown"));
+    assert_eq!(shape_row["resumable"]["rule"], json!("context_unreadable"));
+    let corrupt_row = rows
+        .iter()
+        .find(|r| r["session_id"] == "ses_corrupt")
+        .expect("corrupt row listed");
+    assert_eq!(
+        corrupt_row["context_readable"],
+        json!(false),
+        "corrupt bytes stay bytes-unreadable in list mode"
+    );
+    assert_eq!(corrupt_row["resumable"]["verdict"], json!("unknown"));
+    assert_eq!(
+        corrupt_row["resumable"]["rule"],
+        json!("context_unreadable")
     );
 }
