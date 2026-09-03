@@ -25,9 +25,17 @@
 //! updates it) is NOT re-driven, and a session without join-tracking keys
 //! (not of the converge/merge chain class) is NOT re-driven — byte-identical
 //! to pre-T2 boot (tracked-but-not-driven).
+//!
+//! V1.182 P1 BL-04 (Task 3): the interrupted checkpoint is ALSO exercised
+//! through the real `nexus42 ops inspect` binary surface (daemon-free,
+//! read-only) — human + `--json` assertions per the inspect contract — and
+//! the no-mutation obligation is proven: inspect-then-resume behaves
+//! identically to resume-without-inspect (same completed set, no stage
+//! re-executed, store rows + db file bytes untouched by the inspect runs).
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use assert_cmd::Command;
 use async_trait::async_trait;
 use nexus_daemon_runtime::preset_run::{
     drive_preset_run, resume_driven_sessions, PresetRunConfig, PresetRunOutcome, ResumeDecision,
@@ -43,7 +51,8 @@ use nexus_orchestration::{
     CapabilityError, CapabilityRegistry, CapabilityRegistryHolder, GraphFlowEngine,
     OrchestrationEngine,
 };
-use serde_json::Value;
+use serde_json::{json, Value};
+use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -143,6 +152,28 @@ fn elapsed_ms_from_note(note: &str) -> u64 {
                 .ok()
         })
         .unwrap_or_else(|| panic!("note must carry a numeric elapsed_ms: {note}"))
+}
+
+/// Snapshot the persistent checkpoint rows relevant to the no-mutation
+/// proof: position + raw context + timestamps per session.
+async fn checkpoint_rows(pool: &sqlx::SqlitePool) -> Vec<(String, Option<String>, Vec<u8>, i64)> {
+    let rows = sqlx::query_as::<_, (String, Option<String>, Vec<u8>, i64)>(
+        "SELECT session_id, current_task_id, context_json, updated_at
+         FROM orchestration_sessions ORDER BY session_id",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("snapshot checkpoint rows");
+    rows
+}
+
+/// The REAL `nexus42 ops inspect <id>` binary surface with `HOME` pointed at
+/// the hermetic tmp root (whose seeded `config.toml` resolves the SAME
+/// `state.db` the engine persists to).
+fn nexus42(home: &Path) -> Command {
+    let mut cmd = Command::cargo_bin("nexus42").expect("nexus42 binary");
+    cmd.env("HOME", home);
+    cmd
 }
 
 /// Kill/restart mid-chain: the resume re-drive skips completed edges.
@@ -287,6 +318,276 @@ async fn restart_mid_chain_resumes_without_re_executing_completed_edges() {
         SessionStatus::Completed
     );
 
+    drop(tmp);
+}
+
+/// Interrupt → checkpoint → inspect → boot resume, real binary surface.
+///
+/// V1.182 P1 BL-04 Task 3 evidence chain:
+/// 1. Drive the converge chain to the parked join (instrumented edges fire
+///    exactly once each), then drop the in-memory engine — the sqlite
+///    checkpoint persists while the pool stays open (WAL).
+/// 2. Invoke `nexus42 ops inspect <sid>` (human) and
+///    `nexus42 ops inspect <sid> --json` — the REAL binary over the SAME
+///    db file — and assert both against the inspect contract: run id, the
+///    persisted row fields, live join keys, resumable yes /
+///    `chain_class_no_failure` / `runner_check` `boot_time` caveat (rule 4
+///    never folded into the verdict), position = parked join, timestamps
+///    present.
+///    Also list mode: the checkpoint appears as a candidate with verdict
+///    `yes`.
+/// 3. Snapshot rows + db file bytes around the inspect runs → unchanged
+///    (inspect is side-effect-free).
+/// 4. Resume re-drive completes 3 steps, the completed instrumented edges
+///    did NOT re-fire (count still 2), and the elapsed check still
+///    includes the downtime — byte-identical to resume-without-inspect.
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn inspect_after_interrupt_is_side_effect_free_and_resume_matches_baseline() {
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    let user_home = tmp.path();
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path.clone(), None).await;
+    let pool = state.pool().expect("pool").clone();
+    test_utils::seed_test_creator_and_world(&pool).await;
+
+    let dispatch = Arc::new(CountingDispatch {
+        calls: Arc::new(AtomicUsize::new(0)),
+    });
+    let (engine1, storage) = build_engine(&pool, dispatch.clone());
+
+    // Phase 1: start the converge chain and drive to the parked join.
+    let caps = Arc::new(CapabilityRegistry::with_builtins());
+    let loaded = load_preset_from_str(RESUME_REROUTE_YAML, &caps).expect("test preset loads");
+    let sid = engine1
+        .start_session_with_preset_for_creator(&loaded, "test_creator")
+        .await
+        .expect("start preset session on the daemon engine");
+    let first = drive_preset_run(
+        engine1.as_ref(),
+        Some(&storage),
+        &sid,
+        &PresetRunConfig::default(),
+        None,
+    )
+    .await;
+    assert_eq!(
+        first,
+        PresetRunOutcome::WaitingForInput { steps: 3 },
+        "start -> branch_a -> join (parks at 1/2 arrivals)"
+    );
+    assert_eq!(
+        dispatch.calls.load(Ordering::SeqCst),
+        2,
+        "start + branch_a host-tool edges fired exactly once before the kill"
+    );
+
+    // Kill the in-memory engine (the open pool Arc keeps the WAL db writable
+    // — exactly the interrupted-run state a boot would observe on restart).
+    drop(engine1);
+
+    // ---- Inspect (real binary surface) over the interrupted checkpoint ----
+
+    // Human detail view.
+    let human = nexus42(user_home)
+        .args(["ops", "inspect", &sid.0])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let human = String::from_utf8(human).unwrap();
+    assert!(human.contains(&format!("session:        {}", sid.0)), "{human}");
+    assert!(human.contains("creator:        test_creator"), "{human}");
+    // The checkpoint stores POSITION ONLY (contract §5): preset metadata is
+    // inferred by `SqliteSessionStorage::save` from context keys, and the
+    // engine start path seeds only `_session_id`/`_creator_id` — so the
+    // persisted row carries save()'s documented defaults ("default"/0). The
+    // CLI reports the DB verbatim and never fabricates: pin that honest
+    // negative here.
+    assert!(
+        human.contains("preset:         default"),
+        "checkpoint must carry the persisted preset id: {human}"
+    );
+    assert!(human.contains("preset_version: 0"), "{human}");
+    assert!(
+        human.contains("status:         running"),
+        "raw DB status column (not authoritative): {human}"
+    );
+    assert!(human.contains("position:       join"), "{human}");
+    assert!(
+        human.contains("join state:     2 live join key(s):"),
+        "parked join must expose both live join keys: {human}"
+    );
+    assert!(
+        human.contains("_converge_arrivals_join")
+            && human.contains("_join_wait_start_join"),
+        "both live join keys listed: {human}"
+    );
+    assert!(
+        human.contains("resumable:      yes — candidate for re-drive on next boot"),
+        "verdict yes with the boot-time runner caveat: {human}"
+    );
+    assert!(
+        human.contains("run record:     (no typed run record)"),
+        "no failure record: {human}"
+    );
+
+    // JSON detail view — field-by-field per the inspect contract.
+    let json_out = nexus42(user_home)
+        .args(["ops", "inspect", &sid.0, "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let obj: Value = serde_json::from_slice(&json_out).expect("valid inspect json");
+    assert_eq!(obj["session_id"], json!(sid.0));
+    assert_eq!(obj["creator_id"], json!("test_creator"));
+    assert_eq!(
+        obj["preset_id"], json!("default"),
+        "persisted checkpoint truth, not the in-memory preset id"
+    );
+    assert_eq!(obj["preset_version"], json!(0));
+    assert_eq!(obj["db_status"], json!("running"));
+    assert_eq!(obj["current_task_id"], json!("join"));
+    assert_eq!(obj["run_failure"], Value::Null);
+    assert_eq!(
+        obj["live_join_keys"],
+        json!(["_converge_arrivals_join", "_join_wait_start_join"]),
+        "live join keys must match the persisted checkpoint"
+    );
+    assert_eq!(obj["resumable"]["verdict"], json!("yes"));
+    assert_eq!(obj["resumable"]["rule"], json!("chain_class_no_failure"));
+    assert_eq!(obj["resumable"]["runner_check"], json!("boot_time"));
+    let explanation = obj["resumable"]["explanation"].as_str().unwrap();
+    assert!(
+        explanation.contains("boot"),
+        "verdict:yes explanation must state the boot-time runner caveat: {explanation}"
+    );
+    assert!(
+        obj.get("context_readable").is_none(),
+        "context_readable must be absent on readable rows"
+    );
+    let created_at = obj["created_at"].as_i64().expect("created_at unix secs");
+    let updated_at = obj["updated_at"].as_i64().expect("updated_at unix secs");
+    assert!(
+        created_at >= 1_600_000_000 && updated_at >= created_at,
+        "timestamps must be real persisted unix seconds: created {created_at}, updated {updated_at}"
+    );
+
+    // List mode: the interrupted run is a non-terminal candidate with the
+    // same verdict; count line present.
+    let list_out = nexus42(user_home)
+        .args(["ops", "inspect"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let list = String::from_utf8(list_out).unwrap();
+    assert!(list.contains(&sid.0), "{list}");
+    assert!(list.contains("e2e-resume-reroute"), "{list}");
+    assert!(list.contains("yes"), "list verdict word: {list}");
+    assert!(list.contains("checkpointed session(s)."), "{list}");
+
+    // ---- Side-effect-free proof: rows + db file bytes untouched ----
+    let rows_before = checkpoint_rows(&pool).await;
+    let bytes_before = std::fs::read(&db_path).expect("db bytes before inspect");
+    nexus42(user_home)
+        .args(["ops", "inspect", &sid.0])
+        .assert()
+        .success();
+    nexus42(user_home)
+        .args(["ops", "inspect", &sid.0, "--json"])
+        .assert()
+        .success();
+    nexus42(user_home).args(["ops", "inspect"]).assert().success();
+    let rows_after = checkpoint_rows(&pool).await;
+    let bytes_after = std::fs::read(&db_path).expect("db bytes after inspect");
+    assert_eq!(rows_before, rows_after, "inspect must not mutate rows");
+    assert_eq!(
+        bytes_before, bytes_after,
+        "inspect must not write the db file"
+    );
+
+    // ---- Phase 2: boot resume AFTER the inspect calls ----
+    let (engine2, storage2) = build_engine(&pool, dispatch.clone());
+    let engine_ref: Arc<dyn OrchestrationEngine> = engine2.clone();
+    let wired = build_wired_outer_graph(&loaded, &engine_ref, &caps, Some(dispatch.clone()));
+    let runner = Arc::new(graph_flow::FlowRunner::new(
+        Arc::new(wired),
+        storage2.clone(),
+    ));
+    engine2
+        .shared_state()
+        .runners
+        .write()
+        .await
+        .insert(sid.0.clone(), runner);
+    let summary = SessionSummary {
+        session_id: sid.clone(),
+        creator_id: "test_creator".to_string(),
+        preset_id: loaded.id.clone(),
+        status: SessionStatus::WaitingForInput,
+        current_task_id: Some("join".to_string()),
+    };
+    engine2
+        .shared_state()
+        .sessions
+        .write()
+        .await
+        .push(summary.clone());
+
+    let config = PresetRunConfig {
+        resume_waiting: true,
+        ..PresetRunConfig::default()
+    };
+    let decisions =
+        resume_driven_sessions(engine2.as_ref(), &storage2, &[summary], &config, None).await;
+    assert_eq!(decisions.len(), 1, "exactly one recovered session");
+    match &decisions[0] {
+        ResumeDecision::ReDriven {
+            session_id,
+            outcome,
+        } => {
+            assert_eq!(session_id, &sid);
+            assert_eq!(
+                outcome,
+                &PresetRunOutcome::Completed { steps: 3 },
+                "resume re-drives join -> fallback -> done = 3 steps from the persisted position"
+            );
+        }
+        other => panic!("expected ReDriven, got {other:?}"),
+    }
+
+    // Completed edges did NOT re-fire: identical to the baseline (count
+    // still 2) — inspect did not create a second completed set.
+    assert_eq!(
+        dispatch.calls.load(Ordering::SeqCst),
+        2,
+        "inspect-then-resume must not re-execute completed edges"
+    );
+
+    let ctx = engine2.get_context(&sid).await.expect("context");
+    let note = ctx
+        .get::<String>("_join_timeout_note")
+        .await
+        .expect("reroute must write _join_timeout_note");
+    let elapsed = elapsed_ms_from_note(&note);
+    assert!(
+        elapsed >= DOWNTIME_MS,
+        "elapsed must include the downtime (no re-baseline): {note}"
+    );
+    assert!(
+        elapsed >= JOIN_TIMEOUT_MS,
+        "the deadline must have fired: {note}"
+    );
+    assert_eq!(
+        engine2.get_status(&sid).await.expect("status"),
+        SessionStatus::Completed
+    );
+
+    drop(state);
     drop(tmp);
 }
 
