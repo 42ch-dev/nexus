@@ -173,12 +173,12 @@ export function ChaptersPage() {
                       <TableRow
                         key={row.chapter}
                         // V1.121 v0.4: protected-row tint converges onto the
-                        // tokenized purple-700 scale (DESIGN.md
-                        // components.data-table.row-protected intent —
-                        // purple-700 low-alpha wash). Was a raw color-mix
-                        // arbitrary class; now a Tailwind opacity modifier on
-                        // the registered --color-purple-700 token (no new hue).
-                        className={isProtected ? 'bg-purple-700/10' : undefined}
+                        // registered data-table-row-protected token (DESIGN.md
+                        // components.data-table.row-protected — purple-700
+                        // low-alpha wash). Was a raw color-mix arbitrary class,
+                        // then a Tailwind opacity modifier on purple-700; now
+                        // the dedicated registered-token class (no new hue).
+                        className={isProtected ? 'bg-data-table-row-protected' : undefined}
                         data-testid={`chapter-row-${row.chapter}`}
                       >
                         <TableCell className="text-right tabular-nums">{row.chapter}</TableCell>

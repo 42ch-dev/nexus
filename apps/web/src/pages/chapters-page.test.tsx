@@ -249,8 +249,9 @@ describe('ChaptersPage', () => {
 //
 // The protected-chapter row tint previously used a raw `color-mix` arbitrary
 // class (`bg-[color-mix(in_srgb,var(--color-purple-700)_6%,transparent)]`).
-// It now consumes the tokenized purple-700 scale via the Tailwind opacity
-// modifier (`bg-purple-700/10`) — no new hue, no raw color-mix arbitrary
+// It now consumes the registered `data-table-row-protected` token
+// (`bg-data-table-row-protected` — DESIGN.md components.data-table.row-protected,
+// a purple-700 low-alpha wash) — no new hue, no raw color-mix arbitrary
 // class on a page-listed surface.
 describe('ChaptersPage banner/tint convergence (V1.121 v0.4)', () => {
   it('renders the protected-chapter tint without a raw color-mix arbitrary class', async () => {
@@ -277,9 +278,10 @@ describe('ChaptersPage banner/tint convergence (V1.121 v0.4)', () => {
 
     renderChapters();
     const row = await screen.findByTestId('chapter-row-1');
-    // Tokenized purple-700 opacity modifier — converges onto the registered
-    // semantic scale; no raw color-mix arbitrary class remains.
-    expect(row.className).toMatch(/\bbg-purple-700\/10\b/);
+    // Registered token class — converges onto the
+    // components.data-table.row-protected token; no raw color-mix arbitrary
+    // class remains.
+    expect(row.className).toMatch(/\bbg-data-table-row-protected\b/);
     expect(row.className).not.toMatch(/color-mix/);
     expect(row.className).not.toMatch(/\bbg-\[/);
   });

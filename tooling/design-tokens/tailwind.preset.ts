@@ -68,6 +68,8 @@ const preset: Partial<Config> = {
         'warning-surface-border': cv('warning-surface-border'),
         'info-surface': cv('info-surface'),
         'info-surface-border': cv('info-surface-border'),
+        'data-table-row-protected': cv('data-table-row-protected'),
+        'main-banner-background': cv('main-banner-background'),
         // Finding status pill — DESIGN.md components.finding-status-pill
         // (V1.121 P1 T3; tinted fill + semantic text + border per status).
         'finding-status': {
@@ -350,6 +352,7 @@ const preset: Partial<Config> = {
         'copy-16': ['16px', { lineHeight: '1.6' }],
         'copy-14': ['14px', { lineHeight: '1.55' }],
         'copy-13': ['13px', { lineHeight: '1.5' }],
+        'copy-12': ['12px', { lineHeight: '1.35' }],
         'button-14': ['14px', { lineHeight: '1' }],
         'button-12': ['12px', { lineHeight: '1', letterSpacing: '0.01em' }],
         'label-12-mono': ['12px', { lineHeight: '1.4' }],

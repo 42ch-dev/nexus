@@ -27,6 +27,7 @@
     "clean": "pnpm -r run clean",
     "validate-schemas": "pnpm -F nexus-schema-validator validate",
     "codegen": "pnpm -F nexus-codegen build && pnpm -F nexus-codegen codegen && pnpm -F @42ch/nexus-contracts build",
+    "codegen:verify": "pnpm run codegen && bash tooling/check-codegen-callsite-coverage.sh",
     "codegen:watch": "pnpm -F nexus-codegen build && pnpm -F nexus-codegen dev",
     "publish:contracts": "pnpm -F @42ch/nexus-contracts publish:public",
     "build:design-studio": "pnpm -F design-studio build",

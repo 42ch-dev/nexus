@@ -44,11 +44,23 @@ jobs:
     permissions:
       contents: read
       actions: write
+    env:
+      SQLX_OFFLINE: "true"
+      CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      # Free disk before the Rust toolchain + cargo cache: this job now
+      # compiles the full workspace, so it needs the same ENOSPC headroom
+      # policy as rust-checks / rust-tests (CARGO_INCREMENTAL: "0" above).
+      - uses: ./.github/actions/free-disk-space
       - uses: ./.github/actions/setup-monorepo
         with:
-          rust-toolchain: ""
+          # V1.182 P0 (R-V1163P2QC1-002): rust is required so this job can
+          # compile typify consumers immediately after regen.
+          rust-toolchain: stable
+          # nexus-wasm-host's build.rs compiles embedded modules from source
+          # (same reason as rust-checks).
+          rust-targets: wasm32-unknown-unknown
       - name: Run codegen
         run: pnpm run codegen
       - name: Run codegen tests
@@ -69,6 +81,23 @@ jobs:
         run: test -d packages/nexus-contracts/src/generated && test -f packages/nexus-contracts/src/generated/index.ts
       - name: Verify Rust generated
         run: test -d crates/nexus-contracts/src/generated && test -f crates/nexus-contracts/src/generated/mod.rs
+      - name: Read workspace version for cargo cache key
+        id: workspace-version
+        run: |
+          v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
+        with:
+          # Distinct suffix: rust-checks still needs this job, but a shared
+          # key with concurrent siblings (sqlx / connect-host / tests) races.
+          shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-codegen-callsite
+          workspaces: .
+          # ENOSPC headroom policy (same as rust-checks): never cache every
+          # crate, never persist a partial cache from a failed run.
+          cache-all-crates: false
+          cache-on-failure: false
+      - name: Codegen callsite coverage
+        run: bash tooling/check-codegen-callsite-coverage.sh
       - name: Archive generated types
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:

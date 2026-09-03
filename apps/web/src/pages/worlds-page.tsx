@@ -24,7 +24,10 @@ export function WorldsPage() {
   const [createWorkOpen, setCreateWorkOpen] = useState(false);
   const worlds = useNarrativeWorlds();
   const overview = useTimelineOverview();
-  const overviewWorlds = flattenOverviewWorlds(overview.data);
+  const overviewWorlds = useMemo(
+    () => flattenOverviewWorlds(overview.data),
+    [overview.data],
+  );
 
   const overviewMap = useMemo(() => {
     return new Map(
@@ -81,30 +84,15 @@ export function WorldsPage() {
                 />
               ) : (
                 <>
-                  {/*
-                    V1.127 P0 T1 (AC-V1127-1): createWorld is absent on every
-                    current bridge, so render the Create World affordance as a
-                    disabled card with a desktop-only tooltip instead of
-                    silently swapping it out. Inline (rather than EmptyCreateCard)
-                    because EmptyCreateCard has no disabled path; classes mirror
-                    its layout and drop hover/focus for the disabled state.
-                  */}
-                  <button
-                    type="button"
+                  <EmptyCreateCard
+                    icon={Globe}
+                    title={t('emptyCreateWorldTitle')}
+                    description={t('emptyCreateWorldDescription')}
+                    onClick={handleCreateWorldClick}
                     disabled
-                    tabIndex={-1}
-                    title={t('create.desktop-only')}
+                    titleAttr={t('create.desktop-only')}
                     data-testid="worlds-empty-create-world"
-                    className="flex w-full min-h-[7.5rem] flex-col items-center justify-center gap-2 rounded-card border border-dashed border-gray-alpha-400 p-6 text-center opacity-60 motion-reduce:transition-none"
-                  >
-                    <Globe className="h-8 w-8 shrink-0 text-brand-deep-blue dark:text-blue-700" aria-hidden />
-                    <span className="font-display text-display-20 tracking-tight text-gray-1000">
-                      {t('emptyCreateWorldTitle')}
-                    </span>
-                    <span className="max-w-sm text-copy-14 text-gray-700">
-                      {t('emptyCreateWorldDescription')}
-                    </span>
-                  </button>
+                  />
                   <EmptyCreateCard
                     icon={Plus}
                     title={t('emptyCreateWorkTitle')}
@@ -196,7 +184,7 @@ export function WorldsPage() {
                     disabled={overview.isFetchingNextPage}
                     data-testid="worlds-overview-load-more"
                   >
-                    {overview.isFetchingNextPage ? t('loadingMore') : t('loadMore')}
+                    {overview.isFetchingNextPage ? t('loadingMore') : t('loadMoreActivity')}
                   </Button>
                 </div>
               ) : null}

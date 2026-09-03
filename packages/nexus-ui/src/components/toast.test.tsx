@@ -100,6 +100,7 @@ describe('Toaster + useToast', () => {
   });
 
   it('dismisses a toast when the dismiss button is clicked', () => {
+    vi.useFakeTimers();
     const getApi = renderToaster();
     const { toast } = getApi();
     act(() => toast({ variant: 'info', title: 'Dismiss me' }));
@@ -107,7 +108,26 @@ describe('Toaster + useToast', () => {
     act(() => {
       screen.getByRole('button', { name: 'Dismiss notification' }).click();
     });
+    act(() => {
+      vi.advanceTimersByTime(140); // mirrors --duration-exit (see TOAST_EXIT_MS in toast.tsx)
+    });
     expect(screen.queryByText('Dismiss me')).not.toBeInTheDocument();
+  });
+
+  it('applies DESIGN.md enter/exit motion tokens on the toast surface', () => {
+    const rafSpy = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      cb(0);
+      return 1;
+    });
+    const getApi = renderToaster();
+    const { toast } = getApi();
+    act(() => toast({ variant: 'info', title: 'Motion', testId: 'toast-motion', duration: 0 }));
+    rafSpy.mockRestore();
+    const el = screen.getByTestId('toast-motion');
+    expect(el).toHaveClass('duration-enter');
+    expect(el).toHaveClass('ease-standard');
+    expect(el).toHaveClass('translate-y-0');
+    expect(el).toHaveClass('opacity-100');
   });
 
   it('caps the queue at MAX_TOASTS and keeps the newest items', () => {
