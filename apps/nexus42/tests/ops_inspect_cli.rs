@@ -849,4 +849,27 @@ fn inspect_detail_shape_anomaly_wording_is_distinct_from_corrupt() {
         !explanation.contains("corrupt"),
         "shape-anomaly must not be labelled corrupt context_json: {explanation}"
     );
+
+    // Human view must mirror the same wording split (contract §5): the
+    // resumable line names the unexpected shape, never "corrupt context_json".
+    let human = nexus42(home.path())
+        .args(["ops", "inspect", "ses_shape"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let human = String::from_utf8(human).unwrap();
+    let resumable = human
+        .lines()
+        .find(|l| l.starts_with("resumable:"))
+        .expect("resumable line");
+    assert!(
+        resumable.contains("unexpected shape"),
+        "human resumable line must name the unexpected shape, got: {resumable}"
+    );
+    assert!(
+        !resumable.contains("corrupt"),
+        "human resumable line must not claim corrupt context_json: {resumable}"
+    );
 }

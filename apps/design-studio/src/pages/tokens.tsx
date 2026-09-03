@@ -116,6 +116,15 @@ const COLOR_GROUPS: TokenGroup[] = [
       varName: `--color-pink-${s}`,
     })),
   },
+  {
+    title: 'Component surfaces',
+    hint:
+      'Semantic component fills — DESIGN.md components.data-table.row-protected (protected-row tint, purple) and components.launch-daemon.main-banner (banner fill, amber). Both are translucent color-mix tints that re-resolve on theme flip (dark raises the mix percentage).',
+    tokens: [
+      { label: 'data-table-row-protected', varName: '--color-data-table-row-protected' },
+      { label: 'main-banner-background', varName: '--color-main-banner-background' },
+    ],
+  },
 ];
 
 /* ---------- Typography specimens (DESIGN.md frontmatter typography:) ----------

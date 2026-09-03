@@ -458,11 +458,15 @@ fn render_detail(dto: &InspectDto) -> String {
     }
 
     let verdict_line = match dto.resumable.rule {
-        ResumeRule::ChainClassNoFailure => "yes — candidate for re-drive on next boot (converge/merge chain, no failure record; runner reconstruction is boot-time — see runner_check)",
-        ResumeRule::TypedFailure => "no — typed failure record present (boot never re-drives; see caveat)",
-        ResumeRule::NotConvergeMergeClass => "no — no live converge/merge join state (boot skips: not in chain class)",
-        ResumeRule::TerminalStatus => "no — terminal status (boot never re-drives; see caveat)",
-        ResumeRule::ContextUnreadable => "unknown — context unreadable (corrupt context_json; no verdict fabricated)",
+        ResumeRule::ChainClassNoFailure => "yes — candidate for re-drive on next boot (converge/merge chain, no failure record; runner reconstruction is boot-time — see runner_check)".to_string(),
+        ResumeRule::TypedFailure => "no — typed failure record present (boot never re-drives; see caveat)".to_string(),
+        ResumeRule::NotConvergeMergeClass => "no — no live converge/merge join state (boot skips: not in chain class)".to_string(),
+        ResumeRule::TerminalStatus => "no — terminal status (boot never re-drives; see caveat)".to_string(),
+        // Contract §5 wording split (qc3 S1): corrupt bytes vs parseable-but-
+        // unexpected shape — the DTO explanation already distinguishes the two
+        // honest wordings, so the human line mirrors the JSON explanation
+        // instead of always claiming a corrupt context_json.
+        ResumeRule::ContextUnreadable => format!("unknown — {}", dto.resumable.explanation),
     };
     let _ = writeln!(out, "resumable:      {verdict_line}");
     out
