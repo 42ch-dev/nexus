@@ -1,5 +1,5 @@
 import { ChevronRight, Ellipsis, type LucideIcon } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, memo, type ReactNode } from 'react';
 import { useLocation } from 'react-router';
 
 import { cn } from '@/lib/utils';
@@ -345,7 +345,7 @@ function NavGroupChrome({
  * stays in one place. The active state comes from `isActiveItem` when provided,
  * else the built-in `item.to` prefix match.
  */
-function NavItemLi({
+const NavItemLi = memo(function NavItemLi({
   item,
   activeRoute,
   isActiveItem,
@@ -446,4 +446,4 @@ function NavItemLi({
       </div>
     </li>
   );
-}
+});
