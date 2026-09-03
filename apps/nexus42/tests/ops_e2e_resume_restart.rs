@@ -336,9 +336,12 @@ async fn restart_mid_chain_resumes_without_re_executing_completed_edges() {
 ///    present.
 ///    Also list mode: the checkpoint appears as a candidate with verdict
 ///    `yes`.
-/// 3. Snapshot rows + db file bytes around the inspect runs → unchanged
-///    (inspect is side-effect-free).
-/// 4. Resume re-drive completes 3 steps, the completed instrumented edges
+/// 3. No-mutation proof: checkpoint rows + raw db file bytes captured
+///    BEFORE the first inspect pass and AFTER the last (all six
+///    invocations inside the window) are identical.
+/// 4. Park past the join deadline — the same explicit DOWNTIME sleep as
+///    the baseline restart test (the inspect passes run inside it).
+/// 5. Resume re-drive completes 3 steps, the completed instrumented edges
 ///    did NOT re-fire (count still 2), and the elapsed check still
 ///    includes the downtime — byte-identical to resume-without-inspect.
 #[tokio::test]
@@ -385,7 +388,20 @@ async fn inspect_after_interrupt_is_side_effect_free_and_resume_matches_baseline
     // — exactly the interrupted-run state a boot would observe on restart).
     drop(engine1);
 
+    // Downtime: park past the join deadline — the same explicit DOWNTIME
+    // sleep as the baseline restart test, with the inspect passes running
+    // inside the window.
+    tokio::time::sleep(DOWNTIME).await;
+
     // ---- Inspect (real binary surface) over the interrupted checkpoint ----
+
+    // Side-effect-free proof - baseline captured BEFORE the first inspect
+    // pass: checkpoint rows + raw db file bytes, while the daemon-side pool
+    // is the only open handle. Every inspect pass below must leave both
+    // identical (contract §7 no-mutation obligation) - a mutation from
+    // any pass would flip the post-window comparison.
+    let rows_before = checkpoint_rows(&pool).await;
+    let bytes_before = std::fs::read(&db_path).expect("db bytes before inspect");
 
     // Human detail view.
     let human = nexus42(user_home)
@@ -414,6 +430,20 @@ async fn inspect_after_interrupt_is_side_effect_free_and_resume_matches_baseline
         "raw DB status column (not authoritative): {human}"
     );
     assert!(human.contains("position:       join"), "{human}");
+    // Contract §2: human detail renders both persisted timestamps as
+    // `YYYY-MM-DD HH:MM:SS UTC` - presence/format-light assertion
+    // complementing the JSON numeric checks below.
+    for key in ["created_at", "updated_at"] {
+        let line = human
+            .lines()
+            .find(|l| l.starts_with(key))
+            .unwrap_or_else(|| panic!("human detail must render {key}: {human}"));
+        let date = line.split_whitespace().nth(1).unwrap_or("");
+        assert!(
+            date.len() == 10 && date.split('-').count() == 3,
+            "{key} timestamp must render as YYYY-MM-DD: {line}"
+        );
+    }
     assert!(
         human.contains("join state:     2 live join key(s):"),
         "parked join must expose both live join keys: {human}"
@@ -486,13 +516,26 @@ async fn inspect_after_interrupt_is_side_effect_free_and_resume_matches_baseline
         .clone();
     let list = String::from_utf8(list_out).unwrap();
     assert!(list.contains(&sid.0), "{list}");
-    assert!(list.contains("e2e-resume-reroute"), "{list}");
+    // Column semantics (contract §2 list layout):
+    // `<session_id>  <preset_id>  <status>  <task>  <updated_at>  <verdict>`.
+    // The YAML preset id `e2e-resume-reroute` appears only as the
+    // session_id PREFIX (`{preset_id}:{millis}`, engine.rs:715) - the
+    // preset COLUMN of this checkpoint is `default` (persisted DB truth).
+    // Pin that honest negative on the actual column, not a sid-prefix grep.
+    assert!(
+        list.lines().any(|l| {
+            let cols: Vec<&str> = l.split_whitespace().collect();
+            cols.len() >= 6 && cols[0] == sid.0.as_str() && cols[1] == "default"
+        }),
+        "list row must show the persisted preset column `default`: {list}"
+    );
     assert!(list.contains("yes"), "list verdict word: {list}");
     assert!(list.contains("checkpointed session(s)."), "{list}");
 
-    // ---- Side-effect-free proof: rows + db file bytes untouched ----
-    let rows_before = checkpoint_rows(&pool).await;
-    let bytes_before = std::fs::read(&db_path).expect("db bytes before inspect");
+    // ---- Side-effect-free proof: post-window snapshot ----
+    // (Baseline was captured before the first inspect pass above; this
+    // second human/json/list triple keeps all six invocations inside the
+    // proof window.)
     nexus42(user_home)
         .args(["ops", "inspect", &sid.0])
         .assert()
@@ -510,7 +553,7 @@ async fn inspect_after_interrupt_is_side_effect_free_and_resume_matches_baseline
         "inspect must not write the db file"
     );
 
-    // ---- Phase 2: boot resume AFTER the inspect calls ----
+    // ---- Phase 2: boot resume AFTER the inspect passes ----
     let (engine2, storage2) = build_engine(&pool, dispatch.clone());
     let engine_ref: Arc<dyn OrchestrationEngine> = engine2.clone();
     let wired = build_wired_outer_graph(&loaded, &engine_ref, &caps, Some(dispatch.clone()));
