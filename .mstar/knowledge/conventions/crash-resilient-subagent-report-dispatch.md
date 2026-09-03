@@ -33,3 +33,12 @@ Crashes cluster on the longest-running dispatches (full cargo test suites) — e
 ## Examples
 
 V1.165 P1 QA: first attempt crashed after ~9 min with no report; re-dispatch ran skeleton-first and completed in 10 min with full evidence. V1.165 PM pass 1: crashed mid-edit; re-dispatch repaired two truncated sentences + a hashline-dump corruption in the compass.
+
+## Provider-exhaustion failover (v1.182 update)
+
+A dispatch that dies at startup with `Connect error resource_exhausted` (one opening line, exit 1, zero residue) is model-provider quota, not task failure:
+
+1. Verify zero residue (git status/log in the worktree + no report file) — do NOT damage-survey what never started.
+2. Retry the SAME role at most once with a corrected prompt (e.g. skill-loading via `read skill://<name>` instead of grepping for skill files — a common co-failure).
+3. Second consecutive exhaustion → **switch track** (`fullstack-dev` ↔ `fullstack-dev-2` second track) rather than a third same-model retry; serial handoff justification goes in the dispatch context.
+4. Beware the woken-corpse: a hub DM to a "failed" session can wake it mid-flight, producing an unexpected second implementation. After a provider crash, treat crashed agents as do-not-message; verify who actually authored the final commit before review (`git log` authorship + the report's own account vs disk evidence).

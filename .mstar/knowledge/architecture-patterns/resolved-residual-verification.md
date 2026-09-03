@@ -68,3 +68,13 @@ Symmetrically, `decision: defer` / `target: V1.(N+1)` is set once, at deferral t
 
 - Resolutions that fix a *coverage* gap should land the actual tests in the same commit and the residual `description` should name them; a coverage residual resolved without naming the tests is a smell.
 - When a security/correctness residual is resolved, the resolving commit's diff should touch the exact code path the finding described — verify on close, not just on resolve.
+
+## Aged-cluster re-triage playbook (v1.182 update)
+
+Single-residual verification scales; a 37-item cluster deferred across ~55 versions needs a batch shape:
+
+1. **Rebuild the authoritative inventory** from every surviving carrier (archived residual JSONs + the deferred-iteration compasses' nit records + tracker rows) — roadmap prose like "22 nits" is a claim, not a list; expect the table to disagree with the prose (dedupe overlaps between origin waves; account for absorbed items explicitly).
+2. **Adjudicate each row against HEAD before any fix or archival** — disposition table (`id | claim | verdict fixed/stale/valid/duplicate | evidence file:line | action`) is the single cross-task contract; summary counts derived from the table, never the reverse.
+3. **Fix a bounded top slice** (visibility-ranked, ≤10) and rewrite the roadmap row with the honest remainder + target + trigger; close the row via the module protocol (delete + shipped-archive entry) only when a cluster fully empties.
+4. **Reclassify honestly**: an item that turns out to need wire/auth/design decisions leaves the nit cluster (defer with register entry + roadmap), it does not get fixed to make counts work.
+5. Expect high fixed/stale rates to be the EXCEPTION, not the rule: v1.182's V1.121-design cluster came back 15/15 valid — stale count intuition from "it's old" is worthless; only per-row evidence counts.
