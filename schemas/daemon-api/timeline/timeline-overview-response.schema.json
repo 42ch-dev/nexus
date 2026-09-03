@@ -5,7 +5,7 @@
   "title": "Nexus TimelineOverviewResponse",
   "description": "Cursor-paginated overview of visible Worlds with per-World era/event counts and last activity timestamp. Response for GET /v1/daemon/timeline/overview.",
   "type": "object",
-  "required": ["worlds", "total_worlds"],
+  "required": ["worlds", "total_worlds", "cursor"],
   "properties": {
     "worlds": {
       "type": "array",
