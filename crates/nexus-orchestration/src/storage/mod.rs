@@ -6,6 +6,8 @@
 //!
 //! Design: `.mstar/specs/orchestration-engine.md` §4.3.
 
+pub mod inspect;
 pub mod sqlite;
 
+pub use inspect::{CheckpointRow, CheckpointSummary};
 pub use sqlite::SqliteSessionStorage;

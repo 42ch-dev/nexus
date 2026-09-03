@@ -136,6 +136,7 @@ async fn async_main(cli: Cli) -> Result<()> {
             nexus42::commands::platform::run(command, &config, &output_format).await
         }
         Some(Commands::HostCall(args)) => nexus42::commands::host_call::run(args, &config).await,
+        Some(Commands::Ops { command }) => nexus42::commands::ops::run(command, &config).await,
         None => {
             Cli::parse_from(["nexus42", "--help"]);
             Ok(())

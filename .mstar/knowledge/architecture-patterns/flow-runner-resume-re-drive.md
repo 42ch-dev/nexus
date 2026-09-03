@@ -62,7 +62,9 @@ edges.
    is **finished**, not live. Classifying by key presence re-drives
    completed sessions and auto-advances post-join `llm_judge`/`manual`
    waits on every boot. Require a **non-Null** join-key value for
-   class-positive (`is_converge_merge_chain`, `preset_run.rs`).
+   class-positive (`is_converge_merge_chain`, shared
+   `nexus-orchestration::resume_rules` since the v1.182 P1 QC wave; consumed
+   by both `preset_run.rs` and the `ops inspect` CLI).
 
 3. **Typed-failure must filter before re-drive.** `SqliteSessionStorage::save`
    inserts `status='running'` and `ON CONFLICT` never updates it — a
