@@ -13,6 +13,10 @@
 # SQLX_OFFLINE is mandatory: bare `cargo check` fails sqlx macros without the
 # committed `.sqlx/` offline metadata.
 #
+# Requires bash: package.json `codegen:verify` and CI invoke this script
+# explicitly via `bash`; it is a CI/dev gate, not portable to non-bash
+# environments (CI runs ubuntu-latest; macOS/Linux dev shells qualify).
+#
 # Usage (from repository root):
 #   bash tooling/check-codegen-callsite-coverage.sh
 # After regen:
@@ -26,5 +30,8 @@ cd "$ROOT"
 export SQLX_OFFLINE=true
 
 echo "==> Codegen callsite coverage (SQLX_OFFLINE=true cargo check --workspace)"
+# Default lib/bin graph only (no --all-targets): #[cfg(test)] struct literals
+# are caught downstream by verify-sqlx-offline / rust-checks clippy
+# `--all-targets` (CI budget; boundary accepted by the L2 task-4 review).
 cargo check --workspace
 echo "✅ Workspace compiles after codegen (no E0063-class missing-field breaks)"

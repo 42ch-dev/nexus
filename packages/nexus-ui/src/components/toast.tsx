@@ -133,6 +133,9 @@ export function Toaster() {
   );
 }
 
+// Keep in sync with the `--duration-exit` token
+// (tooling/design-tokens/src/tokens.css) — this JS removal timer must land on
+// the same tick as the CSS exit transition, and toast.test.tsx advances 140ms.
 const TOAST_EXIT_MS = 140;
 
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number) => void }) {

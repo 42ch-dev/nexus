@@ -109,7 +109,7 @@ describe('Toaster + useToast', () => {
       screen.getByRole('button', { name: 'Dismiss notification' }).click();
     });
     act(() => {
-      vi.advanceTimersByTime(140);
+      vi.advanceTimersByTime(140); // mirrors --duration-exit (see TOAST_EXIT_MS in toast.tsx)
     });
     expect(screen.queryByText('Dismiss me')).not.toBeInTheDocument();
   });

@@ -170,6 +170,9 @@ export const queryKeys = {
   },
   timeline: {
     all: ['timeline'] as const,
+    // No per-page key by design: `useInfiniteQuery` stores every cursor page
+    // under this single key (pageParam is not part of it), so `timeline.all`
+    // prefix-invalidation covers all pages. Do not re-add a cursor parameter.
     overview: () => [...queryKeys.timeline.all, 'overview'] as const,
     // V1.147 P2 — per-World timeline log events (machine-written families,
     // e.g. compute_result). `all()` prefix-covers every world + filter so

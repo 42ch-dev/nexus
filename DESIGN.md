@@ -1560,6 +1560,8 @@ Sanctioned Tailwind arbitrary values that intentionally have no token projection
 | `min-h-[180px]` | `apps/web/src/components/canvas/strategy-nodes.tsx` (`StrategyGroupNode` root) | Floor height for the group node's header + inner-graph line at canvas scale; no 4px-grid spacing step lands on the measured minimum. |
 | `border-l-[3px]` | `apps/web/src/components/canvas/presentational/node-chrome-shell.tsx` (`ACCENT_SPINE_CLASSES`, all three surfaces) | 3px spine weight sits between `border-l-2` (illegible against the 1px card border) and `border-l-4` (overpowers compact nodes); a canvas-chrome width constant, not a color concern. |
 
+Future exception batches add a new `## … (V….)` register section at this level (peer of this one); do not re-parent or merge existing registers.
+
 ---
 
 ## Appendix: Canvas Chromatic Hygiene Mapping (V1.121, normative)

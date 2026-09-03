@@ -49,14 +49,17 @@ jobs:
       CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      # Free disk before the Rust toolchain + cargo cache: this job now
+      # compiles the full workspace, so it needs the same ENOSPC headroom
+      # policy as rust-checks / rust-tests (CARGO_INCREMENTAL: "0" above).
       - uses: ./.github/actions/free-disk-space
       - uses: ./.github/actions/setup-monorepo
         with:
           # V1.182 P0 (R-V1163P2QC1-002): rust is required so this job can
-          # compile typify consumers immediately after regen. wasm32 is
-          # needed because nexus-wasm-host's build.rs compiles embedded
-          # modules from source (same as rust-checks).
+          # compile typify consumers immediately after regen.
           rust-toolchain: stable
+          # nexus-wasm-host's build.rs compiles embedded modules from source
+          # (same reason as rust-checks).
           rust-targets: wasm32-unknown-unknown
       - name: Run codegen
         run: pnpm run codegen
@@ -89,6 +92,8 @@ jobs:
           # key with concurrent siblings (sqlx / connect-host / tests) races.
           shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-codegen-callsite
           workspaces: .
+          # ENOSPC headroom policy (same as rust-checks): never cache every
+          # crate, never persist a partial cache from a failed run.
           cache-all-crates: false
           cache-on-failure: false
       - name: Codegen callsite coverage

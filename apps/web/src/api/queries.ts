@@ -690,10 +690,10 @@ export function useDeleteWorld() {
       // — `TimelineOverviewResponse.worlds` lists each World with its era/event
       // counts, so a deleted World must be evicted from the overview cache or
       // it keeps rendering until the next manual refetch. Invalidating
-      // `timeline.all` covers every cached cursor page (overview is the only
-      // timeline sub-key today, and the `overview(cursor)` key is parameterized
-      // by cursor, so a single `overview()` invalidation would miss non-first
-      // pages).
+      // `timeline.all` covers every cached overview page: `overview()` is the
+      // only timeline sub-key today and is unparameterized — `useInfiniteQuery`
+      // stores all cursor pages under that single key, so one prefix
+      // invalidation evicts them all.
       void qc.invalidateQueries({ queryKey: queryKeys.timeline.all });
     },
     onError: (error) => errorToast(error, 'error.couldNotDeleteWorld'),

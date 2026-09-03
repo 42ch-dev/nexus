@@ -96,6 +96,7 @@ const required = [
   { label: 'tokens: data-table row-protected', haystack: tokens, needle: '--color-data-table-row-protected:' },
   { label: 'tokens: main-banner background', haystack: tokens, needle: '--color-main-banner-background:' },
   { label: 'preset: data-table-row-protected', haystack: preset, needle: "cv('data-table-row-protected')" },
+  { label: 'preset: main-banner-background', haystack: preset, needle: "cv('main-banner-background')" },
   { label: 'preset: fontSize copy-12 key', haystack: preset, needle: "'copy-12':" },
 ];
 
