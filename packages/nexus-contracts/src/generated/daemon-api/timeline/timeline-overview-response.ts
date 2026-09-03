@@ -19,6 +19,6 @@ export interface TimelineOverviewResponse {
     last_event_at?: string | null;
     [k: string]: unknown | undefined;
   }[];
-  cursor: string | null;
+  cursor?: string | null;
   total_worlds: number;
 }
