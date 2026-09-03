@@ -228,13 +228,7 @@ fn inspect_detail_json_matches_contract_field_by_field() {
         let pool = create_db(&db_path).await;
         seed_session(
             &pool,
-            &SeedRow::new(
-                "ses_chain",
-                "preset_chain",
-                "running",
-                Some("task_9"),
-                &ctx,
-            ),
+            &SeedRow::new("ses_chain", "preset_chain", "running", Some("task_9"), &ctx),
         )
         .await;
         pool.close().await;
@@ -293,13 +287,7 @@ fn inspect_detail_typed_failure_is_not_resumable() {
         let pool = create_db(&db_path).await;
         seed_session(
             &pool,
-            &SeedRow::new(
-                "ses_failed",
-                "preset_chain",
-                "running",
-                None,
-                &ctx,
-            ),
+            &SeedRow::new("ses_failed", "preset_chain", "running", None, &ctx),
         )
         .await;
         pool.close().await;
@@ -352,13 +340,7 @@ fn inspect_detail_non_chain_class_is_not_resumable() {
         let pool = create_db(&db_path).await;
         seed_session(
             &pool,
-            &SeedRow::new(
-                "ses_plain",
-                "preset_plain",
-                "paused",
-                Some("task_1"),
-                &ctx,
-            ),
+            &SeedRow::new("ses_plain", "preset_plain", "paused", Some("task_1"), &ctx),
         )
         .await;
         pool.close().await;
@@ -493,13 +475,7 @@ fn inspect_list_mode_renders_rows_and_count() {
         .await;
         seed_session(
             &pool,
-            &SeedRow::new(
-                "ses_failed",
-                "preset_chain",
-                "running",
-                None,
-                &failed,
-            ),
+            &SeedRow::new("ses_failed", "preset_chain", "running", None, &failed),
         )
         .await;
         // Terminal row must be filtered out of list mode.
@@ -567,13 +543,7 @@ fn inspect_run_is_read_only() {
         let pool = create_db(&db_path).await;
         seed_session(
             &pool,
-            &SeedRow::new(
-                "ses_chain",
-                "preset_chain",
-                "running",
-                Some("task_9"),
-                &ctx,
-            ),
+            &SeedRow::new("ses_chain", "preset_chain", "running", Some("task_9"), &ctx),
         )
         .await;
         pool.close().await;
@@ -729,10 +699,7 @@ fn inspect_list_is_bounded_to_latest_200_and_reports_honest_total() {
         .stdout
         .clone();
     let text = String::from_utf8(output).unwrap();
-    let shown: Vec<&str> = text
-        .lines()
-        .filter(|l| l.starts_with("ses_"))
-        .collect();
+    let shown: Vec<&str> = text.lines().filter(|l| l.starts_with("ses_")).collect();
     assert_eq!(shown.len(), 200, "list must be bounded to 200 rows");
     assert_eq!(
         shown[0].split_whitespace().next().unwrap(),
@@ -799,13 +766,7 @@ fn inspect_human_run_error_truncation_is_marked() {
         let pool = create_db(&db_path).await;
         seed_session(
             &pool,
-            &SeedRow::new(
-                "ses_multi",
-                "preset_x",
-                "running",
-                None,
-                &ctx,
-            ),
+            &SeedRow::new("ses_multi", "preset_x", "running", None, &ctx),
         )
         .await;
         pool.close().await;
@@ -859,13 +820,7 @@ fn inspect_detail_shape_anomaly_wording_is_distinct_from_corrupt() {
         let pool = create_db(&db_path).await;
         seed_session(
             &pool,
-            &SeedRow::new(
-                "ses_shape",
-                "preset_x",
-                "running",
-                None,
-                ctx,
-            ),
+            &SeedRow::new("ses_shape", "preset_x", "running", None, ctx),
         )
         .await;
         pool.close().await;

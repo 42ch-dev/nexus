@@ -65,9 +65,8 @@ pub struct TypedFailureRecord {
 /// `Some` exactly when [`typed_failure_keys_present`] is `true`.
 #[must_use]
 pub fn typed_failure_record(data: &Map<String, Value>) -> Option<TypedFailureRecord> {
-    let text_value = |key: &str| -> Option<String> {
-        data.get(key).and_then(Value::as_str).map(str::to_string)
-    };
+    let text_value =
+        |key: &str| -> Option<String> { data.get(key).and_then(Value::as_str).map(str::to_string) };
     let record = TypedFailureRecord {
         run_status: text_value(status_key()),
         run_error: text_value(error_key()),
@@ -92,8 +91,7 @@ pub fn live_join_keys(data: &Map<String, Value>) -> Vec<String> {
 /// Chain-class predicate (rule 3 positive): at least one live join key.
 #[must_use]
 pub fn is_converge_merge_chain(data: &Map<String, Value>) -> bool {
-    data.iter()
-        .any(|(k, v)| !v.is_null() && is_join_key(k))
+    data.iter().any(|(k, v)| !v.is_null() && is_join_key(k))
 }
 
 fn is_join_key(key: &str) -> bool {
@@ -226,11 +224,7 @@ mod tests {
         }));
         assert_eq!(
             live_join_keys(&map),
-            [
-                "_converge_arrivals_j1",
-                "_join_wait_start_j1",
-                "_merge_j2"
-            ]
+            ["_converge_arrivals_j1", "_join_wait_start_j1", "_merge_j2"]
         );
         assert!(is_converge_merge_chain(&map));
 

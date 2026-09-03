@@ -412,7 +412,10 @@ async fn inspect_after_interrupt_is_side_effect_free_and_resume_matches_baseline
         .stdout
         .clone();
     let human = String::from_utf8(human).unwrap();
-    assert!(human.contains(&format!("session:        {}", sid.0)), "{human}");
+    assert!(
+        human.contains(&format!("session:        {}", sid.0)),
+        "{human}"
+    );
     assert!(human.contains("creator:        test_creator"), "{human}");
     // The checkpoint stores POSITION ONLY (contract §5): preset metadata is
     // inferred by `SqliteSessionStorage::save` from context keys, and the
@@ -449,8 +452,7 @@ async fn inspect_after_interrupt_is_side_effect_free_and_resume_matches_baseline
         "parked join must expose both live join keys: {human}"
     );
     assert!(
-        human.contains("_converge_arrivals_join")
-            && human.contains("_join_wait_start_join"),
+        human.contains("_converge_arrivals_join") && human.contains("_join_wait_start_join"),
         "both live join keys listed: {human}"
     );
     assert!(
@@ -474,7 +476,8 @@ async fn inspect_after_interrupt_is_side_effect_free_and_resume_matches_baseline
     assert_eq!(obj["session_id"], json!(sid.0));
     assert_eq!(obj["creator_id"], json!("test_creator"));
     assert_eq!(
-        obj["preset_id"], json!("default"),
+        obj["preset_id"],
+        json!("default"),
         "persisted checkpoint truth, not the in-memory preset id"
     );
     assert_eq!(obj["preset_version"], json!(0));
@@ -544,7 +547,10 @@ async fn inspect_after_interrupt_is_side_effect_free_and_resume_matches_baseline
         .args(["ops", "inspect", &sid.0, "--json"])
         .assert()
         .success();
-    nexus42(user_home).args(["ops", "inspect"]).assert().success();
+    nexus42(user_home)
+        .args(["ops", "inspect"])
+        .assert()
+        .success();
     let rows_after = checkpoint_rows(&pool).await;
     let bytes_after = std::fs::read(&db_path).expect("db bytes after inspect");
     assert_eq!(rows_before, rows_after, "inspect must not mutate rows");

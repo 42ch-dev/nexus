@@ -241,10 +241,7 @@ async fn inspect_inner(session_id: Option<String>, config: &CliConfig) -> Result
     let rows = rows?;
     let total = total?;
     let dtos: Vec<InspectDto> = rows.iter().map(project_summary).collect();
-    Ok(InspectOutcome::List {
-        rows: dtos,
-        total,
-    })
+    Ok(InspectOutcome::List { rows: dtos, total })
 }
 
 /// Project a raw checkpoint row into the inspect DTO (contract §3–§4).
@@ -352,7 +349,11 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
 /// `Some` only for the `ContextUnreadable` class and selects the honest
 /// wording (corrupt bytes vs unexpected schema). Rule-4 caveat:
 /// `runner_check` is `boot_time` exactly when the verdict is `yes`.
-fn verdict_for(row_status: &str, class: ResumeClass, unreadable_kind: Option<UnreadableKind>) -> ResumableVerdict {
+fn verdict_for(
+    row_status: &str,
+    class: ResumeClass,
+    unreadable_kind: Option<UnreadableKind>,
+) -> ResumableVerdict {
     match class {
         ResumeClass::TerminalStatus => ResumableVerdict {
             verdict: Verdict::No,
@@ -641,7 +642,10 @@ mod tests {
 
         let unreadable = serde_json::to_value(project(&row(b"\xff"))).unwrap();
         assert_eq!(unreadable["context_readable"], serde_json::json!(false));
-        assert_eq!(unreadable["resumable"]["verdict"], serde_json::json!("unknown"));
+        assert_eq!(
+            unreadable["resumable"]["verdict"],
+            serde_json::json!("unknown")
+        );
         assert_eq!(
             unreadable["resumable"]["rule"],
             serde_json::json!("context_unreadable")

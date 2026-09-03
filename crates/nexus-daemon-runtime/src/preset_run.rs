@@ -352,9 +352,7 @@ pub async fn resume_driven_sessions(
         //    data (single source of truth, qc1 W1; string-typed values only,
         //    mirroring `Context::get`).
         let context_value = serde_json::to_value(&session.context).ok();
-        let data = context_value
-            .as_ref()
-            .and_then(resume_rules::context_data);
+        let data = context_value.as_ref().and_then(resume_rules::context_data);
         if data.is_some_and(resume_rules::typed_failure_keys_present) {
             decisions.push(ResumeDecision::SkippedTypedFailed { session_id });
             continue;

@@ -499,7 +499,10 @@ mod tests {
         let storage = SqliteSessionStorage::new(pool);
         let rows = storage.list_checkpoint_rows().await.expect("list rows");
         assert_eq!(rows.len(), 1);
-        assert!(!rows[0].context_valid_json, "corrupt blob reported honestly");
+        assert!(
+            !rows[0].context_valid_json,
+            "corrupt blob reported honestly"
+        );
         assert!(!rows[0].context_data_is_object);
         assert_eq!(rows[0].run_status, None);
         assert_eq!(rows[0].run_error, None);
