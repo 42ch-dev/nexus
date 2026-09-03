@@ -1551,6 +1551,17 @@ CSS variable tokens are projected from the frontmatter into `tooling/design-toke
 
 ---
 
+## Arbitrary-Value Exceptions (V1.121)
+
+Sanctioned Tailwind arbitrary values that intentionally have no token projection. Any arbitrary value outside this list is a token gap — project a token, or register the exception here before shipping.
+
+| Class | Surface | Rationale |
+| --- | --- | --- |
+| `min-h-[180px]` | `apps/web/src/components/canvas/strategy-nodes.tsx` (`StrategyGroupNode` root) | Floor height for the group node's header + inner-graph line at canvas scale; no 4px-grid spacing step lands on the measured minimum. |
+| `border-l-[3px]` | `apps/web/src/components/canvas/presentational/node-chrome-shell.tsx` (`ACCENT_SPINE_CLASSES`, all three surfaces) | 3px spine weight sits between `border-l-2` (illegible against the 1px card border) and `border-l-4` (overpowers compact nodes); a canvas-chrome width constant, not a color concern. |
+
+---
+
 ## Appendix: Canvas Chromatic Hygiene Mapping (V1.121, normative)
 
 Every Tailwind-palette leftover in `components.canvas.*` was remapped **hue-preserving** onto the brand semantic scales in v0.4. This table is the normative record of that mapping, applied verbatim to both DESIGN files; semantic *meaning* of every token (status, promotion state, confidence, edge kind) is unchanged — only the pigment moves on-palette. Post-v0.4, no `components.canvas.*` value may reference a Tailwind-palette hex (`#94A3B8`, `#3B82F6`, `#10B981`, `#F59E0B`, `#A78BFA`, `#0EA5E9`, `#EF4444`, `#8B5CF6`, `#EDE9FE` — grep-enforced).

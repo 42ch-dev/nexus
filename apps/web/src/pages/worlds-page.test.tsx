@@ -144,6 +144,13 @@ describe('WorldsPage', () => {
 
     renderInApp(<WorldsPage />, { client: clientWithoutCreateWorld });
 
+    // R-V1127P0-QC-S-001: without a createWorld-capable client the Create
+    // World card renders via EmptyCreateCard's disabled path, gated with the
+    // desktop-only tooltip.
+    const worldCta = await screen.findByTestId('worlds-empty-create-world');
+    expect(worldCta).toBeDisabled();
+    expect(worldCta).toHaveAttribute('title', 'Open in the desktop app to create a World');
+
     const cta = await screen.findByTestId('worlds-empty-create-work');
     expect(cta).toHaveTextContent('Create a Work to get started');
     expect(cta.className).toMatch(/\bmin-h-\[7\.5rem\]/);
@@ -310,6 +317,9 @@ describe('WorldsPage', () => {
 
       const loadMore = await screen.findByTestId('worlds-overview-load-more');
       expect(loadMore).toBeInTheDocument();
+      // R-V1127P0-QC-S-003: the overview Load More is activity-enrichment —
+      // pin the clarified label so it cannot drift back to generic copy.
+      expect(loadMore).toHaveTextContent('Load more activity');
 
       await user.click(loadMore);
 
