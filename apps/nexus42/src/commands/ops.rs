@@ -4,8 +4,10 @@
 //! over the v1.180 checkpoint slice (`orchestration_sessions`): it opens the
 //! workspace `state.db` with `nexus_local_db::open_pool_read_only` (no
 //! migrations, no seed, no lock upgrades) and projects the
-//! `resume_driven_sessions` rules 1–3 into a resumable verdict; rule 4
-//! (`engine.has_runner`, boot-time in-memory state) is carried as the
+//! `resume_driven_sessions` rules 1–4 into a resumable verdict via the
+//! shared `nexus_orchestration::resume_rules` cascade (rule 1 = terminal
+//! status, then context readability, typed failure, chain class); rule 4's
+//! in-memory half (`engine.has_runner`, boot-time state) is carried as the
 //! separate `runner_check` caveat — never folded into the verdict.
 //!
 //! Contract: `.mstar/sdd/2026-09-03-v1.182-p1-bl04-checkpoint-resume-ux/inspect-contract.md`.
@@ -24,9 +26,10 @@
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
-use nexus_orchestration::storage::{CheckpointRow, SqliteSessionStorage};
+use nexus_orchestration::resume_rules::{self, ResumeClass};
+use nexus_orchestration::storage::{CheckpointRow, CheckpointSummary, SqliteSessionStorage};
 use serde::Serialize;
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::fmt::Write as _;
 use std::sync::Arc;
 
@@ -45,7 +48,7 @@ pub enum OpsCommand {
 
 /// CLI-local inspect DTO (contract §3 — this accessor is new, so this shape
 /// IS the contract; `snake_case`, field-by-field).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct InspectDto {
     session_id: String,
     creator_id: String,
@@ -65,21 +68,81 @@ struct InspectDto {
 }
 
 /// Typed run-failure record from context `_run_status` / `_run_error`.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct RunFailure {
     run_status: Option<String>,
     run_error: Option<String>,
 }
 
-/// Resumable projection (contract §4): verdict carries rules 1–3; the
+/// Resumable projection (contract §4): verdict carries rules 1–4; the
 /// boot-time runner reconstruction requirement is the separate
 /// `runner_check` caveat, never part of the verdict.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct ResumableVerdict {
-    verdict: &'static str,
-    rule: &'static str,
-    runner_check: &'static str,
+    verdict: Verdict,
+    rule: ResumeRule,
+    runner_check: RunnerCheck,
     explanation: String,
+}
+
+/// Stable resumable verdict word (contract `verdict` field).
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum Verdict {
+    Yes,
+    No,
+    Unknown,
+}
+
+impl std::fmt::Display for Verdict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Yes => "yes",
+            Self::No => "no",
+            Self::Unknown => "unknown",
+        })
+    }
+}
+
+/// Stable verdict rule (contract `rule` field) — the shared
+/// [`ResumeClass`] projected into the DTO.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum ResumeRule {
+    TerminalStatus,
+    ContextUnreadable,
+    TypedFailure,
+    NotConvergeMergeClass,
+    ChainClassNoFailure,
+}
+
+impl From<ResumeClass> for ResumeRule {
+    fn from(class: ResumeClass) -> Self {
+        match class {
+            ResumeClass::TerminalStatus => Self::TerminalStatus,
+            ResumeClass::ContextUnreadable => Self::ContextUnreadable,
+            ResumeClass::TypedFailure => Self::TypedFailure,
+            ResumeClass::NotConvergeMergeClass => Self::NotConvergeMergeClass,
+            ResumeClass::ChainClassNoFailure => Self::ChainClassNoFailure,
+        }
+    }
+}
+
+/// Boot-time runner availability — NEVER part of the verdict (rule 4 is
+/// in-memory daemon state, not derivable from persisted rows).
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum RunnerCheck {
+    BootTime,
+    NotApplicable,
+}
+
+/// Why a context could not be projected — corrupt bytes vs parseable-but-
+/// unexpected schema (distinct honest wording, qc3 S1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnreadableKind {
+    CorruptJson,
+    UnexpectedShape,
 }
 
 /// Dispatch entry for the `ops` group.
@@ -115,19 +178,27 @@ async fn inspect(session_id: Option<String>, json: bool, config: &CliConfig) -> 
 enum InspectOutcome {
     /// No workspace db at all — honest empty state, exit 0.
     NoDatabase(String),
-    /// Detail view for one row.
+    /// Detail view for one row (bare DTO object).
     Detail(Box<InspectDto>),
-    /// List view over non-terminal rows.
-    List(Vec<InspectDto>),
+    /// List view over non-terminal rows (bounded) + honest full total.
+    List { rows: Vec<InspectDto>, total: i64 },
 }
 
 impl InspectOutcome {
     fn print(&self, json: bool) {
         if json {
             let value = match self {
-                Self::NoDatabase(_) => Value::Array(Vec::new()),
+                Self::NoDatabase(_) => serde_json::json!({
+                    "db_present": false,
+                    "total": 0,
+                    "rows": [],
+                }),
                 Self::Detail(dto) => serde_json::to_value(dto).unwrap_or(Value::Null),
-                Self::List(rows) => serde_json::to_value(rows).unwrap_or(Value::Null),
+                Self::List { rows, total } => serde_json::json!({
+                    "db_present": true,
+                    "total": total,
+                    "rows": serde_json::to_value(rows).unwrap_or(Value::Null),
+                }),
             };
             println!("{value}");
             return;
@@ -135,7 +206,7 @@ impl InspectOutcome {
         match self {
             Self::NoDatabase(message) => println!("{message}"),
             Self::Detail(dto) => print!("{}", render_detail(dto)),
-            Self::List(rows) => print!("{}", render_list(rows)),
+            Self::List { rows, total } => print!("{}", render_list(rows, *total)),
         }
     }
 }
@@ -163,34 +234,53 @@ async fn inspect_inner(session_id: Option<String>, config: &CliConfig) -> Result
         };
         return Ok(InspectOutcome::Detail(Box::new(project(&row))));
     }
-    let rows = storage.list_checkpoint_rows().await?;
-    Ok(InspectOutcome::List(rows.iter().map(project).collect()))
+    let (rows, total) = tokio::join!(
+        storage.list_checkpoint_rows(),
+        storage.count_checkpoint_rows()
+    );
+    let rows = rows?;
+    let total = total?;
+    let dtos: Vec<InspectDto> = rows.iter().map(project_summary).collect();
+    Ok(InspectOutcome::List {
+        rows: dtos,
+        total,
+    })
 }
 
 /// Project a raw checkpoint row into the inspect DTO (contract §3–§4).
 fn project(row: &CheckpointRow) -> InspectDto {
     let context: std::result::Result<Value, _> = serde_json::from_slice(&row.context_json);
-    let data = context
-        .ok()
-        .and_then(|root| root.get("data").and_then(Value::as_object).cloned());
+    let shape = context.map_or(Err(UnreadableKind::CorruptJson), |root| {
+        resume_rules::context_data(&root).map_or(Err(UnreadableKind::UnexpectedShape), |data| {
+            Ok(data.clone())
+        })
+    });
 
-    let (context_readable, run_failure, live_join_keys, resumable) = data.as_ref().map_or_else(
-        || {
-            (
-                Some(false),
+    let (context_readable, run_failure, live_join_keys, resumable) = match &shape {
+        Ok(data) => (
+            None,
+            resume_rules::typed_failure_record(data).map(|record| RunFailure {
+                run_status: record.run_status,
+                run_error: record.run_error,
+            }),
+            resume_rules::live_join_keys(data),
+            verdict_for(
+                row.status.as_str(),
+                resume_rules::classify_resumability(row.status.as_str(), Some(data)),
                 None,
-                Vec::new(),
-                ResumableVerdict {
-                    verdict: "unknown",
-                    rule: "context_unreadable",
-                    runner_check: "not_applicable",
-                    explanation: "context unreadable (corrupt context_json); no verdict fabricated"
-                        .to_string(),
-                },
-            )
-        },
-        project_readable_context,
-    );
+            ),
+        ),
+        Err(kind) => (
+            Some(false),
+            None,
+            Vec::new(),
+            verdict_for(
+                row.status.as_str(),
+                resume_rules::classify_resumability(row.status.as_str(), None),
+                Some(*kind),
+            ),
+        ),
+    };
 
     InspectDto {
         session_id: row.session_id.clone(),
@@ -208,72 +298,113 @@ fn project(row: &CheckpointRow) -> InspectDto {
     }
 }
 
-fn project_readable_context(
-    data: &Map<String, Value>,
-) -> (Option<bool>, Option<RunFailure>, Vec<String>, ResumableVerdict) {
-    let text_value = |key: &str| -> Option<String> {
-        data.get(key)
-            .filter(|v| !v.is_null())
-            .and_then(Value::as_str)
-            .map(str::to_string)
-    };
-    let run_status = text_value("_run_status");
-    let run_error = text_value("_run_error");
-    let run_failure = if run_status.is_some() || run_error.is_some() {
-        Some(RunFailure {
-            run_status,
-            run_error,
-        })
+/// Project a lean list row into the inspect DTO. The storage layer already
+/// evaluated the resume-rule predicates in SQL (no `context_json` loaded),
+/// so the verdict comes from the shared extraction cascade — identical
+/// rule order and wording to detail mode.
+fn project_summary(row: &CheckpointSummary) -> InspectDto {
+    let run_failure = (row.run_status.is_some() || row.run_error.is_some()).then(|| RunFailure {
+        run_status: row.run_status.clone(),
+        run_error: row.run_error.clone(),
+    });
+    let live_join_keys: Vec<String> = row
+        .live_join_keys
+        .as_deref()
+        .map(|comma| comma.split(',').map(str::to_string).collect())
+        .unwrap_or_default();
+    let has_live_join_keys = !live_join_keys.is_empty();
+    // Same corrupt-vs-shape honesty as detail mode, from the SQL flags.
+    let unreadable_kind = if !row.context_valid_json {
+        Some(UnreadableKind::CorruptJson)
+    } else if !row.context_data_is_object {
+        Some(UnreadableKind::UnexpectedShape)
     } else {
         None
     };
+    let context_unreadable = unreadable_kind.is_some();
 
-    // Live join keys: written only by merge/converge gate states;
-    // cleared keys are Value::Null (never removed) — non-null only.
-    let mut live_join_keys: Vec<String> = data
-        .iter()
-        .filter(|(k, v)| {
-            !v.is_null()
-                && (k.starts_with("_converge_arrivals_")
-                    || k.starts_with("_merge_")
-                    || k.starts_with("_join_wait_start_"))
-        })
-        .map(|(k, _)| k.clone())
-        .collect();
-    live_join_keys.sort_unstable();
+    InspectDto {
+        session_id: row.session_id.clone(),
+        creator_id: row.creator_id.clone(),
+        preset_id: row.preset_id.clone(),
+        preset_version: row.preset_version,
+        db_status: row.status.clone(),
+        current_task_id: row.current_task_id.clone(),
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        run_failure,
+        live_join_keys,
+        resumable: verdict_for(
+            row.status.as_str(),
+            resume_rules::classify_resumability_extracted(
+                row.status.as_str(),
+                context_unreadable,
+                row.run_status.is_some() || row.run_error.is_some(),
+                has_live_join_keys,
+            ),
+            unreadable_kind,
+        ),
+        context_readable: context_unreadable.then_some(false),
+    }
+}
 
-    let resumable = if run_failure.is_some() {
-        ResumableVerdict {
-            verdict: "no",
-            rule: "typed_failure",
-            runner_check: "not_applicable",
+/// Build the resumable verdict for a classification. `unreadable_kind` is
+/// `Some` only for the `ContextUnreadable` class and selects the honest
+/// wording (corrupt bytes vs unexpected schema). Rule-4 caveat:
+/// `runner_check` is `boot_time` exactly when the verdict is `yes`.
+fn verdict_for(row_status: &str, class: ResumeClass, unreadable_kind: Option<UnreadableKind>) -> ResumableVerdict {
+    match class {
+        ResumeClass::TerminalStatus => ResumableVerdict {
+            verdict: Verdict::No,
+            rule: ResumeRule::TerminalStatus,
+            runner_check: RunnerCheck::NotApplicable,
+            explanation: format!(
+                "terminal status '{row_status}' — boot never re-drives non-running sessions"
+            ),
+        },
+        ResumeClass::ContextUnreadable => ResumableVerdict {
+            verdict: Verdict::Unknown,
+            rule: ResumeRule::ContextUnreadable,
+            runner_check: RunnerCheck::NotApplicable,
+            explanation: match unreadable_kind {
+                Some(UnreadableKind::CorruptJson) => {
+                    "context unreadable (corrupt context_json); no verdict fabricated".to_string()
+                }
+                Some(UnreadableKind::UnexpectedShape) => {
+                    "context readable but unexpected shape (missing or non-object 'data'); \
+                     no verdict fabricated"
+                        .to_string()
+                }
+                None => "context unreadable; no verdict fabricated".to_string(),
+            },
+        },
+        ResumeClass::TypedFailure => ResumableVerdict {
+            verdict: Verdict::No,
+            rule: ResumeRule::TypedFailure,
+            runner_check: RunnerCheck::NotApplicable,
             explanation: "typed failure record present; boot re-drive skips typed-failed sessions"
                 .to_string(),
-        }
-    } else if live_join_keys.is_empty() {
-        ResumableVerdict {
-            verdict: "no",
-            rule: "not_converge_merge_class",
-            runner_check: "not_applicable",
+        },
+        ResumeClass::NotConvergeMergeClass => ResumableVerdict {
+            verdict: Verdict::No,
+            rule: ResumeRule::NotConvergeMergeClass,
+            runner_check: RunnerCheck::NotApplicable,
             explanation: "no live converge/merge join state; boot re-drive skips \
                           sessions outside the converge/merge chain class"
                 .to_string(),
-        }
-    } else {
-        ResumableVerdict {
-            verdict: "yes",
-            rule: "chain_class_no_failure",
-            runner_check: "boot_time",
+        },
+        ResumeClass::ChainClassNoFailure => ResumableVerdict {
+            verdict: Verdict::Yes,
+            rule: ResumeRule::ChainClassNoFailure,
+            runner_check: RunnerCheck::BootTime,
             explanation: "candidate for re-drive on next boot (converge/merge chain, \
                           no failure record); re-drive also requires the daemon to \
                           reconstruct a runner at boot (embedded presets only); \
                           user-preset sessions that fail reconstruction stay \
                           tracked-but-not-driven"
                 .to_string(),
-        }
-    };
-
-    (None, run_failure, live_join_keys, resumable)
+        },
+    }
 }
 
 /// Render unix epoch seconds as `YYYY-MM-DD HH:MM:SS UTC`.
@@ -297,14 +428,19 @@ fn render_detail(dto: &InspectDto) -> String {
     let _ = writeln!(out, "updated_at:     {}", render_ts(dto.updated_at));
 
     match &dto.run_failure {
-        // Human output MAY truncate the error to one line; `--json` is verbatim.
+        // Human output MAY truncate the error to one line — and must mark
+        // the cut (qc2 F-001); `--json` stays DTO-verbatim.
         Some(failure) => {
             let status = failure.run_status.as_deref().unwrap_or("failed");
             let first_line = failure
                 .run_error
                 .as_deref()
                 .map_or("", |e| e.lines().next().unwrap_or(""));
-            let _ = writeln!(out, "run record:     {status}: {first_line}");
+            let marker = match failure.run_error.as_deref() {
+                Some(e) if e.contains('\n') => " … (truncated; see --json)",
+                _ => "",
+            };
+            let _ = writeln!(out, "run record:     {status}: {first_line}{marker}");
         }
         None => out.push_str("run record:     (no typed run record)\n"),
     }
@@ -321,16 +457,17 @@ fn render_detail(dto: &InspectDto) -> String {
     }
 
     let verdict_line = match dto.resumable.rule {
-        "chain_class_no_failure" => "yes — candidate for re-drive on next boot (converge/merge chain, no failure record; runner reconstruction is boot-time — see runner_check)",
-        "typed_failure" => "no — typed failure record present (boot never re-drives; see caveat)",
-        "not_converge_merge_class" => "no — no live converge/merge join state (boot skips: not in chain class)",
-        _ => "unknown — context unreadable (corrupt context_json; no verdict fabricated)",
+        ResumeRule::ChainClassNoFailure => "yes — candidate for re-drive on next boot (converge/merge chain, no failure record; runner reconstruction is boot-time — see runner_check)",
+        ResumeRule::TypedFailure => "no — typed failure record present (boot never re-drives; see caveat)",
+        ResumeRule::NotConvergeMergeClass => "no — no live converge/merge join state (boot skips: not in chain class)",
+        ResumeRule::TerminalStatus => "no — terminal status (boot never re-drives; see caveat)",
+        ResumeRule::ContextUnreadable => "unknown — context unreadable (corrupt context_json; no verdict fabricated)",
     };
     let _ = writeln!(out, "resumable:      {verdict_line}");
     out
 }
 
-fn render_list(rows: &[InspectDto]) -> String {
+fn render_list(rows: &[InspectDto], total: i64) -> String {
     if rows.is_empty() {
         return "No checkpointed sessions.\n".to_string();
     }
@@ -347,7 +484,13 @@ fn render_list(rows: &[InspectDto]) -> String {
             row.resumable.verdict
         );
     }
-    let _ = writeln!(out, "{} checkpointed session(s).", rows.len());
+    let shown: i64 = rows.len().try_into().unwrap_or(i64::MAX);
+    if shown >= total {
+        let _ = writeln!(out, "{total} checkpointed session(s).");
+    } else {
+        // Honest truncated total (qc3 W2): the LIMIT hides no rows silently.
+        let _ = writeln!(out, "{shown} of {total}+ checkpointed session(s).");
+    }
     out
 }
 
@@ -377,9 +520,9 @@ mod tests {
         }})
         .to_string();
         let dto = project(&row(ctx.as_bytes()));
-        assert_eq!(dto.resumable.verdict, "yes");
-        assert_eq!(dto.resumable.rule, "chain_class_no_failure");
-        assert_eq!(dto.resumable.runner_check, "boot_time");
+        assert_eq!(dto.resumable.verdict, Verdict::Yes);
+        assert_eq!(dto.resumable.rule, ResumeRule::ChainClassNoFailure);
+        assert_eq!(dto.resumable.runner_check, RunnerCheck::BootTime);
         assert!(dto.resumable.explanation.contains("boot"));
         assert_eq!(
             dto.live_join_keys,
@@ -397,12 +540,35 @@ mod tests {
         }})
         .to_string();
         let dto = project(&row(ctx.as_bytes()));
-        assert_eq!(dto.resumable.verdict, "no");
-        assert_eq!(dto.resumable.rule, "typed_failure");
-        assert_eq!(dto.resumable.runner_check, "not_applicable");
+        assert_eq!(dto.resumable.verdict, Verdict::No);
+        assert_eq!(dto.resumable.rule, ResumeRule::TypedFailure);
+        assert_eq!(dto.resumable.runner_check, RunnerCheck::NotApplicable);
         let failure = dto.run_failure.expect("failure record");
         assert_eq!(failure.run_status, None);
         assert_eq!(failure.run_error.as_deref(), Some("boom"));
+    }
+
+    #[test]
+    fn terminal_status_forces_no_even_with_live_join_keys() {
+        // schedule-cancel writer (schedules.rs:1226): status='cancelled'
+        // with context untouched — live join keys + no typed failure.
+        let ctx = serde_json::json!({"data": {
+            "_converge_arrivals_j1": ["a"],
+            "_join_wait_start_j1": 1
+        }})
+        .to_string();
+        let mut r = row(ctx.as_bytes());
+        r.status = "cancelled".to_string();
+        let dto = project(&r);
+        assert_eq!(dto.db_status, "cancelled");
+        assert_eq!(
+            dto.live_join_keys,
+            ["_converge_arrivals_j1", "_join_wait_start_j1"]
+        );
+        assert_eq!(dto.resumable.verdict, Verdict::No);
+        assert_eq!(dto.resumable.rule, ResumeRule::TerminalStatus);
+        assert_eq!(dto.resumable.runner_check, RunnerCheck::NotApplicable);
+        assert!(dto.resumable.explanation.contains("terminal"));
     }
 
     #[test]
@@ -415,8 +581,8 @@ mod tests {
         .to_string();
         let dto = project(&row(ctx.as_bytes()));
         assert!(dto.live_join_keys.is_empty());
-        assert_eq!(dto.resumable.verdict, "no");
-        assert_eq!(dto.resumable.rule, "not_converge_merge_class");
+        assert_eq!(dto.resumable.verdict, Verdict::No);
+        assert_eq!(dto.resumable.rule, ResumeRule::NotConvergeMergeClass);
     }
 
     #[test]
@@ -424,27 +590,66 @@ mod tests {
         let ctx = serde_json::json!({"data": {"_merge_j2": ["x"]}}).to_string();
         let dto = project(&row(ctx.as_bytes()));
         assert_eq!(dto.live_join_keys, ["_merge_j2"]);
-        assert_eq!(dto.resumable.verdict, "yes");
+        assert_eq!(dto.resumable.verdict, Verdict::Yes);
     }
 
     #[test]
     fn corrupt_context_is_unknown_and_never_fabricated() {
         let dto = project(&row(b"not-json"));
         assert_eq!(dto.context_readable, Some(false));
-        assert_eq!(dto.resumable.verdict, "unknown");
-        assert_eq!(dto.resumable.rule, "context_unreadable");
+        assert_eq!(dto.resumable.verdict, Verdict::Unknown);
+        assert_eq!(dto.resumable.rule, ResumeRule::ContextUnreadable);
+        assert!(dto.resumable.explanation.contains("corrupt"));
         assert!(dto.run_failure.is_none());
         assert!(dto.live_join_keys.is_empty());
     }
 
     #[test]
+    fn shape_anomaly_wording_is_distinct_from_corrupt() {
+        // Parseable JSON, `data` not an object — schema-shape anomaly, not
+        // byte corruption (qc3 S1).
+        let dto = project(&row(br#"{"data": "not-an-object"}"#));
+        assert_eq!(dto.context_readable, Some(false));
+        assert_eq!(dto.resumable.verdict, Verdict::Unknown);
+        assert_eq!(dto.resumable.rule, ResumeRule::ContextUnreadable);
+        assert!(
+            dto.resumable.explanation.contains("shape"),
+            "shape wording: {}",
+            dto.resumable.explanation
+        );
+        assert!(
+            !dto.resumable.explanation.contains("corrupt"),
+            "shape anomaly must not be labelled corrupt: {}",
+            dto.resumable.explanation
+        );
+    }
+
+    #[test]
     fn context_readable_field_serializes_only_when_false() {
-        let ctx = serde_json::json!({"data": {}}).to_string();
+        let ctx = serde_json::json!({"data": {"_merge_j1": ["x"]}}).to_string();
         let readable = serde_json::to_value(project(&row(ctx.as_bytes()))).unwrap();
         assert!(readable.get("context_readable").is_none());
+        assert_eq!(readable["resumable"]["verdict"], serde_json::json!("yes"));
+        assert_eq!(
+            readable["resumable"]["rule"],
+            serde_json::json!("chain_class_no_failure")
+        );
+        assert_eq!(
+            readable["resumable"]["runner_check"],
+            serde_json::json!("boot_time")
+        );
 
         let unreadable = serde_json::to_value(project(&row(b"\xff"))).unwrap();
         assert_eq!(unreadable["context_readable"], serde_json::json!(false));
+        assert_eq!(unreadable["resumable"]["verdict"], serde_json::json!("unknown"));
+        assert_eq!(
+            unreadable["resumable"]["rule"],
+            serde_json::json!("context_unreadable")
+        );
+        assert_eq!(
+            unreadable["resumable"]["runner_check"],
+            serde_json::json!("not_applicable")
+        );
     }
 
     #[test]
@@ -458,6 +663,25 @@ mod tests {
 
     #[test]
     fn empty_list_renders_honest_empty_state() {
-        assert_eq!(render_list(&[]), "No checkpointed sessions.\n");
+        assert_eq!(render_list(&[], 0), "No checkpointed sessions.\n");
+    }
+
+    #[test]
+    fn list_count_line_surfaces_honest_total_when_truncated() {
+        let ctx = serde_json::json!({"data": {"_merge_j1": ["x"]}}).to_string();
+        let dto = project(&row(ctx.as_bytes()));
+        let shown = render_list(&[dto.clone(), dto], 5);
+        assert!(
+            shown.contains("2 of 5+ checkpointed session(s)."),
+            "truncated total must be honest: {shown}"
+        );
+        assert!(!shown.contains("2 checkpointed session(s)."), "{shown}");
+    }
+
+    #[test]
+    fn list_count_line_plain_when_fully_shown() {
+        let ctx = serde_json::json!({"data": {"_merge_j1": ["x"]}}).to_string();
+        let dto = project(&row(ctx.as_bytes()));
+        assert!(render_list(&[dto], 1).contains("1 checkpointed session(s)."));
     }
 }

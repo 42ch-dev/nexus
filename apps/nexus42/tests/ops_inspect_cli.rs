@@ -57,6 +57,27 @@ struct SeedRow<'a> {
     status: &'a str,
     current_task_id: Option<&'a str>,
     context: &'a [u8],
+    /// Persisted `updated_at` (unix seconds); the list view orders by this.
+    updated_at: i64,
+}
+
+impl<'a> SeedRow<'a> {
+    const fn new(
+        session_id: &'a str,
+        preset_id: &'a str,
+        status: &'a str,
+        current_task_id: Option<&'a str>,
+        context: &'a [u8],
+    ) -> Self {
+        Self {
+            session_id,
+            preset_id,
+            status,
+            current_task_id,
+            context,
+            updated_at: 1_756_990_300,
+        }
+    }
 }
 
 async fn seed_session(pool: &sqlx::SqlitePool, row: &SeedRow<'_>) {
@@ -64,7 +85,7 @@ async fn seed_session(pool: &sqlx::SqlitePool, row: &SeedRow<'_>) {
         "INSERT INTO orchestration_sessions
             (session_id, creator_id, preset_id, preset_version, status,
              current_task_id, context_json, created_at, updated_at)
-         VALUES (?, ?, ?, 3, ?, ?, ?, 1_756_990_000, 1_756_990_300)",
+         VALUES (?, ?, ?, 3, ?, ?, ?, 1_756_990_000, ?)",
     )
     .bind(row.session_id)
     .bind(CREATOR)
@@ -72,6 +93,7 @@ async fn seed_session(pool: &sqlx::SqlitePool, row: &SeedRow<'_>) {
     .bind(row.status)
     .bind(row.current_task_id)
     .bind(row.context)
+    .bind(row.updated_at)
     .execute(pool)
     .await
     .expect("seed session");
@@ -140,7 +162,7 @@ fn inspect_list_empty_store_is_honest() {
 }
 
 #[test]
-fn inspect_list_json_empty_store_is_empty_array() {
+fn inspect_list_json_empty_store_is_envelope_with_zero_total() {
     let home = tempfile::TempDir::new().unwrap();
     let db_path = seed_home_config(home.path());
     run_async(async {
@@ -156,7 +178,11 @@ fn inspect_list_json_empty_store_is_empty_array() {
         .stdout
         .clone();
     let parsed: Value = serde_json::from_slice(&output).expect("valid json");
-    assert_eq!(parsed, json!([]));
+    assert_eq!(
+        parsed,
+        json!({"db_present": true, "total": 0, "rows": []}),
+        "empty store must be distinct from absent db"
+    );
 }
 
 #[test]
@@ -202,13 +228,13 @@ fn inspect_detail_json_matches_contract_field_by_field() {
         let pool = create_db(&db_path).await;
         seed_session(
             &pool,
-            &SeedRow {
-                session_id: "ses_chain",
-                preset_id: "preset_chain",
-                status: "running",
-                current_task_id: Some("task_9"),
-                context: &ctx,
-            },
+            &SeedRow::new(
+                "ses_chain",
+                "preset_chain",
+                "running",
+                Some("task_9"),
+                &ctx,
+            ),
         )
         .await;
         pool.close().await;
@@ -267,13 +293,13 @@ fn inspect_detail_typed_failure_is_not_resumable() {
         let pool = create_db(&db_path).await;
         seed_session(
             &pool,
-            &SeedRow {
-                session_id: "ses_failed",
-                preset_id: "preset_chain",
-                status: "running",
-                current_task_id: None,
-                context: &ctx,
-            },
+            &SeedRow::new(
+                "ses_failed",
+                "preset_chain",
+                "running",
+                None,
+                &ctx,
+            ),
         )
         .await;
         pool.close().await;
@@ -326,13 +352,13 @@ fn inspect_detail_non_chain_class_is_not_resumable() {
         let pool = create_db(&db_path).await;
         seed_session(
             &pool,
-            &SeedRow {
-                session_id: "ses_plain",
-                preset_id: "preset_plain",
-                status: "paused",
-                current_task_id: Some("task_1"),
-                context: &ctx,
-            },
+            &SeedRow::new(
+                "ses_plain",
+                "preset_plain",
+                "paused",
+                Some("task_1"),
+                &ctx,
+            ),
         )
         .await;
         pool.close().await;
@@ -363,13 +389,13 @@ fn inspect_detail_corrupt_context_is_unknown_never_fabricated() {
         let pool = create_db(&db_path).await;
         seed_session(
             &pool,
-            &SeedRow {
-                session_id: "ses_corrupt",
-                preset_id: "preset_x",
-                status: "running",
-                current_task_id: None,
-                context: b"not-json-at-all",
-            },
+            &SeedRow::new(
+                "ses_corrupt",
+                "preset_x",
+                "running",
+                None,
+                b"not-json-at-all",
+            ),
         )
         .await;
         pool.close().await;
@@ -456,36 +482,36 @@ fn inspect_list_mode_renders_rows_and_count() {
         let pool = create_db(&db_path).await;
         seed_session(
             &pool,
-            &SeedRow {
-                session_id: "ses_chain",
-                preset_id: "preset_chain",
-                status: "running",
-                current_task_id: Some("task_9"),
-                context: &chain,
-            },
+            &SeedRow::new(
+                "ses_chain",
+                "preset_chain",
+                "running",
+                Some("task_9"),
+                &chain,
+            ),
         )
         .await;
         seed_session(
             &pool,
-            &SeedRow {
-                session_id: "ses_failed",
-                preset_id: "preset_chain",
-                status: "running",
-                current_task_id: None,
-                context: &failed,
-            },
+            &SeedRow::new(
+                "ses_failed",
+                "preset_chain",
+                "running",
+                None,
+                &failed,
+            ),
         )
         .await;
         // Terminal row must be filtered out of list mode.
         seed_session(
             &pool,
-            &SeedRow {
-                session_id: "ses_done",
-                preset_id: "preset_chain",
-                status: "completed",
-                current_task_id: Some("task_done"),
-                context: &chain,
-            },
+            &SeedRow::new(
+                "ses_done",
+                "preset_chain",
+                "completed",
+                Some("task_done"),
+                &chain,
+            ),
         )
         .await;
         pool.close().await;
@@ -504,7 +530,8 @@ fn inspect_list_mode_renders_rows_and_count() {
     assert!(!text.contains("ses_done"), "terminal rows excluded: {text}");
     assert!(text.contains('2'), "trailing count line: {text}");
 
-    // JSON list: array of the same DTOs, terminal row excluded.
+    // JSON list: envelope with the same DTOs, terminal row excluded,
+    // honest total.
     let output = nexus42(home.path())
         .args(["ops", "inspect", "--json"])
         .assert()
@@ -513,7 +540,9 @@ fn inspect_list_mode_renders_rows_and_count() {
         .stdout
         .clone();
     let parsed: Value = serde_json::from_slice(&output).expect("valid json");
-    let rows = parsed.as_array().expect("top-level array");
+    assert_eq!(parsed["db_present"], json!(true));
+    assert_eq!(parsed["total"], json!(2));
+    let rows = parsed["rows"].as_array().expect("rows array");
     assert_eq!(rows.len(), 2);
     let ids: Vec<&str> = rows
         .iter()
@@ -538,13 +567,13 @@ fn inspect_run_is_read_only() {
         let pool = create_db(&db_path).await;
         seed_session(
             &pool,
-            &SeedRow {
-                session_id: "ses_chain",
-                preset_id: "preset_chain",
-                status: "running",
-                current_task_id: Some("task_9"),
-                context: &ctx,
-            },
+            &SeedRow::new(
+                "ses_chain",
+                "preset_chain",
+                "running",
+                Some("task_9"),
+                &ctx,
+            ),
         )
         .await;
         pool.close().await;
@@ -595,5 +624,274 @@ fn inspect_run_is_read_only() {
     assert_eq!(
         bytes_before, bytes_after,
         "inspect must not write the db file"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// QC fix wave (v1.182 P1 BL-04) — behavior pins added with the fixes.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn inspect_detail_cancelled_with_live_join_keys_is_not_resumable() {
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    let ctx = chain_context();
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        // schedule-cancel writer leaves context untouched (schedules.rs:1226):
+        // live join keys + no typed failure persist, only status='cancelled'.
+        seed_session(
+            &pool,
+            &SeedRow::new(
+                "ses_cancelled",
+                "preset_chain",
+                "cancelled",
+                Some("task_9"),
+                &ctx,
+            ),
+        )
+        .await;
+        pool.close().await;
+    });
+
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "ses_cancelled", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    let obj = parsed.as_object().unwrap();
+
+    // Rule 1 (daemon recovery filter) projected into detail mode: a terminal
+    // status row is never a re-drive candidate, even with live join keys.
+    assert_eq!(obj["db_status"], json!("cancelled"));
+    assert_eq!(
+        obj["live_join_keys"],
+        json!(["_converge_arrivals_j1", "_join_wait_start_j1"]),
+        "live join keys are preserved on cancelled rows (context untouched)"
+    );
+    assert_eq!(obj["run_failure"], Value::Null);
+    assert_eq!(obj["resumable"]["verdict"], json!("no"));
+    assert_eq!(obj["resumable"]["rule"], json!("terminal_status"));
+    assert_eq!(obj["resumable"]["runner_check"], json!("not_applicable"));
+
+    // Human view: terminal status reads `no` with the rule-1 wording.
+    let human = nexus42(home.path())
+        .args(["ops", "inspect", "ses_cancelled"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let human = String::from_utf8(human).unwrap();
+    assert!(human.contains("status:         cancelled"), "{human}");
+    assert!(human.contains("resumable:      no"), "{human}");
+    assert!(
+        human.contains("terminal status"),
+        "rule-1 wording must name the terminal status: {human}"
+    );
+    assert!(
+        human.contains("join state:     2 live join key(s):"),
+        "{human}"
+    );
+}
+
+#[test]
+fn inspect_list_is_bounded_to_latest_200_and_reports_honest_total() {
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        for i in 0..205i64 {
+            seed_session(
+                &pool,
+                &SeedRow {
+                    session_id: &format!("ses_{i:03}"),
+                    preset_id: "preset_bulk",
+                    status: "running",
+                    current_task_id: None,
+                    context: &chain_context(),
+                    updated_at: 1_756_990_000 + i,
+                },
+            )
+            .await;
+        }
+        pool.close().await;
+    });
+
+    let output = nexus42(home.path())
+        .args(["ops", "inspect"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8(output).unwrap();
+    let shown: Vec<&str> = text
+        .lines()
+        .filter(|l| l.starts_with("ses_"))
+        .collect();
+    assert_eq!(shown.len(), 200, "list must be bounded to 200 rows");
+    assert_eq!(
+        shown[0].split_whitespace().next().unwrap(),
+        "ses_204",
+        "rows ordered by updated_at DESC (most recent first)"
+    );
+    assert_eq!(
+        shown[199].split_whitespace().next().unwrap(),
+        "ses_005",
+        "the oldest 5 rows are cut off by the LIMIT"
+    );
+    assert!(
+        text.contains("200 of 205+ checkpointed session(s)."),
+        "count line must surface the honest total: {text}"
+    );
+
+    // JSON: top-level object with db_present / total / rows (DTO-verbatim).
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    assert_eq!(parsed["db_present"], json!(true));
+    assert_eq!(parsed["total"], json!(205));
+    let rows = parsed["rows"].as_array().expect("rows array");
+    assert_eq!(rows.len(), 200, "json list bounded to 200 rows");
+    assert_eq!(rows[0]["session_id"], json!("ses_204"));
+    assert_eq!(rows[199]["session_id"], json!("ses_005"));
+}
+
+#[test]
+fn inspect_list_json_missing_db_reports_db_present_false() {
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    assert!(!db_path.exists());
+
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    assert_eq!(parsed["db_present"], json!(false));
+    assert_eq!(parsed["total"], json!(0));
+    assert_eq!(parsed["rows"], json!([]));
+}
+
+#[test]
+fn inspect_human_run_error_truncation_is_marked() {
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    let ctx = json!({"data": {
+        "_run_status": "failed",
+        "_run_error": "line one\nline two\nline three"
+    }})
+    .to_string()
+    .into_bytes();
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        seed_session(
+            &pool,
+            &SeedRow::new(
+                "ses_multi",
+                "preset_x",
+                "running",
+                None,
+                &ctx,
+            ),
+        )
+        .await;
+        pool.close().await;
+    });
+
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "ses_multi"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let human = String::from_utf8(output).unwrap();
+    let record = human
+        .lines()
+        .find(|l| l.starts_with("run record:"))
+        .expect("run record line");
+    assert!(
+        record.contains("line one … (truncated; see --json)"),
+        "human one-line cut must carry the truncation marker, got: {record}"
+    );
+    assert!(
+        !record.contains("line two"),
+        "only the first line may appear: {record}"
+    );
+
+    // --json stays DTO-verbatim (never truncated).
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "ses_multi", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    assert_eq!(
+        parsed["run_failure"]["run_error"],
+        json!("line one\nline two\nline three"),
+        "json run_error must be verbatim"
+    );
+}
+
+#[test]
+fn inspect_detail_shape_anomaly_wording_is_distinct_from_corrupt() {
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    // Parseable JSON, but `data` is not an object — schema-shape anomaly,
+    // not byte corruption.
+    let ctx = b"{\"data\": \"not-an-object\"}";
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        seed_session(
+            &pool,
+            &SeedRow::new(
+                "ses_shape",
+                "preset_x",
+                "running",
+                None,
+                ctx,
+            ),
+        )
+        .await;
+        pool.close().await;
+    });
+
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "ses_shape", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    let obj = parsed.as_object().unwrap();
+    // Verdict behavior matches corrupt-context (unknown, never fabricated) —
+    // only the explanation wording differs.
+    assert_eq!(obj["context_readable"], json!(false));
+    assert_eq!(obj["resumable"]["verdict"], json!("unknown"));
+    assert_eq!(obj["resumable"]["rule"], json!("context_unreadable"));
+    let explanation = obj["resumable"]["explanation"].as_str().unwrap();
+    assert!(
+        explanation.contains("shape"),
+        "shape-anomaly explanation must name the schema shape, got: {explanation}"
+    );
+    assert!(
+        !explanation.contains("corrupt"),
+        "shape-anomaly must not be labelled corrupt context_json: {explanation}"
     );
 }
