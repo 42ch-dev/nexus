@@ -1,6 +1,9 @@
 //! Closed Actor/Character/ActorWorldBinding wire fixtures (v1.184 P0 Task 1).
 
-use nexus_contracts::{ActorRef, ActorWorldBinding, ActorWorldBindingStatus, Character, CharacterStatus, CreateCharacterRequest};
+use nexus_contracts::{
+    ActorRef, ActorWorldBinding, ActorWorldBindingStatus, Character, CharacterDetail,
+    CharacterStatus, CreateCharacterRequest, CreateCharacterResponse, ListCharactersResponse,
+};
 use std::str::FromStr;
 
 const HEX32: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -147,6 +150,78 @@ fn length_bounded_non_actor_string_keeps_whitespace() {
     use nexus_contracts::generated::daemon_api::worlds::create_fork_request::CreateForkRequestLabel;
     CreateForkRequestLabel::from_str("  fork label  ")
         .expect("length-only fork label keeps leading and trailing whitespace");
+}
+
+fn character_record(display_name: &str) -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": 1,
+        "character_id": chr(),
+        "owner_creator_id": ctr(),
+        "display_name": display_name,
+        "status": "active",
+        "persona": {},
+        "created_at": "2026-09-05T00:00:00Z",
+        "updated_at": "2026-09-05T00:00:00Z"
+    })
+}
+
+fn binding_record() -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": 1,
+        "binding_id": format!("awb_{HEX32}"),
+        "character_id": chr(),
+        "world_id": format!("wld_{HEX32}"),
+        "status": "active",
+        "created_at": "2026-09-05T00:00:00Z",
+        "updated_at": "2026-09-05T00:00:00Z"
+    })
+}
+
+#[test]
+fn character_response_dtos_enforce_display_name_trim_and_unicode() {
+    let ok = character_record("Ada");
+    serde_json::from_value::<CharacterDetail>(serde_json::json!({ "character": ok.clone() }))
+        .expect("detail accepts trimmed name");
+    serde_json::from_value::<CreateCharacterResponse>(serde_json::json!({
+        "character": ok.clone(),
+        "binding": binding_record()
+    }))
+    .expect("create response accepts trimmed name");
+    serde_json::from_value::<ListCharactersResponse>(serde_json::json!({
+        "items": [ok.clone()],
+        "pagination": { "limit": 20, "has_more": false }
+    }))
+    .expect("list response accepts trimmed name");
+
+    let cjk = character_record(&"你".repeat(120));
+    serde_json::from_value::<CharacterDetail>(serde_json::json!({ "character": cjk }))
+        .expect("detail accepts 120 CJK scalars");
+
+    let leading = character_record(" Ada");
+    assert!(serde_json::from_value::<CharacterDetail>(serde_json::json!({ "character": leading.clone() })).is_err());
+    assert!(serde_json::from_value::<CreateCharacterResponse>(serde_json::json!({
+        "character": leading.clone(),
+        "binding": binding_record()
+    }))
+    .is_err());
+    assert!(serde_json::from_value::<ListCharactersResponse>(serde_json::json!({
+        "items": [leading],
+        "pagination": { "limit": 20, "has_more": false }
+    }))
+    .is_err());
+
+    let trailing = character_record("Ada ");
+    assert!(serde_json::from_value::<CharacterDetail>(serde_json::json!({ "character": trailing.clone() })).is_err());
+    assert!(serde_json::from_value::<CreateCharacterResponse>(serde_json::json!({
+        "character": trailing.clone(),
+        "binding": binding_record()
+    }))
+    .is_err());
+    assert!(serde_json::from_value::<ListCharactersResponse>(serde_json::json!({
+        "items": [trailing],
+        "pagination": { "limit": 20, "has_more": false }
+    }))
+    .is_err());
 }
 
 #[test]

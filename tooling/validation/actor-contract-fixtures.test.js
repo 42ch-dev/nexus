@@ -86,6 +86,15 @@ function matches(schema, data, cache) {
     }
     return true;
   }
+  if (types.includes('array')) {
+    if (!Array.isArray(data)) {
+      return false;
+    }
+    if (schema.items) {
+      return data.every((item) => matches(schema.items, item, cache));
+    }
+    return true;
+  }
   if (types.includes('string')) {
     if (typeof data !== 'string') {
       return false;
@@ -135,11 +144,16 @@ function main() {
   const cache = new Map();
   const common = loadSchema('schemas/common/common.schema.json');
   cache.set(common.$id, common);
+  const paginationSchema = loadSchema('schemas/daemon-api/kb/pagination-info.schema.json');
+  cache.set(paginationSchema.$id, paginationSchema);
 
   const actor = compile('schemas/domain/actor-ref.schema.json', cache);
   const character = compile('schemas/domain/character.schema.json', cache);
   const binding = compile('schemas/domain/actor-world-binding.schema.json', cache);
   const createReq = compile('schemas/daemon-api/characters/create-character-request.schema.json', cache);
+  const detail = compile('schemas/daemon-api/characters/character-detail.schema.json', cache);
+  const createRes = compile('schemas/daemon-api/characters/create-character-response.schema.json', cache);
+  const listRes = compile('schemas/daemon-api/characters/list-characters-response.schema.json', cache);
 
   assertAccept(actor, { actor_kind: 'creator', creator_id: CTR }, 'creator actor');
   assertAccept(actor, { actor_kind: 'character', character_id: CHR }, 'character actor');
@@ -194,6 +208,24 @@ function main() {
   );
   assertReject(createReq, { display_name: '', world_id: WLD }, 'create empty name');
   assertReject(createReq, { display_name: 'Ada', world_id: WLD, persona: [] }, 'create invalid persona');
+
+  const pagination = { limit: 20, has_more: false };
+  assertAccept(detail, { character: validCharacter }, 'character detail');
+  assertAccept(detail, { character: { ...validCharacter, display_name: '你'.repeat(120) } }, 'detail 120 CJK');
+  assertReject(detail, { character: { ...validCharacter, display_name: ' Ada' } }, 'detail leading whitespace');
+  assertReject(detail, { character: { ...validCharacter, display_name: 'Ada ' } }, 'detail trailing whitespace');
+  assertAccept(createRes, { character: validCharacter, binding: validBinding }, 'create response');
+  assertReject(
+    createRes,
+    { character: { ...validCharacter, display_name: ' Ada' }, binding: validBinding },
+    'create response leading whitespace',
+  );
+  assertAccept(listRes, { items: [validCharacter], pagination }, 'list response');
+  assertReject(
+    listRes,
+    { items: [{ ...validCharacter, display_name: 'Ada ' }], pagination },
+    'list response trailing whitespace',
+  );
 
   console.log('actor-contract-fixtures: all assertions passed');
 }
