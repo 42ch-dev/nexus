@@ -1,0 +1,293 @@
+//! Character bearer storage and the atomic create+initial-binding transaction.
+
+use serde_json::Value;
+use sqlx::{Sqlite, SqlitePool, Transaction};
+use uuid::Uuid;
+
+use crate::actor_world_binding::{
+    insert_binding_tx, validate_world_sheet_tx, ActorWorldBindingRecord, CreateBindingParams,
+};
+use crate::begin_immediate;
+use crate::error::{ActorContractConflict, LocalDbError};
+
+/// Persisted Character row (storage shape; not a wire DTO).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CharacterRecord {
+    pub character_id: String,
+    pub owner_creator_id: String,
+    pub display_name: String,
+    pub status: String,
+    pub image_uri: Option<String>,
+    pub persona_json: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Inputs for minting a Character together with its first active binding.
+#[derive(Debug, Clone, Copy)]
+pub struct CreateCharacterParams<'a> {
+    pub owner_creator_id: &'a str,
+    pub display_name: &'a str,
+    pub image_uri: Option<&'a str>,
+    pub persona_json: &'a str,
+    pub world_id: &'a str,
+    pub world_sheet_entry_id: Option<&'a str>,
+}
+
+/// Atomic create result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateCharacterResult {
+    pub character: CharacterRecord,
+    pub binding: ActorWorldBindingRecord,
+}
+
+/// Mint a `chr_` + 32 lowercase hex Character id.
+#[must_use]
+pub fn mint_character_id() -> String {
+    format!("chr_{}", Uuid::new_v4().simple())
+}
+
+pub(crate) fn normalize_display_name(raw: &str) -> Result<String, LocalDbError> {
+    let trimmed = raw.trim();
+    let scalars = trimmed.chars().count();
+    if trimmed.is_empty() || scalars > 120 {
+        return Err(LocalDbError::ValidationError(
+            "display_name must be trimmed non-empty and at most 120 Unicode scalars".into(),
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+pub(crate) fn validate_persona_json(raw: &str) -> Result<String, LocalDbError> {
+    let value: Value = serde_json::from_str(raw).map_err(|e| {
+        LocalDbError::ValidationError(format!("persona_json must be a JSON object: {e}"))
+    })?;
+    if !value.is_object() {
+        return Err(LocalDbError::ValidationError(
+            "persona_json must be a JSON object".into(),
+        ));
+    }
+    Ok(value.to_string())
+}
+
+pub(crate) async fn require_owned_world(
+    tx: &mut Transaction<'_, Sqlite>,
+    owner_creator_id: &str,
+    world_id: &str,
+) -> Result<(), LocalDbError> {
+    // SAFETY: ownership lookup against narrative_worlds DDL (20260524).
+    let owner: Option<String> =
+        sqlx::query_scalar("SELECT owner_creator_id FROM narrative_worlds WHERE world_id = ?")
+            .bind(world_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    match owner {
+        Some(stored) if stored == owner_creator_id => Ok(()),
+        Some(_) | None => Err(LocalDbError::ActorNotFound {
+            resource: "world",
+            id: world_id.to_string(),
+        }),
+    }
+}
+
+async fn load_character(
+    tx: &mut Transaction<'_, Sqlite>,
+    character_id: &str,
+) -> Result<Option<CharacterRecord>, LocalDbError> {
+    // SAFETY: SELECT matches characters DDL in 202609050001_actor_identity.sql.
+    let row = sqlx::query(
+        "SELECT character_id, owner_creator_id, display_name, status, image_uri, \
+         persona_json, created_at, updated_at FROM characters WHERE character_id = ?",
+    )
+    .bind(character_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(row.map(|r| {
+        use sqlx::Row;
+        CharacterRecord {
+            character_id: r.get("character_id"),
+            owner_creator_id: r.get("owner_creator_id"),
+            display_name: r.get("display_name"),
+            status: r.get("status"),
+            image_uri: r.get("image_uri"),
+            persona_json: r.get("persona_json"),
+            created_at: r.get("created_at"),
+            updated_at: r.get("updated_at"),
+        }
+    }))
+}
+
+/// Ownership-scoped Character lookup. Foreign ids are not distinguished from missing.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` on database failure.
+pub async fn get_character(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+    character_id: &str,
+) -> Result<Option<CharacterRecord>, LocalDbError> {
+    let mut tx = begin_immediate(pool).await?;
+    let row = load_character(&mut tx, character_id).await?;
+    tx.commit().await?;
+    Ok(row.filter(|c| c.owner_creator_id == owner_creator_id))
+}
+
+/// List Characters owned by `owner_creator_id`.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` on database failure.
+pub async fn list_characters(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+) -> Result<Vec<CharacterRecord>, LocalDbError> {
+    // SAFETY: SELECT matches characters DDL in 202609050001_actor_identity.sql.
+    let rows = sqlx::query(
+        "SELECT character_id, owner_creator_id, display_name, status, image_uri, \
+         persona_json, created_at, updated_at FROM characters \
+         WHERE owner_creator_id = ? ORDER BY created_at ASC, character_id ASC",
+    )
+    .bind(owner_creator_id)
+    .fetch_all(pool)
+    .await?;
+    use sqlx::Row;
+    Ok(rows
+        .into_iter()
+        .map(|r| CharacterRecord {
+            character_id: r.get("character_id"),
+            owner_creator_id: r.get("owner_creator_id"),
+            display_name: r.get("display_name"),
+            status: r.get("status"),
+            image_uri: r.get("image_uri"),
+            persona_json: r.get("persona_json"),
+            created_at: r.get("created_at"),
+            updated_at: r.get("updated_at"),
+        })
+        .collect())
+}
+
+/// Insert Character + first active binding in one write-serialized transaction.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if validation, ownership, WorldSheet, uniqueness, or SQL fails.
+/// Any failure rolls back both inserts.
+pub async fn create_character_with_initial_binding(
+    pool: &SqlitePool,
+    params: CreateCharacterParams<'_>,
+) -> Result<CreateCharacterResult, LocalDbError> {
+    let display_name = normalize_display_name(params.display_name)?;
+    let persona_json = validate_persona_json(params.persona_json)?;
+    let character_id = mint_character_id();
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let mut tx = begin_immediate(pool).await?;
+    let result = create_in_tx(
+        &mut tx,
+        params,
+        &character_id,
+        &display_name,
+        &persona_json,
+        &now,
+    )
+    .await;
+    match result {
+        Ok(created) => {
+            tx.commit().await?;
+            Ok(created)
+        }
+        Err(err) => {
+            let _ = tx.rollback().await;
+            Err(err)
+        }
+    }
+}
+
+async fn create_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    params: CreateCharacterParams<'_>,
+    character_id: &str,
+    display_name: &str,
+    persona_json: &str,
+    now: &str,
+) -> Result<CreateCharacterResult, LocalDbError> {
+    require_owned_world(tx, params.owner_creator_id, params.world_id).await?;
+    validate_world_sheet_tx(tx, params.world_id, params.world_sheet_entry_id).await?;
+
+    // SAFETY: INSERT matches characters DDL in 202609050001_actor_identity.sql.
+    let insert = sqlx::query(
+        "INSERT INTO characters \
+         (character_id, owner_creator_id, display_name, status, image_uri, persona_json, created_at, updated_at) \
+         VALUES (?, ?, ?, 'active', ?, ?, ?, ?)",
+    )
+    .bind(character_id)
+    .bind(params.owner_creator_id)
+    .bind(display_name)
+    .bind(params.image_uri)
+    .bind(persona_json)
+    .bind(now)
+    .bind(now)
+    .execute(&mut **tx)
+    .await;
+    map_actor_constraint(insert)?;
+
+    let binding = insert_binding_tx(
+        tx,
+        CreateBindingParams {
+            owner_creator_id: params.owner_creator_id,
+            character_id,
+            world_id: params.world_id,
+            world_sheet_entry_id: params.world_sheet_entry_id,
+        },
+        now,
+    )
+    .await?;
+
+    let character = load_character(tx, character_id)
+        .await?
+        .ok_or_else(|| LocalDbError::ActorNotFound {
+            resource: "character",
+            id: character_id.to_string(),
+        })?;
+    Ok(CreateCharacterResult { character, binding })
+}
+
+pub(crate) async fn require_owned_character(
+    tx: &mut Transaction<'_, Sqlite>,
+    owner_creator_id: &str,
+    character_id: &str,
+) -> Result<CharacterRecord, LocalDbError> {
+    let row = load_character(tx, character_id).await?;
+    match row {
+        Some(c) if c.owner_creator_id == owner_creator_id => Ok(c),
+        Some(_) | None => Err(LocalDbError::ActorNotFound {
+            resource: "character",
+            id: character_id.to_string(),
+        }),
+    }
+}
+
+/// Map unique/check failures onto stable actor conflicts when possible.
+pub(crate) fn map_actor_constraint<T>(result: Result<T, sqlx::Error>) -> Result<T, LocalDbError> {
+    match result {
+        Ok(v) => Ok(v),
+        Err(err) => {
+            if let sqlx::Error::Database(db) = &err {
+                if db.is_unique_violation() {
+                    let constraint = db.constraint().unwrap_or_default();
+                    let message = db.message();
+                    if constraint.contains("idx_actor_world_bindings_active_unique")
+                        || message.contains("idx_actor_world_bindings_active_unique")
+                        || message.contains("actor_world_bindings")
+                    {
+                        return Err(LocalDbError::ActorContractConflict {
+                            code: ActorContractConflict::DuplicateActiveBinding,
+                        });
+                    }
+                }
+            }
+            Err(LocalDbError::from(err))
+        }
+    }
+}

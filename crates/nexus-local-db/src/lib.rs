@@ -13,7 +13,9 @@
 // V1.153 P2 T2: cas is pure SQL (OCC helpers — no unix APIs); the former
 // `#[cfg(unix)]` gate was wrong and broke `kb_relationships` (which imports
 // `crate::cas`) on the Windows x64 build.
+pub mod actor_world_binding;
 pub mod cas;
+pub mod character;
 pub mod compute_runs;
 pub mod compute_session;
 pub mod creators;
@@ -63,7 +65,16 @@ use std::future::Future;
 pub use version::{DB_SCHEMA_VERSION, SCHEMA_VERSION};
 
 // Re-export error types
-pub use error::LocalDbError;
+pub use error::{ActorContractConflict, LocalDbError};
+
+pub use actor_world_binding::{
+    add_actor_world_binding, count_active_bindings_for_world_tx, list_bindings_for_character,
+    mint_binding_id, remove_binding, ActorWorldBindingRecord, CreateBindingParams,
+};
+pub use character::{
+    create_character_with_initial_binding, get_character, list_characters, mint_character_id,
+    CharacterRecord, CreateCharacterParams, CreateCharacterResult,
+};
 
 // Re-export sqlx pool type for consumers
 pub use sqlx::SqlitePool;
@@ -285,6 +296,21 @@ pub struct SchemaVersions {
 /// }
 /// ```
 ///
+/// Begin a write-serializing SQLite transaction (`BEGIN IMMEDIATE`).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the connection cannot be acquired or the
+/// immediate transaction cannot start.
+pub async fn begin_immediate(
+    pool: &sqlx::SqlitePool,
+) -> Result<sqlx::Transaction<'_, sqlx::Sqlite>, LocalDbError> {
+    let conn = pool.acquire().await?;
+    sqlx::Transaction::begin(conn, Some(std::borrow::Cow::Borrowed("BEGIN IMMEDIATE")))
+        .await
+        .map_err(LocalDbError::from)
+}
+
 /// # Errors
 ///
 /// Returns `LocalDbError` if the connection pool cannot be created.

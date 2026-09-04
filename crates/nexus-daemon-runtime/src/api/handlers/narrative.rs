@@ -106,6 +106,7 @@ pub async fn get_world(
 ///
 /// - `401 AuthRequired` if no active creator is configured.
 /// - `404 NotFound` if the world id is unknown or not owned by the caller.
+/// - `409 Conflict` (`world_has_actor_bindings`) if an active Character binding remains.
 /// - `500 Internal` on database error.
 ///
 /// `POST /v1/daemon/worlds` - create a new World (V1.130 P2).
@@ -229,10 +230,25 @@ pub async fn delete_world(
     // cohesive in one handler rather than scattering fragments across
     // .sqlx/ entries. On any early `return Err(...)` below the `tx` is
     // dropped, which sqlx turns into an automatic ROLLBACK.
-    let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".to_string(),
-        message: format!("delete_world: begin tx failed: {e}"),
-    })?;
+    let mut tx = nexus_local_db::begin_immediate(pool)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: format!("delete_world: begin tx failed: {e}"),
+        })?;
+
+    let binding_count = nexus_local_db::count_active_bindings_for_world_tx(&mut tx, &world_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: format!("delete_world: actor binding check failed: {e}"),
+        })?;
+    if binding_count > 0 {
+        return Err(NexusApiError::ConflictCoded {
+            code: "world_has_actor_bindings".to_string(),
+            message: format!("World {world_id} has active Character bindings"),
+        });
+    }
 
     if let Err(e) = sqlx::query("DELETE FROM kb_extract_jobs WHERE world_id = ?")
         .bind(&world_id)

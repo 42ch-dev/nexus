@@ -80,6 +80,34 @@ pub enum LocalDbError {
     },
     /// Input validation failed before reaching the database.
     ValidationError(String),
+    /// Character / binding / world row is missing for the scoped caller.
+    ActorNotFound {
+        resource: &'static str,
+        id: String,
+    },
+    /// Stable actor-contract product conflict (HTTP 409 at the Daemon).
+    ActorContractConflict { code: ActorContractConflict },
+}
+
+/// Stable actor-contract conflict codes (wire `error.code` at HTTP 409).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActorContractConflict {
+    LastActiveBinding,
+    DuplicateActiveBinding,
+    InvalidWorldSheet,
+    WorldHasActorBindings,
+}
+
+impl ActorContractConflict {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LastActiveBinding => "last_active_actor_world_binding",
+            Self::DuplicateActiveBinding => "duplicate_active_actor_world_binding",
+            Self::InvalidWorldSheet => "invalid_world_sheet",
+            Self::WorldHasActorBindings => "world_has_actor_bindings",
+        }
+    }
 }
 
 impl LocalDbError {
@@ -208,6 +236,12 @@ impl fmt::Display for LocalDbError {
             } => Self::fmt_world_conflict(f, table, id, expected_world, actual_world),
             Self::ValidationError(msg) => {
                 write!(f, "validation error: {msg}")
+            }
+            Self::ActorNotFound { resource, id } => {
+                write!(f, "{resource} '{id}' not found")
+            }
+            Self::ActorContractConflict { code } => {
+                write!(f, "{}", code.as_str())
             }
         }
     }

@@ -310,3 +310,57 @@ async fn delete_world_cascades_kb_and_preserves_works() {
 // not directly referenced in asserts but is used via status_code()/error_code().
 #[allow(dead_code)]
 fn _assert_error_codes_are_accessible(_e: NexusApiError) {}
+
+#[tokio::test]
+async fn delete_world_blocked_when_active_actor_binding_exists() {
+    let (state, _tmp) = handler_state().await;
+    let pool = state.pool().unwrap();
+    let work_id = create_test_work(&state).await;
+
+    let created = nexus_local_db::create_character_with_initial_binding(
+        pool,
+        nexus_local_db::CreateCharacterParams {
+            owner_creator_id: "test_creator",
+            display_name: "Bound",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: "wld_test_world",
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .expect("seed character binding");
+
+    let err = delete_world(State(state.clone()), Path("wld_test_world".to_string()))
+        .await
+        .expect_err("active binding must block world delete");
+    assert_eq!(err.status_code(), StatusCode::CONFLICT);
+    assert_eq!(err.error_code(), "world_has_actor_bindings");
+
+    let world_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM narrative_worlds WHERE world_id = 'wld_test_world'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let work_world: Option<String> =
+        sqlx::query_scalar("SELECT world_id FROM works WHERE work_id = ?")
+            .bind(&work_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    let bind_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM actor_world_bindings WHERE binding_id = ?")
+            .bind(&created.binding.binding_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(world_count, 1, "world row must be unchanged");
+    assert_eq!(
+        work_world.as_deref(),
+        Some("wld_test_world"),
+        "works must not be detached"
+    );
+    assert_eq!(bind_count, 1, "binding must remain");
+}
+
