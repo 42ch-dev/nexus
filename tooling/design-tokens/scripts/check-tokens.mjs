@@ -97,9 +97,16 @@ const required = [
   { label: 'tokens: reading-maturation open-findings text', haystack: tokens, needle: '--color-reading-maturation-open-findings-text:' },
   { label: 'preset: finding-status color group', haystack: preset, needle: "'finding-status':" },
   { label: 'preset: memory-task-kind color group', haystack: preset, needle: "'memory-task-kind':" },
-  { label: 'tokens: nexus-ui badge soft running bg', haystack: tokens, needle: '--color-nexus-ui-badge-soft-running-bg:' },
-  { label: 'tokens: nexus-ui badge soft preset text', haystack: tokens, needle: '--color-nexus-ui-badge-soft-preset-text:' },
-  { label: 'tokens: nexus-ui badge soft error border', haystack: tokens, needle: '--color-nexus-ui-badge-soft-error-border:' },
+  // v1.183 P0 QC2 F-001: full family coverage — every bg/text/border member
+  // of all five badge-soft variants is gated (previously 3/15 samples, so a
+  // dropped queued/warning member would not fail this gate).
+  ...['running', 'queued', 'warning', 'error', 'preset'].flatMap((variant) =>
+    ['bg', 'text', 'border'].map((member) => ({
+      label: `tokens: nexus-ui badge soft ${variant} ${member}`,
+      haystack: tokens,
+      needle: `--color-nexus-ui-badge-soft-${variant}-${member}:`,
+    })),
+  ),
   { label: 'preset: nexus-ui-badge-soft color group', haystack: preset, needle: "'nexus-ui-badge-soft':" },
   { label: 'preset: nexus-ui badge soft consumes var', haystack: preset, needle: "cv('nexus-ui-badge-soft-running-bg')" },
   { label: 'preset: reading-maturation color group', haystack: preset, needle: "'reading-maturation':" },

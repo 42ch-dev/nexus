@@ -479,6 +479,10 @@ export function OutlineCanvas({
           summaryText={summary}
           ariaLabel={t('outline.graphAriaLabel')}
           surfaceKey={`outline:${workId}`}
+          // v1.183 P0 QC fix (qc2 F-003): the Outline surface reads the
+          // minimap with its own accent token, not the shell's strategy
+          // default.
+          minimapAccent="var(--color-canvas-outline-accent)"
         >
           {/* I-QC1-001 — when the projection has zero nodes, render the
               EmptyState as an in-shell overlay so CanvasShell is always

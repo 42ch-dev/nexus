@@ -121,9 +121,9 @@ export interface CanvasShellProps {
    * Defaults to the strategy accent (the shell's original hardcoded color);
    * surfaces with their own accent token pass their
    * `var(--color-canvas-*-accent)` so the minimap reads as part of the active
-   * surface instead of always strategy-purple. Only the World Timeline plumbs
-   * a non-default today (`--color-canvas-timeline-accent`); other surfaces
-   * keep the default until they opt in.
+   * surface instead of always strategy-purple. Outline, World KB, World
+   * Timeline, and Work Timeline all opt in; only the strategy surface keeps
+   * the default.
    */
   minimapAccent?: string;
 }
