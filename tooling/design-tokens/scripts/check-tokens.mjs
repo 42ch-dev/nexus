@@ -98,6 +98,9 @@ const required = [
   { label: 'preset: data-table-row-protected', haystack: preset, needle: "cv('data-table-row-protected')" },
   { label: 'preset: main-banner-background', haystack: preset, needle: "cv('main-banner-background')" },
   { label: 'preset: fontSize copy-12 key', haystack: preset, needle: "'copy-12':" },
+  // ── Disabled-state wash (V1.113 P1 token; preset promotion v1.183 P0 AR-1) ──
+  { label: 'tokens: --color-states-disabled-opacity', haystack: tokens, needle: '--color-states-disabled-opacity:' },
+  { label: 'preset: opacity disabled consumes var', haystack: preset, needle: "cv('states-disabled-opacity')" },
 ];
 
 /** Banned legacy namespace, assembled so a repo-wide grep for the literal

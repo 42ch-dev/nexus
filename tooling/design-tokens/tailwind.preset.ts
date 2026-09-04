@@ -444,6 +444,14 @@ const preset: Partial<Config> = {
         dialog: sv('dialog-width'),
         sheet: sv('sheet-width'),
       },
+      opacity: {
+        // V1.113 P1 / R-V1182P0-002 (v1.183 P0 AR-1): shared disabled-state
+        // wash — promoted from apps/web app-local so every Nexus surface
+        // (incl. design-studio's mirrored gallery) renders the same
+        // disabled chrome. Theme-independent scalar; consumes the
+        // --color-states-disabled-opacity CSS variable.
+        disabled: cv('states-disabled-opacity'),
+      },
       maxHeight: {
         dialog: sv('dialog-max-height'),
       },
