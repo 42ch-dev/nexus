@@ -329,6 +329,21 @@ async fn table_sql(pool: &SqlitePool) -> String {
     .unwrap()
 }
 
+/// Exact `sqlite_master` definitions for every schema object attached to
+/// `kb_key_blocks` (the table row itself, its indexes, its triggers), sorted
+/// for deterministic comparison. `sqlite_autoindex_*` entries carry NULL
+/// `sql`, no schema-owned definition, and are excluded.
+async fn kb_schema_objects(pool: &SqlitePool) -> Vec<(String, String, String)> {
+    sqlx::query_as::<_, (String, String, String)>(
+        "SELECT type, name, sql FROM sqlite_master \
+         WHERE tbl_name = 'kb_key_blocks' AND sql IS NOT NULL \
+         ORDER BY type, name",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
 async fn count_where(pool: &SqlitePool, sql: &str) -> i64 {
     sqlx::query_scalar::<_, i64>(sql).fetch_one(pool).await.unwrap()
 }
@@ -585,8 +600,8 @@ async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
     assert_eq!(pre_rows.len(), 11, "fixture row count");
 
     // ── Apply the owner-scope migration through the real production path ─
-    // `run_migrations` runs with `PRAGMA foreign_keys=OFF` on the migration
-    // connection so the DROP/recreate does not cascade into child tables.
+    // `run_migrations` scopes an FK-off window to the rebuild migration so
+    // the DROP/recreate does not cascade into child tables.
     nexus_local_db::run_migrations(&pool).await.unwrap();
 
     // ── Byte/identity fidelity of legacy rows ───────────────────────────
@@ -724,6 +739,59 @@ async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
         count_where(&pool, "SELECT COUNT(*) FROM kb_relationships WHERE world_id = 'wld_ownerC'").await,
         0,
         "cascade must reach kb_relationships"
+    );
+}
+
+/// Minor (task-1-review): capture exact pre-upgrade `sqlite_master` SQL for
+/// the table, every associated index, and every associated trigger; prove
+/// legacy index SQL survives the rebuild byte-for-byte and the upgraded
+/// schema converges exactly to a fresh install. Only migration-owned schema
+/// objects are supported — the pre-upgrade inventory is pinned so a deployed
+/// custom index/trigger would fail loudly here instead of being dropped
+/// silently by the DROP/recreate strategy.
+#[tokio::test]
+async fn upgrade_preserves_exact_sqlite_master_definitions() {
+    let (pool, _dir) = fresh_pool().await;
+    run_migrator(&pool, pre_upgrade_migrator()).await;
+
+    // ── Pin the pre-upgrade inventory: exactly the table plus the six known
+    //    legacy indexes, and no table-attached triggers. ──────────────────
+    let pre_objects = kb_schema_objects(&pool).await;
+    let pre_tables = pre_objects.iter().filter(|(ty, _, _)| ty == "table").count();
+    assert_eq!(pre_tables, 1, "exactly one kb_key_blocks table row");
+    let pre_index_names: Vec<&str> = pre_objects
+        .iter()
+        .filter(|(ty, _, _)| ty == "index")
+        .map(|(_, name, _)| name.as_str())
+        .collect();
+    let mut expected_indexes = PRE_EXISTING_INDEXES.to_vec();
+    expected_indexes.sort_unstable();
+    assert_eq!(pre_index_names, expected_indexes, "pre-upgrade index inventory");
+    assert!(
+        !pre_objects.iter().any(|(ty, _, _)| ty == "trigger"),
+        "no table-attached triggers are part of the supported inventory"
+    );
+
+    // ── Upgrade through the real production path ─────────────────────────
+    nexus_local_db::run_migrations(&pool).await.unwrap();
+    let upgraded_objects = kb_schema_objects(&pool).await;
+
+    // ── Every pre-existing index survives with byte-identical SQL ────────
+    for (ty, name, sql) in pre_objects.iter().filter(|(ty, _, _)| ty == "index") {
+        debug_assert_eq!(ty, "index");
+        let post = upgraded_objects
+            .iter()
+            .find(|(_, post_name, _)| post_name == name)
+            .unwrap_or_else(|| panic!("index {name} lost in rebuild"));
+        assert_eq!(&post.2, sql, "index {name} SQL changed across the rebuild");
+    }
+
+    // ── The upgraded schema is byte-identical to a fresh install ─────────
+    let (fresh_pool, _fresh_dir) = migrated_pool().await;
+    let fresh_objects = kb_schema_objects(&fresh_pool).await;
+    assert_eq!(
+        upgraded_objects, fresh_objects,
+        "upgraded schema must converge exactly to the fresh-install schema"
     );
 }
 

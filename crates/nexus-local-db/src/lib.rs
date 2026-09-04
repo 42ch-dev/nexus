@@ -378,35 +378,31 @@ pub async fn open_pool_read_only(
 /// }
 /// ```
 ///
-/// # Errors
-///
 /// Returns `LocalDbError` if any migration fails to apply.
+///
+/// Table-rebuild migrations run with FK enforcement suspended for their
+/// duration only, and a rebuild is recorded in `_sqlx_migrations` only after
+/// an in-transaction `PRAGMA foreign_key_check` passes. On any failure the
+/// migration connection is closed rather than returned to the pool, so a
+/// pooled connection can never leak with `foreign_keys` OFF.
 pub async fn run_migrations(pool: &sqlx::SqlitePool) -> Result<(), LocalDbError> {
-    // v1.184 P1 (Task 1): run migrations on a single connection with foreign
-    // keys OFF. sqlx 0.8.6 wraps every migration in a transaction and ignores
-    // the `-- no-transaction` directive, so `PRAGMA foreign_keys` inside a
-    // migration file is a no-op; a table rebuild (DROP + recreate) would then
-    // cascade into its child tables (kb_source_anchors, kb_relationships,
-    // mind_states, actor_world_bindings.world_sheet_entry_id). Setting the
-    // pragma on the migration connection *before* the migrate runner makes it
-    // deterministic. The migration files retain their own PRAGMAs for intent;
-    // FK enforcement is re-enabled on the returned connection.
+    let migrator = sqlx::migrate!("./migrations");
     let mut conn = pool.acquire().await.map_err(LocalDbError::from)?;
-    // SAFETY: PRAGMA statement — no table schema to validate against.
-    sqlx::query("PRAGMA foreign_keys = OFF")
-        .execute(&mut *conn)
-        .await
-        .map_err(LocalDbError::from)?;
-    sqlx::migrate!("./migrations")
-        .run_direct(&mut *conn)
-        .await
-        .map_err(LocalDbError::from)?;
-    // SAFETY: PRAGMA statement — no table schema to validate against.
-    sqlx::query("PRAGMA foreign_keys = ON")
-        .execute(&mut *conn)
-        .await
-        .map_err(LocalDbError::from)?;
-    drop(conn);
+    match apply_pending_migrations(&mut conn, &migrator).await {
+        Ok(()) => drop(conn),
+        Err(err) => {
+            // Never return a failed-migration connection to the pool: its
+            // PRAGMA foreign_keys state is uncertain. Best-effort restore,
+            // then close on drop so the pool replaces it either way.
+            // SAFETY: PRAGMA statement — no table schema to validate against.
+            let _ = sqlx::query("PRAGMA foreign_keys = ON")
+                .execute(&mut *conn)
+                .await;
+            conn.close_on_drop();
+            drop(conn);
+            return Err(err);
+        }
+    }
 
     // V1.67 P2 (W-001): SQLite's `PRAGMA foreign_key_check` returns rows for
     // violations but does not raise an error on its own. Consume the result set
@@ -425,6 +421,184 @@ pub async fn run_migrations(pool: &sqlx::SqlitePool) -> Result<(), LocalDbError>
         });
     }
 
+    Ok(())
+}
+
+/// Apply every pending migration of `migrator` on a single connection.
+///
+/// v1.184 P1 (Task 1 fix round 1): per-migration FK semantics.
+///
+/// Ordinary migrations keep sqlx's established behavior exactly: one
+/// transaction per migration for the script plus the `_sqlx_migrations`
+/// success row (via [`sqlx::migrate::Migrate::apply`]), with FK enforcement
+/// ON. Only migrations whose file declares an FK-off window
+/// (`PRAGMA foreign_keys=OFF` — table rebuilds such as
+/// `20260905000002_actor_knowledge_owners.sql`) go through
+/// [`apply_fk_suspension_migration`], which scopes the suspension to that one
+/// migration and gates its success row on an in-transaction
+/// `PRAGMA foreign_key_check`.
+///
+/// The FK-off window is needed at all because sqlx 0.8.6 wraps every
+/// migration in a transaction and ignores the `-- no-transaction` directive,
+/// so the file's own pragma is a no-op and a DROP/recreate would cascade
+/// into child tables (kb_source_anchors, kb_relationships, mind_states,
+/// actor_world_bindings.world_sheet_entry_id).
+async fn apply_pending_migrations(
+    conn: &mut sqlx::SqliteConnection,
+    migrator: &sqlx::migrate::Migrator,
+) -> Result<(), LocalDbError> {
+    use sqlx::migrate::Migrate as _;
+
+    // Deterministic baseline: ordinary migrations run with FK enforcement ON.
+    // SQLite defaults a fresh connection to foreign_keys=OFF, and open_pool's
+    // pragma only reaches the one pooled connection that executed it.
+    // SAFETY: PRAGMA statement — no table schema to validate against.
+    sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&mut *conn)
+        .await?;
+
+    // Bookkeeping identical to Migrator::run_direct (ignore_missing = false):
+    // fail on a dirty (partially applied) migration, then validate applied
+    // versions/checksums against the source before applying anything new.
+    conn.ensure_migrations_table().await?;
+    if let Some(version) = conn.dirty_version().await? {
+        return Err(sqlx::migrate::MigrateError::Dirty(version).into());
+    }
+    let applied = conn.list_applied_migrations().await?;
+    for applied_migration in &applied {
+        match migrator
+            .iter()
+            .find(|m| m.version == applied_migration.version)
+        {
+            None => {
+                return Err(
+                    sqlx::migrate::MigrateError::VersionMissing(applied_migration.version).into(),
+                );
+            }
+            Some(known) if known.checksum != applied_migration.checksum => {
+                return Err(
+                    sqlx::migrate::MigrateError::VersionMismatch(applied_migration.version).into(),
+                );
+            }
+            Some(_) => {}
+        }
+    }
+    let applied_versions: std::collections::HashSet<i64> =
+        applied.iter().map(|m| m.version).collect();
+
+    for migration in migrator.iter() {
+        if migration.migration_type.is_down_migration()
+            || applied_versions.contains(&migration.version)
+        {
+            continue;
+        }
+        if requires_fk_suspension(migration) {
+            apply_fk_suspension_migration(conn, migration).await?;
+        } else {
+            conn.apply(migration).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Whether the migration file declares an FK-off window
+/// (`PRAGMA foreign_keys=OFF`), i.e. a table rebuild that must run with
+/// enforcement suspended. Whitespace- and case-insensitive.
+fn requires_fk_suspension(migration: &sqlx::migrate::Migration) -> bool {
+    let normalized: String = migration
+        .sql
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .flat_map(char::to_uppercase)
+        .collect();
+    normalized.contains("PRAGMAFOREIGN_KEYS=OFF")
+}
+
+/// Apply a table-rebuild migration inside an FK-off window scoped to that
+/// migration only.
+///
+/// The pragma cannot change inside a transaction, so enforcement is
+/// suspended on the connection first and restored on every outcome. If the
+/// restore itself fails, the error propagates and `run_migrations` closes
+/// the connection instead of returning it to the pool.
+async fn apply_fk_suspension_migration(
+    conn: &mut sqlx::SqliteConnection,
+    migration: &sqlx::migrate::Migration,
+) -> Result<(), LocalDbError> {
+    // SAFETY: PRAGMA statement — no table schema to validate against.
+    sqlx::query("PRAGMA foreign_keys = OFF")
+        .execute(&mut *conn)
+        .await?;
+
+    let result = apply_fk_suspension_tx(conn, migration).await;
+
+    // SAFETY: PRAGMA statement — no table schema to validate against.
+    sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&mut *conn)
+        .await?;
+
+    result
+}
+
+/// Transactional core of [`apply_fk_suspension_migration`]: run the script,
+/// gate the success row on an in-transaction `PRAGMA foreign_key_check`
+/// (any violation rolls the rebuild back instead of recording it applied),
+/// then insert the sqlx-shaped `_sqlx_migrations` success row so script and
+/// bookkeeping commit together.
+async fn apply_fk_suspension_tx(
+    conn: &mut sqlx::SqliteConnection,
+    migration: &sqlx::migrate::Migration,
+) -> Result<(), LocalDbError> {
+    use sqlx::{Connection as _, Executor as _};
+
+    let mut tx = conn.begin().await?;
+    let start = std::time::Instant::now();
+
+    let outcome: Result<(), LocalDbError> = async {
+        tx.execute(&*migration.sql).await.map_err(|err| {
+            sqlx::migrate::MigrateError::ExecuteMigration(err, migration.version)
+        })?;
+
+        // SAFETY: PRAGMA diagnostic query — no table schema to validate against.
+        let violations: Vec<(String, i64, String, i64)> =
+            sqlx::query_as("PRAGMA foreign_key_check")
+                .fetch_all(&mut *tx)
+                .await?;
+        if !violations.is_empty() {
+            return Err(LocalDbError::ConstraintViolation {
+                table: "database".to_string(),
+                constraint: format!(
+                    "migration {} left {} foreign-key violation(s): {violations:?}",
+                    migration.version,
+                    violations.len()
+                ),
+            });
+        }
+
+        let execution_time = i64::try_from(start.elapsed().as_nanos()).unwrap_or(i64::MAX);
+        sqlx::query(
+            "INSERT INTO _sqlx_migrations \
+             ( version, description, success, checksum, execution_time ) \
+             VALUES ( ?1, ?2, TRUE, ?3, ?4 )",
+        )
+        .bind(migration.version)
+        .bind(&*migration.description)
+        .bind(&*migration.checksum)
+        .bind(execution_time)
+        .execute(&mut *tx)
+        .await?;
+
+        Ok(())
+    }
+    .await;
+
+    match outcome {
+        Ok(()) => tx.commit().await?,
+        Err(err) => {
+            tx.rollback().await?;
+            return Err(err);
+        }
+    }
     Ok(())
 }
 
@@ -718,6 +892,248 @@ mod tests {
         assert!(
             msg.contains("PRAGMA foreign_key_check returned 1 violation"),
             "expected FK-check failure, got: {msg}"
+        );
+    }
+
+    // --- v1.184 P1 Task 1 fix round 1: migration FK-suspension safety ---
+
+    /// Pool with exactly one connection and FK enforcement installed on every
+    /// connection the pool opens (including replacements after a discard), so
+    /// a poisoned FK-OFF connection handed back to the pool is observable.
+    async fn single_conn_fk_pool(db_path: &std::path::Path) -> sqlx::SqlitePool {
+        let url = format!("sqlite://{}?mode=rwc", db_path.display());
+        sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .after_connect(|conn, _meta| {
+                Box::pin(async move {
+                    // SAFETY: PRAGMA statement — no table schema to validate against.
+                    sqlx::query("PRAGMA foreign_keys = ON").execute(conn).await?;
+                    Ok(())
+                })
+            })
+            .connect(&url)
+            .await
+            .unwrap()
+    }
+
+    /// Migrator containing every migration shipped before the owner-scope
+    /// rebuild (`20260905000002_actor_knowledge_owners.sql`).
+    fn pre_owner_migrator() -> sqlx::migrate::Migrator {
+        const OWNER_VERSION: i64 = 20260905000002;
+        let full = sqlx::migrate!("./migrations");
+        let pre: Vec<sqlx::migrate::Migration> = full
+            .migrations
+            .iter()
+            .filter(|m| m.version < OWNER_VERSION)
+            .cloned()
+            .collect();
+        sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(pre),
+            ignore_missing: false,
+            locking: true,
+            no_tx: false,
+        }
+    }
+
+    /// Count of successful `_sqlx_migrations` rows for the owner migration.
+    async fn recorded_owner_success(pool: &sqlx::SqlitePool) -> i64 {
+        sqlx::query_scalar(
+            "SELECT COUNT(*) FROM _sqlx_migrations \
+             WHERE version = 20260905000002 AND success = TRUE",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    /// Critical (task-1-review): a failing migration must never return a
+    /// pooled connection with `foreign_keys` still OFF.
+    #[tokio::test]
+    async fn failed_migration_never_returns_fk_off_connection_to_pool() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = single_conn_fk_pool(&dir.path().join("test.db")).await;
+
+        // Pre-upgrade schema: everything before the owner rebuild.
+        {
+            let mut conn = pool.acquire().await.unwrap();
+            apply_pending_migrations(&mut conn, &pre_owner_migrator())
+                .await
+                .unwrap();
+        }
+
+        // Deterministic failure injection: a VIEW named kb_key_blocks_new
+        // makes the owner migration's first statement (`DROP TABLE IF EXISTS
+        // kb_key_blocks_new`) fail ("use DROP VIEW to delete view ...").
+        sqlx::query("CREATE VIEW kb_key_blocks_new AS SELECT 1 AS x")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        run_migrations(&pool)
+            .await
+            .expect_err("owner migration must fail on the sabotage view");
+
+        // The pool must not hand out the poisoned connection: FK enforcement
+        // is ON and a dangling write is rejected.
+        let fk: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(fk, 1, "pooled connection leaked with foreign_keys OFF");
+
+        // SAFETY: test-only direct insert attempting a deliberate violation.
+        let dangling = sqlx::query(
+            "INSERT INTO kb_key_blocks \
+             (key_block_id, world_id, block_type, canonical_name, status, body_json) \
+             VALUES ('kb_dangling', 'nonexistent_world', 'character', 'dangling', \
+                     'provisional', '{}')",
+        )
+        .execute(&pool)
+        .await;
+        let err = dangling
+            .expect_err("dangling FK write must be rejected after a failed migration");
+        assert!(
+            err.to_string().contains("FOREIGN KEY constraint failed"),
+            "expected FK violation, got: {err}"
+        );
+    }
+
+    /// Important (task-1-review): the FK-off window must be scoped to the
+    /// rebuild migration only — a later, unrelated pending migration keeps
+    /// full FK enforcement and is never recorded when it violates FKs.
+    #[tokio::test]
+    async fn fk_suspension_is_scoped_to_rebuild_migrations() {
+        use sqlx::migrate::{Migration, MigrationType, Migrator};
+        use std::borrow::Cow;
+
+        let migrations = vec![
+            Migration::new(
+                1,
+                Cow::Borrowed("create parent/child"),
+                MigrationType::Simple,
+                Cow::Borrowed(
+                    "CREATE TABLE parent (id TEXT PRIMARY KEY);\n\
+                     CREATE TABLE child (id TEXT PRIMARY KEY, p_id TEXT REFERENCES parent (id));",
+                ),
+                false,
+            ),
+            Migration::new(
+                2,
+                Cow::Borrowed("rebuild child"),
+                MigrationType::Simple,
+                Cow::Borrowed(
+                    "-- no-transaction\n\
+                     PRAGMA foreign_keys=OFF;\n\
+                     CREATE TABLE child_new (id TEXT PRIMARY KEY, p_id TEXT REFERENCES parent (id));\n\
+                     INSERT INTO child_new SELECT * FROM child;\n\
+                     DROP TABLE child;\n\
+                     ALTER TABLE child_new RENAME TO child;\n\
+                     PRAGMA foreign_keys=ON;",
+                ),
+                true,
+            ),
+            Migration::new(
+                3,
+                Cow::Borrowed("dangling insert"),
+                MigrationType::Simple,
+                Cow::Borrowed("INSERT INTO child (id, p_id) VALUES ('c1', 'missing_parent');"),
+                false,
+            ),
+        ];
+        let migrator = Migrator {
+            migrations: Cow::Owned(migrations),
+            ignore_missing: false,
+            locking: true,
+            no_tx: false,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let pool = single_conn_fk_pool(&dir.path().join("test.db")).await;
+        let mut conn = pool.acquire().await.unwrap();
+        let err = apply_pending_migrations(&mut conn, &migrator)
+            .await
+            .expect_err("the dangling-insert migration must be rejected");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("FOREIGN KEY constraint failed"),
+            "expected FK violation, got: {msg}"
+        );
+        drop(conn);
+
+        // Migrations 1 and 2 are recorded; the violating migration 3 is not.
+        let recorded: Vec<i64> = sqlx::query_scalar(
+            "SELECT version FROM _sqlx_migrations WHERE success = TRUE ORDER BY version",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            recorded,
+            vec![1, 2],
+            "the FK-violating migration must not be recorded"
+        );
+    }
+
+    /// Important (task-1-review): the owner rebuild must not be recorded
+    /// successful when the post-rebuild integrity check fails; after cleaning
+    /// up the dangling row a retry must apply it (self-healing install).
+    #[tokio::test]
+    async fn owner_migration_not_recorded_when_integrity_check_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = single_conn_fk_pool(&dir.path().join("test.db")).await;
+
+        {
+            let mut conn = pool.acquire().await.unwrap();
+            apply_pending_migrations(&mut conn, &pre_owner_migrator())
+                .await
+                .unwrap();
+        }
+
+        // Pre-existing dangling row: world_id with no narrative_worlds parent
+        // (inserted with enforcement off, mirroring the W-001 fixture above).
+        {
+            let mut conn = pool.acquire().await.unwrap();
+            // SAFETY: PRAGMA statement — no table schema to validate against.
+            sqlx::query("PRAGMA foreign_keys = OFF")
+                .execute(&mut *conn)
+                .await
+                .unwrap();
+            // SAFETY: test-only direct insert to create a deliberate violation.
+            sqlx::query(
+                "INSERT INTO kb_key_blocks \
+                 (key_block_id, world_id, block_type, canonical_name, status, body_json) \
+                 VALUES ('kb_dangling', 'nonexistent_world', 'character', 'dangling', \
+                         'provisional', '{}')",
+            )
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+            // SAFETY: PRAGMA statement — no table schema to validate against.
+            sqlx::query("PRAGMA foreign_keys = ON")
+                .execute(&mut *conn)
+                .await
+                .unwrap();
+        }
+
+        run_migrations(&pool)
+            .await
+            .expect_err("dangling row must fail the owner migration");
+        assert_eq!(
+            recorded_owner_success(&pool).await,
+            0,
+            "owner migration must not be recorded successful with dangling child FKs"
+        );
+
+        // Self-healing: remove the dangling row; a retry applies the rebuild.
+        sqlx::query("DELETE FROM kb_key_blocks WHERE key_block_id = 'kb_dangling'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        run_migrations(&pool).await.unwrap();
+        assert_eq!(
+            recorded_owner_success(&pool).await,
+            1,
+            "retry after cleanup must apply the owner migration"
         );
     }
 
