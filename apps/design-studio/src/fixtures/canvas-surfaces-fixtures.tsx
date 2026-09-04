@@ -89,6 +89,17 @@ const CHAPTER_STATUS_TOKENS = {
   completed: '--color-canvas-outline-chapter-card-status-completed',
 } as const;
 
+/**
+ * Status → AA text step (v1.183 P0 R-V1121P3T4-O001). Mirrors the app
+ * STATUS_TEXT_TOKEN_VAR mapping: label-12 pill text on the 12% tint uses the
+ * hue's `-1000` step; the raw status color fails AA on light tints.
+ */
+const CHAPTER_STATUS_TEXT_TOKENS = {
+  pending: '--color-gray-1000',
+  drafted: '--color-blue-1000',
+  completed: '--color-green-1000',
+} as const;
+
 const CHAPTER_STATUS_LABELS = {
   pending: 'Not started',
   drafted: 'Draft',
@@ -144,7 +155,7 @@ function ChapterNodeSample({
         <span
           className="flex items-center gap-1 rounded-pill bg-gray-alpha-100 px-1.5 py-0.5 text-label-12"
           style={{
-            color: tokenVar,
+            color: `var(${CHAPTER_STATUS_TEXT_TOKENS[status]})`,
             background: `color-mix(in srgb, ${tokenVar} 12%, transparent)`,
           }}
         >
@@ -212,6 +223,12 @@ const SCENE_STATUS_TOKENS = {
   completed: '--color-canvas-outline-scene-status-completed',
 } as const;
 
+/** Scene status → AA text step (mirrors the app SCENE_STATUS_TEXT_TOKEN_VAR). */
+const SCENE_STATUS_TEXT_TOKENS = {
+  drafted: '--color-blue-1000',
+  completed: '--color-green-1000',
+} as const;
+
 const SCENE_STATUS_LABELS = {
   drafted: 'Drafted',
   completed: 'Completed',
@@ -254,7 +271,7 @@ function SceneNodeSample({
           <span
             className="flex items-center gap-1 rounded-pill bg-gray-alpha-100 px-1.5 py-0.5 text-label-12"
             style={{
-              color: tokenVar,
+              color: status ? `var(${SCENE_STATUS_TEXT_TOKENS[status]})` : undefined,
               background: `color-mix(in srgb, ${tokenVar} 12%, transparent)`,
             }}
           >

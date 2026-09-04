@@ -55,6 +55,25 @@ function statusColorVar(status: ChapterStatus): string {
   return `var(${STATUS_TOKEN_VAR[status]})`;
 }
 
+/**
+ * AA text step per status (v1.183 P0 R-V1121P3T4-O001, AR-3): label-12 pill
+ * text on the 12% status tint uses the hue's existing `-1000` step (DESIGN.md
+ * §Contrast rule — body-copy status text uses `*-1000` on its tinted fill);
+ * the raw `*-700` status color fails AA on light tints. pending → gray-1000,
+ * drafted → blue-1000, completed → green-1000 (no new tokens).
+ */
+const STATUS_TEXT_TOKEN_VAR: Record<ChapterStatus, string> = {
+  not_started: '--color-gray-1000',
+  outlined: '--color-gray-1000',
+  draft: '--color-blue-1000',
+  finalized: '--color-green-1000',
+  published: '--color-green-1000',
+};
+
+function statusTextColorVar(status: ChapterStatus): string {
+  return `var(${STATUS_TEXT_TOKEN_VAR[status]})`;
+}
+
 // ---------------------------------------------------------------------------
 // Volume node
 // ---------------------------------------------------------------------------
@@ -110,7 +129,7 @@ export const OutlineChapterNode = memo(function OutlineChapterNode({
       <div className="mt-1 flex flex-wrap items-center gap-1">
         <span
           className="flex items-center gap-1 rounded-pill bg-gray-alpha-100 px-1.5 py-0.5 text-label-12"
-          style={{ color: statusColor, background: `color-mix(in srgb, ${statusColor} 12%, transparent)` }}
+          style={{ color: statusTextColorVar(d.status), background: `color-mix(in srgb, ${statusColor} 12%, transparent)` }}
         >
           <span className="inline-block h-2 w-2 rounded-pill" style={{ background: statusColor }} aria-hidden />
           {t(STATUS_LABEL_KEYS[d.status])}
