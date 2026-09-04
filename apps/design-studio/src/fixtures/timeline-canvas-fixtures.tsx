@@ -407,6 +407,7 @@ function NarrativeSpineSample() {
       {[60, 120, 180, 240, 300, 360].map((x, i) => (
         <line key={i} x1={x} y1={16} x2={x} y2={24} stroke={ACCENT_NARRATIVE} strokeWidth={1.5} strokeLinecap="round" />
       ))}
+      {/* Sample tick positions are illustrative, not production `20 + i * tickSpacing`. */}
       {[60, 180, 300].map((x, i) => (
         <text key={i} x={x} y={34} textAnchor="middle" fill={ACCENT_NARRATIVE} fontSize={9} fontFamily="var(--font-sans, ui-sans-serif, system-ui)" opacity={0.7}>tick</text>
       ))}

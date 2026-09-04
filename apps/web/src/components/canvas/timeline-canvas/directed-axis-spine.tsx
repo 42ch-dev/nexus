@@ -72,6 +72,25 @@ export const SPINE_Y_OFFSET = -8;
 
 const SPINE_VIEWPORT_WIDTH = 4000;
 
+/** Narrative tick spacing/width — exported for co-located geometry tests (no render). */
+export function narrativeSpineTickLayout(totalTicks: number): {
+  tickSpacing: number;
+  totalWidth: number;
+} {
+  const tickSpacing = totalTicks > 1
+    ? Math.min(SPINE_VIEWPORT_WIDTH / (totalTicks - 1), 280)
+    : 200;
+  const totalWidth = totalTicks > 1
+    ? (totalTicks - 1) * tickSpacing + 40
+    : 400;
+  return { tickSpacing, totalWidth };
+}
+
+export function narrativeSpineTickX(index: number, totalTicks: number): number {
+  const { tickSpacing } = narrativeSpineTickLayout(totalTicks);
+  return totalTicks > 1 ? 20 + index * tickSpacing : 20;
+}
+
 function BriefSpine({
   config,
   accentColor,
@@ -159,12 +178,7 @@ function NarrativeSpine({
 }) {
   const { tickTimestamps } = config;
   const totalTicks = tickTimestamps.length;
-  const tickSpacing = totalTicks > 1
-    ? Math.min(SPINE_VIEWPORT_WIDTH / (totalTicks - 1), 280)
-    : 200;
-  const totalWidth = totalTicks > 1
-    ? (totalTicks - 1) * tickSpacing + 40
-    : 400;
+  const { totalWidth } = narrativeSpineTickLayout(totalTicks);
   const spineY = SPINE_HEIGHT / 2;
 
   return (
@@ -186,9 +200,7 @@ function NarrativeSpine({
       />
 
       {tickTimestamps.map((ts, i) => {
-        const x = totalTicks > 1
-          ? 20 + i * tickSpacing
-          : 20;
+        const x = narrativeSpineTickX(i, totalTicks);
         const label = ts.length > 10 ? ts.slice(0, 10) : ts;
         return (
           <g key={i}>
