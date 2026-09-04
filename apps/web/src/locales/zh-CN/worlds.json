@@ -23,6 +23,7 @@
   "timelineActivityOverview": "{{era}} 个纪元 · {{event}} 个事件 · {{when}}",
   "timelineActivityFallback": "时间线 · 暂无活动",
   "loadMore": "加载更多",
+  "loadMoreActivity": "加载更多活动",
   "loadingMore": "加载中…",
   "overview": {
     "failed": "无法加载最近活动"

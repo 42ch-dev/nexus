@@ -133,21 +133,54 @@ export function Toaster() {
   );
 }
 
+// Keep in sync with the `--duration-exit` token
+// (tooling/design-tokens/src/tokens.css) — this JS removal timer must land on
+// the same tick as the CSS exit transition, and toast.test.tsx advances 140ms.
+const TOAST_EXIT_MS = 140;
+
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number) => void }) {
   const { variant, title, description, duration, id, testId } = toast;
   const styles = VARIANT_STYLES[variant];
+  const [motion, setMotion] = useState<'enter' | 'shown' | 'exit'>('enter');
+  const exitTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const exitingRef = useRef(false);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setMotion('shown'));
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  const beginExit = useCallback(() => {
+    if (exitingRef.current) return;
+    exitingRef.current = true;
+    setMotion('exit');
+    exitTimerRef.current = setTimeout(() => onDismiss(id), TOAST_EXIT_MS);
+  }, [id, onDismiss]);
 
   useEffect(() => {
     if (!duration || duration <= 0) return;
-    const timer = setTimeout(() => onDismiss(id), duration);
+    const timer = setTimeout(() => beginExit(), duration);
     return () => clearTimeout(timer);
-  }, [duration, id, onDismiss]);
+  }, [duration, beginExit]);
+
+  useEffect(
+    () => () => {
+      if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
+    },
+    [],
+  );
 
   return (
     <div
       data-testid={testId}
       role={variant === 'error' ? 'alert' : 'status'}
-      className="pointer-events-auto flex overflow-hidden rounded-popover border border-gray-alpha-400 bg-background-100 shadow-popover"
+      className={cn(
+        'pointer-events-auto flex overflow-hidden rounded-popover border border-gray-alpha-400 bg-background-100 shadow-popover',
+        'transition-[opacity,transform] motion-reduce:transition-none',
+        motion === 'enter' && 'translate-y-2 opacity-0',
+        motion === 'shown' && 'translate-y-0 opacity-100 duration-enter ease-standard',
+        motion === 'exit' && 'translate-y-2 opacity-0 duration-exit ease-standard',
+      )}
     >
       <span aria-hidden className={cn('w-1 shrink-0', styles.bar)} />
       <div className="flex flex-1 items-start gap-2 p-4">
@@ -158,7 +191,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number)
         </div>
         <button
           type="button"
-          onClick={() => onDismiss(id)}
+          onClick={beginExit}
           aria-label="Dismiss notification"
           className="shrink-0 rounded-control p-1 text-gray-700 transition-colors duration-state ease-standard hover:bg-gray-alpha-100 hover:text-gray-1000"
         >

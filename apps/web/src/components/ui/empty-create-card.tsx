@@ -12,6 +12,8 @@ export function EmptyCreateCard({
   title,
   description,
   onClick,
+  disabled,
+  titleAttr,
   className,
   'data-testid': testId,
 }: {
@@ -19,6 +21,9 @@ export function EmptyCreateCard({
   title: string;
   description: string;
   onClick: () => void;
+  disabled?: boolean;
+  /** Native tooltip when disabled (e.g. desktop-only gate). */
+  titleAttr?: string;
   className?: string;
   'data-testid'?: string;
 }) {
@@ -26,9 +31,15 @@ export function EmptyCreateCard({
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
+      tabIndex={disabled ? -1 : undefined}
+      title={titleAttr}
       data-testid={testId}
       className={cn(
-        'flex w-full min-h-[7.5rem] flex-col items-center justify-center gap-2 rounded-card border border-dashed border-gray-alpha-400 p-6 text-center transition-colors duration-state ease-standard hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 motion-reduce:transition-none',
+        'flex w-full min-h-[7.5rem] flex-col items-center justify-center gap-2 rounded-card border border-dashed border-gray-alpha-400 p-6 text-center motion-reduce:transition-none',
+        disabled
+          ? 'cursor-not-allowed opacity-60'
+          : 'transition-colors duration-state ease-standard hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2',
         className,
       )}
     >

@@ -124,6 +124,12 @@ describe('toast queue + Toaster rendering', () => {
 
     const button = screen.getByRole('button', { name: 'Dismiss notification' });
     act(() => button.click());
+    // Two-phase dismissal: the toast stays mounted while the exit motion
+    // plays, then unmounts after TOAST_EXIT_MS (mirrors --duration-exit).
+    expect(screen.getByText('Click me away')).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(140); // mirrors --duration-exit (see TOAST_EXIT_MS in toast.tsx)
+    });
     expect(screen.queryByText('Click me away')).not.toBeInTheDocument();
   });
 });
@@ -138,6 +144,11 @@ describe('toast auto-dismiss', () => {
 
     act(() => {
       vi.advanceTimersByTime(5_000);
+    });
+    // Duration elapsed → exit motion starts; unmount happens after TOAST_EXIT_MS.
+    expect(screen.getByText('Ephemeral')).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(140); // mirrors --duration-exit (see TOAST_EXIT_MS in toast.tsx)
     });
     expect(screen.queryByText('Ephemeral')).not.toBeInTheDocument();
   });

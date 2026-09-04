@@ -23,6 +23,7 @@
   "timelineActivityOverview": "{{era}} eras · {{event}} events · {{when}}",
   "timelineActivityFallback": "Timeline · no activity yet",
   "loadMore": "Load more",
+  "loadMoreActivity": "Load more activity",
   "loadingMore": "Loading…",
   "overview": {
     "failed": "Couldn't load recent activity"

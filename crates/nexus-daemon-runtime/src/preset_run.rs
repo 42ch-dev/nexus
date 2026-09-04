@@ -48,6 +48,7 @@ use graph_flow::SessionStorage;
 use nexus_orchestration::engine::{
     EngineSignal, OrchestrationEngine, SessionId, SessionStatus, SessionSummary, StepOutcome,
 };
+use nexus_orchestration::resume_rules;
 use tokio_util::sync::CancellationToken;
 
 /// Bounds and posture for one [`drive_preset_run`] call.
@@ -346,9 +347,13 @@ pub async fn resume_driven_sessions(
         //    typed-failed join. The DB `status` column stays `running`
         //    after a typed failure (save ON CONFLICT does not update it),
         //    so the context keys are the only reliable failure record.
-        let run_status: Option<String> = session.context.get("_run_status").await;
-        let run_error: Option<String> = session.context.get("_run_error").await;
-        if run_status.is_some() || run_error.is_some() {
+        //    Projected via the shared `resume_rules` module — the same
+        //    predicates `nexus42 ops inspect` uses, over the same persisted
+        //    data (single source of truth, qc1 W1; string-typed values only,
+        //    mirroring `Context::get`).
+        let context_value = serde_json::to_value(&session.context).ok();
+        let data = context_value.as_ref().and_then(resume_rules::context_data);
+        if data.is_some_and(resume_rules::typed_failure_keys_present) {
             decisions.push(ResumeDecision::SkippedTypedFailed { session_id });
             continue;
         }
@@ -356,7 +361,7 @@ pub async fn resume_driven_sessions(
         // 2. Converge/merge chain class filter (no-checkpoint default
         //    equivalence): only sessions provably inside a converge/merge
         //    chain are re-driven.
-        if !is_converge_merge_chain(&session.context) {
+        if !data.is_some_and(resume_rules::is_converge_merge_chain) {
             decisions.push(ResumeDecision::SkippedNotConvergeMergeClass { session_id });
             continue;
         }
@@ -376,32 +381,6 @@ pub async fn resume_driven_sessions(
         });
     }
     decisions
-}
-
-/// True when the context carries a LIVE join-tracking key — written only by
-/// merge/converge gate states (`_converge_arrivals_<id>`, `_merge_<id>`,
-/// `_join_wait_start_<id>`).
-///
-/// Key PRESENCE alone is not enough: `Context::set` never removes keys, and
-/// the join gates clear their tracking keys by writing `Value::Null`
-/// (deadline exceeded in `join_timeout_tick`; success-leave in the join
-/// task). A session whose join keys are all Null has LEFT the chain — it is
-/// class-negative and must not be re-driven (a completed session would
-/// otherwise re-execute, and a post-join `llm_judge`/`manual` wait would be
-/// auto-advanced by the resume re-drive).
-fn is_converge_merge_chain(context: &graph_flow::Context) -> bool {
-    let Ok(serde_json::Value::Object(root)) = serde_json::to_value(context) else {
-        return false;
-    };
-    let Some(serde_json::Value::Object(data)) = root.get("data") else {
-        return false;
-    };
-    data.iter().any(|(k, v)| {
-        !v.is_null()
-            && (k.starts_with("_converge_arrivals_")
-                || k.starts_with("_merge_")
-                || k.starts_with("_join_wait_start_"))
-    })
 }
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
 import { ChevronRight, Ellipsis, type LucideIcon } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, memo, type ReactNode } from 'react';
 import { useLocation } from 'react-router';
 
 import { cn } from '@/lib/utils';
@@ -344,8 +344,12 @@ function NavGroupChrome({
  * flat drill-in list so item markup (active bar, icon, label, active classes)
  * stays in one place. The active state comes from `isActiveItem` when provided,
  * else the built-in `item.to` prefix match.
+ *
+ * Memoized: effectiveness depends on callers keeping props referentially
+ * stable (`renderNavItem`, `isActiveItem`, `hasSubmenu`, `onOpenSubmenu`) —
+ * inline closures from a caller silently defeat the memo.
  */
-function NavItemLi({
+const NavItemLi = memo(function NavItemLi({
   item,
   activeRoute,
   isActiveItem,
@@ -446,4 +450,4 @@ function NavItemLi({
       </div>
     </li>
   );
-}
+});

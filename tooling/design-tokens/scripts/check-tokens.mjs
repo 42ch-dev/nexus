@@ -93,6 +93,11 @@ const required = [
   { label: 'preset: memory-task-kind color group', haystack: preset, needle: "'memory-task-kind':" },
   { label: 'preset: reading-maturation color group', haystack: preset, needle: "'reading-maturation':" },
   { label: 'preset: finding-status consumes var', haystack: preset, needle: "cv('finding-status-open-bg')" },
+  { label: 'tokens: data-table row-protected', haystack: tokens, needle: '--color-data-table-row-protected:' },
+  { label: 'tokens: main-banner background', haystack: tokens, needle: '--color-main-banner-background:' },
+  { label: 'preset: data-table-row-protected', haystack: preset, needle: "cv('data-table-row-protected')" },
+  { label: 'preset: main-banner-background', haystack: preset, needle: "cv('main-banner-background')" },
+  { label: 'preset: fontSize copy-12 key', haystack: preset, needle: "'copy-12':" },
 ];
 
 /** Banned legacy namespace, assembled so a repo-wide grep for the literal
