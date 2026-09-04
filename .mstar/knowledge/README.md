@@ -323,3 +323,9 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | Document | Description |
 | --- | --- |
 | [architecture-patterns/decision-rule-projection-single-source.md](architecture-patterns/decision-rule-projection-single-source.md) | Decision-rule projection single source — CLI/GUI restating engine decision rules must consume a shared projection next to the source (`crates/nexus-orchestration/src/resume_rules.rs` consumed by preset_run.rs boot re-drive + ops inspect detail/list), split decidable verdict from boot-time caveat field, never read bookkeeping status columns as rules, pin equivalence on both sides (v1.182 P1 BL-04 distilled; compound v1.182) |
+
+### v1.183 additions
+
+| Document | Description |
+| --- | --- |
+| [architecture-patterns/component-variant-token-projection.md](architecture-patterns/component-variant-token-projection.md) | Component-variant token projection with a four-piece pipeline — project component-library variant colors (badge soft `color-mix` arbitraries) into semantic token families landed via tokens.css + preset cv() + full check-tokens needles (bg/text/border per variant, not samples) + moved test pins; alpha scalars join the color namespace as color-mix operands; Studio surfaces follow value type (swatch vs demo chip); audit cross-package pin drift after shared-component visual changes (v1.183 P0 R-V1121P1QC1-S001 + R-V1182P0-002 distilled; compound v1.183) |
