@@ -83,7 +83,7 @@ export function CreatorEntityListsPanel() {
   }
 
   function openSubmenu(item: CreatorEntityListItem & { kind: 'work' | 'world' }, anchor: HTMLElement) {
-    triggerRef.current = document.activeElement as HTMLElement;
+    triggerRef.current = anchor;
     setSubmenuItem(item);
     setSubmenuAnchor(anchor);
   }

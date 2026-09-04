@@ -92,6 +92,7 @@ export function SelectionSubmenu({
 
   useEffect(() => {
     if (!open || !anchorEl) return;
+    // Containment is the in-tree menu node only; there is no portal consumer of this submenu.
     function handleClickOutside(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         onClose();
