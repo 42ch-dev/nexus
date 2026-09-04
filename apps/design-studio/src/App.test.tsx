@@ -1602,7 +1602,7 @@ describe('Components page — Badge soft/solid matrix', () => {
       expect(badge).toHaveClass('border-transparent');
       expect(badge).toHaveClass('text-white');
     }
-    expect(screen.getByTestId('badge-solid-running')).toHaveClass('bg-green-700');
+    expect(screen.getByTestId('badge-solid-running')).toHaveClass('bg-green-800');
     expect(screen.getByTestId('badge-solid-running')).toHaveClass('dark:text-brand-deep-blue');
   });
 });
