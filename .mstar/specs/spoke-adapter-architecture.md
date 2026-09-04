@@ -122,9 +122,25 @@ The `world_id` column is **retained as a required SQLite column** (FK to `narrat
 
 ## 3. Daemon-API Envelope Strategy (Q8)
 
-### 3.1 Decision: `$ref` spoke schema URIs
+### 3.1 Decision: active V1.139 opaque-object fallback
 
-Daemon-api envelope schemas reference spoke types via their published `$id` URIs. The spoke `knowledge-entry.schema.json` declares `"$id": "https://spoke42.invalid/schemas/data/knowledge-entry.schema.json"`. Nexus daemon-api schemas use:
+The active daemon-api contract does **not** `$ref` the SPOKE `KnowledgeEntry`
+schema. V1.139 shipped the following local schema shapes:
+
+| Surface | Active schema shape |
+|---------|---------------------|
+| `compute-input.schema.json` `key_blocks[]` | Open object (`type: object`, `additionalProperties: true`) |
+| `compute-output.schema.json` `new_key_blocks[]` | Open object (`type: object`, `additionalProperties: true`) |
+| `world-kb-graph-response.schema.json` `entities[]` | Local `$ref` to `world-kb-entity-projection.schema.json` — a Nexus canvas/inspector projection, not the raw SPOKE atom |
+
+The compute item descriptions retain the canonical SPOKE URI
+`https://spoke42.invalid/schemas/data/knowledge-entry.schema.json` and direct
+typed consumers to the published SPOKE packages. Those annotations identify the
+intended atom; they do not make the Nexus schema validate its fields.
+
+External `$ref` is the future target once the published SPOKE packages provide
+schema sources that Nexus codegen can resolve locally. The intended target shape
+remains:
 
 ```json
 {
@@ -136,9 +152,19 @@ Daemon-api envelope schemas reference spoke types via their published `$id` URIs
 }
 ```
 
-### 3.2 Codegen resolution
+### 3.2 Future codegen resolution target
 
-The codegen tooling (`json-schema-to-typescript` + `typify`) resolves `$ref` URIs by loading schema files from a known filesystem path. The spoke-schemas package (npm: `@42ch/spoke-schemas`, cargo: `spoke-schemas`) ships its `schemas/` directory. The codegen schema loader is configured with a resolver that maps `https://spoke42.invalid/schemas/` → the spoke package's `schemas/` directory on disk.
+The target codegen design is to resolve the canonical SPOKE `$ref` from a known
+filesystem path and then feed the resolved schema through the existing
+`json-schema-to-typescript` + `typify` pipeline. This is not the active pipeline:
+`tooling/codegen/src/schema-prep.ts` localizes only
+`https://nexus42.invalid/schemas/` references, disables HTTP(S) resolution, and
+confines file reads to Nexus's localized schema tree.
+
+Promotion from the V1.139 fallback therefore requires both an upstream package
+that ships its `schemas/` sources and an explicit Nexus resolver mapping from
+`https://spoke42.invalid/schemas/` to that pinned package content. Until then,
+§3.4 is the current contract.
 
 ### 3.3 Schema migration impact
 
@@ -146,13 +172,34 @@ The codegen tooling (`json-schema-to-typescript` + `typify`) resolves `$ref` URI
 |------|--------|-------|
 | `schemas/domain/key-block.schema.json` | Exists; owns `KeyBlock` type | **Deleted** |
 | `schemas/common/common.schema.json` | Defines `KeyBlockId`, `BlockType`, `KeyBlockStatus` | `KeyBlockId` removed (spoke uses `entry_id`); `BlockType` and `KeyBlockStatus` **retained** as nexus-local definitions for daemon-api envelope fields and query parameters that still carry the legacy enum values (status transition maps to spoke core vocab internally) |
-| `schemas/daemon-api/canvas/world-kb/world-kb-graph-response.schema.json` | References `KeyBlock` from `key-block.schema.json` | References `KnowledgeEntry` from spoke via `$ref` |
-| `schemas/daemon-api/compute/compute-input.schema.json` | Carries `KeyBlock` in `key_blocks` array | Carries `KnowledgeEntry` from spoke via `$ref` |
-| `schemas/daemon-api/compute/compute-output.schema.json` | References `KeyBlock` in state_delta target | References `KnowledgeEntry` from spoke |
+| `schemas/daemon-api/canvas/world-kb/world-kb-graph-response.schema.json` | References `KeyBlock` from `key-block.schema.json` | References the local `WorldKbEntityProjection` via `world-kb-entity-projection.schema.json`; it does not expose or externally `$ref` a raw SPOKE `KnowledgeEntry` |
+| `schemas/daemon-api/compute/compute-input.schema.json` | Carries `KeyBlock` in `key_blocks` array | Carries serialized SPOKE `KnowledgeEntry` values as open objects under the active V1.139 fallback; the canonical SPOKE URI is descriptive only |
+| `schemas/daemon-api/compute/compute-output.schema.json` | References `KeyBlock` in state_delta target | Keeps the target entry identifier as an opaque string and carries `new_key_blocks` as open objects under the active V1.139 fallback |
 
-### 3.4 Fallback path
+### 3.4 Active fallback and promotion condition
 
-If the codegen tooling cannot resolve external `$ref` URIs for spoke schemas within the P0 slice, the daemon-api schemas annotate the spoke type dependency in their `description` field, and the generated types import spoke types as external crate/package imports. This is treated as a temporary bridge — the target state is `$ref`-based resolution.
+The V1.139 fallback remains active because the published SPOKE packages provide
+compiled types but not the schema sources needed by Nexus's confined codegen
+pipeline. Compute input `key_blocks[]` and compute output `new_key_blocks[]`
+therefore use `type: object` with `additionalProperties: true`; generated Nexus
+contracts preserve that opaque object boundary. Typed interpretation belongs to
+the directly consumed SPOKE package, outside the Nexus envelope codegen.
+
+The World KB graph is intentionally different: it is a Nexus UI projection and
+uses local projection schemas (`WorldKbEntityProjection` plus local edge
+projections), rather than carrying the raw SPOKE atom.
+
+External `$ref` becomes the active contract only after all of the following are
+true:
+
+1. Published SPOKE packages ship the canonical schema sources.
+2. Nexus codegen resolves the canonical SPOKE URI from pinned local package
+   content without network access.
+3. The affected daemon schemas switch from opaque objects to `$ref`, generated
+   outputs are regenerated, and drift/codegen gates prove the resolved shape.
+
+Until that promotion, the canonical URI in schema descriptions is documentation,
+not generation-time validation.
 
 ## 4. `nexus-contracts` Package Boundary (Q9)
 
@@ -202,9 +249,18 @@ The `schema_drift_detection.rs` `build_schema_map()` removes the `key-block.sche
 2. Verify the two npm pins (`@42ch/spoke-schemas`, `@42ch/spoke-operations`) both match the pinned **`0.11.1`** in `package.json`.
 3. Construct a `KnowledgeEntry` from spoke fixture JSON, deserialize via nexus's serde path, serialize back — verify structural round-trip. This catches type-mapping regressions without requiring a local schema.
 
-### 5.3 Daemon-api envelopes that `$ref` spoke types
+### 5.3 Daemon-api envelopes carrying SPOKE values
 
-Schemas in `schemas/daemon-api/**` that `$ref` spoke types continue to have local drift detection for their **own** fields (the envelope wrapper). The spoke fields that come from `$ref` are validated by the codegen tool at generation time — if the `$ref` resolution fails, codegen fails, which CI's `verify-codegen` gate catches.
+Current daemon schemas do not externally `$ref` the SPOKE `KnowledgeEntry`
+schema. Drift detection continues to cover each Nexus envelope's own local
+fields. For compute input `key_blocks[]` and output `new_key_blocks[]`, the open
+object item schema deliberately performs no SPOKE field-level validation; its
+description points to the canonical SPOKE URI. The World KB graph validates its
+own local `WorldKbEntityProjection` shape, not the complete raw SPOKE atom.
+
+Generation-time validation through an external SPOKE `$ref` is the future target
+described in §3.2–§3.4. Only after that promotion would failed external
+resolution become a codegen/CI failure proving the SPOKE field shape.
 
 ## 6. HTTP Route Path Stability (Q12)
 
