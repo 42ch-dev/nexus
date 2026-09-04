@@ -45,6 +45,13 @@ pub use platform::*;
 /// Schema version constants
 pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("VersionRef", 1),
+    ("AddKnowledgeEntryRequest", 1),
+    ("AddKnowledgeEntryResponse", 1),
+    ("KnowledgeViewItem", 1),
+    ("ListCharacterKnowledgeQuery", 1),
+    ("ListCharacterKnowledgeResponse", 1),
+    ("ViewRequest", 1),
+    ("ViewResponse", 1),
     ("AgentScanEntry", 1),
     ("ScanRequest", 1),
     ("ScanResponse", 1),
@@ -241,6 +248,7 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("Character", 1),
     ("Creator", 1),
     ("ForkBranch", 1),
+    ("KnowledgeOwnerRef", 1),
     ("Memory", 1),
     ("Pairing", 1),
     ("StoryManifest", 1),

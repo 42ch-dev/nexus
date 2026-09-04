@@ -36,6 +36,9 @@ Durable Creator-owned Character bearer (v1.184). Distinct from KnowledgeEntry `b
 ### ActorWorldBinding (`actor-world-binding.schema.json`)
 Character↔World association (1..n active bindings). Distinct from WorldMembership.
 
+### KnowledgeOwnerRef (`knowledge-owner-ref.schema.json`)
+Closed World | Character | ActorWorldBinding owner union for KnowledgeEntry wire metadata.
+
 ### TimelineEvent (`timeline-event.schema.json`)
 Canonical timeline event with causality, sequence, and affected knowledge entries. §5.6
 

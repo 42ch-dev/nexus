@@ -97,6 +97,7 @@ pub enum ActorContractConflict {
     DuplicateCharacterDisplayName,
     InvalidWorldSheet,
     WorldHasActorBindings,
+    BindingHasOwnedKnowledge,
 }
 
 impl ActorContractConflict {
@@ -108,6 +109,7 @@ impl ActorContractConflict {
             Self::DuplicateCharacterDisplayName => "duplicate_character_display_name",
             Self::InvalidWorldSheet => "invalid_world_sheet",
             Self::WorldHasActorBindings => "world_has_actor_bindings",
+            Self::BindingHasOwnedKnowledge => "binding_has_owned_knowledge",
         }
     }
 
@@ -129,6 +131,9 @@ impl ActorContractConflict {
             }
             Self::WorldHasActorBindings => {
                 "World has Character bindings that prevent deletion"
+            }
+            Self::BindingHasOwnedKnowledge => {
+                "Cannot remove a binding that still owns KnowledgeEntry rows"
             }
         }
     }
