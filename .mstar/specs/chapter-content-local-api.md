@@ -2,17 +2,21 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Draft — V1.65 Prepare contract for P0 implementation |
-| **Document class** | Draft overlay |
-| **Scope** | Chapter list/detail, outline read/write, structure PATCH, and body read-only Daemon API contracts under `/v1/local/works/{work_id}/chapters/*` |
-| **Coordinates with** | [local-api-surface-conventions.md](./local-api-surface-conventions.md), [daemon-runtime.md](./daemon-runtime.md), [schemas-directory-layout.md](./schemas-directory-layout.md), [web-ui.md](./web-ui.md), repo-root [`DESIGN.md`](../../DESIGN.md) |
-| **Implementation owner** | V1.65 P0 backend implementer; P2 Web UI consumes only via `NexusClient` |
+| **Status** | Shipped — V1.65 chapter surface; V1.75 retired whole-document outline PUT in favor of the canvas patch route |
+| **Document class** | Feature line |
+| **Scope** | Chapter list/detail, outline read, structure PATCH, and body read-only Daemon API contracts under `/v1/daemon/works/{work_id}/chapters/*` |
+| **Coordinates with** | [daemon-api-surface-conventions.md](./daemon-api-surface-conventions.md), [daemon-runtime.md](./daemon-runtime.md), [schemas-directory-layout.md](./schemas-directory-layout.md), [web-ui.md](./web-ui.md), repo-root [`DESIGN.md`](../../DESIGN.md) |
+| **Implementation owner** | `nexus-daemon-runtime` chapter/canvas handlers; Web UI consumes only through `NexusClient` |
 
 ---
 
 ## 1. Purpose and boundary
 
 V1.65 exposes the existing `work_chapters` metadata and file-backed chapter content to the bundled local Web UI so authors can plan and restructure a Work without turning the browser SPA into a manuscript co-writer.
+
+Route and schema names in this document are current. Conditional “P0” wording
+inside DTO/implementation discussions is retained as V1.65 design history and
+does not override the shipped source or schema tree.
 
 The surface is intentionally split:
 
@@ -30,16 +34,16 @@ The surface is intentionally split:
 
 ## 3. Endpoint summary
 
-All endpoints use the V1.64 Daemon API error convention: non-2xx responses are emitted as the daemon error wire envelope with `error` shaped by `schemas/local-api/common/error-response.schema.json`.
+All endpoints use the Daemon API error convention: non-2xx responses are emitted as the daemon error wire envelope with `error` shaped by `schemas/daemon-api/common/error-response.schema.json`.
 
 | Method | Path | Purpose | Mutates file | Mutates DB |
 | --- | --- | --- | --- | --- |
-| `GET` | `/v1/local/works/{work_id}/chapters` | Cursor-paginated chapter summaries | No | No |
-| `GET` | `/v1/local/works/{work_id}/chapters/{n}` | Chapter detail including paths | No | No |
-| `GET` | `/v1/local/works/{work_id}/chapters/{n}/outline` | Read outline markdown | No | No |
-| ~~`PUT`~~ | ~~`/v1/local/works/{work_id}/chapters/{n}/outline`~~ | **Removed in V1.75** (canvas-pivot). Outline prose writes now go through the canvas patch route `POST /v1/local/works/{work_id}/chapters/{chapter_id}/patch` with `set.content` + `base_revision` (`outline_revision` CAS). See [canvas-strategy-surface.md](canvas-strategy-surface.md) §3.5. | — | — |
-| `PATCH` | `/v1/local/works/{work_id}/chapters/{n}` | Structure metadata update | No | Yes |
-| `GET` | `/v1/local/works/{work_id}/chapters/{n}/body` | Read body markdown | No | No |
+| `GET` | `/v1/daemon/works/{work_id}/chapters` | Cursor-paginated chapter summaries | No | No |
+| `GET` | `/v1/daemon/works/{work_id}/chapters/{n}` | Chapter detail including paths | No | No |
+| `GET` | `/v1/daemon/works/{work_id}/chapters/{n}/outline` | Read outline markdown | No | No |
+| ~~`PUT`~~ | ~~`/v1/local/works/{work_id}/chapters/{n}/outline`~~ | **Removed in V1.75** (historical route spelling; canvas pivot). Outline prose writes now go through `POST /v1/daemon/works/{work_id}/chapters/{chapter_id}/patch` with `set.content` + `base_revision` (`outline_revision` CAS). See [canvas-strategy-surface.md](canvas-strategy-surface.md) §3.5. | — | — |
+| `PATCH` | `/v1/daemon/works/{work_id}/chapters/{n}` | Structure metadata update | No | Yes |
+| `GET` | `/v1/daemon/works/{work_id}/chapters/{n}/body` | Read body markdown | No | No |
 
 `{n}` is the chapter number within a volume. V1.65 MUST support `volume` as an optional query parameter on detail/content/patch routes; when omitted it defaults to `1` to preserve existing single-volume behavior.
 
@@ -108,7 +112,7 @@ Suggested `protection` shape:
 
 ## 5. Endpoint contracts
 
-### 5.1 `GET /v1/local/works/{work_id}/chapters`
+### 5.1 `GET /v1/daemon/works/{work_id}/chapters`
 
 Query:
 
@@ -118,7 +122,7 @@ Query:
 | `limit` | integer | `50` | Handler-bounded. |
 | `status` | chapter status | absent | Optional filter; recommended for P2 table filtering. |
 
-Response schema target: `schemas/local-api/works/chapters/list-chapters-response.schema.json`.
+Response schema: `schemas/daemon-api/works/chapters/list-chapters-response.schema.json`.
 
 ```json
 {
@@ -152,7 +156,7 @@ Rules:
 - Ordering defaults to `volume ASC, chapter ASC`.
 - This endpoint does not read markdown files.
 
-### 5.2 `GET /v1/local/works/{work_id}/chapters/{n}`
+### 5.2 `GET /v1/daemon/works/{work_id}/chapters/{n}`
 
 Query:
 
@@ -160,7 +164,7 @@ Query:
 | --- | --- | --- | --- |
 | `volume` | integer | `1` | Positive volume number. |
 
-Response schema target: `schemas/local-api/works/chapters/chapter-detail.schema.json`.
+Response schema: `schemas/daemon-api/works/chapters/chapter-detail.schema.json`.
 
 Returns `ChapterDetail`.
 
@@ -170,7 +174,7 @@ Rules:
 - Returns `work_not_found`/`chapter_not_found` style errors using the shared `ErrorResponse` convention.
 - Does not read outline/body content; path strings are metadata only.
 
-### 5.3 `GET /v1/local/works/{work_id}/chapters/{n}/outline`
+### 5.3 `GET /v1/daemon/works/{work_id}/chapters/{n}/outline`
 
 Query:
 
@@ -178,7 +182,7 @@ Query:
 | --- | --- | --- | --- |
 | `volume` | integer | `1` | Positive volume number. |
 
-Response schema target: `schemas/local-api/works/chapters/chapter-outline.schema.json`.
+Response schema: `schemas/daemon-api/works/chapters/chapter-outline.schema.json`.
 
 ```json
 {
@@ -199,9 +203,9 @@ Rules:
 
 ### 5.4 `PUT /v1/local/works/{work_id}/chapters/{n}/outline` — removed in V1.75
 
-**Removed in V1.75** (canvas-pivot). The V1.65 whole-document outline PUT route, its `put-chapter-outline-request` DTO, and schema file were retired; outline prose writes now go through the canvas patch route `POST /v1/local/works/{work_id}/chapters/{chapter_id}/patch` with `set.content` + `base_revision` (`outline_revision` CAS). The atomic-write / RuntimeLockGuard / body-ownership invariants that this section used to describe are re-anchored to that PATCH content path in [local-api-surface-conventions.md](local-api-surface-conventions.md) §6.2 and §7 (V1.75 amendment); see also [canvas-strategy-surface.md](canvas-strategy-surface.md) §3.5. The outline *read* (`GET …/outline`, §5.3) is unchanged.
+**Removed in V1.75** (canvas-pivot). The historical V1.65 whole-document outline PUT route, its `put-chapter-outline-request` DTO, and schema file were retired; outline prose writes now go through the canvas patch route `POST /v1/daemon/works/{work_id}/chapters/{chapter_id}/patch` with `set.content` + `base_revision` (`outline_revision` CAS). The atomic-write / RuntimeLockGuard / body-ownership invariants that this section used to describe are re-anchored to that PATCH content path in [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) §6.2 and §7 (V1.75 amendment); see also [canvas-strategy-surface.md](canvas-strategy-surface.md) §3.5. The outline *read* (`GET …/outline`, §5.3) is unchanged.
 
-### 5.5 `PATCH /v1/local/works/{work_id}/chapters/{n}`
+### 5.5 `PATCH /v1/daemon/works/{work_id}/chapters/{n}`
 
 Query:
 
@@ -209,7 +213,7 @@ Query:
 | --- | --- | --- | --- |
 | `volume` | integer | `1` | Positive current volume. |
 
-Request schema target: `schemas/local-api/works/chapters/patch-chapter-request.schema.json`.
+Request schema: `schemas/daemon-api/works/chapters/patch-chapter-request.schema.json`.
 
 ```json
 {
@@ -251,7 +255,7 @@ Protection rules:
 - Structural edits to `published` chapters are hard-blocked in V1.65.
 - Edits to `draft` chapters are allowed but should surface a warning in UI because the body may already exist.
 
-### 5.6 `GET /v1/local/works/{work_id}/chapters/{n}/body`
+### 5.6 `GET /v1/daemon/works/{work_id}/chapters/{n}/body`
 
 Query:
 
@@ -259,7 +263,7 @@ Query:
 | --- | --- | --- | --- |
 | `volume` | integer | `1` | Positive volume number. |
 
-Response schema target: `schemas/local-api/works/chapters/chapter-body.schema.json`.
+Response schema: `schemas/daemon-api/works/chapters/chapter-body.schema.json`.
 
 ```json
 {
@@ -318,7 +322,6 @@ The Web UI must consume this surface through `NexusClient` methods such as:
 listChapters(workId, query)
 getChapter(workId, chapter, query)
 getChapterOutline(workId, chapter, query)
-putChapterOutline(workId, chapter, body, query)
 patchChapter(workId, chapter, patch, query)
 getChapterBody(workId, chapter, query)
 ```
@@ -327,18 +330,18 @@ The contract deliberately returns markdown strings and relative workspace paths;
 
 ## 9. Schema placement
 
-P0 should materialize schemas under:
+The current chapter contracts live under:
 
 ```text
-schemas/local-api/works/chapters/
-├── README.md
+schemas/daemon-api/works/chapters/
 ├── chapter-body.schema.json
+├── chapter-content-query.schema.json
 ├── chapter-detail.schema.json
 ├── chapter-outline.schema.json
+├── chapter-protection.schema.json
+├── chapter-status.schema.json
 ├── chapter-summary.schema.json
 ├── list-chapters-query.schema.json
 ├── list-chapters-response.schema.json
 └── patch-chapter-request.schema.json
 ```
-
-If codegen constraints favor a flat `schemas/local-api/works/` folder, P0 may flatten the files with a `chapter-` prefix, but the normative layout target for V1.65 is the `works/chapters/` subtree.

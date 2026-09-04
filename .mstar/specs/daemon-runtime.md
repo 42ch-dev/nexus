@@ -8,6 +8,7 @@
 | **Document class** | Master |
 | **Normative scope** | Architecture boundaries, process model, subsystem responsibilities, pre-release constraints |
 | **Related** | [cli-spec.md](./cli-spec.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [agent-host.md](./agent-host.md) |
+| **Last reconciled** | 2026-09-04 — current Daemon API/runtime facts through V1.183, including V1.180–V1.182 checkpoint inspection and boot re-drive |
 
 ---
 
@@ -23,7 +24,7 @@ Pre-release posture: no compatibility migration layer required; local state may 
 
 ```text
 nexus42 (CLI — entry, routing, UX)
-  ├─ nexus-daemon-runtime (library — lifecycle, subsystems, local API)
+  ├─ nexus-daemon-runtime (library — lifecycle, subsystems, Daemon API)
 │    ├─ local DB / workspace handles
 │    ├─ schedule / worker supervision
 │    ├─ loopback Daemon API (/v1/daemon/*) — local product only
@@ -264,7 +265,7 @@ points, all dispatching through the same `CapabilityRegistry::dispatch` path:
 
 | Entry point | Caller | Normalization | Dispatch |
 |-------------|--------|---------------|----------|
-| `HostToolExecutor::execute()` | CLI `host-call` + HTTP `POST /v1/local/agent-host/internal/tool-executions` | `ToolExecuteRequest` → admission pipeline | `CapabilityRegistry::dispatch` |
+| `HostToolExecutor::execute()` | CLI `host-call` + HTTP `POST /v1/daemon/agent-host/internal/tool-executions` | `ToolExecuteRequest` → admission pipeline | `CapabilityRegistry::dispatch` |
 | `HostToolExecutor::dispatch_from_worker()` | Worker `agent_tool_request` IPC | `{tool_name, args, request_id}` → `ToolExecuteRequest` | Same path |
 | `HostToolExecutor::dispatch_for_schedule()` | Schedule executor (in-process) | `{tool_name, args, request_id}` → `ToolExecuteRequest` with `HostToolCallerKind::Schedule` | Same path |
 
@@ -1135,3 +1136,44 @@ supervised through the lane's watch task: it surfaces as a `JoinError`, ONE
 `peer config reload degraded` warn is logged, the daemon stays up, and new
 hellos keep admitting against the last-good snapshot — a restart restores
 reload.
+
+## 19. Checkpoint inspection and resume semantics (V1.180–V1.182)
+
+Orchestration checkpoints in workspace `state.db` persist the current task and
+serialized context; they are position snapshots, not a completed-stage ledger.
+At daemon boot, recovery starts with rows whose persisted status is
+`running`, `paused`, or `waiting_for_input`, then applies the shared
+`nexus_orchestration::resume_rules` cascade in this order:
+
+1. terminal status is never re-driven;
+2. corrupt JSON or a parseable context with an unexpected `data` shape yields
+   no fabricated verdict;
+3. string-valued `_run_status` or `_run_error` marks a typed failure and skips
+   re-drive;
+4. only a non-null `_converge_arrivals_*`, `_merge_*`, or
+   `_join_wait_start_*` key establishes the converge/merge chain class.
+
+The persisted status column is diagnostic rather than sufficient: checkpoint
+upserts do not advance it. Daemon boot additionally requires an in-memory
+`FlowRunner`, reconstructed for embedded presets; a user-preset session whose
+runner cannot be reconstructed stays tracked but is not driven or marked
+failed. Re-drive continues from persisted `current_task_id` plus context, and
+join timeout elapsed time includes daemon downtime.
+
+The shipped operator surface is the hidden
+`nexus42 ops inspect [SESSION_ID] [--json]` command. It is daemon-free and
+read-only: it opens the workspace database with
+`nexus_local_db::open_pool_read_only`, performs no migrations, seeding, or lock
+upgrade, and reports the shared resume classification. Omitting `SESSION_ID`
+lists at most the 200 most-recent non-terminal checkpoint rows plus the honest
+full count; providing it returns one detail row. Corrupt JSON and an
+unexpected context shape produce distinct diagnostics with an `unknown`
+verdict; a missing database is an empty state with exit zero. Inspection never
+triggers manual resume: re-drive remains a daemon-boot operation.
+
+Implementation authorities:
+`crates/nexus-orchestration/src/resume_rules.rs`,
+`crates/nexus-orchestration/src/storage/inspect.rs`,
+`crates/nexus-daemon-runtime/src/preset_run.rs`,
+`crates/nexus-daemon-runtime/src/boot.rs`, and
+`apps/nexus42/src/commands/ops.rs`.

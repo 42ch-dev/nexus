@@ -8,8 +8,7 @@
 | **Document class** | Master |
 | **Scope** | Stable rules: local vs cloud product lines, crate responsibilities, contracts usage, dependency forbidden edges, current-vs-target wiring, Daemon API *classes* allowed/forbidden |
 | **Scope model SSOT** | [entity-scope-model.md](./entity-scope-model.md) — authoritative for scope hierarchy, crate ownership, and `kb`/`knowledge` naming boundaries |
-| **Delivery compass** | Iteration-scoped milestones, phases, acceptance tests →  |
-| **Related** | [entity-scope-model.md](./entity-scope-model.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [daemon-runtime.md](./daemon-runtime.md), [cli-spec.md](./cli-spec.md), [schemas-directory-layout.md](./schemas-directory-layout.md), [../schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md) |
+| **Related** | [entity-scope-model.md](./entity-scope-model.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [daemon-runtime.md](./daemon-runtime.md), [cli-spec.md](./cli-spec.md), [schemas-directory-layout.md](./schemas-directory-layout.md), [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md) |
 
 **This file is not an implementation checklist.** Do not add migration batches, branch names, or “done by V1.21” task tables here — put those in the matching **iteration compass** and local plan documents (harness process artifacts, not tracked specs).
 
@@ -21,7 +20,7 @@
 
 | Line | Purpose | Integration surface |
 | --- | --- | --- |
-| **Local product** | Orchestration, agent-host, workspace, Creator + Creator memory, World-scoped narrative KB, User-scoped knowledge, narrative graph, Moment context assembly | `nexus42 daemon` → `/v1/local/*` |
+| **Local product** | Orchestration, agent-host, workspace, Creator + Creator memory, World-scoped narrative KB, User-scoped knowledge, narrative graph, Moment context assembly | `nexus42 daemon` → `/v1/daemon/*` |
 | **Cloud enhancement** | Platform HTTP, bundle sync, registration, optional context Stage-1, User/Pairing persistence | `nexus-cloud-sync` + CLI cloud subcommands — **never** Daemon API |
 
 **Hard isolation:** `nexus-daemon-runtime` MUST NOT depend on `nexus-cloud-sync` and MUST NOT register HTTP handlers that perform platform HTTP or proxy sync.
@@ -30,13 +29,13 @@
 
 **Agent identity:** Operational actor for agents and orchestration is **`Creator`** (`creator_id`). `User` / `Pairing` are platform-bridge concepts only.
 
-**Local Web UI (V1.64):** `apps/web` is part of the **local product** line. It is a bundled React/Vite SPA that consumes `/v1/local/*` through generated `@42ch/nexus-contracts` TypeScript types. It is not `nexus-platform`, does not call platform HTTP directly, and must not import or mirror private platform app assumptions.
+**Local Web UI (V1.64):** `apps/web` is part of the **local product** line. It is a bundled React/Vite SPA that consumes `/v1/daemon/*` through generated `@42ch/nexus-contracts` TypeScript types. It is not `nexus-platform`, does not call platform HTTP directly, and must not import or mirror private platform app assumptions.
 
 ---
 
 ## 2. Contracts boundary (frozen)
 
-All **wire shapes** and **platform-aligned DTOs** come from the **`nexus-contracts`** crate (§3.1): generated from `schemas/` (layout: [schemas-directory-layout.md](./schemas-directory-layout.md)) or hand-written under `src/local/` per [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md).
+External wire shapes come from the **`nexus-contracts`** crate's generated modules under `src/generated/`, sourced from `schemas/` (layout: [schemas-directory-layout.md](./schemas-directory-layout.md)). Shared Rust-only DTOs live under `src/local/` per [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md).
 
 | Rule | Detail |
 | --- | --- |
@@ -44,7 +43,7 @@ All **wire shapes** and **platform-aligned DTOs** come from the **`nexus-contrac
 | **`nexus-creator`** | Imports wire/local contract types for Creator and related IDs; adds **domain logic** (validation, conversions, local cache records, path helpers). Any field that must match platform JSON MUST use contract types verbatim (`snake_case` on wire). |
 | **`nexus-cloud-domain`** | Imports contract types for `User`, `Pairing`, and platform-bridge enums; adds **domain logic** only (invariants, mapping from platform responses). |
 | **`nexus-cloud-sync`** | Uses contracts for request/response bodies on HTTP; no parallel HTTP DTOs in application crates. User/Pairing invariants MUST route through `nexus-cloud-domain`. |
-| **Local-only types** | Schedule, daemon status, orchestration HTTP, assembly DTOs → `nexus-contracts/src/local/` (not `schemas/`) unless platform later observes them. |
+| **Local-only types** | Internal orchestration engine state, ACP registry manifests, worker IPC, and daemon-only DTOs → `nexus-contracts/src/local/`. Cross-language Daemon API DTOs observed by the Web UI/desktop/generated clients → `schemas/daemon-api/<concern>/`. |
 
 **Corollary:** If a type appears in a platform API or sync bundle, its definition lives in **`nexus-contracts`**, not in `nexus-creator` or `nexus-cloud-domain`.
 
@@ -60,11 +59,11 @@ These crates are **not** split by the local/cloud program; they sit **under** al
 
 | Crate | Scope ownership | Responsibility boundary | `nexus-cloud-sync` dep? |
 | --- | --- | --- | --- |
-| **`nexus-contracts`** | Cross-scope type foundation | **Wire and local type SSOT** for the OSS monorepo: `src/generated/` from `schemas/` (`pnpm run codegen`); hand-written `src/local/` for CLI↔daemon and orchestration types not observed by platform; `enum_conversions.rs` for shared enums. **No business logic**, no HTTP, no I/O. Published to npm as `@42ch/nexus-contracts` for `nexus-platform`; Rust crate is workspace-internal. | N/A (leaf type library) |
+| **`nexus-contracts`** | Cross-scope type foundation | **Wire and local type SSOT** for the OSS monorepo: `src/generated/` from `schemas/` (`pnpm run codegen`) for external platform and Daemon API consumers; hand-written `src/local/` for Rust-only internal contracts; `enum_conversions.rs` for shared enums. **No business logic**, no HTTP, no I/O. Published to npm as `@42ch/nexus-contracts` for external TypeScript consumers; Rust crate is workspace-internal. | N/A (leaf type library) |
 | **`nexus-home-layout`** | Storage paths for `User`/`Creator` local material | Frozen `~/.nexus42/` path resolution and safe path helpers only. No entity invariants. | N/A |
 | **`nexus-local-db`** | Storage mechanics across Creator/workspace working copies | SQLite initialization, migration, versioning, and shared local persistence APIs. Does not own narrative or User semantics. | No |
 
-**Rules for `nexus-contracts`:** application crates (`nexus-creator`, `nexus-cloud-domain`, `nexus-cloud-sync`, …) **depend on** `nexus-contracts`; they MUST NOT duplicate types defined in `generated/` or `local/`. Schema changes start in `schemas/` → codegen → then domain logic updates.
+**Rules for `nexus-contracts`:** application crates (`nexus-creator`, `nexus-cloud-domain`, `nexus-cloud-sync`, …) **depend on** `nexus-contracts`; they MUST NOT duplicate types defined in `generated/` or `local/`. External contract changes start in `schemas/` → codegen → then application/domain updates; Rust-only internal contracts stay in `src/local/`.
 
 ### 3.2 Application inventory (local + cloud)
 
@@ -85,7 +84,7 @@ These crates are **not** split by the local/cloud program; they sit **under** al
 
 | App | Product line | Responsibility boundary | Cloud/platform dep? |
 | --- | --- | --- | --- |
-| **`apps/web`** | Local product | Browser SPA for Control Room + Setup. Consumes daemon `/v1/local/*` via `@42ch/nexus-contracts` generated TS types and a `NexusClient` transport boundary. Build output (`dist/`) is served by the daemon in release and proxied to the daemon in dev. | **No** direct platform/cloud dependency; no private `nexus-platform` imports or assumptions. |
+| **`apps/web`** | Local product | Browser SPA for Control Room + Setup. Consumes daemon `/v1/daemon/*` via `@42ch/nexus-contracts` generated TS types and a `NexusClient` transport boundary. Build output (`dist/`) is served by the daemon in release and proxied to the daemon in dev. | **No** direct platform/cloud dependency; no private `nexus-platform` imports or assumptions. |
 
 Embedding edge:
 
@@ -95,7 +94,7 @@ apps/web (Vite build → dist/)
       └─ nexus42 binary / nexus-daemon-runtime router static serving
 ```
 
-`rust-embed` is a build-time/static-asset edge only. It does not make the Web UI an owning Rust crate and does not permit the frontend to bypass the Daemon API. `tower-http::ServeDir`-style serving may expose the unauthenticated SPA shell, but data remains behind `/v1/local/*` auth boundaries (see [daemon-runtime.md](./daemon-runtime.md) §4.4).
+`rust-embed` is a build-time/static-asset edge only. It does not make the Web UI an owning Rust crate and does not permit the frontend to bypass the Daemon API. `tower-http::ServeDir`-style serving may expose the unauthenticated SPA shell, but data remains behind `/v1/daemon/*` auth boundaries (see [daemon-runtime.md](./daemon-runtime.md) §4.4).
 
 ### 3.3 Why `nexus-cloud-domain` (not `nexus-domain`)
 
@@ -159,11 +158,11 @@ This section describes the current `Cargo.toml` and `cargo tree` reality. It is 
 | --- | --- | --- |
 | `nexus42` | `nexus-acp-host`, `nexus-cloud-sync` with `legacy-sync`, `nexus-contracts`, `nexus-creator`, `nexus-creator-memory`, `nexus-daemon-runtime`, `nexus-home-layout`, `nexus-local-db`, `nexus-moment-context-assembly` with `cloud-stage`, `nexus-orchestration` | CLI currently reaches cloud-sync and moment assembly. Because the CLI enables `cloud-stage`, `cargo tree -p nexus42` shows `nexus-moment-context-assembly -> nexus-cloud-sync`; this is CLI/cloud-line reachability, not daemon reachability. |
 | `nexus-daemon-runtime` | `nexus-agent-host`, `nexus-contracts`, `nexus-creator`, `nexus-creator-memory`, `nexus-home-layout`, `nexus-knowledge`, `nexus-local-db`, `nexus-moment-context-assembly`, `nexus-narrative`, `nexus-orchestration` | Cargo-wired to the local domain graph with `nexus-moment-context-assembly` default features only. No daemon edge to `nexus-cloud-sync` or `nexus-cloud-domain`. Product wiring remains partial: daemon handlers do not expose moment assembly or narrative/user-knowledge domain HTTP yet. |
-| `apps/web` | npm workspace app consuming `@42ch/nexus-contracts` via workspace version and browser build tooling | Local Web UI product surface. Runtime data access is `/v1/local/*` only; release assets are embedded into `nexus42`/`nexus-daemon-runtime` static serving. Not a cloud app and not part of private `nexus-platform`. |
+| `apps/web` | npm workspace app consuming `@42ch/nexus-contracts` via workspace version and browser build tooling | Local Web UI product surface. Runtime data access is `/v1/daemon/*` only; release assets are embedded into `nexus42`/`nexus-daemon-runtime` static serving. Not a cloud app and not part of private `nexus-platform`. |
 | `nexus-moment-context-assembly` | `nexus-contracts`, `nexus-creator-memory`, `nexus-knowledge`, `nexus-narrative`; optional `nexus-cloud-sync` behind `cloud-stage` | Four-domain Moment library dependencies are wired. Current CLI Stage-0/TwoStage product flow remains narrower and does not call `assemble_moment`; CLI can enable `cloud-stage`, daemon default build does not. |
 | `nexus-narrative` | `nexus-contracts`, `nexus-knowledge` | World/Timeline/Event domain library wired to World KB (`nexus-knowledge`). No dedicated daemon narrative routes yet. |
-| `nexus-knowledge` | `nexus-contracts` | Two-tier knowledge crate (World KB + User knowledge); reachable from narrative, moment assembly, and daemon Cargo graph. Daemon `/v1/local/kb/*` remains the CLI local work KB file index, not the World-scoped narrative KB. |
-| `nexus-knowledge` | `nexus-contracts` | User knowledge/reference-source library; reachable from moment assembly and daemon Cargo graph. `GET /v1/local/references` still uses `nexus-local-db`, not this crate. |
+| `nexus-knowledge` | `nexus-contracts` | Two-tier knowledge crate (World KB + User knowledge); reachable from narrative, moment assembly, and daemon Cargo graph. Daemon `/v1/daemon/kb/*` remains the CLI local work KB file index, not the World-scoped narrative KB. |
+| `nexus-knowledge` | `nexus-contracts` | User knowledge/reference-source library; reachable from moment assembly and daemon Cargo graph. `GET /v1/daemon/references` still uses `nexus-local-db`, not this crate. |
 | `nexus-cloud-domain` | `nexus-contracts` | Cloud-domain library for User/Pairing invariants. |
 | `nexus-cloud-sync` | `nexus-cloud-domain`, `nexus-contracts`, `nexus-home-layout`, `nexus-local-db` | Cloud HTTP/sync transport is wired to `nexus-cloud-domain`; this is CLI/cloud-line only, not daemon reachability. |
 
@@ -251,9 +250,9 @@ nexus-moment-context-assembly (default four-domain library target)
 | `nexus-moment-context-assembly -> nexus-knowledge` | **Wired.** | Full `assemble_moment` may include selected User-scoped knowledge slices; current CLI Stage-0/TwoStage flow does not call this four-domain path. |
 | `nexus-daemon-runtime -> nexus-moment-context-assembly` | **Wired with default features only.** | No daemon `cloud-stage`; KCA-002 B2 retires the daemon context-assemble route. |
 | `nexus-daemon-runtime -> nexus-narrative` | **Wired.** | No dedicated narrative HTTP routes yet. |
-| `nexus-daemon-runtime -> nexus-knowledge` (World KB) | **Wired.** | `/v1/local/kb/*` is still work-scope file index, not World KB (`nexus-knowledge`) integration. |
-| `nexus-daemon-runtime -> nexus-knowledge` | **Wired.** | `GET /v1/local/references` still uses `nexus-local-db`; user knowledge store is not daemon-product wired. |
-| CLI `creator kb` -> World-scoped narrative KB semantics | **Not a Cargo gap.** | KCA-003 C2 keeps `/v1/local/kb/*` and `creator kb` as `scope=work` only; future World KB behavior must route to `nexus-knowledge` + `nexus-narrative` (DR-46). |
+| `nexus-daemon-runtime -> nexus-knowledge` (World KB) | **Wired.** | `/v1/daemon/kb/*` is still work-scope file index, not World KB (`nexus-knowledge`) integration. |
+| `nexus-daemon-runtime -> nexus-knowledge` | **Wired.** | `GET /v1/daemon/references` still uses `nexus-local-db`; user knowledge store is not daemon-product wired. |
+| CLI `creator kb` -> World-scoped narrative KB semantics | **Not a Cargo gap.** | KCA-003 C2 keeps `/v1/daemon/kb/*` and `creator kb` as `scope=work` only; future World KB behavior must route to `nexus-knowledge` + `nexus-narrative` (DR-46). |
 
 ### 5.3 Edges that are already wired and should remain
 
@@ -282,8 +281,8 @@ These are runtime/product gaps after Cargo alignment, not missing dependency edg
 
 | Gap | Boundary impact | V1.24 audit cross-link |
 | --- | --- | --- |
-| Daemon context assembly route retired | `POST /v1/local/context/assemble` is not registered and is retired by KCA-002 B2; context assembly stays CLI in-process. | KCA-002 |
-| Work KB path remains work-scoped | `/v1/local/kb/*` and `creator kb` are `scope=work` local file-index APIs only, not World KB (`nexus-knowledge`) APIs. | KCA-003 |
+| Daemon context assembly route retired | Historical `POST /v1/local/context/assemble` is not registered and was retired by KCA-002 B2; context assembly stays CLI in-process. | KCA-002 |
+| Work KB path remains work-scoped | `/v1/daemon/kb/*` and `creator kb` are `scope=work` local file-index APIs only, not World KB (`nexus-knowledge`) APIs. | KCA-003 |
 | Domain crates are only partially product-wired | `nexus-narrative`, `nexus-knowledge`, and moment assembly are linked in Cargo but not fully surfaced through daemon HTTP/product workflows. | KCA-004/KCA-005 |
 
 ---
@@ -315,4 +314,4 @@ Workspace file writes remain agent-mediated (agent-host internal tool execution)
 
 ---
 
-*Long-term SSOT. Implementation tracking:  and V1.23 .*
+*Long-term SSOT for local/cloud crate and Daemon API boundaries.*

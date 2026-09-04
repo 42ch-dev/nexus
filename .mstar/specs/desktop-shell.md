@@ -4,6 +4,7 @@
 **Document class**: Feature line
 **Created**: 2026-06-25 (Phase 2b, `@architect`)
 **Scope**: Nexus desktop shell contract — `apps/desktop` Tauri v2 wrapper, SPA adapter selection (`TauriClient`), desktop-only `NexusClient` extensions, native file actions + path guard, bundled `nexus42` sidecar lifecycle, port discovery, capability detection, macOS-first unsigned dev build. V1.67+ deferrals (signing, multi-OS, auto-update, in-process lib link, body editor) recorded in §2.
+**Last reconciled**: 2026-09-04 — current Daemon API route namespace and `NexusClient` source-authority rule through V1.183.
 
 **Coordinates with**:
 
@@ -43,7 +44,7 @@ Recorded so deferrals are tracked, not lost:
 
 ## 5. NexusClient desktop contract
 
-**`TauriClient`** (replaces the V1.65 stub at `apps/web/src/lib/nexus/tauri-client.ts`) implements the **21-method `NexusClient` interface** (health + 20 data methods) as **thin desktop-augmentation over `BrowserClient`**: the 21 data methods reuse the identical HTTP transport to `http://127.0.0.1:<resolvedPort>/v1/local/*`. **Not** a full Tauri-plugin IPC rewrite.
+**`TauriClient`** (replaces the V1.65 stub at `apps/web/src/lib/nexus/tauri-client.ts`) implements the current **`NexusClient` interface** as **thin desktop augmentation over `BrowserClient`**: every inherited data method reuses the identical HTTP transport to `http://localhost:<resolvedPort>/v1/daemon/*` (or an explicitly configured remote base URL). The interface is the method-count authority; this specification does not freeze a literal count. **Not** a full Tauri-plugin IPC rewrite.
 
 Desktop-only capability extensions (browser sandbox cannot perform these) are added as a separate `DesktopNexusClient extends NexusClient` (or equivalent capability object), exposed **only in desktop mode**:
 
@@ -65,14 +66,14 @@ Desktop-only capability extensions (browser sandbox cannot perform these) are ad
 Owned by the Tauri app while the desktop session is alive. **Daemon-side detail in [daemon-runtime.md](daemon-runtime.md) §4.6.** Summary:
 
 - **Launch**: `nexus42 daemon start --foreground --port <resolved>` via `Command.sidecar(...)` from `@tauri-apps/plugin-shell` on app start (unless a healthy daemon already responds on the resolved port — then attach).
-- **Readiness**: `GET /v1/local/runtime/health` returns healthy (NOT stdout parsing). Bounded retry/backoff; render `Daemon starting…` until healthy.
+- **Readiness**: `GET /v1/daemon/runtime/health` returns healthy (NOT stdout parsing). Bounded retry/backoff; render `Daemon starting…` until healthy.
 - **Crash after healthy**: restart with bounded exponential backoff; on repeated crash, stop retrying + show `Daemon stopped` + diagnostics.
 - **App quit**: request graceful termination of the owned sidecar; escalate after bounded timeout. Do NOT kill an unrelated user-started daemon without confirming ownership (track the process handle from the Sidecar API; PID-file/port stop is a CLI-compat mechanism only).
 - **Manual restart**: from the daemon-status indicator, stop owned sidecar → spawn fresh → wait for health.
 
 ## 8. Port discovery
 
-**Default `8420` + `NEXUS_DAEMON_PORT` override + health probe.** Resolution: explicit configured port → `NEXUS_DAEMON_PORT` (if valid) → `8420`. App passes `--port <resolved>` so CLI args + env cannot diverge. Readiness = health probe (§7). No dynamic port handshake in V1.66. Conventions codified in [local-api-surface-conventions.md](local-api-surface-conventions.md) §9.
+**Default `8420` + `NEXUS_DAEMON_PORT` override + health probe.** Resolution: explicit configured port → `NEXUS_DAEMON_PORT` (if valid) → `8420`. App passes `--port <resolved>` so CLI args + env cannot diverge. Readiness = health probe (§7). No dynamic port handshake in V1.66. Conventions are codified in [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) §9; the historical filename redirects there.
 
 ## 9. Native file actions + path guard
 
@@ -102,7 +103,7 @@ Window chrome / app menu / native dialogs / desktop context menu / daemon-status
 | --- | --- |
 | `pnpm --filter desktop tauri build` | Unsigned `.app`/`.dmg` produces on clean macOS checkout |
 | `cargo check` in `apps/desktop/src-tauri` | Tauri Rust crate compiles (standalone, not workspace) |
-| `TauriClient` transport parity | 21 data methods mirror `BrowserClient` HTTP paths (test mocks `__TAURI__`) |
+| `TauriClient` transport parity | Every current `NexusClient` data method mirrors `BrowserClient` `/v1/daemon/*` paths (test mocks `__TAURI__`) |
 | Capability detection | Factory selects correct client in browser vs desktop mode |
 | Path guard | Rejection of paths outside workspace root (test coverage) |
 | Sidecar lifecycle | Autostart on launch; health probe; restart-on-crash; stop-on-quit |
@@ -325,7 +326,7 @@ V1.100 does not change daemon routes, JSON schemas, generated TypeScript/Rust co
 
 ### 13.10 V1.105 Amendments — First-launch wizard reshape (Entrance-first + app-level Daemon gate)
 
-**Product behavior target.** V1.105 makes daemon readiness a **launch ritual** (fullscreen gate) and reduces the setup wizard to author choices; V1.170 P1 (AR-17) adds the Entrance step first (Entrance → Agent → Workspace → Done). **Iteration SSOT:** .
+**Product behavior target.** V1.105 makes daemon readiness a **launch ritual** (fullscreen gate) and reduces the setup wizard to author choices; V1.170 P1 (AR-17) adds the Entrance step first (Entrance → Agent → Workspace → Done).
 
 #### 13.10.1 Rule 13 rewrite — always auto-start sidecar (D2)
 
@@ -373,7 +374,6 @@ Prefer `wire_contracts_changed: false`. Portrait shell: `wizard-max-width` **480
 
 #### 13.10.6 V1.106 Amendments — Studio fixtures + shared chrome SSOT
 
-**Iteration SSOT:** .
 
 - **DaemonReadySplash fixtures:** Studio `/surfaces/launch` imports presentational `@web-setup/daemon-ready-splash` — same module as App outer gate.
 - **MainBanner fixtures:** composition-only props-driven chrome in Studio — App `main-banner.tsx` stays daemon-hook-owned; no extract in V1.106.
@@ -382,7 +382,6 @@ Prefer `wire_contracts_changed: false`. Portrait shell: `wizard-max-width` **480
 
 #### 13.10.7 V1.107 Amendments — Studio paint + presentational SSOT
 
-**Iteration SSOT:** .
 
 - **Studio Tailwind content:** Design Studio must scan `apps/web/src/components/setup/**`, `layout/presentational/**`, and `packages/nexus-ui/src/**` so wizard and matrix utilities paint (FB-000).
 - **Shell chrome SSOT:** Extract props-driven modules under `apps/web/src/components/layout/presentational/`; App wrappers (`sidebar.tsx`, `footer-profiles.tsx`, `daemon-health-indicator.tsx`) delegate markup; Studio imports via `@web-layout/*` (FB-013..014).

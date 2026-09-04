@@ -80,7 +80,7 @@ ACP is for agent integration. Nexus still needs a stable internal interface for:
 - Loopback-only by default
 - Minimal surface: workspace status, daemon health, orchestration/agent-host, local KB/memory — **no** sync or platform registration proxy (see [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md))
 - Auth: OS user boundary, with optional token / IPC artifacts under **`$HOME/.nexus42/run/`** (or workspace-scoped subpaths still rooted at `$HOME/.nexus42/`, never under `<workspace>/`)
-- Versioned schema: all stable endpoints live under `/v1/local/*` so TS / Rust codegen can share one contract
+- Versioned schema: all stable endpoints live under `/v1/daemon/*` so TS / Rust codegen can share one contract
 
 ### 3.2.1 Daemon API endpoint families
 
@@ -90,27 +90,27 @@ The Daemon API is the **codegen-ready** internal contract between CLI, daemon, a
 
 | Endpoint / family | Status on daemon | Notes |
 | --- | --- | --- |
-| `GET /v1/local/runtime/health` | Active | Unguarded liveness route. |
-| `GET /v1/local/runtime/status` | Active | Unguarded diagnostic route. |
-| `GET /v1/local/daemon/status` | Active | Unguarded daemon lifecycle snapshot. |
-| `GET /v1/local/workspace`, `POST /v1/local/workspace/init` | Active | Legacy single-workspace info/init routes. |
-| `POST /v1/local/workspace/open`, `POST /v1/local/workspace/commit` | **Active (V1.56 P0)** | Workspace session open/commit with file-level OCC (SHA-256 content hash). Sessions persisted in `SQLite` `workspace_sessions` table; survive daemon restart; expire per TTL (default 5 min). `open` returns file hashes for all tracked files. `commit` validates `changes[]` manifest against session snapshot; rejects on hash mismatch (409 HASH_CONFLICT). See `concurrency.md` §OCC. |
-| `GET|POST /v1/local/workspaces`, `GET|PUT /v1/local/workspaces/active` | Active | Workspace list/create and active workspace selection. |
-| `GET /v1/local/creators`, `GET /v1/local/creators/{creator_id}`, `GET|PUT /v1/local/creators/active`, `POST /v1/local/creators/{creator_id}:logout` | Active | Local creator status/selection/logout only; registration remains CLI/cloud-line. |
-| `GET /v1/local/references` | Active | Local reference list via `nexus-local-db`; not `nexus-knowledge` persistence. |
-| `GET|POST /v1/local/kb/entries`, `GET|DELETE /v1/local/kb/entries/{entry_id}` | Active (`scope=work` only) | CLI local work KB file index; not World KB. See audit KCA-003 C2. |
-| `GET|POST /v1/local/memory/pending-review`, `GET /v1/local/memory/pending-review/count`, `DELETE /v1/local/memory/pending-review/{id}` | Active | Creator-memory pending review routes. |
-| `GET|POST /v1/local/presets`, `POST /v1/local/presets:validate`, `POST /v1/local/presets/{id}:reload` | Active | Local preset management. |
-| `/v1/local/orchestration/*` | Active | Sessions, capabilities, presets, schedules, core-context, history, and signal routes registered in `orchestration_routes()`. |
-| `/v1/local/agent-host/*` | Active | Health, providers, sessions, operations, cancel, events SSE, and internal tool-executions routes. |
-| `GET /v1/local/monitoring/pool` | Active | Protected monitoring route. |
-| `POST /v1/local/context/assemble` | **Retired (KCA-002 B2)** | Not registered in `api/mod.rs`; context assembly stays CLI in-process through `nexus-moment-context-assembly`, not Daemon API. |
-| `GET /v1/local/research/sources` | **NotImplemented / Retired from active table** | Not registered in `api/mod.rs`; do not list as active until a handler exists. |
-| `POST /v1/local/research/scan` | **NotImplemented / Retired from active table** | Not registered in `api/mod.rs`; do not list as active until a handler exists. |
-| `POST /v1/local/agent-sessions/restart` | **Retired** | Not registered; shipped agent session control lives under `/v1/local/agent-host/*`. |
-| `POST /v1/local/sync/push`, `POST /v1/local/sync/pull`, `POST /v1/local/sync/retry` | **Retired** | **Cloud line:** `nexus42 sync …` → `nexus-cloud-sync`; daemon sync routes removed in V1.21. |
+| `GET /v1/daemon/runtime/health` | Active | Unguarded liveness route. |
+| `GET /v1/daemon/runtime/status` | Active | Unguarded diagnostic route. |
+| `GET /v1/daemon/daemon/status` | Active | Unguarded daemon lifecycle snapshot. |
+| `GET /v1/daemon/workspace`, `POST /v1/daemon/workspace/init` | Active | Legacy single-workspace info/init routes. |
+| `POST /v1/daemon/workspace/open`, `POST /v1/daemon/workspace/commit` | **Active (V1.56 P0)** | Workspace session open/commit with file-level OCC (SHA-256 content hash). Sessions persisted in `SQLite` `workspace_sessions` table; survive daemon restart; expire per TTL (default 5 min). `open` returns file hashes for all tracked files. `commit` validates `changes[]` manifest against session snapshot; rejects on hash mismatch (409 HASH_CONFLICT). See `concurrency.md` §OCC. |
+| `GET|POST /v1/daemon/workspaces`, `GET|PUT /v1/daemon/workspaces/active` | Active | Workspace list/create and active workspace selection. |
+| `GET /v1/daemon/creators`, `GET /v1/daemon/creators/{creator_id}`, `GET|PUT /v1/daemon/creators/active`, `POST /v1/daemon/creators/{creator_id}:logout` | Active | Local creator status/selection/logout only; registration remains CLI/cloud-line. |
+| `GET /v1/daemon/references` | Active | Local reference list via `nexus-local-db`; not `nexus-knowledge` persistence. |
+| `GET|POST /v1/daemon/kb/entries`, `GET|DELETE /v1/daemon/kb/entries/{entry_id}` | Active (`scope=work` only) | CLI local work KB file index; not World KB. See audit KCA-003 C2. |
+| `GET|POST /v1/daemon/memory/pending-review`, `GET /v1/daemon/memory/pending-review/count`, `DELETE /v1/daemon/memory/pending-review/{id}` | Active | Creator-memory pending review routes. |
+| `GET|POST /v1/daemon/presets`, `POST /v1/daemon/presets:validate`, `POST /v1/daemon/presets/{id}:reload` | Active | Local preset management. |
+| `/v1/daemon/orchestration/*` | Active | Sessions, capabilities, presets, schedules, core-context, history, and signal routes registered in `orchestration_routes()`. |
+| `/v1/daemon/agent-host/*` | Active | Health, providers, sessions, operations, cancel, events SSE, and internal tool-executions routes. |
+| `GET /v1/daemon/monitoring/pool` | Active | Protected monitoring route. |
+| `POST /v1/local/context/assemble` | **Retired (KCA-002 B2; historical route spelling)** | Not registered in `api/mod.rs`; context assembly stays CLI in-process through `nexus-moment-context-assembly`, not Daemon API. |
+| `GET /v1/local/research/sources` | **NotImplemented / Retired (historical route spelling)** | Not registered in `api/mod.rs`; do not list as active until a handler exists. |
+| `POST /v1/local/research/scan` | **NotImplemented / Retired (historical route spelling)** | Not registered in `api/mod.rs`; do not list as active until a handler exists. |
+| `POST /v1/local/agent-sessions/restart` | **Retired (historical route spelling)** | Not registered; shipped agent session control lives under `/v1/daemon/agent-host/*`. |
+| `POST /v1/local/sync/push`, `POST /v1/local/sync/pull`, `POST /v1/local/sync/retry` | **Retired (historical route spelling)** | **Cloud line:** `nexus42 sync …` → `nexus-cloud-sync`; daemon sync routes removed in V1.21. |
 
-Each write-style endpoint should accept a small request envelope:
+The historical pre-V1.90 sketch expected each write-style endpoint to accept a small request envelope:
 
 ```json
 {
@@ -120,7 +120,7 @@ Each write-style endpoint should accept a small request envelope:
 }
 ```
 
-Each response should return:
+The same historical sketch expected:
 
 ```json
 {
@@ -131,12 +131,17 @@ Each response should return:
 }
 ```
 
+Current handlers and generated schemas are authoritative instead. In
+particular, Daemon API failures use
+`{ success: false, error: { code, message, details?, request_id? } }`, with
+`request_id` nested inside `error`; success payloads remain route-specific.
+
 Rules:
 
 - `request_id` is caller-generated and traceable in logs
 - `workspace_id` is mandatory for workspace-scoped actions
 - `error_code` should align with sync / conflict schemas where applicable
-- Research-specific routes may use the `/v1/local/*` namespace only after they are registered in the daemon router.
+- Research-specific routes may use the `/v1/daemon/*` namespace only after they are registered in the daemon router.
 - **V1.24 KCA-002 B2:** `POST /v1/local/context/assemble` is retired from the Daemon API. CLI/platform context assembly should call `nexus-moment-context-assembly` in-process rather than proxying through the daemon.
 - **V1.2**：若请求体支持可选 **`as_of`**，Local 与 Platform HTTP **须**共享 **同一**字段语义与校验；不得仅在一侧出现私有历史参数。
 
@@ -158,7 +163,7 @@ CLI --Daemon API--> daemon runtime mode --ACP Client--> ACP Agent
   +-- reference refresh (V1.58 P3):
        nexus42 creator reference refresh [ref_id|all]
          └─ DaemonClient::post
-              └─ POST /v1/local/agent-host/internal/tool-executions
+              └─ POST /v1/daemon/agent-host/internal/tool-executions
                    └─ HostToolExecutor::execute()
                         └─ admission_pipeline()
                              └─ CapabilityRegistry::dispatch("nexus.reference.refresh", ...)
@@ -250,7 +255,7 @@ V1.53 cancelled the skills-export CLI/spec line (DF-50). Nexus keeps the static 
 
 - Whether loopback TCP is allowed on shared machines
 - Multi-workspace daemon strategy vs one-daemon-multi-workspace
-- Whether the frozen `/v1/local/*` envelope should be JSON-over-HTTP only or also mirrored on unix socket RPC
+- Whether the frozen `/v1/daemon/*` envelope should be JSON-over-HTTP only or also mirrored on unix socket RPC
 
 ---
 
@@ -266,7 +271,7 @@ V1.53 cancelled the skills-export CLI/spec line (DF-50). Nexus keeps the static 
 │  ┌──────────┐  ┌──────────────┐  ┌───────────────────┐  │
 │  │CLI       │  │Worker        │  │HTTP               │  │
 │  │host-call │  │agent_tool    │  │ToolExecuteRequest │  │
-│  │<tool_id> │  │_request IPC  │  │POST /v1/local/... │  │
+│  │<tool_id> │  │_request IPC  │  │POST /v1/daemon/... │  │
 │  └────┬─────┘  └──────┬───────┘  └────────┬──────────┘  │
 │       │               │                   │              │
 │       ▼               ▼                   ▼              │

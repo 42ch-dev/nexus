@@ -16,7 +16,7 @@
 
 This spec records the durable lifecycle rules for Creator memory fragments that
 feed the SOUL reflection surface. It complements `creator-workflow.md` §5.6 and
-the Daemon API memory schemas under `schemas/local-api/memory/`.
+the Daemon API memory schemas under `schemas/daemon-api/memory/`.
 
 ## 7. Fragment and narrative lifecycle
 

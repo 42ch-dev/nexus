@@ -1,8 +1,9 @@
 # Spoke Adapter Architecture
 
 > **Status:** Normative (v0.19 — V1.155 P1 capability-token production + tenant isolation: `nexus42 connect token issue` CLI (issuer.key Ed25519 create-once 0600, `claims.iss` MUST equal issuer-derived peer id), operator config `~/.nexus42/connect/config.json` (`trusted_issuers` / `require_capability_token` / `capability_token_provider{enabled, issuer_key_path}`, deny-unknown-fields, absent ⇒ pre-V1.155 defaults, malformed ⇒ fail-closed boot error, require-without-issuers ⇒ boot error); enforcement spoke-side fail-closed (`evaluate_invoke_token_gate` ⇒ `auth_failed` before the nexus handler, zero side effects) + nexus `PeerScope` intersection — token can never widen allowlist scope; all opt-in, defaults unchanged; §10.4 row → production + §10.6 row; residual `R-V1148P3-001` closed; v0.18 — V1.155 P0 N-C3 multi-host production: `HostManifestPort.list_peer_host_capability_manifests` is production — the last adapter stub is gone; `peer_hosts` table records manifest-backed outbound observations at `connect()` return (lock #1 fallback: inbound-only peers not recorded), empty → `Ok(vec![])` preserved, corrupt stored row → `InternalError`; adapter read `list_observed_peer_hosts` (manifest + `last_seen`) backs the `connect peers list` CLI; §7.3 matrix + §10.6 N-C3 row delivered; residual `R-V1142P1-002` closed; v0.17 — V1.154 P2 QC fix wave: module-id pin hardened to key-presence (any request-carried `computable.module_id` — differing string or non-string value — must equal the gated id else `module_not_scoped`), Connect compute reuses the `nexus_wasm_host::ModuleCache` compiled-module cache (id + bytes-hash keying, overwrite-on-change eviction), missing compute target entry maps to the `invalid_input` family, shared `is_safe_module_id` + `module_identity_missing` marker — §10.6 compute row; v0.16 — V1.154 P2 N-C2 compute half + world-aware CAS: `compute` served over Connect (host-local modules under `~/.nexus42/modules/`, per-peer `module_scope` fail-closed, read-only `settle:false`, module-id pin against request override) + fixed `world_conflict` wire code on world-aware CAS write predicates + semantic reasoning-complete milestone via roles `computable-engine` + capabilities `l2-computable` (literal string absent), §10.3/§10.4/§10.6); v0.15 — V1.154 P1 N-C2 read-half QC fix wave: response byte cap (2 MiB, envelope `response_too_large`) + scope-batch-array entry caps + concurrency-model/single-deadline clarity in the §10.6 bridge row, `connect_host_slice` → `"n-c2"` §10.3); v0.14 — V1.154 P0 spoke lockstep pin 0.9.1→0.9.2: Connect session-peer invoke identity (`InvokeHandlerV2`; payload `extensions.nexus.peer_id` informational-only, hard deny on mismatch, §10.4/§10.6); spoke-connect `mdns` feature removed upstream); v0.13 — V1.153 P0 spoke lockstep pin 0.8.2→0.9.1: `spoke-operations` port traits + `orchestrate_*` sync→async (adapter adapted signature-level; durable note §7.3); v0.12 — V1.152 DF-77 §11 Narrative Knowledge Pack I/O: shipped P0+P1; P2 dogfood-confirmed — additive daemon export/import routes + all three conflict policies (skip/rename/overwrite) + CLI↔daemon shared `import_pack` module + Control Room panel; v0.11 — V1.151 DF-76 §7.4 inspector packet field surface (shipped P0+P1; P2 dogfood-confirmed against the spoke assemble-module recipe handbook); v0.10 — V1.150 DF-75 §7.4 slot + Moment Directive + generation-stage matrix shipped at P2 close; v0.9 was V1.149 lore activation §7.4 production matrix: default-on engine + Relation hop expand; v0.8 was V1.148 spoke pin 0.6.1→0.8.2 + RuleQueryPort production + orchestrate_check daemon route + Connect Host N-C0 surface; v0.7 was V1.146 spoke InternalError reject code: pin bump 0.6.0→0.6.1; v0.6 was V1.145 spoke consumer alignment: adapter rehome to spoke-adapter + dep reversal + WorldKB/timeline read via ScopeQuery + scope-pushdown contract; v0.5 was V1.144 spoke 0.5.0 upgrade + RelationPort OCC extension + orchestrate_relate cutover)
+> **Current reconciliation (V1.183):** V1.181 shipped DF-79 lore-emission hygiene and the DF-80 clean-room SillyTavern lorebook importer; their durable contracts are folded into §7.4 and §11 below.
 > **Document class:** Master
-> **Scope:** The `nexus-spoke-adapter` crate boundary, `extensions.nexus` namespace contract, spoke-operations delegation rules, daemon-api envelope strategy, drift detection adaptation, the `/kb/` HTTP route stability decision, the opt-in Connect Host N-C0 surface (DF-72), and the Narrative Knowledge Pack I/O product-transport surface (DF-77).
+> **Scope:** The `nexus-spoke-adapter` crate boundary, `extensions.nexus` namespace contract, spoke-operations delegation rules, daemon-api envelope strategy, drift detection adaptation, the `/kb/` HTTP route stability decision, the opt-in Connect Host N-C0 surface (DF-72), lore emission hygiene (DF-79), and Narrative Knowledge Pack I/O including the clean-room SillyTavern importer (DF-77/DF-80).
 > **Related:** [entity-scope-model.md](entity-scope-model.md), [local-db-schema.md](local-db-schema.md), [schemas-directory-layout.md](schemas-directory-layout.md), spoke `CONCEPTS.md`, spoke `.mstar/specs/spoke-data-model.md`, spoke `.mstar/specs/spoke-operations.md`, spoke `.mstar/specs/spoke-connect.md`. Iteration product drafts (process): `fl-r-connect-host-foundation.md`, `fl-l-w7-knowledge-pack-productization.md`.
 
 ## 0. Document Position
@@ -463,6 +464,9 @@ nexus-spoke-adapter/src/
   extensions.rs                     ← extensions.nexus accessors
   ops.rs                            ← Surface A delegation wrappers
   conversion/                       ← V1.145 P1a — WorldKbEntry↔KnowledgeEntry free fns + WorldKbEntrySpokeExt (sole conversion seam)
+  pack.rs                          ← Narrative Knowledge Pack build/parse helpers
+  pack/
+    st_lorebook.rs                 ← Clean-room documented-format SillyTavern lorebook → Pack converter (V1.181 / DF-80)
   adapter/
     mod.rs                          ← NexusAdapter struct + TX bridge (Arc<Mutex<Option<Transaction>>>) [V1.146 rename; V1.145 P1b rehome from nexus-local-db]
     ── Spoke port trait impls ──
@@ -518,19 +522,43 @@ DF-74 delivered V1.149; **DF-75 delivered V1.150**; DF-76 delivered V1.151.
 
 #### Inspector packet field surface (V1.151 / DF-76 — shipped; P2 dogfood-confirmed)
 
-V1.151 (DF-76, plans P0+P1+P2) makes the V1.149–V1.150 traces **author-visible** via an **enriched inspector packet** — a **separate emission path** from `to_full_context()` (AC-I6: assembled bytes are byte-identical to V1.150). **Consumer-only discipline holds:** the `modules.*` section keeps the spoke assemble-module recipe vocabulary (presented, not cloned); `slot_map`/`budget`/`moment_directive` are **product-local** sections, explicitly outside the spoke recipe. No new spoke wire, no `schemas/` spoke DTOs; the daemon wire DTOs are nexus-product-local (`schemas/daemon-api/inspector/`). Product behavior SSOT: iteration draft `fl-l-w6-assembly-inspector.md` (promoted to tracked status at P2 close).
+V1.151 (DF-76, plans P0+P1+P2) makes the V1.149–V1.150 traces **author-visible** via an **enriched inspector packet** — a **separate emission path** from `to_full_context()` (AC-I6: assembled bytes are byte-identical to V1.150). **Consumer-only discipline holds:** the `modules.*` section keeps the spoke assemble-module recipe vocabulary (presented, not cloned); `slot_map`/`budget`/`moment_directive` and the V1.181 `hygiene` trace are **product-local** sections, explicitly outside the spoke recipe. No new spoke wire or `schemas/` spoke DTOs; the daemon wire DTOs are nexus-product-local (`schemas/daemon-api/inspector/`). Product behavior SSOT: iteration draft `fl-l-w6-assembly-inspector.md` (promoted to tracked status at P2 close).
 
-**P2 confirmation (2026-08-05, dogfood + recipe sweep):** the `modules.*` surface was verified against the spoke assemble-module recipe handbook (`assemble-module-recipes.md`) and the shipped `build_inspector_packet` (`nexus-moment-context-assembly/src/inspector.rs`, exercised by the T1 dogfood `dogfood_inspector_packet_stages` across `produce`/`review`/`persist`). Nexus is **consumer-only**: it presents the trace in the recipe **vocabulary** (`placement` = accepted-entries snapshot; `activation_trace` = full fire/miss provenance with `reason`), and does **not** clone the spoke `AssemblePacket.modules` wire — no `position_hint`/`depth`/`outlet`/`matched_key`/`hop_count` inner fields, no `packet_id`/`entries[]` envelope; nexus adds product fields (`canonical_name`, `accepted`) to the per-entry rows. `slot_map`/`budget`/`moment_directive` are top-level **product-local** sections, explicitly outside the spoke recipe (never under `modules.*`, AC-I3).
+**P2 confirmation (2026-08-05, dogfood + recipe sweep):** the `modules.*` surface was verified against the spoke assemble-module recipe handbook (`assemble-module-recipes.md`) and the shipped `build_inspector_packet` (`nexus-moment-context-assembly/src/inspector.rs`, exercised by the T1 dogfood `dogfood_inspector_packet_stages` across `produce`/`review`/`persist`). Nexus is **consumer-only**: it presents the trace in the recipe **vocabulary** (`placement` = accepted-entries snapshot; `activation_trace` = full fire/miss provenance with `reason`) and does **not** clone the spoke `AssemblePacket.modules` wire. `slot_map`/`budget`/`moment_directive`/`hygiene` are top-level **product-local** sections, explicitly outside the spoke recipe (never under `modules.*`, AC-I3).
 
 | Aspect | Contract (architect lock — grounded) |
 |--------|--------------------------------------|
-| **Packet shape** | `{ "modules": { "placement", "activation_trace" }, "slot_map": [...], "budget": {...}, "moment_directive": {...} }`. `modules.*` **unchanged** from the V1.150 packet (former builder `apps/nexus42/src/commands/platform/context.rs:810-845`; now `nexus-moment-context-assembly/src/inspector.rs`): `placement[]` = accepted entries `{entry_id, canonical_name, reason}`; `activation_trace[]` = full trace `{entry_id, canonical_name, reason, accepted}` (`ActivationTraceEntry`, `nexus-spoke-adapter/src/adapter/activation.rs:156-167`). |
+| **Packet shape** | `{ "modules": { "placement", "activation_trace" }, "slot_map": [...], "budget": {...}, "moment_directive": {...}, "hygiene": [...] }`. `modules.*` remains the spoke-recipe vocabulary: `placement[]` = accepted entries `{entry_id, canonical_name, reason}`; `activation_trace[]` = full trace `{entry_id, canonical_name, reason, accepted}`. Product-local `hygiene` is always present and is specified below. The builder authority is `nexus-moment-context-assembly/src/inspector.rs`. |
 | **`slot_map`** | `[{ "entry_id", "slot" }]` — every accepted entry that survived the stage gate → its slot id. Slot ids = `SlotRouting` field names (`nexus-moment-context-assembly/src/slots.rs:92-109`): `world.before` / `default` / `world.after` / `kb.outlet.<name>` / `style.post_history`, plus `moment.directive` when an active directive renders (top-level section). **Derived from the V1.150 routing output, never re-routed**; captured **post stage-gate** (the gate drops `style.post_history` for non-produce/review stages, `slots.rs:257`). **Additive capture:** `SlotMapEntry` + `SlotRouting::to_slot_map()`; `MomentContext.slot_map: Option<Vec<SlotMapEntry>>` populated at `assemble_moment_with_directive` (`moment.rs:714`). |
 | **`budget`** | `{ "primary_tokens_est", "hop_tokens_est", "cap", "remaining" }` (u | null) — chars/4 estimator (`estimate_tokens`, `activation.rs:778`, summary-or-name / 4). **Additive:** `ActivationBudget` on `ActivationResult` (values already computed inside `apply_activation_with_hops` at `activation.rs:576` and `expand_relation_hops` at `activation.rs:698`; surface via `HopExpandResult.tokens_consumed`); `MomentContext.activation_budget` captured at `moment.rs:695`. `cap` = effective hop cap (`None` ⇒ depth+cycle only); `remaining` = budget left after primary + hops (`None` when no cap). No-hops path: primary estimate only, `cap`/`remaining` = `None`. |
 | **`moment_directive`** | Status/metadata only — `{ "scope": "work"|"world"|null, "scope_id", "insert_depth": "head"|"mid"|"tail"|null, "ttl_kind": "generations"|"chapters"|null, "ttl_remaining": u|null, "clear_on_scene_change": bool, "status": "active"|"none" }`. Sources: persisted `MomentDirectiveRow` (`nexus-local-db/src/moment_directive.rs:59-87` — `scope_kind`, `scope_id`, `insert_depth`, `ttl_kind`, `ttl_remaining`, `clear_on_scene_change`, `status`). **Additive:** `ActiveDirective` (`nexus-moment-context-assembly/src/directive.rs:103-134`) gains `ttl_remaining/status/scope_kind/scope_id`; `MomentContext.moment_directive_meta` captured at `moment.rs:779`. `status` = `"active"` when injected this assembly (active-row lookups only, `moment_directive.rs:224-243`), `"none"` when absent. |
 | **Directive-body exclusion (AC-I3, by construction)** | The packet builder reads `MomentContext.moment_directive_meta` and **never** `MomentContext.moment_directive` (the body, `moment.rs:292`) nor the `body` column. The directive body is author content surfaced only via the directive `show` surface / the assembled prompt. Enforced by the extended `inspector_packet_never_carries_moment_directive` test. |
 | **Builder home** | Packet building stays **product-local**: `build_inspector_packet` relocated from `apps/nexus42` (private fn, `context.rs:810-845`) to MCA module `nexus-moment-context-assembly/src/inspector.rs` (`pub fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value`, shipped P0) — shared by the CLI (`emit_inspector_packet`, `context.rs:785`), the daemon route (`POST /v1/daemon/inspector/moment`, tier2, ownership-guarded via `is_world_owned` — `handlers/check.rs:98-184` pattern), and the Control Room panel. No inspector logic in `spoke-operations`. |
 | **Directive daemon route (P0, H5)** | `POST /v1/daemon/moment-directive` — thin set/show/clear HTTP wrapper over `nexus_local_db::moment_directive::{set_active, replace_active, get_active_for_work, get_active_for_world, clear}` (CLI precedent `apps/nexus42/src/commands/creator/moment_directive.rs:145/247/273`); validation mirrors the CLI (`handle_set`, `apps/nexus42/src/commands/creator/moment_directive.rs:145`; explicit `replace` via the unique partial index, `local-db moment_directive.rs:126` — no silent overwrite). `LocalDirectiveStore` (now `nexus-daemon-runtime/src/directive_store.rs:37`) relocated so CLI and route share the composition root (cannot live in `nexus-local-db` — cycle MCA → spoke-adapter → local-db). |
+
+#### Lore emission hygiene (V1.181 / DF-79 — shipped)
+
+Author-defined lore cleanup travels in
+`body.attributes.hygiene` as an ordered array of
+`{pattern, replacement, description?}` objects. The owning implementation is
+`crates/nexus-moment-context-assembly/src/hygiene.rs`; authors edit the carrier
+through the existing `creator world kb edit --body` surface.
+
+The transform runs on each carrier-bearing entry's emitted `body.summary`
+after the generation-stage gate and before slot routing. It operates only on
+owned assembly-local entry copies: persisted World-KB bodies are never
+mutated, and activation matching has already completed. Entries without the
+carrier remain unchanged and do not produce trace rows.
+
+The read path degrades instead of failing assembly. Pattern length is capped
+at 256 characters, input and output at 64 KiB of characters, and parsed
+transforms at 32 per entry. Invalid or overlong regexes are skipped; bounded
+input/output truncation and malformed-carrier decisions are explicit in the
+trace. The inspector packet always includes top-level `hygiene`, with one row
+per carrier-bearing entry shaped as
+`{entry_id, applied, skipped, notes}` and an empty array when no trace exists.
+Source authorities are `hygiene.rs`, `moment.rs::render_gated_slots`, and
+`inspector.rs::build_inspector_packet`.
 
 #### Production-vs-stub matrix per port family (V1.148)
 
@@ -899,15 +927,39 @@ V1.152 implements `rename` + `overwrite`, removing the "not yet implemented"
 stubs). `skip` is the default. `--dry-run` covers all three policies. CLI +
 daemon share the single `import_pack` path.
 
-### 11.7 Non-goals (product)
+### 11.7 Clean-room SillyTavern lorebook import (V1.181 / DF-80 — shipped)
 
-Pack I/O does **not** ship: an ST lorebook → Pack importer; a seed pack /
-community Pool / marketplace / registry / signing / remote pull; multi-pack
-compose / stack; automatic post-import activation flip (activation travels with
-lore but is not force-enabled); or a new spoke wire dialect (pack is a product
-transport envelope, not a `spoke-operations` surface).
+The CLI accepts
+`creator world kb pack import <world_ref> --from-st <PATH>` as an alternative
+to `--in <PACK>`; clap requires exactly one of those inputs. This is a
+CLI-only documented-format converter, not a daemon route. Format knowledge
+comes from the public SillyTavern World Info documentation, never from
+SillyTavern source code.
 
-### 11.8 Dogfood gate
+`crates/nexus-spoke-adapter/src/pack/st_lorebook.rs::parse_st_lorebook` maps
+entry `comment` to `canonical_name`, `content` to `body.summary`, `key`/`keys`
+to `modules.activation.keys`, and `constant` to
+`modules.activation.constant`. It emits Pack JSON, which then follows the
+unchanged `parse_pack` → shared `import_pack` path. Consequently
+`--conflict skip|rename|overwrite` and `--dry-run` have the same semantics as
+native Pack import.
+
+Unknown or unsupported entry fields produce conversion diagnostics and do not
+silently block otherwise convertible entries. File-level malformed JSON,
+non-object roots, or a missing/non-array/non-object `entries` value abort
+before any write. The importer does not support Tavern Card/PNG extraction,
+network fetches, or a second import orchestration path.
+
+### 11.8 Non-goals (product)
+
+Pack I/O still does **not** ship a seed pack / community Pool / marketplace /
+registry / signing / remote pull; multi-pack compose / stack; automatic
+post-import activation flip (activation travels with lore but is not
+force-enabled); Tavern Card/PNG extraction or network import; or a new spoke
+wire dialect (pack is a product transport envelope, not a `spoke-operations`
+surface).
+
+### 11.9 Dogfood gate
 
 P2 ships `dogfood_pack_round_trip_preserves_activation_and_relations`
 (`apps/nexus42/.../pack.rs::tests`) — seeds World A (entries with

@@ -137,7 +137,7 @@ Does **not** advance `current_stage`; merges into `inspiration_log` and schedule
 
 `daemon schedule` remains valid; schedules created via `creator run <preset>` **must** record `work_id` and stage id in schedule seed/metadata (wire key `fl_e_stage` in V1.34 implementation).
 
-### 5.4 Daemon-attached auto-chain (V1.39 extension)
+### 5.4 Daemon-attached auto-chain (V1.39 historical design)
 
 When `auto_chain_enabled` on a Work (default true for new starts):
 
@@ -147,6 +147,16 @@ When `auto_chain_enabled` on a Work (default true for new starts):
 4. **Boot resume**: daemon restart auto-resumes only schedules tied to checkpointed auto-chain Works; other schedules remain paused (safe default).
 
 `creator run resume <work_id>` recovers when auto-resume did not run or user disabled auto-chain.
+
+The V1.39 list above is retained as historical workflow intent. Current
+orchestration checkpoint/re-drive behavior is narrower and source-backed by
+[`daemon-runtime.md`](daemon-runtime.md) §19: checkpoints persist position and
+context rather than a completed-stage ledger; daemon boot re-drives only
+non-terminal, readable, non-failed sessions with live converge/merge join
+state and a reconstructed runner. `nexus42 ops inspect [SESSION_ID] [--json]`
+is read-only and never triggers resume. The current Work auto-chain recovery
+command is `nexus42 creator works resume-chain`, migrated from the historical
+`creator run resume` spelling above.
 
 ### 5.5 Side-input lane (V1.39 extension)
 
@@ -167,7 +177,7 @@ V1.79 adds a read-only reflection surface over the creator's internalized SOUL f
 - **Keyword clusters** from each fragment's `keywords` JSON array.
 - **Temporal drift** from each fragment's `created_at` timestamp, with growth count folded into the timeline.
 
-Wire contract: `schemas/local-api/memory/memory-fragment-info.schema.json` extends the list-fragments item DTO with optional `keywords: string[]` and optional `created_at: string` (RFC 3339 by description). The extension is additive: `fragment_id` and `summary` remain the only required fields, and internal ownership/session fields (`creator_id`, `session_id`, `ttl`) stay out of the response. The visualization is a consumer of the creator-scoped memory list endpoint; it does not create, patch, or delete memory fragments.
+Wire contract: `schemas/daemon-api/memory/memory-fragment-info.schema.json` extends the list-fragments item DTO with optional `keywords: string[]` and optional `created_at: string` (RFC 3339 by description). The extension is additive: `fragment_id` and `summary` remain the only required fields, and internal ownership/session fields (`creator_id`, `session_id`, `ttl`) stay out of the response. The visualization is a consumer of the creator-scoped memory list endpoint; it does not create, patch, or delete memory fragments.
 
 ---
 

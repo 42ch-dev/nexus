@@ -4,7 +4,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative |
+| **Status** | Normative — current route, provider, worker, and ACP boundaries reconciled through V1.183 |
 | **Document class** | Master |
 | **Normative scope** | Host boundaries, provider model, capability contract, security/supervision invariants |
 | **Related** | [daemon-runtime.md](./daemon-runtime.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [acp-client-tech-spec.md](./acp-client-tech-spec.md) |
@@ -32,7 +32,7 @@ Define **`nexus-agent-host`**: the orchestration/facade above ACP and native CLI
 ```text
 OSS CLI (cli-spec)
   └─ nexus-daemon-runtime
-       ├─ /v1/local/agent-host/*  (Daemon API — normative surface per [daemon-runtime.md §2 layered surface](./daemon-runtime.md))
+       ├─ /v1/daemon/agent-host/*  (Daemon API — normative surface per [daemon-runtime.md §2 layered surface](./daemon-runtime.md))
        └─ Arc<dyn HostFacade>
             └─ nexus-agent-host
                  ├─ core: sessions, operations, lifecycle
@@ -53,6 +53,15 @@ Multica / OpenDesign are **reference architectures only**, not runtime dependenc
 | --- | --- | --- |
 | ACP adapter | Official SDK path via `nexus-acp-host` | Preferred for Registry-listed agents |
 | Native CLI adapter | Managed subprocess (e.g. Claude CLI wave 1) | Narrower capability surface; same HostOperation contract |
+
+
+**Current runtime wiring (V1.183):** the crate contains both the ACP adapter and
+native CLI adapters, but daemon boot currently registers only installed
+`codex-native`, `claude-native`, and `dsh-native` providers in the route-facing
+`HostManager`. Daemon-orchestrated ACP sessions run in per-creator
+`nexus42 acp-worker` children. Registry discovery or the presence of
+`providers::acp` must therefore not be presented as an in-process daemon ACP
+session that boot has registered.
 
 **Runtime rule**: `nexus-daemon-runtime` depends only on **`HostFacade` traits**, never on provider-specific crates.
 
@@ -100,49 +109,54 @@ crates/nexus-agent-host/
 ├── AGENTS.md
 ├── Cargo.toml
 └── src/
-    ├── lib.rs                    # public facade traits and DTO re-exports
+    ├── lib.rs                    # facade/provider traits and public re-exports
     ├── error.rs                  # HostError and HostResult
     ├── ids.rs                    # ProviderId, HostSessionId, HostOperationId
     ├── config.rs                 # AgentHostConfig, ProviderConfig, TimeoutConfig
     ├── core/
     │   ├── mod.rs
-    │   ├── manager.rs            # HostManager implementation
-    │   ├── session.rs            # SessionRegistry + state transitions
-    │   ├── operation.rs          # OpRegistry + op admission/cancel state
-    │   └── lifecycle.rs          # startup/shutdown/drain helpers
+    │   ├── manager.rs            # HostManager + operation admission/lifecycle
+    │   └── session.rs            # SessionRegistry + state transitions
     ├── capability/
     │   ├── mod.rs
-    │   ├── model.rs              # HostOperation, HostEvent, CapabilityDescriptor
-    │   ├── negotiation.rs        # ACP/native capability mapping
-    │   └── risk.rs               # read/write/destructive tool risk classes
+    │   ├── model.rs              # HostOperation, HostEvent, descriptors
+    │   ├── negotiation.rs        # provider capability mapping
+    │   └── risk.rs               # read/write/destructive risk classes
     ├── discovery/
     │   ├── mod.rs
     │   ├── catalog.rs            # ProviderCatalog
-    │   ├── config.rs             # explicit configured providers
-    │   ├── path_scan.rs          # known command lookup
+    │   ├── config.rs             # explicitly configured providers
+    │   ├── path_scan.rs          # known native command lookup
     │   └── acp_registry.rs       # RegistryClient adapter
     ├── policy/
     │   ├── mod.rs
-    │   ├── admission.rs          # provider/capability/session limits
-    │   └── permission.rs         # ACP permission outcome selection
+    │   ├── admission.rs          # provider/capability/session gates
+    │   └── permission.rs         # host permission resolution
     ├── providers/
     │   ├── mod.rs
-    │   ├── acp.rs                # AcpProvider using nexus-acp-host
+    │   ├── acp.rs                # AcpProvider via nexus-acp-host
     │   └── native_cli/
     │       ├── mod.rs
-    │       ├── common.rs         # managed process helpers
-    │       └── claude.rs         # Wave 1 native Claude CLI adapter
+    │       ├── claude.rs
+    │       ├── codex.rs
+    │       ├── dsh.rs
+    │       └── map_{claude,codex,dsh}.rs
     └── telemetry/
         ├── mod.rs
-        └── events.rs             # structured host event helpers
+        └── events.rs
 ```
 
 ### 2.2 Workspace dependencies
 
 - Root `Cargo.toml`: `crates/nexus-agent-host` is a workspace member.
-- `nexus-agent-host/Cargo.toml`: depends on `nexus-acp-host`, `nexus-contracts`, `nexus-home-layout`, `tokio`, `async-trait`, `futures-util`, `serde`, `serde_json`, `thiserror`, `tracing`, `uuid`, `chrono`, `toml`, and `reqwest` (only if registry paths require direct HTTP access).
-- `nexus-daemon-runtime/Cargo.toml`: depends on `nexus-agent-host` only after facade compiles.
-- `nexus42/Cargo.toml`: no new direct dependency for Wave 1.
+- `nexus-agent-host/Cargo.toml`: depends on the ACP boundary
+  (`nexus-acp-host`), Nexus contracts/home layout, Tokio/streaming and serde
+  support, discovery/risk helpers, and the three native-provider SDK crates
+  (`claude-codes`, `codex-codes`, `deepseek-harness-sdk`).
+- `nexus-daemon-runtime/Cargo.toml`: depends on `nexus-agent-host` as the
+  facade implementation; provider-specific Rust modules do not cross the
+  `HostFacade` call boundary.
+- `nexus42/Cargo.toml`: no direct dependency on `nexus-agent-host`.
 
 ### 2.3 DTO sourcing
 
@@ -315,26 +329,32 @@ pub struct ProviderCatalogEntry {
 
 ### 4.1 ACP provider
 
-The ACP provider uses `nexus-acp-host` primitives — the official Rust SDK via `nexus-acp-host`, not a hand-rolled JSON-RPC parser.
+The ACP provider uses the official Rust SDK through `nexus-acp-host`; it does
+not implement a second JSON-RPC stack.
 
-#### 4.1.1 Lifecycle (10 steps)
+#### 4.1.1 Lifecycle
 
-1. **Resolve provider**: launch strategy from explicit config or registry entry.
-2. **Spawn provider**: `nexus_acp_host::transport::AgentSpawner`.
-3. **Build SDK connection**: `nexus_acp_host::AcpSdkAdapter::with_connection(...)` from child stdio.
-4. **Initialize**: send `initialize` with latest supported protocol version, client info `nexus42` + crate version, and client capabilities for filesystem, terminal, and MCP as policy allows.
-5. **Capability mapping**: convert initialize response into `CapabilityDescriptor` — `load_session` from `agentCapabilities.loadSession`, prompt modality from prompt capabilities, MCP transport from MCP capabilities, auth methods from response.
-6. **Session creation**: default `session/new` for managed-only reproducibility. If request explicitly asks restore and `load_session` is supported, allow `session/load` only for host-owned persisted sessions.
-7. **Optional model/mode**: use SDK config-option APIs where available. If setting fails and policy allows fallback, emit `Status` warning and continue with default. If policy disallows, return `CapabilityUnsupported`.
-8. **Execute prompt**: translate `HostContentBlock` into ACP content blocks. Stream ACP `session/update` messages into `HostEvent` variants. Emit exactly one terminal `OpFinished` or `OpFailed`.
-9. **Permission handling**: on `session/request_permission`, evaluate via `nexus-acp-host::PermissionPolicy::evaluate_for_agent()` with tool context and risk classification. See §7.2.
-10. **Shutdown**: cancel active op if any, wait for configured graceful timeout, terminate child, then force kill if needed.
+1. A caller resolves and spawns the provider process and constructs
+   `nexus_acp_host::AcpSdkAdapter::with_connection(...)` from its stdio.
+2. `AcpProvider::new(...)` installs the host permission resolver and owns the
+   connected adapter plus its session map.
+3. `probe()` performs a bounded `initialize` handshake.
+4. `launch()` creates an ACP session and stores the ACP session id and returned
+   configuration options.
+5. `execute()` maps normalized prompt/model/mode operations to ACP. Prompt
+   execution calls `NexusAcpClient::stream_prompt()` and yields a
+   `HostEventStream` with exactly one terminal event.
+6. Permission requests are evaluated by the installed host callback and
+   surfaced as permission-result stream updates.
+7. `cancel()` calls `NexusAcpClient::cancel()` for the session; `shutdown()`
+   removes that session from provider tracking.
 
 #### 4.1.2 Streaming transport
 
-ACP is JSON-RPC 2.0 over newline-delimited stdio. The `AcpProvider` adapter manages this internally via `ActiveSession::read_update()`.
-
-**Known gap (R-001)**: `NexusAcpClient::prompt()` returns `AcpResult<NexusPromptCompleted>` (one-shot), not a stream. The SDK's `ActiveSession::read_update()` can read streaming `session/update` messages but is not exposed through the public trait. Resolution: wrap `ActiveSession::read_update()` into a stream type within `nexus-acp-host`, bridging `!Send` via `LocalSetBridge`.
+`AcpSdkAdapter::stream_prompt()` drives the SDK `ActiveSession::read_update()`
+loop on `LocalSetBridge` and exposes Nexus-owned `AcpStreamUpdate` values over a
+Tokio channel. `AcpProvider` maps those DTOs to `HostEvent` variants; SDK schema
+types do not cross the `nexus-acp-host` boundary.
 
 **ACP event → HostEvent mapping (D-006)**:
 
@@ -551,7 +571,7 @@ Parse session ID path parameters as `uuid::Uuid` at the handler boundary. Return
 
 ### 8.1 Design
 
-The daemon exposes a single `HostEvent`-based SSE endpoint (`GET /v1/local/agent-host/sessions/{id}/events`) that relays provider-side events to HTTP clients. The transport between provider and daemon is provider-specific:
+The daemon exposes a single `HostEvent`-based SSE endpoint (`GET /v1/daemon/agent-host/sessions/{id}/events`) that relays provider-side events to HTTP clients. The transport between provider and daemon is provider-specific:
 
 - **ACP provider**: JSON-RPC 2.0 over newline-delimited stdio via `ActiveSession::read_update()`. The `AcpProvider` adapter manages this internally. The daemon relay consumes `HostEventStream` and publishes as SSE.
 - **Non-ACP provider (e.g., native CLI)**: provider-adapter-specific transport (subprocess stdio, named pipes, etc.). Each native adapter normalizes its output into `HostEvent` variants per the per-provider stream adapter pattern (§4.2.2).
@@ -560,9 +580,10 @@ Both paths converge on the same `HostEventStream` type, so the SSE relay is prov
 
 ### 8.2 Streaming adaptation status
 
-The `into_event_stream` scaffold exists in `acp.rs` but the full ACP event → `HostEvent` mapping is not wired for all ACP event types (D-006). The mapping is defined in §4.1.2.
-
-For V1.18/Wave 1, the HTTP endpoint may return buffered event arrays if streaming transport is not yet implemented, but the internal `HostFacade::exec` must already use `HostEventStream` to avoid painting the design into a non-streaming corner.
+The streaming path is shipped: `NexusAcpClient::stream_prompt()` exposes
+Nexus-owned updates, `AcpProvider::stream_update_to_event()` maps text,
+thought, tool-call, tool-update, plan, permission-result, and stopped updates,
+and `HostManager` relays the normalized events to SSE subscribers.
 
 ### 8.3 Timeout enforcement (D-004)
 
@@ -638,13 +659,23 @@ Integration is via narrow facade only:
 
 | Method | Route | Purpose |
 |---|---|---|
-| `GET` | `/v1/local/agent-host/providers` | list discovered providers and negotiated/static capabilities |
-| `POST` | `/v1/local/agent-host/sessions` | create managed session |
-| `GET` | `/v1/local/agent-host/sessions` | list managed sessions and health |
-| `POST` | `/v1/local/agent-host/sessions/{id}/operations` | execute prompt or config op |
-| `POST` | `/v1/local/agent-host/operations/{op_id}:cancel` | cancel active op |
-| `GET` | `/v1/local/agent-host/sessions/{id}/events` | SSE event stream |
-| `DELETE` | `/v1/local/agent-host/sessions/{id}` | shut down one session (must not shut down entire host) |
+| `GET` | `/v1/daemon/agent-host/health` | report agent-host health |
+| `GET` | `/v1/daemon/agent-host/providers` | list the route-facing provider catalog |
+| `POST` | `/v1/daemon/agent-host/scan` | scan registry-known and native providers on local `PATH` |
+| `POST` | `/v1/daemon/agent-host/sessions` | create managed session |
+| `GET` | `/v1/daemon/agent-host/sessions` | list managed sessions and health |
+| `GET` | `/v1/daemon/agent-host/sessions/{id}` | get one managed session |
+| `POST` | `/v1/daemon/agent-host/sessions/{id}/operations` | execute prompt or config op |
+| `POST` | `/v1/daemon/agent-host/operations/{operation_id}:cancel` | cancel active operation; the handler requires the `:cancel` suffix |
+| `GET` | `/v1/daemon/agent-host/sessions/{id}/events` | SSE event stream |
+| `DELETE` | `/v1/daemon/agent-host/sessions/{id}` | shut down one session (must not shut down entire host) |
+
+The cancel spelling is intentional. Axum registers
+`POST /v1/daemon/agent-host/operations/:operation_id`; the handler then
+requires the captured final segment to end in `:cancel` and strips that suffix
+before resolving the operation. Therefore clients MUST send
+`/operations/{operation_id}:cancel`; a bare
+`POST /operations/{operation_id}` is rejected.
 
 V1.20 redesign extends these routes with additional agent-host endpoints (see V1.20 spec §4.3).
 
@@ -691,7 +722,7 @@ Multica is an open-source AI-native team collaboration platform that wraps multi
 ### 11.4 Architecture mapping
 
 ```
-Multica Runtime          ≈ nexus-daemon-runtime  (local API + lifecycle)
+Multica Runtime          ≈ nexus-daemon-runtime  (Daemon API + lifecycle)
 Multica Agent Protocol   ≈ ProviderAdapter        (ACP SDK / native CLI)
 Multica event model     ≈ HostEvent + SSE relay  (unified event stream)
 Multica task lifecycle   ≈ HostSession state machine (managed-only)
@@ -793,11 +824,11 @@ ACP providers can request permissions (`session/request_permission`) with allow/
 
 These decisions were made during V1.18 PM review and remain authoritative.
 
-### R-001: ACP streaming gap [MEDIUM]
+### R-001: ACP streaming bridge [MEDIUM — RESOLVED]
 
-`NexusAcpClient::prompt()` returns one-shot, not a stream. `ActiveSession::read_update()` can read streaming messages but is not exposed through the public trait.
-
-**Resolution**: Wrap `ActiveSession::read_update()` into a stream type within `nexus-acp-host`, bridging `!Send` via `LocalSetBridge`. This may add scope to provider implementation.
+`NexusAcpClient::stream_prompt()` now wraps the SDK
+`ActiveSession::read_update()` path behind Nexus-owned `AcpStreamUpdate` DTOs
+and `LocalSetBridge`; `AcpProvider` maps that stream to `HostEvent`.
 
 ### R-002: Cancel and Health are not operations [MEDIUM — RESOLVED]
 

@@ -1,10 +1,28 @@
 # ACP Client Integration — Technical Specification
 
-**Status**: Accepted — worker-delegated ACP hosting: daemon runtime does not link `agent-client-protocol`; ACP sessions run in per-creator `nexus42 acp-worker` child processes.  
+**Status:** Shipped. Current implementation uses official `agent-client-protocol = "=0.11.1"` behind Nexus-owned DTOs; daemon-orchestrated ACP sessions are delegated to per-creator `nexus42 acp-worker` children, while the route-facing daemon `HostManager` currently registers installed native CLI providers. Sections 2–10 retain the original V1.0 design and migration record where not superseded by the current amendment below.
 **Document class**: Master  
 
 **Source Plan**: `2025-04-05-acp-client`
 **Date**: 2026-04-06
+**Last reconciled**: 2026-09-04 — current SDK pin, client trait authority, provider wiring, and ACP worker boundary through V1.183.
+
+
+The shipped boundary is:
+
+- `crates/nexus-acp-host/Cargo.toml` pins
+  `agent-client-protocol = "=0.11.1"`.
+- Official SDK types are confined to `nexus-acp-host`; the public
+  `NexusAcpClient` trait uses Nexus-owned DTOs and includes both one-shot and
+  streaming prompt operations without treating a method count as a contract.
+- `nexus-agent-host::providers::acp` consumes `NexusAcpClient` /
+  `AcpSdkAdapter`, but those provider-specific types do not cross the
+  `HostFacade` boundary.
+- The daemon runtime does not import SDK protocol types or execute ACP sessions
+  in process. Daemon orchestration delegates those sessions to a per-creator
+  `nexus42 acp-worker` child; the route-facing `HostManager` boot path currently
+  registers installed `codex-native`, `claude-native`, and `dsh-native`
+  adapters.
 
 ---
 
@@ -25,39 +43,20 @@
 
 ## 1. SDK Selection Decision
 
-### 1.1 Candidates
+### 1.1 Current dependency and boundary
 
-| Criterion | `agent-client-protocol` v0.10.4 | `sacp` v10.1.0 / v11.0.0-alpha |
-|-----------|-------------------------------|-------------------------------|
-| **Publisher** | Zed Industries | Niko Matsakis |
-| **Stability** | Stable release (crates.io) | Rapid iteration (10 breaking releases in 3 months) |
-| **API Style** | Trait-based (`Client` trait, `Agent` trait) | Builder-based (`ClientToAgent::builder().run_until()`) |
-| **Transport** | stdio (JSON-RPC 2.0) | stdio (JSON-RPC 2.0) |
-| **Runtime** | Requires `tokio::task::LocalSet` + `spawn_local` (futures are `!Send`) | Likely similar constraint (unconfirmed) |
-| **Production Users** | Zed Editor, Block/Goose | Unknown production adopters |
-| **Registry Future** | Current official crate | To be renamed as `agent-client-protocol` v1.0 |
-| **Ecosystem Fit** | Official ACP docs recommend this crate | Forward-looking, but alpha-quality API |
+The shipped ACP SDK is **`agent-client-protocol` 0.11.1**, exact-pinned in
+`crates/nexus-acp-host/Cargo.toml`. `crates/nexus-acp-host/src/client.rs`
+confines `agent_client_protocol::schema` types to `AcpSdkAdapter` conversion
+and implementation code; consumers use nexus contract DTOs through
+`NexusAcpClient`.
 
-### 1.2 Decision: **`agent-client-protocol` v0.10.4 (Recommended)**
-
-**Rationale:**
-
-1. **Stability**: v0.10.4 is a published stable release on crates.io. The `sacp` crate has had 10 breaking releases in 3 months — adopting it means constant churn for a V1.0 product that must ship.
-2. **Documentation**: Official ACP docs at `agentclientprotocol.com/libraries/rust` reference `agent-client-protocol` as the crate name. It has documented `Client` and `Agent` traits with runnable examples.
-3. **Production Validation**: Used by Zed Editor and Block/Goose — real-world battle testing against actual agents in the registry.
-4. **Upgrade Path**: When `sacp` becomes `agent-client-protocol` v1.0, we can evaluate migration. The adapter layer (see §2.2) isolates the SDK behind a thin trait, making the swap manageable.
-5. **V1.0 Priority**: We need a working integration, not the most advanced API. Stability > feature completeness for V1.0.
-
-**Risk Mitigation**:
-- Wrap all SDK usage behind a `NexusAcpClient` trait in `apps/nexus42/src/acp/client.rs` (adapter pattern).
-- Pin exact version in `Cargo.toml`: `agent-client-protocol = "=0.10.4"`.
-- If the SDK becomes unmaintained or the v1.0 `sacp` rename happens before our GA, the adapter layer limits the migration surface.
-
-### 1.3 Alternative: Deferred (if SDK proves insufficient)
-
-If `agent-client-protocol` v0.10.4 lacks a critical feature (e.g., missing `session/load` support, broken `request_permission` handling), the fallback is to implement the JSON-RPC 2.0 stdio transport directly. The ACP protocol spec is public and well-documented — a thin `tokio::process::Command` + JSON-RPC client would suffice for V1.0's scope.
-
-**This fallback is NOT recommended unless a concrete gap is discovered.** The SDK handles framing, notification multiplexing, and protocol versioning — all error-prone to re-implement.
+`crates/nexus-agent-host/src/providers/acp.rs` adapts that client boundary to
+the normalized `ProviderAdapter` lifecycle (initialize, session creation,
+prompt/stream, cancel, shutdown). The daemon runtime does not directly link
+the SDK. No fixed client-method count is normative: the trait definition and
+its adapter implementation are the source authority as protocol support
+evolves.
 
 ---
 
@@ -88,7 +87,7 @@ If `agent-client-protocol` v0.10.4 lacks a critical feature (e.g., missing `sess
                └─────────────┘    └─────────────────┘
 
 ┌─────────────────────────────────────────────────────────┐
-│                   daemon runtime Daemon                       │
+│                   daemon runtime (historical V1.0)      │
 │                                                         │
 │  ┌──────────┐   ┌──────────┐   ┌──────────────────┐    │
 │  │ HTTP     │──▶│ Handlers │──▶│ WorkspaceState   │    │
@@ -316,7 +315,7 @@ The ACP protocol is designed for direct stdio communication. The existing `Daemo
 
 ### 4.2 V1.0 Daemon API Additions (Minimal)
 
-No new Daemon API endpoints are required for V1.0 ACP integration. The existing daemon endpoints (`/v1/local/runtime/health`, `/v1/local/workspace`, etc.) are sufficient for CLI use.
+No new Daemon API endpoints were required for the original V1.0 ACP integration. Current CLI-internal daemon access uses the `/v1/daemon/*` namespace; agents do not receive raw daemon access merely by participating in ACP.
 
 ### 4.3 V1.1+ Daemon API Expansion (Deferred)
 
@@ -686,7 +685,12 @@ cat ~/.nexus42/registry/cache_meta.json
 
 ## 10. Refined Task Breakdown
 
-### Task 1: ACP SDK Dependency + Adapter Trait
+> **Historical record:** Tasks 1–5 below preserve the original V1.0 plan.
+> Current crate homes, SDK pin, trait surface, provider wiring, and worker
+> delegation are defined by the amendment at the top of this document and
+> by the current source tree.
+
+### Task 1: ACP SDK Dependency + Adapter Trait (historical V1.0 plan)
 
 **Scope**: Add `agent-client-protocol` crate, implement `NexusAcpClient` adapter trait.
 
@@ -696,13 +700,13 @@ cat ~/.nexus42/registry/cache_meta.json
 - `apps/nexus42/src/acp/error.rs`
 
 **Files to modify:**
-- `apps/nexus42/Cargo.toml` — add `agent-client-protocol = "=0.10.4"` dependency
+- `apps/nexus42/Cargo.toml` — originally planned `agent-client-protocol = "=0.10.4"` dependency; current pin is `=0.11.1` in `crates/nexus-acp-host/Cargo.toml`
 - `apps/nexus42/src/main.rs` — add `mod acp;` and `Agent` command variant
 - `apps/nexus42/src/commands/mod.rs` — add `pub mod agent;`
 
 **Acceptance criteria:**
 - [ ] `cargo build -p nexus42` succeeds with the ACP SDK dependency
-- [ ] `NexusAcpClient` trait is defined with methods: `initialize()`, `create_session()`, `prompt()`, `cancel()`
+- [ ] The planned V1.0 `NexusAcpClient` surface included `initialize()`, `create_session()`, `prompt()`, and `cancel()`; the current trait definition is authoritative and also supports streaming/configuration operations
 - [ ] `AcpError` enum covers: connection failed, timeout, protocol error, agent crashed, not installed
 - [ ] `AcpSdkAdapter` struct wraps the SDK's `Client` trait implementation
 - [ ] Unit tests for error types pass
