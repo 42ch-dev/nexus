@@ -352,6 +352,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cursor_prefix_only_empty_id() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let result = get_timeline_overview(State(state), make_query(Some("tl:".to_string()))).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            NexusApiError::InvalidInput { field, reason } => {
+                assert_eq!(field, "cursor");
+                assert_eq!(reason, "cursor is empty");
+            }
+            other => panic!("Expected InvalidInput, got: {other:?}"),
+        }
+        drop(tmp);
+    }
+
+    #[tokio::test]
     async fn cursor_invalid_format() {
         let (tmp, nexus_home, db_path) = create_test_workspace().await;
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
