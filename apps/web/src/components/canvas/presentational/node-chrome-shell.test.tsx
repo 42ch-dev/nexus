@@ -77,6 +77,14 @@ describe('NodeChromeShell rendering', () => {
     // Dragging tier — gated by the data-dragging attribute so the RF wrapper
     // forwards the dragging prop without a class-name branch.
     expect(cls).toContain('data-[dragging=true]:shadow-elevation-4');
+    // v1.183 P0 (R-V1121P3QC3-S001): the transition covers box-shadow AND
+    // border-color so the selection border flip animates alongside the
+    // elevation tiers (the old transition-shadow dropped border-color).
+    expect(cls).toContain('transition-[box-shadow,border-color]');
+    // Duration/ease/motion-reduce stay pinned on the v0.4 motion scale.
+    expect(cls).toContain('duration-state');
+    expect(cls).toContain('ease-standard');
+    expect(cls).toContain('motion-reduce:transition-none');
   });
 
   it('forwards the dragging prop as a data-dragging attribute', () => {

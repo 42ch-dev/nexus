@@ -157,8 +157,12 @@ export function NodeChromeShell({
         // Base structural chrome. `shadow-card` is the v0.4 elevation-1 alias
         // (DESIGN.md §Elevation). Hover lifts to elevation-2; the
         // `data-[dragging=true]` variant lifts further to elevation-4 when
-        // the RF wrapper forwards the dragging prop.
-        'min-w-canvas-node-default rounded-card border bg-canvas-node-fill px-3 py-2 shadow-card transition-shadow duration-state ease-standard motion-reduce:transition-none hover:shadow-elevation-2 data-[dragging=true]:shadow-elevation-4',
+        // the RF wrapper forwards the dragging prop. The transition covers
+        // both box-shadow and border-color so the selection border flip
+        // animates alongside the elevation tiers (v1.183 P0
+        // R-V1121P3QC3-S001); duration/ease/motion-reduce stay on the v0.4
+        // motion scale.
+        'min-w-canvas-node-default rounded-card border bg-canvas-node-fill px-3 py-2 shadow-card transition-[box-shadow,border-color] duration-state ease-standard motion-reduce:transition-none hover:shadow-elevation-2 data-[dragging=true]:shadow-elevation-4',
         selected
           ? 'border-canvas-node-border-selected'
           : 'border-canvas-node-border',
