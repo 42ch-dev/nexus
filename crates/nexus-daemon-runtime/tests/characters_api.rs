@@ -471,3 +471,115 @@ async fn create_rejects_malformed_json_unknown_properties_and_invalid_ids_with_c
         .await;
     assert_canonical_invalid_input(&invalid_id);
 }
+
+
+#[tokio::test]
+async fn duplicate_display_name_is_stable_409() {
+    let ctx = ctx().await;
+    create_character(&ctx.server, "Ava", WORLD_A).await;
+    let resp = ctx
+        .server
+        .post("/v1/daemon/characters")
+        .json(&json!({ "display_name": "Ava", "world_id": WORLD_B }))
+        .await;
+    assert_eq!(resp.status_code(), 409, "body={}", resp.text());
+    let body: Value = resp.json();
+    assert_eq!(body["error"]["code"], "duplicate_character_display_name");
+    assert_ne!(body["error"]["message"], "duplicate_character_display_name");
+}
+
+#[tokio::test]
+async fn untrimmed_display_name_is_rejected() {
+    let ctx = ctx().await;
+    let resp = ctx
+        .server
+        .post("/v1/daemon/characters")
+        .json(&json!({ "display_name": " Ava ", "world_id": WORLD_A }))
+        .await;
+    assert_eq!(resp.status_code(), 422, "body={}", resp.text());
+    let body: Value = resp.json();
+    assert_eq!(body["error"]["code"], "invalid_input");
+}
+
+#[tokio::test]
+async fn create_list_show_accept_real_local_creator_id() {
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    let owner = "ctr_localabcdef123456";
+    std::fs::write(
+        nexus_home.join("config.toml"),
+        format!(
+            "active_creator_id = \"{owner}\"\n\n[active_workspace_slug_by_creator]\n\"{owner}\" = \"default\"\n"
+        ),
+    )
+    .unwrap();
+    let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+    let pool = state.pool().unwrap().clone();
+    nexus_local_db::ensure_creator_row(&pool, owner, "Local")
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO narrative_worlds \
+         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+          time_policy, metadata_json, created_at) \
+         VALUES (?, 'ws', ?, ?, ?, 'active', 'private', 'manual', '{}', datetime('now'))",
+    )
+    .bind(WORLD_A)
+    .bind(owner)
+    .bind(WORLD_A)
+    .bind("world-a")
+    .execute(&pool)
+    .await
+    .unwrap();
+    let server = TestServer::new(api::create_router(state, DaemonApiConfig::keyless()))
+        .expect("test server");
+    let created = server
+        .post("/v1/daemon/characters")
+        .json(&json!({ "display_name": "LocalAva", "world_id": WORLD_A }))
+        .await;
+    assert_eq!(created.status_code(), 201, "body={}", created.text());
+    let body: Value = created.json();
+    assert_eq!(body["character"]["owner_creator_id"], owner);
+    let id = body["character"]["character_id"].as_str().unwrap();
+    let show = server.get(&format!("/v1/daemon/characters/{id}")).await;
+    assert_eq!(show.status_code(), 200, "body={}", show.text());
+    let listed = server.get("/v1/daemon/characters").await;
+    assert_eq!(listed.status_code(), 200, "body={}", listed.text());
+    let listed_body: Value = listed.json();
+    assert_eq!(listed_body["items"].as_array().unwrap().len(), 1);
+    drop(tmp);
+}
+
+#[tokio::test]
+async fn list_paginates_large_fixture_with_sql_bounds() {
+    let ctx = ctx().await;
+    let mut ids = Vec::new();
+    for i in 0..25 {
+        let body = create_character(&ctx.server, &format!("Char{i:02}"), WORLD_A).await;
+        ids.push(body["character"]["character_id"].as_str().unwrap().to_string());
+    }
+    let mut seen = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let url = match &cursor {
+            None => "/v1/daemon/characters?limit=10".to_string(),
+            Some(c) => format!("/v1/daemon/characters?limit=10&cursor={c}"),
+        };
+        let page = ctx.server.get(&url).await;
+        assert_eq!(page.status_code(), 200, "body={}", page.text());
+        let p: Value = page.json();
+        let items = p["items"].as_array().unwrap();
+        assert!(items.len() <= 10);
+        for item in items {
+            seen.push(item["character_id"].as_str().unwrap().to_string());
+        }
+        if p["pagination"]["has_more"].as_bool().unwrap() {
+            cursor = Some(p["pagination"]["next_cursor"].as_str().unwrap().to_string());
+        } else {
+            break;
+        }
+    }
+    assert_eq!(seen.len(), 25);
+    seen.sort();
+    ids.sort();
+    assert_eq!(seen, ids);
+}

@@ -6,7 +6,7 @@ use common::LiveDaemon;
 use serde_json::Value;
 use std::process::Output;
 
-const OWNER: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const OWNER: &str = "ctr_localabcdef123456";
 const WORLD_A: &str = "wld_worldA";
 const WORLD_B: &str = "wld_worldB";
 

@@ -13,7 +13,7 @@ export interface AddCharacterBindingRequest {
    */
   world_id: string;
   /**
-   * Optional WorldSheet KnowledgeEntry id.
+   * Optional WorldSheet KnowledgeEntry id (at most 128 bytes).
    */
   world_sheet_entry_id?: string;
 }

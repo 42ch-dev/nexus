@@ -21,9 +21,8 @@
           "description": "Actor kind discriminant for a Creator bearer."
         },
         "creator_id": {
-          "type": "string",
-          "pattern": "^ctr_[0-9a-f]{32}$",
-          "description": "Creator ID: lowercase ctr_ prefix and exactly 32 hex characters."
+          "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorId",
+          "description": "Creator bearer id (`CreatorId`)."
         }
       }
     },

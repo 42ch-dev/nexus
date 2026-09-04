@@ -35,7 +35,7 @@ export interface NexusActorWorldBinding {
    */
   status: "active" | "inactive";
   /**
-   * Optional WorldSheet KnowledgeEntry id (block_type=character lore). Absent when unbound.
+   * Optional WorldSheet KnowledgeEntry id (block_type=character lore). Absent when unbound. At most 128 bytes.
    */
   world_sheet_entry_id?: string;
   /**

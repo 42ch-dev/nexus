@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT binding_id as \"binding_id!\",\n                  character_id as \"character_id!\",\n                  world_id as \"world_id!\",\n                  status as \"status!\",\n                  world_sheet_entry_id,\n                  created_at as \"created_at!\",\n                  updated_at as \"updated_at!\"\n           FROM actor_world_bindings WHERE character_id = ? ORDER BY created_at ASC, binding_id ASC",
+  "query": "SELECT binding_id as \"binding_id!\",\n                  character_id as \"character_id!\",\n                  world_id as \"world_id!\",\n                  status as \"status!\",\n                  world_sheet_entry_id,\n                  created_at as \"created_at!\",\n                  updated_at as \"updated_at!\"\n           FROM actor_world_bindings\n           WHERE character_id = ?\n           ORDER BY created_at ASC, binding_id ASC\n           LIMIT ? OFFSET ?",
   "describe": {
     "columns": [
       {
@@ -40,7 +40,7 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 3
     },
     "nullable": [
       false,
@@ -52,5 +52,5 @@
       false
     ]
   },
-  "hash": "d1e7919f3700a1c015cac494a46974e590c94cdf3e5da86788f0463cb42da6b7"
+  "hash": "ba7f1524e096f3cea54fed8f8bc63eeb54b3789f9b189d597b591fe6bbf89f04"
 }

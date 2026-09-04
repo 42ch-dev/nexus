@@ -14,8 +14,10 @@ CREATE TABLE IF NOT EXISTS characters (
             AND length(display_name) BETWEEN 1 AND 120
         ),
     status TEXT NOT NULL CHECK (status IN ('active', 'archived')),
-    image_uri TEXT,
-    persona_json TEXT NOT NULL DEFAULT '{}',
+    image_uri TEXT
+        CHECK (image_uri IS NULL OR length(image_uri) <= 2048),
+    persona_json TEXT NOT NULL DEFAULT '{}'
+        CHECK (length(persona_json) <= 16384),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -38,6 +40,7 @@ CREATE TABLE IF NOT EXISTS actor_world_bindings (
         REFERENCES narrative_worlds (world_id) ON DELETE RESTRICT,
     status TEXT NOT NULL CHECK (status IN ('active', 'inactive')),
     world_sheet_entry_id TEXT
+        CHECK (world_sheet_entry_id IS NULL OR length(world_sheet_entry_id) <= 128)
         REFERENCES kb_key_blocks (key_block_id) ON DELETE SET NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL

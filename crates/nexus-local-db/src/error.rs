@@ -94,6 +94,7 @@ pub enum LocalDbError {
 pub enum ActorContractConflict {
     LastActiveBinding,
     DuplicateActiveBinding,
+    DuplicateCharacterDisplayName,
     InvalidWorldSheet,
     WorldHasActorBindings,
 }
@@ -104,6 +105,7 @@ impl ActorContractConflict {
         match self {
             Self::LastActiveBinding => "last_active_actor_world_binding",
             Self::DuplicateActiveBinding => "duplicate_active_actor_world_binding",
+            Self::DuplicateCharacterDisplayName => "duplicate_character_display_name",
             Self::InvalidWorldSheet => "invalid_world_sheet",
             Self::WorldHasActorBindings => "world_has_actor_bindings",
         }
@@ -118,6 +120,9 @@ impl ActorContractConflict {
             }
             Self::DuplicateActiveBinding => {
                 "An active binding already exists for this Character and World"
+            }
+            Self::DuplicateCharacterDisplayName => {
+                "An active Character with this display name already exists for this Creator"
             }
             Self::InvalidWorldSheet => {
                 "WorldSheet is missing, deleted, the wrong type, or belongs to another World"

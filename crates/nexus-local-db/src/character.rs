@@ -10,6 +10,9 @@ use crate::actor_world_binding::{
 use crate::begin_immediate;
 use crate::error::{ActorContractConflict, LocalDbError};
 
+const PERSONA_JSON_MAX_BYTES: usize = 16_384;
+const IMAGE_URI_MAX_BYTES: usize = 2048;
+
 /// Persisted Character row (storage shape; not a wire DTO).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CharacterRecord {
@@ -48,14 +51,28 @@ pub fn mint_character_id() -> String {
 }
 
 pub(crate) fn normalize_display_name(raw: &str) -> Result<String, LocalDbError> {
-    let trimmed = raw.trim();
-    let scalars = trimmed.chars().count();
-    if trimmed.is_empty() || scalars > 120 {
+    if raw.trim() != raw {
+        return Err(LocalDbError::ValidationError(
+            "display_name must be trimmed (no leading or trailing whitespace)".into(),
+        ));
+    }
+    let scalars = raw.chars().count();
+    if raw.is_empty() || scalars > 120 {
         return Err(LocalDbError::ValidationError(
             "display_name must be trimmed non-empty and at most 120 Unicode scalars".into(),
         ));
     }
-    Ok(trimmed.to_string())
+    Ok(raw.to_string())
+}
+
+pub(crate) fn validate_image_uri(raw: Option<&str>) -> Result<Option<String>, LocalDbError> {
+    match raw {
+        None => Ok(None),
+        Some(uri) if uri.len() > IMAGE_URI_MAX_BYTES => Err(LocalDbError::ValidationError(
+            "image_uri must be at most 2048 bytes".into(),
+        )),
+        Some(uri) => Ok(Some(uri.to_string())),
+    }
 }
 
 pub(crate) fn validate_persona_json(raw: &str) -> Result<String, LocalDbError> {
@@ -67,7 +84,13 @@ pub(crate) fn validate_persona_json(raw: &str) -> Result<String, LocalDbError> {
             "persona_json must be a JSON object".into(),
         ));
     }
-    Ok(value.to_string())
+    let serialized = value.to_string();
+    if serialized.len() > PERSONA_JSON_MAX_BYTES {
+        return Err(LocalDbError::ValidationError(
+            "persona_json must be at most 16384 bytes".into(),
+        ));
+    }
+    Ok(serialized)
 }
 
 pub(crate) async fn require_owned_world(
@@ -130,13 +153,37 @@ pub async fn get_character(
     owner_creator_id: &str,
     character_id: &str,
 ) -> Result<Option<CharacterRecord>, LocalDbError> {
-    let mut tx = begin_immediate(pool).await?;
-    let row = load_character(&mut tx, character_id).await?;
-    tx.commit().await?;
-    Ok(row.filter(|c| c.owner_creator_id == owner_creator_id))
+    let row = sqlx::query!(
+        r#"SELECT character_id as "character_id!",
+                  owner_creator_id as "owner_creator_id!",
+                  display_name as "display_name!",
+                  status as "status!",
+                  image_uri,
+                  persona_json as "persona_json!",
+                  created_at as "created_at!",
+                  updated_at as "updated_at!"
+           FROM characters
+           WHERE character_id = ? AND owner_creator_id = ?"#,
+        character_id,
+        owner_creator_id
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| CharacterRecord {
+        character_id: r.character_id,
+        owner_creator_id: r.owner_creator_id,
+        display_name: r.display_name,
+        status: r.status,
+        image_uri: r.image_uri,
+        persona_json: r.persona_json,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+    }))
 }
 
-/// List Characters owned by `owner_creator_id`.
+/// List Characters owned by `owner_creator_id` with SQL `LIMIT`/`OFFSET`.
+///
+/// Callers that paginate should pass `limit + 1` so they can detect `has_more`.
 ///
 /// # Errors
 ///
@@ -144,6 +191,8 @@ pub async fn get_character(
 pub async fn list_characters(
     pool: &SqlitePool,
     owner_creator_id: &str,
+    limit: i64,
+    offset: i64,
 ) -> Result<Vec<CharacterRecord>, LocalDbError> {
     let rows = sqlx::query!(
         r#"SELECT character_id as "character_id!",
@@ -155,8 +204,12 @@ pub async fn list_characters(
                   created_at as "created_at!",
                   updated_at as "updated_at!"
            FROM characters
-           WHERE owner_creator_id = ? ORDER BY created_at ASC, character_id ASC"#,
-        owner_creator_id
+           WHERE owner_creator_id = ?
+           ORDER BY created_at ASC, character_id ASC
+           LIMIT ? OFFSET ?"#,
+        owner_creator_id,
+        limit,
+        offset
     )
     .fetch_all(pool)
     .await?;
@@ -187,6 +240,7 @@ pub async fn create_character_with_initial_binding(
 ) -> Result<CreateCharacterResult, LocalDbError> {
     let display_name = normalize_display_name(params.display_name)?;
     let persona_json = validate_persona_json(params.persona_json)?;
+    let image_uri = validate_image_uri(params.image_uri)?;
     let character_id = mint_character_id();
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -197,6 +251,7 @@ pub async fn create_character_with_initial_binding(
         &character_id,
         &display_name,
         &persona_json,
+        image_uri.as_deref(),
         &now,
     )
     .await;
@@ -218,13 +273,13 @@ async fn create_in_tx(
     character_id: &str,
     display_name: &str,
     persona_json: &str,
+    image_uri: Option<&str>,
     now: &str,
 ) -> Result<CreateCharacterResult, LocalDbError> {
     require_owned_world(tx, params.owner_creator_id, params.world_id).await?;
     validate_world_sheet_tx(tx, params.world_id, params.world_sheet_entry_id).await?;
 
     let owner_creator_id = params.owner_creator_id;
-    let image_uri = params.image_uri;
     let insert = sqlx::query!(
         r#"INSERT INTO characters
            (character_id, owner_creator_id, display_name, status, image_uri, persona_json, created_at, updated_at)
@@ -309,6 +364,16 @@ pub(crate) fn map_actor_constraint<T>(result: Result<T, sqlx::Error>) -> Result<
                     {
                         return Err(LocalDbError::ActorContractConflict {
                             code: ActorContractConflict::DuplicateActiveBinding,
+                        });
+                    }
+                    if constraint.contains("idx_characters_owner_active_display_name")
+                        || message.contains("idx_characters_owner_active_display_name")
+                        || message.contains(
+                            "UNIQUE constraint failed: characters.owner_creator_id, characters.display_name",
+                        )
+                    {
+                        return Err(LocalDbError::ActorContractConflict {
+                            code: ActorContractConflict::DuplicateCharacterDisplayName,
                         });
                     }
                 }

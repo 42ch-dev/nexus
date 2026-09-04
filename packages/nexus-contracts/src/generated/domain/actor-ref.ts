@@ -15,7 +15,7 @@ export interface CreatorActorRef {
    */
   actor_kind: "creator";
   /**
-   * Creator ID: lowercase ctr_ prefix and exactly 32 hex characters.
+   * Creator bearer id (`CreatorId`).
    */
   creator_id: string;
 }

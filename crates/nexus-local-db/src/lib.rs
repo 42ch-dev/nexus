@@ -68,7 +68,7 @@ pub use version::{DB_SCHEMA_VERSION, SCHEMA_VERSION};
 pub use error::{ActorContractConflict, LocalDbError};
 
 pub use actor_world_binding::{
-    add_actor_world_binding, count_active_bindings_for_world_tx, list_bindings_for_character,
+    add_actor_world_binding, count_bindings_for_world_tx, list_bindings_for_character,
     mint_binding_id, remove_binding, ActorWorldBindingRecord, CreateBindingParams,
 };
 pub use character::{

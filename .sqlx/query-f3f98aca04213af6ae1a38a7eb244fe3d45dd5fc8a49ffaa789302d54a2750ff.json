@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT character_id as \"character_id!\",\n                  owner_creator_id as \"owner_creator_id!\",\n                  display_name as \"display_name!\",\n                  status as \"status!\",\n                  image_uri,\n                  persona_json as \"persona_json!\",\n                  created_at as \"created_at!\",\n                  updated_at as \"updated_at!\"\n           FROM characters\n           WHERE owner_creator_id = ? ORDER BY created_at ASC, character_id ASC",
+  "query": "SELECT character_id as \"character_id!\",\n                  owner_creator_id as \"owner_creator_id!\",\n                  display_name as \"display_name!\",\n                  status as \"status!\",\n                  image_uri,\n                  persona_json as \"persona_json!\",\n                  created_at as \"created_at!\",\n                  updated_at as \"updated_at!\"\n           FROM characters\n           WHERE owner_creator_id = ?\n           ORDER BY created_at ASC, character_id ASC\n           LIMIT ? OFFSET ?",
   "describe": {
     "columns": [
       {
@@ -45,7 +45,7 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 3
     },
     "nullable": [
       false,
@@ -58,5 +58,5 @@
       false
     ]
   },
-  "hash": "bc932d797af505149faf0a80b8c1a7ab0a37898abac10dd7d2954a1d177c4d96"
+  "hash": "f3f98aca04213af6ae1a38a7eb244fe3d45dd5fc8a49ffaa789302d54a2750ff"
 }

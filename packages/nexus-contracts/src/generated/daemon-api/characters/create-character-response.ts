@@ -24,7 +24,7 @@ export interface NexusCharacter {
    */
   character_id: string;
   /**
-   * Owning Creator ID (lowercase ctr_ + 32 hex). Never accepted from create/bind request bodies.
+   * Owning Creator ID (`CreatorId`). Never accepted from create/bind request bodies.
    */
   owner_creator_id: string;
   /**
@@ -36,11 +36,11 @@ export interface NexusCharacter {
    */
   status: "active" | "archived";
   /**
-   * Optional Character-owned image URI (metadata only).
+   * Optional Character-owned image URI (metadata only; at most 2048 bytes).
    */
   image_uri?: string;
   /**
-   * Character-owned persona metadata object. Not a Canvas asset system.
+   * Character-owned persona metadata object. Not a Canvas asset system. Serialized JSON at most 16384 bytes.
    */
   persona: {
     [k: string]: unknown | undefined;
@@ -79,7 +79,7 @@ export interface NexusActorWorldBinding {
    */
   status: "active" | "inactive";
   /**
-   * Optional WorldSheet KnowledgeEntry id (block_type=character lore). Absent when unbound.
+   * Optional WorldSheet KnowledgeEntry id (block_type=character lore). Absent when unbound. At most 128 bytes.
    */
   world_sheet_entry_id?: string;
   /**

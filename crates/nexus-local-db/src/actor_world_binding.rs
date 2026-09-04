@@ -65,6 +65,11 @@ pub(crate) async fn validate_world_sheet_tx(
     let Some(sheet_id) = world_sheet_entry_id else {
         return Ok(());
     };
+    if sheet_id.len() > 128 {
+        return Err(LocalDbError::ValidationError(
+            "world_sheet_entry_id must be at most 128 bytes".into(),
+        ));
+    }
     let ok = sqlx::query_scalar!(
         r#"SELECT EXISTS(
             SELECT 1 FROM kb_key_blocks
@@ -187,9 +192,24 @@ pub async fn list_bindings_for_character(
     pool: &SqlitePool,
     owner_creator_id: &str,
     character_id: &str,
+    limit: i64,
+    offset: i64,
 ) -> Result<Vec<ActorWorldBindingRecord>, LocalDbError> {
-    let mut tx = begin_immediate(pool).await?;
-    require_owned_character(&mut tx, owner_creator_id, character_id).await?;
+    let owned = sqlx::query_scalar!(
+        r#"SELECT owner_creator_id as "owner_creator_id!" FROM characters WHERE character_id = ?"#,
+        character_id
+    )
+    .fetch_optional(pool)
+    .await?;
+    match owned {
+        Some(stored) if stored == owner_creator_id => {}
+        Some(_) | None => {
+            return Err(LocalDbError::ActorNotFound {
+                resource: "character",
+                id: character_id.to_string(),
+            });
+        }
+    }
     let rows = sqlx::query!(
         r#"SELECT binding_id as "binding_id!",
                   character_id as "character_id!",
@@ -198,12 +218,16 @@ pub async fn list_bindings_for_character(
                   world_sheet_entry_id,
                   created_at as "created_at!",
                   updated_at as "updated_at!"
-           FROM actor_world_bindings WHERE character_id = ? ORDER BY created_at ASC, binding_id ASC"#,
-        character_id
+           FROM actor_world_bindings
+           WHERE character_id = ?
+           ORDER BY created_at ASC, binding_id ASC
+           LIMIT ? OFFSET ?"#,
+        character_id,
+        limit,
+        offset
     )
-    .fetch_all(&mut *tx)
+    .fetch_all(pool)
     .await?;
-    tx.commit().await?;
     Ok(rows
         .into_iter()
         .map(|r| {
@@ -227,7 +251,7 @@ pub async fn list_bindings_for_character(
 /// # Errors
 ///
 /// Returns `LocalDbError` on database failure.
-pub async fn count_active_bindings_for_world_tx(
+pub async fn count_bindings_for_world_tx(
     tx: &mut Transaction<'_, Sqlite>,
     world_id: &str,
 ) -> Result<i64, LocalDbError> {

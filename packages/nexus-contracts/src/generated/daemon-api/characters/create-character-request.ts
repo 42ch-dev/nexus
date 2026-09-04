@@ -9,7 +9,7 @@
  */
 export interface CreateCharacterRequest {
   /**
-   * Character display name (1-120 after trim).
+   * Character display name. Trimmed non-empty; at most 120 Unicode scalars. Untrimmed values are rejected.
    */
   display_name: string;
   /**
@@ -17,17 +17,17 @@ export interface CreateCharacterRequest {
    */
   world_id: string;
   /**
-   * Optional Character-owned image URI.
+   * Optional Character-owned image URI (at most 2048 bytes).
    */
   image_uri?: string;
   /**
-   * Optional persona metadata object.
+   * Optional persona metadata object. Serialized JSON at most 16384 bytes.
    */
   persona?: {
     [k: string]: unknown | undefined;
   };
   /**
-   * Optional WorldSheet link on the initial binding.
+   * Optional WorldSheet link on the initial binding (at most 128 bytes).
    */
   world_sheet_entry_id?: string;
 }

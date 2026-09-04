@@ -24,9 +24,8 @@
       "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CharacterId"
     },
     "owner_creator_id": {
-      "type": "string",
-      "pattern": "^ctr_[0-9a-f]{32}$",
-      "description": "Owning Creator ID (lowercase ctr_ + 32 hex). Never accepted from create/bind request bodies."
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorId",
+      "description": "Owning Creator ID (`CreatorId`). Never accepted from create/bind request bodies."
     },
     "display_name": {
       "type": "string",
@@ -39,13 +38,14 @@
     },
     "image_uri": {
       "type": "string",
-      "description": "Optional Character-owned image URI (metadata only)."
+      "maxLength": 2048,
+      "description": "Optional Character-owned image URI (metadata only; at most 2048 bytes)."
     },
     "persona": {
       "type": "object",
       "additionalProperties": true,
       "default": {},
-      "description": "Character-owned persona metadata object. Not a Canvas asset system."
+      "description": "Character-owned persona metadata object. Not a Canvas asset system. Serialized JSON at most 16384 bytes."
     },
     "created_at": {
       "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"

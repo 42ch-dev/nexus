@@ -15,7 +15,8 @@
     },
     "world_sheet_entry_id": {
       "type": "string",
-      "description": "Optional WorldSheet KnowledgeEntry id."
+      "maxLength": 128,
+      "description": "Optional WorldSheet KnowledgeEntry id (at most 128 bytes)."
     }
   }
 }

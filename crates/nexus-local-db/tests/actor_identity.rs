@@ -323,7 +323,7 @@ async fn non_last_remove_deletes_only_that_row() {
     .await
     .unwrap();
 
-    let remaining = list_bindings_for_character(&pool, OWNER, &created.character.character_id)
+    let remaining = list_bindings_for_character(&pool, OWNER, &created.character.character_id, 100, 0)
         .await
         .unwrap();
     assert_eq!(remaining.len(), 1);
@@ -523,13 +523,13 @@ async fn duplicate_character_display_name_is_not_duplicate_binding() {
     .await
     .unwrap_err();
     assert!(
-        !matches!(
+        matches!(
             err,
             LocalDbError::ActorContractConflict {
-                code: ActorContractConflict::DuplicateActiveBinding
+                code: ActorContractConflict::DuplicateCharacterDisplayName
             }
         ),
-        "owner/display unique must not map to duplicate binding, got {err:?}"
+        "owner/display unique must map to duplicate display name, got {err:?}"
     );
 }
 

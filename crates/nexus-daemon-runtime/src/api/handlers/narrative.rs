@@ -106,7 +106,7 @@ pub async fn get_world(
 ///
 /// - `401 AuthRequired` if no active creator is configured.
 /// - `404 NotFound` if the world id is unknown or not owned by the caller.
-/// - `409 Conflict` (`world_has_actor_bindings`) if an active Character binding remains.
+/// - `409 Conflict` (`world_has_actor_bindings`) if any Character binding remains.
 /// - `500 Internal` on database error.
 ///
 /// `POST /v1/daemon/worlds` - create a new World (V1.130 P2).
@@ -237,7 +237,7 @@ pub async fn delete_world(
             message: format!("delete_world: begin tx failed: {e}"),
         })?;
 
-    let binding_count = nexus_local_db::count_active_bindings_for_world_tx(&mut tx, &world_id)
+    let binding_count = nexus_local_db::count_bindings_for_world_tx(&mut tx, &world_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -291,13 +291,15 @@ pub async fn delete_world(
     {
         Ok(res) => res.rows_affected(),
         Err(e) => {
-            let msg = e.to_string();
-            if msg.contains("FOREIGN KEY constraint failed") {
-                return Err(NexusApiError::from(
-                    nexus_local_db::LocalDbError::ActorContractConflict {
-                        code: nexus_local_db::ActorContractConflict::WorldHasActorBindings,
-                    },
-                ));
+            // Last resort after the declarative binding pre-count.
+            if let sqlx::Error::Database(db) = &e {
+                if db.is_foreign_key_violation() {
+                    return Err(NexusApiError::from(
+                        nexus_local_db::LocalDbError::ActorContractConflict {
+                            code: nexus_local_db::ActorContractConflict::WorldHasActorBindings,
+                        },
+                    ));
+                }
             }
             return Err(NexusApiError::Internal {
                 code: "DATABASE_ERROR".to_string(),

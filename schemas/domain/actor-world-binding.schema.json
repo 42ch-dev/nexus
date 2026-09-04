@@ -33,7 +33,8 @@
     },
     "world_sheet_entry_id": {
       "type": "string",
-      "description": "Optional WorldSheet KnowledgeEntry id (block_type=character lore). Absent when unbound."
+      "maxLength": 128,
+      "description": "Optional WorldSheet KnowledgeEntry id (block_type=character lore). Absent when unbound. At most 128 bytes."
     },
     "created_at": {
       "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
