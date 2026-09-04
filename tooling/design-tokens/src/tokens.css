@@ -515,7 +515,7 @@
   /* Sidebar nav — DESIGN.md §Sidebar Nav (V1.99 P1 projection; v1.183 P0
      AR-2: structural (non-color) sizing values live in the bare
      `--sidebar-nav-*` namespace, not the `--color-*` helper — same pattern
-     as --dialog-*/--sheet-*). Theme-independent: single :root definition
+     as the dialog/sheet structural vars. Theme-independent: single :root definition
      (layout should not shift), no dark pair. */
   --sidebar-nav-width: 248px;
   --sidebar-nav-item-height: 36px;
