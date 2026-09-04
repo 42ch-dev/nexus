@@ -107,7 +107,7 @@
 104:
 105:| Document | Class | Status |
 106:| --- | --- | --- |
-107:| [orchestration-engine.md](orchestration-engine.md) | Master | Active; **V1.62 Shipped** §5.2 narrative.compute + §8.4 combat-engine; **V1.179 P2** §7.5 DR-06 bounded joins (`timeout_ms`/`on_timeout`) |
+107:| [orchestration-engine.md](orchestration-engine.md) | Master | Shipped; **V1.62 Shipped** §5.2 narrative.compute + §8.4 combat-engine; **V1.179 P2 Shipped** §7.5 DR-06 bounded joins (`timeout_ms`/`on_timeout`) |
 108:| [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) | Master | Shipped (V1.4 WS7 → V1.34 agent-host + schedule wiring); canonical SSOT for ongoing schedule work |
 109:| [preset-conditional-routing.md](preset-conditional-routing.md) | Feature line | **Shipped (V1.42 P2)** — DF-56 `llm_judge` GO/NOGO minimal slice; V1.52/V1.56 overlays promoted (V1.158); **V1.179 P2** DR-06 bounded joins (§3.3.3, Normative) |
 110:| [llm-extract.md](llm-extract.md) | Master | **Normative — V1.51 Shipped (T-A P0)** — `nexus.llm.extract` capability + `LlmExtractTask` + `kb_extract_jobs` LLM payload extension (closes R-V150KBED-01) |
