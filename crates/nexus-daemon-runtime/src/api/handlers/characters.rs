@@ -13,14 +13,27 @@ use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
+use chrono::{DateTime, Utc};
 use nexus_contracts::daemon_api::characters::{
     add_character_binding_request::AddCharacterBindingRequest,
-    add_character_binding_response::AddCharacterBindingResponse,
-    character_detail::CharacterDetail, create_character_request::CreateCharacterRequest,
-    create_character_response::CreateCharacterResponse,
+    add_character_binding_response::{
+        AddCharacterBindingResponse, NexusActorWorldBinding as AddedBindingWire,
+    },
+    character_detail::{CharacterDetail, NexusCharacter as DetailCharacterWire},
+    create_character_request::CreateCharacterRequest,
+    create_character_response::{
+        CreateCharacterResponse, NexusActorWorldBinding as CreatedBindingWire,
+        NexusCharacter as CreatedCharacterWire,
+    },
     list_character_bindings_query::ListCharacterBindingsQuery,
-    list_character_bindings_response::ListCharacterBindingsResponse,
-    list_characters_query::ListCharactersQuery, list_characters_response::ListCharactersResponse,
+    list_character_bindings_response::{
+        ListCharacterBindingsResponse, NexusActorWorldBinding as ListedBindingWire,
+        NexusPaginationInfo as BindingPaginationInfo,
+    },
+    list_characters_query::ListCharactersQuery,
+    list_characters_response::{
+        ListCharactersResponse, NexusCharacter as ListedCharacterWire, NexusPaginationInfo,
+    },
 };
 use nexus_contracts::{ActorWorldBinding, Character};
 use nexus_local_db::{
@@ -61,38 +74,79 @@ fn map_wire<T: DeserializeOwned>(value: impl Serialize) -> Result<T, NexusApiErr
     serde_json::from_value(json).map_err(wire_err)
 }
 
+fn parse_rfc3339(raw: &str) -> Result<DateTime<Utc>, NexusApiError> {
+    DateTime::parse_from_rfc3339(raw)
+        .map(|dt| dt.with_timezone(&Utc))
+        .map_err(wire_err)
+}
+
+fn finish_builder<T, E: std::fmt::Display>(value: Result<T, E>) -> Result<T, NexusApiError> {
+    value.map_err(wire_err)
+}
+
+fn parse_optional<T>(raw: &Option<String>) -> Result<Option<T>, NexusApiError>
+where
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
+    raw.as_deref().map(str::parse).transpose().map_err(wire_err)
+}
+
 fn character_from_record(record: &CharacterRecord) -> Result<Character, NexusApiError> {
-    let persona: serde_json::Value = serde_json::from_str(&record.persona_json).map_err(wire_err)?;
-    let mut value = serde_json::json!({
-        "schema_version": 1,
-        "character_id": record.character_id,
-        "owner_creator_id": record.owner_creator_id,
-        "display_name": record.display_name,
-        "status": record.status,
-        "persona": persona,
-        "created_at": record.created_at,
-        "updated_at": record.updated_at,
-    });
-    if let Some(uri) = &record.image_uri {
-        value["image_uri"] = serde_json::Value::String(uri.clone());
-    }
-    serde_json::from_value(value).map_err(wire_err)
+    let persona: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(&record.persona_json).map_err(wire_err)?;
+    finish_builder(
+        Character::builder()
+            .schema_version(1u64)
+            .character_id(record.character_id.as_str())
+            .owner_creator_id(record.owner_creator_id.as_str())
+            .display_name(record.display_name.as_str())
+            .status(record.status.as_str())
+            .persona(persona)
+            .image_uri(parse_optional(&record.image_uri)?)
+            .created_at(parse_rfc3339(&record.created_at)?)
+            .updated_at(parse_rfc3339(&record.updated_at)?)
+            .try_into(),
+    )
 }
 
 fn binding_from_record(record: &ActorWorldBindingRecord) -> Result<ActorWorldBinding, NexusApiError> {
-    let mut value = serde_json::json!({
-        "schema_version": 1,
-        "binding_id": record.binding_id,
-        "character_id": record.character_id,
-        "world_id": record.world_id,
-        "status": record.status,
-        "created_at": record.created_at,
-        "updated_at": record.updated_at,
-    });
-    if let Some(sheet) = &record.world_sheet_entry_id {
-        value["world_sheet_entry_id"] = serde_json::Value::String(sheet.clone());
-    }
-    serde_json::from_value(value).map_err(wire_err)
+    finish_builder(
+        ActorWorldBinding::builder()
+            .schema_version(1u64)
+            .binding_id(record.binding_id.as_str())
+            .character_id(record.character_id.as_str())
+            .world_id(record.world_id.as_str())
+            .status(record.status.as_str())
+            .world_sheet_entry_id(parse_optional(&record.world_sheet_entry_id)?)
+            .created_at(parse_rfc3339(&record.created_at)?)
+            .updated_at(parse_rfc3339(&record.updated_at)?)
+            .try_into(),
+    )
+}
+
+fn pagination_info(limit: u32, has_more: bool, next_cursor: Option<String>) -> Result<NexusPaginationInfo, NexusApiError> {
+    finish_builder(
+        NexusPaginationInfo::builder()
+            .limit(i64::from(limit))
+            .has_more(has_more)
+            .next_cursor(next_cursor)
+            .try_into(),
+    )
+}
+
+fn binding_pagination_info(
+    limit: u32,
+    has_more: bool,
+    next_cursor: Option<String>,
+) -> Result<BindingPaginationInfo, NexusApiError> {
+    finish_builder(
+        BindingPaginationInfo::builder()
+            .limit(i64::from(limit))
+            .has_more(has_more)
+            .next_cursor(next_cursor)
+            .try_into(),
+    )
 }
 
 fn persona_json_string(map: &serde_json::Map<String, serde_json::Value>) -> String {
@@ -132,10 +186,16 @@ pub async fn create_character(
     .await?;
     Ok((
         StatusCode::CREATED,
-        Json(map_wire(serde_json::json!({
-            "character": character_from_record(&created.character)?,
-            "binding": binding_from_record(&created.binding)?,
-        }))?),
+        Json(finish_builder(
+            CreateCharacterResponse::builder()
+                .character(map_wire::<CreatedCharacterWire>(character_from_record(
+                    &created.character,
+                )?)?)
+                .binding(map_wire::<CreatedBindingWire>(binding_from_record(
+                    &created.binding,
+                )?)?)
+                .try_into(),
+        )?),
     ))
 }
 
@@ -161,14 +221,12 @@ pub async fn list_characters(
         .take(limit as usize)
         .map(|row| character_from_record(&row))
         .collect::<Result<_, _>>()?;
-    Ok(Json(map_wire(serde_json::json!({
-        "items": items,
-        "pagination": {
-            "limit": i64::from(limit),
-            "has_more": has_more,
-            "next_cursor": next_cursor,
-        }
-    }))?))
+    Ok(Json(finish_builder(
+        ListCharactersResponse::builder()
+            .items(map_wire::<Vec<ListedCharacterWire>>(items)?)
+            .pagination(pagination_info(limit, has_more, next_cursor)?)
+            .try_into(),
+    )?))
 }
 
 /// `GET /v1/daemon/characters/{character_id}`
@@ -180,9 +238,11 @@ pub async fn get_character(
     let row = nexus_local_db::get_character(state.pool_or_uninit()?, &owner, &character_id)
         .await?
         .ok_or_else(|| NexusApiError::NotFound(format!("character {character_id}")))?;
-    Ok(Json(map_wire(serde_json::json!({
-        "character": character_from_record(&row)?,
-    }))?))
+    Ok(Json(finish_builder(
+        CharacterDetail::builder()
+            .character(map_wire::<DetailCharacterWire>(character_from_record(&row)?)?)
+            .try_into(),
+    )?))
 }
 
 /// `POST /v1/daemon/characters/{character_id}/bindings`
@@ -205,9 +265,11 @@ pub async fn add_binding(
     .await?;
     Ok((
         StatusCode::CREATED,
-        Json(map_wire(serde_json::json!({
-            "binding": binding_from_record(&binding)?,
-        }))?),
+        Json(finish_builder(
+            AddCharacterBindingResponse::builder()
+                .binding(map_wire::<AddedBindingWire>(binding_from_record(&binding)?)?)
+                .try_into(),
+        )?),
     ))
 }
 
@@ -235,14 +297,12 @@ pub async fn list_bindings(
         .take(limit as usize)
         .map(|row| binding_from_record(&row))
         .collect::<Result<_, _>>()?;
-    Ok(Json(map_wire(serde_json::json!({
-        "items": items,
-        "pagination": {
-            "limit": i64::from(limit),
-            "has_more": has_more,
-            "next_cursor": next_cursor,
-        }
-    }))?))
+    Ok(Json(finish_builder(
+        ListCharacterBindingsResponse::builder()
+            .items(map_wire::<Vec<ListedBindingWire>>(items)?)
+            .pagination(binding_pagination_info(limit, has_more, next_cursor)?)
+            .try_into(),
+    )?))
 }
 
 /// `DELETE /v1/daemon/characters/{character_id}/bindings/{binding_id}`
@@ -254,4 +314,95 @@ pub async fn remove_binding(
     nexus_local_db::remove_binding(state.pool_or_uninit()?, &owner, &character_id, &binding_id)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod conversion_tests {
+    use super::*;
+
+    fn sample_character() -> CharacterRecord {
+        CharacterRecord {
+            character_id: "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            owner_creator_id: "ctr_localabcdef123456".into(),
+            display_name: "Ava".into(),
+            status: "active".into(),
+            image_uri: Some("https://example.test/ava.png".into()),
+            persona_json: r#"{"tone":"calm"}"#.into(),
+            created_at: "2026-09-05T00:00:00Z".into(),
+            updated_at: "2026-09-05T00:00:01Z".into(),
+        }
+    }
+
+    fn sample_binding() -> ActorWorldBindingRecord {
+        ActorWorldBindingRecord {
+            binding_id: "awb_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+            character_id: "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            world_id: "wld_worldA".into(),
+            status: "active".into(),
+            world_sheet_entry_id: Some("sheet-1".into()),
+            created_at: "2026-09-05T00:00:00Z".into(),
+            updated_at: "2026-09-05T00:00:01Z".into(),
+        }
+    }
+
+    #[test]
+    fn character_from_record_uses_generated_builder_fields() {
+        let mapped = character_from_record(&sample_character()).expect("valid record");
+        assert_eq!(
+            mapped.character_id.as_str(),
+            "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+        assert_eq!(mapped.owner_creator_id.as_str(), "ctr_localabcdef123456");
+        assert_eq!(mapped.display_name.as_str(), "Ava");
+        assert_eq!(
+            mapped.image_uri.as_ref().map(|u| u.as_str()),
+            Some("https://example.test/ava.png")
+        );
+        assert_eq!(
+            mapped.persona.get("tone").and_then(|v| v.as_str()),
+            Some("calm")
+        );
+        let envelope: CreateCharacterResponse = finish_builder(
+            CreateCharacterResponse::builder()
+                .character(map_wire::<CreatedCharacterWire>(mapped).expect("embed character"))
+                .binding(
+                    map_wire::<CreatedBindingWire>(
+                        binding_from_record(&sample_binding()).expect("binding"),
+                    )
+                    .expect("embed binding"),
+                )
+                .try_into(),
+        )
+        .expect("typed create envelope");
+        assert_eq!(
+            envelope.character.character_id.as_str(),
+            "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+    }
+
+    #[test]
+    fn invalid_status_is_character_wire_invalid() {
+        let mut record = sample_character();
+        record.status = "unknown".into();
+        let err = character_from_record(&record).expect_err("status must fail");
+        match err {
+            NexusApiError::Internal { code, .. } => assert_eq!(code, "CHARACTER_WIRE_INVALID"),
+            other => panic!("expected CHARACTER_WIRE_INVALID, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn list_envelope_is_generated_builder() {
+        let items = vec![character_from_record(&sample_character()).expect("character")];
+        let listed: ListCharactersResponse = finish_builder(
+            ListCharactersResponse::builder()
+                .items(map_wire::<Vec<ListedCharacterWire>>(items).expect("embed items"))
+                .pagination(pagination_info(10, true, Some("v1:10".into())).expect("page"))
+                .try_into(),
+        )
+        .expect("typed list envelope");
+        assert_eq!(listed.items.len(), 1);
+        assert!(listed.pagination.has_more);
+        assert_eq!(listed.pagination.next_cursor.as_deref(), Some("v1:10"));
+    }
 }
