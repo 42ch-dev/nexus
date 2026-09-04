@@ -18,10 +18,55 @@ The **product-thesis pillar** that *worlds react* via WASM compute — combat re
 The **Canvas hero pattern** (V1.122, deepened V1.123): a World's Timeline is the primary Canvas surface for **World entry** — authors open a World and meet its *when* axis before its entity graph or chapter structure. `CanvasSurfaceKind = "timeline"` is a peer surface alongside Strategy / Outline (Timeline-companion) / World KB, and is the default **World-entry** surface. **Outline** remains the default for **Work entry** (V1.118, unchanged). From V1.123, Timeline is not a single flat event list: it is **three zoom layers** — [Brief](#brief), [Narrative](#narrative), and [Moment](#moment) — with domain-differentiated use (World: Brief+Narrative; Work: Narrative+Moment via peer `work-timeline`).
 
 **Spine vs projection** (locked product model):
-- **Spine:** World + Timeline + KnowledgeEntry + Fork — the truth of the narrative universe. Timeline is the World's *when* axis (three layers).
+- **Spine:** World + Timeline + KnowledgeEntry + Fork — the truth of the narrative universe. Timeline is the World's *when* axis (three layers). KnowledgeEntry is one primitive with exactly one canonical owner scope (World / Character / ActorWorldBinding — see [KnowledgeEntry](#knowledgeentry)); shipped storage is World-owned only.
 - **Projection:** Work + Outline + Manuscript — the authoring plan and prose bound to a World. Outline is the Work's structural projection (chapters / scenes); Work Timeline is a peer projection for Narrative+Moment.
 
 Authors should feel: **World first for World building (Timeline, Brief-led); Work first for chapter writing (Outline), with Work Timeline reachable for scene precision.** Dual entry defaults encode that. Spec: [canvas-strategy-surface.md](.mstar/specs/canvas-strategy-surface.md).
+
+---
+
+## Actors & Narrative Identity
+
+The Actor model is **accepted product direction — implementation not shipped**: no Actor storage, schema, or API is shipped yet, and no current source models are claimed shipped under these terms. Durable authority: [actor-product-model.md](.mstar/specs/actor-product-model.md).
+
+### Actor
+The cross-cutting **narrative identity** primitive — *who can think and act* in a story. Outward line: **Nexus Actors are who can think and act — Creators conduct the story; Characters live it.** `ActorRef` is a closed v1 sum: `Creator | Character` — a product-identity model, **not** a unified actors-table storage commitment (existing Creator storage remains). Actor is **not a fourth pillar**: it cuts across [Harness](#harness) (executes an Actor), Canvas (surfaces one), and [Computable](#computable) (worlds react to one). One [Agent Host](#agent-host) / runtime / provider plane serves both kinds; a Character session executes under the owning Creator's admission boundary with an isolated ACP conversation history.
+
+**Identity axes — keep these separate:**
+
+| Axis | What it is | Why it is not (or is) Actor identity |
+|------|-----------|--------------------------------------|
+| **User Entrance** | User-layer usage identity (`developer` \| `content-creator`, V1.170 P1) selecting SPA layout trees — see [Entrance](#entrance) | UI routing state; creates, swaps, or hides no agent or narrative identity |
+| **Creator profile** | Shipped operational identity aggregate (`creator_id`): admission boundary, ownership, SOUL/Memory bearer | The *Creator Actor kind's operational record* — the profile is storage; Actor is the narrative-identity reading of it |
+| **Orchestration role** | Workflow-function routing inside presets (`GraphNode.agent` / `WorkerAgentConfig.role`) | Names which worker executes a step; never names *who* in the story |
+| **ACP session** (`HostSessionId`) | Transport conversation identity between Nexus and an agent | A session is a pipe: isolated per Actor/World view, but carries no identity semantics |
+| **V1.164 holder** | The l5 MindState/belief/observation `holder` field — an in-world epistemic subject reference (today: a World-scoped character KnowledgeEntry id, or `"world"`) | A ToM data pointer; holder→Character mapping is additive roadmap work, not an existing identity join |
+| **`actor_kind=character`** | Roadmap `ActorRef` discriminant value marking a first-class [Character](#character) identity row | This one *is* Actor vocabulary — the identity axis; it does not denote a KB lore row |
+| **`block_type=character`** | Shipped World KB lore taxonomy value on [KnowledgeEntry](#knowledgeentry) | Lore *about* a person inside a World (a [WorldSheet](#worldsheet)) — a separate axis from `actor_kind=character`: taxonomy vs identity |
+
+### Creator
+The local user's shipped identity aggregate — author profile, preferences, memories — and the **operational owner / admission identity** for everything Nexus executes. Under the Actor model the Creator is the first Actor kind: the god/orchestrator/narrative driver who **conducts** the story — owns Worlds (via the shipped `WorldMembership` aggregate — Creator↔World only, [world-membership.schema.json](schemas/domain/world-membership.schema.json)), carries SOUL + Memory ([Creator Memory](#creator-memory)), and holds **omniscient read** over all KnowledgeEntries in owned Worlds, including creator-only facts. Existing `creator_id` storage and FKs are not re-keyed, and Creator execution stays byte-stable when no Character is bound. Distinct from [Entrance](#entrance) (User-layer layout identity), orchestration roles, and ACP sessions — see the axis table under [Actor](#actor).
+
+### Character
+The second Actor kind (roadmap — not shipped): a durable, **Creator-owned** narrative identity that **lives inside** the story. A Character carries its own SOUL, Memory, ToM (built additively on the V1.164–V1.166 l5 MindState/belief/observation foundation; holder-to-Character mapping is additive), and image/persona assets. A Character is **not** a World-scoped `KnowledgeEntry(block_type=character)` — those remain [WorldSheets](#worldsheet) (lore). A Character associates with **one or more** Worlds only through explicit [ActorWorldBinding](#actorworldbinding)s — creation atomically establishes an initial binding, and an active Character never has zero active bindings. Character SOUL/Memory uses a **distinct bearer** from [Creator Memory](#creator-memory) — Character writes never enter Creator memory rows. Character execution requires the requesting Creator to own both the Character and the World plus an active binding; a missing/invalid binding or incomplete view **fails closed** — never falls back to the Creator/god context or a default ACP session.
+
+### ActorWorldBinding
+The roadmap association record linking a [Character](#character) to one World — Character↔World cardinality is exactly **one-or-more** (one or more bindings per active Character, each to exactly one World). Character creation establishes an initial ActorWorldBinding atomically; no active Character may have zero active bindings, so removing the last binding must fail or transition the Character out of active state per the later lifecycle contract — never an active orphan. A binding carries the binding-local isolated Character KE scope and may link optional [WorldSheets](#worldsheet). **Naming:** `WorldMembership` is reserved for the *shipped* Creator↔World aggregate and MUST NOT name Character↔World — ActorWorldBinding is the only Character↔World term. Execution gate: a Character session requires an active binding plus Creator ownership of both ends.
+
+### WorldSheet
+A World-scoped `KnowledgeEntry(block_type=character)` read under the Actor model: **character lore owned by a World** — World-local truth, optionally linked from an [ActorWorldBinding](#actorworldbinding) as that World's sheet about a Character; unbound sheets remain pure lore. Existing character KEs stay WorldSheets; no silent migration. A WorldSheet is data *about* a person in a World; a [Character](#character) (`actor_kind=character`) is *who can think and act* — separate axes.
+
+### Character KnowledgeView
+The composed, authorized knowledge scope a [Character](#character) perceives inside one active [ActorWorldBinding](#actorworldbinding): authorized World KE + Character-owned KE + binding-local KE. One [KnowledgeEntry](#knowledgeentry) primitive with exactly one canonical owner scope per entry (accepted roadmap direction — the Character and ActorWorldBinding owner scopes are not shipped storage yet):
+
+- **World-owned KE** remains World-local truth.
+- **Character-owned KE** lives in the Character knowledge space and may be explicitly shared — mounted into multiple of that Character's active bindings **without copying**.
+- **ActorWorldBinding-owned KE** (binding-local) belongs to one binding and is isolated from the Character's other Worlds — private to that World life.
+
+Cross-World sharing is explicit — it never implicitly copies all World facts or memories. Contrast the Creator view over an owned World: omniscient, including creator-only facts.
+
+### Viewpoint
+Subordinate **execution context** — logically `{actor_id, world_id, optional branch_id/event_id}` — describing *from where* an [Actor](#actor) acts or reads within a session. Viewpoint is not an identity, not an Actor kind, and not the name of any Character↔World association. The earlier same-day Viewpoint-as-identity direction (2026-09-04) is superseded by the Actor product lock ([actor-product-model.md](.mstar/specs/actor-product-model.md) §0).
 
 ---
 
@@ -32,6 +77,8 @@ The core creative container — a narrative universe with its own knowledge base
 
 ### KnowledgeEntry
 The fundamental unit of structured knowledge in a world. KnowledgeEntries have typed attributes (character, location, event, concept, etc.), taxonomy labels, and an immutable identity. *Computable* KnowledgeEntries accumulate mutable state over WASM compute invocations.
+
+**Canonical owner scope** (Actor-model alignment — accepted roadmap direction, not shipped storage): KnowledgeEntry stays **one primitive**, and each entry has exactly **one** canonical owner scope — **World**, **[Character](#character)**, or **[ActorWorldBinding](#actorworldbinding)**. World-owned KE remains World-local; Character-owned KE may be explicitly shared across that Character's bindings (mounted without copying); ActorWorldBinding-owned KE is isolated to that World life. The only shipped owner scope today is World: every World KB entry is World-owned, and current `block_type=character` rows are [WorldSheets](#worldsheet). The per-scope composition a Character perceives is the [Character KnowledgeView](#character-knowledgeview).
 
 ### Lore Activation
 The default-on mechanism (V1.149 / DF-74) that selects and orders World KB entries for a moment by their `modules.activation` fire-conditions (`keys` / `secondary_keys` / `logic` / `constant` / `priority` / `order` / `match`), with optional relation-hop expansion (≤2 hops) from firing entries. Worlds whose entries carry no activation module are assembled byte-identically to the pre-activation path. Applied during [Moment Context Assembly](#moment-context-assembly); dialect and contract: [`spoke-adapter-architecture.md`](.mstar/specs/spoke-adapter-architecture.md) §7.4.
@@ -100,11 +147,8 @@ A pre-configured bundle of compute capabilities with a YAML manifest. Presets de
 ### System Preset (`_system.*`)
 A built-in preset shipped with the app under `presets/_system/<name>/`, addressed by a qualified id with the `_system.` prefix (e.g. `_system.maintenance`). The on-disk directory is the **stripped** name — resolving an id to a path must strip the prefix first (see `.mstar/knowledge/conventions/system-preset-qualified-id-resolution.md`). System presets are read-only and hidden from author-facing management surfaces (e.g. Sessions list, preset Delete).
 
-### Creator
-The local user's identity aggregate — author profile, preferences, memories. A creator has one or more works and is the "self" that agents interact with.
-
 ### Creator Memory
-The creator's persistent memory pipeline — a structured I/O system ("SOUL") that stores and retrieves personal context across sessions. This is *not* World KB; it's the author's own memory (writing preferences, character voice notes, etc.).
+The creator's persistent memory pipeline — a structured I/O system ("SOUL") that stores and retrieves personal context across sessions. This is *not* World KB; it's the author's own memory (writing preferences, character voice notes, etc.). Creator-scoped only: under the Actor model (roadmap), a [Character](#character)'s SOUL/Memory uses a **distinct bearer** — Character writes never enter Creator memory rows. See [Actor](#actor).
 
 ### Moment Context Assembly
 The process of assembling the right set of KnowledgeEntries, timeline state, and creator memory for a given creative moment. Produces a "moment context" that an agent sees when performing a task (e.g., "write next chapter"). **Not** the Timeline [Moment](#moment) layer (scene/beat Canvas projection on Work Timeline) — this entry is the **session context-assembly** concept.
@@ -190,6 +234,18 @@ Paths are relative to the repo root. Each entry links the term to its authoritat
 | Computable (pillar) | Compute (Capability), WASM host, compute-module-abi | [compute-module-abi.md](.mstar/specs/compute-module-abi.md) |
 | Timeline-first World building | World, Timeline, Brief, Narrative, Moment, Outline, Workspace (Canvas), Fork | [canvas-strategy-surface.md](.mstar/specs/canvas-strategy-surface.md) |
 
+### Actors & Narrative Identity
+
+| Term | Related concepts | Spec doc |
+|------|-----------------|----------|
+| Actor | Creator, Character, ActorWorldBinding, Viewpoint | [actor-product-model.md](.mstar/specs/actor-product-model.md) — durable authority (accepted product direction, implementation not shipped) |
+| Creator | Actor, WorldMembership (Creator↔World), Creator Memory, World | [creator-workflow.md](.mstar/specs/creator-workflow.md) (shipped operational owner); [actor-product-model.md](.mstar/specs/actor-product-model.md) (Actor-kind reframing) |
+| Character | Actor, ActorWorldBinding, WorldSheet, Character KnowledgeView | [actor-product-model.md](.mstar/specs/actor-product-model.md) — accepted direction, not shipped |
+| ActorWorldBinding | Character, World, WorldSheet (≠ WorldMembership) | [actor-product-model.md](.mstar/specs/actor-product-model.md) — accepted direction, not shipped |
+| WorldSheet | KnowledgeEntry (`block_type=character`), ActorWorldBinding | [entity-scope-model.md](.mstar/specs/entity-scope-model.md) (shipped KE taxonomy); [actor-product-model.md](.mstar/specs/actor-product-model.md) (binding linkage) |
+| Character KnowledgeView | Character, ActorWorldBinding, KnowledgeEntry, Scope | [actor-product-model.md](.mstar/specs/actor-product-model.md) — accepted direction, not shipped |
+| Viewpoint | Actor, World, Moment Context Assembly | [actor-product-model.md](.mstar/specs/actor-product-model.md) (subordinate execution context) |
+
 ### Creative Writing Domain
 
 | Term | Related concepts | Spec doc |
@@ -215,8 +271,7 @@ Paths are relative to the repo root. Each entry links the term to its authoritat
 | Run | Compute, Module, Accept, Discard, Compute result | [daemon-api-surface-conventions.md](.mstar/specs/daemon-api-surface-conventions.md) |
 | Compute result | Run, Timeline, Accept, Computable | [entity-scope-model.md](.mstar/specs/entity-scope-model.md) |
 | Preset | Compute, Orchestration, Capability | [orchestration-engine.md](.mstar/specs/orchestration-engine.md) |
-| Creator | Creator Memory, Works | [creator-workflow.md](.mstar/specs/creator-workflow.md) |
-| Creator Memory | Creator, SOUL I/O | [creator-workflow.md](.mstar/specs/creator-workflow.md) |
+| Creator Memory | Creator, SOUL I/O, Character (distinct SOUL/Memory bearer — roadmap) | [creator-workflow.md](.mstar/specs/creator-workflow.md) |
 | Moment Context Assembly | Scope, KnowledgeEntry, Creator Memory (≠ Timeline Moment layer) | [local-runtime-boundary.md](.mstar/specs/local-runtime-boundary.md) |
 | Quality Loop | Findings, Review, Knowledge Loop | [novel-writing/quality-loop.md](.mstar/specs/novel-writing/quality-loop.md) |
 | Knowledge Loop | KnowledgeEntry, SourceAnchor, Quality Loop | [novel-writing/quality-loop.md](.mstar/specs/novel-writing/quality-loop.md) |

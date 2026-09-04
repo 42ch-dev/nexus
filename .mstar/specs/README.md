@@ -74,6 +74,7 @@
 72:| [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md) | Master | Active — current external daemon contracts use the Daemon API namespace; V1.64 originally established the bundled Web UI as an external API consumer (moved from knowledge root 2026-08-17) |
 73:| [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md) | Master | Normative — World KB implementation SSOT (crate responsibilities, loops, taxonomy; V1.139 SPOKE alignment); moved from knowledge root 2026-08-17 |
 | [embedding-readiness.md](embedding-readiness.md) | Master | Normative — V1.181 P0 (RN-OGA-3 readiness-contract form): platform-provided embeddings, OSS ships no execution; `EmbeddingIdentity` tuple + fail-closed derived-index protocol + explicit lexical fallback; governs `crates/nexus-embedding/` |
+| [actor-product-model.md](actor-product-model.md) | Draft overlay | **Draft (2026-09-04 user product lock)** — implementation not shipped (no Actor storage, schema, or API exists yet; no source models claimed shipped under these terms); **product semantics user-locked and authoritative for planning**; durable trackable spec-path authority (product-model SSOT); carries **no implement authority** until normative implementation specs land |
 74:
 75:### Runtime and persistence
 76:
@@ -182,6 +183,7 @@
 178:| ACP worker process | acp-client-tech-spec | daemon-runtime, local-runtime-boundary |
 179:| KB naming (KCA-003) | entity-scope-model §5.4 + cli-command-ia §3.2 | cli-spec §6.2E–F |
 180:| LLM extraction capability | [llm-extract.md](llm-extract.md) | entity-scope-model §5.5.6, world-kb-runtime-architecture §5.5, cli-spec §6.2G |
+| Actor/Creator/Character identity, ActorWorldBinding, WorldSheet distinction, KnowledgeEntry owner scopes, Viewpoint | [actor-product-model.md](actor-product-model.md) | entity-scope-model (shipped KE taxonomy + scope hierarchy), world-kb-runtime-architecture, agent-host, acp-client-tech-spec |
 181:| Compute module ABI (V1 envelope) | [compute-module-abi.md](compute-module-abi.md) | wasm-host, schemas-directory-layout §3.5, orchestration-engine §8.4, entity-scope-model §5.5.9, `schemas/daemon-api/compute/` |
 182:| WASM compute host runtime | [wasm-host.md](wasm-host.md) | compute-module-abi, orchestration-engine §8.4, `crates/nexus-wasm-host/AGENTS.md` |
 | Orchestration checkpoint resume / `ops inspect` | [daemon-runtime.md](daemon-runtime.md) §19 | cli-spec §6.3B (`nexus42 ops inspect`), preset-conditional-routing §3.3.3 |
