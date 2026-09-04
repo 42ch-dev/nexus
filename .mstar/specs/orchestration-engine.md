@@ -1,10 +1,10 @@
 # Orchestration Engine — Design Specification
 
-**Status**: Shipped (V1.4–V1.34 — orchestration engine SSOT, preset loader, worker IPC, capability registry). **V1.39 target**: DF-53 on_complete auto-chain + DF-68 boot resume policy. **V1.62 Shipped**: §5.2 `narrative.compute` capability + §8.4 `combat-engine` preset (deferred from V1.61 P3). FL-D (DF-29/31/56) shipped V1.56.  
+**Status**: Shipped (V1.4–V1.34 — orchestration engine SSOT, preset loader, worker IPC, capability registry). **V1.39 target**: DF-53 on_complete auto-chain + DF-68 boot resume policy. **V1.62 Shipped**: §5.2 `narrative.compute` capability + §8.4 `combat-engine` preset (deferred from V1.61 P3). FL-D (DF-29/31/56) shipped V1.56. **V1.179 P2 shipped**: DR-06 bounded joins (§7.5 `timeout_ms` / `on_timeout` on `merge:`/`converge:` states — additive fields; normative field table + semantics in [preset-conditional-routing.md](preset-conditional-routing.md) §3.3.3).
 **Document class**: Master  
 **Pillar (V1.122)**: **Harness** — this spec is the control-strategy engine contract for the [Harness](../../STRATEGY.md) pillar (orchestration engine + agent host + capability registry + presets). Harness is the "how an author harnesses AI agents to execute creative work" pillar; the user-visible Strategy/Strategies → **Harness** product rename shipped V1.156 P3; internal identifiers remain `strategy`/`preset` (architect LOCKED).
 **Author**: @project-manager (brainstorm consolidation) / to be co-authored by @architect before first implement
-**Date**: 2026-04-17; **Last updated**: 2026-06-23 — V1.62 P2 §5.2 + §8.4
+**Date**: 2026-04-17; **Last updated**: 2026-09-04 — V1.179 P2 DR-06 bounded joins reconciled (see status line)
 **Scope**: daemon runtime (daemon), new `crates/nexus-acp-host`, new `crates/nexus-orchestration`, `nexus42` CLI additions, preset bundle format.
 **Supersedes**: — (new topic)
 **Coordinates with**:
@@ -720,7 +720,7 @@ Error format:
 
 #### 7.6.1 Shared semantic validation facade (V1.32)
 
-V1.32 introduces a **shared semantic validation facade** used by both the CLI/API validate endpoint (`POST /v1/local/presets:validate`) and the orchestration loader. The facade is the single quality gate; there are no parallel weaker checks.
+V1.32 introduces a **shared semantic validation facade** used by both the CLI/API validate endpoint (`POST /v1/daemon/presets:validate`) and the orchestration loader. The facade is the single quality gate; there are no parallel weaker checks.
 
 The facade is composed of three layers:
 
@@ -902,7 +902,7 @@ pub fn validate_assets_in_bundle(bundle_root: &Path, bundle: &PresetBundle) -> V
 pub fn validate_path_safety(bundle_root: &Path, bundle: &PresetBundle) -> Vec<ValidationProblem> { … }
 ```
 
-CLI and daemon `POST /v1/local/presets:validate` call these functions directly without constructing a graph, so validation diagnostics are available without full loader overhead.
+CLI and daemon `POST /v1/daemon/presets:validate` call these functions directly without constructing a graph, so validation diagnostics are available without full loader overhead.
 
 ### 8.2 Mapping rules (YAML → graph-flow)
 
@@ -927,7 +927,7 @@ CLI and daemon `POST /v1/local/presets:validate` call these functions directly w
 ### 8.3 Caching and reloading
 
 - Loader caches `LoadedPreset` keyed by `source_hash`.
-- On `registry.refresh` capability call or the shipped Daemon API `POST /v1/local/presets/{id}:reload`, loader recomputes hash; if changed, invalidates cache and rebuilds. There is currently no top-level `nexus42 preset reload` CLI.
+- On `registry.refresh` capability call or the shipped Daemon API `POST /v1/daemon/presets/{id}:reload`, loader recomputes hash; if changed, invalidates cache and rebuilds. There is currently no top-level `nexus42 preset reload` CLI.
 - Running sessions continue on the previous graph (snapshot semantics); new sessions pick up the new graph.
 
 ### 8.4 `narrative.compute` capability and `combat-engine` preset (V1.62 P2 — Normative)
@@ -1112,11 +1112,11 @@ Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependen
 - `Capability` trait + registry; register **built-ins listed in §5.2 except `acp.*` and `judge.llm`** (those land Phase 3).
 - Worker Manager (spawn/supervise/shutdown) + stdin/stdout JSON-RPC IPC codec.
 - daemon runtime wires engine at startup (outside any HSM state changes — that's Phase 4).
-- New HTTP endpoints (authoritative list added to `acp-client-tech-spec.md` §4.3):
-  - `GET  /v1/local/orchestration/sessions`
-  - `GET  /v1/local/orchestration/sessions/{session_id}`
-  - `POST /v1/local/orchestration/sessions/{session_id}/signal`  (`pause` | `resume` | `cancel` | `advance`)
-  - `GET  /v1/local/orchestration/capabilities`
+- New HTTP endpoints (authoritative list added to `acp-client-tech-spec.md` §4.3; current names under the Daemon API namespace):
+  - `GET  /v1/daemon/orchestration/sessions`
+  - `GET  /v1/daemon/orchestration/sessions/{session_id}`
+  - `POST /v1/daemon/orchestration/sessions/{session_id}/signal`  (`pause` | `resume` | `cancel` | `advance`)
+  - `GET  /v1/daemon/orchestration/capabilities`
 - Register and run `_system.maintenance` hardcoded graph (not yet via file loader).
 
 **Acceptance**
@@ -1124,7 +1124,7 @@ Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependen
 - [ ] Engine can create, step, pause, resume, cancel a hardcoded 3-state test graph
 - [ ] SQLite storage roundtrip test: start session → kill daemon → restart → resume (manual signal) → completes
 - [ ] Worker Manager test: spawn dummy worker (shell script), send `worker/health`, get reply, `worker/shutdown`, observe graceful exit within 5 s
-- [ ] `GET /v1/local/orchestration/sessions` returns at least `_system.maintenance`'s session when daemon is in plain `Running` state (simulated — HSM lands Phase 4)
+- [ ] `GET /v1/daemon/orchestration/sessions` returns at least `_system.maintenance`'s session when daemon is in plain `Running` state (simulated — HSM lands Phase 4)
 - [ ] `cargo test --workspace` green; clippy/fmt clean
 
 ### 10.4 Phase 3 — Preset loader + `novel-writing` end-to-end (M; 1–2 agent sessions)

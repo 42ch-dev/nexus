@@ -14,6 +14,7 @@
 **V1.64 P3 Draft overlay:** §6.3 daemon Web UI serving — `daemon start` logs Web UI URL; new `daemon ui`/`daemon web` convenience command; §7.1 first-run path updated. See also [web-ui.md](./web-ui.md) §11 and [daemon-runtime.md](./daemon-runtime.md) §4.4.
 **V1.65 Prepare amendment:** outline and chapter-structure editing becomes UI-first through the bundled Web UI chapter-content Daemon API. CLI parity for existing creator/run/chapter workflows is retained; no shipped CLI command is removed or renamed by this UI-first slice.
 **V1.175 P1 amendment:** §6.2G.3-6 — reading / fork / inspector leaves (groups 3, 5, 6), strategy patch leaves (group 1), outline/timeline/chapter leaves (group 2), KB entity patch + memory closure + findings triage (groups 4, 7, 8). Thin daemon-HTTP leaves over existing routes (AR-83); no daemon route changes.
+**V1.182 P1 amendment:** §6.3B — hidden `nexus42 ops inspect [SESSION_ID] [--json]` operator group (BL-04): daemon-free read-only checkpoint projection with shared `resume_rules`; never triggers resume.
 
 ## 0. 文档定位
 
@@ -368,7 +369,7 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。**V1.
 
 `creator kb` scope 约束（对齐 [`entity-scope-model.md`](./entity-scope-model.md) §5.3）：
 
-- **`--scope work`（默认，V1.23 必须保留；V1.24 KCA-003 C2 强化为唯一已实现 scope）**：表示活跃 `creator_id` + 活跃 `workspace_slug` 下的 **CLI local work KB index**。当前实现通过 daemon local API `/v1/local/kb/entries` 优先处理，失败时回退到 `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/...` 下的本地文件 / `index.json` 工作索引。它是工作资料/文件索引，**不是** `nexus-kb` 的 World graph，**也不是** `nexus-knowledge` 的 User/global knowledge index。V1.24 的 daemon handler (`handlers/kb.rs`) 和 CLI (`creator kb`) 均已明确标注为 work-scope only。
+- **`--scope work`（默认，V1.23 必须保留；V1.24 KCA-003 C2 强化为唯一已实现 scope）**：表示活跃 `creator_id` + 活跃 `workspace_slug` 下的 **CLI local work KB index**。当前实现通过 daemon local API `/v1/daemon/kb/entries` 优先处理，失败时回退到 `$HOME/.nexus42/creators/<creator_id>/workspaces/<workspace_slug>/...` 下的本地文件 / `index.json` 工作索引。它是工作资料/文件索引，**不是** `nexus-kb` 的 World graph，**也不是** `nexus-knowledge` 的 User/global knowledge index。V1.24 的 daemon handler (`handlers/kb.rs`) 和 CLI (`creator kb`) 均已明确标注为 work-scope only。
 - **`--scope world`（V1.27+ shipped）**：要求可解析的 `world_id`（显式 flag 或当前 workspace binding），并路由到 `nexus-narrative` + `nexus-knowledge`。该路径查询的是 World-scoped narrative KB assets（KnowledgeEntries、SourceAnchors、graph/query primitives），不得回退到 `--scope work` 文件索引。
 - **User/global knowledge（未来目标）**：不得塞进 `creator kb` 或 `creator kb --scope user`。User-scoped global knowledge/reference material 应通过 `nexus-knowledge` 的 CLI 入口暴露；在六组顶层命令锁定下，推荐入口为 `nexus42 platform knowledge ...`（或等价的 platform/user knowledge 子命令），并由 `nexus-knowledge` 处理存储、标签检索与供 Moment assembly 读取的切片。**Durable roadmap:** DR-52 (user/global knowledge entry surface).
 
@@ -413,7 +414,7 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 
 - daemon runtime 是本地 supervisor，不是 ACP Agent/Server。
 - `daemon` 负责运行态控制，不承载 ACP 协议协商职责。
-- **Shipped:** `daemon schedule ...` is wired to the daemon orchestration schedules Daemon API (`/v1/local/orchestration/schedules/*`) via `commands/daemon/schedule.rs`.
+- **Shipped:** `daemon schedule ...` is wired to the daemon orchestration schedules Daemon API (`/v1/daemon/orchestration/schedules/*`) via `commands/daemon/schedule.rs`.
 - **Session control ownership:** `daemon schedule ...` is the primary orchestration CLI surface. It exercises the full sessions control plane through schedule operations: `current_session_id` points at the active orchestration session, and schedule signals cascade through the supervisor to the active session as described in [`creator-schedule-and-core-context.md`](./creator-schedule-and-core-context.md) §3.3.
 - **Removed:** `daemon orchestrate ...` is not a shipped compatibility surface. Do not document `daemon orchestrate run` in new plans or runbooks; use `daemon schedule ...` for shipped orchestration control unless a future plan intentionally introduces a new session-control wrapper.
 
@@ -461,10 +462,10 @@ A new convenience subcommand `nexus42 daemon ui` (alias `nexus42 daemon web`) st
 | `nexus42 daemon ui --port <N>` | Use a specific port (default: 8420) |
 | `nexus42 daemon web` | Alias for `nexus42 daemon ui` |
 
-The static SPA shell (HTML/JS/CSS) is unauthenticated — it carries no data. All data flows through the existing loopback Daemon API (`/v1/local/*`), which remains keyless on `localhost` per the V1.20 model. See [daemon-runtime.md](./daemon-runtime.md) §4.4 and [web-ui.md](./web-ui.md) §4 for the full serving model.
+The static SPA shell (HTML/JS/CSS) is unauthenticated — it carries no data. All data flows through the existing loopback Daemon API (`/v1/daemon/*`), which remains keyless on `localhost` per the V1.20 model. See [daemon-runtime.md](./daemon-runtime.md) §4.4 and [web-ui.md](./web-ui.md) §4 for the full serving model.
 
 **V1.65 authoring note:** chapter outline and structure editing is exposed first
-through the daemon-served Web UI (`/v1/local/works/{work_id}/chapters/*`). This
+through the daemon-served Web UI (`/v1/daemon/works/{work_id}/chapters/*`). This
 does not remove CLI parity for existing `creator run`, Work status, reconcile, or
 chapter-oriented orchestration flows. The CLI remains the power-user and
 automation surface; the Web UI becomes the primary author-facing surface for
@@ -932,12 +933,47 @@ All write tools route through the same admission pipeline (`Allowlist → Active
 
 **Daemon API** (shipped):
 
-- `GET /v1/local/presets`
-- `POST /v1/local/presets`
-- `POST /v1/local/presets:validate`
-- `POST /v1/local/presets/{id}:reload`
+- `GET /v1/daemon/presets`
+- `POST /v1/daemon/presets`
+- `POST /v1/daemon/presets:validate`
+- `POST /v1/daemon/presets/{id}:reload`
 
 There is **no** top-level `nexus42 preset ...` command group. User creative entry is **`creator run`** (V1.33); validation/listing is **`system preset`**.
+
+### 6.3B `nexus42 ops` — hidden operator inspection group (V1.182 P1 — BL-04)
+
+**Shipped:** `nexus42 ops inspect [SESSION_ID] [--json]` — a **hidden**
+operator group (clap `hide = true`, absent from root `--help`; the V1.35
+visible-group lock in §6.0B forces hiding — same posture as `preset`).
+Documented here plus `ops inspect --help`.
+
+It is a **daemon-free, read-only** projection of the V1.180 checkpoint slice
+(`orchestration_sessions`): it opens the workspace `state.db` via
+`nexus_local_db::open_pool_read_only` (no migrations, no seed, no lock
+upgrade) and projects the shared `nexus_orchestration::resume_rules` cascade
+into a resumable verdict. Checkpoints persist **position only** — there is no
+completed-stages ledger, and the output never claims one.
+
+| Behavior | Contract |
+| --- | --- |
+| `nexus42 ops inspect` (no argument) | List view: at most the 200 most-recent **non-terminal** checkpoint rows plus the honest full count (`total`) |
+| `nexus42 ops inspect <session_id>` | Detail view: one row (`session_id`, `creator_id`, `preset_id`, `preset_version`, `db_status`, `current_task_id`, `created_at`, `updated_at`, `run_failure`, `live_join_keys`, `resumable`, `context_readable`) |
+| `[--json]` | Emits the CLI-local inspect DTO verbatim (`snake_case`); `--json` errors print `{"error": ...}` on stdout, exit 1 (stdout stays machine-clean) |
+| Verdict words | `yes` / `no` / `unknown` with a `rule` (terminal_status / context_unreadable / typed_failure / not_converge_merge_class / chain_class_no_failure) and `explanation` |
+| Honesty rules | `db_status` is the raw DB column, never presented as authoritative run state; corrupt `context_json` → `verdict: "unknown"` (`context_readable: false` only for corrupt bytes; valid-JSON-unexpected-shape is byte-readable with the anomaly carried in the classification) |
+| Missing database | Honest empty state, exit 0 |
+| Unknown session id | Error, exit 1 |
+
+**Read-only / no-manual-resume boundary:** inspection **never** implies or
+triggers resume — re-drive remains a daemon-boot operation (see
+[daemon-runtime.md](./daemon-runtime.md) §19). Rule 4's in-memory half
+(boot-time `engine.has_runner` reconstruction) is carried as the separate
+`runner_check` caveat, never folded into the verdict.
+
+Implementation authorities: `apps/nexus42/src/commands/ops.rs`,
+`crates/nexus-orchestration/src/resume_rules.rs`,
+`crates/nexus-orchestration/src/storage/inspect.rs`, and
+`crates/nexus-orchestration/src/storage/sqlite.rs`.
 
 ### 6.4 `nexus42 acp`（能力协议命令组）
 
@@ -963,7 +999,7 @@ There is **no** top-level `nexus42 preset ...` command group. User creative entr
 
 操作主体：`sync` 的 `creator_id` 与 `workspace_slug` 必须对应当前活跃上下文；HTTP 优先 `Authorization: Bearer <creator_api_key>`，User 代操时使用 `Authorization: Bearer <user_access_token>` + `X-Creator-Id`。
 
-**架构边界（长期）**：`sync` 属于 **cloud 产品线**，由 CLI 调用 **`nexus-cloud-sync`** 完成 platform HTTP；Daemon API **不得**承载 `/v1/local/sync/*` 或注册代理。见 [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md) §5–§6。
+**架构边界（长期）**：`sync` 属于 **cloud 产品线**，由 CLI 调用 **`nexus-cloud-sync`** 完成 platform HTTP；Daemon API **不得**承载 `/v1/daemon/sync/*` 或注册代理。见 [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md) §5–§6。
 
 ### 6.6 `nexus42 platform`（平台能力命令组）
 
@@ -1568,7 +1604,7 @@ testing and troubleshooting of individual `nexus.*` / `fs/*` host tools.
 CLI `--help` text documents this intent.
 
 **Wiring**: `nexus42 host-call` → `DaemonClient::post` → daemon
-`POST /v1/local/agent-host/internal/tool-executions` →
+`POST /v1/daemon/agent-host/internal/tool-executions` →
 `HostToolExecutor::execute()` → `admission_pipeline()` →
 `CapabilityRegistry::dispatch()` → tool handler → response.
 
@@ -1613,7 +1649,7 @@ content hash, and updates the DB row (`last_refreshed_at`, `content_hash`,
 - Output format: `[DRY RUN] Would refresh N reference source(s):` followed by one line per source.
 
 **Wiring**: `nexus42 creator reference refresh` → `DaemonClient::post` →
-daemon `POST /v1/local/agent-host/internal/tool-executions` →
+daemon `POST /v1/daemon/agent-host/internal/tool-executions` →
 `HostToolExecutor::execute()` → `admission_pipeline()` →
 `CapabilityRegistry::dispatch("nexus.reference.refresh", {"reference_source_id":"..."})` →
 `ReferenceRefresh::run()` → fetch URL → hash → update DB → write body.md.

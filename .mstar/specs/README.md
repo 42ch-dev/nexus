@@ -38,7 +38,7 @@
 37:| Class | Implement authority | Typical header `Status` |
 38:| --- | --- | --- |
 39:| Master | When normative / active | Normative, Active, Accepted |
-40:| Draft overlay | While Status is Draft | Draft (Vx.xx) |
+40:| Draft overlay | While Status is Draft | Draft (Vx.xx), or Shipped α/β (Vx.xx) for overlay bodies carrying shipped slices |
 41:| Feature line | Yes | Shipped (Vx.xx) |
 42:| Exploration | No | Exploration |
 43:| Companion | OSS scope only | Normative (companion) |
@@ -62,16 +62,16 @@
 61:
 62:| Document | Class | Status |
 63:| --- | --- | --- |
-64:| [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) | Master | Active |
+64:| [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) | Master | Active — V1.64 amendment: local Web UI workspace member + embedded asset edge |
 65:| [entity-scope-model.md](entity-scope-model.md) | Master | Normative — V1.40 Shipped §5.1.1; V1.51 Shipped §5.5.6; **V1.62 Shipped** §5.5.9 (computable-flag + structured validation). **V1.158**: §1.4 V1.123 three-layer overlay + V1.156 3×2 matrix completion amendment promoted to Normative (World×Moment + Work×Brief closed; frontend-only, `wire_contracts_changed: false`). **V1.159**: §5.1.1 era taxonomy amendment (`era_type` + §5.6 `custom`/`custom_label: "parent_era"` nesting carrier — additive, `wire_contracts_changed: false`). **V1.162**: §6.6 fork-creation write boundary + lineage projection contract amendment (PD-01 local-vs-platform reconciliation; carrier approach B locked — branch-level `is_fork`/`parent_branch_id`/`forked_from_event_id`/`label?` fro…
 66:| [local-runtime-boundary.md](local-runtime-boundary.md) | Master | Normative |
-67:| [schemas-directory-layout.md](schemas-directory-layout.md) | Master | Normative — V1.64 Shipped (local-api common + findings list-response) |
-68:| [local-api-surface-conventions.md](local-api-surface-conventions.md) | Master | Normative — **V1.67 amended** (§3.2 casing ratification, §4 `items` enforcement, §5 sort-param contract; 0.5.0→0.6.0) |
+67:| [schemas-directory-layout.md](schemas-directory-layout.md) | Master | Normative — current Daemon API contracts live under `schemas/daemon-api/`; generated authorities: Rust `generated::daemon_api` + TypeScript `generated/daemon-api` (reconciled through V1.183). V1.139 architect §5.2: `domain/key-block.schema.json` deleted (spoke `knowledge-entry.schema.json` is the KB type source) |
+68:| [local-api-surface-conventions.md](local-api-surface-conventions.md) | Redirect stub | **V1.90 redirect stub** — renamed to [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md); retained for historical links from iteration compasses/plans |
 69:| [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) | Master | Normative — V1.77 amendment (§11 findings PATCH as non-OCC resource PATCH); cross-resource Daemon API response/query conventions for `schemas/daemon-api/` + `nexus-daemon-runtime` handlers |
 | [outbox-consolidation.md](outbox-consolidation.md) | Master | Normative — V1.59 P-last promote (single-writer contract + schema ownership); **V1.177 revision** (daemon `outbox` table dropped at V1.163 — §2.3/§6 closed history) |
 70:| [reference-knowledge.md](reference-knowledge.md) | Master | Normative — V1.58 P-last promote (reference body refreshable scan pipeline) |
 71:| [spoke-adapter-architecture.md](spoke-adapter-architecture.md) | Master | **Normative (v0.19 — V1.155 P1 capability-token production + tenant isolation: `nexus42 connect token issue` CLI (issuer.key Ed25519 create-once 0600, `claims.iss` MUST equal issuer-derived peer id), operator config `~/.nexus42/connect/config.json` (`trusted_issuers` / `require_capability_token` / `capability_token_provider{enabled, issuer_key_path}`, deny-unknown-fields, absent ⇒ pre-V1.155 defaults, malformed ⇒ fail-closed boot error, require-without-issuers ⇒ boot error); enforcement spoke-side fail-closed (`evaluate_invoke_token_gate` ⇒ `auth_failed` before the nexus handler, zero side effects) + nexus `PeerScope` intersection — token can never widen allowlist scope; all opt-in, …
-72:| [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md) | Master | Normative — external-consumer boundary rule for `schemas/` (platform wire + external Local API clients incl. bundled web UI); moved from knowledge root 2026-08-17 |
+72:| [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md) | Master | Active — current external daemon contracts use the Daemon API namespace; V1.64 originally established the bundled Web UI as an external API consumer (moved from knowledge root 2026-08-17) |
 73:| [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md) | Master | Normative — World KB implementation SSOT (crate responsibilities, loops, taxonomy; V1.139 SPOKE alignment); moved from knowledge root 2026-08-17 |
 | [embedding-readiness.md](embedding-readiness.md) | Master | Normative — V1.181 P0 (RN-OGA-3 readiness-contract form): platform-provided embeddings, OSS ships no execution; `EmbeddingIdentity` tuple + fail-closed derived-index protocol + explicit lexical fallback; governs `crates/nexus-embedding/` |
 74:
@@ -79,12 +79,12 @@
 76:
 77:| Document | Class | Status |
 78:| --- | --- | --- |
-79:| [daemon-runtime.md](daemon-runtime.md) | Master | Normative — V1.64 amendment (bundled local Web UI static serving); **V1.118 amendment** (§17 no-Profile boot + lazy `state.db` open) |
+79:| [daemon-runtime.md](daemon-runtime.md) | Master | Normative — V1.65 Prepare (bundled Web UI serving + chapter-content route family); **V1.90 amendment** (§14 surface renamed Local API → **Daemon API** with `/v1/daemon/` prefix); **V1.118 amendment** (§17 no-Profile boot + lazy `state.db` open); **V1.153 amendment** (§4.6 headless `nexus-runtime` profile); **V1.180–V1.182** (§19 checkpoint inspection + boot re-drive semantics; reconciled through V1.183) |
 80:| [local-db-schema.md](local-db-schema.md) | Master | Normative — V1.40 Shipped §4.1.2 (KB validation + narrative_worlds + kb_extract_jobs artifact locator) |
 81:| [concurrency.md](concurrency.md) | Master | **Normative — V1.51 Shipped (T-B P0/P1)** — advisory lock + heartbeat + OCC + zombie detection |
-82:| [canvas-strategy-surface.md](canvas-strategy-surface.md) | Draft overlay | **Shipped α (V1.70)** — Canvas product vision (Nexus = AI-autonomous executor; human steers via Canvas, AI owns prose) + 3 surfaces (Strategy/outline+timeline/World KB) on React Flow + no-raw-file-editing principle + TipTap-as-in-node + Preset→Strategy terminology. **V1.70** shipped the Strategy read/overlay/Idea-steer α slice; write-boundary + node-granular edits + outline/timeline + World KB remain Draft for V1.71+. **V1.122 Draft overlay (§3.3.2 + §4.5)** — fourth peer surface `CanvasSurfaceKind = "timeline"` (World-building hero) + architect-locked World-building projection + write-boundary reuse + Timeline-as-default-World-entry IA; shipped β text preserved (additive); `wire_co…
-83:| [reference-store-layout.md](reference-store-layout.md) | Master | Normative |
-84:| [chapter-content-local-api.md](chapter-content-local-api.md) | Draft overlay | Draft (V1.65) — chapter-content Daemon API field contract (`/v1/daemon/works/{work_id}/chapters/*`); cited by daemon-api-surface-conventions §6 |
+82:| [canvas-strategy-surface.md](canvas-strategy-surface.md) | Draft overlay | **Shipped β (V1.74)** — Strategy α (V1.70) + Strategy write-boundary (V1.71) + Outline+Timeline β (V1.72) + World KB β (V1.73) + World KB relationships β (V1.74) shipped; **V1.122/V1.123 Draft overlays** (Timeline peer surface = default World entry; three-layer Brief/Narrative/Moment + Work Timeline) + **V1.156** 3×2 matrix completion + **V1.159** era taxonomy + **V1.162** fork authoring chrome, and **V1.163** event-level cross-surface binding — each additive and frontend-only (`wire_contracts_changed: false`); see the promotion blockquote chain in the doc |
+| [reference-store-layout.md](reference-store-layout.md) | Master | Normative |
+84:| [chapter-content-local-api.md](chapter-content-local-api.md) | Feature line | Shipped — V1.65 chapter surface (`/v1/daemon/works/{work_id}/chapters/*`); V1.75 retired whole-document outline PUT in favor of the canvas patch route; cited by daemon-api-surface-conventions §6.2/§7 |
 85:
 86:### Compute and WASM
 87:
@@ -97,7 +97,7 @@
 94:
 95:| Document | Class | Status |
 96:| --- | --- | --- |
-97:| [cli-spec.md](cli-spec.md) | Master | **Normative — V1.51 Shipped** — V1.40 §6.2G world binding + **V1.51** `kb adopt`/`rescan`/`pending --missing-only` (T-A P0/P1/P2); legacy V1.46 overlay fully merged; V1.52 §6.2G.2/§6.2G.1 overlays promoted (V1.158) |
+97:| [cli-spec.md](cli-spec.md) | Master | **Normative — V1.51 Shipped** — V1.40 §6.2G world binding + **V1.51** `kb adopt`/`rescan`/`pending --missing-only` (T-A P0/P1/P2); legacy V1.46 overlay fully merged; V1.52 §6.2G.1/§6.2G.2 overlays promoted (V1.158); **V1.175 P1** §6.2G.3–§6.2G.6 thin daemon-HTTP leaves; **V1.182 P1** §6.3B hidden `nexus42 ops inspect` (BL-04) |
 98:| [cli-command-ia.md](cli-command-ia.md) | Master (Shipped V1.35) | Shipped (V1.35) |
 99:| [creator-centric-entry-model.md](creator-centric-entry-model.md) | Master (Shipped V1.35) | Shipped (V1.35) |
 100:
@@ -107,9 +107,9 @@
 104:
 105:| Document | Class | Status |
 106:| --- | --- | --- |
-107:| [orchestration-engine.md](orchestration-engine.md) | Master | Active; **V1.62 Shipped** §5.2 narrative.compute + §8.4 combat-engine |
-108:| [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) | Legacy scope | Active (WS7 schedule/core_context) |
-109:| [preset-conditional-routing.md](preset-conditional-routing.md) | Feature line | **Shipped (V1.42 P2)** — DF-56 `llm_judge` GO/NOGO minimal slice; V1.52/V1.56 overlays promoted (V1.158) |
+107:| [orchestration-engine.md](orchestration-engine.md) | Master | Active; **V1.62 Shipped** §5.2 narrative.compute + §8.4 combat-engine; **V1.179 P2** §7.5 DR-06 bounded joins (`timeout_ms`/`on_timeout`) |
+108:| [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) | Master | Shipped (V1.4 WS7 → V1.34 agent-host + schedule wiring); canonical SSOT for ongoing schedule work |
+109:| [preset-conditional-routing.md](preset-conditional-routing.md) | Feature line | **Shipped (V1.42 P2)** — DF-56 `llm_judge` GO/NOGO minimal slice; V1.52/V1.56 overlays promoted (V1.158); **V1.179 P2** DR-06 bounded joins (§3.3.3, Normative) |
 110:| [llm-extract.md](llm-extract.md) | Master | **Normative — V1.51 Shipped (T-A P0)** — `nexus.llm.extract` capability + `LlmExtractTask` + `kb_extract_jobs` LLM payload extension (closes R-V150KBED-01) |
 111:
 112:### Creator product lines
@@ -117,13 +117,13 @@
 114:| Document | Class | Status |
 115:| --- | --- | --- |
 116:| [work-experience-model.md](work-experience-model.md) | Feature line | Shipped (V1.33) |
-117:| [creator-workflow.md](creator-workflow.md) | Feature line | Shipped (V1.34; V1.40 Shipped — DF-63 W5 `novel-review-master sync_world_kb` extract binding) |
+117:| [creator-workflow.md](creator-workflow.md) | Feature line | Shipped (V1.34; V1.39 DF-53 auto-chain + daemon continuity; **V1.40 Shipped** — DF-63 W5 `novel-review-master sync_world_kb` extract binding; V1.79 SOUL visualization contract) |
 118:| **[novel-writing/](novel-writing/README.md)** | Feature subtree | **`work_profile: novel`** — see [novel-writing/README.md](novel-writing/README.md) for per-file index (workflow-profile, quality-loop, author-experience, overlays, …) |
 119:| [essay-profile.md](essay-profile.md) | Feature line | Draft (V1.52) — `work_profile: essay` first non-novel profile |
-120:| [web-ui.md](web-ui.md) | Feature line | **Shipped (V1.65)** — local Web UI product contract (`apps/web` React/Vite SPA, daemon-served, Tauri-ready); Control Room + Setup (V1.64) + Content-Authoring UI stage (V1.65 §13) + Desktop Shell stage (V1.66 §14, Shipped) + Surface Convergence & De-risk stage (V1.67 §15, Shipped) + V1.69 Design System Maturation & Canvas Draft + **V1.70 Canvas Strategy Implement (α) stage (V1.70 §16, Shipped)** + CI/desktop-build optimization (parallel ops track). **V1.118 Draft amendment** (§29.17 Creation peer groups + Canvas-first work shell). **V1.156 PD-4**: §29.2/§29.3/§29.4 Harness pillar-entry rename (user-visible Strategy/Strategies → Harness; Preset stays; internal identifiers unchanged). |
+120:| [web-ui.md](web-ui.md) | Feature line | **Shipped (V1.65)** — local Web UI product contract (`apps/web` React/Vite SPA, daemon-served, Tauri-ready); Control Room + Setup (V1.64) + Content-Authoring UI stage (V1.65 §13) + Desktop Shell stage (V1.66 §14, Shipped) + Surface Convergence & De-risk stage (V1.67 §15, Shipped) + V1.69 Design System Maturation & Canvas Draft + **V1.70 Canvas Strategy Implement (α) stage (V1.70 §16, Shipped)** + CI/desktop-build optimization (parallel ops track); stages through V1.78; **V1.94/V1.98/V1.118/V1.125/V1.122 Draft amendments** (§29–§30 IA, Design Studio, creation peer groups, Three-pillar pivot + Timeline-first Canvas IA); **V1.147** Computable Run Studio; **V1.156 PD-4** §29.4 Harness pillar-entry rename; **V1.157** React 19; **V1.170 P1** Entrance-first setup (AR-17). |
 121:| [design-studio.md](design-studio.md) | Feature line | Draft (V1.98) with V1.99–V1.101 studio-first amendments — standalone contributor/dev gallery and visual proving ground; not author-facing product UI |
-122:| [desktop-shell.md](desktop-shell.md) | Feature line | **Shipped (V1.66)** — Tauri v2 desktop shell contract (`apps/desktop` wrapper, `TauriClient`, sidecar lifecycle, port discovery, native file actions + path guard); macOS-first unsigned dev build. **V1.118 Draft amendment** (§13.11 Daemon no-Profile boot). |
-123:| [creator-run-preset-entry.md](creator-run-preset-entry.md) | Master | **Shipped (V1.45)** — `creator run <preset_id>` generic entry; wave 0 for V1.45 CLI IA (promoted P-last) |
+122:| [desktop-shell.md](desktop-shell.md) | Feature line | **Shipped (V1.66)** — Tauri v2 desktop shell contract (`apps/desktop` wrapper, `TauriClient`, sidecar lifecycle, port discovery, native file actions + path guard); macOS-first unsigned dev build. **V1.118 P0 shipped** (§13.11 Daemon no-Profile boot). Reconciled through V1.183. |
+123:| [creator-run-preset-entry.md](creator-run-preset-entry.md) | Master | **Shipped (V1.45 — 2026-06-13; P-last promotion Draft → Shipped 2026-06-14)** — `creator run <preset_id>` generic entry; wave 0 for V1.45 CLI IA |
 124:| [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
 125:| [creator-memory-soul-lifecycle.md](creator-memory-soul-lifecycle.md) | Draft overlay | Draft (V1.82 amendment) — per-(creator, world) narrative lifecycle |
 126:| [reading-chrome-profile-checklist.md](reading-chrome-profile-checklist.md) | Feature line | Shipped (V1.91) — acceptance checklist on DESIGN.md `reading-chrome-*` tokens |
@@ -133,11 +133,11 @@
 130:
 131:| Document | Class | Status |
 132:| --- | --- | --- |
-133:| [acp-client-tech-spec.md](acp-client-tech-spec.md) | Master | Accepted |
+133:| [acp-client-tech-spec.md](acp-client-tech-spec.md) | Master | **Shipped** — official `agent-client-protocol = "=0.11.1"` behind Nexus-owned DTOs; daemon-orchestrated ACP sessions in per-creator `nexus42 acp-worker` children; route-facing HostManager registers installed native CLI providers; reconciled through V1.183 |
 134:| [acp-capability-set.md](acp-capability-set.md) | Master | Normative |
-135:| [agent-host.md](agent-host.md) | Master | Normative |
-136:| [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) | Feature line | Shipped (V1.34) |
-137:| [capability-registry.md](capability-registry.md) | Draft overlay | Draft (V1.53) — runtime SSOT framework for `nexus.*` dispatch |
+135:| [agent-host.md](agent-host.md) | Master | Normative — current route, provider, worker, and ACP boundaries reconciled through V1.183 |
+136:| [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) | Master | Master (V1.57 P-last promote — bridge Master promotion; shipped V1.34) |
+137:| [capability-registry.md](capability-registry.md) | Master | Master (V1.57 P-last promote — bridge Master promotion + P0/P1/P3 spec changes folded in; runtime SSOT for `nexus.*` dispatch) |
 138:| [registry-integration.md](registry-integration.md) | Master | Normative |
 139:
 140:### Feature contracts and companions
@@ -172,7 +172,7 @@
 168:| --- | --- | --- |
 169:| Top-level CLI groups | cli-spec §6.0B | cli-command-ia (Shipped V1.35 supplement) |
 170:| First-run / local vs platform | cli-spec §7 | creator-centric-entry-model (Shipped V1.35 supplement) |
-171:| Work / `creator run` | [creator-run-preset-entry.md](creator-run-preset-entry.md) (V1.45 Draft) | work-experience-model, cli-spec §6.2 |
+171:| Work / `creator run` | [creator-run-preset-entry.md](creator-run-preset-entry.md) (V1.45 Shipped) | work-experience-model, cli-spec §6.2 |
 172:| Novel profile / `Works/<work_ref>/` layout | [novel-writing/workflow-profile.md](novel-writing/workflow-profile.md) | work-experience-model, [novel-writing/sync-contract.md](novel-writing/sync-contract.md), cli-spec §12.1 |
 173:| Creator workflow stages / chain | creator-workflow | work-experience-model, novel-writing/workflow-profile (produce) |
 174:| Preset YAML / loader / validator | orchestration-engine | creator-schedule § YAML additions |
@@ -182,8 +182,9 @@
 178:| ACP worker process | acp-client-tech-spec | daemon-runtime, local-runtime-boundary |
 179:| KB naming (KCA-003) | entity-scope-model §5.4 + cli-command-ia §3.2 | cli-spec §6.2E–F |
 180:| LLM extraction capability | [llm-extract.md](llm-extract.md) | entity-scope-model §5.5.6, world-kb-runtime-architecture §5.5, cli-spec §6.2G |
-181:| Compute module ABI (V1 envelope) | [compute-module-abi.md](compute-module-abi.md) | wasm-host, schemas-directory-layout §3.5, orchestration-engine §8.4, entity-scope-model §5.5.9, `schemas/local-api/compute/` |
+181:| Compute module ABI (V1 envelope) | [compute-module-abi.md](compute-module-abi.md) | wasm-host, schemas-directory-layout §3.5, orchestration-engine §8.4, entity-scope-model §5.5.9, `schemas/daemon-api/compute/` |
 182:| WASM compute host runtime | [wasm-host.md](wasm-host.md) | compute-module-abi, orchestration-engine §8.4, `crates/nexus-wasm-host/AGENTS.md` |
+| Orchestration checkpoint resume / `ops inspect` | [daemon-runtime.md](daemon-runtime.md) §19 | cli-spec §6.3B (`nexus42 ops inspect`), preset-conditional-routing §3.3.3 |
 183:
 184:---
 185:
@@ -192,7 +193,7 @@
 188:| Trigger | Required action | Status |
 189:| --- | --- | --- |
 190:| **Post-V1.35 CLI changes** | Update cli-spec §6–§7 first; update shipped supplements only when rationale, acceptance, or migration history changes | V1.36-V1.40 amendments folded into Master (no follow-up merge needed yet) |
-191:| **V1.53 ACP capability registry hygiene** | Promote or retain `capability-registry.md` after P0/P1 registry semantics land; skills-export compatibility spec retired and DF-50 Cancelled | Active V1.53 |
+191:| **V1.53 ACP capability registry hygiene** | Promote or retain `capability-registry.md` after P0/P1 registry semantics land; skills-export compatibility spec retired and DF-50 Cancelled | **Done 2026-06-22** — promoted to Master at V1.57 P-last (see header + this index) |
 192:| **Novel-writing sync module removed from code** | Archive novel-writing-sync-contract | Module still shipped (V1.36+); sync contract retained |
 193:| **V1.40 shipped (DF-63 closed)** | Mark `entity-scope-model.md` §5.1.1 + `cli-spec.md` §6.2G + `creator-workflow.md` persist + `local-db-schema.md` §4.1.2 + `novel-writing/workflow-profile.md` §3.5.1 as Shipped V1.40 in their headers | **Done 2026-06-11** (see headers + this index) |
 194:

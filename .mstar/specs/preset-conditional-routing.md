@@ -1,9 +1,9 @@
 # Preset Conditional Routing — Specification
 
-**Status**: Shipped (V1.42 P2 — 2026-06-12; `llm_judge` GO/NOGO → two `next` edges; V1.52 T-B P0 — 2026-06-19; N-way labeled routing; V1.52 T-B P1 — 2026-06-19; multi-branch merge semantics; V1.56 P2 — 2026-06-22; arbitrary stage conditional + expression routing + converge nodes; V1.56 P3 — 2026-06-22; registry.refresh conditional edges + workspace branch inputs)  
+**Status**: Shipped (V1.42 P2 — 2026-06-12; `llm_judge` GO/NOGO → two `next` edges; V1.52 T-B P0 — 2026-06-19; N-way labeled routing; V1.52 T-B P1 — 2026-06-19; multi-branch merge semantics; V1.56 P2 — 2026-06-22; arbitrary stage conditional + expression routing + converge nodes; V1.56 P3 — 2026-06-22; registry.refresh conditional edges + workspace branch inputs; **V1.179 P2 — 2026-08-27; DR-06 bounded joins** — `timeout_ms` / `on_timeout` on `merge:`/`converge:` states (additive fields; normative §3.3.3))  
 **Document class**: Feature line (conditional routing — minimal slice → N-way labeled → merge semantics → full expression routing → data-source integration)  
 **Created**: 2026-06-06  
-**Last updated**: 2026-06-22 (V1.56 P3: registry + workspace context fields shipped, §3.4 added)
+**Last updated**: 2026-09-04 (V1.179 P2: DR-06 bounded joins shipped, §3.3.3)
 **Tracker**: DF-56 (conditional routing / branching engine)  
 **Scope**: Preset `next.kind: conditional` loader + runtime evaluator (shipped)  
 **Coordinates with**:
@@ -423,4 +423,4 @@ The runtime scans compiled expression ASTs for `registry_refresh` and `workspace
 
 ---
 
-*Normative SSOT for preset conditional routing. V1.42 Draft established minimal `llm_judge` GO/NOGO; V1.52 promoted N-way labeled routing + multi-branch merge semantics; V1.56 promoted expression grammar + context namespace. All overlays promoted to Normative (V1.158 P3).*
+*Normative SSOT for preset conditional routing. V1.42 Draft established minimal `llm_judge` GO/NOGO; V1.52 promoted N-way labeled routing + multi-branch merge semantics; V1.56 promoted expression grammar + context namespace. All overlays promoted to Normative (V1.158 P3). V1.179 P2 added the DR-06 bounded-join amendment (§3.3.3).*
