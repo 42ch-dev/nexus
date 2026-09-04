@@ -410,8 +410,14 @@ components:
     logo-shell-height-px: "20"
     logo-clear-space-ratio: "0.25"
     active-bar-color: "{colors.blue-700}"
+    # Brand mark/accent are surface-conditional (the shell can render on light
+    # or dark plates in either theme), so both frontmatter blocks declare the
+    # full on-light/on-dark key pair with the same values (v1.183 P0
+    # R-V1121P0QC1-F007 key-structure normalization).
     brand-mark-on-light: "{colors.brand-deep-blue}"
     brand-accent-on-light: "{colors.brand-cyan}"
+    brand-mark-on-dark: "{colors.brand-cyan}"
+    brand-accent-on-dark: "{colors.brand-cyan-800}"
 
   # ── logo: root ──
   logo:
