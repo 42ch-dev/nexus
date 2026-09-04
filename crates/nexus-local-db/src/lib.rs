@@ -455,7 +455,8 @@ async fn apply_pending_migrations(
     // SAFETY: PRAGMA statement — no table schema to validate against.
     sqlx::query("PRAGMA foreign_keys = ON")
         .execute(&mut *conn)
-        .await?;
+        .await
+        .map_err(sqlx::migrate::MigrateError::Execute)?;
 
     // Bookkeeping identical to Migrator::run_direct (ignore_missing = false):
     // fail on a dirty (partially applied) migration, then validate applied
@@ -526,16 +527,22 @@ async fn apply_fk_suspension_migration(
     migration: &sqlx::migrate::Migration,
 ) -> Result<(), LocalDbError> {
     // SAFETY: PRAGMA statement — no table schema to validate against.
+    //
+    // Mapped to `MigrateError::Execute` so a transient failure at the pragma
+    // seam keeps the stock runner's co-boot retry classification
+    // (`is_transient_migration_error`), matching sqlx's `Migrate::apply`.
     sqlx::query("PRAGMA foreign_keys = OFF")
         .execute(&mut *conn)
-        .await?;
+        .await
+        .map_err(sqlx::migrate::MigrateError::Execute)?;
 
     let result = apply_fk_suspension_tx(conn, migration).await;
 
     // SAFETY: PRAGMA statement — no table schema to validate against.
     sqlx::query("PRAGMA foreign_keys = ON")
         .execute(&mut *conn)
-        .await?;
+        .await
+        .map_err(sqlx::migrate::MigrateError::Execute)?;
 
     result
 }
@@ -551,7 +558,16 @@ async fn apply_fk_suspension_tx(
 ) -> Result<(), LocalDbError> {
     use sqlx::{Connection as _, Executor as _};
 
-    let mut tx = conn.begin().await?;
+    // `begin`/integrity-query/bookkeeping/commit errors are mapped to
+    // `MigrateError::Execute` — exactly how sqlx's stock `Migrate::apply`
+    // classifies them (`MigrateError::Execute(#[from] Error)`) — so a
+    // transient SQLITE_BUSY or `_sqlx_migrations` UNIQUE race at any of
+    // these seams keeps the existing single co-boot retry instead of
+    // degrading to a non-retryable `LocalDbError::Sqlx`.
+    let mut tx = conn
+        .begin()
+        .await
+        .map_err(sqlx::migrate::MigrateError::Execute)?;
     let start = std::time::Instant::now();
 
     let outcome: Result<(), LocalDbError> = async {
@@ -563,7 +579,8 @@ async fn apply_fk_suspension_tx(
         let violations: Vec<(String, i64, String, i64)> =
             sqlx::query_as("PRAGMA foreign_key_check")
                 .fetch_all(&mut *tx)
-                .await?;
+                .await
+                .map_err(sqlx::migrate::MigrateError::Execute)?;
         if !violations.is_empty() {
             return Err(LocalDbError::ConstraintViolation {
                 table: "database".to_string(),
@@ -586,16 +603,22 @@ async fn apply_fk_suspension_tx(
         .bind(&*migration.checksum)
         .bind(execution_time)
         .execute(&mut *tx)
-        .await?;
+        .await
+        .map_err(sqlx::migrate::MigrateError::Execute)?;
 
         Ok(())
     }
     .await;
 
     match outcome {
-        Ok(()) => tx.commit().await?,
+        Ok(()) => tx
+            .commit()
+            .await
+            .map_err(sqlx::migrate::MigrateError::Execute)?,
         Err(err) => {
-            tx.rollback().await?;
+            tx.rollback()
+                .await
+                .map_err(sqlx::migrate::MigrateError::Execute)?;
             return Err(err);
         }
     }
@@ -1134,6 +1157,101 @@ mod tests {
             recorded_owner_success(&pool).await,
             1,
             "retry after cleanup must apply the owner migration"
+        );
+    }
+
+    /// Important (task-1-fix-2 / task-1-review): a transient failure at the
+    /// custom FK-suspension bookkeeping seam must keep the co-boot retry
+    /// classification. The loser of a first-boot race on a rebuild migration
+    /// collides on `_sqlx_migrations.version` at the runner's bookkeeping
+    /// INSERT; sqlx's stock `Migrate::apply` surfaces that as
+    /// `MigrateError::Execute` (retryable), and the custom path must too —
+    /// before this fix it degraded to a non-retryable `LocalDbError::Sqlx`.
+    ///
+    /// Deterministic injection: the rebuild script pre-inserts its own
+    /// `_sqlx_migrations` success row, so the runner's bookkeeping INSERT for
+    /// the same version deterministically violates the `version` PRIMARY KEY
+    /// at the custom bookkeeping seam — no real second process needed. Every
+    /// attempt fails identically, so `run_migrations_with_retry` must run
+    /// exactly twice (initial attempt + single retry) and surface the error.
+    #[tokio::test]
+    async fn fk_suspension_bookkeeping_collision_keeps_co_boot_retry() {
+        use sqlx::migrate::{Migration, MigrationType, Migrator};
+        use std::borrow::Cow;
+
+        let migrations = vec![Migration::new(
+            1,
+            Cow::Borrowed("rebuild with bookkeeping collision"),
+            MigrationType::Simple,
+            Cow::Borrowed(
+                "-- no-transaction\n\
+                 PRAGMA foreign_keys=OFF;\n\
+                 CREATE TABLE rebuild_target (id TEXT PRIMARY KEY);\n\
+                 INSERT INTO _sqlx_migrations \
+                     (version, description, success, checksum, execution_time) \
+                 VALUES (1, 'rebuild with bookkeeping collision', TRUE, X'00', 0);\n\
+                 PRAGMA foreign_keys=ON;",
+            ),
+            true,
+        )];
+        let migrator = Migrator {
+            migrations: Cow::Owned(migrations),
+            ignore_missing: false,
+            locking: true,
+            no_tx: false,
+        };
+        let migrator_ref = &migrator;
+
+        let dir = tempfile::tempdir().unwrap();
+        let pool = single_conn_fk_pool(&dir.path().join("test.db")).await;
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let calls_ref = &calls;
+
+        let err = run_migrations_with_retry(&pool, |p| async move {
+            calls_ref.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let mut conn = p.acquire().await?;
+            apply_pending_migrations(&mut conn, migrator_ref).await
+        })
+        .await
+        .expect_err("the injected bookkeeping collision must surface after the single retry");
+
+        // The real SQLite error at the custom bookkeeping seam keeps the
+        // co-boot signature (UNIQUE on `_sqlx_migrations.version`) …
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("UNIQUE constraint failed: _sqlx_migrations.version"),
+            "expected the bookkeeping UNIQUE collision, got: {msg}"
+        );
+        // … and is classified transient, so the existing single retry ran.
+        assert!(
+            is_transient_migration_error(&err),
+            "custom-path bookkeeping collision must stay transient, got: {err}"
+        );
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "a transient custom-path failure must take the existing single retry"
+        );
+
+        // Atomicity preserved: both attempts rolled back, nothing recorded.
+        let recorded: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE success = TRUE")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            recorded, 0,
+            "the colliding rebuild must never be recorded successful"
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'rebuild_target'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            0,
+            "the rolled-back rebuild script must leave no schema behind"
         );
     }
 
