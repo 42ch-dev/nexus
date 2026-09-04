@@ -146,6 +146,7 @@
 143:| --- | --- | --- |
 144:| [canonical-hash.md](canonical-hash.md) | Companion | Normative (OSS notes; platform ADR-006 authoritative) |
 145:| [world-delta-propose-apply.md](world-delta-propose-apply.md) | Feature line | Normative — V1.60 P-last promotion (world-delta propose/apply local parity) |
+| [findings-lifecycle.md](findings-lifecycle.md) | Master | Normative — V1.77 Phase 2b promotion (cross-profile 6-state findings lifecycle + `target_executor` routing + UI remediation surface); produce side owned by quality-loop §2 |
 146:
 147:*Novel-writing sync module contract: [novel-writing/sync-contract.md](novel-writing/sync-contract.md).*
 148:
@@ -224,7 +225,7 @@
 221:| `novel-findings-maturity.md` | [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §9 |
 222:| `body-editor.md` | [canvas-strategy-surface.md](canvas-strategy-surface.md) (2026-06-26 — body-editor direction rejected) |
 223:| `non-novel-profiles-roadmap.md` | [game-bible-profile.md](game-bible-profile.md) + [script-profile.md](script-profile.md) + [essay-profile.md](essay-profile.md) (all targets shipped) |
-224:| `findings-lifecycle.md` | [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §2 |
+224:| `novel-writing/findings-lifecycle.md` (V1.49 overlay) | [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §2 — retired; current cross-profile Master: [findings-lifecycle.md](findings-lifecycle.md) |
 225:| `narrative-indexes.md` | [novel-writing/workflow-profile.md](novel-writing/workflow-profile.md) §4.6 |
 226:
 227:**Former filename:** `local-platform-isolation-and-crate-architecture.md` → `local-cloud-crate-architecture.md` (2026-05-20).

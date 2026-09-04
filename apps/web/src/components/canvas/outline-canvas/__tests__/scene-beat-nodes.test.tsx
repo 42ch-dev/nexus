@@ -114,6 +114,27 @@ describe('OutlineSceneNode', () => {
     expect(container.textContent).toContain('Completed');
   });
 
+  // v1.183 P0 (R-V1121P3T4-O001, AR-3): label-12 chip text on the 12% status
+  // tint must use the hue's `-1000` AA step, not the raw `*-700` status color
+  // (fails AA on light tints). Same recipe as the chapter pill in
+  // outline-nodes.tsx.
+  it('renders the status chip text on the hue-1000 AA step', () => {
+    const { container } = renderInApp(
+      <OutlineSceneNode {...sceneProps({ title: 'S1', status: 'drafted' })} />,
+    );
+    const chip = container.querySelector('.rounded-pill.bg-gray-alpha-100') as HTMLElement;
+    expect(chip).not.toBeNull();
+    expect(chip.style.color).toBe('var(--color-blue-1000)');
+  });
+  it('renders the completed chip text on the green-1000 AA step', () => {
+    const { container } = renderInApp(
+      <OutlineSceneNode {...sceneProps({ title: 'S1', status: 'completed' })} />,
+    );
+    const chip = container.querySelector('.rounded-pill.bg-gray-alpha-100') as HTMLElement;
+    expect(chip).not.toBeNull();
+    expect(chip.style.color).toBe('var(--color-green-1000)');
+  });
+
   it('omits the status chip when status is null', () => {
     const { container } = renderInApp(
       <OutlineSceneNode {...sceneProps({ title: 'S1', status: null })} />,

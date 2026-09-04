@@ -410,6 +410,10 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
           onConnect={handleConnect}
           summaryText={surface.summaryText}
           ariaLabel={t('worldKb.graphAriaLabel')}
+          // v1.183 P0 QC fix (qc2 F-003): the World KB surface reads the
+          // minimap with its own accent token, not the shell's strategy
+          // default.
+          minimapAccent="var(--color-canvas-worldkb-accent)"
         >
           <div className="pointer-events-none absolute inset-0" />
           {/* V1.76: confidence threshold filter (confirmed edges below the

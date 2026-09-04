@@ -31,6 +31,7 @@ function makeOverview(
 function makeClient(overview: TimelineOverviewResponse): NexusClient {
   return {
     getTimelineOverview: vi.fn().mockResolvedValue(overview),
+    getWorldKbGraph: vi.fn(),
     health: vi.fn().mockResolvedValue({ status: 'ok', version: 'test' }),
   } as unknown as NexusClient;
 }
@@ -58,8 +59,9 @@ describe('GlobalTimelineView — V1.126 P2 composite endpoint', () => {
       },
     ]);
 
+    const client = makeClient(overview);
     renderInApp(<GlobalTimelineView />, {
-      client: makeClient(overview),
+      client,
     });
 
     const view = await screen.findByTestId('global-timeline-view');
@@ -74,6 +76,7 @@ describe('GlobalTimelineView — V1.126 P2 composite endpoint', () => {
     expect(rows[0]).toHaveAttribute('data-layer', 'brief');
     expect(rows[1]).toHaveAttribute('data-world-id', 'solara');
     expect(rows[1]).toHaveAttribute('data-layer', 'narrative');
+    expect(client.getWorldKbGraph).not.toHaveBeenCalled();
   });
 
   it('links each row to the per-World Timeline route', async () => {

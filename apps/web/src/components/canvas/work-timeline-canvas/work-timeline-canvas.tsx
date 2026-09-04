@@ -473,6 +473,10 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
             })}
             surfaceKey="work-timeline"
             surfaceKind="work-timeline"
+            // v1.183 P0 QC fix (qc2 F-003): the Work Timeline surface reads
+            // the minimap with the shared Timeline accent token (brand-blue),
+            // matching its surface chrome, not the shell's strategy default.
+            minimapAccent="var(--color-canvas-timeline-accent)"
             relayout={surface.relayout}
             fitViewOptions={{
               nodes: filterTimelineEntityNodes(surface.nodes),

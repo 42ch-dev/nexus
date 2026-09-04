@@ -18,53 +18,55 @@ describe('Badge', () => {
   it('renders soft running with ~16% fill and ~50% border alpha', () => {
     render(<Badge variant="running">Running</Badge>);
     const badge = screen.getByText('Running');
-    expect(badge).toHaveClass('text-green-1000');
-    expect(badge.className).toContain('color-mix(in_srgb,var(--color-green-700)_16%,transparent)');
-    expect(badge.className).toContain('color-mix(in_srgb,var(--color-green-700)_50%,transparent)');
+    // v1.183 P0 R-V1121P1QC1-S001: soft triples consume the projected
+    // nexus-ui-badge-soft-* tokens (16% fill / -1000 text / 50% border).
+    expect(badge).toHaveClass('text-nexus-ui-badge-soft-running-text');
+    expect(badge).toHaveClass('bg-nexus-ui-badge-soft-running-bg');
+    expect(badge).toHaveClass('border-nexus-ui-badge-soft-running-border');
   });
 
   it('renders soft queued with teal accent', () => {
     render(<Badge variant="queued">Queued</Badge>);
     const badge = screen.getByText('Queued');
-    expect(badge).toHaveClass('text-teal-1000');
-    expect(badge.className).toContain('color-mix(in_srgb,var(--color-teal-700)_50%,transparent)');
+    expect(badge).toHaveClass('text-nexus-ui-badge-soft-queued-text');
+    expect(badge).toHaveClass('border-nexus-ui-badge-soft-queued-border');
   });
 
   it('renders soft warning with amber accent', () => {
     render(<Badge variant="warning">Warning</Badge>);
     const badge = screen.getByText('Warning');
-    expect(badge).toHaveClass('text-amber-1000');
-    expect(badge.className).toContain('color-mix(in_srgb,var(--color-amber-700)_50%,transparent)');
+    expect(badge).toHaveClass('text-nexus-ui-badge-soft-warning-text');
+    expect(badge).toHaveClass('border-nexus-ui-badge-soft-warning-border');
   });
 
   it('renders soft error with red accent', () => {
     render(<Badge variant="error">Failed</Badge>);
     const badge = screen.getByText('Failed');
-    expect(badge).toHaveClass('text-red-1000');
-    expect(badge.className).toContain('color-mix(in_srgb,var(--color-red-700)_50%,transparent)');
+    expect(badge).toHaveClass('text-nexus-ui-badge-soft-error-text');
+    expect(badge).toHaveClass('border-nexus-ui-badge-soft-error-border');
   });
 
   it('renders soft preset with purple accent', () => {
     render(<Badge variant="preset">Preset</Badge>);
     const badge = screen.getByText('Preset');
-    expect(badge).toHaveClass('text-purple-1000');
-    expect(badge.className).toContain('color-mix(in_srgb,var(--color-purple-700)_50%,transparent)');
+    expect(badge).toHaveClass('text-nexus-ui-badge-soft-preset-text');
+    expect(badge).toHaveClass('border-nexus-ui-badge-soft-preset-border');
   });
 
   it.each([
     ['neutral', 'bg-gray-alpha-100', 'text-gray-900', null],
-    ['running', 'color-mix(in_srgb,var(--color-green-700)_16%,transparent)', 'text-green-1000', 'color-mix(in_srgb,var(--color-green-700)_50%,transparent)'],
-    ['queued', 'color-mix(in_srgb,var(--color-teal-700)_16%,transparent)', 'text-teal-1000', 'color-mix(in_srgb,var(--color-teal-700)_50%,transparent)'],
-    ['warning', 'color-mix(in_srgb,var(--color-amber-700)_16%,transparent)', 'text-amber-1000', 'color-mix(in_srgb,var(--color-amber-700)_50%,transparent)'],
-    ['error', 'color-mix(in_srgb,var(--color-red-700)_16%,transparent)', 'text-red-1000', 'color-mix(in_srgb,var(--color-red-700)_50%,transparent)'],
-    ['preset', 'color-mix(in_srgb,var(--color-purple-700)_16%,transparent)', 'text-purple-1000', 'color-mix(in_srgb,var(--color-purple-700)_50%,transparent)'],
+    ['running', 'bg-nexus-ui-badge-soft-running-bg', 'text-nexus-ui-badge-soft-running-text', 'border-nexus-ui-badge-soft-running-border'],
+    ['queued', 'bg-nexus-ui-badge-soft-queued-bg', 'text-nexus-ui-badge-soft-queued-text', 'border-nexus-ui-badge-soft-queued-border'],
+    ['warning', 'bg-nexus-ui-badge-soft-warning-bg', 'text-nexus-ui-badge-soft-warning-text', 'border-nexus-ui-badge-soft-warning-border'],
+    ['error', 'bg-nexus-ui-badge-soft-error-bg', 'text-nexus-ui-badge-soft-error-text', 'border-nexus-ui-badge-soft-error-border'],
+    ['preset', 'bg-nexus-ui-badge-soft-preset-bg', 'text-nexus-ui-badge-soft-preset-text', 'border-nexus-ui-badge-soft-preset-border'],
   ] as const)('renders soft %s with distinct hue and 16% fill / 50% border', (variant, bgClass, textClass, borderClass) => {
     render(<Badge variant={variant}>{variant}</Badge>);
     const badge = screen.getByText(variant);
     expect(badge).toHaveClass(textClass);
-    expect(badge.className).toContain(bgClass);
+    expect(badge).toHaveClass(bgClass);
     if (borderClass) {
-      expect(badge.className).toContain(borderClass);
+      expect(badge).toHaveClass(borderClass);
     }
   });
 
@@ -101,18 +103,22 @@ describe('Badge', () => {
       </Badge>,
     );
     const badge = screen.getByText('Solid Running');
-    expect(badge).toHaveClass('bg-green-700');
+    // v1.183 P0 R-V1121P1T3-S001 (AR-3): light solid fill sits one step
+    // darker (green-800) so white text clears AA; dark pins the bright
+    // green-700 fill per the Button Contrast Invariant.
+    expect(badge).toHaveClass('bg-green-800');
+    expect(badge).toHaveClass('dark:bg-green-700');
     expect(badge).toHaveClass('text-white');
     expect(badge).toHaveClass('dark:text-brand-deep-blue');
     expect(badge).toHaveClass('border-transparent');
   });
 
   it.each([
-    ['queued', 'bg-teal-700'],
-    ['warning', 'bg-amber-700'],
-    ['error', 'bg-red-800'],
-    ['preset', 'bg-purple-700'],
-  ] as const)('renders solid %s with transparent border and dark deep-blue text', (variant, bg) => {
+    ['queued', 'bg-teal-800', 'dark:bg-teal-700'],
+    ['warning', 'bg-amber-800', 'dark:bg-amber-700'],
+    ['error', 'bg-red-800', null],
+    ['preset', 'bg-purple-700', null],
+  ] as const)('renders solid %s with transparent border and dark deep-blue text', (variant, bg, darkBg) => {
     render(
       <Badge tone="solid" variant={variant}>
         {variant}
@@ -120,6 +126,9 @@ describe('Badge', () => {
     );
     const badge = screen.getByText(variant);
     expect(badge).toHaveClass(bg);
+    if (darkBg) {
+      expect(badge).toHaveClass(darkBg);
+    }
     expect(badge).toHaveClass('text-white');
     expect(badge).toHaveClass('dark:text-brand-deep-blue');
     expect(badge).toHaveClass('border-transparent');

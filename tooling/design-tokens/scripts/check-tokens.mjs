@@ -78,6 +78,12 @@ const required = [
   { label: 'preset: width sheet consumes structural var', haystack: preset, needle: "sheet: sv('sheet-width')" },
   { label: 'preset: maxHeight dialog consumes structural var', haystack: preset, needle: "dialog: sv('dialog-max-height')" },
 
+  // ── Sidebar nav sizing (structural namespace, v1.183 P0 AR-2) ──
+  { label: 'tokens: --sidebar-nav-width', haystack: tokens, needle: '--sidebar-nav-width:' },
+  { label: 'tokens: --sidebar-nav-item-height', haystack: tokens, needle: '--sidebar-nav-item-height:' },
+  { label: 'preset: spacing sidebar-nav width consumes structural var', haystack: preset, needle: "sv('sidebar-nav-width')" },
+  { label: 'preset: spacing sidebar-nav item-height consumes structural var', haystack: preset, needle: "sv('sidebar-nav-item-height')" },
+
   // ── Reading chrome projection (V1.121 v0.4 T6) ──
   { label: 'tokens: reading-chrome title family → display', haystack: tokens, needle: '--reading-chrome-novel-chapter-title-font-family: var(--font-display)' },
 
@@ -91,6 +97,18 @@ const required = [
   { label: 'tokens: reading-maturation open-findings text', haystack: tokens, needle: '--color-reading-maturation-open-findings-text:' },
   { label: 'preset: finding-status color group', haystack: preset, needle: "'finding-status':" },
   { label: 'preset: memory-task-kind color group', haystack: preset, needle: "'memory-task-kind':" },
+  // v1.183 P0 QC2 F-001: full family coverage — every bg/text/border member
+  // of all five badge-soft variants is gated (previously 3/15 samples, so a
+  // dropped queued/warning member would not fail this gate).
+  ...['running', 'queued', 'warning', 'error', 'preset'].flatMap((variant) =>
+    ['bg', 'text', 'border'].map((member) => ({
+      label: `tokens: nexus-ui badge soft ${variant} ${member}`,
+      haystack: tokens,
+      needle: `--color-nexus-ui-badge-soft-${variant}-${member}:`,
+    })),
+  ),
+  { label: 'preset: nexus-ui-badge-soft color group', haystack: preset, needle: "'nexus-ui-badge-soft':" },
+  { label: 'preset: nexus-ui badge soft consumes var', haystack: preset, needle: "cv('nexus-ui-badge-soft-running-bg')" },
   { label: 'preset: reading-maturation color group', haystack: preset, needle: "'reading-maturation':" },
   { label: 'preset: finding-status consumes var', haystack: preset, needle: "cv('finding-status-open-bg')" },
   { label: 'tokens: data-table row-protected', haystack: tokens, needle: '--color-data-table-row-protected:' },
@@ -98,6 +116,9 @@ const required = [
   { label: 'preset: data-table-row-protected', haystack: preset, needle: "cv('data-table-row-protected')" },
   { label: 'preset: main-banner-background', haystack: preset, needle: "cv('main-banner-background')" },
   { label: 'preset: fontSize copy-12 key', haystack: preset, needle: "'copy-12':" },
+  // ── Disabled-state wash (V1.113 P1 token; preset promotion v1.183 P0 AR-1) ──
+  { label: 'tokens: --color-states-disabled-opacity', haystack: tokens, needle: '--color-states-disabled-opacity:' },
+  { label: 'preset: opacity disabled consumes var', haystack: preset, needle: "cv('states-disabled-opacity')" },
 ];
 
 /** Banned legacy namespace, assembled so a repo-wide grep for the literal
@@ -110,6 +131,8 @@ const BANNED_SHEET_WIDTH_NS = '--color-sheet-' + 'width';
 const BANNED_DIALOG_WIDTH_HELPER = "cv('dialog-" + "width')";
 const BANNED_DIALOG_MAX_HEIGHT_HELPER = "cv('dialog-max-" + "height')";
 const BANNED_SHEET_WIDTH_HELPER = "cv('sheet-" + "width')";
+const BANNED_SIDEBAR_NAV_NS = '--color-sidebar-' + 'nav-';
+const BANNED_SIDEBAR_NAV_HELPER = "cv('sidebar-" + "nav-";
 
 /** @type {Array<{ label: string, haystack: string, needle: string }>} */
 const forbidden = [
@@ -121,6 +144,8 @@ const forbidden = [
   { label: 'preset: dialog width must not use the color-var helper', haystack: preset, needle: BANNED_DIALOG_WIDTH_HELPER },
   { label: 'preset: dialog max-height must not use the color-var helper', haystack: preset, needle: BANNED_DIALOG_MAX_HEIGHT_HELPER },
   { label: 'preset: sheet width must not use the color-var helper', haystack: preset, needle: BANNED_SHEET_WIDTH_HELPER },
+  { label: 'tokens: sidebar-nav sizing must not use the color namespace', haystack: tokens, needle: BANNED_SIDEBAR_NAV_NS },
+  { label: 'preset: sidebar-nav sizing must not use the color-var helper', haystack: preset, needle: BANNED_SIDEBAR_NAV_HELPER },
 ];
 
 /** Light (:root) and dark blocks — theme-split assertions below. */
