@@ -1339,8 +1339,14 @@ pub async fn read_kb_state_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     key_block_id: &str,
 ) -> Result<Option<KbStateRow>, LocalDbError> {
+    // v1.184 P1: `world_id` is nullable since migration
+    // 20260905000002_actor_knowledge_owners.sql (non-World owners store NULL).
+    // The state-delta lane is World-only by construction
+    // (`update_kb_state_in_tx` is world-scoped), so the `!` override asserts
+    // the legacy NOT NULL contract instead of widening `KbStateRow` to
+    // `Option<String>`; a non-World row here fails closed at decode time.
     let row = sqlx::query!(
-        "SELECT block_type, body_json, world_id FROM kb_key_blocks \
+        "SELECT block_type, body_json, world_id AS \"world_id!\" FROM kb_key_blocks \
          WHERE key_block_id = ?",
         key_block_id,
     )

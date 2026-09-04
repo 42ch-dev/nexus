@@ -382,10 +382,31 @@ pub async fn open_pool_read_only(
 ///
 /// Returns `LocalDbError` if any migration fails to apply.
 pub async fn run_migrations(pool: &sqlx::SqlitePool) -> Result<(), LocalDbError> {
-    sqlx::migrate!("./migrations")
-        .run(pool)
+    // v1.184 P1 (Task 1): run migrations on a single connection with foreign
+    // keys OFF. sqlx 0.8.6 wraps every migration in a transaction and ignores
+    // the `-- no-transaction` directive, so `PRAGMA foreign_keys` inside a
+    // migration file is a no-op; a table rebuild (DROP + recreate) would then
+    // cascade into its child tables (kb_source_anchors, kb_relationships,
+    // mind_states, actor_world_bindings.world_sheet_entry_id). Setting the
+    // pragma on the migration connection *before* the migrate runner makes it
+    // deterministic. The migration files retain their own PRAGMAs for intent;
+    // FK enforcement is re-enabled on the returned connection.
+    let mut conn = pool.acquire().await.map_err(LocalDbError::from)?;
+    // SAFETY: PRAGMA statement — no table schema to validate against.
+    sqlx::query("PRAGMA foreign_keys = OFF")
+        .execute(&mut *conn)
         .await
         .map_err(LocalDbError::from)?;
+    sqlx::migrate!("./migrations")
+        .run_direct(&mut *conn)
+        .await
+        .map_err(LocalDbError::from)?;
+    // SAFETY: PRAGMA statement — no table schema to validate against.
+    sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&mut *conn)
+        .await
+        .map_err(LocalDbError::from)?;
+    drop(conn);
 
     // V1.67 P2 (W-001): SQLite's `PRAGMA foreign_key_check` returns rows for
     // violations but does not raise an error on its own. Consume the result set
