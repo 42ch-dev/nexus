@@ -185,8 +185,60 @@ fn output_path(out_root: &Path, rel: &Path) -> PathBuf {
         .join(format!("{}.rs", to_rust_module_name(stem)))
 }
 
+/// typify's `maxLength`/`minLength` checks use UTF-8 `value.len()`. JSON Schema
+/// draft-07 counts Unicode scalars, so rewrite every generated length check.
+/// Trim rejection is not a JSON Schema keyword. Inject it only into Character
+/// `display_name` newtypes — including copies typify emits when a response DTO
+/// inlines Character — so every occurrence matches the domain parser. Other
+/// length-bounded strings stay untrimmed.
+fn is_character_display_name_type(type_name: &str) -> bool {
+    type_name.contains("Character") && type_name.ends_with("DisplayName")
+}
+
+fn inject_character_display_name_trim(rust: &str) -> String {
+    const IMPL: &str = "impl :: std :: str :: FromStr for ";
+    const FROM_STR_OPEN: &str =
+        "fn from_str (value : & str) -> :: std :: result :: Result < Self , self :: error :: ConversionError > { ";
+    const TRIM_GUARD: &str =
+        "if value . trim () != value { return Err (\"must be trimmed\" . into ()) ; } ";
+
+    let mut out = String::with_capacity(rust.len() + 256);
+    let mut cursor = 0;
+    while let Some(rel) = rust[cursor..].find(IMPL) {
+        let impl_at = cursor + rel;
+        out.push_str(&rust[cursor..impl_at]);
+        let name_start = impl_at + IMPL.len();
+        let Some(name_len) = rust[name_start..].find(' ') else {
+            out.push_str(&rust[impl_at..]);
+            return out;
+        };
+        let name_end = name_start + name_len;
+        let type_name = &rust[name_start..name_end];
+        out.push_str(&rust[impl_at..name_end]);
+        cursor = name_end;
+        if !is_character_display_name_type(type_name) {
+            continue;
+        }
+        if let Some(open_rel) = rust[cursor..].find(FROM_STR_OPEN) {
+            let insert_at = cursor + open_rel + FROM_STR_OPEN.len();
+            out.push_str(&rust[cursor..insert_at]);
+            if !rust[insert_at..].starts_with(TRIM_GUARD) {
+                out.push_str(TRIM_GUARD);
+            }
+            cursor = insert_at;
+        }
+    }
+    out.push_str(&rust[cursor..]);
+    out
+}
+
+fn rewrite_unicode_scalar_length_checks(rust: &str) -> String {
+    inject_character_display_name_trim(&rust.replace("value . len ()", "value . chars () . count ()"))
+}
+
 /// A path relative to the schemas dir, rendered with POSIX separators, for
 /// skip-list matching (independent of platform path separators).
+
 fn rel_posix(path: &Path) -> String {
     path.components()
         .filter_map(|c| match c {
@@ -234,7 +286,7 @@ fn generate_schema_rust(schema_path: &Path, rel: &Path, out_path: &Path) -> Resu
         .add_root_schema(schema)
         .map_err(|err| format!("typify failed for {}: {err}", schema_path.display()))?;
 
-    let rust = type_space.to_stream().to_string();
+    let rust = rewrite_unicode_scalar_length_checks(&type_space.to_stream().to_string());
     if rust.trim().is_empty() {
         return Err(format!(
             "typify produced empty output for {}",

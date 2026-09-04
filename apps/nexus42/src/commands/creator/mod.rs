@@ -13,6 +13,7 @@
 //! - **Maintenance**: `demo-seed`, `logout`
 
 pub mod bootstrap;
+pub mod character;
 pub mod inspector;
 pub mod kb;
 pub mod knowledge;
@@ -596,6 +597,11 @@ pub enum CreatorCommand {
         #[command(subcommand)]
         command: world::WorldCommand,
     },
+    /// Character identity and World bindings (daemon-only)
+    Character {
+        #[command(subcommand)]
+        command: character::CharacterCommand,
+    },
 
     /// Reading-depth data CRUD (V1.175 P1, group 3) — progress + annotations.
     ///
@@ -767,6 +773,7 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::Reference { command } => reference::run(command, config).await,
         CreatorCommand::Kb { command } => kb::run(command, config).await,
         CreatorCommand::World { command } => world::run(command, config).await,
+        CreatorCommand::Character { command } => character::run(command, config).await,
         CreatorCommand::Reading { command } => reading::run(command, config).await,
         CreatorCommand::Inspector { command } => inspector::run(command, config).await,
         CreatorCommand::Knowledge { command } => knowledge::run(command, config).await,

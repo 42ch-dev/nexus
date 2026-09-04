@@ -9,6 +9,7 @@ export * from './daemon-api/agent-host';
 export * from './daemon-api/canvas/outline';
 export * from './daemon-api/canvas/strategy';
 export * from './daemon-api/canvas/world-kb';
+export * from './daemon-api/characters';
 export * from './daemon-api/check';
 export * from './daemon-api/common';
 export * from './daemon-api/compute';
@@ -71,6 +72,15 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   WorldKbRelationshipProjection: 1,
   WorldKbSourceAnchorProjection: 1,
   WorldKbValidationError: 1,
+  AddCharacterBindingRequest: 1,
+  AddCharacterBindingResponse: 1,
+  CharacterDetail: 1,
+  CreateCharacterRequest: 1,
+  CreateCharacterResponse: 1,
+  ListCharacterBindingsQuery: 1,
+  ListCharacterBindingsResponse: 1,
+  ListCharactersQuery: 1,
+  ListCharactersResponse: 1,
   CheckRequest: 1,
   CheckResponse: 1,
   ErrorResponse: 1,
@@ -218,6 +228,9 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   WorldRuleResponse: 1,
   WorldRuleUpdateRequest: 1,
   WorldRulesListResponse: 1,
+  ActorRef: 1,
+  ActorWorldBinding: 1,
+  Character: 1,
   Creator: 1,
   ForkBranch: 1,
   Memory: 1,

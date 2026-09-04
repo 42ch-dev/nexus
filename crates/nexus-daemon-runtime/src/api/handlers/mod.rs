@@ -45,6 +45,7 @@ pub(crate) fn raw_user_home(
 pub mod acp;
 pub mod agent_host;
 pub mod chapters;
+pub mod characters;
 pub mod check;
 pub mod compute_modules;
 pub mod compute_runs;

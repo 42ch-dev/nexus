@@ -34,6 +34,12 @@ pub type WorldId = String;
 /// `Creator` `ID` (prefix: 'ctr_')
 pub type CreatorId = String;
 
+/// `Character` `ID` (prefix: `chr_` + 32 lowercase hex)
+pub type CharacterId = String;
+
+/// `ActorWorldBinding` `ID` (prefix: `awb_` + 32 lowercase hex)
+pub type ActorWorldBindingId = String;
+
 /// `User` `ID` (prefix: 'usr_')
 pub type UserId = String;
 

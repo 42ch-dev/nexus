@@ -3,6 +3,7 @@
 
 pub mod agent_host;
 pub mod canvas;
+pub mod characters;
 pub mod check;
 pub mod common;
 pub mod compute;
@@ -24,6 +25,7 @@ pub mod worlds;
 
 pub use agent_host::*;
 pub use canvas::*;
+pub use characters::*;
 pub use check::*;
 pub use common::*;
 pub use compute::*;

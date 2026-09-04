@@ -135,6 +135,10 @@ pub enum NexusApiError {
     #[error("Conflict: {0}")]
     Conflict(String),
 
+    /// HTTP 409 with a stable public product code.
+    #[error("{message}")]
+    ConflictCoded { code: String, message: String },
+
     /// Resource locked by another process (e.g., `runtime_lock_holder`)
     /// DF-60 §4: HTTP 423 Locked
     #[error("Locked: {reason}")]
@@ -248,6 +252,7 @@ impl NexusApiError {
         match self {
             Self::Uninitialized
             | Self::Conflict(_)
+            | Self::ConflictCoded { .. }
             | Self::StrategyConflict { .. }
             | Self::OutlineConflict { .. }
             | Self::WorldKbConflict { .. } => StatusCode::CONFLICT,
@@ -357,6 +362,7 @@ impl NexusApiError {
             Self::WorldKbValidationFailed { .. } => "world_kb_validation_failed",
             Self::SessionExpired => "session_expired",
             Self::Conflict(_) => "conflict",
+            Self::ConflictCoded { code, .. } => code.as_str(),
             Self::Locked { .. } => "locked",
             Self::ServiceUnavailable { .. } => "service_unavailable",
             Self::PresetGatesFailed { .. } => "preset_gates_failed",
@@ -597,6 +603,13 @@ impl From<nexus_local_db::LocalDbError> for NexusApiError {
                 "world",
                 "the row moved to another world; refetch it in its stored world and reapply",
             ),
+            nexus_local_db::LocalDbError::ActorNotFound { resource, id } => {
+                Self::NotFound(format!("{resource} {id} not found"))
+            }
+            nexus_local_db::LocalDbError::ActorContractConflict { code } => Self::ConflictCoded {
+                code: code.as_str().to_string(),
+                message: code.message().to_string(),
+            },
             _ => Self::Internal {
                 code: "DATABASE_ERROR".into(),
                 message: err.to_string(),
@@ -682,6 +695,31 @@ mod tests {
             details.get("entity_id").and_then(|v| v.as_str()),
             Some("kb_race")
         );
+    }
+
+    #[test]
+    fn actor_contract_conflicts_map_to_human_readable_409() {
+        use nexus_local_db::ActorContractConflict;
+        let cases = [
+            ActorContractConflict::LastActiveBinding,
+            ActorContractConflict::DuplicateActiveBinding,
+            ActorContractConflict::InvalidWorldSheet,
+            ActorContractConflict::WorldHasActorBindings,
+        ];
+        for code in cases {
+            let err = NexusApiError::from(nexus_local_db::LocalDbError::ActorContractConflict {
+                code,
+            });
+            assert_eq!(err.status_code(), StatusCode::CONFLICT);
+            assert_eq!(err.error_code(), code.as_str());
+            let body = err.to_response_body();
+            assert_eq!(body.error.code, code.as_str());
+            assert_eq!(body.error.message, code.message());
+            assert_ne!(
+                body.error.message, code.as_str(),
+                "message must not be the wire code"
+            );
+        }
     }
 
     #[test]

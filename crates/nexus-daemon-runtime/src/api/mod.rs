@@ -653,6 +653,27 @@ fn pack_routes() -> Router<WorkspaceState> {
         )
 }
 
+fn character_routes() -> Router<WorkspaceState> {
+    Router::new()
+        .route(
+            "/v1/daemon/characters",
+            get(handlers::characters::list_characters)
+                .post(handlers::characters::create_character),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id",
+            get(handlers::characters::get_character),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/bindings",
+            get(handlers::characters::list_bindings).post(handlers::characters::add_binding),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/bindings/:binding_id",
+            delete(handlers::characters::remove_binding),
+        )
+}
+
 /// Profile-scoped (Tier-2) routes — require active creator + lazy-open pool.
 fn tier2_routes() -> Router<WorkspaceState> {
     Router::new()
@@ -661,6 +682,7 @@ fn tier2_routes() -> Router<WorkspaceState> {
             "/v1/daemon/monitoring/pool",
             get(handlers::monitoring::pool_status),
         )
+        .merge(character_routes())
         .merge(kb_routes())
         .merge(memory_routes())
         .merge(works_routes())
