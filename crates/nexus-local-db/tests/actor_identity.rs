@@ -188,12 +188,15 @@ async fn duplicate_active_binding_is_rejected() {
     )
     .await
     .unwrap_err();
-    assert!(matches!(
-        err,
-        LocalDbError::ActorContractConflict {
-            code: ActorContractConflict::DuplicateActiveBinding
-        }
-    ));
+    assert!(
+        matches!(
+            err,
+            LocalDbError::ActorContractConflict {
+                code: ActorContractConflict::DuplicateActiveBinding
+            }
+        ),
+        "unexpected duplicate mapping: {err:?} display={err}"
+    );
 }
 
 #[tokio::test]
@@ -404,3 +407,154 @@ fn mint_character_id_matches_db_shape() {
     assert!(id.starts_with("chr_"));
     assert!(id[4..].chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
 }
+
+#[tokio::test]
+async fn null_primary_keys_are_rejected() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    let chr_err = sqlx::query("INSERT INTO characters (character_id, owner_creator_id, display_name, status, persona_json, created_at, updated_at) VALUES (NULL, ?, 'N', 'active', '{}', datetime('now'), datetime('now'))")
+        .bind(OWNER)
+        .execute(&pool)
+        .await
+        .unwrap_err();
+    assert!(chr_err.to_string().contains("NOT NULL") || chr_err.to_string().to_lowercase().contains("constraint"));
+
+    let created = create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "NullPk",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_A,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    let bind_err = sqlx::query("INSERT INTO actor_world_bindings (binding_id, character_id, world_id, status, created_at, updated_at) VALUES (NULL, ?, ?, 'inactive', datetime('now'), datetime('now'))")
+        .bind(&created.character.character_id)
+        .bind(WORLD_B)
+        .execute(&pool)
+        .await
+        .unwrap_err();
+    assert!(bind_err.to_string().contains("NOT NULL") || bind_err.to_string().to_lowercase().contains("constraint"));
+}
+
+#[tokio::test]
+async fn binding_admission_rejects_archived_character() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    let created = create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "Archived",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_A,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    sqlx::query("UPDATE characters SET status = 'archived' WHERE character_id = ?")
+        .bind(&created.character.character_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let err = add_actor_world_binding(
+        &pool,
+        CreateBindingParams {
+            owner_creator_id: OWNER,
+            character_id: &created.character.character_id,
+            world_id: WORLD_B,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        LocalDbError::ActorNotFound {
+            resource: "character",
+            ..
+        }
+    ));
+    let extra: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM actor_world_bindings WHERE character_id = ? AND world_id = ?",
+    )
+    .bind(&created.character.character_id)
+    .bind(WORLD_B)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(extra, 0);
+}
+
+#[tokio::test]
+async fn duplicate_character_display_name_is_not_duplicate_binding() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "Same",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_A,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    let err = create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "Same",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_B,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        !matches!(
+            err,
+            LocalDbError::ActorContractConflict {
+                code: ActorContractConflict::DuplicateActiveBinding
+            }
+        ),
+        "owner/display unique must not map to duplicate binding, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn actor_identity_indexes_include_world_sheet_fk() {
+    let (pool, _dir) = fresh_pool().await;
+    let name: Option<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_actor_world_bindings_world_sheet_entry_id'",
+    )
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        name.as_deref(),
+        Some("idx_actor_world_bindings_world_sheet_entry_id")
+    );
+}
+
+#[tokio::test]
+async fn actor_conflict_display_is_human_readable() {
+    let msg = LocalDbError::ActorContractConflict {
+        code: ActorContractConflict::LastActiveBinding,
+    }
+    .to_string();
+    assert_ne!(msg, "last_active_actor_world_binding");
+    assert!(msg.contains("last active"));
+}
+

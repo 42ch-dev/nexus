@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT character_id as \"character_id!\",\n                  owner_creator_id as \"owner_creator_id!\",\n                  display_name as \"display_name!\",\n                  status as \"status!\",\n                  image_uri,\n                  persona_json as \"persona_json!\",\n                  created_at as \"created_at!\",\n                  updated_at as \"updated_at!\"\n           FROM characters\n           WHERE owner_creator_id = ? ORDER BY created_at ASC, character_id ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "character_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "owner_creator_id!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "display_name!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "status!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "image_uri",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "persona_json!",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at!",
+        "ordinal": 7,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "bc932d797af505149faf0a80b8c1a7ab0a37898abac10dd7d2954a1d177c4d96"
+}

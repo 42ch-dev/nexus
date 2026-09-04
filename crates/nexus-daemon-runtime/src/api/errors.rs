@@ -608,7 +608,7 @@ impl From<nexus_local_db::LocalDbError> for NexusApiError {
             }
             nexus_local_db::LocalDbError::ActorContractConflict { code } => Self::ConflictCoded {
                 code: code.as_str().to_string(),
-                message: code.as_str().to_string(),
+                message: code.message().to_string(),
             },
             _ => Self::Internal {
                 code: "DATABASE_ERROR".into(),
@@ -695,6 +695,31 @@ mod tests {
             details.get("entity_id").and_then(|v| v.as_str()),
             Some("kb_race")
         );
+    }
+
+    #[test]
+    fn actor_contract_conflicts_map_to_human_readable_409() {
+        use nexus_local_db::ActorContractConflict;
+        let cases = [
+            ActorContractConflict::LastActiveBinding,
+            ActorContractConflict::DuplicateActiveBinding,
+            ActorContractConflict::InvalidWorldSheet,
+            ActorContractConflict::WorldHasActorBindings,
+        ];
+        for code in cases {
+            let err = NexusApiError::from(nexus_local_db::LocalDbError::ActorContractConflict {
+                code,
+            });
+            assert_eq!(err.status_code(), StatusCode::CONFLICT);
+            assert_eq!(err.error_code(), code.as_str());
+            let body = err.to_response_body();
+            assert_eq!(body.error.code, code.as_str());
+            assert_eq!(body.error.message, code.message());
+            assert_ne!(
+                body.error.message, code.as_str(),
+                "message must not be the wire code"
+            );
+        }
     }
 
     #[test]

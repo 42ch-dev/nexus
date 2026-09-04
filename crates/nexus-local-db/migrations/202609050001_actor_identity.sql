@@ -2,7 +2,7 @@
 -- Additive/immutable. Existing creator_id columns and WorldSheet ownership stay unchanged.
 
 CREATE TABLE IF NOT EXISTS characters (
-    character_id TEXT PRIMARY KEY
+    character_id TEXT NOT NULL PRIMARY KEY
         CHECK (
             character_id GLOB 'chr_[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'
         ),
@@ -28,7 +28,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_characters_owner_active_display_name
     WHERE status = 'active';
 
 CREATE TABLE IF NOT EXISTS actor_world_bindings (
-    binding_id TEXT PRIMARY KEY
+    binding_id TEXT NOT NULL PRIMARY KEY
         CHECK (
             binding_id GLOB 'awb_[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'
         ),
@@ -48,6 +48,9 @@ CREATE INDEX IF NOT EXISTS idx_actor_world_bindings_character_id
 
 CREATE INDEX IF NOT EXISTS idx_actor_world_bindings_world_id
     ON actor_world_bindings (world_id);
+
+CREATE INDEX IF NOT EXISTS idx_actor_world_bindings_world_sheet_entry_id
+    ON actor_world_bindings (world_sheet_entry_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_actor_world_bindings_active_unique
     ON actor_world_bindings (character_id, world_id)

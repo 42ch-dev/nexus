@@ -108,6 +108,25 @@ impl ActorContractConflict {
             Self::WorldHasActorBindings => "world_has_actor_bindings",
         }
     }
+
+    /// Human-readable API message for this conflict code.
+    #[must_use]
+    pub const fn message(self) -> &'static str {
+        match self {
+            Self::LastActiveBinding => {
+                "Cannot remove the last active world binding from a Character"
+            }
+            Self::DuplicateActiveBinding => {
+                "An active binding already exists for this Character and World"
+            }
+            Self::InvalidWorldSheet => {
+                "WorldSheet is missing, deleted, the wrong type, or belongs to another World"
+            }
+            Self::WorldHasActorBindings => {
+                "World has Character bindings that prevent deletion"
+            }
+        }
+    }
 }
 
 impl LocalDbError {
@@ -241,7 +260,7 @@ impl fmt::Display for LocalDbError {
                 write!(f, "{resource} '{id}' not found")
             }
             Self::ActorContractConflict { code } => {
-                write!(f, "{}", code.as_str())
+                write!(f, "{}", code.message())
             }
         }
     }

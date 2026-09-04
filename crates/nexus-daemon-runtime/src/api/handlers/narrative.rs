@@ -244,10 +244,11 @@ pub async fn delete_world(
             message: format!("delete_world: actor binding check failed: {e}"),
         })?;
     if binding_count > 0 {
-        return Err(NexusApiError::ConflictCoded {
-            code: "world_has_actor_bindings".to_string(),
-            message: format!("World {world_id} has active Character bindings"),
-        });
+        return Err(NexusApiError::from(
+            nexus_local_db::LocalDbError::ActorContractConflict {
+                code: nexus_local_db::ActorContractConflict::WorldHasActorBindings,
+            },
+        ));
     }
 
     if let Err(e) = sqlx::query("DELETE FROM kb_extract_jobs WHERE world_id = ?")
@@ -290,12 +291,22 @@ pub async fn delete_world(
     {
         Ok(res) => res.rows_affected(),
         Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("FOREIGN KEY constraint failed") {
+                return Err(NexusApiError::from(
+                    nexus_local_db::LocalDbError::ActorContractConflict {
+                        code: nexus_local_db::ActorContractConflict::WorldHasActorBindings,
+                    },
+                ));
+            }
             return Err(NexusApiError::Internal {
                 code: "DATABASE_ERROR".to_string(),
                 message: format!("delete_world failed: {e}"),
             });
         }
     };
+
+
 
     if deleted == 0 {
         // Concurrent delete raced; treat as 404 — row is gone. The tx rolls

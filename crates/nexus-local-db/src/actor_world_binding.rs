@@ -1,9 +1,12 @@
 //! ActorWorldBinding storage and the authoritative last-binding removal transaction.
 
-use sqlx::{Row, Sqlite, SqlitePool, Transaction};
+use sqlx::{Sqlite, SqlitePool, Transaction};
 use uuid::Uuid;
 
-use crate::character::{map_actor_constraint, require_owned_character, require_owned_world};
+use crate::character::{
+    map_actor_constraint, require_active_owned_character, require_owned_character,
+    require_owned_world,
+};
 use crate::error::{ActorContractConflict, LocalDbError};
 use crate::begin_immediate;
 
@@ -34,15 +37,23 @@ pub fn mint_binding_id() -> String {
     format!("awb_{}", Uuid::new_v4().simple())
 }
 
-fn row_to_binding(r: sqlx::sqlite::SqliteRow) -> ActorWorldBindingRecord {
+fn record_from_query(
+    binding_id: String,
+    character_id: String,
+    world_id: String,
+    status: String,
+    world_sheet_entry_id: Option<String>,
+    created_at: String,
+    updated_at: String,
+) -> ActorWorldBindingRecord {
     ActorWorldBindingRecord {
-        binding_id: r.get("binding_id"),
-        character_id: r.get("character_id"),
-        world_id: r.get("world_id"),
-        status: r.get("status"),
-        world_sheet_entry_id: r.get("world_sheet_entry_id"),
-        created_at: r.get("created_at"),
-        updated_at: r.get("updated_at"),
+        binding_id,
+        character_id,
+        world_id,
+        status,
+        world_sheet_entry_id,
+        created_at,
+        updated_at,
     }
 }
 
@@ -54,18 +65,17 @@ pub(crate) async fn validate_world_sheet_tx(
     let Some(sheet_id) = world_sheet_entry_id else {
         return Ok(());
     };
-    // SAFETY: WorldSheet cross-table rule (P0 world_id predicate).
-    let ok: i64 = sqlx::query_scalar(
-        "SELECT EXISTS(\
-            SELECT 1 FROM kb_key_blocks \
-            WHERE key_block_id = ? \
-              AND world_id = ? \
-              AND block_type = 'character' \
-              AND status != 'deleted'\
-         )",
+    let ok = sqlx::query_scalar!(
+        r#"SELECT EXISTS(
+            SELECT 1 FROM kb_key_blocks
+            WHERE key_block_id = ?
+              AND world_id = ?
+              AND block_type = 'character'
+              AND status != 'deleted'
+         ) as "ok!: i64""#,
+        sheet_id,
+        world_id
     )
-    .bind(sheet_id)
-    .bind(world_id)
     .fetch_one(&mut **tx)
     .await?;
     if ok == 0 {
@@ -83,18 +93,20 @@ pub(crate) async fn insert_binding_tx(
 ) -> Result<ActorWorldBindingRecord, LocalDbError> {
     validate_world_sheet_tx(tx, params.world_id, params.world_sheet_entry_id).await?;
     let binding_id = mint_binding_id();
-    // SAFETY: INSERT matches actor_world_bindings DDL in 202609050001_actor_identity.sql.
-    let insert = sqlx::query(
-        "INSERT INTO actor_world_bindings \
-         (binding_id, character_id, world_id, status, world_sheet_entry_id, created_at, updated_at) \
-         VALUES (?, ?, ?, 'active', ?, ?, ?)",
+    let character_id = params.character_id;
+    let world_id = params.world_id;
+    let world_sheet_entry_id = params.world_sheet_entry_id;
+    let insert = sqlx::query!(
+        r#"INSERT INTO actor_world_bindings
+           (binding_id, character_id, world_id, status, world_sheet_entry_id, created_at, updated_at)
+           VALUES (?, ?, ?, 'active', ?, ?, ?)"#,
+        binding_id,
+        character_id,
+        world_id,
+        world_sheet_entry_id,
+        now,
+        now
     )
-    .bind(&binding_id)
-    .bind(params.character_id)
-    .bind(params.world_id)
-    .bind(params.world_sheet_entry_id)
-    .bind(now)
-    .bind(now)
     .execute(&mut **tx)
     .await;
     map_actor_constraint(insert)?;
@@ -110,18 +122,33 @@ async fn load_binding_tx(
     tx: &mut Transaction<'_, Sqlite>,
     binding_id: &str,
 ) -> Result<Option<ActorWorldBindingRecord>, LocalDbError> {
-    // SAFETY: SELECT matches actor_world_bindings DDL.
-    let row = sqlx::query(
-        "SELECT binding_id, character_id, world_id, status, world_sheet_entry_id, created_at, updated_at \
-         FROM actor_world_bindings WHERE binding_id = ?",
+    let row = sqlx::query!(
+        r#"SELECT binding_id as "binding_id!",
+                  character_id as "character_id!",
+                  world_id as "world_id!",
+                  status as "status!",
+                  world_sheet_entry_id,
+                  created_at as "created_at!",
+                  updated_at as "updated_at!"
+           FROM actor_world_bindings WHERE binding_id = ?"#,
+        binding_id
     )
-    .bind(binding_id)
     .fetch_optional(&mut **tx)
     .await?;
-    Ok(row.map(row_to_binding))
+    Ok(row.map(|r| {
+        record_from_query(
+            r.binding_id,
+            r.character_id,
+            r.world_id,
+            r.status,
+            r.world_sheet_entry_id,
+            r.created_at,
+            r.updated_at,
+        )
+    }))
 }
 
-/// Add a second (or later) active binding for an owned Character.
+/// Add a second (or later) active binding for an owned active Character.
 ///
 /// # Errors
 ///
@@ -133,7 +160,8 @@ pub async fn add_actor_world_binding(
     let now = chrono::Utc::now().to_rfc3339();
     let mut tx = begin_immediate(pool).await?;
     let result = async {
-        require_owned_character(&mut tx, params.owner_creator_id, params.character_id).await?;
+        require_active_owned_character(&mut tx, params.owner_creator_id, params.character_id)
+            .await?;
         require_owned_world(&mut tx, params.owner_creator_id, params.world_id).await?;
         insert_binding_tx(&mut tx, params, &now).await
     }
@@ -162,19 +190,39 @@ pub async fn list_bindings_for_character(
 ) -> Result<Vec<ActorWorldBindingRecord>, LocalDbError> {
     let mut tx = begin_immediate(pool).await?;
     require_owned_character(&mut tx, owner_creator_id, character_id).await?;
-    // SAFETY: SELECT matches actor_world_bindings DDL.
-    let rows = sqlx::query(
-        "SELECT binding_id, character_id, world_id, status, world_sheet_entry_id, created_at, updated_at \
-         FROM actor_world_bindings WHERE character_id = ? ORDER BY created_at ASC, binding_id ASC",
+    let rows = sqlx::query!(
+        r#"SELECT binding_id as "binding_id!",
+                  character_id as "character_id!",
+                  world_id as "world_id!",
+                  status as "status!",
+                  world_sheet_entry_id,
+                  created_at as "created_at!",
+                  updated_at as "updated_at!"
+           FROM actor_world_bindings WHERE character_id = ? ORDER BY created_at ASC, binding_id ASC"#,
+        character_id
     )
-    .bind(character_id)
     .fetch_all(&mut *tx)
     .await?;
     tx.commit().await?;
-    Ok(rows.into_iter().map(row_to_binding).collect())
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            record_from_query(
+                r.binding_id,
+                r.character_id,
+                r.world_id,
+                r.status,
+                r.world_sheet_entry_id,
+                r.created_at,
+                r.updated_at,
+            )
+        })
+        .collect())
 }
 
-/// Count active bindings for a World inside an open write transaction.
+/// Count every binding for a World inside an open write transaction.
+///
+/// Includes inactive rows because `ON DELETE RESTRICT` applies to all statuses.
 ///
 /// # Errors
 ///
@@ -183,11 +231,10 @@ pub async fn count_active_bindings_for_world_tx(
     tx: &mut Transaction<'_, Sqlite>,
     world_id: &str,
 ) -> Result<i64, LocalDbError> {
-    // SAFETY: COUNT against actor_world_bindings.
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM actor_world_bindings WHERE world_id = ? AND status = 'active'",
+    let count = sqlx::query_scalar!(
+        r#"SELECT COUNT(*) as "count!: i64" FROM actor_world_bindings WHERE world_id = ?"#,
+        world_id
     )
-    .bind(world_id)
     .fetch_one(&mut **tx)
     .await?;
     Ok(count)
@@ -243,11 +290,10 @@ async fn remove_binding_tx(
     }
     require_owned_world(tx, owner_creator_id, &binding.world_id).await?;
 
-    // SAFETY: cardinality count inside the reserved lock.
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM actor_world_bindings WHERE character_id = ? AND status = 'active'",
+    let count = sqlx::query_scalar!(
+        r#"SELECT COUNT(*) as "count!: i64" FROM actor_world_bindings WHERE character_id = ? AND status = 'active'"#,
+        character_id
     )
-    .bind(character_id)
     .fetch_one(&mut **tx)
     .await?;
     if count <= 1 {
@@ -256,12 +302,11 @@ async fn remove_binding_tx(
         });
     }
 
-    // SAFETY: delete exactly the target active row.
-    let deleted = sqlx::query(
-        "DELETE FROM actor_world_bindings WHERE binding_id = ? AND character_id = ? AND status = 'active'",
+    let deleted = sqlx::query!(
+        r#"DELETE FROM actor_world_bindings WHERE binding_id = ? AND character_id = ? AND status = 'active'"#,
+        binding_id,
+        character_id
     )
-    .bind(binding_id)
-    .bind(character_id)
     .execute(&mut **tx)
     .await?
     .rows_affected();
