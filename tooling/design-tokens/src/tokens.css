@@ -238,6 +238,29 @@
   --color-reading-maturation-open-findings-text: var(--color-amber-1000);
   --color-reading-maturation-open-findings-border: color-mix(in srgb, var(--color-amber-700) 30%, transparent);
 
+  /* nexus-ui Badge soft variants — DESIGN.md components.badge-status-pill.soft
+     (v1.183 P0 R-V1121P1QC1-S001 projection; same tint pattern as
+     finding-status-pill: 16% fill + hue-1000 text + 50% border per variant).
+     color-mix resolves through the hue scales, and the dark contract keeps
+     the same alphas (DESIGN.dark.md badge-status-pill.soft), so a single
+     :root definition serves both themes. Neutral stays on the gray-alpha
+     tokens directly (no hue mix to project). */
+  --color-nexus-ui-badge-soft-running-bg: color-mix(in srgb, var(--color-green-700) 16%, transparent);
+  --color-nexus-ui-badge-soft-running-text: var(--color-green-1000);
+  --color-nexus-ui-badge-soft-running-border: color-mix(in srgb, var(--color-green-700) 50%, transparent);
+  --color-nexus-ui-badge-soft-queued-bg: color-mix(in srgb, var(--color-teal-700) 16%, transparent);
+  --color-nexus-ui-badge-soft-queued-text: var(--color-teal-1000);
+  --color-nexus-ui-badge-soft-queued-border: color-mix(in srgb, var(--color-teal-700) 50%, transparent);
+  --color-nexus-ui-badge-soft-warning-bg: color-mix(in srgb, var(--color-amber-700) 16%, transparent);
+  --color-nexus-ui-badge-soft-warning-text: var(--color-amber-1000);
+  --color-nexus-ui-badge-soft-warning-border: color-mix(in srgb, var(--color-amber-700) 50%, transparent);
+  --color-nexus-ui-badge-soft-error-bg: color-mix(in srgb, var(--color-red-700) 16%, transparent);
+  --color-nexus-ui-badge-soft-error-text: var(--color-red-1000);
+  --color-nexus-ui-badge-soft-error-border: color-mix(in srgb, var(--color-red-700) 50%, transparent);
+  --color-nexus-ui-badge-soft-preset-bg: color-mix(in srgb, var(--color-purple-700) 16%, transparent);
+  --color-nexus-ui-badge-soft-preset-text: var(--color-purple-1000);
+  --color-nexus-ui-badge-soft-preset-border: color-mix(in srgb, var(--color-purple-700) 50%, transparent);
+
   /* Canvas surface — DESIGN.md §Canvas Surface (V1.70; V1.121 v0.4 chromatic
      hygiene: every status/marker/edge color resolves to the brand semantic
      scales — see DESIGN.md §Appendix: Canvas Chromatic Hygiene Mapping).

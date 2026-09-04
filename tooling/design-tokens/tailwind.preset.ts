@@ -146,6 +146,37 @@ const preset: Partial<Config> = {
             border: cv('reading-maturation-open-findings-border'),
           },
         },
+        // nexus-ui Badge soft variants — DESIGN.md
+        // components.badge-status-pill.soft (v1.183 P0 R-V1121P1QC1-S001
+        // projection; tinted fill + semantic -1000 text + 50% border per
+        // variant). Neutral stays on gray-alpha tokens directly.
+        'nexus-ui-badge-soft': {
+          running: {
+            bg: cv('nexus-ui-badge-soft-running-bg'),
+            text: cv('nexus-ui-badge-soft-running-text'),
+            border: cv('nexus-ui-badge-soft-running-border'),
+          },
+          queued: {
+            bg: cv('nexus-ui-badge-soft-queued-bg'),
+            text: cv('nexus-ui-badge-soft-queued-text'),
+            border: cv('nexus-ui-badge-soft-queued-border'),
+          },
+          warning: {
+            bg: cv('nexus-ui-badge-soft-warning-bg'),
+            text: cv('nexus-ui-badge-soft-warning-text'),
+            border: cv('nexus-ui-badge-soft-warning-border'),
+          },
+          error: {
+            bg: cv('nexus-ui-badge-soft-error-bg'),
+            text: cv('nexus-ui-badge-soft-error-text'),
+            border: cv('nexus-ui-badge-soft-error-border'),
+          },
+          preset: {
+            bg: cv('nexus-ui-badge-soft-preset-bg'),
+            text: cv('nexus-ui-badge-soft-preset-text'),
+            border: cv('nexus-ui-badge-soft-preset-border'),
+          },
+        },
         // Brand primitives — DESIGN.md + @42ch/nexus-ui/theme.css.
         brand: {
           'deep-blue': cv('brand-deep-blue'),

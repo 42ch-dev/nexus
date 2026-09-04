@@ -8,11 +8,15 @@ import { cn } from '../lib/cn';
  *
  * Height 24px, px-2 (8px), radius-pill, label-12. Soft tone keeps tinted fills
  * with strengthened borders (raised to 16% alpha in FB-V1106-001 so each hue
- * reads distinctly). Solid tone uses semantic fills + high-contrast text.
- * Alpha layers use `color-mix(...)` so the same class stays correct in both
- * light and dark. Dark solid text follows the Button Contrast Invariant
- * (bright fills → `brand-deep-blue`, not white). State changes (variant/tone
- * or theme swap) ease over duration-state per the v0.4 motion scale.
+ * reads distinctly) — the per-variant fill/text/border triple is projected as
+ * `nexus-ui-badge-soft-*` tokens (v1.183 P0 R-V1121P1QC1-S001), resolving via
+ * color-mix so the same class stays correct in both light and dark. Solid
+ * tone uses semantic fills + high-contrast text; light solid fills sit one
+ * step darker (`-800`) so white text clears AA, with `dark:bg-*-700` pins
+ * keeping the bright dark fills (v1.183 P0 R-V1121P1T3-S001, AR-3). Dark
+ * solid text follows the Button Contrast Invariant (bright fills →
+ * `brand-deep-blue`, not white). State changes (variant/tone or theme swap)
+ * ease over duration-state per the v0.4 motion scale.
  */
 const badgeVariants = cva(
   'inline-flex items-center gap-1 rounded-pill border px-2 h-6 text-label-12 font-semibold whitespace-nowrap transition-colors duration-state ease-standard',
@@ -42,35 +46,37 @@ const badgeVariants = cva(
         tone: 'soft',
         variant: 'running',
         class:
-          'bg-[color-mix(in_srgb,var(--color-green-700)_16%,transparent)] text-green-1000 border-[color-mix(in_srgb,var(--color-green-700)_50%,transparent)]',
+          'bg-nexus-ui-badge-soft-running-bg text-nexus-ui-badge-soft-running-text border-nexus-ui-badge-soft-running-border',
       },
       {
         tone: 'soft',
         variant: 'queued',
         class:
-          'bg-[color-mix(in_srgb,var(--color-teal-700)_16%,transparent)] text-teal-1000 border-[color-mix(in_srgb,var(--color-teal-700)_50%,transparent)]',
+          'bg-nexus-ui-badge-soft-queued-bg text-nexus-ui-badge-soft-queued-text border-nexus-ui-badge-soft-queued-border',
       },
       {
         tone: 'soft',
         variant: 'warning',
         class:
-          'bg-[color-mix(in_srgb,var(--color-amber-700)_16%,transparent)] text-amber-1000 border-[color-mix(in_srgb,var(--color-amber-700)_50%,transparent)]',
+          'bg-nexus-ui-badge-soft-warning-bg text-nexus-ui-badge-soft-warning-text border-nexus-ui-badge-soft-warning-border',
       },
       {
         tone: 'soft',
         variant: 'error',
         class:
-          'bg-[color-mix(in_srgb,var(--color-red-700)_16%,transparent)] text-red-1000 border-[color-mix(in_srgb,var(--color-red-700)_50%,transparent)]',
+          'bg-nexus-ui-badge-soft-error-bg text-nexus-ui-badge-soft-error-text border-nexus-ui-badge-soft-error-border',
       },
       {
         tone: 'soft',
         variant: 'preset',
         class:
-          'bg-[color-mix(in_srgb,var(--color-purple-700)_16%,transparent)] text-purple-1000 border-[color-mix(in_srgb,var(--color-purple-700)_50%,transparent)]',
+          'bg-nexus-ui-badge-soft-preset-bg text-nexus-ui-badge-soft-preset-text border-nexus-ui-badge-soft-preset-border',
       },
       // ── solid (opt-in): semantic fill + high-contrast text; no visible border ──
       // Light: white on dark fills. Dark: deep-blue on bright semantic fills
       // (Button Contrast Invariant); neutral keeps white on dark gray-200.
+      // Light fills sit at -800 (white text clears AA, v1.183 P0 AR-3);
+      // `dark:bg-*-700` pins keep the bright dark-theme fills unchanged.
       {
         tone: 'solid',
         variant: 'neutral',
@@ -79,17 +85,17 @@ const badgeVariants = cva(
       {
         tone: 'solid',
         variant: 'running',
-        class: 'bg-green-700 text-white dark:text-brand-deep-blue',
+        class: 'bg-green-800 text-white dark:bg-green-700 dark:text-brand-deep-blue',
       },
       {
         tone: 'solid',
         variant: 'queued',
-        class: 'bg-teal-700 text-white dark:text-brand-deep-blue',
+        class: 'bg-teal-800 text-white dark:bg-teal-700 dark:text-brand-deep-blue',
       },
       {
         tone: 'solid',
         variant: 'warning',
-        class: 'bg-amber-700 text-white dark:text-brand-deep-blue',
+        class: 'bg-amber-800 text-white dark:bg-amber-700 dark:text-brand-deep-blue',
       },
       {
         tone: 'solid',

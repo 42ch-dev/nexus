@@ -228,12 +228,15 @@ components:
       warning: { backgroundColor: "rgba(183,110,0,0.16)", textColor: "{colors.amber-1000}", borderColor: "rgba(183,110,0,0.50)" }
       error: { backgroundColor: "rgba(229,72,77,0.16)", textColor: "{colors.red-1000}", borderColor: "rgba(229,72,77,0.50)" }
       preset: { backgroundColor: "rgba(124,58,237,0.16)", textColor: "{colors.purple-1000}", borderColor: "rgba(124,58,237,0.50)" }
-    # solid (opt-in): semantic fill + high-contrast white text; no visible border
+    # solid (opt-in): semantic fill + high-contrast white text; no visible border.
+    # Light fills sit one step darker (-800) so #ffffff clears AA (v1.183 P0
+    # AR-3, R-V1121P1T3-S001); dark keeps the bright -700 fills with
+    # brand-deep-blue text (DESIGN.dark.md badge-status-pill.solid).
     solid:
       neutral: { backgroundColor: "{colors.gray-1000}", textColor: "#ffffff", borderColor: "transparent" }
-      running: { backgroundColor: "{colors.green-700}", textColor: "#ffffff", borderColor: "transparent" }
-      queued: { backgroundColor: "{colors.teal-700}", textColor: "#ffffff", borderColor: "transparent" }
-      warning: { backgroundColor: "{colors.amber-700}", textColor: "#ffffff", borderColor: "transparent" }
+      running: { backgroundColor: "{colors.green-800}", textColor: "#ffffff", borderColor: "transparent" }
+      queued: { backgroundColor: "{colors.teal-800}", textColor: "#ffffff", borderColor: "transparent" }
+      warning: { backgroundColor: "{colors.amber-800}", textColor: "#ffffff", borderColor: "transparent" }
       error: { backgroundColor: "{colors.red-800}", textColor: "#ffffff", borderColor: "transparent" }
       preset: { backgroundColor: "{colors.purple-700}", textColor: "#ffffff", borderColor: "transparent" }
 
