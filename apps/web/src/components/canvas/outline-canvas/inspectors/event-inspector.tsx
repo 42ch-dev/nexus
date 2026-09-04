@@ -97,7 +97,7 @@ export function TimelinePanel({
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <CalendarPlus className="h-5 w-5 text-teal-700" aria-hidden />
+          <CalendarPlus className="h-5 w-5 text-canvas-outline-timeline-marker" aria-hidden />
           {t('eventInspector.title')}
         </CardTitle>
         <CardDescription>{t('eventInspector.description')}</CardDescription>
