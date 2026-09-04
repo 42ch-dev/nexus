@@ -54,6 +54,21 @@ function sceneStatusColorVar(status: OutlineSceneStatus): string {
   return `var(${SCENE_STATUS_TOKEN_VAR[status]})`;
 }
 
+/**
+ * AA text step per scene status (v1.183 P0 R-V1121P3T4-O001, AR-3) — same
+ * recipe as the chapter pill in outline-nodes.tsx: label-12 text on the 12%
+ * status tint uses the hue's existing `-1000` step (drafted → blue-1000,
+ * completed → green-1000; no new tokens).
+ */
+const SCENE_STATUS_TEXT_TOKEN_VAR: Record<OutlineSceneStatus, string> = {
+  drafted: '--color-blue-1000',
+  completed: '--color-green-1000',
+};
+
+function sceneStatusTextColorVar(status: OutlineSceneStatus): string {
+  return `var(${SCENE_STATUS_TEXT_TOKEN_VAR[status]})`;
+}
+
 // ---------------------------------------------------------------------------
 // Scene node
 // ---------------------------------------------------------------------------
@@ -87,7 +102,7 @@ export const OutlineSceneNode = memo(function OutlineSceneNode({
           <span
             className="flex items-center gap-1 rounded-pill bg-gray-alpha-100 px-1.5 py-0.5 text-label-12"
             style={{
-              color: sceneStatusColorVar(d.status),
+              color: sceneStatusTextColorVar(d.status),
               background: `color-mix(in srgb, ${sceneStatusColorVar(d.status)} 12%, transparent)`,
             }}
           >

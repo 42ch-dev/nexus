@@ -99,7 +99,7 @@ export function StrategyAltView({ parsed, statusByState }: StrategyAltViewProps)
                 {t(`strategy.node.kind.${kind}`, { defaultValue: kind })}
               </span>
               {graph ? (
-                <span className="text-label-12 text-purple-700">
+                <span className="text-label-12 text-canvas-strategy-accent">
                   {t('strategy.altView.innerGraph', { id: graph })}
                 </span>
               ) : null}

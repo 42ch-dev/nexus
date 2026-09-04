@@ -92,7 +92,7 @@ function CreateCardButton({
       className={cn(
         'flex w-full min-h-[7.5rem] flex-col items-center justify-center gap-2 rounded-card border border-dashed border-gray-alpha-400 p-6 text-center motion-reduce:transition-none',
         disabled
-          ? 'opacity-60 cursor-not-allowed'
+          ? 'opacity-disabled cursor-not-allowed'
           : 'transition-colors duration-state ease-standard hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2',
       )}
     >

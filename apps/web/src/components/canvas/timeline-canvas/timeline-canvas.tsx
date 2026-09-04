@@ -1325,6 +1325,10 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
             ariaLabel={t('timeline.canvasAriaLabel')}
             surfaceKey="timeline"
             surfaceKind="timeline"
+            // v1.183 P0 (R-V1121P3QC1-S002): the Timeline surface reads the
+            // minimap with its own accent token, not the shell's strategy
+            // default.
+            minimapAccent="var(--color-canvas-timeline-accent)"
             relayout={surface.relayout}
             fitViewOptions={{
               nodes: filterTimelineEntityNodes(surface.nodes),

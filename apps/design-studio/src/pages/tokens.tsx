@@ -941,6 +941,55 @@ function EnterExitDemo() {
   );
 }
 
+/**
+ * Disabled-wash chip (DESIGN.md §States, R-V1182P0-002 / v1.183 P0 AR-1) —
+ * renders the shared disabled-state wash at the live
+ * --color-states-disabled-opacity value (NOT a COLOR_GROUPS swatch:
+ * ColorSwatch assumes color-valued vars; this is a scalar opacity). The
+ * chip is a realistic disabled-button context so the reader sees the wash
+ * the way EmptyCreateCard and the disabled:opacity-disabled utility paint
+ * it. Re-resolves on theme flip (the wash is theme-independent, but the
+ * chip's surface colors are not).
+ */
+function DisabledWashDemo() {
+  const { resolvedTheme } = useTheme();
+  const [computed, setComputed] = useState('');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const el = document.createElement('div');
+    el.style.opacity = 'var(--color-states-disabled-opacity)';
+    el.style.display = 'none';
+    document.body.appendChild(el);
+    const value = getComputedStyle(el).opacity;
+    document.body.removeChild(el);
+    const rafId = requestAnimationFrame(() => setComputed(value));
+    return () => cancelAnimationFrame(rafId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedTheme]);
+
+  return (
+    <div className="flex flex-col gap-2" data-testid="states-disabled-wash-chip">
+      <button
+        type="button"
+        disabled
+        className="cursor-not-allowed rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-1.5 text-button-14 font-button text-gray-1000"
+        style={{ opacity: 'var(--color-states-disabled-opacity)' }}
+      >
+        Disabled action
+      </button>
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <span className="text-label-14 text-gray-1000 truncate">
+          states-disabled-opacity
+        </span>
+        <span className="text-copy-13 text-gray-700 truncate font-mono">
+          {computed || 'var(--color-states-disabled-opacity)'}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Sections                                                            */
 /* ------------------------------------------------------------------ */
@@ -954,6 +1003,7 @@ function SubNav() {
     { label: 'Elevation', href: '#tokens-elevation' },
     { label: 'Motion', href: '#tokens-motion' },
     { label: 'Canvas', href: '#tokens-canvas' },
+    { label: 'States', href: '#tokens-states' },
   ];
 
   return (
@@ -1042,6 +1092,23 @@ function SpacingSection() {
         {SPACING_SCALE.map((s) => (
           <SpacingBar key={s.label} step={s} />
         ))}
+      </div>
+    </section>
+  );
+}
+function StatesSection() {
+  return (
+    <section data-testid="tokens-states">
+      <SectionHeading id="tokens-states">States</SectionHeading>
+      <p className="text-copy-14 text-gray-700 mb-4 max-w-prose">
+        Shared disabled-state wash (DESIGN.md §States) — the{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">--color-states-disabled-opacity</code>{' '}
+        scalar consumed by the Tailwind <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">opacity-disabled</code>{' '}
+        utility from the shared preset. The chip applies the live variable so what you see is the
+        token, and re-resolves on theme flip.
+      </p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+        <DisabledWashDemo />
       </div>
     </section>
   );
@@ -1232,6 +1299,7 @@ export function TokensPage() {
       <RadiusSection />
       <ElevationSection />
       <MotionSection />
+      <StatesSection />
       <CanvasSection />
 
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">

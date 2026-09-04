@@ -116,6 +116,16 @@ export interface CanvasShellProps {
    * directed-axis-spine decoration node) can pass a `nodes` filter here.
    */
   fitViewOptions?: FitViewOptions;
+  /**
+   * v1.183 P0 (R-V1121P3QC1-S002) — surface-aware MiniMap node swatch color.
+   * Defaults to the strategy accent (the shell's original hardcoded color);
+   * surfaces with their own accent token pass their
+   * `var(--color-canvas-*-accent)` so the minimap reads as part of the active
+   * surface instead of always strategy-purple. Outline, World KB, World
+   * Timeline, and Work Timeline all opt in; only the strategy surface keeps
+   * the default.
+   */
+  minimapAccent?: string;
 }
 
 /**
@@ -138,6 +148,9 @@ function CanvasShellInner({
   relayout,
   surfaceKind,
   fitViewOptions,
+  // Strategy accent is the original hardcoded swatch; surfaces with their
+  // own accent token opt in via the minimapAccent prop (R-V1121P3QC1-S002).
+  minimapAccent = 'var(--color-canvas-strategy-accent)',
 }: CanvasShellProps) {
   const { t } = useTranslation('canvas');
   // FB-GS-000 — cache pan/zoom so a graph↔list toggle does not drop the
@@ -209,7 +222,7 @@ function CanvasShellInner({
         <MiniMap
           className="!rounded-card !border !border-gray-alpha-400 !bg-background-100 !shadow-elevation-2"
           maskColor="var(--color-canvas-minimap)"
-          nodeColor={() => 'var(--color-canvas-strategy-accent)'}
+          nodeColor={() => minimapAccent}
           pannable
           zoomable
         />

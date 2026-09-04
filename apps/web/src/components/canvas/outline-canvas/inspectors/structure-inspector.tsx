@@ -51,7 +51,7 @@ export function OutlineStructurePanel({
     <Card className="min-h-[480px]">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <BookOpen className="h-5 w-5 text-purple-700" aria-hidden />
+          <BookOpen className="h-5 w-5 text-canvas-strategy-accent" aria-hidden />
           {t('structureInspector.title')}
         </CardTitle>
         <CardDescription>{t('structureInspector.description')}</CardDescription>
