@@ -147,7 +147,7 @@ pub enum KbCommand {
     QueueExtract {
         /// Work-scope entry ID to extract from (e.g. `kb_a1b2c3d4`)
         work_entry_id: String,
-        /// Target world ID for the resulting `WorldKbEntry`
+        /// Target world ID for the resulting `KnowledgeEntryRecord`
         #[arg(long)]
         world_id: String,
         /// Source work ID (parent of the chapter artifact)
@@ -172,7 +172,7 @@ pub enum KbCommand {
     ///
     /// V1.50 T-B P2: `creator kb rescan <work_ref>/<chapter>` re-runs the
     /// review-time heuristic over one chapter's current prose, idempotently
-    /// upserts `kb_extract_jobs` candidates, refreshes confirmed `WorldKbEntry`
+    /// upserts `kb_extract_jobs` candidates, refreshes confirmed `KnowledgeEntryRecord`
     /// bodies so KB rows reflect the current text, and reports the diff.
     /// Cross-author attempts return `403` (`WORLD_KB_FORBIDDEN`).
     ///
@@ -669,7 +669,7 @@ async fn kb_show(
 /// then atomically renames the index. This prevents orphan entry files on
 /// partial failure (W2).
 ///
-/// For world scope: creates a `WorldKbEntry` via `SqliteKbStore::insert_knowledge_entry`.
+/// For world scope: creates a `KnowledgeEntryRecord` via `SqliteKbStore::insert_knowledge_entry`.
 async fn kb_add(
     config: &CliConfig,
     file: &std::path::Path,
@@ -690,7 +690,7 @@ async fn kb_add(
 
         let store = open_world_kb_store(config).await?;
         let mut kb =
-            nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(&wid, bt, &entry_title);
+            nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(&wid, bt, &entry_title);
 
         // Read file content as summary if provided
         if file.exists() {
@@ -700,7 +700,7 @@ async fn kb_add(
             } else {
                 content
             };
-            kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::WorldKbBody {
+            kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
                 summary: Some(summary),
                 attributes: None,
                 tags: None,
@@ -1180,7 +1180,7 @@ mod tests {
     async fn legacy_kb_scope_world_list_exercises_forward_path() {
         use crate::db::Schema;
         use nexus_contracts::BlockType;
-        use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+        use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
         use nexus_knowledge::world_kb::KbStore;
         use nexus_local_db::kb_store::SqliteKbStore;
 
@@ -1193,8 +1193,8 @@ mod tests {
         )
         .await;
         let store = SqliteKbStore::new(pool.clone());
-        let mut kb_block = WorldKbEntry::new("wld_ut", BlockType::Character, "char_ut_list");
-        kb_block.body = Some(WorldKbBody {
+        let mut kb_block = KnowledgeEntryRecord::new("wld_ut", BlockType::Character, "char_ut_list");
+        kb_block.body = Some(KnowledgeEntryBody {
             summary: Some("UT list summary".to_string()),
             attributes: Some(serde_json::json!({"novel_category": "character"})),
             tags: Some(vec!["ut-list".to_string()]),
@@ -1221,7 +1221,7 @@ mod tests {
     async fn legacy_kb_scope_world_show_exercises_forward_path() {
         use crate::db::Schema;
         use nexus_contracts::BlockType;
-        use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+        use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
         use nexus_knowledge::world_kb::KbStore;
         use nexus_local_db::kb_store::SqliteKbStore;
 
@@ -1240,8 +1240,8 @@ mod tests {
         )
         .await;
         let store = SqliteKbStore::new(pool.clone());
-        let mut kb_block = WorldKbEntry::new("wld_ut_show", BlockType::Character, "char_ut_show");
-        kb_block.body = Some(WorldKbBody {
+        let mut kb_block = KnowledgeEntryRecord::new("wld_ut_show", BlockType::Character, "char_ut_show");
+        kb_block.body = Some(KnowledgeEntryBody {
             summary: Some("UT show summary".to_string()),
             attributes: Some(serde_json::json!({"novel_category": "character"})),
             tags: Some(vec!["ut-show".to_string()]),
@@ -1265,7 +1265,7 @@ mod tests {
     async fn legacy_kb_scope_world_remove_exercises_forward_path() {
         use crate::db::Schema;
         use nexus_contracts::BlockType;
-        use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+        use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
         use nexus_knowledge::world_kb::KbStore;
         use nexus_local_db::kb_store::SqliteKbStore;
 
@@ -1284,8 +1284,8 @@ mod tests {
         )
         .await;
         let store = SqliteKbStore::new(pool.clone());
-        let mut kb_block = WorldKbEntry::new("wld_ut_rm", BlockType::Character, "char_ut_rm");
-        kb_block.body = Some(WorldKbBody {
+        let mut kb_block = KnowledgeEntryRecord::new("wld_ut_rm", BlockType::Character, "char_ut_rm");
+        kb_block.body = Some(KnowledgeEntryBody {
             summary: Some("UT remove summary".to_string()),
             attributes: Some(serde_json::json!({"novel_category": "character"})),
             tags: Some(vec!["ut-rm".to_string()]),
@@ -1323,8 +1323,8 @@ mod tests {
         )
         .await;
         let store2 = SqliteKbStore::new(pool2.clone());
-        let mut kb_block2 = WorldKbEntry::new("wld_ut_rm2", BlockType::Character, "char_ut_rm2");
-        kb_block2.body = Some(WorldKbBody {
+        let mut kb_block2 = KnowledgeEntryRecord::new("wld_ut_rm2", BlockType::Character, "char_ut_rm2");
+        kb_block2.body = Some(KnowledgeEntryBody {
             summary: Some("UT cross-author".to_string()),
             attributes: Some(serde_json::json!({"novel_category": "character"})),
             tags: Some(vec!["ut-rm2".to_string()]),

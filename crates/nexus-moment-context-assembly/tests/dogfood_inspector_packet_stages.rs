@@ -43,7 +43,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use nexus_contracts::{BlockType, TimePolicy, Visibility};
-use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
 use nexus_knowledge::world_kb::{InMemoryKbStore, KbStore};
 use nexus_knowledge::InMemoryKnowledgeStore;
 use nexus_moment_context_assembly::directive::{
@@ -108,12 +108,12 @@ fn build_world() -> (
     (narrative, kb, stage0)
 }
 
-/// Build a `WorldKbEntry` with the given `modules.activation` payload.
-fn entry(name: &str, id: &str, activation: &serde_json::Value) -> WorldKbEntry {
-    let mut entry = WorldKbEntry::new(WORLD_ID, BlockType::Character, name);
+/// Build a `KnowledgeEntryRecord` with the given `modules.activation` payload.
+fn entry(name: &str, id: &str, activation: &serde_json::Value) -> KnowledgeEntryRecord {
+    let mut entry = KnowledgeEntryRecord::new(WORLD_ID, BlockType::Character, name);
     entry.entry_id = id.to_string();
     entry.created_at = "2026-01-01T00:00:04Z".to_string();
-    entry.body = Some(WorldKbBody {
+    entry.body = Some(KnowledgeEntryBody {
         summary: Some(format!("{name} — a harbor fixture entry.")),
         ..Default::default()
     });
@@ -121,12 +121,12 @@ fn entry(name: &str, id: &str, activation: &serde_json::Value) -> WorldKbEntry {
     entry
 }
 
-/// Build a neutral `WorldKbEntry` — no `modules.activation` at all.
-fn neutral_entry(name: &str, id: &str) -> WorldKbEntry {
-    let mut entry = WorldKbEntry::new(WORLD_ID, BlockType::InfoPoint, name);
+/// Build a neutral `KnowledgeEntryRecord` — no `modules.activation` at all.
+fn neutral_entry(name: &str, id: &str) -> KnowledgeEntryRecord {
+    let mut entry = KnowledgeEntryRecord::new(WORLD_ID, BlockType::InfoPoint, name);
     entry.entry_id = id.to_string();
     entry.created_at = "2026-01-01T00:00:04Z".to_string();
-    entry.body = Some(WorldKbBody {
+    entry.body = Some(KnowledgeEntryBody {
         summary: Some(format!("{name} — a neutral harbor fixture entry.")),
         ..Default::default()
     });

@@ -27,6 +27,7 @@
 //!
 //! See tracked spec §2.2 for the full round-trip contract.
 
+use nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef;
 use serde_json::{Map, Value};
 use spoke_operations::ExtensionMap;
 use spoke_schemas::knowledge_entry::KnowledgeEntryExtensionsKey;
@@ -55,17 +56,21 @@ fn nexus_namespace(entry: &KnowledgeEntry) -> Option<&Map<String, Value>> {
     entry.extensions.get(&nexus_key())
 }
 
-/// The 5 typed identity field names managed by the accessors in this module.
-const KNOWN_NEXUS_KEYS: [&str; 5] = [
+/// The 8 typed identity/owner field names managed by the accessors in this
+/// module (v1.184 P1 adds the canonical owner keys + `creator_only`).
+const KNOWN_NEXUS_KEYS: [&str; 8] = [
     "world_id",
+    "character_id",
+    "actor_world_binding_id",
+    "creator_only",
     "created_from_command_id",
     "source_work_id",
     "source_chapter",
     "source_provenance_kind",
 ];
 
-/// Returns `true` if `key` is one of the 5 typed `extensions.nexus` identity
-/// fields managed by the accessors in this module.
+/// Returns `true` if `key` is one of the 8 typed `extensions.nexus` identity
+/// / owner fields managed by the accessors in this module.
 ///
 /// This is the single source of truth for the typed/unknown key boundary
 /// (spec §2.2 round-trip rule 2); storage and conversion-seam callers use it
@@ -76,8 +81,8 @@ pub fn is_known_nexus_key(key: &str) -> bool {
 }
 
 /// Read the *unknown* keys under `extensions.nexus` — everything outside the
-/// 5 typed identity fields. Returns an owned map; `None` when no unknown keys
-/// are present (or the namespace is absent).
+/// 8 typed identity/owner fields. Returns an owned map; `None` when no
+/// unknown keys are present (or the namespace is absent).
 ///
 /// Used by the conversion seam reverse direction to surface product-local
 /// extras onto the nexus domain type so they survive the spoke round-trip.
@@ -163,6 +168,70 @@ pub fn get_provenance(entry: &KnowledgeEntry) -> (Option<&str>, Option<i64>, Opt
     )
 }
 
+/// Read the canonical owner from `extensions.nexus` (v1.184 P1).
+///
+/// Returns `None` when no typed owner key is present (World, Character, or
+/// binding) — the conversion seam fails closed rather than fabricating a
+/// World owner. Precedence is `world_id` > `character_id` >
+/// `actor_world_binding_id`; a well-formed entry carries exactly one.
+#[must_use]
+pub fn get_owner(entry: &KnowledgeEntry) -> Option<KnowledgeOwnerRef> {
+    let ns = nexus_namespace(entry)?;
+    if let Some(world_id) = ns.get("world_id").and_then(Value::as_str) {
+        return Some(KnowledgeOwnerRef::world(world_id));
+    }
+    if let Some(character_id) = ns.get("character_id").and_then(Value::as_str) {
+        return Some(KnowledgeOwnerRef::character(character_id));
+    }
+    if let Some(binding_id) = ns
+        .get("actor_world_binding_id")
+        .and_then(Value::as_str)
+    {
+        return Some(KnowledgeOwnerRef::actor_world_binding(binding_id));
+    }
+    None
+}
+
+/// Read the `creator_only` flag from `extensions.nexus` (default `false`).
+#[must_use]
+pub fn get_creator_only(entry: &KnowledgeEntry) -> bool {
+    nexus_namespace(entry)
+        .and_then(|m| m.get("creator_only"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// Set the canonical owner on `extensions.nexus`, removing the other two
+/// owner keys so the projection is unambiguous (v1.184 P1).
+///
+/// World owners emit `world_id`; Character owners emit `character_id`;
+/// binding owners emit `actor_world_binding_id`. A non-World owner NEVER
+/// carries a `world_id` key (no fabricated World id). When `creator_only` is
+/// `true` the flag is emitted; otherwise the key is removed. Unknown keys
+/// already present in `extensions.nexus` are preserved verbatim.
+pub fn set_owner(entry: &mut KnowledgeEntry, owner: &KnowledgeOwnerRef, creator_only: bool) {
+    let ns = entry.extensions.entry(nexus_key()).or_default();
+    ns.remove("world_id");
+    ns.remove("character_id");
+    ns.remove("actor_world_binding_id");
+    match owner {
+        KnowledgeOwnerRef::World(id) => {
+            ns.insert("world_id".into(), Value::String(id.clone()));
+        }
+        KnowledgeOwnerRef::Character(id) => {
+            ns.insert("character_id".into(), Value::String(id.clone()));
+        }
+        KnowledgeOwnerRef::ActorWorldBinding(id) => {
+            ns.insert("actor_world_binding_id".into(), Value::String(id.clone()));
+        }
+    }
+    if creator_only {
+        ns.insert("creator_only".into(), Value::Bool(true));
+    } else {
+        ns.remove("creator_only");
+    }
+}
+
 /// Set the three provenance fields together.
 ///
 /// Mutates the entry in place. Each `None` removes the corresponding key.
@@ -191,10 +260,12 @@ pub fn set_provenance(
 /// Build the `extensions.nexus` namespace object from typed nexus fields.
 ///
 /// Returns the namespace value as a [`serde_json::Value`] (always an object
-/// when serialized). The 5 typed fields are written authoritatively:
-///
-/// - `world_id` is always inserted (required).
-/// - Each optional field is inserted when `Some`, removed when `None`.
+/// when serialized). The owner is written authoritatively from
+/// [`KnowledgeOwnerRef`] (World → `world_id`, Character → `character_id`,
+/// binding → `actor_world_binding_id`); the other owner keys are removed so
+/// a non-World owner never fabricates a `world_id`. `creator_only` is emitted
+/// when set (World-owned only). Each optional provenance field is inserted
+/// when `Some`, removed when `None`.
 ///
 /// Unknown keys already present under the `"nexus"` namespace of
 /// `existing_extensions` are preserved verbatim — they are carried over
@@ -207,7 +278,8 @@ pub fn set_provenance(
 /// boundary.
 #[must_use]
 pub fn build_extensions_nexus(
-    world_id: &str,
+    owner: &KnowledgeOwnerRef,
+    creator_only: bool,
     created_from_command_id: Option<&str>,
     source_work_id: Option<&str>,
     source_chapter: Option<i64>,
@@ -219,7 +291,25 @@ pub fn build_extensions_nexus(
         .cloned()
         .unwrap_or_default();
 
-    nexus.insert("world_id".into(), Value::String(world_id.to_owned()));
+    nexus.remove("world_id");
+    nexus.remove("character_id");
+    nexus.remove("actor_world_binding_id");
+    match owner {
+        KnowledgeOwnerRef::World(id) => {
+            nexus.insert("world_id".into(), Value::String(id.clone()));
+        }
+        KnowledgeOwnerRef::Character(id) => {
+            nexus.insert("character_id".into(), Value::String(id.clone()));
+        }
+        KnowledgeOwnerRef::ActorWorldBinding(id) => {
+            nexus.insert("actor_world_binding_id".into(), Value::String(id.clone()));
+        }
+    }
+    if creator_only {
+        nexus.insert("creator_only".into(), Value::Bool(true));
+    } else {
+        nexus.remove("creator_only");
+    }
     insert_opt_string(
         &mut nexus,
         "created_from_command_id",
@@ -240,7 +330,7 @@ fn insert_opt_string(nexus: &mut Map<String, Value>, key: &str, value: Option<&s
     };
 }
 
-/// Reserved `extensions.nexus` key carrying the full nexus `WorldKbBody`
+/// Reserved `extensions.nexus` key carrying the full nexus `KnowledgeEntryBody`
 /// losslessly across the spoke boundary.
 ///
 /// Spoke's typed `BodyAttributeValue` only models string/number/bool

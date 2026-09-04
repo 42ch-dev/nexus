@@ -10,7 +10,7 @@
 #![allow(clippy::unwrap_used)]
 
 use nexus_contracts::BlockType;
-use nexus_knowledge::world_kb::{KbStore, WorldKbEntry};
+use nexus_knowledge::world_kb::{KbStore, KnowledgeEntryRecord};
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::mind_state_store::{
     delete_mind_state, get_mind_state, insert_mind_state, list_mind_states_by_holder,
@@ -49,7 +49,7 @@ async fn seed_holder(pool: &sqlx::SqlitePool) -> String {
     .unwrap();
 
     let store = SqliteKbStore::new(pool.clone());
-    let kb = WorldKbEntry::new("wld_mind_test", BlockType::Character, "Bo");
+    let kb = KnowledgeEntryRecord::new("wld_mind_test", BlockType::Character, "Bo");
     let holder_id = kb.entry_id.clone();
     store.insert_knowledge_entry(kb).await.unwrap();
     holder_id

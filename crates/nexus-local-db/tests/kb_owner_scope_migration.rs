@@ -14,7 +14,7 @@
 #![allow(clippy::unwrap_used)]
 
 use nexus_contracts::BlockType;
-use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
+use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use nexus_knowledge::world_kb::store::KbStoreError;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_store::SqliteKbStore;
@@ -668,11 +668,11 @@ async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
 
     // ── Legacy World store behavior on the upgraded database ────────────
     let store = SqliteKbStore::new(pool.clone());
-    let kb = WorldKbEntry::new(WORLD_A, BlockType::Character, "Post Upgrade Hero");
+    let kb = KnowledgeEntryRecord::new(WORLD_A, BlockType::Character, "Post Upgrade Hero");
     let inserted = store.insert_knowledge_entry(kb.clone()).await.unwrap();
     assert_eq!(inserted.entry_id, kb.entry_id);
     let fetched = store.get_knowledge_entry(&kb.entry_id).await.unwrap();
-    assert_eq!(fetched.world_id, WORLD_A);
+    assert_eq!(fetched.world_id(), Some(WORLD_A));
     assert_eq!(fetched.canonical_name, "Post Upgrade Hero");
     // New store inserts land as World-owned rows.
     let new_owner: (String, i64) = sqlx::query_as(
@@ -691,7 +691,7 @@ async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
     );
     // Legacy duplicate mapping intact (2067 → KbStoreError::Duplicate).
     let dup = store
-        .insert_knowledge_entry(WorldKbEntry::new(WORLD_A, BlockType::Character, "Post Upgrade Hero"))
+        .insert_knowledge_entry(KnowledgeEntryRecord::new(WORLD_A, BlockType::Character, "Post Upgrade Hero"))
         .await
         .unwrap_err();
     assert!(

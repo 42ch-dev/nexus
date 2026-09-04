@@ -7,13 +7,13 @@
 //! - AC1: `novel-writing` schedule completion triggers missing-KB detection.
 //! - AC3: `--missing-only` lists missing candidates from the advisory log.
 //! - AC4: missing candidates are **not** written to `kb_extract_jobs`.
-//! - AC6: existing confirmed `WorldKbEntry` rows filter out known entities.
+//! - AC6: existing confirmed `KnowledgeEntryRecord` rows filter out known entities.
 //!
 //! Run with: cargo test -p nexus-orchestration --test `missing_kb_detection`
 
 #![allow(clippy::unwrap_used)]
 
-use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
+use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::list_pending_for_world;
 use nexus_local_db::kb_store::SqliteKbStore;
@@ -223,16 +223,16 @@ async fn ac4_missing_candidates_not_written_to_extract_jobs() {
     );
 }
 
-// ── AC6: existing confirmed WorldKbEntry filters out known entity ────────────────
+// ── AC6: existing confirmed KnowledgeEntryRecord filters out known entity ────────────────
 
 #[tokio::test]
 async fn ac6_existing_key_block_filters_known_entity() {
     let pool = test_pool().await;
     seed_world(&pool).await;
 
-    // Confirm a WorldKbEntry for "Aria Stormblade" before finalize.
+    // Confirm a KnowledgeEntryRecord for "Aria Stormblade" before finalize.
     let store = SqliteKbStore::new(pool.clone());
-    let mut kb = WorldKbEntry::new(
+    let mut kb = KnowledgeEntryRecord::new(
         WORLD,
         nexus_contracts::BlockType::Character,
         "Aria Stormblade",

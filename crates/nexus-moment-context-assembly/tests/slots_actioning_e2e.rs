@@ -17,7 +17,7 @@
 #![allow(clippy::manual_string_new, clippy::doc_markdown)]
 
 use nexus_contracts::BlockType;
-use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
+use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use nexus_knowledge::world_kb::{InMemoryKbStore, KbStore};
 use nexus_knowledge::InMemoryKnowledgeStore;
 use nexus_moment_context_assembly::stage0::Stage0Assembly;
@@ -26,9 +26,9 @@ use nexus_narrative::InMemoryNarrativeGateway;
 
 const WORLD_ID: &str = "wld_slots_e2e";
 
-/// Build a `WorldKbEntry` with the given `modules.activation` payload.
-fn entry(name: &str, id: &str, activation: &serde_json::Value) -> WorldKbEntry {
-    let mut entry = WorldKbEntry::new(WORLD_ID, BlockType::Character, name);
+/// Build a `KnowledgeEntryRecord` with the given `modules.activation` payload.
+fn entry(name: &str, id: &str, activation: &serde_json::Value) -> KnowledgeEntryRecord {
+    let mut entry = KnowledgeEntryRecord::new(WORLD_ID, BlockType::Character, name);
     entry.entry_id = id.to_string();
     entry.modules = Some(serde_json::json!({ "activation": activation }));
     entry

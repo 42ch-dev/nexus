@@ -4,9 +4,9 @@
 //!
 //! # Wire conversion reuse (HARD, spec §7.1)
 //!
-//! The adapter REUSES the sole conversion seam (`world_kb_to_spoke` /
-//! `spoke_to_world_kb` in `crate::conversion`, since V1.145 P1a)
-//! between SQLite-backed [`WorldKbEntry`] rows and spoke [`KnowledgeEntry`]
+//! The adapter REUSES the sole conversion seam (`knowledge_record_to_spoke` /
+//! `spoke_to_knowledge_record` in `crate::conversion`, since V1.145 P1a)
+//! between SQLite-backed [`KnowledgeEntryRecord`] rows and spoke [`KnowledgeEntry`]
 //! wire types. No second conversion path is added here.
 //!
 //! # CAS contract (spec §7.4)
@@ -25,12 +25,12 @@
 //! | Row moved to another world (world-aware CAS miss, V1.154 P2 R3) | world-conflict marker (`InternalError` carrier; wire `world_conflict` per spec §3.2) |
 
 use super::NexusAdapter;
-use crate::conversion::{spoke_to_world_kb, world_kb_to_spoke};
+use crate::conversion::{spoke_to_knowledge_record, knowledge_record_to_spoke};
 use crate::extensions::build_extensions_nexus;
 use crate::{KnowledgeEntry, KnowledgeEntryPort, SpokeReject, SpokeRejectCode, SpokeResult};
 use async_trait::async_trait;
 use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
-use nexus_knowledge::world_kb::WorldKbEntry;
+use nexus_knowledge::world_kb::KnowledgeEntryRecord;
 use nexus_local_db::kb_store::{
     cas_update_key_block_fields, update_key_block_auxiliary_fields_in_tx, SqliteKbStore,
 };
@@ -172,13 +172,13 @@ impl KnowledgeEntryPort for NexusAdapter<'_> {
         let pool = self.pool.clone();
         let entry_id = entry_id.to_string();
         let store = SqliteKbStore::new(pool);
-        let world_entry: WorldKbEntry = match store.get_knowledge_entry(&entry_id).await {
+        let world_entry: KnowledgeEntryRecord = match store.get_knowledge_entry(&entry_id).await {
             Ok(row) => row,
             Err(e) => return Self::map_get_err(e, &entry_id),
         };
         // Reuse the sole conversion seam (spec §7.1) — now free functions
         // in nexus-spoke-adapter (V1.145 P1a dep-graph reversal).
-        SpokeResult::Ok(world_kb_to_spoke(&world_entry))
+        SpokeResult::Ok(knowledge_record_to_spoke(&world_entry))
     }
 
     async fn put_knowledge_entry(
@@ -230,15 +230,25 @@ async fn put_create(
     // nexus-spoke-adapter (V1.145 P1a). Set the initial post-create revision
     // to 1 (matches the V1.73 NULL-normalization rule: the first successful
     // write sets revision = 1).
-    let mut world_entry: WorldKbEntry = spoke_to_world_kb(entry.clone());
+    let mut world_entry: KnowledgeEntryRecord = match spoke_to_knowledge_record(entry.clone()) {
+        Ok(v) => v,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InvalidInput,
+                format!("create entry lacks canonical owner metadata: {e}"),
+                json!({ "entry_id": entry_id }),
+            );
+        }
+    };
     world_entry.revision = Some(1);
 
     // V1.145 P0 T2: build `extensions.nexus` JSON at the adapter boundary so
     // the storage layer stays spoke-unaware. Mirrors the UPDATE CAS path in
     // `run_cas_update_in_tx` (spec §7.4); the JSON is passed opaquely to
-    // `insert_key_block_with_extensions_in_tx`.
+    // `insert_key_block_with_extensions_in_tx`. v1.184 P1: owner-aware.
     let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
-        &world_entry.world_id,
+        &world_entry.owner,
+        world_entry.creator_only,
         world_entry.created_from_command_id.as_deref(),
         world_entry.source_work_id.as_deref(),
         world_entry.source_chapter,
@@ -289,7 +299,7 @@ async fn put_create(
             SpokeResult::Ok(result)
         }
         Err(KbStoreError::Duplicate {
-            world_id,
+            owner,
             name,
             block_type,
         }) => reject(
@@ -297,7 +307,7 @@ async fn put_create(
             format!("Entry already exists: {entry_id}"),
             json!({
                 "entry_id": entry_id,
-                "world_id": world_id,
+                "owner": owner,
                 "canonical_name": name,
                 "block_type": format!("{block_type:?}"),
             }),
@@ -334,7 +344,16 @@ async fn put_update_bound(
     expected: u64,
 ) -> SpokeResult<KnowledgeEntry> {
     let entry_id = entry.entry_id.clone();
-    let world_entry: WorldKbEntry = spoke_to_world_kb(entry.clone());
+    let world_entry: KnowledgeEntryRecord = match spoke_to_knowledge_record(entry.clone()) {
+        Ok(v) => v,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InvalidInput,
+                format!("knowledge entry lacks canonical owner metadata: {e}"),
+                json!({ "entry_id": entry_id }),
+            );
+        }
+    };
     let mut tx = adapter
         .take_bound_tx()
         .expect("bound adapter must have tx in cell");
@@ -357,7 +376,16 @@ async fn put_update_unbound(
     expected: u64,
 ) -> SpokeResult<KnowledgeEntry> {
     let entry_id = entry.entry_id.clone();
-    let world_entry: WorldKbEntry = spoke_to_world_kb(entry.clone());
+    let world_entry: KnowledgeEntryRecord = match spoke_to_knowledge_record(entry.clone()) {
+        Ok(v) => v,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InvalidInput,
+                format!("knowledge entry lacks canonical owner metadata: {e}"),
+                json!({ "entry_id": entry_id }),
+            );
+        }
+    };
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
@@ -415,7 +443,16 @@ pub(crate) async fn commit_compute_settlement(
 
         for (entry, expected) in entry_updates {
             let entry_id = entry.entry_id.clone();
-            let world_entry: WorldKbEntry = spoke_to_world_kb(entry);
+            let world_entry: KnowledgeEntryRecord = match spoke_to_knowledge_record(entry) {
+                Ok(v) => v,
+                Err(e) => {
+                    return reject(
+                        SpokeRejectCode::InvalidInput,
+                        format!("knowledge entry lacks canonical owner metadata: {e}"),
+                        json!({ "entry_id": entry_id }),
+                    );
+                }
+            };
             match run_cas_update_in_tx(&mut tx, &entry_id, &world_entry, expected).await {
                 SpokeResult::Ok(_) => {}
                 SpokeResult::Reject(r) => {
@@ -458,7 +495,7 @@ pub(crate) async fn commit_compute_settlement(
 async fn run_cas_update_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     entry_id: &str,
-    world_entry: &WorldKbEntry,
+    world_entry: &KnowledgeEntryRecord,
     expected: u64,
 ) -> SpokeResult<u64> {
     let body_json = world_entry
@@ -473,7 +510,8 @@ async fn run_cas_update_in_tx(
         .as_ref()
         .map(|a| serde_json::to_string(a).unwrap_or_default());
     let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
-        &world_entry.world_id,
+        &world_entry.owner,
+        world_entry.creator_only,
         world_entry.created_from_command_id.as_deref(),
         world_entry.source_work_id.as_deref(),
         world_entry.source_chapter,
@@ -487,6 +525,19 @@ async fn run_cas_update_in_tx(
         .as_ref()
         .map(|m| serde_json::to_string(m).unwrap_or_default());
 
+    // v1.184 P1: the CAS update lane is World-owned only — a non-World
+    // candidate cannot be patched through the world-scoped CAS (fails closed
+    // rather than passing an empty world id into a same-world predicate).
+    let Some(world_id) = world_entry.world_id() else {
+        return reject(
+            SpokeRejectCode::InvalidInput,
+            format!(
+                "knowledge entry update requires a World-owned record (got {})",
+                world_entry.owner.kind()
+            ),
+            json!({ "entry_id": entry_id }),
+        );
+    };
     let new_rev = match cas_update_key_block_fields(
         tx,
         entry_id,
@@ -500,7 +551,7 @@ async fn run_cas_update_in_tx(
         // cross-process writer moved the row to another world between the
         // gate check and this CAS, the predicate misses and the storage
         // layer classifies it as WorldConflict.
-        &world_entry.world_id,
+        world_id,
     )
     .await
     {
@@ -577,7 +628,7 @@ mod tests {
     use super::*;
     use crate::KnowledgeEntryPort;
     use nexus_contracts::BlockType;
-    use nexus_knowledge::world_kb::{WorldKbBody, WorldKbEntry};
+    use nexus_knowledge::world_kb::{KnowledgeEntryBody, KnowledgeEntryRecord};
     use nexus_local_db::{open_pool, run_migrations};
 
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
@@ -610,18 +661,18 @@ mod tests {
     /// Build a spoke `KnowledgeEntry` fixture with a populated `extensions.nexus`
     /// (so it round-trips into the `kb_key_blocks` row that requires `world_id`).
     fn spoke_entry(entry_id: &str, canonical_name: &str, revision: Option<u64>) -> KnowledgeEntry {
-        // Round-trip through the sole conversion seam: build a WorldKbEntry
+        // Round-trip through the sole conversion seam: build a KnowledgeEntryRecord
         // (which carries world_id natively), convert forward to spoke — this
         // guarantees the fixture satisfies the storage shape requirements
         // (world_id present under extensions.nexus; canonical_name format-valid).
-        let mut world = WorldKbEntry::new("wld_1", BlockType::Character, canonical_name);
+        let mut world = KnowledgeEntryRecord::new("wld_1", BlockType::Character, canonical_name);
         world.entry_id = entry_id.to_string();
         world.revision = revision;
-        world.body = Some(WorldKbBody {
+        world.body = Some(KnowledgeEntryBody {
             summary: Some(format!("{canonical_name} summary")),
             ..Default::default()
         });
-        world_kb_to_spoke(&world)
+        knowledge_record_to_spoke(&world)
     }
 
     /// Test helper: unwrap a `SpokeResult::Ok` or panic with the reject payload.

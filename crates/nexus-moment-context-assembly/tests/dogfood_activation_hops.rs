@@ -22,7 +22,7 @@
 use std::collections::{HashMap, HashSet};
 
 use nexus_contracts::{BlockType, TimePolicy, Visibility};
-use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
 use nexus_knowledge::world_kb::{InMemoryKbStore, KbStore};
 use nexus_knowledge::{InMemoryKnowledgeStore, KnowledgeStore, KnowledgeTag};
 use nexus_moment_context_assembly::stage0::Stage0Assembly;
@@ -142,11 +142,11 @@ fn entry(
     name: &str,
     summary: &str,
     modules: Option<serde_json::Value>,
-) -> WorldKbEntry {
-    let mut e = WorldKbEntry::new(world_id, block_type, name);
+) -> KnowledgeEntryRecord {
+    let mut e = KnowledgeEntryRecord::new(world_id, block_type, name);
     e.entry_id = id.to_string();
     e.created_at = "2026-01-01T00:00:04Z".to_string();
-    e.body = Some(WorldKbBody {
+    e.body = Some(KnowledgeEntryBody {
         summary: Some(summary.to_string()),
         ..Default::default()
     });
@@ -156,7 +156,7 @@ fn entry(
 
 // Long integration test; splitting would obscure the end-to-end scenario
 #[allow(clippy::too_many_lines)]
-async fn seed_harbor_kb(kb: &InMemoryKbStore) -> Vec<WorldKbEntry> {
+async fn seed_harbor_kb(kb: &InMemoryKbStore) -> Vec<KnowledgeEntryRecord> {
     let entries = vec![
         // Constant seed — always fires, top of the constant band.
         entry(
@@ -643,7 +643,7 @@ fn build_neutral_world_b() -> (
 async fn seed_neutral_world_b(
     kb: &InMemoryKbStore,
     knowledge: &InMemoryKnowledgeStore,
-) -> Vec<WorldKbEntry> {
+) -> Vec<KnowledgeEntryRecord> {
     let entries = vec![
         entry(
             WORLD_B_ID,

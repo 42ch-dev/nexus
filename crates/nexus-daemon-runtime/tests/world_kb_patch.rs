@@ -1,7 +1,7 @@
 //! V1.73 P0 World KB patch-route integration tests.
 //!
 //! Exercises the four World KB Daemon API handlers directly against a
-//! canonical daemon `WorkspaceState` with a seeded creator/world/WorldKbEntry:
+//! canonical daemon `WorkspaceState` with a seeded creator/world/KnowledgeEntryRecord:
 //! - `patch_entity` happy path + per-row OCC 409 conflict + 422 validation.
 //! - `promote_candidate` adopt + reject (entity-scope-model §5.5.2 state machine).
 //! - `get_graph` + `get_candidates` read projections.
@@ -188,7 +188,7 @@ async fn patch_entity_title_bumps_version() {
 }
 
 /// V1.143 Phase5 (Greptile P1): `patch_entity` must preserve the full
-/// `WorldKbBody` through the orchestrator upsert cutover. Spoke's
+/// `KnowledgeEntryBody` through the orchestrator upsert cutover. Spoke's
 /// `BodyAttributeValue` only models string/number/bool; null/array/object
 /// attribute values used to be silently dropped on the persist round-trip
 /// (`build_spoke_upsert_request` → spoke seam → `put_update`). The conversion seam
@@ -361,7 +361,7 @@ async fn patch_entity_cross_author_forbidden() {
     assert_eq!(err.status_code(), axum::http::StatusCode::FORBIDDEN);
 }
 
-/// Regression for V1.73 greploop issue 3: `patch_entity` read the `WorldKbEntry` (and
+/// Regression for V1.73 greploop issue 3: `patch_entity` read the `KnowledgeEntryRecord` (and
 /// ran the cross-world scope check) BEFORE `require_world_owner`. An
 /// unauthenticated-but-locally-active creator could therefore distinguish
 /// `NotFound` ("entity not in this world") from `Forbidden` ("not your world"),
@@ -564,7 +564,7 @@ async fn patch_entity_create_on_absent_happy_path() {
         .await
         .expect("created row must exist in the store");
     assert_eq!(stored.entry_id, entity_id);
-    assert_eq!(stored.world_id, "wld_test_world");
+    assert_eq!(stored.world_id(), Some("wld_test_world"));
     assert_eq!(stored.revision, Some(1));
     assert_eq!(stored.status, "provisional");
 }
@@ -2629,7 +2629,7 @@ async fn promote_merge_target_cas_miss_marks_target_conflict() {
     );
 }
 
-// ─── computable WorldKbEntry state read (V1.114 P2) ───────────────────────────────
+// ─── computable KnowledgeEntryRecord state read (V1.114 P2) ───────────────────────────────
 
 #[tokio::test]
 async fn get_key_block_state_computable_returns_state() {

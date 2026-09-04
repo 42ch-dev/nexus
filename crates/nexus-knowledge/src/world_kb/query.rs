@@ -89,22 +89,22 @@ impl KbQuery {
     }
 }
 
-/// Result of inserting a `WorldKbEntry`.
+/// Result of inserting a `KnowledgeEntryRecord`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KbInsertResult {
-    /// ID of the created `WorldKbEntry`.
+    /// ID of the created `KnowledgeEntryRecord`.
     pub entry_id: String,
-    /// World the `WorldKbEntry` belongs to.
-    pub world_id: String,
+    /// Canonical owner of the created record (v1.184 P1).
+    pub owner: crate::world_kb::knowledge_entry::KnowledgeOwnerRef,
     /// Creation timestamp.
     pub created_at: String,
 }
 
-/// Result of querying `WorldKbEntry`s.
+/// Result of querying `KnowledgeEntryRecord`s.
 #[derive(Debug, Clone)]
 pub struct KbQueryResult {
-    /// Matching `WorldKbEntry`s (after pagination).
-    pub items: Vec<crate::world_kb::knowledge_entry::WorldKbEntry>,
+    /// Matching `KnowledgeEntryRecord`s (after pagination).
+    pub items: Vec<crate::world_kb::knowledge_entry::KnowledgeEntryRecord>,
     /// Total number of matching items (ignoring limit/offset).
     pub total_count: usize,
     /// Whether more results exist beyond the current page.

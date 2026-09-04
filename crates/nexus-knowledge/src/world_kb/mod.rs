@@ -1,6 +1,6 @@
-//! World KB — World-scoped narrative KB graph: `WorldKbEntry` + `SourceAnchor`.
+//! World KB — World-scoped narrative KB graph: `KnowledgeEntryRecord` + `SourceAnchor`.
 //!
-//! This module owns the `WorldKbEntry` aggregate (structured knowledge units in
+//! This module owns the `KnowledgeEntryRecord` aggregate (structured knowledge units in
 //! world timelines), the `SourceAnchor` value object, and the `KbStore` trait
 //! for World-scoped KB graph insertion and query.
 //!
@@ -14,7 +14,7 @@
 //!
 //! # Uniqueness constraint
 //!
-//! Under the same `world_id`, at most one **active** `WorldKbEntry` may exist
+//! Under the same `world_id`, at most one **active** `KnowledgeEntryRecord` may exist
 //! for a given `(canonical_name, block_type)` pair.
 
 #![allow(clippy::missing_errors_doc)]
@@ -33,7 +33,10 @@ pub mod validation;
 pub use errors::{KbError, ValidationError, ValidationKind};
 pub use extract_finalize::{finalize_extract, ExtractFinalizeInput};
 pub use extract_sync::{compute_kb_diff, diff_and_apply, KbSyncDiff, KbSyncUpdate};
-pub use knowledge_entry::{BeliefPropositionRaw, MentalFieldsRaw, WorldKbBody, WorldKbEntry};
+pub use knowledge_entry::{
+    BeliefPropositionRaw, KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef,
+    MentalFieldsRaw,
+};
 pub use query::{KbInsertResult, KbQuery, KbQueryResult};
 pub use store::{InMemoryKbStore, KbStore, KbStoreError};
 pub use validation::{
@@ -41,6 +44,6 @@ pub use validation::{
 };
 
 // V1.139 P1 T2 — wire-boundary re-export. `spoke_schemas::KnowledgeEntry` is the
-// spoke standard type; `WorldKbEntry` converts to/from it at the seam (see
+// spoke standard type; `KnowledgeEntryRecord` converts to/from it at the seam (see
 // `knowledge_entry.rs`). spoke-operations receive the spoke type only (spec §7).
 pub use spoke_schemas::KnowledgeEntry;

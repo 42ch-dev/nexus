@@ -14,7 +14,7 @@ use nexus42::commands::creator::world::kb::{kb_delete, kb_edit, WORLD_KB_FORBIDD
 use nexus42::db::Schema;
 use nexus42::errors::CliError;
 use nexus_contracts::BlockType;
-use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_store::SqliteKbStore;
 
@@ -26,7 +26,7 @@ const CANON_NAME: &str = "char_hero";
 const VALID_BODY: &str =
     r#"{"summary":"updated","attributes":{"novel_category":"character"},"tags":["novel"]}"#;
 
-/// Fresh pool + world owned by [`OWNER`] + one novel-valid `WorldKbEntry`.
+/// Fresh pool + world owned by [`OWNER`] + one novel-valid `KnowledgeEntryRecord`.
 async fn fresh_pool_with_block() -> (sqlx::SqlitePool, String, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("state.db");
@@ -44,8 +44,8 @@ async fn fresh_pool_with_block() -> (sqlx::SqlitePool, String, tempfile::TempDir
     .await;
 
     let store = SqliteKbStore::new(pool.clone());
-    let mut kb = WorldKbEntry::new(WORLD, BlockType::Character, CANON_NAME);
-    kb.body = Some(WorldKbBody {
+    let mut kb = KnowledgeEntryRecord::new(WORLD, BlockType::Character, CANON_NAME);
+    kb.body = Some(KnowledgeEntryBody {
         summary: Some("Original summary".to_string()),
         attributes: Some(serde_json::json!({"novel_category": "character"})),
         tags: Some(vec!["novel".to_string()]),

@@ -10,12 +10,12 @@
 //! Consumed by both the daemon handler (direct Control Room lane, Task 4)
 //! and (in a future refactor) the `narrative.compute` capability.
 
-use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
+use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use nexus_knowledge::world_kb::{KbQuery, KbStore};
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::narrative_gateway::SqliteNarrativeGateway;
 use nexus_narrative::NarrativeGateway;
-use nexus_spoke_adapter::conversion::world_kb_to_spoke;
+use nexus_spoke_adapter::conversion::knowledge_record_to_spoke;
 use nexus_wasm_host::ModuleManifest;
 use serde_json::{Map, Value};
 use sqlx::SqlitePool;
@@ -174,7 +174,7 @@ impl ComputeInputBuilder {
     async fn query_entries(
         &self,
         kb_store: &SqliteKbStore,
-    ) -> Result<Vec<WorldKbEntry>, ComputeBuildError> {
+    ) -> Result<Vec<KnowledgeEntryRecord>, ComputeBuildError> {
         let q = KbQuery::new(&self.world_id).with_computable(Some(true));
         let computable_blocks = kb_store.query(&q).await?;
 
@@ -185,7 +185,7 @@ impl ComputeInputBuilder {
             .map(String::as_str)
             .collect();
 
-        let key_blocks: Vec<WorldKbEntry> = computable_blocks
+        let key_blocks: Vec<KnowledgeEntryRecord> = computable_blocks
             .items
             .into_iter()
             .filter(|kb| {
@@ -204,7 +204,7 @@ impl ComputeInputBuilder {
     async fn load_referenced_entries(
         &self,
         kb_store: &SqliteKbStore,
-        key_blocks: &mut Vec<WorldKbEntry>,
+        key_blocks: &mut Vec<KnowledgeEntryRecord>,
     ) -> Result<(), ComputeBuildError> {
         let mut referenced_entry_ids: Vec<String> = Vec::new();
         for key in self.invocation_params.keys() {
@@ -226,10 +226,10 @@ impl ComputeInputBuilder {
                 ))
             })?;
 
-            if ref_entry.world_id != self.world_id {
+            if ref_entry.world_id() != Some(self.world_id.as_str()) {
                 return Err(ComputeBuildError::ReferencedEntryNotInWorld(format!(
                     "referenced entry {ref_id} belongs to world {}, not {}",
-                    ref_entry.world_id, self.world_id
+                    ref_entry.world_id().unwrap_or_default(), self.world_id
                 )));
             }
 
@@ -281,12 +281,12 @@ impl ComputeInputBuilder {
     }
 }
 
-/// Convert domain `WorldKbEntry` entries to spoke `KnowledgeEntry` JSON object maps.
-fn convert_entries_to_spoke_json(entries: Vec<WorldKbEntry>) -> Vec<Map<String, Value>> {
+/// Convert domain `KnowledgeEntryRecord` entries to spoke `KnowledgeEntry` JSON object maps.
+fn convert_entries_to_spoke_json(entries: Vec<KnowledgeEntryRecord>) -> Vec<Map<String, Value>> {
     entries
         .into_iter()
         .map(|kb| {
-            let spoke = world_kb_to_spoke(&kb);
+            let spoke = knowledge_record_to_spoke(&kb);
             serde_json::to_value(&spoke)
                 .ok()
                 .and_then(|v| v.as_object().cloned())

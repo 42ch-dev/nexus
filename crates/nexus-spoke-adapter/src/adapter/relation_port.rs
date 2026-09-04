@@ -4,7 +4,7 @@
 //! # Wire ↔ row mapping (spoke 0.5.0)
 //!
 //! There is no second conversion seam for `Relation` analogous to the
-//! V1.139 `WorldKbEntry ↔ KnowledgeEntry` pair — spoke's `Relation`
+//! V1.139 `KnowledgeEntryRecord ↔ KnowledgeEntry` pair — spoke's `Relation`
 //! wire type maps directly onto the nexus `kb_relationships` row at
 //! this boundary via the single reverse-mapping seam
 //! [`crate::conversion::kb_relationship_row_to_spoke`] (moved here in
@@ -325,6 +325,57 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
             }),
         );
     };
+
+    // v1.184 P1: relationships remain World-owned in this iteration. Every
+    // create must have BOTH endpoints owned by the same World (owner_kind =
+    // 'world' + matching stored `world_id`) and non-deleted — a Character or
+    // binding-owned row, a foreign-world row, or a deleted row is rejected
+    // here (fail-closed), mirroring the daemon `require_entities_in_world`
+    // seam. The ownership check reads the typed owner columns (authorization
+    // never trusts payload claims).
+    let endpoint_ids = [&relation.from_id, &relation.to_id];
+    let endpoint_rows = sqlx::query_as::<_, (String, String)>(
+        "SELECT key_block_id, status FROM kb_key_blocks \
+         WHERE owner_kind = 'world' AND world_id = ? AND key_block_id IN (?, ?)",
+    )
+    .bind(&world_id)
+    .bind(&relation.from_id)
+    .bind(&relation.to_id)
+    .fetch_all(pool)
+    .await;
+    let endpoint_rows = match endpoint_rows {
+        Ok(rows) => rows,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("storage error on endpoint ownership pre-check: {e}"),
+                json!({ "relation_id": relation_id }),
+            );
+        }
+    };
+    let mut missing = Vec::new();
+    let mut deleted = Vec::new();
+    for id in endpoint_ids.iter().copied() {
+        match endpoint_rows.iter().find(|(k, _)| k == id) {
+            None => missing.push(id.to_string()),
+            Some((_, status)) if status == "deleted" => deleted.push(id.to_string()),
+            Some(_) => {}
+        }
+    }
+    if !missing.is_empty() {
+        return reject(
+            SpokeRejectCode::InvalidInput,
+            format!("relation endpoints are not World-owned in world {world_id}: {}", missing.join(", ")),
+            json!({ "relation_id": relation_id, "missing": missing }),
+        );
+    }
+    if !deleted.is_empty() {
+        return reject(
+            SpokeRejectCode::InvalidInput,
+            format!("cannot relate deleted entities: {}", deleted.join(", ")),
+            json!({ "relation_id": relation_id, "deleted": deleted }),
+        );
+    }
 
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
@@ -1991,5 +2042,113 @@ mod tests {
             5,
             "all 5 edges returned — no truncation"
         );
+    }
+    // ── v1.184 P1 T2: World-only same-world endpoint enforcement ──────
+
+    /// Seed a Character-owned KB row (`owner_kind='character'`, NULL
+    /// `world_id`) plus its `characters` FK parent.
+    async fn seed_character_owned_endpoint(pool: &sqlx::SqlitePool, key_block_id: &str) {
+        // SAFETY: test-only static INSERTs with bind params.
+        sqlx::query(
+            "INSERT INTO characters \
+             (character_id, owner_creator_id, display_name, status, image_uri, persona_json, \
+              created_at, updated_at) \
+             VALUES ('chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'ctr_test', 'Rel Char', 'active', NULL, '{}', \
+              '2026-09-05T00:00:00Z', '2026-09-05T00:00:00Z')",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO kb_key_blocks \
+             (key_block_id, owner_kind, character_id, block_type, canonical_name, status) \
+             VALUES (?, 'character', 'chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'character', ?, 'confirmed')",
+        )
+        .bind(key_block_id)
+        .bind(key_block_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    /// Assert a create rejects with INVALID_INPUT and persists nothing.
+    async fn assert_create_rejected_invalid_input(pool: &sqlx::SqlitePool, relation: Relation) {
+        let adapter = NexusAdapter::new(pool.clone());
+        match adapter.put_relation(relation, None).await {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InvalidInput,
+                    "non-World/foreign/deleted endpoint must reject INVALID_INPUT: {r:?}"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InvalidInput reject, got Ok"),
+        }
+        let rows = list_relationships_for_world(pool, "wld_rel", false, i64::MAX)
+            .await
+            .unwrap();
+        assert!(rows.is_empty(), "rejected create must persist nothing");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_relation_create_rejects_character_owned_endpoint() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+        seed_character_owned_endpoint(&pool, "kb_char_owned").await;
+        assert_create_rejected_invalid_input(
+            &pool,
+            spoke_relation("rel_char_src", "kb_char_owned", "kb_dst"),
+        )
+        .await;
+        assert_create_rejected_invalid_input(
+            &pool,
+            spoke_relation("rel_char_dst", "kb_src", "kb_char_owned"),
+        )
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_relation_create_rejects_cross_world_endpoint() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+        // SAFETY: test-only static INSERTs with bind params; a World-owned
+        // endpoint living in a DIFFERENT world than the relation's claim.
+        sqlx::query(
+            "INSERT INTO narrative_worlds \
+             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json) \
+             VALUES ('wld_other', 'wrk_test', 'ctr_test', 'Other', 'other', 'active', 'private', 'manual', '{}')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO kb_key_blocks \
+             (key_block_id, world_id, block_type, canonical_name, status) \
+             VALUES ('kb_other', 'wld_other', 'character', 'kb_other', 'confirmed')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert_create_rejected_invalid_input(
+            &pool,
+            spoke_relation("rel_cross", "kb_src", "kb_other"),
+        )
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_relation_create_rejects_deleted_endpoint() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world_and_endpoints(&pool).await;
+        // SAFETY: test-only static UPDATE with bind params.
+        sqlx::query("UPDATE kb_key_blocks SET status = 'deleted' WHERE key_block_id = 'kb_dst'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_create_rejected_invalid_input(
+            &pool,
+            spoke_relation("rel_deleted", "kb_src", "kb_dst"),
+        )
+        .await;
     }
 }

@@ -192,10 +192,10 @@ async fn cross_chapter_dry_run_shows_reuse_summary_without_writing() {
     assert_eq!(aelin_reuse.source_chapters, vec![1, 2, 3]);
     assert!(
         !aelin_reuse.existing_kb_row,
-        "no confirmed WorldKbEntry yet → existing_kb_row false"
+        "no confirmed KnowledgeEntryRecord yet → existing_kb_row false"
     );
 
-    // Nothing was written: no pending candidate, no WorldKbEntry.
+    // Nothing was written: no pending candidate, no KnowledgeEntryRecord.
     let pending = list_pending_for_world(&pool, WORLD, None).await.unwrap();
     assert!(
         pending.is_empty(),
@@ -208,7 +208,7 @@ async fn cross_chapter_dry_run_shows_reuse_summary_without_writing() {
     assert!(blocks.is_empty(), "dry-run must not write KnowledgeEntries");
 }
 
-// ── AC4: existing confirmed WorldKbEntry match → body refresh, candidate reuse ─
+// ── AC4: existing confirmed KnowledgeEntryRecord match → body refresh, candidate reuse ─
 
 #[tokio::test]
 async fn cross_chapter_existing_kb_match_refreshes_body() {
@@ -224,7 +224,7 @@ async fn cross_chapter_existing_kb_match_refreshes_body() {
         .iter()
         .find(|r| r.canonical_name_guess.as_deref() == Some("Aelin"))
         .unwrap();
-    // Adopt → confirmed WorldKbEntry.
+    // Adopt → confirmed KnowledgeEntryRecord.
     nexus42::commands::creator::world::kb::kb_adopt(
         &pool,
         OWNER,
@@ -264,7 +264,7 @@ async fn cross_chapter_existing_kb_match_refreshes_body() {
         aelin_pending, 0,
         "confirmed row must not be duplicated as a new pending candidate"
     );
-    // The confirmed WorldKbEntry is intact + singular.
+    // The confirmed KnowledgeEntryRecord is intact + singular.
     let blocks = SqliteKbStore::new(pool.clone())
         .list_by_world(WORLD)
         .await
@@ -273,7 +273,7 @@ async fn cross_chapter_existing_kb_match_refreshes_body() {
         .iter()
         .filter(|kb| kb.canonical_name == "Aelin")
         .count();
-    assert_eq!(aelin_kb, 1, "exactly one confirmed WorldKbEntry for Aelin");
+    assert_eq!(aelin_kb, 1, "exactly one confirmed KnowledgeEntryRecord for Aelin");
 }
 
 // ── Reconciliation: stale candidate removed when name vanishes from all ────

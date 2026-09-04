@@ -2,7 +2,7 @@
 //! dialect (V1.164 P2 T1, l5-mind).
 //!
 //! Covers plan Task 1 + AC-V1164-6 / AC-V1164-7:
-//! - A `WorldKbEntry` carrying `modules.mental` (nine-field subset) and
+//! - A `KnowledgeEntryRecord` carrying `modules.mental` (nine-field subset) and
 //!   `modules.belief` (handbook proposition rows) survives the spoke
 //!   conversion seam verbatim — all fields + unknown keys preserved (the
 //!   same unknown-key fidelity discipline as `extensions.nexus`).
@@ -16,17 +16,17 @@
 
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::{
-    BeliefPropositionRaw, MentalFieldsRaw, WorldKbEntry,
+    BeliefPropositionRaw, MentalFieldsRaw, KnowledgeEntryRecord,
 };
-use nexus_spoke_adapter::conversion::{spoke_to_world_kb, world_kb_to_spoke};
+use nexus_spoke_adapter::conversion::{spoke_to_knowledge_record, knowledge_record_to_spoke};
 use serde_json::{json, Value};
 
 /// Character entry carrying the handbook worked-example false-belief
 /// structure (Bo's stale "marble in the box" belief) plus an unknown key
 /// inside the `modules.mental` bag and one inside a belief row — both must
 /// survive the seam verbatim.
-fn bo_entry() -> WorldKbEntry {
-    let mut entry = WorldKbEntry::new("wld_test", BlockType::Character, "Bo");
+fn bo_entry() -> KnowledgeEntryRecord {
+    let mut entry = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Bo");
     entry.entry_id = "kb_bo".to_string();
     entry.modules = Some(json!({
         "mental": {
@@ -59,8 +59,8 @@ fn bo_entry() -> WorldKbEntry {
 
 /// Designated world-state `info_point` entry (AR-1 / PD-10) carrying the
 /// narrated world fact row (`holder: "world"`).
-fn world_state_entry() -> WorldKbEntry {
-    let mut entry = WorldKbEntry::new("wld_test", BlockType::InfoPoint, "World State");
+fn world_state_entry() -> KnowledgeEntryRecord {
+    let mut entry = KnowledgeEntryRecord::new("wld_test", BlockType::InfoPoint, "World State");
     entry.entry_id = "kb_world_state".to_string();
     entry.modules = Some(json!({
         "belief": [
@@ -80,9 +80,9 @@ fn world_state_entry() -> WorldKbEntry {
     entry
 }
 
-/// Round-trip a `WorldKbEntry` through the spoke conversion seam.
-fn roundtrip(entry: &WorldKbEntry) -> WorldKbEntry {
-    spoke_to_world_kb(world_kb_to_spoke(entry))
+/// Round-trip a `KnowledgeEntryRecord` through the spoke conversion seam.
+fn roundtrip(entry: &KnowledgeEntryRecord) -> KnowledgeEntryRecord {
+    spoke_to_knowledge_record(knowledge_record_to_spoke(entry)).unwrap()
 }
 
 #[test]

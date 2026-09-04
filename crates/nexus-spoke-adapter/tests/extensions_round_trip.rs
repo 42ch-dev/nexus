@@ -8,6 +8,7 @@
 //! - Empty `extensions.nexus` is valid.
 
 use std::collections::HashMap;
+use nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef;
 use std::num::NonZeroU64;
 
 use nexus_spoke_adapter::extensions::{
@@ -212,7 +213,8 @@ fn build_extensions_nexus_writes_typed_fields_and_preserves_unknown_keys() {
     }));
 
     let value = build_extensions_nexus(
-        "wld_abc",
+        &KnowledgeOwnerRef::world("wld_abc"),
+        false,
         Some("cmd_xyz"),
         Some("wrk_def"),
         Some(3),
@@ -250,7 +252,7 @@ fn build_extensions_nexus_omits_optional_fields_when_none_and_removes_stale() {
         }
     }));
 
-    let value = build_extensions_nexus("wld_abc", None, None, None, None, &existing);
+    let value = build_extensions_nexus(&KnowledgeOwnerRef::world("wld_abc"), false, None, None, None, None, &existing);
 
     let ns = value.as_object().expect("nexus namespace is an object");
     assert_eq!(
@@ -280,7 +282,8 @@ fn build_extensions_nexus_handles_missing_namespace() {
     let existing = ExtensionMap::new();
 
     let value = build_extensions_nexus(
-        "wld_abc",
+        &KnowledgeOwnerRef::world("wld_abc"),
+        false,
         Some("cmd_xyz"),
         None,
         None,

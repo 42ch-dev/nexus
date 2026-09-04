@@ -1,8 +1,13 @@
-//! `WorldKbEntry` aggregate — structured knowledge unit in a world timeline.
+//! `KnowledgeEntryRecord` aggregate — structured knowledge unit in a
+//! World / Character / binding timeline.
 //!
-//! `WorldKbEntry` is the primary knowledge container in Nexus. Each KB has a lifecycle
-//! from provisional → confirmed (with possible deprecation/merge/deletion).
-//! See data-model-v1.md §5.5, consistency-rules-v1.md §3.2.
+//! `KnowledgeEntryRecord` is the canonical owner-aware knowledge container in
+//! Nexus (v1.184 P1): the pre-v1.184 `KnowledgeEntryRecord` generalized in place into a
+//! single aggregate carrying a closed [`KnowledgeOwnerRef`] (`World`,
+//! `Character`, `ActorWorldBinding`) and a World-only `creator_only` flag. Each
+//! KB has a lifecycle from provisional → confirmed (with possible
+//! deprecation/merge/deletion). See data-model-v1.md §5.5,
+//! consistency-rules-v1.md §3.2.
 
 use crate::world_kb::errors::KbError;
 use crate::world_kb::source_anchor::SourceAnchor;
@@ -10,12 +15,13 @@ use nexus_contracts::BlockType;
 use nexus_contracts::KeyBlockStatus;
 use serde::{Deserialize, Serialize};
 
-/// `WorldKbEntry` body content.
+/// `KnowledgeEntryRecord` body content.
 ///
 /// # V1.61 Structured Compute Layer
 ///
 /// The [`state`] and [`computable`] fields are additive (optional) for the WASM
-/// compute pipeline (compass Q4). Existing `WorldKbEntry`s without them remain valid.
+/// compute pipeline (compass Q4). Existing `KnowledgeEntryRecord`s without
+/// them remain valid.
 ///
 /// ## Computable `BlockType` set
 ///
@@ -31,7 +37,7 @@ use serde::{Deserialize, Serialize};
 /// dynamic `state` (mutable runtime data, nested by `block_type` per
 /// compass Q5: `state.character.current_hp`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct WorldKbBody {
+pub struct KnowledgeEntryBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -45,7 +51,7 @@ pub struct WorldKbBody {
     /// Only meaningful when [`computable`](Self::computable) is `Some(true)`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<serde_json::Value>,
-    /// Marks this `WorldKbEntry` as participating in WASM compute (V1.61, compass Q4).
+    /// Marks this `KnowledgeEntryRecord` as participating in WASM compute (V1.61, compass Q4).
     /// When `Some(true)`, `state` holds mutable runtime state and `attributes`
     /// hold immutable compute params. Stored inside `body_json` (no DB column)
     /// for additive, migration-free rollout.
@@ -85,19 +91,109 @@ pub struct MembershipPermissionCheck {
     pub can_sync_kb: bool,
 }
 
-/// `WorldKbEntry` aggregate — a structured knowledge unit in a world timeline.
+/// Closed canonical owner reference for a [`KnowledgeEntryRecord`]
+/// (v1.184 P1).
+///
+/// Exactly one variant is set per record, mirroring the `kb_key_blocks`
+/// owner union: `owner_kind` plus the matching owner-id column
+/// (`world_id` / `character_id` / `actor_world_binding_id`). The [`kind`]()
+/// strings match the DB CHECK vocabulary verbatim.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct WorldKbEntry {
+#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
+pub enum KnowledgeOwnerRef {
+    /// World-owned narrative KB entry (the pre-v1.184 sole shape).
+    World(String),
+    /// Character-owned entry shared across the Character's active bindings.
+    Character(String),
+    /// Binding-local entry isolated to exactly one `ActorWorldBinding`.
+    ActorWorldBinding(String),
+}
+
+impl KnowledgeOwnerRef {
+    /// Canonical World owner.
+    #[must_use]
+    pub fn world(world_id: impl Into<String>) -> Self {
+        Self::World(world_id.into())
+    }
+
+    /// Canonical Character owner.
+    #[must_use]
+    pub fn character(character_id: impl Into<String>) -> Self {
+        Self::Character(character_id.into())
+    }
+
+    /// Canonical binding owner.
+    #[must_use]
+    pub fn actor_world_binding(binding_id: impl Into<String>) -> Self {
+        Self::ActorWorldBinding(binding_id.into())
+    }
+
+    /// The `owner_kind` column vocabulary for this owner (`"world"` /
+    /// `"character"` / `"actor_world_binding"`).
+    #[must_use]
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::World(_) => "world",
+            Self::Character(_) => "character",
+            Self::ActorWorldBinding(_) => "actor_world_binding",
+        }
+    }
+
+    /// The owner's id (regardless of kind).
+    #[must_use]
+    pub fn id(&self) -> &str {
+        match self {
+            Self::World(id) | Self::Character(id) | Self::ActorWorldBinding(id) => id,
+        }
+    }
+
+    /// `Some(world_id)` when World-owned, else `None`.
+    #[must_use]
+    pub fn world_id(&self) -> Option<&str> {
+        match self {
+            Self::World(id) => Some(id),
+            Self::Character(_) | Self::ActorWorldBinding(_) => None,
+        }
+    }
+
+    /// `Some(character_id)` when Character-owned, else `None`.
+    #[must_use]
+    pub fn character_id(&self) -> Option<&str> {
+        match self {
+            Self::Character(id) => Some(id),
+            Self::World(_) | Self::ActorWorldBinding(_) => None,
+        }
+    }
+
+    /// `Some(binding_id)` when binding-owned, else `None`.
+    #[must_use]
+    pub fn actor_world_binding_id(&self) -> Option<&str> {
+        match self {
+            Self::ActorWorldBinding(id) => Some(id),
+            Self::World(_) | Self::Character(_) => None,
+        }
+    }
+}
+
+/// `KnowledgeEntryRecord` aggregate — a structured knowledge unit owned by a
+/// World, Character, or `ActorWorldBinding`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct KnowledgeEntryRecord {
     pub schema_version: u32,
     pub entry_id: String,
-    pub world_id: String,
+    /// Canonical owner (immutable after insert — stores reject any change).
+    pub owner: KnowledgeOwnerRef,
+    /// World-owner-only creator visibility flag (`creator_only` column).
+    /// May only be `true` for a [`KnowledgeOwnerRef::World`] owner (DB CHECK).
+    #[serde(default)]
+    pub creator_only: bool,
     pub block_type: BlockType,
     pub canonical_name: String,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub revision: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub body: Option<WorldKbBody>,
+    pub body: Option<KnowledgeEntryBody>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_anchor: Option<SourceAnchor>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -105,7 +201,7 @@ pub struct WorldKbEntry {
     pub created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
-    // V1.52 T-A P2: Work→WorldKbEntry provenance (entity-scope-model.md §5.5.7)
+    // V1.52 T-A P2: Work→KnowledgeEntryRecord provenance (entity-scope-model.md §5.5.7)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_work_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -113,7 +209,8 @@ pub struct WorldKbEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_provenance_kind: Option<String>,
     /// Unknown keys carried under `extensions.nexus` on the spoke boundary —
-    /// everything outside the 5 typed identity fields (`world_id`,
+    /// everything outside the 8 typed identity/owner fields (`world_id`,
+    /// `character_id`, `actor_world_binding_id`, `creator_only`,
     /// `created_from_command_id`, `source_work_id`, `source_chapter`,
     /// `source_provenance_kind`). Preserved verbatim across the `SQLite`
     /// read-modify-write cycle and the spoke conversion seam (spec §2.2
@@ -130,16 +227,57 @@ pub struct WorldKbEntry {
     pub modules: Option<serde_json::Value>,
 }
 
-impl WorldKbEntry {
-    /// Create a new provisional `WorldKbEntry`.
+impl KnowledgeEntryRecord {
+    /// Create a new provisional World-owned `KnowledgeEntryRecord`.
+    ///
+    /// **World convenience constructor** (v1.184 P1): the pre-v1.184
+    /// `KnowledgeEntryRecord::new` shape, preserved so the (still-World-scoped)
+    /// callers build the same aggregate. For Character/binding ownership use
+    /// [`Self::for_character`] / [`Self::for_binding`].
+    ///
     /// Precondition: caller must have `WorldMembership` with `can_sync_kb=true`.
     #[must_use]
     pub fn new(world_id: &str, block_type: BlockType, canonical_name: &str) -> Self {
+        Self::with_owner(KnowledgeOwnerRef::world(world_id), block_type, canonical_name)
+    }
+
+    /// Create a new provisional Character-owned `KnowledgeEntryRecord`.
+    #[must_use]
+    pub fn for_character(
+        character_id: &str,
+        block_type: BlockType,
+        canonical_name: &str,
+    ) -> Self {
+        Self::with_owner(
+            KnowledgeOwnerRef::character(character_id),
+            block_type,
+            canonical_name,
+        )
+    }
+
+    /// Create a new provisional binding-owned `KnowledgeEntryRecord`.
+    #[must_use]
+    pub fn for_binding(
+        binding_id: &str,
+        block_type: BlockType,
+        canonical_name: &str,
+    ) -> Self {
+        Self::with_owner(
+            KnowledgeOwnerRef::actor_world_binding(binding_id),
+            block_type,
+            canonical_name,
+        )
+    }
+
+    /// Shared constructor core for every owner kind.
+    #[must_use]
+    fn with_owner(owner: KnowledgeOwnerRef, block_type: BlockType, canonical_name: &str) -> Self {
         let entry_id = format!("kb_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
         Self {
             schema_version: 1,
             entry_id,
-            world_id: world_id.to_string(),
+            owner,
+            creator_only: false,
             block_type,
             canonical_name: canonical_name.to_string(),
             status: KeyBlockStatus::Provisional.as_str().to_string(),
@@ -157,15 +295,25 @@ impl WorldKbEntry {
         }
     }
 
+    /// `Some(world_id)` when this record is World-owned, else `None`.
+    ///
+    /// Replaces the pre-v1.184 `KnowledgeEntryRecord::world_id` field. Callers that
+    /// operate on World-owned records only (e.g. world-scoped store reads)
+    /// may rely on `Some`; a `None` signals a non-World owner.
+    #[must_use]
+    pub fn world_id(&self) -> Option<&str> {
+        self.owner.world_id()
+    }
+
     // NOTE (V1.145 P1a): the lifecycle methods that delegate status transitions
     // to spoke-operations (`confirm` / `deprecate` / `merge_into` / `delete`)
-    // moved to `nexus_spoke_adapter::conversion::WorldKbEntrySpokeExt`. They
+    // moved to `nexus_spoke_adapter::conversion::KnowledgeEntryRecordSpokeExt`. They
     // could not stay here because they call spoke-operations through the
     // adapter, and keeping them would preserve the `nexus-knowledge →
     // nexus-spoke-adapter` dependency edge (spec §8 dep-graph reversal). The
-    // `WorldKbEntry ↔ spoke KnowledgeEntry` conversion seam likewise moved to
-    // `nexus_spoke_adapter::conversion` (free functions `world_kb_to_spoke` /
-    // `spoke_to_world_kb` — orphan rule forbids the `From` impls here). This
+    // `KnowledgeEntryRecord ↔ spoke KnowledgeEntry` conversion seam likewise moved to
+    // `nexus_spoke_adapter::conversion` (free functions `knowledge_record_to_spoke` /
+    // `spoke_to_knowledge_record` — orphan rule forbids the `From` impls here). This
     // crate now owns only the pure domain aggregate + its non-spoke methods.
 
     /// Check if this KB is in confirmed state.
@@ -199,7 +347,7 @@ impl WorldKbEntry {
     ///
     /// # Errors
     /// Returns `Err(KbError::...)` if validation fails.
-    pub fn set_body(&mut self, body: WorldKbBody) -> Result<(), KbError> {
+    pub fn set_body(&mut self, body: KnowledgeEntryBody) -> Result<(), KbError> {
         if !self.can_modify_body() {
             return Err(KbError::ImmutableConfirmedState);
         }
@@ -371,18 +519,66 @@ mod tests {
 
     #[test]
     fn test_create_provisional_keyblock() {
-        let kb = WorldKbEntry::new("wld_test123", BlockType::Character, "Test Character");
+        let kb = KnowledgeEntryRecord::new("wld_test123", BlockType::Character, "Test Character");
         assert_eq!(kb.status, "provisional");
         assert_eq!(kb.revision, None);
         assert_eq!(kb.schema_version, 1);
-        assert_eq!(kb.world_id, "wld_test123");
+        assert_eq!(kb.owner, KnowledgeOwnerRef::world("wld_test123"));
+        assert_eq!(kb.world_id(), Some("wld_test123"));
+        assert!(!kb.creator_only);
         assert!(kb.entry_id.starts_with("kb_"));
+    }
+    // ── v1.184 P1 T2: closed owner ref + constructors ─────────────────
+
+    #[test]
+    fn test_world_convenience_constructor_sets_world_owner() {
+        let kb = KnowledgeEntryRecord::new("wld_x", BlockType::Character, "Aria");
+        assert_eq!(kb.owner, KnowledgeOwnerRef::world("wld_x"));
+        assert_eq!(kb.owner.kind(), "world");
+        assert_eq!(kb.owner.id(), "wld_x");
+        assert_eq!(kb.owner.world_id(), Some("wld_x"));
+        assert_eq!(kb.owner.character_id(), None);
+        assert_eq!(kb.owner.actor_world_binding_id(), None);
+        assert!(!kb.creator_only);
+    }
+
+    #[test]
+    fn test_character_constructor_sets_character_owner() {
+        let kb = KnowledgeEntryRecord::for_character("chr_x", BlockType::Character, "Shared");
+        assert_eq!(kb.owner, KnowledgeOwnerRef::character("chr_x"));
+        assert_eq!(kb.owner.kind(), "character");
+        assert_eq!(kb.owner.id(), "chr_x");
+        assert_eq!(kb.owner.world_id(), None);
+        assert_eq!(kb.owner.character_id(), Some("chr_x"));
+        assert!(!kb.creator_only);
+    }
+
+    #[test]
+    fn test_binding_constructor_sets_binding_owner() {
+        let kb = KnowledgeEntryRecord::for_binding("awb_x", BlockType::Character, "Private");
+        assert_eq!(kb.owner, KnowledgeOwnerRef::actor_world_binding("awb_x"));
+        assert_eq!(kb.owner.kind(), "actor_world_binding");
+        assert_eq!(kb.owner.id(), "awb_x");
+        assert_eq!(kb.owner.world_id(), None);
+        assert_eq!(kb.owner.actor_world_binding_id(), Some("awb_x"));
+        assert!(!kb.creator_only);
+    }
+
+    #[test]
+    fn test_owner_kind_matches_db_vocabulary() {
+        // The `kind()` strings are the `owner_kind` CHECK vocabulary verbatim.
+        assert_eq!(KnowledgeOwnerRef::world("w").kind(), "world");
+        assert_eq!(KnowledgeOwnerRef::character("c").kind(), "character");
+        assert_eq!(
+            KnowledgeOwnerRef::actor_world_binding("b").kind(),
+            "actor_world_binding"
+        );
     }
 
     #[test]
     fn test_modify_provisional_body_allowed() {
-        let mut kb = WorldKbEntry::new("wld_test", BlockType::Scene, "Forest");
-        kb.set_body(WorldKbBody {
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Scene, "Forest");
+        kb.set_body(KnowledgeEntryBody {
             summary: Some("A dark forest".to_string()),
             attributes: None,
             tags: Some(vec!["location".to_string()]),
@@ -410,16 +606,16 @@ mod tests {
         ];
 
         for bt in &types {
-            let kb = WorldKbEntry::new("wld_test", *bt, "Test");
+            let kb = KnowledgeEntryRecord::new("wld_test", *bt, "Test");
             let json = serde_json::to_string(&kb).unwrap();
-            let deserialized: WorldKbEntry = serde_json::from_str(&json).unwrap();
+            let deserialized: KnowledgeEntryRecord = serde_json::from_str(&json).unwrap();
             assert_eq!(deserialized.block_type, *bt);
         }
     }
 
     #[test]
     fn test_source_anchor_traceability() {
-        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero");
         let anchor = SourceAnchor::new("stm_visible1", "sum_1", Some("chapter_summary"));
         kb.set_source_anchor(anchor).unwrap();
         assert!(kb
@@ -429,7 +625,7 @@ mod tests {
 
     #[test]
     fn test_source_anchor_invalid_ref() {
-        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero");
         let anchor = SourceAnchor::new("stm_hidden", "sum_1", None);
         kb.set_source_anchor(anchor).unwrap();
         assert!(kb
@@ -441,7 +637,7 @@ mod tests {
 
     #[test]
     fn test_state_roundtrip_serialize_deserialize_preserves_state() {
-        let body = WorldKbBody {
+        let body = KnowledgeEntryBody {
             summary: Some("Hero character".to_string()),
             attributes: Some(serde_json::json!({"max_hp": 100, "base_atk": 30})),
             tags: Some(vec!["combat".to_string()]),
@@ -457,7 +653,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&body).unwrap();
-        let deserialized: WorldKbBody = serde_json::from_str(&json).unwrap();
+        let deserialized: KnowledgeEntryBody = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized.computable, Some(true));
         assert_eq!(
@@ -472,8 +668,8 @@ mod tests {
 
     #[test]
     fn test_state_roundtrip_without_state_and_computable() {
-        // Legacy WorldKbEntry without state/computable should roundtrip correctly
-        let body = WorldKbBody {
+        // Legacy KnowledgeEntryRecord without state/computable should roundtrip correctly
+        let body = KnowledgeEntryBody {
             summary: Some("Old block".to_string()),
             attributes: None,
             tags: None,
@@ -481,7 +677,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&body).unwrap();
-        let deserialized: WorldKbBody = serde_json::from_str(&json).unwrap();
+        let deserialized: KnowledgeEntryBody = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized.summary.as_deref(), Some("Old block"));
         assert_eq!(deserialized.state, None);
@@ -490,7 +686,7 @@ mod tests {
 
     #[test]
     fn test_state_roundtrip_empty_state_object() {
-        let body = WorldKbBody {
+        let body = KnowledgeEntryBody {
             summary: Some("minimal".to_string()),
             attributes: Some(serde_json::json!({"max_hp": 50})),
             tags: None,
@@ -499,7 +695,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&body).unwrap();
-        let deserialized: WorldKbBody = serde_json::from_str(&json).unwrap();
+        let deserialized: KnowledgeEntryBody = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized.computable, Some(true));
         assert!(deserialized
@@ -515,8 +711,8 @@ mod tests {
 
     /// Fixture entry carrying the handbook `modules.mental` subset +
     /// `modules.belief` rows (worked-example box/basket story).
-    fn mental_dialect_entry(entry_id: &str, block_type: BlockType) -> WorldKbEntry {
-        let mut kb = WorldKbEntry::new("wld_test", block_type, "Dialect Holder");
+    fn mental_dialect_entry(entry_id: &str, block_type: BlockType) -> KnowledgeEntryRecord {
+        let mut kb = KnowledgeEntryRecord::new("wld_test", block_type, "Dialect Holder");
         kb.entry_id = entry_id.to_string();
         kb.modules = Some(serde_json::json!({
             "mental": {
@@ -605,15 +801,15 @@ mod tests {
 
     #[test]
     fn test_mental_absent_or_non_object_parses_as_none() {
-        let bare = WorldKbEntry::new("wld_test", BlockType::Character, "Bare");
+        let bare = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Bare");
         assert!(bare.parse_mental_fields().is_none());
         assert!(bare.parse_belief_rows().is_empty());
 
-        let mut scalar = WorldKbEntry::new("wld_test", BlockType::Character, "Scalar");
+        let mut scalar = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Scalar");
         scalar.modules = Some(serde_json::json!({ "mental": "not-an-object" }));
         assert!(scalar.parse_mental_fields().is_none());
 
-        let mut not_array = WorldKbEntry::new("wld_test", BlockType::Character, "NotArray");
+        let mut not_array = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "NotArray");
         not_array.modules = Some(serde_json::json!({ "belief": { "holder": "world" } }));
         assert!(not_array.parse_belief_rows().is_empty());
     }

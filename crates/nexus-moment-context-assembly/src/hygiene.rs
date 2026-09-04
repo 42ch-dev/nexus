@@ -4,7 +4,7 @@
 //! A lore author attaches find/replace transforms to an entry via the
 //! `body.attributes.hygiene` carrier — a JSON array of
 //! `{"pattern": string, "replacement": string, "description"?: string}`
-//! objects on the nexus [`WorldKbBody`]. The transforms are applied to the
+//! objects on the nexus [`KnowledgeEntryBody`]. The transforms are applied to the
 //! emitted `body.summary` text at slot emission (between the generation-
 //! stage gate and slot routing in `moment.rs`), on the owned assembly-local
 //! entry copies — the stored World-KB body is never mutated.
@@ -55,9 +55,9 @@
 //! verbatim — never a silent zero-output deletion that starves every later
 //! match.
 //!
-//! [`WorldKbBody`]: nexus_knowledge::world_kb::knowledge_entry::WorldKbBody
+//! [`KnowledgeEntryBody`]: nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody
 
-use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
+use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use regex::Regex;
 
 /// Maximum hygiene pattern length (architect lock, Q6-mirror) — chars.
@@ -119,7 +119,7 @@ pub struct HygieneTraceEntry {
 /// stored World-KB rows are never touched. Entries without a `hygiene`
 /// carrier pass through unchanged and produce no trace rows.
 #[must_use]
-pub fn apply_hygiene(entries: Vec<WorldKbEntry>) -> (Vec<WorldKbEntry>, Vec<HygieneTraceEntry>) {
+pub fn apply_hygiene(entries: Vec<KnowledgeEntryRecord>) -> (Vec<KnowledgeEntryRecord>, Vec<HygieneTraceEntry>) {
     let mut trace = Vec::new();
     let mut out = Vec::with_capacity(entries.len());
     for mut entry in entries {
@@ -676,29 +676,29 @@ fn append_capped(out: &mut String, out_chars: &mut usize, seg: &str) -> bool {
 mod tests {
     use super::*;
     use nexus_contracts::BlockType;
-    use nexus_knowledge::world_kb::knowledge_entry::WorldKbBody;
+    use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody;
 
     fn entry_with_hygiene(
         entry_id: &str,
         summary: &str,
         carrier: &serde_json::Value,
-    ) -> WorldKbEntry {
-        let mut entry = WorldKbEntry::new("wld_1", BlockType::Character, "Hero");
+    ) -> KnowledgeEntryRecord {
+        let mut entry = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
         entry.entry_id = entry_id.to_string();
-        entry.body = Some(WorldKbBody {
+        entry.body = Some(KnowledgeEntryBody {
             summary: Some(summary.to_string()),
             attributes: Some(serde_json::json!({ "hygiene": carrier })),
-            ..WorldKbBody::default()
+            ..KnowledgeEntryBody::default()
         });
         entry
     }
 
-    fn entry_without_carrier(entry_id: &str, summary: &str) -> WorldKbEntry {
-        let mut entry = WorldKbEntry::new("wld_1", BlockType::Character, "Hero");
+    fn entry_without_carrier(entry_id: &str, summary: &str) -> KnowledgeEntryRecord {
+        let mut entry = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
         entry.entry_id = entry_id.to_string();
-        entry.body = Some(WorldKbBody {
+        entry.body = Some(KnowledgeEntryBody {
             summary: Some(summary.to_string()),
-            ..WorldKbBody::default()
+            ..KnowledgeEntryBody::default()
         });
         entry
     }
@@ -1553,15 +1553,15 @@ mod tests {
 
     #[test]
     fn carrier_without_summary_counts_all_skipped() {
-        let mut entry = WorldKbEntry::new("wld_1", BlockType::Character, "Hero");
+        let mut entry = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero");
         entry.entry_id = "kb_1".to_string();
-        entry.body = Some(WorldKbBody {
+        entry.body = Some(KnowledgeEntryBody {
             summary: None,
             attributes: Some(serde_json::json!({ "hygiene": [
                 { "pattern": "dragon", "replacement": "wyrm" },
                 { "pattern": "hero", "replacement": "champion" },
             ] })),
-            ..WorldKbBody::default()
+            ..KnowledgeEntryBody::default()
         });
         let (out, trace) = apply_hygiene(vec![entry]);
         assert!(out[0].body.as_ref().unwrap().summary.is_none());

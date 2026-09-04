@@ -10,9 +10,9 @@ pub enum ValidationKind {
     MissingNovelCategory,
     /// `body.attributes.novel_category` is not one of the seven valid values.
     InvalidNovelCategory,
-    /// `body.attributes` is missing for a novel-profile `WorldKbEntry`.
+    /// `body.attributes` is missing for a novel-profile `KnowledgeEntryRecord`.
     MissingAttributes,
-    /// `body` is `None` for a novel-profile `WorldKbEntry`.
+    /// `body` is `None` for a novel-profile `KnowledgeEntryRecord`.
     MissingBody,
     /// `body.attributes` exists but is not a JSON object.
     NonObjectAttributes,
@@ -32,11 +32,11 @@ pub enum ValidationKind {
     InvalidScriptCategory,
     /// `body.attributes.script_category` exists but is not a string (V1.55 P3).
     NonStringScriptCategory,
-    /// `body.attributes` is missing for a computable `WorldKbEntry` (V1.61 P1).
+    /// `body.attributes` is missing for a computable `KnowledgeEntryRecord` (V1.61 P1).
     MissingStructuredAttributes,
-    /// `body.state` is missing for a computable `WorldKbEntry` (V1.61 P1).
+    /// `body.state` is missing for a computable `KnowledgeEntryRecord` (V1.61 P1).
     MissingStructuredState,
-    /// `body.state` is not a JSON object for a computable `WorldKbEntry` (V1.61 P1).
+    /// `body.state` is not a JSON object for a computable `KnowledgeEntryRecord` (V1.61 P1).
     NonObjectStructuredState,
     /// `body.state` does not contain the expected per-`block_type` nested key (V1.61 P1).
     InvalidStructuredStateKey,
@@ -89,7 +89,7 @@ impl fmt::Display for ValidationError {
 
 impl std::error::Error for ValidationError {}
 
-/// Error type for `WorldKbEntry` and `SourceAnchor` operations.
+/// Error type for `KnowledgeEntryRecord` and `SourceAnchor` operations.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum KbError {
     /// Permission denied.
@@ -133,6 +133,11 @@ pub enum KbError {
         /// Maximum allowed length.
         max: usize,
     },
+
+    /// Canonical owner metadata is absent at the conversion seam (v1.184 P1).
+    /// The seam fails closed rather than fabricating a World owner.
+    #[error("knowledge entry has no canonical owner metadata")]
+    MissingOwner,
 }
 
 #[cfg(test)]

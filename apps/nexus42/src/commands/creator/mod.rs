@@ -870,12 +870,12 @@ async fn run_demo_seed(config: &CliConfig, force: bool) -> Result<()> {
     println!("✓ Demo event: {}", event.event_id);
 
     // 3. Create demo KB block
-    let mut kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+    let mut kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
         &world.world_id,
         nexus_contracts::BlockType::Character,
         "Hero",
     );
-    kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::WorldKbBody {
+    kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
         summary: Some("The protagonist of the demo world.".to_string()),
         attributes: None,
         tags: Some(vec!["protagonist".to_string(), "demo".to_string()]),

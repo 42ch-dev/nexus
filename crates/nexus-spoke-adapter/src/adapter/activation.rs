@@ -107,7 +107,7 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
-use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
+use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use serde::{Deserialize, Serialize};
 
 /// Maximum regex key length (architect lock Q6) — chars.
@@ -141,9 +141,9 @@ pub struct ActivationBudget {
 pub struct ActivationResult {
     /// Entries that passed activation (or are `constant` seeds, or have no
     /// activation module — neutral entries are included as matched).
-    pub matched: Vec<WorldKbEntry>,
+    pub matched: Vec<KnowledgeEntryRecord>,
     /// Entries that did not pass activation and are not constant seeds.
-    pub unmatched: Vec<WorldKbEntry>,
+    pub unmatched: Vec<KnowledgeEntryRecord>,
     /// Per-entry fire/miss trace for diagnostics.
     pub trace: Vec<ActivationTraceEntry>,
     /// Token-budget accounting (spec §2 H3): `Some` whenever activation ran
@@ -217,7 +217,7 @@ impl Default for HopConfig {
 #[derive(Debug, Clone)]
 pub struct HopExpandResult {
     /// Entries pulled by the hop BFS, in discovery order (BFS level order).
-    pub pulled: Vec<WorldKbEntry>,
+    pub pulled: Vec<KnowledgeEntryRecord>,
     /// One accepted trace row per pulled entry, carrying the hop fields
     /// (`hop_origin_entry_id`, `hop_depth`, `source_relation_type`,
     /// `source_relation_id`).
@@ -510,7 +510,7 @@ fn miss_reason(arm: &str, mode: &str, scanned: usize, notes: &[String]) -> Strin
 ///   (tests/config; merged with per-entry `constant`/`constant_seeds`).
 #[must_use]
 pub fn apply_activation(
-    entries: &[WorldKbEntry],
+    entries: &[KnowledgeEntryRecord],
     scan_text: &str,
     constant_seed_ids: &[String],
 ) -> ActivationResult {
@@ -574,7 +574,7 @@ pub fn apply_activation(
 /// * `hop` — Hop knobs ([`HopConfig`]).
 #[must_use]
 pub fn apply_activation_with_hops(
-    entries: &[WorldKbEntry],
+    entries: &[KnowledgeEntryRecord],
     scan_text: &str,
     constant_seed_ids: &[String],
     edges: &[HopEdge],
@@ -600,7 +600,7 @@ pub fn apply_activation_with_hops(
             max_hops: hop.max_hops,
             max_hop_tokens: budget,
         };
-        let pool: HashMap<String, WorldKbEntry> = entries
+        let pool: HashMap<String, KnowledgeEntryRecord> = entries
             .iter()
             .map(|entry| (entry.entry_id.clone(), entry.clone()))
             .collect();
@@ -691,14 +691,14 @@ pub fn apply_activation_with_hops(
 /// An edge endpoint that is not a candidate entry (outside `entry_pool`, e.g.
 /// a key block not in the fetched set) is skipped silently — hop expansion
 /// only reaches entries present in the candidate pool.
-// plan-locked signature (plan T1): engine-internal `HashMap<String, WorldKbEntry>`
+// plan-locked signature (plan T1): engine-internal `HashMap<String, KnowledgeEntryRecord>`
 // with the default hasher — generalizing over hashers would be dead flexibility.
 #[allow(clippy::implicit_hasher)]
 #[must_use]
 pub fn expand_relation_hops(
     seeds: &[String],
     pre_visited: &[String],
-    entry_pool: &HashMap<String, WorldKbEntry>,
+    entry_pool: &HashMap<String, KnowledgeEntryRecord>,
     edges: &[HopEdge],
     config: &HopConfig,
 ) -> HopExpandResult {
@@ -714,7 +714,7 @@ pub fn expand_relation_hops(
     }
 
     let mut visited: HashSet<String> = seeds.iter().chain(pre_visited).cloned().collect();
-    let mut pulled: Vec<WorldKbEntry> = Vec::new();
+    let mut pulled: Vec<KnowledgeEntryRecord> = Vec::new();
     let mut hop_trace: Vec<ActivationTraceEntry> = Vec::new();
     let mut remaining = config.max_hop_tokens.unwrap_or(usize::MAX);
     // V1.151 P0 (spec §2 H3): hop spend = sum of estimates over pulled
@@ -775,7 +775,7 @@ pub fn expand_relation_hops(
 
 /// Token estimate for one entry: `chars/4` of summary-or-name (plan T1; the
 /// same estimator reserves the primary-matched KB cost and gates each hop).
-fn estimate_tokens(entry: &WorldKbEntry) -> usize {
+fn estimate_tokens(entry: &KnowledgeEntryRecord) -> usize {
     let text = entry
         .body
         .as_ref()
@@ -792,19 +792,19 @@ fn estimate_tokens(entry: &WorldKbEntry) -> usize {
 /// primary-fired or are `constant` seeds (neutral entries never seed a hop,
 /// which keeps neutral-only Worlds byte-equivalent under hops).
 struct PrimaryPassOutput {
-    matched: Vec<(WorldKbEntry, ActivationSortKey)>,
-    unmatched: Vec<WorldKbEntry>,
+    matched: Vec<(KnowledgeEntryRecord, ActivationSortKey)>,
+    unmatched: Vec<KnowledgeEntryRecord>,
     trace: Vec<ActivationTraceEntry>,
     seed_ids: Vec<String>,
 }
 
 fn run_primary_pass(
-    entries: &[WorldKbEntry],
+    entries: &[KnowledgeEntryRecord],
     scan_text: &str,
     constant_seed_ids: &[String],
 ) -> PrimaryPassOutput {
     let base_lower = scan_text.to_lowercase();
-    let mut matched: Vec<(WorldKbEntry, ActivationSortKey)> = Vec::new();
+    let mut matched: Vec<(KnowledgeEntryRecord, ActivationSortKey)> = Vec::new();
     let mut unmatched = Vec::new();
     let mut trace = Vec::new();
     let mut seed_ids = Vec::new();
@@ -880,7 +880,7 @@ fn run_primary_pass(
 
 /// Parse the `modules.activation` config of an entry (`None` when absent or
 /// malformed — malformed configs classify as neutral).
-fn parse_activation(entry: &WorldKbEntry) -> Option<ActivationConfig> {
+fn parse_activation(entry: &KnowledgeEntryRecord) -> Option<ActivationConfig> {
     entry
         .modules
         .as_ref()
@@ -900,7 +900,7 @@ fn compare_sort_keys(a: &ActivationSortKey, b: &ActivationSortKey) -> Ordering {
 /// Sort the matched pairs in place (spec §4). `sort_by` is stable, so equal
 /// sort keys keep their original entry order — an all-neutral set sorts to
 /// its original order and stays byte-identical to V1.146 flag-off.
-fn sort_matched(matched: &mut [(WorldKbEntry, ActivationSortKey)]) {
+fn sort_matched(matched: &mut [(KnowledgeEntryRecord, ActivationSortKey)]) {
     matched.sort_by(|(_, a), (_, b)| compare_sort_keys(a, b));
 }
 
@@ -1083,20 +1083,20 @@ fn evaluate_entry(
 mod tests {
     use super::*;
     use nexus_contracts::BlockType;
-    use nexus_knowledge::world_kb::knowledge_entry::WorldKbBody;
+    use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody;
     use serde_json::json;
 
-    /// Helper: build a `WorldKbEntry` with modules.activation.
+    /// Helper: build a `KnowledgeEntryRecord` with modules.activation.
     fn entry_with_activation(
         id: &str,
         name: &str,
         summary: &str,
         modules_val: Option<serde_json::Value>,
-    ) -> WorldKbEntry {
-        let mut entry = WorldKbEntry::new("wld_test", BlockType::Character, name);
+    ) -> KnowledgeEntryRecord {
+        let mut entry = KnowledgeEntryRecord::new("wld_test", BlockType::Character, name);
         // Override the random entry_id with a predictable one for tests
         entry.entry_id = id.to_string();
-        entry.body = Some(WorldKbBody {
+        entry.body = Some(KnowledgeEntryBody {
             summary: Some(summary.to_string()),
             ..Default::default()
         });
@@ -1120,7 +1120,7 @@ mod tests {
         activation_json(keys, &[], logic)
     }
 
-    fn run(entries: &[WorldKbEntry], scan: &str) -> ActivationResult {
+    fn run(entries: &[KnowledgeEntryRecord], scan: &str) -> ActivationResult {
         apply_activation(entries, scan, &[])
     }
 
@@ -1975,11 +1975,11 @@ mod tests {
 
     #[test]
     fn test_modules_activation_survives_spoke_roundtrip() {
-        use crate::conversion::{spoke_to_world_kb, world_kb_to_spoke};
+        use crate::conversion::{spoke_to_knowledge_record, knowledge_record_to_spoke};
 
-        let mut entry = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
+        let mut entry = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero");
         entry.entry_id = "kb_rt1".to_string();
-        entry.body = Some(WorldKbBody {
+        entry.body = Some(KnowledgeEntryBody {
             summary: Some("The hero of the story".to_string()),
             ..Default::default()
         });
@@ -1998,8 +1998,8 @@ mod tests {
         }));
 
         // Forward → spoke, reverse → nexus.
-        let spoke = world_kb_to_spoke(&entry);
-        let roundtripped = spoke_to_world_kb(spoke);
+        let spoke = knowledge_record_to_spoke(&entry);
+        let roundtripped = spoke_to_knowledge_record(spoke).unwrap();
 
         let modules = roundtripped
             .modules
