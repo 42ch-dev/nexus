@@ -27,6 +27,7 @@
 //!
 //! See tracked spec §2.2 for the full round-trip contract.
 
+use nexus_knowledge::world_kb::errors::KbError;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef;
 use serde_json::{Map, Value};
 use spoke_operations::ExtensionMap;
@@ -170,26 +171,58 @@ pub fn get_provenance(entry: &KnowledgeEntry) -> (Option<&str>, Option<i64>, Opt
 
 /// Read the canonical owner from `extensions.nexus` (v1.184 P1).
 ///
-/// Returns `None` when no typed owner key is present (World, Character, or
-/// binding) — the conversion seam fails closed rather than fabricating a
-/// World owner. Precedence is `world_id` > `character_id` >
-/// `actor_world_binding_id`; a well-formed entry carries exactly one.
-#[must_use]
-pub fn get_owner(entry: &KnowledgeEntry) -> Option<KnowledgeOwnerRef> {
-    let ns = nexus_namespace(entry)?;
-    if let Some(world_id) = ns.get("world_id").and_then(Value::as_str) {
-        return Some(KnowledgeOwnerRef::world(world_id));
+/// The owner representation is closed: exactly **one** typed owner key
+/// (`world_id` / `character_id` / `actor_world_binding_id`) must be present
+/// and carry a string value. This fails closed instead of resolving by
+/// precedence — a malformed entry that carries multiple typed owner keys, or
+/// any owner key holding a non-string/null value, is rejected rather than
+/// silently accepting one claim and discarding the other.
+///
+/// # Errors
+/// - [`KbError::MissingOwner`] when no typed owner key is present.
+/// - [`KbError::InvalidOwnerMetadata`] when more than one typed owner key is
+///   present, or an owner key is present but not a string (including `null`).
+pub fn get_owner(entry: &KnowledgeEntry) -> Result<KnowledgeOwnerRef, KbError> {
+    let ns = nexus_namespace(entry).ok_or(KbError::MissingOwner)?;
+    // Collect the present, string-typed owner claims as `(key, value)`,
+    // rejecting a present-but-non-string/null owner key outright.
+    let mut claims: Vec<(&str, &str)> = Vec::with_capacity(3);
+    for key in ["world_id", "character_id", "actor_world_binding_id"] {
+        match ns.get(key) {
+            None => {}
+            Some(Value::String(s)) => claims.push((key, s)),
+            Some(Value::Null) => {
+                return Err(KbError::InvalidOwnerMetadata(format!(
+                    "extensions.nexus.{key} is null"
+                )));
+            }
+            Some(_) => {
+                return Err(KbError::InvalidOwnerMetadata(format!(
+                    "extensions.nexus.{key} must be a string"
+                )));
+            }
+        }
     }
-    if let Some(character_id) = ns.get("character_id").and_then(Value::as_str) {
-        return Some(KnowledgeOwnerRef::character(character_id));
+
+    match claims.len() {
+        0 => Err(KbError::MissingOwner),
+        1 => {
+            let (key, id) = claims
+                .pop()
+                .expect("len == 1 as matched above");
+            Ok(match key {
+                "world_id" => KnowledgeOwnerRef::world(id),
+                "character_id" => KnowledgeOwnerRef::character(id),
+                "actor_world_binding_id" => KnowledgeOwnerRef::actor_world_binding(id),
+                _ => unreachable!("only the three typed owner keys are collected"),
+            })
+        }
+        _ => Err(KbError::InvalidOwnerMetadata(
+            "multiple typed owner keys present (world_id/character_id/actor_world_binding_id) \
+             — the entry is ambiguous"
+                .to_string(),
+        )),
     }
-    if let Some(binding_id) = ns
-        .get("actor_world_binding_id")
-        .and_then(Value::as_str)
-    {
-        return Some(KnowledgeOwnerRef::actor_world_binding(binding_id));
-    }
-    None
 }
 
 /// Read the `creator_only` flag from `extensions.nexus` (default `false`).

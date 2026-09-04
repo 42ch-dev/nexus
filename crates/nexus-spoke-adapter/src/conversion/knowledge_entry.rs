@@ -183,9 +183,15 @@ pub fn spoke_to_knowledge_record(
     // Greptile P1 — body fidelity).
     let lossless_body_value = take_nexus_body(&mut s);
     // Canonical owner from the typed extension keys (v1.184 P1). Fail closed
-    // when absent — a spoke entry with no owner metadata is malformed.
-    let owner = get_owner(&s).ok_or(KbError::MissingOwner)?;
+    // when absent, ambiguous, or malformed (non-string/null owner key) — a
+    // spoke entry with anything other than exactly one valid owner claim is
+    // rejected, never resolved by precedence.
+    let owner = get_owner(&s)?;
     let creator_only = get_creator_only(&s);
+    // creator_only is World-only (v1.184 P1 fix): a Character/binding-owned
+    // wire entry that sets the flag is rejected here, matching both store
+    // implementations and the SQLite CHECK.
+    nexus_knowledge::world_kb::knowledge_entry::validate_creator_only_owner(&owner, creator_only)?;
     // Extract borrowed accessor data into owned values FIRST, so subsequent
     // field moves out of `s` are not blocked by outstanding borrows.
     let created_from_command_id = get_created_from_command_id(&s).map(String::from);
@@ -197,7 +203,10 @@ pub fn spoke_to_knowledge_record(
     let extensions_nexus_extras = get_nexus_extras(&s).map(Value::Object);
     let entry_type = s.entry_type.clone();
     let canonical_name = s.canonical_name.to_string();
-    let schema_version = u32::try_from(s.schema_version.get()).unwrap_or(1);
+    // Lossless reverse conversion (v1.184 P1 fix): a wire schema_version that
+    // exceeds the domain u32 range is rejected, never silently normalized to 1.
+    let schema_version = u32::try_from(s.schema_version.get())
+        .map_err(|_| KbError::UnsupportedSchemaVersion(s.schema_version.get()))?;
 
     // Reverse body (fallback): spoke closed body → nexus body. All 5 fields
     // map back; body is `None` only when every field is empty/None. Used only
@@ -241,7 +250,7 @@ pub fn spoke_to_knowledge_record(
         entry_id: s.entry_id,
         owner,
         creator_only,
-        block_type: entry_type_to_block_type(&entry_type),
+        block_type: entry_type_to_block_type(&entry_type)?,
         canonical_name,
         status: s.status,
         revision: s.revision,
@@ -270,9 +279,14 @@ fn block_type_to_entry_type(bt: BlockType) -> String {
         .unwrap_or_else(|| "character".to_string())
 }
 
-/// Parse spoke `entry_type` back to nexus `BlockType` (unknown values → default).
-fn entry_type_to_block_type(s: &str) -> BlockType {
-    serde_json::from_value(Value::String(s.to_string())).unwrap_or_default()
+/// Parse spoke `entry_type` back to nexus `BlockType` (v1.184 P1 fix).
+///
+/// The wire contract leaves `entry_type` an open string while the domain
+/// `BlockType` is closed; an unrecognized value is a conversion error, never
+/// silently normalized to the default block type.
+fn entry_type_to_block_type(s: &str) -> Result<BlockType, KbError> {
+    serde_json::from_value(Value::String(s.to_string()))
+        .map_err(|_| KbError::UnknownEntryType(s.to_string()))
 }
 
 /// Forward attribute shape: nexus JSON object member → spoke `BodyAttribute`.

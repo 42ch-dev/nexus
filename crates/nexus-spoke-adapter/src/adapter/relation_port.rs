@@ -1170,29 +1170,35 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn put_relation_unknown_endpoint_rejects_internal_error() {
+    async fn put_relation_unknown_endpoint_rejects_invalid_input() {
         let (pool, _dir) = fresh_pool().await;
         seed_world_and_endpoints(&pool).await;
 
         let adapter = NexusAdapter::new(pool.clone());
         let relation = spoke_relation("rel_bad_endpoint", "kb_src", "kb_nonexistent");
 
+        // v1.184 P1 (Task 2, world-only endpoints): the World-owned endpoint
+        // pre-check now rejects a missing/foreign endpoint as INVALID_INPUT
+        // *before* any INSERT is attempted, so the target FK constraint never
+        // fires for this case. The caller error is invalid input, not a
+        // server/storage fault — matching the fail-closed owner metadata
+        // contract (L2 finding 1).
         match adapter.put_relation(relation, None).await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
                     r.code,
-                    SpokeRejectCode::InternalError,
-                    "FK violation on target endpoint must surface as INTERNAL_ERROR (storage-level constraint)"
+                    SpokeRejectCode::InvalidInput,
+                    "missing target endpoint must surface as INVALID_INPUT (world-only endpoint pre-check)"
                 );
             }
-            SpokeResult::Ok(_) => panic!("expected INTERNAL_ERROR reject"),
+            SpokeResult::Ok(_) => panic!("expected INVALID_INPUT reject"),
         }
 
         // The transaction must have rolled back: no row exists.
         let rows = list_relationships_for_world(&pool, "wld_rel", true, 100)
             .await
             .unwrap();
-        assert!(rows.is_empty(), "tx rolled back on FK violation");
+        assert!(rows.is_empty(), "tx rolled back on rejected endpoint");
     }
 
     // ── put_relation CAS update path ──────────────────────────────────

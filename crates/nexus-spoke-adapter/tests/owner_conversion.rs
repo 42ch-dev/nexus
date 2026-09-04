@@ -133,6 +133,123 @@ fn creator_only_round_trips_as_nexus_metadata() {
     assert_eq!(back.owner, KnowledgeOwnerRef::world("wld_x"));
 }
 
+/// Build a spoke entry whose `extensions.nexus` JSON is exactly the supplied
+/// map (bypassing the typed setters) — used to synthesize malformed wire
+/// payloads the typed setter would never emit.
+fn spoke_with_nexus(json_map: serde_json::Value) -> spoke_schemas::KnowledgeEntry {
+    let rec = record_for(&KnowledgeOwnerRef::world("wld_x"), "Wire");
+    let mut spoke = knowledge_record_to_spoke(&rec);
+    let key = KnowledgeEntryExtensionsKey::try_from("nexus").unwrap();
+    // The `extensions` map holds the namespace as a JSON object (the same
+    // shape `nexus_namespace` reads back), not a wrapped `Value`.
+    let obj = json_map
+        .as_object()
+        .expect("nexus payload is an object")
+        .clone();
+    spoke.extensions.insert(key, obj);
+    spoke
+}
+
+/// Ambiguous owner metadata must fail closed (v1.184 P1 fix): every pair (and
+/// the triple) of typed owner keys present at once is rejected — precedence is
+/// not an ambiguity check.
+#[test]
+fn ambiguous_owner_keys_reject_both_pairs_and_triple() {
+    for ns in [
+        serde_json::json!({"world_id": "wld_1", "character_id": "chr_1"}),
+        serde_json::json!({"world_id": "wld_1", "actor_world_binding_id": "awb_1"}),
+        serde_json::json!({"character_id": "chr_1", "actor_world_binding_id": "awb_1"}),
+        serde_json::json!({
+            "world_id": "wld_1",
+            "character_id": "chr_1",
+            "actor_world_binding_id": "awb_1"
+        }),
+    ] {
+        let spoke = spoke_with_nexus(ns);
+        let err = spoke_to_knowledge_record(spoke).unwrap_err();
+        assert!(
+            matches!(err, nexus_knowledge::world_kb::errors::KbError::InvalidOwnerMetadata(_)),
+            "ambiguous owner metadata must reject, got {err:?}"
+        );
+    }
+}
+
+/// A present owner key carrying a non-string value (or `null`) must fail
+/// closed, never be silently ignored (v1.184 P1 fix).
+#[test]
+fn wrong_typed_or_null_owner_key_rejects() {
+    for ns in [
+        serde_json::json!({"world_id": 12345}),
+        serde_json::json!({"world_id": null}),
+        serde_json::json!({"character_id": ["not", "a", "string"]}),
+        serde_json::json!({"actor_world_binding_id": {"id": "nested"}}),
+    ] {
+        let spoke = spoke_with_nexus(ns);
+        let err = spoke_to_knowledge_record(spoke).unwrap_err();
+        assert!(
+            matches!(err, nexus_knowledge::world_kb::errors::KbError::InvalidOwnerMetadata(_)),
+            "malformed owner key must reject, got {err:?}"
+        );
+    }
+}
+
+/// `creator_only` is World-only (v1.184 P1 fix): a Character- or
+/// binding-owned wire entry carrying the flag is rejected at the conversion
+/// seam, matching the store invariants.
+#[test]
+fn creator_only_on_non_world_owner_rejects() {
+    for owner in [
+        KnowledgeOwnerRef::character("chr_1"),
+        KnowledgeOwnerRef::actor_world_binding("awb_1"),
+    ] {
+        let mut rec = record_for(&owner, "Flagged");
+        rec.creator_only = true;
+        let spoke = knowledge_record_to_spoke(&rec);
+        let err = spoke_to_knowledge_record(spoke).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                nexus_knowledge::world_kb::errors::KbError::CreatorOnlyRequiresWorld(_)
+            ),
+            "creator_only on {owner:?} must reject, got {err:?}"
+        );
+    }
+}
+
+/// A wire `schema_version` exceeding `u32::MAX` must not be silently
+/// normalized to `1` (v1.184 P1 fix).
+#[test]
+fn schema_version_overflow_rejects_not_normalizes() {
+    let rec = record_for(&KnowledgeOwnerRef::world("wld_x"), "Overflow");
+    let mut spoke = knowledge_record_to_spoke(&rec);
+    spoke.schema_version = std::num::NonZero::new((u32::MAX as u64) + 1).expect("non-zero");
+    let err = spoke_to_knowledge_record(spoke).unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            nexus_knowledge::world_kb::errors::KbError::UnsupportedSchemaVersion(n) if *n == (u32::MAX as u64) + 1
+        ),
+        "schema_version overflow must reject, got {err:?}"
+    );
+}
+
+/// An unknown spoke `entry_type` must not silently normalize to the default
+/// block type (v1.184 P1 fix).
+#[test]
+fn unknown_entry_type_rejects_not_normalizes() {
+    let rec = record_for(&KnowledgeOwnerRef::world("wld_x"), "UnknownType");
+    let mut spoke = knowledge_record_to_spoke(&rec);
+    spoke.entry_type = "not_a_real_block_type".to_string();
+    let err = spoke_to_knowledge_record(spoke).unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            nexus_knowledge::world_kb::errors::KbError::UnknownEntryType(t) if t == "not_a_real_block_type"
+        ),
+        "unknown entry_type must reject, got {err:?}"
+    );
+}
+
 /// Unknown `extensions.nexus` keys survive the round-trip verbatim for every
 /// owner kind; the typed owner keys never leak into the extras bag.
 #[test]

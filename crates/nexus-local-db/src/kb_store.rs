@@ -487,6 +487,17 @@ impl SqliteKbStore {
         validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)
             .map_err(validation_err)?;
 
+        // v1.184 P1 fix: `creator_only` is World-only — the SQLite schema
+        // CHECK is defense in depth, but the explicit check surfaces a
+        // validation error and keeps the invariant identical across domain /
+        // memory / conversion boundaries. Mapped to `ValidationLegacy` (not
+        // the `validation_err` fallback, which would mislabel it `MissingBody`).
+        nexus_knowledge::world_kb::knowledge_entry::validate_creator_only_owner(
+            &kb.owner,
+            kb.creator_only,
+        )
+        .map_err(|e| KbStoreError::ValidationLegacy(e.to_string()))?;
+
         let key_block_id = kb.entry_id.clone();
         let owner = kb.owner.clone();
         let created_at = kb.created_at.clone();

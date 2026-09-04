@@ -408,6 +408,26 @@ impl KnowledgeEntryRecord {
     }
 }
 
+/// Validate the owner/flag invariant shared by every write boundary
+/// (v1.184 P1 fix): `creator_only` may be `true` only for a
+/// [`KnowledgeOwnerRef::World`] owner. Used by both `KbStore`
+/// implementations (in-memory + `SQLite`) and the spoke conversion seam so
+/// the invariant holds identically across domain, memory, `SQLite`, and
+/// conversion (the `SQLite` schema CHECK remains defense in depth).
+///
+/// # Errors
+/// Returns [`KbError::CreatorOnlyRequiresWorld`] when `creator_only` is set
+/// on a Character- or binding-owned record.
+pub fn validate_creator_only_owner(
+    owner: &KnowledgeOwnerRef,
+    creator_only: bool,
+) -> Result<(), KbError> {
+    if creator_only && owner.world_id().is_none() {
+        return Err(KbError::CreatorOnlyRequiresWorld(owner.kind()));
+    }
+    Ok(())
+}
+
 // ── Mental-layer dialect raw types (V1.164 P2 T1, l5-mind) ────────────────
 //
 // Typed serde raw intermediates for the spoke `modules.mental` (nine-field)

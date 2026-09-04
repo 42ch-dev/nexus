@@ -138,6 +138,33 @@ pub enum KbError {
     /// The seam fails closed rather than fabricating a World owner.
     #[error("knowledge entry has no canonical owner metadata")]
     MissingOwner,
+
+    /// Owner metadata on the spoke boundary is ambiguous or malformed
+    /// (v1.184 P1 fix): more than one typed owner key present, or an owner
+    /// key carrying a non-string/null value. Zero owner keys is
+    /// [`KbError::MissingOwner`]. The seam fails closed rather than picking
+    /// one claim by precedence.
+    #[error("invalid owner metadata: {0}")]
+    InvalidOwnerMetadata(String),
+
+    /// `creator_only` set on a non-World owner (v1.184 P1 fix): the flag is
+    /// World-only; domain, both store implementations, and the conversion
+    /// boundary enforce the same invariant. Carries the owner `kind()`.
+    #[error("creator_only requires a World owner (got {0} owner)")]
+    CreatorOnlyRequiresWorld(&'static str),
+
+    /// Wire `schema_version` exceeds the domain `u32` range (v1.184 P1 fix):
+    /// reverse conversion fails closed instead of silently normalizing an
+    /// unsupported future version to `1`.
+    #[error("unsupported schema_version: {0} exceeds the u32 range")]
+    UnsupportedSchemaVersion(u64),
+
+    /// Unknown `entry_type` on the spoke wire (v1.184 P1 fix): the wire
+    /// contract leaves `entry_type` an open string while the domain
+    /// `BlockType` is closed — an unrecognized value fails closed instead of
+    /// silently normalizing to the default block type.
+    #[error("unknown entry_type: {0}")]
+    UnknownEntryType(String),
 }
 
 #[cfg(test)]

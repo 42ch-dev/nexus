@@ -428,3 +428,48 @@ async fn owner_scoped_active_uniqueness_via_store() {
         }
     );
 }
+
+// v1.184 P1 fix parity: the SQLite store must reject `creator_only` on a
+// Character- or binding-owned record with a structured validation error
+// *before* the insert (the schema CHECK remains defense in depth), matching
+// the in-memory / conversion boundaries.
+#[tokio::test]
+async fn insert_rejects_creator_only_on_non_world_owner() {
+    let (pool, _dir) = migrated_pool().await;
+    seed_world(&pool, WORLD_A).await;
+    seed_character(&pool, CHARACTER).await;
+    let store = SqliteKbStore::new(pool);
+
+    for owner in [
+        KnowledgeOwnerRef::character(CHARACTER),
+        KnowledgeOwnerRef::actor_world_binding(BINDING),
+    ] {
+        let mut rec = record_with_body(owner.clone(), "Flagged");
+        rec.creator_only = true;
+        let err = store.insert_knowledge_entry(rec).await.unwrap_err();
+        assert!(
+            matches!(&err, KbStoreError::ValidationLegacy(msg) if msg.contains("creator_only")),
+            "creator_only on {owner:?} must be rejected with a validation error, got {err:?}"
+        );
+    }
+}
+
+// World-owned creator_only remains accepted (DB CHECK allows it).
+#[tokio::test]
+async fn insert_accepts_creator_only_on_world_owner() {
+    let (pool, _dir) = migrated_pool().await;
+    seed_world(&pool, WORLD_A).await;
+    let store = SqliteKbStore::new(pool);
+
+    let mut rec = record_with_body(KnowledgeOwnerRef::world(WORLD_A), "Flagged");
+    rec.creator_only = true;
+    let result = store.insert_knowledge_entry(rec).await.unwrap();
+    assert_eq!(result.owner, KnowledgeOwnerRef::world(WORLD_A));
+
+    // The typed creator_only column round-trips to true.
+    let got = store
+        .get_knowledge_entry(&result.entry_id)
+        .await
+        .unwrap();
+    assert!(got.creator_only);
+}
