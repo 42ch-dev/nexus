@@ -307,6 +307,11 @@ async fn list_bindings(
         for item in &resp.items {
             println!("{}  {}  {}", &*item.binding_id, &*item.world_id, item.status);
         }
+        if resp.pagination.has_more {
+            if let Some(next) = &resp.pagination.next_cursor {
+                println!("next_cursor: {next}");
+            }
+        }
     }
     Ok(())
 }

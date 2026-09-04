@@ -21,6 +21,7 @@ struct Ctx {
     _tmp: TestTempRoot,
     server: TestServer,
     pool: sqlx::SqlitePool,
+    nexus_home: std::path::PathBuf,
 }
 
 async fn ctx() -> Ctx {
@@ -32,7 +33,7 @@ async fn ctx() -> Ctx {
         ),
     )
     .unwrap();
-    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
     let pool = state.pool().unwrap().clone();
     seed_actor_fixture(&pool).await;
     let server = TestServer::new(api::create_router(state, DaemonApiConfig::keyless()))
@@ -41,6 +42,7 @@ async fn ctx() -> Ctx {
         _tmp: tmp,
         server,
         pool,
+        nexus_home,
     }
 }
 
@@ -311,4 +313,161 @@ async fn add_binding_duplicate_and_remove_last_are_stable_conflicts() {
     .await
     .unwrap();
     assert_eq!(remaining, 1);
+}
+
+fn switch_active_creator(ctx: &Ctx, creator_id: &str) {
+    std::fs::write(
+        ctx.nexus_home.join("config.toml"),
+        format!(
+            "active_creator_id = \"{creator_id}\"\n\n[active_workspace_slug_by_creator]\n\"{creator_id}\" = \"default\"\n"
+        ),
+    )
+    .unwrap();
+}
+
+fn assert_canonical_invalid_input(resp: &axum_test::TestResponse) {
+    assert_eq!(resp.status_code(), 422, "body={}", resp.text());
+    let body: Value = resp.json();
+    assert_eq!(body["success"], false, "body={body}");
+    assert_eq!(body["error"]["code"], "invalid_input", "body={body}");
+    assert!(
+        body["error"]["message"].as_str().is_some_and(|m| !m.is_empty()),
+        "body={body}"
+    );
+}
+
+async fn count_bindings(pool: &sqlx::SqlitePool, character_id: &str) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM actor_world_bindings WHERE character_id = ?")
+        .bind(character_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn seed_foreign_character(
+    pool: &sqlx::SqlitePool,
+) -> nexus_local_db::character::CharacterRecord {
+    sqlx::query(
+        "INSERT INTO narrative_worlds \
+         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+          time_policy, metadata_json, created_at) \
+         VALUES ('wld_otherWorld', 'ws', ?, 'o', 'other', 'active', 'private', 'manual', '{}', datetime('now'))",
+    )
+    .bind(OTHER)
+    .execute(pool)
+    .await
+    .unwrap();
+    let foreign = nexus_local_db::create_character_with_initial_binding(
+        pool,
+        nexus_local_db::CreateCharacterParams {
+            owner_creator_id: OTHER,
+            display_name: "Foreign",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: "wld_otherWorld",
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    foreign.character
+}
+
+#[tokio::test]
+async fn foreign_binding_routes_are_404_and_do_not_mutate() {
+    let ctx = ctx().await;
+    let foreign = seed_foreign_character(&ctx.pool).await;
+    let chr = foreign.character_id.clone();
+    let before = count_bindings(&ctx.pool, &chr).await;
+    assert_eq!(before, 1);
+
+    let add = ctx
+        .server
+        .post(&format!("/v1/daemon/characters/{chr}/bindings"))
+        .json(&json!({ "world_id": WORLD_A }))
+        .await;
+    assert_eq!(add.status_code(), 404, "body={}", add.text());
+    let add_body: Value = add.json();
+    assert_eq!(add_body["success"], false);
+    assert_eq!(add_body["error"]["code"], "not_found");
+
+    let listed = ctx
+        .server
+        .get(&format!("/v1/daemon/characters/{chr}/bindings"))
+        .await;
+    assert_eq!(listed.status_code(), 404, "body={}", listed.text());
+    let listed_body: Value = listed.json();
+    assert_eq!(listed_body["error"]["code"], "not_found");
+
+    let binding_id: String = sqlx::query_scalar(
+        "SELECT binding_id FROM actor_world_bindings WHERE character_id = ?",
+    )
+    .bind(&chr)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let removed = ctx
+        .server
+        .delete(&format!(
+            "/v1/daemon/characters/{chr}/bindings/{binding_id}"
+        ))
+        .await;
+    assert_eq!(removed.status_code(), 404, "body={}", removed.text());
+    let removed_body: Value = removed.json();
+    assert_eq!(removed_body["error"]["code"], "not_found");
+
+    assert_eq!(count_bindings(&ctx.pool, &chr).await, before);
+}
+
+#[tokio::test]
+async fn switching_active_creator_hides_owned_characters() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let id = created["character"]["character_id"].as_str().unwrap();
+
+    switch_active_creator(&ctx, OTHER);
+
+    let hidden = ctx.server.get(&format!("/v1/daemon/characters/{id}")).await;
+    assert_eq!(hidden.status_code(), 404, "body={}", hidden.text());
+    let hidden_body: Value = hidden.json();
+    assert_eq!(hidden_body["error"]["code"], "not_found");
+
+    let list = ctx.server.get("/v1/daemon/characters").await;
+    assert_eq!(list.status_code(), 200, "body={}", list.text());
+    let listed: Value = list.json();
+    assert_eq!(listed["items"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn create_rejects_malformed_json_unknown_properties_and_invalid_ids_with_canonical_envelope() {
+    let ctx = ctx().await;
+
+    let malformed = ctx
+        .server
+        .post("/v1/daemon/characters")
+        .content_type("application/json")
+        .text("{oops")
+        .await;
+    assert_canonical_invalid_input(&malformed);
+
+    let unknown = ctx
+        .server
+        .post("/v1/daemon/characters")
+        .json(&json!({
+            "display_name": "Ada",
+            "world_id": WORLD_A,
+            "owner_creator_id": OWNER
+        }))
+        .await;
+    assert_canonical_invalid_input(&unknown);
+
+    let invalid_id = ctx
+        .server
+        .post("/v1/daemon/characters")
+        .json(&json!({
+            "display_name": "Ada",
+            "world_id": "not-a-world"
+        }))
+        .await;
+    assert_canonical_invalid_input(&invalid_id);
 }

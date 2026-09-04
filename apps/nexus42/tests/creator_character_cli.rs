@@ -162,3 +162,133 @@ async fn create_bind_remove_journey_human_and_json() {
         stderr(&fail_closed)
     );
 }
+
+
+#[tokio::test]
+async fn binding_list_human_and_json_paginate() {
+    let d = LiveDaemon::start().await;
+    activate_owner(&d).await;
+
+    let created = d
+        .cli(&[
+            "creator",
+            "character",
+            "create",
+            "--display-name",
+            "Ava",
+            "--world-id",
+            WORLD_A,
+            "--json",
+        ])
+        .await;
+    assert!(created.status.success(), "create: {}", stderr(&created));
+    let created_json: Value = serde_json::from_str(&stdout(&created)).unwrap();
+    let chr = created_json["character"]["character_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let bound = d
+        .cli(&[
+            "creator",
+            "character",
+            "binding",
+            "add",
+            "--character-id",
+            &chr,
+            "--world-id",
+            WORLD_B,
+            "--json",
+        ])
+        .await;
+    assert!(bound.status.success(), "bind: {}", stderr(&bound));
+
+    let json_page = d
+        .cli(&[
+            "creator",
+            "character",
+            "binding",
+            "list",
+            "--character-id",
+            &chr,
+            "--limit",
+            "1",
+            "--json",
+        ])
+        .await;
+    assert!(
+        json_page.status.success(),
+        "json list: {}",
+        stderr(&json_page)
+    );
+    let page: Value = serde_json::from_str(&stdout(&json_page)).unwrap();
+    assert_eq!(page["items"].as_array().unwrap().len(), 1);
+    assert_eq!(page["pagination"]["has_more"], true);
+    let cursor = page["pagination"]["next_cursor"].as_str().unwrap().to_string();
+
+    let json_page2 = d
+        .cli(&[
+            "creator",
+            "character",
+            "binding",
+            "list",
+            "--character-id",
+            &chr,
+            "--limit",
+            "1",
+            "--cursor",
+            &cursor,
+            "--json",
+        ])
+        .await;
+    assert!(json_page2.status.success(), "json page2: {}", stderr(&json_page2));
+    let page2: Value = serde_json::from_str(&stdout(&json_page2)).unwrap();
+    assert_eq!(page2["items"].as_array().unwrap().len(), 1);
+    assert_ne!(page["items"][0]["binding_id"], page2["items"][0]["binding_id"]);
+
+    let human = d
+        .cli(&[
+            "creator",
+            "character",
+            "binding",
+            "list",
+            "--character-id",
+            &chr,
+            "--limit",
+            "1",
+        ])
+        .await;
+    assert!(human.status.success(), "human list: {}", stderr(&human));
+    let human_out = stdout(&human);
+    assert!(!human_out.trim_start().starts_with('{'));
+    let human_cursor = human_out
+        .lines()
+        .find_map(|line| line.strip_prefix("next_cursor: "))
+        .expect("human next_cursor")
+        .to_string();
+
+    let human2 = d
+        .cli(&[
+            "creator",
+            "character",
+            "binding",
+            "list",
+            "--character-id",
+            &chr,
+            "--limit",
+            "1",
+            "--cursor",
+            &human_cursor,
+        ])
+        .await;
+    assert!(human2.status.success(), "human page2: {}", stderr(&human2));
+    let human2_out = stdout(&human2);
+    let first_id = page["items"][0]["binding_id"].as_str().unwrap();
+    let second_id = page2["items"][0]["binding_id"].as_str().unwrap();
+    assert!(human_out.contains(first_id) || human_out.contains(second_id));
+    assert!(human2_out.contains(first_id) || human2_out.contains(second_id));
+    assert_ne!(
+        human_out.lines().next().unwrap_or(""),
+        human2_out.lines().next().unwrap_or("")
+    );
+}

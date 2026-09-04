@@ -10,9 +10,11 @@ use crate::api::errors::NexusApiError;
 use crate::api::handlers::world_kb_guards::require_creator;
 use crate::api::pagination::{decode_offset_cursor, offset_page_meta};
 use crate::workspace::WorkspaceState;
+use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
+use serde::de::DeserializeOwned;
 use nexus_contracts::daemon_api::characters::{
     add_character_binding_request::AddCharacterBindingRequest,
     add_character_binding_response::AddCharacterBindingResponse,
@@ -89,11 +91,20 @@ fn persona_json_string(map: &serde_json::Map<String, serde_json::Value>) -> Stri
     serde_json::Value::Object(map.clone()).to_string()
 }
 
+
+fn parse_canonical_json<T: DeserializeOwned>(bytes: &Bytes) -> Result<T, NexusApiError> {
+    serde_json::from_slice(bytes).map_err(|err| NexusApiError::BadRequest {
+        code: "invalid_input".into(),
+        message: err.to_string(),
+    })
+}
+
 /// `POST /v1/daemon/characters`
 pub async fn create_character(
     State(state): State<WorkspaceState>,
-    Json(req): Json<CreateCharacterRequest>,
+    body: Bytes,
 ) -> Result<(StatusCode, Json<CreateCharacterResponse>), NexusApiError> {
+    let req: CreateCharacterRequest = parse_canonical_json(&body)?;
     let owner = require_creator(&state)?;
     let persona = persona_json_string(&req.persona);
     let created = nexus_local_db::create_character_with_initial_binding(
@@ -160,8 +171,9 @@ pub async fn get_character(
 pub async fn add_binding(
     State(state): State<WorkspaceState>,
     Path(character_id): Path<String>,
-    Json(req): Json<AddCharacterBindingRequest>,
+    body: Bytes,
 ) -> Result<(StatusCode, Json<AddCharacterBindingResponse>), NexusApiError> {
+    let req: AddCharacterBindingRequest = parse_canonical_json(&body)?;
     let owner = require_creator(&state)?;
     let binding = nexus_local_db::add_actor_world_binding(
         state.pool_or_uninit()?,
