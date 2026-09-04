@@ -194,11 +194,10 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             CertFingerprintResponse
         ),
         // ── daemon-api/check/ (V1.148 P2 — orchestrate_check daemon route) ──
-        // CheckRequest is a plain object → Strict. CheckResponse is registered
-        // for inventory completeness but is skipped by the drift loop: it is a
-        // oneOf-root schema (mirrors spoke CheckResponse) with no top-level
-        // `properties`, and the `properties.is_empty()` guard skips it before
-        // any field comparison (oneOf-aware drift checking is future work).
+        // CheckRequest is a plain object → Strict. CheckResponse is a oneOf-root
+        // schema (mirrors spoke CheckResponse) with no top-level `properties`.
+        // The drift loop checks each non-empty root oneOf arm and skips empty
+        // arms (no field comparison possible).
         entry!(
             "schemas/daemon-api/check/check-request.schema.json",
             Strict,
@@ -231,9 +230,9 @@ fn build_schema_map() -> Vec<SchemaEntry> {
         ),
         // DR-63 (V1.158 P2, R-V1151P2-002): moment-directive RESPONSE schema.
         // oneOf-root (directive row | empty `{}`) with no top-level
-        // `properties` — registered for inventory completeness but skipped by
-        // the drift loop (same `properties.is_empty()` guard as CheckResponse;
-        // wire exactness is enforced by nexus-daemon-runtime/tests/directive_api.rs).
+        // `properties`. Non-empty arms are field-checked; empty arms are
+        // skipped. Wire exactness is also enforced by
+        // nexus-daemon-runtime/tests/directive_api.rs.
         entry!(
             "schemas/daemon-api/inspector/moment-directive-response.schema.json",
             Strict,

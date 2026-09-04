@@ -185,18 +185,31 @@ fn output_path(out_root: &Path, rel: &Path) -> PathBuf {
         .join(format!("{}.rs", to_rust_module_name(stem)))
 }
 
-/// A path relative to the schemas dir, rendered with POSIX separators, for
-/// skip-list matching (independent of platform path separators).
 /// typify's `maxLength`/`minLength` checks use UTF-8 `value.len()`. JSON Schema
-/// draft-07 and the actor-name rule count Unicode scalars. Also reject untrimmed
-/// values for length-bounded strings (explicit trim policy: no silent trim).
-fn rewrite_unicode_scalar_length_checks(rust: &str) -> String {
+/// draft-07 counts Unicode scalars, so rewrite every generated length check.
+/// Trim rejection is not a JSON Schema keyword: apply it only to Actor name
+/// fields whose schemas explicitly require a trimmed value (no silent trim).
+fn schema_requires_explicit_trim(rel_posix: &str) -> bool {
+    matches!(
+        rel_posix,
+        "domain/character.schema.json"
+            | "daemon-api/characters/create-character-request.schema.json"
+    )
+}
+
+fn rewrite_unicode_scalar_length_checks(rust: &str, enforce_trim: bool) -> String {
     let rust = rust.replace("value . len ()", "value . chars () . count ()");
+    if !enforce_trim {
+        return rust;
+    }
     rust.replace(
         "fn from_str (value : & str) -> :: std :: result :: Result < Self , self :: error :: ConversionError > { if value . chars () . count ()",
         "fn from_str (value : & str) -> :: std :: result :: Result < Self , self :: error :: ConversionError > { if value . trim () != value { return Err (\"must be trimmed\" . into ()) ; } if value . chars () . count ()",
     )
 }
+
+/// A path relative to the schemas dir, rendered with POSIX separators, for
+/// skip-list matching (independent of platform path separators).
 
 fn rel_posix(path: &Path) -> String {
     path.components()
@@ -245,7 +258,10 @@ fn generate_schema_rust(schema_path: &Path, rel: &Path, out_path: &Path) -> Resu
         .add_root_schema(schema)
         .map_err(|err| format!("typify failed for {}: {err}", schema_path.display()))?;
 
-    let rust = rewrite_unicode_scalar_length_checks(&type_space.to_stream().to_string());
+    let rust = rewrite_unicode_scalar_length_checks(
+        &type_space.to_stream().to_string(),
+        schema_requires_explicit_trim(&rel_posix(rel)),
+    );
     if rust.trim().is_empty() {
         return Err(format!(
             "typify produced empty output for {}",

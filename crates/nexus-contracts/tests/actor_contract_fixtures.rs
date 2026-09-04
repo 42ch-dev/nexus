@@ -143,6 +143,13 @@ fn character_display_name_unicode_scalar_and_trim_bounds() {
 }
 
 #[test]
+fn length_bounded_non_actor_string_keeps_whitespace() {
+    use nexus_contracts::generated::daemon_api::worlds::create_fork_request::CreateForkRequestLabel;
+    CreateForkRequestLabel::from_str("  fork label  ")
+        .expect("length-only fork label keeps leading and trailing whitespace");
+}
+
+#[test]
 fn rust_fixtures_cover_malformed_ids() {
     let mut character = serde_json::json!({
         "schema_version": 1,
