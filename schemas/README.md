@@ -9,7 +9,7 @@
 | Directory | Files (approx.) | Purpose |
 | --- | --- | --- |
 | [common/](common/) | 3 | Shared IDs, enums, `SourceAnchor`, `VersionRef` |
-| [domain/](domain/) | 9 | Wire entities (Creator, World, TimelineEvent, …) |
+| [domain/](domain/) | 12 | Wire entities (Creator, World, Character, ActorRef, …) |
 | [platform/http-bff/](platform/http-bff/) | 34 | Platform HTTP request/response bodies |
 | [platform/sync/](platform/sync/) | 7 | CLI ↔ platform sync protocol (bundle, delta, pull, conflict) |
 | [daemon-api/common/](daemon-api/common/) | 1 | Shared Daemon API envelopes — `ErrorResponse` (F-E1, V1.64) |
@@ -20,6 +20,7 @@
 | [daemon-api/schedule/](daemon-api/schedule/) | 14 | Schedule + core-context CRUD schemas (V1.63) |
 | [daemon-api/workspace/](daemon-api/workspace/) | 8 | Workspace management CRUD schemas (V1.63) |
 | [daemon-api/creators/](daemon-api/creators/) | 8 | Creator management CRUD schemas (V1.63) |
+| [daemon-api/characters/](daemon-api/characters/) | 9 | Character identity + ActorWorldBinding DTOs (v1.184 P0) |
 | [daemon-api/orchestration/sessions/](daemon-api/orchestration/sessions/) | 4 | Orchestration engine session READ schemas (V1.63 P3) |
 | [daemon-api/orchestration/capabilities/](daemon-api/orchestration/capabilities/) | 2 | Capability registry READ schemas (V1.63 P3) |
 | [daemon-api/preset-management/](daemon-api/preset-management/) | 7 | Preset management full-surface schemas (V1.63 P3) |

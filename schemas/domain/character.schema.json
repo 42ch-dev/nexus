@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/domain/character.schema.json",
+  "schema_version": 1,
+  "title": "Nexus Character",
+  "description": "Durable Creator-owned Character bearer. Clients never send owner_creator_id on create; the field is stored/read only.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "character_id",
+    "owner_creator_id",
+    "display_name",
+    "status",
+    "persona",
+    "created_at",
+    "updated_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "character_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CharacterId"
+    },
+    "owner_creator_id": {
+      "type": "string",
+      "pattern": "^ctr_[0-9a-f]{32}$",
+      "description": "Owning Creator ID (lowercase ctr_ + 32 hex). Never accepted from create/bind request bodies."
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "description": "Character display name. Trimmed non-empty; at most 120 Unicode scalars."
+    },
+    "status": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CharacterStatus"
+    },
+    "image_uri": {
+      "type": "string",
+      "description": "Optional Character-owned image URI (metadata only)."
+    },
+    "persona": {
+      "type": "object",
+      "additionalProperties": true,
+      "default": {},
+      "description": "Character-owned persona metadata object. Not a Canvas asset system."
+    },
+    "created_at": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
+    },
+    "updated_at": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
+    }
+  }
+}

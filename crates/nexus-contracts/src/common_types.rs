@@ -34,6 +34,12 @@ pub type WorldId = String;
 /// `Creator` `ID` (prefix: 'ctr_')
 pub type CreatorId = String;
 
+/// `Character` `ID` (prefix: `chr_` + 32 lowercase hex)
+pub type CharacterId = String;
+
+/// `ActorWorldBinding` `ID` (prefix: `awb_` + 32 lowercase hex)
+pub type ActorWorldBindingId = String;
+
 /// `User` `ID` (prefix: 'usr_')
 pub type UserId = String;
 
@@ -184,6 +190,24 @@ pub enum CreatorStatus {
     Active,
     Archived,
     Locked,
+}
+
+/// Character bearer status. v1.184 product surfaces never archive a Character.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CharacterStatus {
+    #[default]
+    Active,
+    Archived,
+}
+
+/// ActorWorldBinding status. Distinct from workspace `BindingStatus`.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ActorWorldBindingStatus {
+    #[default]
+    Active,
+    Inactive,
 }
 
 /// `How` creator was registered (data-model-v1.md §5.2)

@@ -12,12 +12,13 @@
 //! nexus-contracts`. See `crates/nexus-contracts/AGENTS.md` for the full rule.
 
 use crate::common_types::{
-    AccountStatus, AgentProfileStatus, BindingStatus, BlockType, CommandOrigin, CommandStatus,
-    CommandType, CreatorStatus, DeliveryState, DeltaOperation, DeltaType, ForkBranchStatus,
-    KeyBlockStatus, ManifestType, ManuscriptStorage, MembershipRole, MembershipStatus, MemoryKind,
-    MemoryStatus, PairingSource, PairingStatus, ProfileKind, PublishStoryOutcome,
-    ReferenceSourceType, RegistrationSource, ScanStatus, SelectionMode, StoryManifestStatus,
-    SubscriptionTier, TimelineEventStatus, TimelineEventType, VerificationStatus, WorldStatus,
+    AccountStatus, ActorWorldBindingStatus, AgentProfileStatus, BindingStatus, BlockType,
+    CharacterStatus, CommandOrigin, CommandStatus, CommandType, CreatorStatus, DeliveryState,
+    DeltaOperation, DeltaType, ForkBranchStatus, KeyBlockStatus, ManifestType, ManuscriptStorage,
+    MembershipRole, MembershipStatus, MemoryKind, MemoryStatus, PairingSource, PairingStatus,
+    ProfileKind, PublishStoryOutcome, ReferenceSourceType, RegistrationSource, ScanStatus,
+    SelectionMode, StoryManifestStatus, SubscriptionTier, TimelineEventStatus, TimelineEventType,
+    VerificationStatus, WorldStatus,
 };
 use crate::generated::daemon_api::canvas::world_kb::world_kb_relationship_kind::WorldKbRelationshipKind;
 use crate::generated::daemon_api::works::chapters::chapter_status::ChapterStatus;
@@ -448,6 +449,26 @@ impl BindingStatus {
             Self::Active => "active",
             Self::Unlinked => "unlinked",
             Self::Stale => "stale",
+        }
+    }
+}
+
+impl CharacterStatus {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Archived => "archived",
+        }
+    }
+}
+
+impl ActorWorldBindingStatus {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Inactive => "inactive",
         }
     }
 }

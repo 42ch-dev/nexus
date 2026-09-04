@@ -57,9 +57,10 @@ pub use generated::domain::world_membership::WorldMembershipRole as MembershipRo
 // (spoke-adapter-architecture spec §3.3 retains them as nexus-local enums for
 // daemon-api envelope fields / query parameters).
 pub use common_types::{
-    BlockType, BundleId, CommandId, CreatorId, DeliveryState, DeltaSequence, KeyBlockId,
-    KeyBlockStatus, ManuscriptId, ManuscriptPhase, ReferenceSourceType, ScanStatus, SchemaVersion,
-    SourceSummaryRef, StoryManifestId, TimelineEventId, Timestamp, UserId, WorkspaceId, WorldId,
+    ActorWorldBindingId, ActorWorldBindingStatus, BlockType, BundleId, CharacterId, CharacterStatus,
+    CommandId, CreatorId, DeliveryState, DeltaSequence, KeyBlockId, KeyBlockStatus, ManuscriptId,
+    ManuscriptPhase, ReferenceSourceType, ScanStatus, SchemaVersion, SourceSummaryRef, StoryManifestId,
+    TimelineEventId, Timestamp, UserId, WorkspaceId, WorldId,
 };
 
 // Sync / bundle / publish enums: typify mangles these per-schema, so alias the

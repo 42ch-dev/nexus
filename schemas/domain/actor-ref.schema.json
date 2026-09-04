@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/domain/actor-ref.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ActorRef",
+  "description": "Closed v1 Actor identity sum: Creator | Character. No unknown kinds; a payload cannot carry both bearer ids.",
+  "type": "object",
+  "oneOf": [
+    {
+      "title": "CreatorActorRef",
+      "type": "object",
+      "required": [
+        "actor_kind",
+        "creator_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "actor_kind": {
+          "type": "string",
+          "pattern": "^creator$",
+          "description": "Actor kind discriminant for a Creator bearer."
+        },
+        "creator_id": {
+          "type": "string",
+          "pattern": "^ctr_[0-9a-f]{32}$",
+          "description": "Creator ID: lowercase ctr_ prefix and exactly 32 hex characters."
+        }
+      }
+    },
+    {
+      "title": "CharacterActorRef",
+      "type": "object",
+      "required": [
+        "actor_kind",
+        "character_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "actor_kind": {
+          "type": "string",
+          "pattern": "^character$",
+          "description": "Actor kind discriminant for a Character bearer. Unrelated to KnowledgeEntry block_type=character."
+        },
+        "character_id": {
+          "type": "string",
+          "pattern": "^chr_[0-9a-f]{32}$",
+          "description": "Character ID: lowercase chr_ prefix and exactly 32 hex characters."
+        }
+      }
+    }
+  ]
+}

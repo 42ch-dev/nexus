@@ -21,6 +21,16 @@
       "pattern": "^ctr_[a-zA-Z0-9]+$",
       "description": "Creator ID (prefix: 'ctr_')"
     },
+    "CharacterId": {
+      "type": "string",
+      "pattern": "^chr_[0-9a-f]{32}$",
+      "description": "Character ID (lowercase prefix chr_ and exactly 32 hex characters)"
+    },
+    "ActorWorldBindingId": {
+      "type": "string",
+      "pattern": "^awb_[0-9a-f]{32}$",
+      "description": "ActorWorldBinding ID (lowercase prefix awb_ and exactly 32 hex characters)"
+    },
     "UserId": {
       "type": "string",
       "pattern": "^usr_[a-zA-Z0-9]+$",
@@ -240,6 +250,16 @@
       "type": "string",
       "enum": ["active", "unlinked", "stale"],
       "description": "Workspace binding status (data-model-v1.md §5.14)"
+    },
+    "CharacterStatus": {
+      "type": "string",
+      "enum": ["active", "archived"],
+      "description": "Character bearer status. v1.184 product surfaces never archive a Character."
+    },
+    "ActorWorldBindingStatus": {
+      "type": "string",
+      "enum": ["active", "inactive"],
+      "description": "ActorWorldBinding status. v1.184 APIs create active rows only; inactive is reserved storage vocabulary."
     },
     "ProfileKind": {
       "type": "string",
