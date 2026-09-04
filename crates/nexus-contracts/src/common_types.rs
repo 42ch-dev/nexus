@@ -192,24 +192,6 @@ pub enum CreatorStatus {
     Locked,
 }
 
-/// Character bearer status. v1.184 product surfaces never archive a Character.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum CharacterStatus {
-    #[default]
-    Active,
-    Archived,
-}
-
-/// ActorWorldBinding status. Distinct from workspace `BindingStatus`.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ActorWorldBindingStatus {
-    #[default]
-    Active,
-    Inactive,
-}
-
 /// `How` creator was registered (data-model-v1.md §5.2)
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

@@ -187,6 +187,17 @@ fn output_path(out_root: &Path, rel: &Path) -> PathBuf {
 
 /// A path relative to the schemas dir, rendered with POSIX separators, for
 /// skip-list matching (independent of platform path separators).
+/// typify's `maxLength`/`minLength` checks use UTF-8 `value.len()`. JSON Schema
+/// draft-07 and the actor-name rule count Unicode scalars. Also reject untrimmed
+/// values for length-bounded strings (explicit trim policy: no silent trim).
+fn rewrite_unicode_scalar_length_checks(rust: &str) -> String {
+    let rust = rust.replace("value . len ()", "value . chars () . count ()");
+    rust.replace(
+        "fn from_str (value : & str) -> :: std :: result :: Result < Self , self :: error :: ConversionError > { if value . chars () . count ()",
+        "fn from_str (value : & str) -> :: std :: result :: Result < Self , self :: error :: ConversionError > { if value . trim () != value { return Err (\"must be trimmed\" . into ()) ; } if value . chars () . count ()",
+    )
+}
+
 fn rel_posix(path: &Path) -> String {
     path.components()
         .filter_map(|c| match c {
@@ -234,7 +245,7 @@ fn generate_schema_rust(schema_path: &Path, rel: &Path, out_path: &Path) -> Resu
         .add_root_schema(schema)
         .map_err(|err| format!("typify failed for {}: {err}", schema_path.display()))?;
 
-    let rust = type_space.to_stream().to_string();
+    let rust = rewrite_unicode_scalar_length_checks(&type_space.to_stream().to_string());
     if rust.trim().is_empty() {
         return Err(format!(
             "typify produced empty output for {}",

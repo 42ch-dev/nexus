@@ -90,10 +90,14 @@ function matches(schema, data, cache) {
     if (typeof data !== 'string') {
       return false;
     }
-    if (schema.minLength !== undefined && data.length < schema.minLength) {
+    const scalarCount = Array.from(data).length;
+    if (schema.minLength !== undefined && scalarCount < schema.minLength) {
       return false;
     }
-    if (schema.maxLength !== undefined && data.length > schema.maxLength) {
+    if (schema.maxLength !== undefined && scalarCount > schema.maxLength) {
+      return false;
+    }
+    if (Object.prototype.hasOwnProperty.call(schema, 'minLength') && data.trim() !== data) {
       return false;
     }
     if (schema.pattern && !new RegExp(schema.pattern).test(data)) {
@@ -160,6 +164,11 @@ function main() {
   assertReject(character, { ...validCharacter, extra: 1 }, 'character extra properties');
   assertReject(character, { ...validCharacter, display_name: '' }, 'empty display name');
   assertReject(character, { ...validCharacter, display_name: 'a'.repeat(121) }, 'display name too long');
+  assertAccept(character, { ...validCharacter, display_name: '你'.repeat(120) }, '120 CJK scalars');
+  assertReject(character, { ...validCharacter, display_name: '你'.repeat(121) }, '121 CJK scalars');
+  assertReject(character, { ...validCharacter, display_name: ' Ada' }, 'leading whitespace');
+  assertReject(character, { ...validCharacter, display_name: 'Ada ' }, 'trailing whitespace');
+  assertReject(character, { ...validCharacter, display_name: '   ' }, 'whitespace only');
   assertReject(character, { ...validCharacter, persona: 'not-an-object' }, 'invalid persona metadata');
   assertReject(character, { ...validCharacter, character_id: 'chr_ABCDEF' }, 'uppercase hex id');
 

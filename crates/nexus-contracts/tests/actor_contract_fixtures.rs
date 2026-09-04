@@ -1,6 +1,7 @@
 //! Closed Actor/Character/ActorWorldBinding wire fixtures (v1.184 P0 Task 1).
 
-use nexus_contracts::{ActorRef, ActorWorldBinding, Character, CreateCharacterRequest};
+use nexus_contracts::{ActorRef, ActorWorldBinding, ActorWorldBindingStatus, Character, CharacterStatus, CreateCharacterRequest};
+use std::str::FromStr;
 
 const HEX32: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -84,4 +85,100 @@ fn binding_rejects_unknown_status() {
         "updated_at": "2026-09-05T00:00:00Z"
     });
     assert!(serde_json::from_value::<ActorWorldBinding>(valid).is_err());
+}
+
+
+#[test]
+fn root_status_populates_generated_records() {
+    let character = serde_json::from_value::<Character>(serde_json::json!({
+        "schema_version": 1,
+        "character_id": chr(),
+        "owner_creator_id": ctr(),
+        "display_name": "Ada",
+        "status": "active",
+        "persona": {},
+        "created_at": "2026-09-05T00:00:00Z",
+        "updated_at": "2026-09-05T00:00:00Z"
+    }))
+    .expect("character");
+    assert_eq!(character.status, CharacterStatus::Active);
+    assert_eq!(character.status.as_str(), "active");
+    let constructed = Character {
+        character_id: character.character_id.clone(),
+        created_at: character.created_at,
+        display_name: character.display_name.clone(),
+        image_uri: None,
+        owner_creator_id: character.owner_creator_id.clone(),
+        persona: character.persona.clone(),
+        schema_version: character.schema_version,
+        status: CharacterStatus::Active,
+        updated_at: character.updated_at,
+    };
+    assert_eq!(constructed.status, CharacterStatus::Active);
+
+    let binding = serde_json::from_value::<ActorWorldBinding>(serde_json::json!({
+        "schema_version": 1,
+        "binding_id": format!("awb_{HEX32}"),
+        "character_id": chr(),
+        "world_id": format!("wld_{HEX32}"),
+        "status": "active",
+        "created_at": "2026-09-05T00:00:00Z",
+        "updated_at": "2026-09-05T00:00:00Z"
+    }))
+    .expect("binding");
+    assert_eq!(binding.status, ActorWorldBindingStatus::Active);
+}
+
+#[test]
+fn character_display_name_unicode_scalar_and_trim_bounds() {
+    use nexus_contracts::generated::domain::character::CharacterDisplayName;
+    let ok_cjk: String = "你".repeat(120);
+    CharacterDisplayName::from_str(&ok_cjk).expect("120 CJK scalars");
+    assert!(CharacterDisplayName::from_str(&"你".repeat(121)).is_err());
+    CharacterDisplayName::from_str(&"a".repeat(120)).expect("120 ascii");
+    assert!(CharacterDisplayName::from_str("").is_err());
+    assert!(CharacterDisplayName::from_str("   ").is_err());
+    assert!(CharacterDisplayName::from_str(" Ada").is_err());
+    assert!(CharacterDisplayName::from_str("Ada ").is_err());
+}
+
+#[test]
+fn rust_fixtures_cover_malformed_ids() {
+    let mut character = serde_json::json!({
+        "schema_version": 1,
+        "character_id": chr(),
+        "owner_creator_id": ctr(),
+        "display_name": "Ada",
+        "status": "active",
+        "persona": {},
+        "created_at": "2026-09-05T00:00:00Z",
+        "updated_at": "2026-09-05T00:00:00Z"
+    });
+    character["character_id"] = serde_json::json!("chr_ABCDEF");
+    assert!(serde_json::from_value::<Character>(character.clone()).is_err());
+    character["character_id"] = serde_json::json!(format!("chr_{}", &HEX32[..31]));
+    assert!(serde_json::from_value::<Character>(character).is_err());
+
+    let mut binding = serde_json::json!({
+        "schema_version": 1,
+        "binding_id": "awb_short",
+        "character_id": chr(),
+        "world_id": format!("wld_{HEX32}"),
+        "status": "active",
+        "created_at": "2026-09-05T00:00:00Z",
+        "updated_at": "2026-09-05T00:00:00Z"
+    });
+    assert!(serde_json::from_value::<ActorWorldBinding>(binding.clone()).is_err());
+    binding["binding_id"] = serde_json::json!(format!("awb_{HEX32}"));
+    binding["character_id"] = serde_json::json!("chr_nothex");
+    assert!(serde_json::from_value::<ActorWorldBinding>(binding).is_err());
+
+    assert!(serde_json::from_value::<ActorRef>(serde_json::json!({
+        "actor_kind":"character","character_id":"chr_nothex"
+    }))
+    .is_err());
+    assert!(serde_json::from_value::<ActorRef>(serde_json::json!({
+        "actor_kind":"creator","creator_id": format!("CTR_{HEX32}")
+    }))
+    .is_err());
 }

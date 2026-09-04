@@ -87,6 +87,30 @@ const COMPILE_OPTS = {
   ignoreMinAndMaxItems: true,
 };
 
+/** Exact-string patterns (`^literal$`) become singleton enums so TS emits literals.
+ * Rust typify still consumes the source `pattern` discriminants (it panics on
+ * per-arm `enum`/`const` inside oneOf). This rewrite is TypeScript-compile only.
+ */
+function rewriteExactStringPatterns(node: unknown): void {
+  if (Array.isArray(node)) {
+    for (const item of node) rewriteExactStringPatterns(item);
+    return;
+  }
+  if (node === null || typeof node !== 'object') {
+    return;
+  }
+  const rec = node as Record<string, unknown>;
+  const pattern = rec.pattern;
+  if (typeof pattern === 'string' && rec.type === 'string') {
+    const exact = pattern.match(/^\^([A-Za-z0-9_]+)\$$/);
+    if (exact) {
+      rec.enum = [exact[1]];
+      delete rec.pattern;
+    }
+  }
+  for (const value of Object.values(rec)) rewriteExactStringPatterns(value);
+}
+
 /** POSIX-relative schema paths (relative to the localized tree root). */
 function posix(rel: string): string {
   return rel.split(path.sep).join('/');
@@ -143,6 +167,7 @@ async function compileSchema(localizedDir: string, rel: string, typeName: string
   const schema = readJSON<Record<string, unknown>>(abs) as JsonSchema;
   // Override `Nexus <Name>` product prefix → canonical basename-derived name.
   (schema as Record<string, unknown>).title = typeName;
+  rewriteExactStringPatterns(schema);
   const ts = await compile(schema, typeName, { ...COMPILE_OPTS, cwd: path.dirname(abs) });
   return `${BANNER}\n\n${ts.trim()}\n`;
 }

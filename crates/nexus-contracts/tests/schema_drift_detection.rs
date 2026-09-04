@@ -135,8 +135,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             WorldMembership
         ),
         // v1.184 P0 Task 1 — Actor/Character/binding closed contracts.
-        // ActorRef is a oneOf-root schema (no top-level `properties`); the
-        // drift loop skips field comparison, matching CheckResponse.
         entry!("schemas/domain/actor-ref.schema.json", Strict, ActorRef),
         entry!("schemas/domain/character.schema.json", Strict, Character),
         entry!(
@@ -1445,7 +1443,13 @@ fn make_dummy_string(prop_def: &Value) -> Value {
     // Handle pattern constraints — Nexus patterns look like `^prefix_[a-zA-Z0-9]+$`.
     // Extract the literal prefix and append a valid suffix.
     if let Some(pattern) = prop_def.get("pattern").and_then(|p| p.as_str()) {
-        // Extract the literal prefix: characters between `^` and the first `[` or `\`.
+        let inner = pattern.trim_start_matches('^').trim_end_matches('$');
+        if !inner.is_empty()
+            && !inner.chars().any(|c| matches!(c, '[' | '\\' | '.' | '{' | '*' | '+' | '?' | '(' | ')' | '|'))
+        {
+            return Value::String(inner.to_string());
+        }
+        // Extract the literal prefix: characters between `^` and the first `[` or `\\`.
         let prefix = pattern
             .strip_prefix('^')
             .unwrap_or(pattern)
@@ -1787,6 +1791,40 @@ fn schema_drift_detection() {
         let required = extract_required(&schema);
 
         if properties.is_empty() {
+            if let Some(arms) = schema.get("oneOf").and_then(|v| v.as_array()) {
+                for arm in arms {
+                    let arm_properties = extract_properties(arm);
+                    let arm_required = extract_required(arm);
+                    if arm_properties.is_empty() {
+                        continue;
+                    }
+                    let test_json =
+                        build_test_json(&arm_properties, &schema_cache, entry.schema_path);
+                    for checker in &entry.checkers {
+                        checked_count += 1;
+                        match checker(test_json.clone()) {
+                            Ok((struct_name, serialized)) => {
+                                let errors = check_fields_match(
+                                    entry.schema_path,
+                                    &struct_name,
+                                    &serialized,
+                                    &arm_properties,
+                                    &arm_required,
+                                    entry.mode,
+                                );
+                                all_errors.extend(errors);
+                            }
+                            Err(e) => {
+                                all_errors.push(format!(
+                                    "  [{path}] DESERIALIZATION ERROR: {e}",
+                                    path = entry.schema_path
+                                ));
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
             // Skip schemas with no properties (definitions-only schemas like common.schema.json)
             continue;
         }
@@ -1984,4 +2022,31 @@ fn drift_detection_type_mismatch_fails() {
         result.is_err(),
         "Expected deserialization to fail for type mismatch (schema says integer, Rust has string)"
     );
+}
+
+#[test]
+fn actor_ref_one_of_arms_roundtrip_and_reject() {
+    let creator = serde_json::json!({
+        "actor_kind": "creator",
+        "creator_id": "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    });
+    let character = serde_json::json!({
+        "actor_kind": "character",
+        "character_id": "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    });
+    let creator_v: ActorRef = serde_json::from_value(creator.clone()).expect("creator arm");
+    let character_v: ActorRef = serde_json::from_value(character.clone()).expect("character arm");
+    assert_eq!(serde_json::to_value(&creator_v).unwrap()["actor_kind"], "creator");
+    assert_eq!(serde_json::to_value(&character_v).unwrap()["actor_kind"], "character");
+    assert!(serde_json::from_value::<ActorRef>(serde_json::json!({
+        "actor_kind": "npc",
+        "creator_id": "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }))
+    .is_err());
+    assert!(serde_json::from_value::<ActorRef>(serde_json::json!({
+        "actor_kind": "creator",
+        "creator_id": "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "character_id": "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }))
+    .is_err());
 }

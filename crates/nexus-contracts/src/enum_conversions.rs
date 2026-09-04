@@ -12,8 +12,8 @@
 //! nexus-contracts`. See `crates/nexus-contracts/AGENTS.md` for the full rule.
 
 use crate::common_types::{
-    AccountStatus, ActorWorldBindingStatus, AgentProfileStatus, BindingStatus, BlockType,
-    CharacterStatus, CommandOrigin, CommandStatus, CommandType, CreatorStatus, DeliveryState,
+    AccountStatus, AgentProfileStatus, BindingStatus, BlockType, CommandOrigin, CommandStatus,
+    CommandType, CreatorStatus, DeliveryState,
     DeltaOperation, DeltaType, ForkBranchStatus, KeyBlockStatus, ManifestType, ManuscriptStorage,
     MembershipRole, MembershipStatus, MemoryKind, MemoryStatus, PairingSource, PairingStatus,
     ProfileKind, PublishStoryOutcome, ReferenceSourceType, RegistrationSource, ScanStatus,
@@ -453,7 +453,7 @@ impl BindingStatus {
     }
 }
 
-impl CharacterStatus {
+impl crate::generated::domain::character::CharacterStatus {
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
@@ -463,7 +463,7 @@ impl CharacterStatus {
     }
 }
 
-impl ActorWorldBindingStatus {
+impl crate::generated::domain::actor_world_binding::ActorWorldBindingStatus {
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
