@@ -426,9 +426,12 @@ const preset: Partial<Config> = {
         'setup-wizard-surface-input-row-min-height': cv('setup-wizard-surface-input-row-min-height'),
         'setup-wizard-surface-input-row-gap': cv('setup-wizard-surface-input-row-gap'),
         'setup-wizard-surface-cta-container-gap': cv('setup-wizard-surface-cta-container-gap'),
-        // V1.99 P1: sidebar-nav sizing tokens (DESIGN.md §sidebar-nav)
-        'sidebar-nav-width': cv('sidebar-nav-width'),
-        'sidebar-nav-item-height': cv('sidebar-nav-item-height'),
+        // V1.99 P1: sidebar-nav sizing tokens (DESIGN.md §sidebar-nav).
+        // Structural (non-color) tokens — bare `--sidebar-nav-*` namespace
+        // (v1.183 P0 AR-2), referenced via sv() like --dialog-*/--sheet-*;
+        // Tailwind keys stable so all consumers stay unchanged.
+        'sidebar-nav-width': sv('sidebar-nav-width'),
+        'sidebar-nav-item-height': sv('sidebar-nav-item-height'),
       },
       maxWidth: {
         'setup-wizard-step-wizard-max-width': cv('setup-wizard-wizard-max-width'),

@@ -489,10 +489,13 @@
   --ease-standard: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-emphasized: cubic-bezier(0.2, 0.8, 0.2, 1);
 
-  /* Sidebar nav — DESIGN.md §Sidebar Nav (V1.99 P1 projection).
-     Same values in light and dark (layout should not shift). */
-  --color-sidebar-nav-width: 248px;
-  --color-sidebar-nav-item-height: 36px;
+  /* Sidebar nav — DESIGN.md §Sidebar Nav (V1.99 P1 projection; v1.183 P0
+     AR-2: structural (non-color) sizing values live in the bare
+     `--sidebar-nav-*` namespace, not the `--color-*` helper — same pattern
+     as --dialog-*/--sheet-*). Theme-independent: single :root definition
+     (layout should not shift), no dark pair. */
+  --sidebar-nav-width: 248px;
+  --sidebar-nav-item-height: 36px;
 
   /* Reading surface — DESIGN.md §Typography/reading-prose (V1.79 P0). */
   --reading-prose-measure: 68ch;
@@ -846,9 +849,8 @@
   --color-setup-wizard-surface-cta-primary-max-width: 400px;
   --color-setup-wizard-surface-cta-container-gap: 16px;
 
-  /* Sidebar nav — DESIGN.md §Sidebar Nav (V1.99 P1 projection). */
-  --color-sidebar-nav-width: 248px;
-  --color-sidebar-nav-item-height: 36px;
+  /* (Sidebar nav sizing is theme-independent — single :root definition
+     above; v1.183 P0 AR-2 deleted the dark duplicate pair.) */
 
   /* Elevation — DESIGN.dark.md §Elevation (V1.121 v0.4): pure-black shadows,
      stronger alphas; same scale + alias chain as light. */

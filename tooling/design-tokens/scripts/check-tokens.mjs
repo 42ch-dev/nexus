@@ -78,6 +78,12 @@ const required = [
   { label: 'preset: width sheet consumes structural var', haystack: preset, needle: "sheet: sv('sheet-width')" },
   { label: 'preset: maxHeight dialog consumes structural var', haystack: preset, needle: "dialog: sv('dialog-max-height')" },
 
+  // ── Sidebar nav sizing (structural namespace, v1.183 P0 AR-2) ──
+  { label: 'tokens: --sidebar-nav-width', haystack: tokens, needle: '--sidebar-nav-width:' },
+  { label: 'tokens: --sidebar-nav-item-height', haystack: tokens, needle: '--sidebar-nav-item-height:' },
+  { label: 'preset: spacing sidebar-nav width consumes structural var', haystack: preset, needle: "sv('sidebar-nav-width')" },
+  { label: 'preset: spacing sidebar-nav item-height consumes structural var', haystack: preset, needle: "sv('sidebar-nav-item-height')" },
+
   // ── Reading chrome projection (V1.121 v0.4 T6) ──
   { label: 'tokens: reading-chrome title family → display', haystack: tokens, needle: '--reading-chrome-novel-chapter-title-font-family: var(--font-display)' },
 
@@ -113,6 +119,8 @@ const BANNED_SHEET_WIDTH_NS = '--color-sheet-' + 'width';
 const BANNED_DIALOG_WIDTH_HELPER = "cv('dialog-" + "width')";
 const BANNED_DIALOG_MAX_HEIGHT_HELPER = "cv('dialog-max-" + "height')";
 const BANNED_SHEET_WIDTH_HELPER = "cv('sheet-" + "width')";
+const BANNED_SIDEBAR_NAV_NS = '--color-sidebar-' + 'nav-';
+const BANNED_SIDEBAR_NAV_HELPER = "cv('sidebar-" + "nav-";
 
 /** @type {Array<{ label: string, haystack: string, needle: string }>} */
 const forbidden = [
@@ -124,6 +132,8 @@ const forbidden = [
   { label: 'preset: dialog width must not use the color-var helper', haystack: preset, needle: BANNED_DIALOG_WIDTH_HELPER },
   { label: 'preset: dialog max-height must not use the color-var helper', haystack: preset, needle: BANNED_DIALOG_MAX_HEIGHT_HELPER },
   { label: 'preset: sheet width must not use the color-var helper', haystack: preset, needle: BANNED_SHEET_WIDTH_HELPER },
+  { label: 'tokens: sidebar-nav sizing must not use the color namespace', haystack: tokens, needle: BANNED_SIDEBAR_NAV_NS },
+  { label: 'preset: sidebar-nav sizing must not use the color-var helper', haystack: preset, needle: BANNED_SIDEBAR_NAV_HELPER },
 ];
 
 /** Light (:root) and dark blocks — theme-split assertions below. */
