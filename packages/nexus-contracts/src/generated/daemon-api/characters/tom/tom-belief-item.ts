@@ -5,7 +5,7 @@
  */
 
 /**
- * One Character ToM belief row read from an authorized carrier's authoritative modules.belief array. Keyset order is (order, carrier_entry_id, row_ordinal): L1 (order 1) sorts before L2 (order 2).
+ * One Character ToM belief row read from an authorized carrier's authoritative modules.belief array. Keyset order is (order, carrier_entry_id, row_ordinal): L1 (order 1) sorts before L2 (order 2). row_ordinal is the physical zero-based array index; malformed legacy elements are skipped without renumbering.
  */
 export interface TomBeliefItem {
   /**
@@ -13,7 +13,7 @@ export interface TomBeliefItem {
    */
   carrier_entry_id: string;
   /**
-   * Zero-based position of the row inside the carrier's modules.belief array.
+   * Physical zero-based position of the row inside the carrier's modules.belief array.
    */
   row_ordinal: number;
   /**
@@ -41,17 +41,25 @@ export interface TomBeliefItem {
    */
   representation?: "Explicit" | "Implicit";
   /**
-   * Content Type (handbook closed label).
+   * Content Type (handbook closed label; slash-containing labels are literal).
    */
-  content_type?: string;
+  content_type?:
+    | "Location"
+    | "Contents/Physical State"
+    | "Identity/Relation"
+    | "Epistemic"
+    | "Desire/Intention"
+    | "Emotion"
+    | "Trait/Value"
+    | "Action/Event";
   /**
    * Mental Source (handbook closed label).
    */
-  source?: string;
+  source?: "Narration" | "Perception" | "Memory" | "Testimony" | "Inference" | "Imagination" | "Unknown";
   /**
    * Context (handbook closed label).
    */
-  context?: string;
+  context?: "Deceptive" | "Temporal" | "Counterfactual" | "Neutral";
   /**
    * Latest derivative MindState timestamp recorded against this carrier, when any. MindState is never treated as a second authority.
    */

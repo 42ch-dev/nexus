@@ -1631,7 +1631,11 @@ pub async fn cas_update_key_block_modules_in_tx(
     expected_revision: i64,
 ) -> Result<u64, LocalDbError> {
     let now = chrono::Utc::now().to_rfc3339();
-    let new_revision = expected_revision + 1;
+    // Checked increment (v1.184 P4 T2 fix): an `i64::MAX` expected revision
+    // must reject deterministically instead of overflowing the bump.
+    let new_revision = expected_revision.checked_add(1).ok_or_else(|| {
+        LocalDbError::ValidationError("expected_revision overflow: cannot bump revision".into())
+    })?;
     let result = sqlx::query(
         "UPDATE kb_key_blocks SET revision = ?, updated_at = ?, modules_json = ?          WHERE key_block_id = ? AND COALESCE(revision, 0) = ?",
     )

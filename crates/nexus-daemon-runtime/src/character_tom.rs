@@ -19,6 +19,10 @@ use sqlx::SqlitePool;
 
 const CURSOR_PREFIX: &str = "tom3:";
 const CURSOR_SEP: char = '\u{1f}';
+/// Fixed query-work bounds (fix round 1, review I4): the corpus is admitted
+/// only up to these caps; exceeding them fails closed before materialization.
+const MAX_CARRIERS_PER_SCOPE: u32 = 200;
+const MAX_BELIEF_ROWS_PER_CARRIER: usize = 200;
 
 /// One belief row in keyset order `(order, carrier_entry_id, row_ordinal)`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,6 +152,13 @@ impl CharacterTomService {
     }
 
     /// List Character ToM rows from authorized carriers only.
+    ///
+    /// Work is bounded before materialization: each owner scope admits at
+    /// most `MAX_CARRIERS_PER_SCOPE` carriers and each carrier at most
+    /// `MAX_BELIEF_ROWS_PER_CARRIER` belief rows; exceeding either cap fails
+    /// closed. `row_ordinal` is the physical `modules.belief` array index —
+    /// malformed legacy elements are skipped without renumbering so keyset
+    /// cursors never skip/duplicate around them.
     pub async fn list(
         &self,
         caller_creator_id: &str,
@@ -158,21 +169,31 @@ impl CharacterTomService {
             .await?;
         let cursor = Self::decode_cursor(&query.cursor)?;
         let carriers = self.authorized_carriers(viewer_character_id, &query.binding_id).await?;
+        let recorded = self.carrier_recorded_at_map(&carriers).await?;
         let mut keyed = Vec::new();
         for carrier in carriers {
-            let recorded_at = self.latest_carrier_recorded_at(&carrier.entry_id).await?;
-            for (ordinal, belief) in carrier.parse_belief_rows().into_iter().enumerate() {
+            let recorded_at = recorded.get(&carrier.entry_id).cloned().flatten();
+            let rows = carrier_belief_elements(carrier.modules.as_ref())?;
+            if rows.len() > MAX_BELIEF_ROWS_PER_CARRIER {
+                return Err(corpus_exceeded("belief rows per carrier"));
+            }
+            for (ordinal, element) in rows.iter().enumerate() {
+                let Ok(belief) = serde_json::from_value::<BeliefPropositionRaw>(element.clone())
+                else {
+                    continue; // malformed legacy element: skip, keep physical ordinal
+                };
                 if validate_character_tom_belief_row(&belief, viewer_character_id).is_err() {
                     continue;
                 }
                 let order = belief.order.unwrap_or(0);
+                let ordinal = u32::try_from(ordinal).map_err(|_| corpus_exceeded("belief rows per carrier"))?;
                 keyed.push((
                     order,
                     carrier.entry_id.clone(),
-                    u32::try_from(ordinal).unwrap_or(0),
+                    ordinal,
                     CharacterTomBeliefRow {
                         carrier_entry_id: carrier.entry_id.clone(),
-                        row_ordinal: u32::try_from(ordinal).unwrap_or(0),
+                        row_ordinal: ordinal,
                         belief,
                         carrier_recorded_at: recorded_at.clone(),
                     },
@@ -200,7 +221,7 @@ impl CharacterTomService {
             .map_err(map_kb_validation)?;
         if input.belief.order == Some(2) {
             let subject = input.belief.holder.as_deref().unwrap_or_default();
-            self.require_active_subject_binding(subject, &input.world_id)
+            self.require_active_subject_binding(caller_creator_id, subject, &input.world_id)
                 .await?;
         }
         let carrier = self
@@ -210,8 +231,14 @@ impl CharacterTomService {
                 &input.carrier_entry_id,
             )
             .await?;
+        if input.expected_revision >= i64::MAX {
+            return Err(NexusApiError::BadRequest {
+                code: "invalid_input".into(),
+                message: "expected_revision exceeds the CAS increment domain".into(),
+            });
+        }
         let mut modules = carrier.modules.clone().unwrap_or_else(|| json!({}));
-        append_belief_row(&mut modules, &input.belief);
+        append_belief_row(&mut modules, &input.belief)?;
         let modules_str = serde_json::to_string(&modules).map_err(internal_wire)?;
         let mind_state_id = format!("ms_{}", uuid::Uuid::new_v4().simple());
         let mind_state_wire = build_derivative_mind_state_wire(
@@ -233,6 +260,9 @@ impl CharacterTomService {
         Ok((input.carrier_entry_id, new_revision, mind_state_id))
     }
 
+    /// Stored admission: active owned viewer Character, active owned World,
+    /// and the viewer's active selected binding (P2 `ActorAdmissionService`
+    /// parity). Foreign/missing rows are 404; inactive rows are 409.
     async fn admit_viewer(
         &self,
         caller_creator_id: &str,
@@ -240,21 +270,64 @@ impl CharacterTomService {
         world_id: &str,
         binding_id: &str,
     ) -> Result<(), NexusApiError> {
-        self.views
-            .require_owned_character(caller_creator_id, viewer_character_id)
+        self.require_active_owned_character(caller_creator_id, viewer_character_id)
             .await?;
-        self.views.require_owned_world(caller_creator_id, world_id).await?;
+        self.require_active_owned_world(caller_creator_id, world_id)
+            .await?;
         self.views
             .require_active_binding(viewer_character_id, binding_id, world_id)
             .await?;
         Ok(())
     }
 
+    async fn require_active_owned_character(
+        &self,
+        creator_id: &str,
+        character_id: &str,
+    ) -> Result<(), NexusApiError> {
+        let row = nexus_local_db::get_character(&self.pool, creator_id, character_id).await?;
+        match row {
+            Some(stored) if stored.status == "active" => Ok(()),
+            Some(stored) => Err(NexusApiError::ConflictCoded {
+                code: "character_inactive".into(),
+                message: format!("character {character_id} is {}", stored.status),
+            }),
+            None => Err(not_found("character", character_id)),
+        }
+    }
+
+    async fn require_active_owned_world(
+        &self,
+        creator_id: &str,
+        world_id: &str,
+    ) -> Result<(), NexusApiError> {
+        let row: Option<(String, String)> = sqlx::query_as(
+            "SELECT owner_creator_id, status FROM narrative_worlds WHERE world_id = ?",
+        )
+        .bind(world_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(NexusApiError::from)?;
+        match row {
+            Some((owner, status)) if owner == creator_id && status == "active" => Ok(()),
+            Some((owner, status)) if owner == creator_id => Err(NexusApiError::ConflictCoded {
+                code: "world_inactive".into(),
+                message: format!("world {world_id} is {status}"),
+            }),
+            _ => Err(not_found("world", world_id)),
+        }
+    }
+
+    /// L2 subject admission: the subject Character must be an active owned
+    /// Character with its own active binding to the selected World.
     async fn require_active_subject_binding(
         &self,
+        caller_creator_id: &str,
         subject_character_id: &str,
         world_id: &str,
     ) -> Result<(), NexusApiError> {
+        self.require_active_owned_character(caller_creator_id, subject_character_id)
+            .await?;
         let row: Option<String> = sqlx::query_scalar(
             r"SELECT binding_id FROM actor_world_bindings
               WHERE character_id = ? AND world_id = ? AND status = 'active' LIMIT 1",
@@ -271,22 +344,33 @@ impl CharacterTomService {
         }
     }
 
+    /// Bounded carrier enumeration: each owner scope admits at most
+    /// `MAX_CARRIERS_PER_SCOPE` rows (fetched as cap + 1 to detect overflow);
+    /// exceeding the cap fails closed before any row is materialized into the
+    /// belief-row working set.
     async fn authorized_carriers(
         &self,
         viewer_character_id: &str,
         binding_id: &str,
     ) -> Result<Vec<KnowledgeEntryRecord>, NexusApiError> {
+        let probe = MAX_CARRIERS_PER_SCOPE + 1;
         let mut out = self
             .store
-            .list_by_owner_complete(&KnowledgeOwnerRef::character(viewer_character_id))
+            .list_by_owner_keyset(&KnowledgeOwnerRef::character(viewer_character_id), None, probe, false)
             .await
             .map_err(map_kb_store)?;
-        out.extend(
-            self.store
-                .list_by_owner_complete(&KnowledgeOwnerRef::actor_world_binding(binding_id))
-                .await
-                .map_err(map_kb_store)?,
-        );
+        if out.len() > MAX_CARRIERS_PER_SCOPE as usize {
+            return Err(corpus_exceeded("character-owned carriers"));
+        }
+        let binding_carriers = self
+            .store
+            .list_by_owner_keyset(&KnowledgeOwnerRef::actor_world_binding(binding_id), None, probe, false)
+            .await
+            .map_err(map_kb_store)?;
+        if binding_carriers.len() > MAX_CARRIERS_PER_SCOPE as usize {
+            return Err(corpus_exceeded("binding-owned carriers"));
+        }
+        out.extend(binding_carriers);
         Ok(out)
     }
 
@@ -300,7 +384,10 @@ impl CharacterTomService {
             .store
             .get_knowledge_entry(carrier_entry_id)
             .await
-            .map_err(|_| not_found("carrier_entry", carrier_entry_id))?;
+            .map_err(|err| match err {
+                KbStoreError::NotFound(_) => not_found("carrier_entry", carrier_entry_id),
+                other => map_kb_store(other),
+            })?;
         if matches!(carrier.status.as_str(), "deleted" | "merged" | "deprecated") {
             return Err(not_found("carrier_entry", carrier_entry_id));
         }
@@ -315,33 +402,89 @@ impl CharacterTomService {
         }
     }
 
-    async fn latest_carrier_recorded_at(
+    /// Latest derivative MindState `occurred_at` per carrier, in one bounded
+    /// grouped query over the already-admitted (cap-bounded) carrier set.
+    async fn carrier_recorded_at_map(
         &self,
-        carrier_entry_id: &str,
-    ) -> Result<Option<String>, NexusApiError> {
-        let row: Option<String> = sqlx::query_scalar(
-            r"SELECT occurred_at FROM mind_states
-              WHERE holder_entry_id = ?
-              ORDER BY created_at DESC LIMIT 1",
-        )
-        .bind(carrier_entry_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(NexusApiError::from)?;
-        Ok(row)
+        carriers: &[KnowledgeEntryRecord],
+    ) -> Result<std::collections::HashMap<String, Option<String>>, NexusApiError> {
+        let mut map = std::collections::HashMap::new();
+        if carriers.is_empty() {
+            return Ok(map);
+        }
+        let placeholders = std::iter::repeat_n("?", carriers.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        // SAFETY: placeholders are literal `?` binds; ids are bound parameters.
+        let sql = format!(
+            "SELECT holder_entry_id, occurred_at FROM mind_states \
+             WHERE holder_entry_id IN ({placeholders}) ORDER BY created_at DESC"
+        );
+        let mut query = sqlx::query_as::<_, (String, Option<String>)>(&sql);
+        for carrier in carriers {
+            query = query.bind(&carrier.entry_id);
+        }
+        let rows = query.fetch_all(&self.pool).await.map_err(NexusApiError::from)?;
+        for (holder, occurred_at) in rows {
+            map.entry(holder).or_insert(occurred_at);
+        }
+        Ok(map)
     }
 }
 
-fn append_belief_row(modules: &mut Value, row: &BeliefPropositionRaw) {
-    let obj = modules.as_object_mut().expect("modules object");
-    let belief = obj.entry("belief").or_insert_with(|| json!([]));
-    if !belief.is_array() {
-        *belief = json!([]);
+/// Borrow the carrier's `modules.belief` array elements.
+///
+/// Malformed stored shapes fail closed: a present non-object `modules` value
+/// or a present non-array `belief` member is a deterministic
+/// `carrier_modules_malformed` conflict — never a panic, never a silent
+/// rewrite. Absent `modules`/`belief` yields an empty slice.
+fn carrier_belief_elements(modules: Option<&Value>) -> Result<&[Value], NexusApiError> {
+    let Some(modules) = modules else {
+        return Ok(&[]);
+    };
+    let obj = modules.as_object().ok_or_else(modules_malformed)?;
+    match obj.get("belief") {
+        None => Ok(&[]),
+        Some(value) => value.as_array().map(Vec::as_slice).ok_or_else(modules_malformed),
     }
+}
+
+fn modules_malformed() -> NexusApiError {
+    NexusApiError::ConflictCoded {
+        code: "carrier_modules_malformed".into(),
+        message: "carrier modules must be an object and modules.belief, when present, an array"
+            .into(),
+    }
+}
+
+fn corpus_exceeded(what: &str) -> NexusApiError {
+    NexusApiError::ConflictCoded {
+        code: "view_incomplete".into(),
+        message: format!(
+            "Character ToM corpus exceeds the fixed {what} bound; refusing unbounded work"
+        ),
+    }
+}
+
+/// Append `row` to `modules.belief`, preserving every unknown sibling module
+/// key and existing element verbatim. Malformed stored shapes reject without
+/// mutation instead of panicking or overwriting a non-array `belief` value.
+fn append_belief_row(modules: &mut Value, row: &BeliefPropositionRaw) -> Result<(), NexusApiError> {
+    if !modules.is_object() {
+        return Err(modules_malformed());
+    }
+    let obj = modules.as_object_mut().expect("checked is_object above");
+    if let Some(existing) = obj.get("belief") {
+        if !existing.is_array() {
+            return Err(modules_malformed());
+        }
+    }
+    let belief = obj.entry("belief").or_insert_with(|| json!([]));
     belief
         .as_array_mut()
-        .expect("belief array")
-        .push(serde_json::to_value(row).expect("belief row serializes"));
+        .expect("checked is_array above")
+        .push(serde_json::to_value(row).map_err(internal_wire)?);
+    Ok(())
 }
 
 fn build_derivative_mind_state_wire(
