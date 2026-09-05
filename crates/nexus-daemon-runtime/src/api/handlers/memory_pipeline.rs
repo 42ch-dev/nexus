@@ -16,6 +16,7 @@
 
 use crate::api::errors::NexusApiError;
 use nexus_creator_memory::bearer::MemoryBearerRef;
+use nexus_moment_context_assembly::CharacterMindInput;
 use nexus_creator_memory::errors::MemoryError;
 use nexus_creator_memory::review::{
     PendingReviewInput, ReviewAction, ReviewDecision, SessionDigestSummarizer,
@@ -705,6 +706,7 @@ async fn bearer_recent_fragment_signals(
                 character_id,
                 ctx.scope_id,
                 FETCH_LIMIT,
+                0,
             )
             .await
             .map_err(map_local_db_error)?;
@@ -774,6 +776,86 @@ async fn bearer_persist_narrative(
                 .map_err(map_local_db_error)
         }
     }
+}
+
+// ── Character mind projection (v1.184 P3) ────────────────────────────────
+
+/// Max fragments fetched per scope before deterministic merge + cap.
+const MIND_PROJECTION_FETCH_LIMIT: i64 = 100;
+
+/// Load the bounded, deterministic Character SOUL/Memory projection for an
+/// admitted Character scope and fold it into a [`CharacterMindInput`].
+///
+/// Caller guarantees admission (owner/active Character + active binding). The
+/// projection is **honest-empty**: a missing SOUL.md yields `None` (the SOUL
+/// slot stays empty); absent memory yields no lines. Only the executing
+/// Character's shared scope plus the selected binding-local scope are
+/// included — never another Character's or the Creator's data. The merged
+/// memory lines are bounded and deterministically ordered (created_at DESC,
+/// fragment_id DESC) by [`CharacterMindInput::new`].
+pub(crate) async fn load_character_mind_projection(
+    pool: &SqlitePool,
+    nexus_home: &Path,
+    owner_creator_id: &str,
+    character_id: &str,
+    binding_id: Option<&str>,
+) -> CharacterMindInput {
+    let bearer = MemoryBearerRef::Character {
+        owner_creator_id,
+        character_id,
+    };
+    // Honest empty: a missing SOUL.md is not an error. Non-parse is irrelevant —
+    // we read the raw text (bounded at render time), never the parsed tree.
+    let soul = if bearer.validate().is_ok() {
+        let path = bearer.soul_path(nexus_home);
+        std::fs::read_to_string(&path).ok()
+    } else {
+        None
+    };
+
+    // Shared Character scope + the selected binding-local scope. A binding
+    // read merges both; a shared read (None) fetches the shared scope once.
+    let mut rows: Vec<(String, String, String)> = Vec::new(); // (created_at, fragment_id, summary)
+    let mut keywords_by_fragment: Vec<(String, String)> = Vec::new(); // (fragment_id, keywords)
+    let mut scopes = vec![None];
+    if let Some(b) = binding_id {
+        scopes.push(Some(b));
+    }
+    for scope in scopes {
+        if let Ok(fetched) = nexus_local_db::list_character_fragments(
+            pool,
+            owner_creator_id,
+            character_id,
+            scope,
+            MIND_PROJECTION_FETCH_LIMIT,
+            0,
+        )
+        .await
+        {
+            for f in fetched {
+                rows.push((f.created_at.clone(), f.fragment_id.clone(), f.summary));
+                keywords_by_fragment.push((f.fragment_id, f.keywords));
+            }
+        }
+    }
+    // Deterministic merge: created_at DESC, fragment_id DESC (newest first).
+    rows.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+    let lines: Vec<String> = rows
+        .into_iter()
+        .map(|(_, fragment_id, summary)| {
+            let keywords = keywords_by_fragment
+                .iter()
+                .find(|(id, _)| *id == fragment_id)
+                .map(|(_, kw)| kw.clone())
+                .unwrap_or_default();
+            if keywords.is_empty() {
+                format!("- {summary}")
+            } else {
+                format!("- {summary} — keywords: {keywords}")
+            }
+        })
+        .collect();
+    CharacterMindInput::new(soul, lines)
 }
 
 // ── Synthesis input building (arm-agnostic; V1.81 G2 caps preserved) ──────

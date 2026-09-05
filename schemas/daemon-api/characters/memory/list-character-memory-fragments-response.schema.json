@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/characters/memory/list-character-memory-fragments-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListCharacterMemoryFragmentsResponse",
+  "description": "Response for GET /v1/daemon/characters/{character_id}/memory/fragments (cursor pagination). Fragments are ordered created_at DESC, fragment_id DESC (deterministic).",
+  "type": "object",
+  "required": ["fragments", "pagination"],
+  "additionalProperties": false,
+  "properties": {
+    "fragments": {
+      "type": "array",
+      "items": {
+        "$ref": "https://nexus42.invalid/schemas/daemon-api/characters/memory/character-memory-fragment-info.schema.json"
+      }
+    },
+    "pagination": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/kb/pagination-info.schema.json"
+    }
+  }
+}

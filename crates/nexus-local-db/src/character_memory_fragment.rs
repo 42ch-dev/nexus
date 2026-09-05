@@ -197,7 +197,9 @@ async fn load_fragment(
 /// IS NULL`); `Some(b)` reads only that binding-local scope. Binding-local
 /// reads require the exact active binding for the Character.
 ///
-/// Results are ordered `created_at DESC`.
+/// Results are ordered `created_at DESC, fragment_id DESC` (a total order, so
+/// offset pagination is deterministic); `offset` skips that many rows of the
+/// ordered scope.
 ///
 /// # Errors
 ///
@@ -210,6 +212,7 @@ pub async fn list_character_fragments(
     character_id: &str,
     binding_id: Option<&str>,
     limit: i64,
+    offset: i64,
 ) -> Result<Vec<CharacterMemoryFragmentRecord>, LocalDbError> {
     require_owned_character_pool(pool, owner_creator_id, character_id).await?;
     if let Some(binding_id) = binding_id {
@@ -217,6 +220,7 @@ pub async fn list_character_fragments(
             .await?;
     }
     let limit = limit.clamp(1, MAX_CHARACTER_MEMORY_LIST_LIMIT);
+    let offset = offset.max(0);
     if let Some(binding_id) = binding_id {
         let rows = sqlx::query!(
             r#"SELECT fragment_id as "fragment_id!", session_id as "session_id!",
@@ -226,10 +230,11 @@ pub async fn list_character_fragments(
                       revision as "revision!"
                FROM character_memory_fragments
                WHERE character_id = ? AND actor_world_binding_id = ?
-               ORDER BY created_at DESC LIMIT ?"#,
+               ORDER BY created_at DESC, fragment_id DESC LIMIT ? OFFSET ?"#,
             character_id,
             binding_id,
-            limit
+            limit,
+            offset
         )
         .fetch_all(pool)
         .await?;
@@ -253,9 +258,10 @@ pub async fn list_character_fragments(
                       revision as "revision!"
                FROM character_memory_fragments
                WHERE character_id = ? AND actor_world_binding_id IS NULL
-               ORDER BY created_at DESC LIMIT ?"#,
+               ORDER BY created_at DESC, fragment_id DESC LIMIT ? OFFSET ?"#,
             character_id,
-            limit
+            limit,
+            offset
         )
         .fetch_all(pool)
         .await?;

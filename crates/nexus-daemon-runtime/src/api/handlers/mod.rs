@@ -46,6 +46,7 @@ pub mod acp;
 pub mod actor_knowledge;
 pub mod agent_host;
 pub mod chapters;
+pub mod character_memory;
 pub mod characters;
 pub mod check;
 pub mod compute_modules;

@@ -24,6 +24,18 @@ use nexus_contracts::daemon_api::characters::{
     list_character_bindings_response::ListCharacterBindingsResponse,
     list_characters_response::ListCharactersResponse,
 };
+use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_request::CaptureCharacterPendingReviewRequest;
+use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_response::CaptureCharacterPendingReviewResponse;
+use nexus_contracts::daemon_api::characters::memory::count_character_pending_reviews_response::CountCharacterPendingReviewsResponse;
+use nexus_contracts::daemon_api::characters::memory::delete_character_pending_review_response::DeleteCharacterPendingReviewResponse;
+use nexus_contracts::daemon_api::characters::memory::list_character_memory_fragments_response::ListCharacterMemoryFragmentsResponse;
+use nexus_contracts::daemon_api::characters::memory::list_character_pending_reviews_response::ListCharacterPendingReviewsResponse;
+use nexus_contracts::daemon_api::characters::memory::promote_character_fragment_request::PromoteCharacterFragmentRequest;
+use nexus_contracts::daemon_api::characters::memory::promote_character_fragment_response::PromoteCharacterFragmentResponse;
+use nexus_contracts::daemon_api::characters::memory::review_character_memory_request::ReviewCharacterMemoryRequest;
+use nexus_contracts::daemon_api::characters::memory::review_character_memory_response::ReviewCharacterMemoryResponse;
+use nexus_contracts::daemon_api::characters::soul::character_soul_narrative_request::CharacterSoulNarrativeRequest;
+use nexus_contracts::daemon_api::characters::soul::character_soul_narrative_response::CharacterSoulNarrativeResponse;
 
 /// `creator character` subcommands.
 #[derive(Debug, Subcommand)]
@@ -73,6 +85,16 @@ pub enum CharacterCommand {
     Knowledge {
         #[command(subcommand)]
         command: KnowledgeCommand,
+    },
+    /// Character SOUL/Memory bearer operations (v1.184 P3)
+    Memory {
+        #[command(subcommand)]
+        command: CharacterMemoryCommand,
+    },
+    /// Character SOUL narrative operations (v1.184 P3)
+    Soul {
+        #[command(subcommand)]
+        command: CharacterSoulCommand,
     },
     /// Run a Character prompt through the existing Agent Host
     Run {
@@ -195,6 +217,112 @@ pub enum KnowledgeCommand {
     },
 }
 
+/// `creator character memory` subcommands (v1.184 P3).
+#[derive(Debug, Subcommand)]
+pub enum CharacterMemoryCommand {
+    /// Capture a session-end digest into the Character review queue
+    Capture {
+        #[arg(long)]
+        character_id: String,
+        #[arg(long)]
+        pending_id: String,
+        #[arg(long)]
+        session_id: String,
+        #[arg(long)]
+        binding_id: Option<String>,
+        #[arg(long)]
+        task_kind: Option<String>,
+        /// Session digest (raw text)
+        #[arg(long)]
+        digest: String,
+        #[arg(long)]
+        created_at: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// List pending-review entries for a Character scope
+    PendingList {
+        #[arg(long)]
+        character_id: String,
+        #[arg(long)]
+        binding_id: Option<String>,
+        #[arg(long)]
+        limit: Option<i64>,
+        #[arg(long)]
+        cursor: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Count pending-review entries for a Character scope
+    PendingCount {
+        #[arg(long)]
+        character_id: String,
+        #[arg(long)]
+        binding_id: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Dismiss a pending-review entry without promoting
+    PendingDismiss {
+        #[arg(long)]
+        character_id: String,
+        #[arg(long)]
+        pending_id: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Drain one bounded batch of the Character review queue
+    Review {
+        #[arg(long)]
+        character_id: String,
+        #[arg(long)]
+        binding_id: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// List Character memory fragments for a scope
+    Fragments {
+        #[arg(long)]
+        character_id: String,
+        #[arg(long)]
+        binding_id: Option<String>,
+        #[arg(long)]
+        limit: Option<i64>,
+        #[arg(long)]
+        cursor: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Explicit, revision-checked local→shared promotion
+    Promote {
+        #[arg(long)]
+        character_id: String,
+        #[arg(long)]
+        fragment_id: String,
+        #[arg(long)]
+        expected_revision: u64,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+}
+
+/// `creator character soul` subcommands (v1.184 P3).
+#[derive(Debug, Subcommand)]
+pub enum CharacterSoulCommand {
+    /// Read or regenerate the Character SOUL narrative
+    Reflect {
+        #[arg(long)]
+        character_id: String,
+        #[arg(long)]
+        binding_id: Option<String>,
+        /// Force on-demand synthesis (registers a synthesizer)
+        #[arg(long, default_value_t = false)]
+        force: bool,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+}
+
 /// Run `creator character`.
 ///
 /// # Errors
@@ -303,6 +431,74 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                 )
                 .await
             }
+        },
+        CharacterCommand::Memory { command } => match command {
+            CharacterMemoryCommand::Capture {
+                character_id,
+                pending_id,
+                session_id,
+                binding_id,
+                task_kind,
+                digest,
+                created_at,
+                json,
+            } => {
+                memory_capture(
+                    &client, &character_id, &pending_id, &session_id, binding_id, task_kind,
+                    digest, created_at, json,
+                )
+                .await
+            }
+            CharacterMemoryCommand::PendingList {
+                character_id,
+                binding_id,
+                limit,
+                cursor,
+                json,
+            } => {
+                memory_pending_list(&client, &character_id, binding_id, limit, cursor, json).await
+            }
+            CharacterMemoryCommand::PendingCount {
+                character_id,
+                binding_id,
+                json,
+            } => {
+                memory_pending_count(&client, &character_id, binding_id, json).await
+            }
+            CharacterMemoryCommand::PendingDismiss {
+                character_id,
+                pending_id,
+                json,
+            } => memory_pending_dismiss(&client, &character_id, &pending_id, json).await,
+            CharacterMemoryCommand::Review {
+                character_id,
+                binding_id,
+                json,
+            } => memory_review(&client, &character_id, binding_id, json).await,
+            CharacterMemoryCommand::Fragments {
+                character_id,
+                binding_id,
+                limit,
+                cursor,
+                json,
+            } => memory_fragments(&client, &character_id, binding_id, limit, cursor, json).await,
+            CharacterMemoryCommand::Promote {
+                character_id,
+                fragment_id,
+                expected_revision,
+                json,
+            } => {
+                memory_promote(&client, &character_id, &fragment_id, expected_revision, json)
+                    .await
+            }
+        },
+        CharacterCommand::Soul { command } => match command {
+            CharacterSoulCommand::Reflect {
+                character_id,
+                binding_id,
+                force,
+                json,
+            } => soul_reflect(&client, &character_id, binding_id, force, json).await,
         },
         CharacterCommand::Run {
             character_id,
@@ -772,6 +968,290 @@ async fn run_character(
         println!("operation_id: {}", operation.operation_id);
         println!("result:");
         println!("{result}");
+    }
+    Ok(())
+}
+
+// ─── Character SOUL/Memory helpers (v1.184 P3) ─────────────────────────────
+
+fn character_memory_base(character_id: &str) -> String {
+    format!("/v1/daemon/characters/{character_id}/memory")
+}
+
+fn binding_pairs(binding_id: Option<&str>, limit: Option<i64>, cursor: Option<&str>) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
+    if let Some(b) = binding_id {
+        pairs.push(("binding_id".to_string(), b.to_string()));
+    }
+    if let Some(n) = limit {
+        pairs.push(("limit".to_string(), n.to_string()));
+    }
+    if let Some(c) = cursor {
+        pairs.push(("cursor".to_string(), c.to_string()));
+    }
+    pairs
+}
+
+async fn memory_capture(
+    client: &DaemonClient,
+    character_id: &str,
+    pending_id: &str,
+    session_id: &str,
+    binding_id: Option<String>,
+    task_kind: Option<String>,
+    digest: String,
+    created_at: Option<String>,
+    json: bool,
+) -> Result<()> {
+    let mut body = serde_json::json!({
+        "pending_id": pending_id,
+        "session_id": session_id,
+        "raw_digest": digest,
+    });
+    if let Some(b) = binding_id {
+        body["binding_id"] = serde_json::Value::String(b);
+    }
+    if let Some(k) = task_kind {
+        body["task_kind"] = serde_json::Value::String(k);
+    }
+    if let Some(t) = created_at {
+        body["created_at"] = serde_json::Value::String(t);
+    }
+    let req: CaptureCharacterPendingReviewRequest = serde_json::from_value(body)?;
+    let resp: CaptureCharacterPendingReviewResponse = client
+        .post(&format!("{}/pending-review", character_memory_base(character_id)), &req)
+        .await?;
+    print_character_capture(&resp, json);
+    Ok(())
+}
+
+fn print_character_capture(resp: &CaptureCharacterPendingReviewResponse, json: bool) {
+    if json {
+        println!("{}", serde_json::to_string_pretty(resp).unwrap_or_default());
+    } else {
+        println!("Captured pending review:");
+        println!("  pending_id: {}", &*resp.pending_id);
+    }
+}
+
+async fn memory_pending_list(
+    client: &DaemonClient,
+    character_id: &str,
+    binding_id: Option<String>,
+    limit: Option<i64>,
+    cursor: Option<String>,
+    json: bool,
+) -> Result<()> {
+    let pairs = binding_pairs(binding_id.as_deref(), limit, cursor.as_deref());
+    let path = query_path(&format!("{}/pending-review", character_memory_base(character_id)), &pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect::<Vec<_>>());
+    let resp: ListCharacterPendingReviewsResponse = client.get(&path).await?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+    } else if resp.items.is_empty() {
+        println!("No pending reviews.");
+    } else {
+        for r in &resp.items {
+            if let Some(b) = r.binding_id.as_deref() {
+                println!("{}  {}  binding={}", &*r.pending_id, &*r.task_kind, b);
+            } else {
+                println!("{}  {}  shared", &*r.pending_id, &*r.task_kind);
+            }
+        }
+        if resp.pagination.has_more {
+            if let Some(next) = &resp.pagination.next_cursor {
+                println!("next_cursor: {next}");
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn memory_pending_count(
+    client: &DaemonClient,
+    character_id: &str,
+    binding_id: Option<String>,
+    json: bool,
+) -> Result<()> {
+    let mut path = format!("{}/pending-review/count", character_memory_base(character_id));
+    if let Some(b) = binding_id {
+        path = format!("{path}?binding_id={b}");
+    }
+    let resp: CountCharacterPendingReviewsResponse = client.get(&path).await?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+    } else {
+        println!("{} pending review(s).", resp.count);
+    }
+    Ok(())
+}
+
+async fn memory_pending_dismiss(
+    client: &DaemonClient,
+    character_id: &str,
+    pending_id: &str,
+    json: bool,
+) -> Result<()> {
+    let resp: DeleteCharacterPendingReviewResponse = client
+        .delete(&format!(
+            "{}/pending-review/{pending_id}",
+            character_memory_base(character_id)
+        ))
+        .await?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+    } else if resp.success {
+        println!("Pending review '{pending_id}' dismissed.");
+    } else {
+        println!("Dismiss did not succeed for '{pending_id}'.");
+    }
+    Ok(())
+}
+
+/// Drain one bounded batch; loops while `has_more` (cap 100 calls, stops on
+/// zero-progress) mirroring `creator memory review`.
+const CHARACTER_REVIEW_DRAIN_MAX_CALLS: u32 = 100;
+
+async fn memory_review(
+    client: &DaemonClient,
+    character_id: &str,
+    binding_id: Option<String>,
+    json: bool,
+) -> Result<()> {
+    let mut promoted: i64 = 0;
+    let mut fragmented: i64 = 0;
+    let mut dropped: i64 = 0;
+    let mut processed: i64 = 0;
+    let mut has_more = false;
+    let mut stopped_zero_progress = false;
+    for call in 0..CHARACTER_REVIEW_DRAIN_MAX_CALLS {
+        let mut body = serde_json::json!({});
+        if let Some(b) = binding_id.clone() {
+            body["binding_id"] = serde_json::Value::String(b);
+        }
+        let req: ReviewCharacterMemoryRequest = serde_json::from_value(body)?;
+        let resp: ReviewCharacterMemoryResponse = client
+            .post(&format!("{}/review", character_memory_base(character_id)), &req)
+            .await?;
+        promoted += resp.promoted;
+        fragmented += resp.fragmented;
+        dropped += resp.dropped;
+        processed += resp.processed.unwrap_or(0);
+        has_more = resp.has_more.unwrap_or(false);
+        if !has_more {
+            break;
+        }
+        if resp.processed.unwrap_or(0) == 0 {
+            stopped_zero_progress = true;
+            break;
+        }
+        if call + 1 >= CHARACTER_REVIEW_DRAIN_MAX_CALLS {
+            has_more = true;
+            break;
+        }
+    }
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "promoted": promoted,
+                "fragmented": fragmented,
+                "dropped": dropped,
+                "processed": processed,
+                "has_more": has_more,
+                "stopped_zero_progress": stopped_zero_progress,
+            }))?
+        );
+    } else if processed == 0 && !has_more {
+        println!("No pending memories to review.");
+    } else {
+        println!("Review completed: promoted={promoted}, fragmented={fragmented}, dropped={dropped}");
+    }
+    Ok(())
+}
+
+async fn memory_fragments(
+    client: &DaemonClient,
+    character_id: &str,
+    binding_id: Option<String>,
+    limit: Option<i64>,
+    cursor: Option<String>,
+    json: bool,
+) -> Result<()> {
+    let pairs = binding_pairs(binding_id.as_deref(), limit, cursor.as_deref());
+    let path = query_path(&format!("{}/fragments", character_memory_base(character_id)), &pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect::<Vec<_>>());
+    let resp: ListCharacterMemoryFragmentsResponse = client.get(&path).await?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+    } else if resp.fragments.is_empty() {
+        println!("No memory fragments found.");
+    } else {
+        for f in &resp.fragments {
+            let scope = f.binding_id.as_deref().map(|s| s.as_str()).unwrap_or("shared");
+            println!("{}  {}  {}", &*f.fragment_id, scope, &*f.summary);
+        }
+        if resp.pagination.has_more {
+            if let Some(next) = &resp.pagination.next_cursor {
+                println!("next_cursor: {next}");
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn memory_promote(
+    client: &DaemonClient,
+    character_id: &str,
+    fragment_id: &str,
+    expected_revision: u64,
+    json: bool,
+) -> Result<()> {
+    let req: PromoteCharacterFragmentRequest = serde_json::from_value(serde_json::json!({
+        "expected_revision": expected_revision,
+    }))?;
+    let resp: PromoteCharacterFragmentResponse = client
+        .post(
+            &format!(
+                "{}/fragments/{fragment_id}:promote",
+                character_memory_base(character_id)
+            ),
+            &req,
+        )
+        .await?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+    } else {
+        println!("Promoted fragment {} to shared (revision {}).", &*resp.fragment.fragment_id, resp.fragment.revision);
+    }
+    Ok(())
+}
+
+async fn soul_reflect(
+    client: &DaemonClient,
+    character_id: &str,
+    binding_id: Option<String>,
+    force: bool,
+    json: bool,
+) -> Result<()> {
+    let mut body = serde_json::json!({ "force_regenerate": force });
+    if let Some(b) = binding_id {
+        body["binding_id"] = serde_json::Value::String(b);
+    }
+    let req: CharacterSoulNarrativeRequest = serde_json::from_value(body)?;
+    let resp: CharacterSoulNarrativeResponse = client
+        .post(
+            &format!("/v1/daemon/characters/{character_id}/soul/reflect"),
+            &req,
+        )
+        .await?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+    } else {
+        println!("character_id: {}", &*resp.character_id);
+        println!("state:        {}", &resp.state.to_string());
+        if let Some(n) = resp.narrative.as_deref() {
+            println!("narrative:");
+            println!("{n}");
+        }
     }
     Ok(())
 }

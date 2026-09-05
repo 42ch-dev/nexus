@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/characters/memory/promote-character-fragment-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus PromoteCharacterFragmentResponse",
+  "description": "Response body for POST /v1/daemon/characters/{character_id}/memory/fragments/{fragment_id}:promote. Returns the promoted fragment (same id, cleared binding provenance, incremented revision).",
+  "type": "object",
+  "required": ["fragment"],
+  "additionalProperties": false,
+  "properties": {
+    "fragment": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/characters/memory/character-memory-fragment-info.schema.json"
+    }
+  }
+}

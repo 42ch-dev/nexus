@@ -470,3 +470,108 @@ async fn character_provenance_rejects_inactive_character_before_side_effects() {
 
     drop(s.tmp);
 }
+
+#[tokio::test]
+async fn character_mind_projection_is_bounded_scoped_and_honest_empty() {
+    use crate::api::handlers::memory_pipeline::load_character_mind_projection;
+    use nexus_creator_memory::soul_io;
+
+    let s = setup().await;
+    // The character was created with one initial binding to WORLD_A.
+    let binding_a1 = nexus_local_db::list_bindings_for_character(
+        &s.pool,
+        OWNER_A,
+        &s.chr_a,
+        10,
+        0,
+    )
+    .await
+    .unwrap()
+    .into_iter()
+    .next()
+    .unwrap()
+    .binding_id;
+
+    // Honest empty: no SOUL.md and no fragments → both slots empty.
+    let mind = load_character_mind_projection(
+        &s.pool, &s.nexus_home, OWNER_A, &s.chr_a, Some(&binding_a1),
+    )
+    .await;
+    assert_eq!(mind.memory.len(), 0, "no fragments yet");
+    assert!(mind.soul.is_none(), "no SOUL.md yet");
+
+    // A shared fragment and a binding-local fragment.
+    let shared = nexus_local_db::NewCharacterMemoryFragment {
+        fragment_id: "frag_shared_p".to_string(),
+        session_id: "sess_shared_p".to_string(),
+        character_id: s.chr_a.clone(),
+        actor_world_binding_id: None,
+        keywords: r#"["harbor"]"#.to_string(),
+        summary: "SHAREDPROJ the harbor accord holds.".to_string(),
+        created_at: "2026-01-01T00:00:01Z".to_string(),
+        ttl: None,
+    };
+    nexus_local_db::create_character_fragment(&s.pool, OWNER_A, &shared)
+        .await
+        .unwrap();
+    let local = nexus_local_db::NewCharacterMemoryFragment {
+        fragment_id: "frag_local_a".to_string(),
+        session_id: "sess_local_a".to_string(),
+        character_id: s.chr_a.clone(),
+        actor_world_binding_id: Some(binding_a1.clone()),
+        keywords: r#"["lantern"]"#.to_string(),
+        summary: "LOCALPROJ only this binding saw the lantern.".to_string(),
+        created_at: "2026-01-01T00:00:02Z".to_string(),
+        ttl: None,
+    };
+    nexus_local_db::create_character_fragment(&s.pool, OWNER_A, &local)
+        .await
+        .unwrap();
+
+    // Projection for that binding: shared + binding-local, newest first.
+    let mind = load_character_mind_projection(
+        &s.pool, &s.nexus_home, OWNER_A, &s.chr_a, Some(&binding_a1),
+    )
+    .await;
+    assert_eq!(mind.memory.len(), 2);
+    assert!(
+        mind.memory[0].contains("LOCALPROJ"),
+        "newest (binding-local) first: {:?}",
+        mind.memory
+    );
+    assert!(mind.memory[1].contains("SHAREDPROJ"));
+
+    // The shared scope (no binding) sees only the shared fragment.
+    let mind = load_character_mind_projection(
+        &s.pool, &s.nexus_home, OWNER_A, &s.chr_a, None,
+    )
+    .await;
+    assert_eq!(mind.memory.len(), 1);
+    assert!(mind.memory[0].contains("SHAREDPROJ"));
+
+    // A foreign OWNER_B scope never observes Character A data.
+    let mind = load_character_mind_projection(
+        &s.pool, &s.nexus_home, OWNER_B, &s.chr_a, Some(&binding_a1),
+    )
+    .await;
+    assert!(
+        mind.memory.is_empty() && mind.soul.is_none(),
+        "foreign owner must not observe Character A data"
+    );
+
+    // Writing SOUL.md makes the soul slot present (raw text, honest).
+    let bearer = MemoryBearerRef::Character {
+        owner_creator_id: OWNER_A,
+        character_id: &s.chr_a,
+    };
+    soul_io::create(&s.nexus_home, bearer).unwrap();
+    let doc = soul_io::load(&s.nexus_home, bearer).unwrap();
+    soul_io::save(&s.nexus_home, bearer, &doc).unwrap();
+    let mind = load_character_mind_projection(
+        &s.pool, &s.nexus_home, OWNER_A, &s.chr_a, Some(&binding_a1),
+    )
+    .await;
+    assert!(mind.soul.is_some(), "SOUL.md present after save");
+
+    drop(s.tmp);
+}

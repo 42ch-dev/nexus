@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT fragment_id as \"fragment_id!\", session_id as \"session_id!\",\n                      character_id as \"character_id!\", actor_world_binding_id,\n                      keywords as \"keywords!\", summary as \"summary!\",\n                      created_at as \"created_at!\", ttl,\n                      revision as \"revision!\"\n               FROM character_memory_fragments\n               WHERE character_id = ? AND actor_world_binding_id IS NULL\n               ORDER BY created_at DESC LIMIT ?",
+  "query": "SELECT fragment_id as \"fragment_id!\", session_id as \"session_id!\",\n                      character_id as \"character_id!\", actor_world_binding_id,\n                      keywords as \"keywords!\", summary as \"summary!\",\n                      created_at as \"created_at!\", ttl,\n                      revision as \"revision!\"\n               FROM character_memory_fragments\n               WHERE character_id = ? AND actor_world_binding_id IS NULL\n               ORDER BY created_at DESC, fragment_id DESC LIMIT ? OFFSET ?",
   "describe": {
     "columns": [
       {
@@ -50,7 +50,7 @@
       }
     ],
     "parameters": {
-      "Right": 2
+      "Right": 3
     },
     "nullable": [
       false,
@@ -64,5 +64,5 @@
       false
     ]
   },
-  "hash": "8a2a5d799a3668037970857d07817a993c13dfeea03bd82341c8260eaadeaa20"
+  "hash": "db2b782f0bd66628248edb799bfa231c8e80efbd213ab77b6b25c452bae540dc"
 }

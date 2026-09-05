@@ -61,6 +61,69 @@ const CHARACTER_MEMORY_HEADING: &str = "## Character Memory";
 const CHARACTER_TOM_L1_HEADING: &str = "## Character ToM — L1";
 const CHARACTER_TOM_L2_HEADING: &str = "## Character ToM — L2";
 
+/// P3 Character SOUL/Memory projection into the two reserved mind slots.
+///
+/// Immutable once built: [`Self::new`] applies fixed deterministic bounds
+/// (UTF-8-safe truncation + entry cap) so the projected slots are stable and
+/// bounded when rendered. `None`/empty keep the P2 empty-heading bytes
+/// identical (missing optional memory is an honest empty section).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CharacterMindInput {
+    /// SOUL.md text for the executing Character, bounded and truncated.
+    pub soul: Option<String>,
+    /// Memory lines for the admitted scope, bounded and caller-ordered.
+    pub memory: Vec<String>,
+}
+
+/// Max Unicode scalar chars for the projected SOUL slot (4 KiB).
+pub const CHARACTER_MIND_MAX_SOUL_CHARS: usize = 4096;
+/// Max memory lines projected into the `## Character Memory` slot.
+pub const CHARACTER_MIND_MAX_MEMORY_ENTRIES: usize = 20;
+/// Max Unicode scalar chars per projected memory line.
+pub const CHARACTER_MIND_MAX_ENTRY_CHARS: usize = 280;
+
+impl CharacterMindInput {
+    /// Build a bounded, deterministic mind input.
+    #[must_use]
+    pub fn new(soul: Option<String>, memory: Vec<String>) -> Self {
+        let soul = soul.map(|s| truncate_chars(&s, CHARACTER_MIND_MAX_SOUL_CHARS));
+        let memory: Vec<String> = memory
+            .into_iter()
+            .take(CHARACTER_MIND_MAX_MEMORY_ENTRIES)
+            .map(|line| truncate_chars(&line, CHARACTER_MIND_MAX_ENTRY_CHARS))
+            .collect();
+        Self { soul, memory }
+    }
+
+    /// Whether neither slot carries content (used by tests to assert the
+    /// legacy/honest-empty path).
+    #[cfg(test)]
+    fn is_empty(&self) -> bool {
+        self.soul.as_deref().map_or(true, str::is_empty) && self.memory.is_empty()
+    }
+}
+
+/// Truncate `text` to at most `max_chars` Unicode scalar chars, appending
+/// `…` when truncated (UTF-8 safe — never splits a multi-byte char).
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let mut truncated_at: Option<usize> = None;
+    for (idx, _ch) in text.char_indices() {
+        if idx as usize >= max_chars {
+            truncated_at = Some(idx);
+            break;
+        }
+    }
+    let end = truncated_at.unwrap_or(text.len());
+    let mut s = text[..end].to_string();
+    if truncated_at.is_some() {
+        s.push('…');
+    }
+    s
+}
+
 /// Actor discriminant for internal MCA context. Authorization is caller-owned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MomentActorKind {
@@ -79,15 +142,25 @@ pub struct MomentActorContext {
     pub kind: MomentActorKind,
     /// Character view rows. Required for [`MomentActorKind::Character`]; ignored otherwise.
     pub character_view: Option<CharacterViewInput>,
+    /// P3 SOUL/Memory projection for [`MomentActorKind::Character`]. `None`
+    /// means no projection (the P2 empty-heading bytes). Ignored for Creator.
+    pub character_mind: Option<CharacterMindInput>,
 }
 
 impl MomentActorContext {
     /// Character actor with a bounded admitted view (may be empty rows).
     #[must_use]
     pub fn character(view: CharacterViewInput) -> Self {
+        Self::character_with_mind(view, CharacterMindInput::default())
+    }
+
+    /// Character actor with a bounded admitted SOUL/Memory projection.
+    #[must_use]
+    pub fn character_with_mind(view: CharacterViewInput, mind: CharacterMindInput) -> Self {
         Self {
             kind: MomentActorKind::Character,
             character_view: Some(view),
+            character_mind: Some(mind),
         }
     }
 
@@ -97,6 +170,7 @@ impl MomentActorContext {
         Self {
             kind: MomentActorKind::Creator,
             character_view: None,
+            character_mind: None,
         }
     }
 
@@ -106,6 +180,7 @@ impl MomentActorContext {
         Self {
             kind: MomentActorKind::Creator,
             character_view: Some(view),
+            character_mind: None,
         }
     }
 
@@ -395,10 +470,11 @@ pub struct MomentContext {
     /// ran (no World-KB, activation off, or all entries gated off).
     /// Additive — never part of `to_full_context()` (AC-I6).
     pub hygiene_trace: Option<Vec<crate::hygiene::HygieneTraceEntry>>,
-    /// When true, `to_full_context` emits the four fixed Character mind headings
-    /// even with empty bodies. Legacy assemblies leave this false so empty
-    /// sections stay omitted.
-    pub character_mind: bool,
+    /// P3 SOUL/Memory projection into the four fixed Character mind headings.
+    /// `Some(mind)` emits the headings (SOUL/Memory bodies when present; the
+    /// two ToM headings always empty); `None` is legacy — empty sections stay
+    /// omitted.
+    pub character_mind: Option<CharacterMindInput>,
 }
 
 impl MomentContext {
@@ -433,7 +509,7 @@ impl MomentContext {
         let directive = section(self.moment_directive.as_ref(), MOMENT_DIRECTIVE_HEADING);
         let world_kb = section(self.world_kb.as_ref(), WORLD_KB_HEADING);
         let user_knowledge = section(self.user_knowledge.as_ref(), USER_KNOWLEDGE_HEADING);
-        let character_mind = self.character_mind.then(render_character_mind_headings);
+        let character_mind = self.character_mind.as_ref().map(render_character_mind_headings);
 
         let mut parts: Vec<Option<String>> = vec![stage0, character_mind];
         match self.moment_directive_depth {
@@ -882,10 +958,10 @@ where
         activation_budget,
         moment_directive_meta: directive.as_ref().map(MomentDirectiveStatus::from),
         hygiene_trace,
-        character_mind: request
-            .actor
-            .as_ref()
-            .is_some_and(MomentActorContext::is_character),
+        character_mind: request.actor.as_ref().and_then(|a| {
+            a.is_character()
+                .then(|| a.character_mind.clone().unwrap_or_default())
+        }),
     };
 
     // 6. Cross-domain truncation if max_tokens set (the directive section is
@@ -966,9 +1042,21 @@ fn render_gated_slots(
 }
 
 
-fn render_character_mind_headings() -> String {
+fn render_character_mind_headings(mind: &CharacterMindInput) -> String {
+    let soul = mind
+        .soul
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|s| format!("{s}\n"))
+        .unwrap_or_default();
+    let memory = if mind.memory.is_empty() {
+        String::new()
+    } else {
+        let lines = mind.memory.join("\n");
+        format!("{lines}\n")
+    };
     format!(
-        "{CHARACTER_SOUL_HEADING}\n\n{CHARACTER_MEMORY_HEADING}\n\n{CHARACTER_TOM_L1_HEADING}\n\n{CHARACTER_TOM_L2_HEADING}\n"
+        "{CHARACTER_SOUL_HEADING}\n\n{soul}{CHARACTER_MEMORY_HEADING}\n\n{memory}{CHARACTER_TOM_L1_HEADING}\n\n{CHARACTER_TOM_L2_HEADING}\n"
     )
 }
 
@@ -1975,7 +2063,7 @@ mod tests {
             activation_budget: None,
             moment_directive_meta: None,
             hygiene_trace: None,
-            character_mind: false,
+            character_mind: None,
         };
 
         let (personality, rest) = ctx.split_stage0_personality();
@@ -2019,7 +2107,7 @@ mod tests {
             activation_budget: None,
             moment_directive_meta: None,
             hygiene_trace: None,
-            character_mind: false,
+            character_mind: None,
         };
 
         // apply_cross_domain_truncation uses split_stage0_personality internally
@@ -2880,5 +2968,105 @@ mod tests {
             .iter()
             .any(|t| t.entry_id == "kb_guild" && !t.accepted));
         assert!(!trace.iter().any(|t| t.entry_id == "kb_guild" && t.accepted));
+    }
+
+    // ── P3: Character SOUL/Memory slot projection ─────────────────────────
+
+    #[test]
+    fn mind_input_applies_fixed_bounds_deterministically() {
+        let long_soul = "x".repeat(CHARACTER_MIND_MAX_SOUL_CHARS + 500);
+        let wide_soul = "é".repeat(CHARACTER_MIND_MAX_SOUL_CHARS + 3);
+        let entries: Vec<String> = (0..(CHARACTER_MIND_MAX_MEMORY_ENTRIES + 7))
+            .map(|i| format!("entry {i} {}", "y".repeat(CHARACTER_MIND_MAX_ENTRY_CHARS + 100)))
+            .collect();
+
+        let mind = CharacterMindInput::new(Some(long_soul), entries.clone());
+        assert_eq!(
+            mind.soul.as_ref().unwrap().chars().count(),
+            CHARACTER_MIND_MAX_SOUL_CHARS + 1,
+            "truncation appends one ellipsis scalar"
+        );
+        assert!(mind.soul.as_ref().unwrap().ends_with('…'));
+        assert_eq!(
+            mind.memory.len(),
+            CHARACTER_MIND_MAX_MEMORY_ENTRIES,
+            "entry cap applies"
+        );
+        assert!(mind.memory.last().unwrap().ends_with('…'));
+
+        // Multi-byte safe: truncating é-heavy text never splits a char.
+        let mind = CharacterMindInput::new(Some(wide_soul), vec![]);
+        assert!(mind.soul.is_some());
+        assert!(mind.soul.as_ref().unwrap().ends_with('…'));
+
+        // Empty / None keeps is_empty true (legacy empty headings).
+        let empty = CharacterMindInput::default();
+        assert!(empty.is_empty());
+        let filled = CharacterMindInput::new(Some("soul".to_string()), vec!["m1".to_string()]);
+        assert!(!filled.is_empty());
+    }
+
+    #[test]
+    fn render_mind_slots_bounded_and_ordered_with_empty_tom() {
+        let mind = CharacterMindInput::new(
+            Some("# Ava\nSOUL body".to_string()),
+            vec!["- m1".to_string(), "- m2".to_string()],
+        );
+        let rendered = render_character_mind_headings(&mind);
+        assert!(rendered.starts_with("## Character SOUL\n\n"));
+        assert!(rendered.contains("# Ava\nSOUL body\n"));
+        assert!(rendered.contains("## Character Memory\n\n- m1\n- m2\n"));
+        assert!(rendered.contains("## Character ToM — L1\n\n## Character ToM — L2\n"));
+        // SOUL before Memory before ToM; no ToM content.
+        let soul_pos = rendered.find("## Character SOUL").unwrap();
+        let mem_pos = rendered.find("## Character Memory").unwrap();
+        let tom1 = rendered.find("## Character ToM — L1").unwrap();
+        assert!(soul_pos < mem_pos && mem_pos < tom1);
+        assert!(!rendered.contains("ToM — L1\n\nsome L1"));
+        assert!(!rendered.contains("ToM — L2\n\nsome L2"));
+    }
+
+    #[tokio::test]
+    async fn character_mind_slots_fill_only_when_projected() {
+        let stores = TestStores::new();
+        let allowed = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
+            "wld_1",
+            nexus_contracts::BlockType::Character,
+            "AdmittedAda",
+        );
+        // Empty mind: legacy P2 empty headings, no SOUL/Memory bodies.
+        let request = MomentRequest::new(Stage0Assembly {
+            user_prompt: "Act.".to_string(),
+            personality: "Creator SOUL must not leak.".to_string(),
+            ..Stage0Assembly::default()
+        })
+        .with_world("wld_1")
+        .with_actor(MomentActorContext::character(CharacterViewInput::from_entries(
+            vec![allowed.clone()],
+        )));
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let empty_full = ctx.to_full_context();
+        assert!(empty_full.contains("## Character SOUL\n\n## Character Memory\n\n"));
+
+        // Projected mind: SOUL + Memory bodies present; ToM stays empty.
+        let projected = CharacterMindInput::new(
+            Some("# Ava\nSOUL".to_string()),
+            vec!["- SHAREDMEMORYMARKER".to_string(), "- LOCALMEMORYMARKER".to_string()],
+        );
+        let request = MomentRequest::new(Stage0Assembly {
+            user_prompt: "Act.".to_string(),
+            personality: "Creator SOUL must not leak.".to_string(),
+            ..Stage0Assembly::default()
+        })
+        .with_world("wld_1")
+        .with_actor(MomentActorContext::character_with_mind(
+            CharacterViewInput::from_entries(vec![allowed]),
+            projected,
+        ));
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let full = ctx.to_full_context();
+        assert!(full.contains("# Ava\nSOUL\n"));
+        assert!(full.contains("- SHAREDMEMORYMARKER\n- LOCALMEMORYMARKER\n"));
+        assert!(full.contains("## Character ToM — L1\n\n## Character ToM — L2\n"));
     }
 }

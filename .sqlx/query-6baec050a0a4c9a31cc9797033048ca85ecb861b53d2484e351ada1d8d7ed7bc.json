@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT pending_id as \"pending_id!\", session_id as \"session_id!\",\n                  character_id as \"character_id!\", actor_world_binding_id,\n                  task_kind as \"task_kind!\", raw_digest as \"raw_digest!\",\n                  created_at as \"created_at!\"\n           FROM character_memory_pending_review\n           WHERE character_id = ? AND actor_world_binding_id IS ?\n           ORDER BY created_at DESC LIMIT ?",
+  "query": "SELECT pending_id as \"pending_id!\", session_id as \"session_id!\",\n                  character_id as \"character_id!\", actor_world_binding_id,\n                  task_kind as \"task_kind!\", raw_digest as \"raw_digest!\",\n                  created_at as \"created_at!\"\n           FROM character_memory_pending_review\n           WHERE character_id = ? AND actor_world_binding_id IS ?\n           ORDER BY created_at DESC, pending_id DESC LIMIT ? OFFSET ?",
   "describe": {
     "columns": [
       {
@@ -40,7 +40,7 @@
       }
     ],
     "parameters": {
-      "Right": 3
+      "Right": 4
     },
     "nullable": [
       false,
@@ -52,5 +52,5 @@
       false
     ]
   },
-  "hash": "9c06d5a16aaffc03f5d6fe02e47527a360b547935b9b9b7be8ee2b027595a631"
+  "hash": "6baec050a0a4c9a31cc9797033048ca85ecb861b53d2484e351ada1d8d7ed7bc"
 }

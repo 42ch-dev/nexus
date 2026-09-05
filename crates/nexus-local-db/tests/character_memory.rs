@@ -207,14 +207,14 @@ async fn pending_review_roundtrip_and_character_isolation() {
     assert_eq!(fetched.actor_world_binding_id.as_deref(), Some(s.binding_a1.as_str()));
 
     // Shared scope lists only provenance-free rows.
-    let list = list_character_pending_reviews(&pool, OWNER, &s.char_a, None, 10)
+    let list = list_character_pending_reviews(&pool, OWNER, &s.char_a, None, 10, 0)
         .await
         .unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].pending_id, "pend_1");
     assert_eq!(count_character_pending_reviews(&pool, OWNER, &s.char_a, None).await.unwrap(), 1);
     // Binding scope lists only that binding's rows.
-    let list_b1 = list_character_pending_reviews(&pool, OWNER, &s.char_a, Some(&s.binding_a1), 10)
+    let list_b1 = list_character_pending_reviews(&pool, OWNER, &s.char_a, Some(&s.binding_a1), 10, 0)
         .await
         .unwrap();
     assert_eq!(list_b1.len(), 1);
@@ -227,14 +227,14 @@ async fn pending_review_roundtrip_and_character_isolation() {
     );
 
     // Character B is fully isolated.
-    assert!(list_character_pending_reviews(&pool, OWNER, &s.char_b, None, 10)
+    assert!(list_character_pending_reviews(&pool, OWNER, &s.char_b, None, 10, 0)
         .await
         .unwrap()
         .is_empty());
     assert_eq!(count_character_pending_reviews(&pool, OWNER, &s.char_b, None).await.unwrap(), 0);
 
     // Bounded list honors LIMIT.
-    let bounded = list_character_pending_reviews(&pool, OWNER, &s.char_a, Some(&s.binding_a1), 1)
+    let bounded = list_character_pending_reviews(&pool, OWNER, &s.char_a, Some(&s.binding_a1), 1, 0)
         .await
         .unwrap();
     assert_eq!(bounded.len(), 1);
@@ -413,7 +413,7 @@ async fn fragment_scope_isolation_between_shared_and_bindings() {
         .unwrap();
 
     // Shared scope holds only provenance-free fragments.
-    let shared = list_character_fragments(&pool, OWNER, &s.char_a, None, 10)
+    let shared = list_character_fragments(&pool, OWNER, &s.char_a, None, 10, 0)
         .await
         .unwrap();
     assert_eq!(shared.len(), 1);
@@ -421,19 +421,19 @@ async fn fragment_scope_isolation_between_shared_and_bindings() {
     assert_eq!(shared[0].revision, 0);
 
     // Binding scopes are exact: each returns only its own provenance.
-    let b1 = list_character_fragments(&pool, OWNER, &s.char_a, Some(&s.binding_a1), 10)
+    let b1 = list_character_fragments(&pool, OWNER, &s.char_a, Some(&s.binding_a1), 10, 0)
         .await
         .unwrap();
     assert_eq!(b1.len(), 1);
     assert_eq!(b1[0].fragment_id, "frag_b1");
-    let b2 = list_character_fragments(&pool, OWNER, &s.char_a, Some(&s.binding_a2), 10)
+    let b2 = list_character_fragments(&pool, OWNER, &s.char_a, Some(&s.binding_a2), 10, 0)
         .await
         .unwrap();
     assert_eq!(b2.len(), 1);
     assert_eq!(b2[0].fragment_id, "frag_b2");
 
     // Character A/B isolation holds per scope.
-    let b_shared = list_character_fragments(&pool, OWNER, &s.char_b, None, 10)
+    let b_shared = list_character_fragments(&pool, OWNER, &s.char_b, None, 10, 0)
         .await
         .unwrap();
     assert_eq!(b_shared.len(), 1);
@@ -961,7 +961,7 @@ async fn binding_local_reads_require_exact_active_binding() {
         .await
         .unwrap()
         .is_none());
-    assert!(list_character_pending_reviews(&pool, OWNER, &s.char_a, Some(&s.binding_a2), 10)
+    assert!(list_character_pending_reviews(&pool, OWNER, &s.char_a, Some(&s.binding_a2), 10, 0)
         .await
         .unwrap()
         .is_empty());
@@ -972,7 +972,7 @@ async fn binding_local_reads_require_exact_active_binding() {
         0
     );
     // The shared scope also cannot see binding-local rows.
-    assert!(list_character_pending_reviews(&pool, OWNER, &s.char_a, None, 10)
+    assert!(list_character_pending_reviews(&pool, OWNER, &s.char_a, None, 10, 0)
         .await
         .unwrap()
         .is_empty());
@@ -994,7 +994,7 @@ async fn binding_local_reads_require_exact_active_binding() {
         .await
         .unwrap_err();
     assert!(matches!(err, LocalDbError::ActorNotFound { .. }));
-    let err = list_character_fragments(&pool, OWNER, &s.char_a, Some(&s.binding_b1), 10)
+    let err = list_character_fragments(&pool, OWNER, &s.char_a, Some(&s.binding_b1), 10, 0)
         .await
         .unwrap_err();
     assert!(matches!(err, LocalDbError::ActorNotFound { .. }));
@@ -1005,7 +1005,7 @@ async fn binding_local_reads_require_exact_active_binding() {
         .unwrap()
         .is_some());
     assert_eq!(
-        list_character_fragments(&pool, OWNER, &s.char_a, Some(&s.binding_a1), 10)
+        list_character_fragments(&pool, OWNER, &s.char_a, Some(&s.binding_a1), 10, 0)
             .await
             .unwrap()
             .len(),
@@ -1048,6 +1048,7 @@ async fn inactive_binding_rows_are_unreadable() {
         &s.char_a,
         Some("awb_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1"),
         10,
+        0,
     )
     .await
     .unwrap_err();
@@ -1134,6 +1135,7 @@ async fn archived_or_paused_world_rejects_provenance_writes_and_reads() {
         &s.char_a,
         Some("awb_ccccccccccccccccccccccccccccccc1"),
         10,
+        0,
     )
     .await
     .unwrap_err();
@@ -1165,14 +1167,14 @@ async fn list_limits_are_clamped_to_one_documented_bound() {
     // Negative / zero clamp up to 1.
     for bad in [-1, 0] {
         assert_eq!(
-            list_character_pending_reviews(&pool, OWNER, &s.char_a, None, bad)
+            list_character_pending_reviews(&pool, OWNER, &s.char_a, None, bad, 0)
                 .await
                 .unwrap()
                 .len(),
             1
         );
         assert_eq!(
-            list_character_fragments(&pool, OWNER, &s.char_a, None, bad)
+            list_character_fragments(&pool, OWNER, &s.char_a, None, bad, 0)
                 .await
                 .unwrap()
                 .len(),
@@ -1188,6 +1190,7 @@ async fn list_limits_are_clamped_to_one_documented_bound() {
             &s.char_a,
             None,
             nexus_local_db::MAX_CHARACTER_MEMORY_LIST_LIMIT + 1,
+            0,
         )
         .await
         .unwrap()

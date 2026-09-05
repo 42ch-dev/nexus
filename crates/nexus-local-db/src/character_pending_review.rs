@@ -172,6 +172,10 @@ pub async fn get_character_pending_review(
 /// that binding-local scope and requires the exact active binding with an
 /// owned active World. `limit` is clamped to `1..=MAX_CHARACTER_MEMORY_LIST_LIMIT`.
 ///
+/// Results are ordered `created_at DESC, pending_id DESC` (a total order, so
+/// offset pagination is deterministic); `offset` skips that many rows of the
+/// ordered scope.
+///
 /// # Errors
 ///
 /// Returns `LocalDbError::ActorNotFound` when the Character (or, for a
@@ -183,6 +187,7 @@ pub async fn list_character_pending_reviews(
     character_id: &str,
     binding_id: Option<&str>,
     limit: i64,
+    offset: i64,
 ) -> Result<Vec<CharacterPendingReviewRecord>, LocalDbError> {
     require_owned_character_pool(pool, owner_creator_id, character_id).await?;
     if let Some(binding_id) = binding_id {
@@ -190,6 +195,7 @@ pub async fn list_character_pending_reviews(
             .await?;
     }
     let limit = limit.clamp(1, MAX_CHARACTER_MEMORY_LIST_LIMIT);
+    let offset = offset.max(0);
     let rows = sqlx::query!(
         r#"SELECT pending_id as "pending_id!", session_id as "session_id!",
                   character_id as "character_id!", actor_world_binding_id,
@@ -197,10 +203,11 @@ pub async fn list_character_pending_reviews(
                   created_at as "created_at!"
            FROM character_memory_pending_review
            WHERE character_id = ? AND actor_world_binding_id IS ?
-           ORDER BY created_at DESC LIMIT ?"#,
+           ORDER BY created_at DESC, pending_id DESC LIMIT ? OFFSET ?"#,
         character_id,
         binding_id,
-        limit
+        limit,
+        offset
     )
     .fetch_all(pool)
     .await?;

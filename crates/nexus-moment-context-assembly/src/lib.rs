@@ -47,8 +47,10 @@ pub use directive::{
 pub use generation::GenerationStage;
 pub use inspector::build_inspector_packet;
 pub use moment::{
-    assemble_moment, assemble_moment_with_directive, MomentActorContext, MomentActorKind,
-    MomentContext, MomentRequest,
+    assemble_moment, assemble_moment_with_directive, CharacterMindInput,
+    CHARACTER_MIND_MAX_ENTRY_CHARS, CHARACTER_MIND_MAX_MEMORY_ENTRIES,
+    CHARACTER_MIND_MAX_SOUL_CHARS, MomentActorContext, MomentActorKind, MomentContext,
+    MomentRequest,
 };
 pub use stage0::Stage0Assembly;
 pub use world_context::{
