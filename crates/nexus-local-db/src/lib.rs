@@ -136,6 +136,15 @@ pub use character_soul_narrative::{
     upsert_character_soul_narrative, CharacterSoulNarrativeRecord,
 };
 
+/// Hard upper bound for Character memory list page sizes.
+///
+/// Every `list_*` read on the Character memory repositories clamps its `limit`
+/// to `1..=MAX_CHARACTER_MEMORY_LIST_LIMIT` before issuing SQL, so a caller
+/// cannot force unbounded materialization (SQLite treats `LIMIT -1` as
+/// "no limit"). Follows the local-db pagination convention (clamp, as in
+/// [`reference_source`](crate::reference_source)).
+pub const MAX_CHARACTER_MEMORY_LIST_LIMIT: i64 = 500;
+
 // Re-export mind_state_store types (V1.164 P2, l5-mind when-axis storage)
 pub use mind_state_store::{
     delete_mind_state, get_mind_state, insert_mind_state, list_mind_states_by_holder, MindStateRow,

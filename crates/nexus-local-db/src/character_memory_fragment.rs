@@ -13,11 +13,12 @@
 use sqlx::SqlitePool;
 
 use crate::actor_world_binding::{
-    require_active_character_binding_pool, require_valid_provenance_tx,
+    require_active_owned_provenance_pool, require_valid_provenance_tx,
 };
 use crate::character::{require_active_owned_character, require_owned_character_pool};
 use crate::cas::cas_check_with_version_column;
 use crate::error::{ActorContractConflict, LocalDbError};
+use crate::MAX_CHARACTER_MEMORY_LIST_LIMIT;
 
 /// Character memory fragment row (storage shape; not a wire DTO).
 #[derive(Debug, Clone)]
@@ -145,15 +146,21 @@ pub async fn get_character_fragment(
     pool: &SqlitePool,
     owner_creator_id: &str,
     character_id: &str,
+    binding_id: Option<&str>,
     fragment_id: &str,
 ) -> Result<Option<CharacterMemoryFragmentRecord>, LocalDbError> {
     require_owned_character_pool(pool, owner_creator_id, character_id).await?;
-    load_fragment(pool, character_id, fragment_id).await
+    if let Some(binding_id) = binding_id {
+        require_active_owned_provenance_pool(pool, owner_creator_id, character_id, binding_id)
+            .await?;
+    }
+    load_fragment(pool, character_id, binding_id, fragment_id).await
 }
 
 async fn load_fragment(
     pool: &SqlitePool,
     character_id: &str,
+    binding_id: Option<&str>,
     fragment_id: &str,
 ) -> Result<Option<CharacterMemoryFragmentRecord>, LocalDbError> {
     let row = sqlx::query!(
@@ -163,9 +170,10 @@ async fn load_fragment(
                   created_at as "created_at!", ttl,
                   revision as "revision!"
            FROM character_memory_fragments
-           WHERE fragment_id = ? AND character_id = ?"#,
+           WHERE fragment_id = ? AND character_id = ? AND actor_world_binding_id IS ?"#,
         fragment_id,
-        character_id
+        character_id,
+        binding_id
     )
     .fetch_optional(pool)
     .await?;
@@ -185,7 +193,6 @@ async fn load_fragment(
 }
 
 /// List a bounded page of Character fragments in a single scope.
-///
 /// `binding_id = None` reads the shared Character scope (`actor_world_binding_id
 /// IS NULL`); `Some(b)` reads only that binding-local scope. Binding-local
 /// reads require the exact active binding for the Character.
@@ -206,7 +213,11 @@ pub async fn list_character_fragments(
 ) -> Result<Vec<CharacterMemoryFragmentRecord>, LocalDbError> {
     require_owned_character_pool(pool, owner_creator_id, character_id).await?;
     if let Some(binding_id) = binding_id {
-        require_active_character_binding_pool(pool, character_id, binding_id).await?;
+        require_active_owned_provenance_pool(pool, owner_creator_id, character_id, binding_id)
+            .await?;
+    }
+    let limit = limit.clamp(1, MAX_CHARACTER_MEMORY_LIST_LIMIT);
+    if let Some(binding_id) = binding_id {
         let rows = sqlx::query!(
             r#"SELECT fragment_id as "fragment_id!", session_id as "session_id!",
                       character_id as "character_id!", actor_world_binding_id,
@@ -327,6 +338,13 @@ pub async fn promote_character_fragment_to_shared(
                 code: ActorContractConflict::CharacterFragmentAlreadyShared,
             });
         };
+        // Revalidate the source binding inside the write transaction before
+        // clearing its provenance: it must still be active, belong to this
+        // Character, and target an owned active World. An invalid source
+        // binding rejects with zero mutation rather than leaking the row into
+        // shared Character memory.
+        require_valid_provenance_tx(&mut tx, owner_creator_id, character_id, Some(old_binding))
+            .await?;
         if current.revision != expected_revision {
             return Err(LocalDbError::VersionMismatch {
                 table: "character_memory_fragments".to_string(),

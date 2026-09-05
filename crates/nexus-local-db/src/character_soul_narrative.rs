@@ -11,7 +11,7 @@
 use futures_util::TryStreamExt;
 use sqlx::SqlitePool;
 
-use crate::actor_world_binding::require_active_character_binding_pool;
+use crate::actor_world_binding::require_active_owned_provenance_pool;
 use crate::character::{require_active_owned_character, require_owned_character_pool};
 use crate::error::LocalDbError;
 use crate::soul_narrative::{build_stats_fingerprint, SoulNarrativeFragmentStats};
@@ -113,7 +113,8 @@ pub async fn get_character_soul_narrative(
 ) -> Result<Option<CharacterSoulNarrativeRecord>, LocalDbError> {
     require_owned_character_pool(pool, owner_creator_id, character_id).await?;
     if let Some(binding_id) = binding_id {
-        require_active_character_binding_pool(pool, character_id, binding_id).await?;
+        require_active_owned_provenance_pool(pool, owner_creator_id, character_id, binding_id)
+            .await?;
     }
     load_narrative(pool, character_id, binding_id).await
 }
@@ -284,7 +285,8 @@ pub async fn character_soul_narrative_fragment_stats(
 ) -> Result<(SoulNarrativeFragmentStats, Option<CharacterSoulNarrativeRecord>), LocalDbError> {
     require_owned_character_pool(pool, owner_creator_id, character_id).await?;
     if let Some(binding_id) = binding_id {
-        require_active_character_binding_pool(pool, character_id, binding_id).await?;
+        require_active_owned_provenance_pool(pool, owner_creator_id, character_id, binding_id)
+            .await?;
     }
 
     // 1. Cheap SQL aggregates — O(1) index scan, no row materialization.

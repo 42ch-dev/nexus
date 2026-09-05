@@ -199,28 +199,42 @@ async fn pending_review_roundtrip_and_character_isolation() {
         .await
         .unwrap();
 
-    let fetched = get_character_pending_review(&pool, OWNER, &s.char_a, "pend_2")
+    let fetched = get_character_pending_review(&pool, OWNER, &s.char_a, Some(&s.binding_a1), "pend_2")
         .await
         .unwrap()
         .unwrap();
     assert_eq!(fetched.character_id, s.char_a);
     assert_eq!(fetched.actor_world_binding_id.as_deref(), Some(s.binding_a1.as_str()));
 
-    let list = list_character_pending_reviews(&pool, OWNER, &s.char_a, 10)
+    // Shared scope lists only provenance-free rows.
+    let list = list_character_pending_reviews(&pool, OWNER, &s.char_a, None, 10)
         .await
         .unwrap();
-    assert_eq!(list.len(), 2);
-    assert_eq!(count_character_pending_reviews(&pool, OWNER, &s.char_a).await.unwrap(), 2);
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].pending_id, "pend_1");
+    assert_eq!(count_character_pending_reviews(&pool, OWNER, &s.char_a, None).await.unwrap(), 1);
+    // Binding scope lists only that binding's rows.
+    let list_b1 = list_character_pending_reviews(&pool, OWNER, &s.char_a, Some(&s.binding_a1), 10)
+        .await
+        .unwrap();
+    assert_eq!(list_b1.len(), 1);
+    assert_eq!(list_b1[0].pending_id, "pend_2");
+    assert_eq!(
+        count_character_pending_reviews(&pool, OWNER, &s.char_a, Some(&s.binding_a1))
+            .await
+            .unwrap(),
+        1
+    );
 
     // Character B is fully isolated.
-    assert!(list_character_pending_reviews(&pool, OWNER, &s.char_b, 10)
+    assert!(list_character_pending_reviews(&pool, OWNER, &s.char_b, None, 10)
         .await
         .unwrap()
         .is_empty());
-    assert_eq!(count_character_pending_reviews(&pool, OWNER, &s.char_b).await.unwrap(), 0);
+    assert_eq!(count_character_pending_reviews(&pool, OWNER, &s.char_b, None).await.unwrap(), 0);
 
     // Bounded list honors LIMIT.
-    let bounded = list_character_pending_reviews(&pool, OWNER, &s.char_a, 1)
+    let bounded = list_character_pending_reviews(&pool, OWNER, &s.char_a, Some(&s.binding_a1), 1)
         .await
         .unwrap();
     assert_eq!(bounded.len(), 1);
@@ -232,7 +246,7 @@ async fn pending_review_roundtrip_and_character_isolation() {
     assert!(delete_character_pending_review(&pool, OWNER, &s.char_a, "pend_1")
         .await
         .unwrap());
-    assert!(get_character_pending_review(&pool, OWNER, &s.char_a, "pend_1")
+    assert!(get_character_pending_review(&pool, OWNER, &s.char_a, None, "pend_1")
         .await
         .unwrap()
         .is_none());
@@ -426,7 +440,7 @@ async fn fragment_scope_isolation_between_shared_and_bindings() {
     assert_eq!(b_shared[0].fragment_id, "frag_b_char");
 
     // A fragment id owned by Character B is invisible through Character A.
-    assert!(get_character_fragment(&pool, OWNER, &s.char_a, "frag_b_char")
+    assert!(get_character_fragment(&pool, OWNER, &s.char_a, None, "frag_b_char")
         .await
         .unwrap()
         .is_none());
@@ -682,7 +696,7 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
         .await
         .unwrap_err();
     assert!(matches!(err, LocalDbError::VersionMismatch { .. }));
-    let still = get_character_fragment(&pool, OWNER, &s.char_a, "frag_p")
+    let still = get_character_fragment(&pool, OWNER, &s.char_a, Some(&s.binding_a1), "frag_p")
         .await
         .unwrap()
         .unwrap();
@@ -739,7 +753,7 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
         .unwrap_err();
     assert!(matches!(err, LocalDbError::ActorNotFound { .. }));
     assert_eq!(
-        get_character_fragment(&pool, OWNER, &s.char_a, "frag_p")
+        get_character_fragment(&pool, OWNER, &s.char_a, None, "frag_p")
             .await
             .unwrap()
             .unwrap()
@@ -890,7 +904,7 @@ async fn binding_removal_succeeds_once_local_memory_is_gone() {
     assert!(!list_bindings_still_present(&pool, &s.binding_a2).await);
 
     // The promoted fragment survives as shared Character memory.
-    let kept = get_character_fragment(&pool, OWNER, &s.char_a, "frag_dep")
+    let kept = get_character_fragment(&pool, OWNER, &s.char_a, None, "frag_dep")
         .await
         .unwrap()
         .unwrap();
@@ -925,4 +939,354 @@ async fn character_memory_never_touches_creator_tables() {
         .unwrap();
 
     assert_eq!(creator_memory_row_counts(&pool).await, (0, 0, 0, 0));
+}
+
+// ── Fix-1: exact active-binding read scope ───────────────────────────────
+
+#[tokio::test]
+async fn binding_local_reads_require_exact_active_binding() {
+    let (pool, _dir) = fresh_pool().await;
+    let s = seed(&pool).await;
+
+    create_character_pending_review(&pool, OWNER, &pending("pend_b1", &s.char_a, Some(&s.binding_a1)))
+        .await
+        .unwrap();
+    create_character_fragment(&pool, OWNER, &fragment("frag_b1", &s.char_a, Some(&s.binding_a1)))
+        .await
+        .unwrap();
+
+    // A valid active binding of the SAME Character may not read another
+    // binding's local scope.
+    assert!(get_character_pending_review(&pool, OWNER, &s.char_a, Some(&s.binding_a2), "pend_b1")
+        .await
+        .unwrap()
+        .is_none());
+    assert!(list_character_pending_reviews(&pool, OWNER, &s.char_a, Some(&s.binding_a2), 10)
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        count_character_pending_reviews(&pool, OWNER, &s.char_a, Some(&s.binding_a2))
+            .await
+            .unwrap(),
+        0
+    );
+    // The shared scope also cannot see binding-local rows.
+    assert!(list_character_pending_reviews(&pool, OWNER, &s.char_a, None, 10)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(get_character_fragment(&pool, OWNER, &s.char_a, None, "frag_b1")
+        .await
+        .unwrap()
+        .is_none());
+    assert!(get_character_fragment(&pool, OWNER, &s.char_a, Some(&s.binding_a2), "frag_b1")
+        .await
+        .unwrap()
+        .is_none());
+
+    // Another Character's binding is refused outright.
+    let err = get_character_pending_review(&pool, OWNER, &s.char_a, Some(&s.binding_b1), "pend_b1")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, LocalDbError::ActorNotFound { .. }));
+    let err = get_character_fragment(&pool, OWNER, &s.char_a, Some(&s.binding_b1), "frag_b1")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, LocalDbError::ActorNotFound { .. }));
+    let err = list_character_fragments(&pool, OWNER, &s.char_a, Some(&s.binding_b1), 10)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, LocalDbError::ActorNotFound { .. }));
+
+    // The exact owning binding reads the scope.
+    assert!(get_character_pending_review(&pool, OWNER, &s.char_a, Some(&s.binding_a1), "pend_b1")
+        .await
+        .unwrap()
+        .is_some());
+    assert_eq!(
+        list_character_fragments(&pool, OWNER, &s.char_a, Some(&s.binding_a1), 10)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn inactive_binding_rows_are_unreadable() {
+    let (pool, _dir) = fresh_pool().await;
+    let s = seed(&pool).await;
+
+    // Raw-insert an inactive binding (public APIs never produce one), then
+    // raw-insert a binding-local row under it. Reads must refuse it because
+    // the scope is not an ACTIVE binding.
+    sqlx::query(
+        "INSERT INTO actor_world_bindings \
+         (binding_id, character_id, world_id, status, created_at, updated_at) \
+         VALUES ('awb_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1', ?, ?, 'inactive', datetime('now'), datetime('now'))",
+    )
+    .bind(&s.char_a)
+    .bind(WORLD_A)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO character_memory_fragments \
+         (fragment_id, session_id, character_id, actor_world_binding_id, created_at) \
+         VALUES ('frag_inactive', 'sess_x', ?, ?, datetime('now'))",
+    )
+    .bind(&s.char_a)
+    .bind("awb_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let err = list_character_fragments(
+        &pool,
+        OWNER,
+        &s.char_a,
+        Some("awb_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1"),
+        10,
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, LocalDbError::ActorNotFound { .. }));
+}
+
+// ── Fix-1: owned active World provenance ─────────────────────────────────
+
+#[tokio::test]
+async fn archived_or_paused_world_rejects_provenance_writes_and_reads() {
+    let (pool, _dir) = fresh_pool().await;
+    let s = seed(&pool).await;
+
+    // Seed an owned-but-archived World and a raw active binding to it (public
+    // admission refuses cross-state worlds, so insert directly).
+    sqlx::query(
+        "INSERT INTO narrative_worlds \
+         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+          time_policy, metadata_json, created_at) \
+         VALUES ('wld_archived', 'ws', ?, 'Arch', 'arch', 'archived', 'private', 'manual', '{}', datetime('now'))",
+    )
+    .bind(OWNER)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO actor_world_bindings \
+         (binding_id, character_id, world_id, status, created_at, updated_at) \
+         VALUES ('awb_ccccccccccccccccccccccccccccccc1', ?, 'wld_archived', 'active', datetime('now'), datetime('now'))",
+    )
+    .bind(&s.char_a)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for id in ["pend_arch", "pend_arch2"] {
+        let err = create_character_pending_review(
+            &pool,
+            OWNER,
+            &pending(id, &s.char_a, Some("awb_ccccccccccccccccccccccccccccccc1")),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(err, LocalDbError::ActorNotFound { .. }),
+            "archived world write should be refused, got {err:?}"
+        );
+    }
+    let err = create_character_fragment(
+        &pool,
+        OWNER,
+        &fragment("frag_arch", &s.char_a, Some("awb_ccccccccccccccccccccccccccccccc1")),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, LocalDbError::ActorNotFound { .. }));
+    let err = upsert_character_soul_narrative(
+        &pool,
+        OWNER,
+        &narrative(&s.char_a, Some("awb_ccccccccccccccccccccccccccccccc1"), "n"),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, LocalDbError::ActorNotFound { .. }));
+
+    assert_eq!(table_count(&pool, "character_memory_pending_review").await, 0);
+    assert_eq!(table_count(&pool, "character_memory_fragments").await, 0);
+
+    // Raw-insert a row under the archived-world binding and assert binding-
+    // scoped reads refuse it too.
+    sqlx::query(
+        "INSERT INTO character_memory_fragments \
+         (fragment_id, session_id, character_id, actor_world_binding_id, created_at) \
+         VALUES ('frag_arch_r', 'sess_x', ?, ?, datetime('now'))",
+    )
+    .bind(&s.char_a)
+    .bind("awb_ccccccccccccccccccccccccccccccc1")
+    .execute(&pool)
+    .await
+    .unwrap();
+    let err = list_character_fragments(
+        &pool,
+        OWNER,
+        &s.char_a,
+        Some("awb_ccccccccccccccccccccccccccccccc1"),
+        10,
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, LocalDbError::ActorNotFound { .. }));
+
+    // Removal of a binding onto a non-active World is refused with zero
+    // mutation.
+    let err = remove_binding(&pool, OWNER, &s.char_a, "awb_ccccccccccccccccccccccccccccccc1")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, LocalDbError::ActorNotFound { .. }));
+    assert!(list_bindings_still_present(&pool, "awb_ccccccccccccccccccccccccccccccc1").await);
+}
+
+// ── Fix-1: bounded limit normalization ───────────────────────────────────
+
+#[tokio::test]
+async fn list_limits_are_clamped_to_one_documented_bound() {
+    let (pool, _dir) = fresh_pool().await;
+    let s = seed(&pool).await;
+
+    for i in 0..3 {
+        let p = pending(&format!("pend_clamp_{i}"), &s.char_a, None);
+        create_character_pending_review(&pool, OWNER, &p).await.unwrap();
+        let f = fragment(&format!("frag_clamp_{i}"), &s.char_a, None);
+        create_character_fragment(&pool, OWNER, &f).await.unwrap();
+    }
+
+    // Negative / zero clamp up to 1.
+    for bad in [-1, 0] {
+        assert_eq!(
+            list_character_pending_reviews(&pool, OWNER, &s.char_a, None, bad)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            list_character_fragments(&pool, OWNER, &s.char_a, None, bad)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+    // Very large clamps to the repository bound (still returns all 3 rows here
+    // because 3 < MAX).
+    assert_eq!(
+        list_character_pending_reviews(
+            &pool,
+            OWNER,
+            &s.char_a,
+            None,
+            nexus_local_db::MAX_CHARACTER_MEMORY_LIST_LIMIT + 1,
+        )
+        .await
+        .unwrap()
+        .len(),
+        3
+    );
+}
+
+// ── Fix-1: promotion revalidates source binding in-transaction ───────────
+
+#[tokio::test]
+async fn promotion_revalidates_source_binding_inside_transaction() {
+    let (pool, _dir) = fresh_pool().await;
+    let s = seed(&pool).await;
+
+    create_character_fragment(&pool, OWNER, &fragment("frag_rs", &s.char_a, Some(&s.binding_a1)))
+        .await
+        .unwrap();
+    upsert_character_soul_narrative(&pool, OWNER, &narrative(&s.char_a, None, "shared"))
+        .await
+        .unwrap();
+    upsert_character_soul_narrative(&pool, OWNER, &narrative(&s.char_a, Some(&s.binding_a1), "b1"))
+        .await
+        .unwrap();
+
+    // Case 1: binding becomes inactive after the row exists.
+    sqlx::query("UPDATE actor_world_bindings SET status = 'inactive' WHERE binding_id = ?")
+        .bind(&s.binding_a1)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let err = promote_character_fragment_to_shared(&pool, OWNER, &s.char_a, "frag_rs", 0)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, LocalDbError::ActorNotFound { .. }));
+    assert!(!frag_is_shared(&pool, &s.char_a, "frag_rs").await);
+    assert_eq!(frag_revision(&pool, &s.char_a, "frag_rs").await, 0);
+    assert_eq!(frag_binding(&pool, &s.char_a, "frag_rs").await.as_deref(), Some(s.binding_a1.as_str()));
+    assert_eq!(table_count(&pool, "character_soul_narratives").await, 2);
+
+    // Case 2: binding active again, but its World archived.
+    sqlx::query(
+        "UPDATE actor_world_bindings SET status = 'active' WHERE binding_id = ?",
+    )
+    .bind(&s.binding_a1)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE narrative_worlds SET status = 'archived' WHERE world_id = ?")
+        .bind(WORLD_A)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let err = promote_character_fragment_to_shared(&pool, OWNER, &s.char_a, "frag_rs", 0)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, LocalDbError::ActorNotFound { .. }));
+    assert!(!frag_is_shared(&pool, &s.char_a, "frag_rs").await);
+    assert_eq!(frag_revision(&pool, &s.char_a, "frag_rs").await, 0);
+    assert_eq!(table_count(&pool, "character_soul_narratives").await, 2);
+}
+
+async fn frag_is_shared(pool: &SqlitePool, character_id: &str, fragment_id: &str) -> bool {
+    let binding: Option<String> = sqlx::query_scalar(
+        "SELECT actor_world_binding_id FROM character_memory_fragments \
+         WHERE fragment_id = ? AND character_id = ?",
+    )
+    .bind(fragment_id)
+    .bind(character_id)
+    .fetch_optional(pool)
+    .await
+    .unwrap();
+    binding.is_none()
+}
+
+async fn frag_revision(pool: &SqlitePool, character_id: &str, fragment_id: &str) -> i64 {
+    sqlx::query_scalar(
+        "SELECT revision FROM character_memory_fragments \
+         WHERE fragment_id = ? AND character_id = ?",
+    )
+    .bind(fragment_id)
+    .bind(character_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn frag_binding(
+    pool: &SqlitePool,
+    character_id: &str,
+    fragment_id: &str,
+) -> Option<String> {
+    sqlx::query_scalar(
+        "SELECT actor_world_binding_id FROM character_memory_fragments \
+         WHERE fragment_id = ? AND character_id = ?",
+    )
+    .bind(fragment_id)
+    .bind(character_id)
+    .fetch_optional(pool)
+    .await
+    .unwrap()
 }

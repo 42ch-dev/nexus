@@ -4,8 +4,8 @@ use sqlx::{Sqlite, SqlitePool, Transaction};
 use uuid::Uuid;
 
 use crate::character::{
-    map_actor_constraint, require_active_owned_character, require_owned_character,
-    require_owned_world,
+    map_actor_constraint, require_active_owned_character, require_owned_active_world,
+    require_owned_character, require_owned_world,
 };
 use crate::error::{ActorContractConflict, LocalDbError};
 use crate::begin_immediate;
@@ -241,7 +241,30 @@ pub(crate) async fn require_valid_provenance_tx(
         return Ok(());
     };
     let binding = require_active_character_binding_tx(tx, character_id, binding_id).await?;
-    crate::character::require_owned_world(tx, owner_creator_id, &binding.world_id).await?;
+    crate::character::require_owned_active_world(tx, owner_creator_id, &binding.world_id).await?;
+    Ok(())
+}
+
+/// Pool variant of [`require_valid_provenance_tx`] for binding-scoped reads.
+///
+/// A binding-scoped read must present a binding that is active, belongs to the
+/// same Character, and targets a World owned and active by `owner_creator_id`;
+/// otherwise the row is unavailable (not-found, indistinguishable from
+/// missing).
+///
+/// # Errors
+///
+/// Returns `LocalDbError::ActorNotFound` for a missing, foreign, inactive, or
+/// non-active-World binding; `LocalDbError` on database failure.
+pub(crate) async fn require_active_owned_provenance_pool(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+    character_id: &str,
+    binding_id: &str,
+) -> Result<(), LocalDbError> {
+    let binding = require_active_character_binding_pool(pool, character_id, binding_id).await?;
+    crate::character::require_owned_active_world_pool(pool, owner_creator_id, &binding.world_id)
+        .await?;
     Ok(())
 }
 
@@ -394,7 +417,7 @@ async fn remove_binding_tx(
 ) -> Result<(), LocalDbError> {
     require_owned_character(tx, owner_creator_id, character_id).await?;
     let binding = require_active_character_binding_tx(tx, character_id, binding_id).await?;
-    require_owned_world(tx, owner_creator_id, &binding.world_id).await?;
+    require_owned_active_world(tx, owner_creator_id, &binding.world_id).await?;
 
     let count = sqlx::query_scalar!(
         r#"SELECT COUNT(*) as "count!: i64" FROM actor_world_bindings WHERE character_id = ? AND status = 'active'"#,

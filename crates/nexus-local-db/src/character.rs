@@ -113,6 +113,65 @@ pub(crate) async fn require_owned_world(
     }
 }
 
+/// Owned **and active** World validation (v1.184 P3 provenance rule).
+///
+/// Character memory provenance requires a binding to target a World that is
+/// both owned by the caller and `status = 'active'`. Archived or paused
+/// Worlds reject as not-found, so binding-local memory can never be authored
+/// or removed under an inactive World.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::ActorNotFound` when the World is missing, owned by
+/// another Creator, or not active; `LocalDbError` on database failure.
+pub(crate) async fn require_owned_active_world(
+    tx: &mut Transaction<'_, Sqlite>,
+    owner_creator_id: &str,
+    world_id: &str,
+) -> Result<(), LocalDbError> {
+    let owner = sqlx::query_scalar!(
+        r#"SELECT owner_creator_id as "owner_creator_id!"
+           FROM narrative_worlds WHERE world_id = ? AND status = 'active'"#,
+        world_id
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+    match owner {
+        Some(stored) if stored == owner_creator_id => Ok(()),
+        Some(_) | None => Err(LocalDbError::ActorNotFound {
+            resource: "world",
+            id: world_id.to_string(),
+        }),
+    }
+}
+
+/// Pool variant of [`require_owned_active_world`] for read paths.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::ActorNotFound` when the World is missing, owned by
+/// another Creator, or not active; `LocalDbError` on database failure.
+pub(crate) async fn require_owned_active_world_pool(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+    world_id: &str,
+) -> Result<(), LocalDbError> {
+    let owner = sqlx::query_scalar!(
+        r#"SELECT owner_creator_id as "owner_creator_id!"
+           FROM narrative_worlds WHERE world_id = ? AND status = 'active'"#,
+        world_id
+    )
+    .fetch_optional(pool)
+    .await?;
+    match owner {
+        Some(stored) if stored == owner_creator_id => Ok(()),
+        Some(_) | None => Err(LocalDbError::ActorNotFound {
+            resource: "world",
+            id: world_id.to_string(),
+        }),
+    }
+}
+
 async fn load_character(
     tx: &mut Transaction<'_, Sqlite>,
     character_id: &str,
