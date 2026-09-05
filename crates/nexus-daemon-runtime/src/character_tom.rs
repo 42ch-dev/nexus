@@ -193,17 +193,20 @@ impl CharacterTomService {
         // DB-side pre-parse bounds (fix round 3): carrier counts, belief-array
         // lengths, and modules JSON validity are enforced with compile-time SQL
         // before any `modules_json` text is parsed or materialized into records.
+        let mut admitted_ids: Vec<String> = Vec::new();
         for owner in [
             KnowledgeOwnerRef::character(viewer_character_id),
             KnowledgeOwnerRef::actor_world_binding(&query.binding_id),
         ] {
             self.probe_scope_violations(&owner).await?;
-            self.probe_scope_carriers(&owner).await?;
+            let admitted = self.probe_scope_carriers(&owner).await?;
+            admitted_ids.extend(admitted.into_iter().map(|c| c.key_block_id));
         }
+        // The timestamp lookup is constrained to exactly this concrete admitted
+        // carrier-id snapshot — never an owner-scope rescan — so carriers
+        // inserted/changed after the probe cannot enter the result (fix round 4).
+        let recorded = self.carrier_recorded_at_map(&admitted_ids).await?;
         let carriers = self.authorized_carriers(viewer_character_id, &query.binding_id).await?;
-        let recorded = self
-            .carrier_recorded_at_map(viewer_character_id, &query.binding_id)
-            .await?;
         let mut keyed = Vec::new();
         for carrier in carriers {
             let recorded_at = recorded.get(&carrier.entry_id).cloned().flatten();
@@ -459,40 +462,34 @@ impl CharacterTomService {
         }
     }
 
-    /// Latest derivative MindState `occurred_at` per carrier in the viewer's
-    /// two admitted owner scopes. The `GROUP BY holder_entry_id` aggregation
-    /// with `MAX(created_at)` returns at most one row per carrier — derivative
-    /// history is never fetched unbounded (fix round 2). Callers run this only
-    /// after carrier-count bounds have been enforced, so the result set is
-    /// bounded by `2 * MAX_CARRIERS_PER_SCOPE`.
+    /// Latest derivative MindState `occurred_at` per carrier in the concrete
+    /// admitted carrier-id set (fix round 4).
+    ///
+    /// The query constrains `holder_entry_id` to the exact admitted id snapshot
+    /// (a single `json_each(?)` bind of the id array) and uses an anti-join to
+    /// return at most one row per id — the latest by `(created_at,
+    /// mind_state_id)`. It never rescans owner scope and never scans rows for
+    /// carriers outside the admitted snapshot, so the total work is bounded by
+    /// the admitted carrier cap (`<= 2 * MAX_CARRIERS_PER_SCOPE`) at the SQL
+    /// boundary.
     async fn carrier_recorded_at_map(
         &self,
-        viewer_character_id: &str,
-        binding_id: &str,
+        admitted_ids: &[String],
     ) -> Result<std::collections::HashMap<String, Option<String>>, NexusApiError> {
+        if admitted_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
         #[derive(sqlx::FromRow)]
         struct LatestDerivative {
             carrier_entry_id: String,
             occurred_at: Option<String>,
         }
+        let ids_json = serde_json::to_string(admitted_ids).map_err(internal_wire)?;
         let rows = sqlx::query_as!(
             LatestDerivative,
             r#"SELECT m.holder_entry_id AS "carrier_entry_id!", m.occurred_at
                FROM mind_states m
-               INNER JOIN kb_key_blocks kb ON kb.key_block_id = m.holder_entry_id
-               WHERE (kb.character_id = ? OR kb.actor_world_binding_id = ?)
-                 AND kb.status NOT IN ('deleted', 'merged', 'deprecated')
-                 AND (
-                   kb.modules_json IS NULL
-                   OR (
-                     json_valid(kb.modules_json)
-                     AND (
-                       json_type(kb.modules_json, '$.belief') IS NULL
-                       OR json_type(kb.modules_json, '$.belief') = 'array'
-                     )
-                     AND COALESCE(json_array_length(kb.modules_json, '$.belief'), 0) <= ?
-                   )
-                 )
+               WHERE m.holder_entry_id IN (SELECT value FROM json_each(?))
                  AND NOT EXISTS (
                    SELECT 1 FROM mind_states m2
                    WHERE m2.holder_entry_id = m.holder_entry_id
@@ -500,17 +497,13 @@ impl CharacterTomService {
                           OR (m2.created_at = m.created_at
                               AND m2.mind_state_id > m.mind_state_id))
                  )"#,
-            viewer_character_id,
-            binding_id,
-            MAX_BELIEF_ROWS_PER_CARRIER_I64
+            ids_json
         )
         .fetch_all(&self.pool)
         .await
         .map_err(NexusApiError::from)?;
-        // The anti-join returns exactly one row per admitted probe-ok carrier —
-        // the latest derivative by `(created_at, mind_state_id)` — restricted to
-        // the already-probed active carrier set, so derivative history is never
-        // materialized unbounded and never reads a stale/foreign carrier.
+        // Exactly one latest derivative row per admitted id, matching the
+        // `json_each` id snapshot — never a scope rescan.
         Ok(rows
             .into_iter()
             .map(|row| (row.carrier_entry_id, row.occurred_at))

@@ -15,6 +15,7 @@ use serde_json::{json, Value};
 
 const OWNER: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const WORLD_A: &str = "wld_worldA";
+const WORLD_B: &str = "wld_worldB";
 const OTHER_CHR: &str = "chr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
 struct Ctx {
@@ -103,6 +104,18 @@ fn l1_body(
         "source": "Perception",
         "context": "Neutral"
     })
+}
+
+async fn add_binding(server: &TestServer, character_id: &str, world_id: &str) -> String {
+    let resp = server
+        .post(&format!("/v1/daemon/characters/{character_id}/bindings"))
+        .json(&json!({ "world_id": world_id }))
+        .await;
+    assert_eq!(resp.status_code(), 201, "add binding: {}", resp.text());
+    resp.json::<Value>()["binding"]["binding_id"]
+        .as_str()
+        .unwrap()
+        .to_string()
 }
 
 async fn record(server: &TestServer, character_id: &str, body: Value) -> axum_test::TestResponse {
@@ -344,6 +357,15 @@ async fn set_world_status(pool: &sqlx::SqlitePool, world_id: &str, status: &str)
 async fn seed_carrier_with_modules(pool: &sqlx::SqlitePool, character_id: &str, name: &str, modules: Value) -> String {
     let store = SqliteKbStore::new(pool.clone());
     let mut kb = KnowledgeEntryRecord::for_character(character_id, BlockType::Character, name);
+    kb.modules = Some(modules);
+    let id = kb.entry_id.clone();
+    store.insert_knowledge_entry(kb).await.unwrap();
+    id
+}
+
+async fn seed_binding_carrier_with_modules(pool: &sqlx::SqlitePool, binding_id: &str, name: &str, modules: Value) -> String {
+    let store = SqliteKbStore::new(pool.clone());
+    let mut kb = KnowledgeEntryRecord::for_binding(binding_id, BlockType::Character, name);
     kb.modules = Some(modules);
     let id = kb.entry_id.clone();
     store.insert_knowledge_entry(kb).await.unwrap();
@@ -770,4 +792,69 @@ async fn stale_deleted_carrier_histories_do_not_surface_or_error() {
         .collect();
     assert!(holder_ids.iter().all(|h| *h == alive), "only alive carrier emitted");
     assert!(!holder_ids.contains(&deleted.as_str()), "deleted carrier excluded");
+}
+
+#[tokio::test]
+async fn timestamp_lookup_is_scoped_to_selected_binding_admitted_ids() {
+    // A carrier owned by a second (unselected) binding of the same Character
+    // carries a large derivative history. Listing with the selected binding
+    // must never surface that carrier's timestamps/rows — the timestamp lookup
+    // is constrained to the concrete admitted carrier-id snapshot, not an
+    // owner-scope rescan (fix round 4).
+    let ctx = ctx().await;
+    // Seed a second World so the viewer Character gains a second (unselected)
+    // binding — a Character may hold only one active binding per World.
+    sqlx::query(
+        "INSERT INTO narrative_worlds \
+         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+          time_policy, metadata_json, created_at) \
+         VALUES (?, 'ws', ?, ?, ?, 'active', 'private', 'manual', '{}', datetime('now'))",
+    )
+    .bind(WORLD_B)
+    .bind(OWNER)
+    .bind(WORLD_B)
+    .bind(WORLD_B)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    let a = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr_a = a["character"]["character_id"].as_str().unwrap().to_string();
+    let bind_a = a["binding"]["binding_id"].as_str().unwrap().to_string();
+    let bind_b = add_binding(&ctx.server, &chr_a, WORLD_B).await;
+
+    // Selected-binding carrier with a valid L1 row + its derivative.
+    let selected_carrier =
+        seed_binding_carrier_with_modules(&ctx.pool, &bind_a, "SelectedBinding", json!({"belief": []})).await;
+    let resp = record(
+        &ctx.server,
+        &chr_a,
+        l1_body(WORLD_A, &bind_a, &selected_carrier, &chr_a, 0),
+    )
+    .await;
+    assert_eq!(resp.status_code(), 200, "{}", resp.text());
+
+    // Unselected-binding carrier with a large derivative history.
+    let unselected_carrier =
+        seed_binding_carrier_with_modules(&ctx.pool, &bind_b, "UnselectedBinding", json!({"belief": []})).await;
+    for i in 0..40 {
+        insert_derivative_mind_state(
+            &ctx.pool,
+            &format!("ms_unsel_{i}"),
+            &unselected_carrier,
+            &format!("2097-01-{i:02}T00:00:00Z"),
+            &format!("2097-01-{i:02}T00:00:00Z"),
+        )
+        .await;
+    }
+
+    let page = list_tom(&ctx.server, &chr_a, WORLD_A, &bind_a).await;
+    let items = page["items"].as_array().unwrap();
+    let carrier_ids: Vec<&str> = items
+        .iter()
+        .map(|row| row["carrier_entry_id"].as_str().unwrap())
+        .collect();
+    // Only the selected-binding carrier appears; the unselected one's history
+    // is outside the admitted id snapshot and never surfaces.
+    assert_eq!(carrier_ids, vec![selected_carrier.as_str()]);
+    assert!(!carrier_ids.contains(&unselected_carrier.as_str()));
 }
