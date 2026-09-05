@@ -98,6 +98,8 @@ pub enum ActorContractConflict {
     InvalidWorldSheet,
     WorldHasActorBindings,
     BindingHasOwnedKnowledge,
+    BindingHasLocalMemory,
+    CharacterFragmentAlreadyShared,
 }
 
 impl ActorContractConflict {
@@ -110,6 +112,8 @@ impl ActorContractConflict {
             Self::InvalidWorldSheet => "invalid_world_sheet",
             Self::WorldHasActorBindings => "world_has_actor_bindings",
             Self::BindingHasOwnedKnowledge => "binding_has_owned_knowledge",
+            Self::BindingHasLocalMemory => "binding_has_local_memory",
+            Self::CharacterFragmentAlreadyShared => "character_fragment_already_shared",
         }
     }
 
@@ -134,6 +138,12 @@ impl ActorContractConflict {
             }
             Self::BindingHasOwnedKnowledge => {
                 "Cannot remove a binding that still owns KnowledgeEntry rows"
+            }
+            Self::BindingHasLocalMemory => {
+                "Cannot remove a binding that still has binding-local Character memory"
+            }
+            Self::CharacterFragmentAlreadyShared => {
+                "Character memory fragment is already shared (no binding provenance to clear)"
             }
         }
     }

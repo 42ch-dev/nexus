@@ -498,9 +498,25 @@ async fn assemble_admitted_prompt(
     user_prompt: String,
 ) -> Result<String, NexusApiError> {
     let pool = state.pool().cloned().ok_or(NexusApiError::Uninitialized)?;
+    // The active Creator is the only trusted owner of the admitted Character.
+    let creator_id = require_creator(state)?;
     let view = CharacterViewInput::from_entries(ctx.view.items.clone());
     let actor = match &ctx.actor {
-        AdmittedActor::Character { .. } => MomentActorContext::character(view),
+        AdmittedActor::Character { character_id } => {
+            // v1.184 P3: project only the admitted Character's SOUL/Memory
+            // (shared scope + the selected binding scope) into the reserved
+            // mind slots. Honest-empty when optional data is absent.
+            let mind =
+                crate::api::handlers::memory_pipeline::load_character_mind_projection(
+                    &pool,
+                    state.nexus_home(),
+                    &creator_id,
+                    character_id,
+                    ctx.binding_id.as_deref(),
+                )
+                .await?;
+            MomentActorContext::character_with_mind(view, mind)
+        }
         AdmittedActor::Creator { .. } => MomentActorContext::creator_with_view(view),
     };
     let mut request = MomentRequest::new(Stage0Assembly {
@@ -517,9 +533,7 @@ async fn assemble_admitted_prompt(
         request = request.with_event(event);
     }
     if matches!(ctx.actor, AdmittedActor::Creator { .. }) {
-        if let Ok(creator_id) = require_creator(state) {
-            request = request.with_user(creator_id);
-        }
+        request = request.with_user(creator_id);
     }
     let narrative = SqliteNarrativeGateway::new(pool.clone());
     let kb = SpokeBackedKbStore::new(pool.clone());

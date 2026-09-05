@@ -23,8 +23,12 @@ pub use nexus_contracts::{
     ListPendingReviewsResponse, MemoryFragmentInfo, PaginationInfo, PendingReviewInfo,
     ReviewRequest, ReviewResponse, SoulNarrativeRequest, SoulNarrativeResponse,
 };
-use nexus_creator_memory::soul_narrative::SoulNarrativeSynthesizer as _;
-use nexus_creator_memory::MemoryError;
+use crate::api::handlers::memory_pipeline::{
+    process_bearer_review_batch, reflect_bearer_soul, REVIEW_BATCH_LIMIT,
+    MIN_SOUL_NARRATIVE_FRAGMENTS, MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
+};
+use crate::api::handlers::memory_pipeline::BearerPipelineCtx;
+use nexus_creator_memory::review::PendingReviewInput;
 use tracing::{debug, info};
 
 /// POST /v1/daemon/memory/pending-review
@@ -571,6 +575,8 @@ pub async fn delete_pending_review(
 ///
 /// Auth: requires active creator from config.toml (R-V133P4-01).
 /// Request body `creator_id` must match the active creator, otherwise 403.
+const REVIEW_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 pub async fn review(
     State(state): State<WorkspaceState>,
     Json(req): Json<ReviewRequest>,
@@ -633,8 +639,21 @@ pub async fn review(
         let deadline = tokio::time::Instant::now() + REVIEW_CALL_TIMEOUT;
         let nexus_home = state.nexus_home().to_owned();
         let pool = state.pool_or_uninit()?.clone();
+        let inputs: Vec<PendingReviewInput> = rows
+            .iter()
+            .map(|row| PendingReviewInput {
+                pending_id: row.pending_id.clone(),
+                session_id: row.session_id.clone(),
+                bearer_id: row.creator_id.clone(),
+                scope_id: row.world_id.clone(),
+                task_kind: row.task_kind.clone(),
+                raw_digest: row.raw_digest.clone(),
+                created_at: row.created_at.clone(),
+            })
+            .collect();
+        let ctx = BearerPipelineCtx::creator(&active_creator, None);
         let mut batch =
-            process_review_batch(&rows, &nexus_home, &active_creator, &pool, deadline).await;
+            process_bearer_review_batch(&inputs, &nexus_home, &ctx, &pool, deadline).await;
 
         // `has_more` is the drain-completion contract: `true` means the queue
         // may not be fully drained and the client should re-request
@@ -685,322 +704,6 @@ pub async fn review(
 /// (`DEFAULT_QUERY_LIMIT = 50`): a 50-row synchronous batch is the smallest
 /// policy that preserves the local-only / small-queue threat model while
 /// bounding the request duration. Not user-configurable in this slice.
-const REVIEW_BATCH_LIMIT: i64 = 50;
-
-/// Per-call server budget for `POST /memory/review` (V1.80 REL-01).
-///
-/// Implemented as a deadline checked before each row; on expiry the handler
-/// returns the partial progress accumulated so far (`has_more = true`) instead
-/// of failing the request.
-const REVIEW_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-
-/// Outcome of a bounded review batch, accumulated incrementally so the deadline
-/// path can return partial progress.
-struct ReviewBatchOutcome {
-    promoted: i64,
-    fragmented: i64,
-    dropped: i64,
-    /// Rows inspected (classified + action attempted) so far. This is the
-    /// "rows attempted" progress signal — it advances even when a row's action
-    /// fails or times out and the row is left pending. Drain *completion* is
-    /// decided from `any_row_remained_pending` (see below), NOT from this count
-    /// alone, so a non-advancing row can never produce a false "Review
-    /// complete" (W-QC3-001 / R-V180P0-QC3-001).
-    processed: usize,
-    has_more: bool,
-    /// True if any fetched row was inspected but NOT completed — it timed out
-    /// mid-row, or its side effect failed, leaving the row pending (not
-    /// deleted). When true, the caller MUST report `has_more = true` so the
-    /// client re-requests and the queue keeps draining. This is the
-    /// queue-advancement signal that `processed` is not: a row counts as
-    /// `processed` whether or not it was actually removed from the pending
-    /// queue. Key invariant: if any row fetched in this batch still awaits
-    /// completion, the drain is not done.
-    any_row_remained_pending: bool,
-    // Diagnostics for logging; not serialized.
-    more_in_db: bool,
-    processing_slice: usize,
-}
-
-impl ReviewBatchOutcome {
-    const fn new() -> Self {
-        Self {
-            promoted: 0,
-            fragmented: 0,
-            dropped: 0,
-            processed: 0,
-            has_more: false,
-            any_row_remained_pending: false,
-            more_in_db: false,
-            processing_slice: 0,
-        }
-    }
-}
-
-/// Process a bounded slice of the review queue for a creator's pending entries.
-///
-/// This is the deadline-aware evolution of the V1.33 `process_review_queue`:
-/// before each row the deadline is checked, and the per-row async side effect
-/// is bounded by `timeout_at(deadline, …)` so a single slow promote cannot
-/// overrun the whole request. Classification (promote/fragment/drop) and the
-/// post-success pending-row delete are unchanged. On budget expiry the loop
-/// stops and the caller reports `has_more = true` with the counters accumulated
-/// so far — completed side effects/deletes are NOT rolled back.
-async fn process_review_batch(
-    rows: &[PendingReviewInfo],
-    nexus_home: &std::path::Path,
-    creator_id: &str,
-    pool: &sqlx::SqlitePool,
-    deadline: tokio::time::Instant,
-) -> ReviewBatchOutcome {
-    let mut outcome = ReviewBatchOutcome::new();
-
-    for row in rows {
-        // Check the deadline before each row. If the budget is exhausted, stop
-        // and let the caller report partial progress.
-        if tokio::time::Instant::now() >= deadline {
-            break;
-        }
-
-        let input = nexus_creator_memory::review::PendingReviewInput {
-            pending_id: row.pending_id.clone(),
-            session_id: row.session_id.clone(),
-            creator_id: row.creator_id.clone(),
-            world_id: row.world_id.clone(),
-            task_kind: row.task_kind.clone(),
-            raw_digest: row.raw_digest.clone(),
-            created_at: row.created_at.clone(),
-        };
-
-        let decision = nexus_creator_memory::review::classify_pending_review(&input);
-
-        // Wrap the per-row work so a slow side effect cannot overrun the budget.
-        // On timeout the row is left in place (not deleted) and the loop stops;
-        // the caller reports `has_more = true` and the row is retried next call.
-        let row_result = tokio::time::timeout_at(
-            deadline,
-            process_single_review_row(&decision, &input, nexus_home, creator_id, pool),
-        )
-        .await;
-
-        // `processed` counts rows *inspected* (attempted): it advances for both
-        // successful and timed-out/failed rows, so the client's progress signal
-        // reflects work the server actually performed. It is NOT a drain-
-        // completion signal — queue advancement (rows actually completed and
-        // deleted) is tracked separately via `any_row_remained_pending`, which
-        // the caller folds into `has_more` so a non-advancing row never yields a
-        // false "Review complete" (W-QC3-001 / R-V180P0-QC3-001).
-        outcome.processed += 1;
-
-        match row_result {
-            Ok(action_counts) => {
-                outcome.promoted += action_counts.promoted;
-                outcome.fragmented += action_counts.fragmented;
-                outcome.dropped += action_counts.dropped;
-                // A row whose action produced zero counts was NOT completed: its
-                // side effect failed (promote/fragment error) or it hit an
-                // unimplemented action, so it was not deleted and remains
-                // pending. Any such row must keep `has_more` true so the client
-                // re-requests instead of terminating with a false "complete".
-                if action_counts.promoted + action_counts.fragmented + action_counts.dropped == 0 {
-                    outcome.any_row_remained_pending = true;
-                }
-            }
-            Err(_elapsed) => {
-                // Deadline expired mid-row. The row was inspected but its side
-                // effect was abandoned, so it remains pending (not deleted).
-                // Stop processing further rows; the caller reports `has_more`
-                // and the row is retried next call.
-                outcome.any_row_remained_pending = true;
-                tracing::info!(
-                    creator_id = %creator_id,
-                    pending_id = %row.pending_id,
-                    processed = outcome.processed,
-                    "Review deadline reached mid-batch; returning partial progress"
-                );
-                break;
-            }
-        }
-    }
-
-    outcome
-}
-
-/// Counts produced by a single row's classify+action. Each field is 0 or 1.
-struct RowActionCounts {
-    promoted: i64,
-    fragmented: i64,
-    dropped: i64,
-}
-
-/// Classify one pending row, perform the action (promote/fragment/drop), and
-/// delete the pending row on success. Behavior matches the V1.33
-/// `process_review_queue` body; extracted so the deadline loop can bound it.
-async fn process_single_review_row(
-    decision: &nexus_creator_memory::review::ReviewDecision,
-    input: &nexus_creator_memory::review::PendingReviewInput,
-    nexus_home: &std::path::Path,
-    creator_id: &str,
-    pool: &sqlx::SqlitePool,
-) -> RowActionCounts {
-    let mut counts = RowActionCounts {
-        promoted: 0,
-        fragmented: 0,
-        dropped: 0,
-    };
-
-    match decision.action {
-        nexus_creator_memory::review::ReviewAction::PromoteToLongTerm => {
-            let summarizer = PassthroughSummarizer {
-                creator_id: creator_id.to_string(),
-            };
-            match nexus_creator_memory::review::promote_to_long_term(
-                nexus_home,
-                creator_id,
-                input,
-                &summarizer,
-            )
-            .await
-            {
-                Ok(_) => {
-                    counts.promoted = 1;
-                    delete_pending_by_id(pool, &input.pending_id).await;
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        pending_id = %input.pending_id,
-                        error = %e,
-                        "Failed to promote pending review; skipping"
-                    );
-                }
-            }
-        }
-        nexus_creator_memory::review::ReviewAction::FragmentOnly => {
-            let fragment = nexus_creator_memory::review::create_fragment_from_review(input);
-            let record = nexus_local_db::memory_fragment::MemoryFragmentRecord {
-                fragment_id: fragment.fragment_id,
-                session_id: fragment.session_id,
-                creator_id: fragment.creator_id,
-                keywords: serde_json::to_string(&fragment.keywords).unwrap_or_default(),
-                summary: fragment.summary,
-                created_at: fragment.created_at,
-                ttl: fragment.ttl,
-                world_id: input.world_id.clone(),
-            };
-
-            match nexus_local_db::memory_fragment::create_fragment(pool, &record).await {
-                Ok(()) => {
-                    counts.fragmented = 1;
-                    delete_pending_by_id(pool, &input.pending_id).await;
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        pending_id = %input.pending_id,
-                        error = %e,
-                        "Failed to create fragment; skipping"
-                    );
-                }
-            }
-        }
-        nexus_creator_memory::review::ReviewAction::Drop => {
-            delete_pending_by_id(pool, &input.pending_id).await;
-            counts.dropped = 1;
-        }
-        // MergeIntoExisting and TriggerSoulExperienceOnly are Phase 2 features
-        _ => {
-            tracing::debug!(
-                pending_id = %input.pending_id,
-                action = ?decision.action,
-                "Skipping unimplemented review action"
-            );
-        }
-    }
-
-    counts
-}
-
-/// Delete a pending review entry by ID (best-effort, logs on failure).
-///
-/// At-least-once semantics (R-V180P0-QC2-001): the delete runs AFTER the row's
-/// side effect (promote/fragment/drop) succeeds. If the delete itself fails (DB
-/// error), the pending row remains and may be reprocessed on the next review
-/// call — for promote/fragment that means a duplicate memory/fragment. This is
-/// accepted under the local-only / single-active-creator / small-queue threat
-/// model (operator-triggered review, bounded pipeline, observable warn log);
-/// it mirrors the pre-existing V1.33 best-effort pattern. A transactional
-/// side-effect-then-delete (or a row-state flip before the side effect) would
-/// harden it for an untrusted/multi-writer model in a future major version.
-async fn delete_pending_by_id(pool: &sqlx::SqlitePool, pending_id: &str) {
-    let pid = pending_id.to_string();
-    if let Err(e) = sqlx::query!(
-        "DELETE FROM memory_pending_review WHERE pending_id = ?",
-        pid
-    )
-    .execute(pool)
-    .await
-    {
-        tracing::warn!(pending_id = %pending_id, error = %e, "Failed to delete pending review after processing");
-    }
-}
-
-/// Passthrough summarizer that returns the raw digest with an UNTRUSTED header.
-///
-/// In a future iteration, this will be replaced by an ACP-based summarizer
-/// that produces a more structured memory entry. For V1.33, the raw digest
-/// is used directly to close the loop without requiring LLM calls.
-///
-/// **Security (R-V133P4-03):** Prepends a provenance header so downstream
-/// consumers can identify untrusted content from session capture digests.
-///
-/// **Safety (R-V133P4-06):** Caps the raw digest at `MAX_DIGEST_BYTES` (256 KiB).
-/// Larger digests are truncated with a warning log.
-struct PassthroughSummarizer {
-    /// Active creator ID — injected at construction time so the UNTRUSTED
-    /// header is self-contained for downstream consumers (R-V133P4-03).
-    creator_id: String,
-}
-
-/// Maximum allowed digest size in bytes (256 KiB). R-V133P4-06.
-const MAX_DIGEST_BYTES: usize = 256 * 1024;
-
-// `unused_async_trait_impl` (new in clippy 1.98): `summarize` is a passthrough
-// that performs no async I/O; `async` is by `SessionDigestSummarizer` trait
-// contract — toolchain-drift debt.
-#[allow(clippy::unused_async_trait_impl)]
-impl nexus_creator_memory::review::SessionDigestSummarizer for PassthroughSummarizer {
-    async fn summarize(
-        &self,
-        session_id: &str,
-        task_kind: &str,
-        raw_digest: &str,
-        world_id: Option<&str>,
-    ) -> Result<String, nexus_creator_memory::errors::MemoryError> {
-        // R-V133P4-06: Size guard — truncate if digest exceeds 256 KiB.
-        let digest = if raw_digest.len() > MAX_DIGEST_BYTES {
-            tracing::warn!(
-                original_len = raw_digest.len(),
-                max_bytes = MAX_DIGEST_BYTES,
-                "PassthroughSummarizer: raw_digest exceeds 256 KiB cap, truncating"
-            );
-            &raw_digest[..MAX_DIGEST_BYTES]
-        } else {
-            raw_digest
-        };
-
-        // R-V133P4-03: Prepend UNTRUSTED provenance header so downstream
-        // consumers (context assembly, moment prompts) can apply extra validation.
-        // Header must be self-contained: creator_id binds the LTM to the active
-        // creator (not body-supplied), captured_at provides RFC 3339 provenance.
-        let captured_at = chrono::Utc::now().to_rfc3339();
-        let header = format!(
-            "# UNTRUSTED: sourced from session_capture digest\n# creator_id: {}\n# session_id: {session_id}\n# task_kind: {task_kind}\n# world_id: {}\n# captured_at: {captured_at}\n\n",
-            self.creator_id,
-            world_id.unwrap_or("(none)")
-        );
-        Ok(format!("{header}{digest}"))
-    }
-}
-
 /// `GET /v1/daemon/memory/fragments?creator_id=...&keyword=...&limit=...`
 ///
 /// Lists memory fragments for a creator with optional keyword filter.
@@ -1095,56 +798,16 @@ pub async fn fragments(
     }))
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-/// Minimum fragment count before narrative synthesis is attempted.
-const MIN_SOUL_NARRATIVE_FRAGMENTS: i64 = 10;
-
-/// Minimum distinct keyword count before narrative synthesis is attempted.
-const MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS: i64 = 20;
-
-/// Maximum Unicode scalar characters persisted for a synthesized narrative.
-///
-/// Longer drafts are truncated cleanly before the quality gate and upsert.
-const SOUL_NARRATIVE_MAX_CHARS: usize = 16 * 1024;
-
-/// Forward-looking tokens checked by the narrative quality suffix heuristic.
-const FORWARD_LOOKING_TOKENS: &[&str] = &[
-    "will", "shall", "next", "upcoming", "future", "continue", "toward", "await", "explore",
-    "discover",
-];
-
-/// Forward-looking bigrams checked by the narrative quality suffix heuristic.
-const FORWARD_LOOKING_BIGRAMS: &[(&str, &str)] = &[
-    ("looking", "ahead"),
-    ("going", "forward"),
-    ("what", "if"),
-    ("how", "might"),
-];
+// ─── SOUL narrative reflect (v1.184 P3: dispatches through the bearer core) ─
 
 /// `POST /v1/daemon/memory/soul/reflect`
 ///
-/// Reads or regenerates the cached whole-Creator SOUL narrative.
-/// The endpoint:
-/// 1. Enforces active creator (same pattern as `fragments`).
-/// 2. Computes fragment stats for the insufficient-data gate.
-/// 3. When `force_regenerate` is `false` (the read/poll path):
-///    - Returns `insufficient_data` if below gate.
-///    - Returns `ungenerated` if above gate but no cache row exists.
-///    - Returns `current` if cache row exists and fragments haven't changed.
-///    - Returns `stale` if cache row exists but fragments have changed.
-///    - **Never** calls the LLM — synthesis is on-demand only.
-/// 4. When `force_regenerate` is `true` (the explicit CTA):
-///    - Returns `insufficient_data` if below gate.
-///    - Synthesizes via `SoulNarrativeSynthesizer` (ACP-backed), persists
-///      the result, and returns `current`.
-/// 5. The insufficient-data gate (`fragment_count < 10` OR
-///    `distinct_keyword_count < 20`) is evaluated BEFORE any ACP call, so
-///    new creators never pay LLM latency for a guaranteed-thin result.
+/// Reads or regenerates the cached whole-Creator SOUL narrative. The public
+/// Creator handler validates the active creator + world ownership, then
+/// delegates to the bearer-parameterized [`reflect_bearer_soul`] core; the
+/// wire response shape and state strings are preserved byte-for-byte.
 ///
 /// Auth: requires active creator from config.toml.
-/// Request body `creator_id` must match the active creator, otherwise 403.
-#[allow(clippy::too_many_lines, clippy::similar_names)]
 pub async fn reflect_soul(
     State(state): State<WorkspaceState>,
     Json(req): Json<SoulNarrativeRequest>,
@@ -1165,15 +828,13 @@ pub async fn reflect_soul(
     if !nexus_creator::local_identity::is_valid_creator_id(&req.creator_id) {
         return Err(NexusApiError::InvalidInput {
             field: "creator_id".into(),
-            reason: "creator_id must start with 'ctr_' followed by alphanumeric characters".into(),
+            reason: "creator_id must start with 'ctr_' followed by alphanumeric characters"
+                .into(),
         });
     }
 
     let world_id = req.world_id.as_deref();
 
-    // V1.82: per-World narrative ownership check. Reuse the shared helper that
-    // works/world_kb/host-tool handlers already use. Non-owned/non-existent
-    // worlds are rejected before any stats query or synthesis.
     if let Some(w) = world_id {
         if !nexus_local_db::narrative_write::is_world_owned(
             state.pool_or_uninit()?,
@@ -1199,461 +860,62 @@ pub async fn reflect_soul(
         "Reflecting on SOUL narrative"
     );
 
-    // 1. Compute fragment stats + cache row in one DB round-trip (G2 fix).
-    let (fragment_stats, cached) = nexus_local_db::soul_narrative_fragment_stats(
-        state.pool_or_uninit()?,
-        &active_creator,
-        world_id,
-    )
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".into(),
-        message: format!("failed to compute fragment stats: {e}"),
-    })?;
-
-    let force = req.force_regenerate;
-
-    // 2. Insufficient-data gate (before any ACP call).
-    let min_distinct = usize::try_from(MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS).unwrap_or(usize::MAX);
-    let insufficient = fragment_stats.fragment_count < MIN_SOUL_NARRATIVE_FRAGMENTS
-        || fragment_stats.distinct_keyword_count < min_distinct;
-
-    if insufficient {
-        return Ok(Json(SoulNarrativeResponse {
-            creator_id: active_creator,
-            state: "insufficient_data".parse().expect("valid state constant"),
-            narrative: None,
-            generated_at: None,
-            stale: false,
-            fragment_count_at_generation: None,
-            max_fragment_created_at_at_generation: None,
-            current_fragment_count: u64::try_from(fragment_stats.fragment_count).unwrap_or(0),
-            current_distinct_keyword_count: u64::try_from(fragment_stats.distinct_keyword_count)
-                .unwrap_or(0),
-            min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
-            min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
-        }));
-    }
-
-    // 3. Stale detection — stats-only rows (narrative=None) are treated as
-    //    ungenerated, not stale (G3 fix).
-    let has_narrative = cached.as_ref().and_then(|c| c.narrative.as_ref()).is_some();
-    let stale = cached.as_ref().is_some_and(|c| {
-        has_narrative
-            && (c.fragment_count_at_generation != fragment_stats.fragment_count
-                || c.max_fragment_created_at_at_generation.as_deref()
-                    != fragment_stats.max_created_at.as_deref())
-    });
-
-    // 4. Read/poll path (force=false): return current, stale, or ungenerated.
-    //    NEVER calls the LLM — synthesis is gated behind force=true (G1 fix).
-    if !force {
-        if let Some(ref c) = cached {
-            // Stats-only row (G3) — treat as ungenerated, not stale/current.
-            if !has_narrative {
-                return Ok(Json(SoulNarrativeResponse {
-                    creator_id: active_creator,
-                    state: "ungenerated".parse().expect("valid state constant"),
-                    narrative: None,
-                    generated_at: None,
-                    stale: false,
-                    fragment_count_at_generation: None,
-                    max_fragment_created_at_at_generation: None,
-                    current_fragment_count: u64::try_from(fragment_stats.fragment_count)
-                        .unwrap_or(0),
-                    current_distinct_keyword_count: u64::try_from(
-                        fragment_stats.distinct_keyword_count,
-                    )
-                    .unwrap_or(0),
-                    min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
-                    min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
-                }));
-            }
-            if stale {
-                return Ok(Json(SoulNarrativeResponse {
-                    creator_id: active_creator,
-                    state: "stale".parse().expect("valid state constant"),
-                    narrative: c.narrative.clone(),
-                    generated_at: c.generated_at.clone(),
-                    stale: true,
-                    fragment_count_at_generation: Some(
-                        u64::try_from(c.fragment_count_at_generation).unwrap_or(0),
-                    ),
-                    max_fragment_created_at_at_generation: c
-                        .max_fragment_created_at_at_generation
-                        .clone(),
-                    current_fragment_count: u64::try_from(fragment_stats.fragment_count)
-                        .unwrap_or(0),
-                    current_distinct_keyword_count: u64::try_from(
-                        fragment_stats.distinct_keyword_count,
-                    )
-                    .unwrap_or(0),
-                    min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
-                    min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
-                }));
-            }
-            // Not stale → current.
-            return Ok(Json(SoulNarrativeResponse {
-                creator_id: active_creator,
-                state: "current".parse().expect("valid state constant"),
-                narrative: c.narrative.clone(),
-                generated_at: c.generated_at.clone(),
-                stale: false,
-                fragment_count_at_generation: Some(
-                    u64::try_from(c.fragment_count_at_generation).unwrap_or(0),
-                ),
-                max_fragment_created_at_at_generation: c
-                    .max_fragment_created_at_at_generation
-                    .clone(),
-                current_fragment_count: u64::try_from(fragment_stats.fragment_count).unwrap_or(0),
-                current_distinct_keyword_count: u64::try_from(
-                    fragment_stats.distinct_keyword_count,
-                )
-                .unwrap_or(0),
-                min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
-                min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
-            }));
-        }
-        // Above gate but no cache row → ungenerated.
-        // Populate current_* counts from fragment_stats; narrative/generated_at = None.
-        return Ok(Json(SoulNarrativeResponse {
-            creator_id: active_creator,
-            state: "ungenerated".parse().expect("valid state constant"),
-            narrative: None,
-            generated_at: None,
-            stale: false,
-            fragment_count_at_generation: None,
-            max_fragment_created_at_at_generation: None,
-            current_fragment_count: u64::try_from(fragment_stats.fragment_count).unwrap_or(0),
-            current_distinct_keyword_count: u64::try_from(fragment_stats.distinct_keyword_count)
-                .unwrap_or(0),
-            min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
-            min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
-        }));
-    }
-
-    // 5. force=true → synthesize (explicit CTA, on-demand only).
-    let registry =
-        state
+    // Build the ACP synthesizer only when force=true; the core returns the
+    // canonical `ServiceUnavailable` when no capability registry is present.
+    let synthesizer = if req.force_regenerate {
+        let registry = state
             .capability_registry()
             .ok_or_else(|| NexusApiError::ServiceUnavailable {
                 message: "capability registry not available".to_string(),
             })?;
-
-    let synthesizer =
-        crate::api::handlers::soul_narrative_synthesizer::AcpSoulNarrativeSynthesizer::new(
-            registry,
-        );
-
-    // Build capped input signal scoped to the (creator, world) subset.
-    let input = build_soul_narrative_synthesis_input(
-        state.pool_or_uninit()?,
-        &active_creator,
-        world_id,
-        &fragment_stats,
-    )
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".into(),
-        message: format!("failed to build synthesis input: {e}"),
-    })?;
-
-    // Keep the keyword list for the post-synthesis quality gate.
-    let top_keywords = input.top_keywords.clone();
-
-    let draft = synthesizer
-        .synthesize(&active_creator, input)
-        .await
-        .map_err(map_soul_narrative_memory_error)?;
-
-    // 5b. Validate and cap the draft before persistence.
-    //
-    // Long narratives are truncated cleanly; the quality gate then runs on the
-    // text that will actually be persisted, so we never store an unvalidated
-    // or oversized draft.
-    let narrative = truncate_summary(&draft.narrative, SOUL_NARRATIVE_MAX_CHARS);
-    validate_soul_narrative_draft(&narrative, &top_keywords)
-        .map_err(map_soul_narrative_memory_error)?;
-
-    // 6. Persist the result (including stats cache for future read-path hits).
-    let now = chrono::Utc::now().to_rfc3339();
-    let stats_fingerprint = nexus_local_db::build_stats_fingerprint(
-        fragment_stats.fragment_count,
-        fragment_stats.max_created_at.as_deref(),
-    );
-    let record = nexus_local_db::SoulNarrativeRecord {
-        creator_id: active_creator.clone(),
-        world_id: world_id.map(std::string::ToString::to_string),
-        narrative: Some(narrative.clone()),
-        generated_at: Some(now.clone()),
-        fragment_count_at_generation: fragment_stats.fragment_count,
-        max_fragment_created_at_at_generation: fragment_stats.max_created_at.clone(),
-        distinct_keyword_count_cache: i64::try_from(fragment_stats.distinct_keyword_count)
-            .unwrap_or(0),
-        stats_fingerprint: Some(stats_fingerprint),
-        created_at: now.clone(),
-        updated_at: now,
+        Some(
+            crate::api::handlers::soul_narrative_synthesizer::AcpSoulNarrativeSynthesizer::new(
+                registry,
+            ),
+        )
+    } else {
+        None
     };
-    nexus_local_db::upsert_soul_narrative(state.pool_or_uninit()?, &record)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: format!("failed to persist soul narrative: {e}"),
-        })?;
 
-    Ok(Json(SoulNarrativeResponse {
-        creator_id: active_creator,
-        state: "current".parse().expect("valid state constant"),
-        narrative: Some(narrative),
-        generated_at: record.generated_at,
-        stale: false,
-        fragment_count_at_generation: Some(
-            u64::try_from(record.fragment_count_at_generation).unwrap_or(0),
-        ),
-        max_fragment_created_at_at_generation: record.max_fragment_created_at_at_generation,
-        current_fragment_count: u64::try_from(fragment_stats.fragment_count).unwrap_or(0),
-        current_distinct_keyword_count: u64::try_from(fragment_stats.distinct_keyword_count)
-            .unwrap_or(0),
+    let pool = state.pool_or_uninit()?;
+    let ctx = BearerPipelineCtx::creator(&active_creator, world_id);
+    let outcome = reflect_bearer_soul(pool, &ctx, req.force_regenerate, synthesizer.as_ref())
+        .await?;
+
+    Ok(Json(map_reflect_outcome(active_creator, outcome)))
+}
+
+/// Map a bearer-agnostic reflect outcome to the wire `SoulNarrativeResponse`.
+fn map_reflect_outcome(
+    creator_id: String,
+    o: crate::api::handlers::memory_pipeline::ReflectOutcome,
+) -> SoulNarrativeResponse {
+    let state_str = match o.state {
+        crate::api::handlers::memory_pipeline::ReflectState::InsufficientData => {
+            "insufficient_data"
+        }
+        crate::api::handlers::memory_pipeline::ReflectState::Ungenerated => "ungenerated",
+        crate::api::handlers::memory_pipeline::ReflectState::Current => "current",
+        crate::api::handlers::memory_pipeline::ReflectState::Stale => "stale",
+    };
+    SoulNarrativeResponse {
+        creator_id,
+        state: state_str.parse().expect("valid state constant"),
+        narrative: o.narrative,
+        generated_at: o.generated_at,
+        stale: o.stale,
+        fragment_count_at_generation: o.fragment_count_at_generation,
+        max_fragment_created_at_at_generation: o.max_fragment_created_at_at_generation,
+        current_fragment_count: o.current_fragment_count,
+        current_distinct_keyword_count: o.current_distinct_keyword_count,
         min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
         min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
-    }))
-}
-
-/// Truncate `summary` to at most `max_chars` Unicode scalar characters.
-///
-/// If the summary exceeds `max_chars`, takes the first `max_chars - 1` chars
-/// and appends `…`. This avoids the UTF-8 byte-slice truncation panic that
-/// `&s[..279]` causes when byte 279 is mid-multibyte-char.
-fn truncate_summary(summary: &str, max_chars: usize) -> String {
-    if summary.chars().count() <= max_chars {
-        summary.to_string()
-    } else {
-        let t: String = summary.chars().take(max_chars - 1).collect();
-        format!("{t}…")
     }
 }
 
-/// Map narrative-synthesis `MemoryError` variants to canonical `NexusApiError`
-/// shapes without string-content matching.
-fn map_soul_narrative_memory_error(err: MemoryError) -> NexusApiError {
-    match err {
-        MemoryError::WorkerUnavailable => NexusApiError::ServiceUnavailable {
-            message: "ACP worker unavailable for narrative synthesis".into(),
-        },
-        MemoryError::CapabilityMissing { capability } => NexusApiError::ServiceUnavailable {
-            message: format!("{capability} capability not available in registry"),
-        },
-        MemoryError::MalformedOutput { reason }
-        | MemoryError::QualityThresholdMissed { reason } => NexusApiError::BadRequest {
-            code: "narrative_generation_failed".into(),
-            message: reason,
-        },
-        other => NexusApiError::Internal {
-            code: "NARRATIVE_SYNTHESIS_ERROR".into(),
-            message: other.to_string(),
-        },
-    }
-}
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
-/// Lightweight, deterministic quality gate for a synthesized narrative draft.
-///
-/// Passes when the draft references at least two of the provided top keywords,
-/// or when it ends with a forward-looking suffix (question or future-oriented
-/// language). This is a cheap runtime guard against generic/partial output.
-fn validate_soul_narrative_draft(
-    narrative: &str,
-    top_keywords: &[(String, u64)],
-) -> Result<(), MemoryError> {
-    let lower = narrative.to_lowercase();
-    let keyword_hits = top_keywords
-        .iter()
-        .filter(|(kw, _)| lower.contains(&kw.to_lowercase()))
-        .count();
-
-    if keyword_hits >= 2 || has_forward_looking_suffix(narrative) {
-        return Ok(());
-    }
-
-    Err(MemoryError::QualityThresholdMissed {
-        reason: format!(
-            "narrative quality floor missed: {keyword_hits} keyword hits and no forward-looking suffix"
-        ),
-    })
-}
-
-/// Heuristic: does the narrative end with a forward-looking reflection?
-fn has_forward_looking_suffix(narrative: &str) -> bool {
-    let trimmed = narrative.trim_end();
-    if trimmed.ends_with('?') {
-        return true;
-    }
-
-    // The last sentence is the last non-empty segment after splitting on
-    // terminal punctuation. rsplit + skip-empty handles a trailing period
-    // (rsplit_once lands on the terminal punctuation and yields an empty
-    // `after`, which previously made this always false for narratives ending
-    // in `.`/`!` — greptile review feedback).
-    let last_sentence = trimmed
-        .rsplit(['.', '!', '?'])
-        .map(str::trim)
-        .find(|s| !s.is_empty())
-        .unwrap_or(trimmed);
-
-    let words: Vec<String> = last_sentence
-        .split_whitespace()
-        .map(|w| {
-            w.trim_matches(|c: char| !c.is_alphanumeric())
-                .to_lowercase()
-        })
-        .filter(|w| !w.is_empty())
-        .collect();
-
-    if words
-        .iter()
-        .any(|w| FORWARD_LOOKING_TOKENS.contains(&w.as_str()))
-    {
-        return true;
-    }
-
-    words.windows(2).any(|pair| {
-        FORWARD_LOOKING_BIGRAMS
-            .iter()
-            .any(|(a, b)| pair[0] == *a && pair[1] == *b)
-    })
-}
-
-/// Build a capped `SoulNarrativeSynthesisInput` from a `(creator_id, world_id)`
-/// fragment subset.
-///
-/// Caps: ≤30 keywords, ≤24 summaries ≤280 chars, ≤8 temporal buckets.
-async fn build_soul_narrative_synthesis_input(
-    pool: &sqlx::SqlitePool,
-    creator_id: &str,
-    world_id: Option<&str>,
-    stats: &nexus_local_db::SoulNarrativeFragmentStats,
-) -> Result<nexus_creator_memory::soul_narrative::SoulNarrativeSynthesisInput, NexusApiError> {
-    use nexus_creator_memory::soul_narrative::SoulNarrativeSynthesisInput;
-
-    // Fetch recent fragments for the scope (Creator whole or world subset).
-    let fragments = nexus_local_db::list_fragments_limited(pool, creator_id, world_id, 100)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: format!("failed to fetch fragments for synthesis: {e}"),
-        })?;
-
-    // Count keywords across all fragments.
-    let mut keyword_counts: std::collections::HashMap<String, u64> =
-        std::collections::HashMap::new();
-    let mut summaries: Vec<String> = Vec::new();
-
-    for frag in &fragments {
-        if let Ok(keywords) = serde_json::from_str::<Vec<String>>(&frag.keywords) {
-            for kw in keywords {
-                *keyword_counts.entry(kw).or_default() += 1;
-            }
-        }
-        // Cap summaries: ≤24, each ≤280 chars (Unicode scalar chars, not bytes).
-        if summaries.len() < 24 {
-            let summary = truncate_summary(&frag.summary, 280);
-            summaries.push(summary);
-        }
-    }
-
-    // Sort keywords by count desc, cap at 30.
-    let mut top_keywords: Vec<(String, u64)> = keyword_counts.into_iter().collect();
-    top_keywords.sort_by_key(|(_k, count)| std::cmp::Reverse(*count));
-    top_keywords.truncate(30);
-
-    // Build temporal buckets (up to 8) by grouping fragments into time windows.
-    let temporal_buckets = build_temporal_buckets(&fragments);
-
-    Ok(SoulNarrativeSynthesisInput {
-        top_keywords,
-        recent_summaries: summaries,
-        temporal_buckets,
-        total_fragment_count: u64::try_from(stats.fragment_count).unwrap_or(0),
-        distinct_keyword_count: u64::try_from(stats.distinct_keyword_count).unwrap_or(0),
-        oldest_created_at: fragments.last().map(|f| f.created_at.clone()),
-        newest_created_at: fragments.first().map(|f| f.created_at.clone()),
-    })
-}
-
-/// Build up to 8 temporal buckets from fragments (ordered by `created_at`).
-fn build_temporal_buckets(
-    fragments: &[nexus_local_db::MemoryFragmentRecord],
-) -> Vec<nexus_creator_memory::soul_narrative::TemporalBucket> {
-    use nexus_creator_memory::soul_narrative::TemporalBucket;
-
-    if fragments.is_empty() {
-        return Vec::new();
-    }
-
-    let max_buckets = 8;
-    let n = fragments.len();
-    let bucket_size = n.div_ceil(max_buckets); // ceiling division
-    let bucket_size = bucket_size.max(1);
-
-    let mut buckets: Vec<TemporalBucket> = Vec::new();
-
-    for (bi, chunk) in fragments.chunks(bucket_size).enumerate() {
-        if buckets.len() >= max_buckets {
-            break;
-        }
-
-        // Collect top 5 keywords in this bucket.
-        let mut kw_counts: std::collections::HashMap<String, u64> =
-            std::collections::HashMap::new();
-        for frag in chunk {
-            if let Ok(keywords) = serde_json::from_str::<Vec<String>>(&frag.keywords) {
-                for kw in keywords {
-                    *kw_counts.entry(kw).or_default() += 1;
-                }
-            }
-        }
-        let mut top: Vec<(String, u64)> = kw_counts.into_iter().collect();
-        top.sort_by_key(|(_k, count)| std::cmp::Reverse(*count));
-        top.truncate(5);
-        let top_keywords: Vec<String> = top.into_iter().map(|(k, _)| k).collect();
-
-        // Label: use the first fragment's created_at date portion.
-        let label = chunk.first().map_or_else(
-            || format!("bucket_{bi}"),
-            |f| {
-                // Extract date portion (first 10 chars = YYYY-MM-DD).
-                if f.created_at.len() >= 10 {
-                    f.created_at[..10].to_string()
-                } else {
-                    f.created_at.clone()
-                }
-            },
-        );
-
-        buckets.push(TemporalBucket {
-            label,
-            top_keywords,
-            fragment_count: u64::try_from(chunk.len()).unwrap_or(0),
-        });
-    }
-
-    // `fragments` arrive in `created_at DESC` order (newest first), so the
-    // chunks above are newest→oldest. The synthesis prompt describes drift
-    // *over time* and expects chronological order (oldest→newest); reverse so
-    // bucket[0] is the earliest period. (Greptile review feedback.)
-    buckets.reverse();
-
-    buckets
-}
-
-/// Decode the `memory_fragments.keywords` JSON-array string into `Vec<String>`.
-///
-/// V1.79 SOUL visualization reads this off the list-fragments wire shape. The
-/// stored column is a JSON array (`["alpha","beta"]`); legacy or corrupt rows
-/// may hold malformed JSON. A decode failure degrades to an **empty** list
-/// rather than failing the whole fragments response — the read-only viz then
-/// simply shows no keywords for that fragment. Mirrors the same
-/// `serde_json::from_str::<Vec<String>>(...).unwrap_or_default()` contract used
-/// by `nexus_local_db::memory_fragment::get_all_keywords`.
+/// Minimum fragment count before narrative synthesis is attempted.
 fn decode_fragment_keywords(raw: &str) -> Vec<String> {
     serde_json::from_str::<Vec<String>>(raw).unwrap_or_default()
 }
@@ -1674,91 +936,6 @@ fn read_active_creator_id(nexus_home: &std::path::Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_creator_memory::review::SessionDigestSummarizer as _;
-
-    #[tokio::test]
-    async fn passthrough_summarizer_includes_untrusted_header() {
-        let summarizer = PassthroughSummarizer {
-            creator_id: "ctr_test_creator".to_string(),
-        };
-        let result = summarizer
-            .summarize(
-                "sess_123",
-                "brainstorm",
-                "My brainstorm content",
-                Some("world_1"),
-            )
-            .await
-            .unwrap();
-
-        assert!(
-            result.starts_with("# UNTRUSTED:"),
-            "LTM body should start with UNTRUSTED header, got: {}",
-            &result[..result.len().min(50)]
-        );
-        assert!(
-            result.contains("# creator_id: ctr_test_creator"),
-            "Header should include creator_id (active creator)"
-        );
-        assert!(
-            result.contains("# session_id: sess_123"),
-            "Header should include session_id"
-        );
-        assert!(
-            result.contains("# task_kind: brainstorm"),
-            "Header should include task_kind"
-        );
-        assert!(
-            result.contains("# world_id: world_1"),
-            "Header should include world_id"
-        );
-        assert!(
-            result.contains("# captured_at: "),
-            "Header should include captured_at (RFC 3339)"
-        );
-        assert!(
-            result.contains("My brainstorm content"),
-            "Body should contain the raw digest after the header"
-        );
-    }
-
-    #[tokio::test]
-    async fn passthrough_summarizer_truncates_large_digest() {
-        let summarizer = PassthroughSummarizer {
-            creator_id: "ctr_big".to_string(),
-        };
-        // Create a digest larger than 256 KiB.
-        let large_digest = "x".repeat(MAX_DIGEST_BYTES + 1000);
-        let result = summarizer
-            .summarize("sess_big", "test", &large_digest, None)
-            .await
-            .unwrap();
-
-        // The result should be capped at MAX_DIGEST_BYTES + header.
-        let body_after_header = result.split_once("\n\n").map_or("", |(_, body)| body);
-        assert_eq!(
-            body_after_header.len(),
-            MAX_DIGEST_BYTES,
-            "Digest should be truncated to MAX_DIGEST_BYTES"
-        );
-    }
-
-    #[tokio::test]
-    async fn passthrough_summarizer_small_digest_unchanged() {
-        let summarizer = PassthroughSummarizer {
-            creator_id: "ctr_small".to_string(),
-        };
-        let small = "Hello world";
-        let result = summarizer
-            .summarize("sess_small", "test", small, None)
-            .await
-            .unwrap();
-
-        assert!(
-            result.contains(small),
-            "Small digest should be included verbatim"
-        );
-    }
 
     // ── V1.79: keyword JSON decode (SOUL visualization projection) ──────────
 
@@ -1790,60 +967,6 @@ mod tests {
 
     // ─── R-V181P0-QC3-W002: UTF-8 char-safe summary truncation ───────────
 
-    #[test]
-    fn truncate_summary_short_enough_returns_unchanged() {
-        let short = "Hello world";
-        assert_eq!(truncate_summary(short, 280), short);
-    }
-
-    #[test]
-    fn truncate_summary_exactly_at_limit_returns_unchanged() {
-        let exact = "a".repeat(280);
-        assert_eq!(truncate_summary(&exact, 280), exact);
-    }
-
-    #[test]
-    fn truncate_summary_over_limit_ascii_truncates_with_ellipsis() {
-        let long = "a".repeat(300);
-        let result = truncate_summary(&long, 280);
-        // 279 chars + '…' = 280 chars
-        assert_eq!(result.chars().count(), 280);
-        assert!(result.ends_with('…'));
-    }
-
-    #[test]
-    fn truncate_summary_cjk_multibyte_no_panic() {
-        // Each CJK char is 3 bytes; 300 CJK chars = 900 bytes.
-        // Byte index 279 is mid-character → old byte-slice would panic.
-        let cjk = "字".repeat(300);
-        let result = truncate_summary(&cjk, 280);
-        // Must not panic. 279 CJK chars + '…' = 280 chars.
-        assert_eq!(result.chars().count(), 280);
-        assert!(result.ends_with('…'));
-    }
-
-    #[test]
-    fn truncate_summary_emoji_multibyte_no_panic() {
-        // Emoji can be 4+ bytes; byte slice at 279 would panic.
-        let emoji = "🎉".repeat(300);
-        let result = truncate_summary(&emoji, 280);
-        assert_eq!(result.chars().count(), 280);
-        assert!(result.ends_with('…'));
-    }
-
-    #[test]
-    fn truncate_summary_short_below_limit_unchanged() {
-        assert_eq!(truncate_summary("abc", 280), "abc");
-        assert_eq!(truncate_summary("", 280), "");
-    }
-
-    // ─── V1.80 REL-01: deadline-aware partial progress ───────────────────
-
-    /// With a deadline already in the past, `process_review_batch` inspects
-    /// zero rows and returns all-zero counters. The caller (review handler)
-    /// then reports `has_more = true` because `processed < processing_slice`.
-    /// This proves the deadline-check-before-each-row logic stops the loop
-    /// immediately on budget exhaustion without touching side effects.
     #[tokio::test]
     async fn process_review_batch_past_deadline_processes_zero_rows() {
         let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
@@ -1873,10 +996,33 @@ mod tests {
             .expect("fetch");
         assert_eq!(rows.len(), 3, "precondition: 3 rows seeded");
 
+        let inputs: Vec<PendingReviewInput> = rows
+            .into_iter()
+            .map(|row| PendingReviewInput {
+                pending_id: row.pending_id,
+                session_id: row.session_id,
+                bearer_id: row.creator_id,
+                scope_id: row.world_id,
+                task_kind: row.task_kind,
+                raw_digest: row.raw_digest,
+                created_at: row.created_at,
+            })
+            .collect();
+
         // Deadline already in the past.
         let deadline = tokio::time::Instant::now();
-        let outcome =
-            process_review_batch(&rows, &nexus_home, "ctr_testuser", &pool, deadline).await;
+        let ctx = crate::api::handlers::memory_pipeline::BearerPipelineCtx::creator(
+            "ctr_testuser",
+            None,
+        );
+        let outcome = crate::api::handlers::memory_pipeline::process_bearer_review_batch(
+            &inputs,
+            &nexus_home,
+            &ctx,
+            &pool,
+            deadline,
+        )
+        .await;
 
         assert_eq!(outcome.processed, 0, "past deadline must inspect zero rows");
         assert_eq!(outcome.promoted, 0);
@@ -2356,52 +1502,5 @@ mod tests {
         drop(tmp);
     }
 
-    #[test]
-    fn validate_draft_passes_with_two_keyword_hits() {
-        let keywords = vec![
-            ("magic".to_string(), 5),
-            ("science".to_string(), 3),
-            ("love".to_string(), 1),
-        ];
-        let narrative = "A story about magic and science intertwined.";
-        assert!(validate_soul_narrative_draft(narrative, &keywords).is_ok());
-    }
 
-    #[test]
-    fn validate_draft_passes_with_forward_looking_suffix() {
-        let keywords = vec![("magic".to_string(), 5)];
-        let narrative = "The hero stood alone. What will happen next?";
-        assert!(validate_soul_narrative_draft(narrative, &keywords).is_ok());
-    }
-
-    #[test]
-    fn validate_draft_forward_looking_suffix_with_period_terminator() {
-        // Regression (greptile): a narrative ending in '.' with a forward-looking
-        // last sentence must pass even with <2 keyword hits. The old rsplit_once
-        // logic used the empty `after` (post-terminal-punctuation) segment and
-        // always returned false here, wrongly rejecting valid narratives.
-        let keywords = vec![("magic".to_string(), 5)]; // 0 hits
-        let narrative = "The hero stood alone. Their journey will continue.";
-        assert!(validate_soul_narrative_draft(narrative, &keywords).is_ok());
-    }
-
-    #[test]
-    fn validate_draft_fails_when_quality_floor_missed() {
-        let keywords = vec![("magic".to_string(), 5), ("science".to_string(), 3)];
-        let narrative = "The hero stood alone in a room.";
-        let err = validate_soul_narrative_draft(narrative, &keywords)
-            .expect_err("should fail quality floor");
-        match err {
-            MemoryError::QualityThresholdMissed { .. } => {}
-            other => panic!("expected QualityThresholdMissed, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn narrative_longer_than_max_chars_is_truncated_cleanly() {
-        let long = "x".repeat(SOUL_NARRATIVE_MAX_CHARS + 100);
-        let truncated = truncate_summary(&long, SOUL_NARRATIVE_MAX_CHARS);
-        assert_eq!(truncated.chars().count(), SOUL_NARRATIVE_MAX_CHARS);
-        assert!(truncated.ends_with('…'));
-    }
 }

@@ -4,8 +4,8 @@ use sqlx::{Sqlite, SqlitePool, Transaction};
 use uuid::Uuid;
 
 use crate::character::{
-    map_actor_constraint, require_active_owned_character, require_owned_character,
-    require_owned_world,
+    map_actor_constraint, require_active_owned_character, require_owned_active_world,
+    require_owned_character, require_owned_world,
 };
 use crate::error::{ActorContractConflict, LocalDbError};
 use crate::begin_immediate;
@@ -153,6 +153,121 @@ async fn load_binding_tx(
     }))
 }
 
+/// Require an active binding that belongs to `character_id` (tx variant).
+///
+/// Cross-Character or non-active bindings are indistinguishable from missing.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::ActorNotFound` when the binding is missing, belongs
+/// to another Character, or is not active; `LocalDbError` on database failure.
+pub(crate) async fn require_active_character_binding_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    character_id: &str,
+    binding_id: &str,
+) -> Result<ActorWorldBindingRecord, LocalDbError> {
+    let binding = load_binding_tx(tx, binding_id).await?;
+    match binding {
+        Some(b) if b.character_id == character_id && b.status == "active" => Ok(b),
+        _ => Err(LocalDbError::ActorNotFound {
+            resource: "actor_world_binding",
+            id: binding_id.to_string(),
+        }),
+    }
+}
+
+/// Pool variant of [`require_active_character_binding_tx`] for read paths.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::ActorNotFound` when the binding is missing, belongs
+/// to another Character, or is not active; `LocalDbError` on database failure.
+pub(crate) async fn require_active_character_binding_pool(
+    pool: &SqlitePool,
+    character_id: &str,
+    binding_id: &str,
+) -> Result<ActorWorldBindingRecord, LocalDbError> {
+    let row = sqlx::query!(
+        r#"SELECT binding_id as "binding_id!",
+                  character_id as "character_id!",
+                  world_id as "world_id!",
+                  status as "status!",
+                  world_sheet_entry_id,
+                  created_at as "created_at!",
+                  updated_at as "updated_at!"
+           FROM actor_world_bindings WHERE binding_id = ?"#,
+        binding_id
+    )
+    .fetch_optional(pool)
+    .await?;
+    match row {
+        Some(r) if r.character_id == character_id && r.status == "active" => {
+            Ok(record_from_query(
+                r.binding_id,
+                r.character_id,
+                r.world_id,
+                r.status,
+                r.world_sheet_entry_id,
+                r.created_at,
+                r.updated_at,
+            ))
+        }
+        _ => Err(LocalDbError::ActorNotFound {
+            resource: "actor_world_binding",
+            id: binding_id.to_string(),
+        }),
+    }
+}
+
+/// Validate optional binding provenance inside an open write transaction.
+///
+/// A non-null binding must be active, belong to the same Character, and
+/// target a World owned by `owner_creator_id`. Shared-scope (`None`) writes
+/// skip binding validation entirely. Used by every Character memory write
+/// path so binding-local rows cannot be created against a foreign Character,
+/// a non-active binding, or a World owned by someone else.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::ActorNotFound` for a missing, foreign, or inactive
+/// binding; `LocalDbError` on owner/world or database failure.
+pub(crate) async fn require_valid_provenance_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    owner_creator_id: &str,
+    character_id: &str,
+    actor_world_binding_id: Option<&str>,
+) -> Result<(), LocalDbError> {
+    let Some(binding_id) = actor_world_binding_id else {
+        return Ok(());
+    };
+    let binding = require_active_character_binding_tx(tx, character_id, binding_id).await?;
+    crate::character::require_owned_active_world(tx, owner_creator_id, &binding.world_id).await?;
+    Ok(())
+}
+
+/// Pool variant of [`require_valid_provenance_tx`] for binding-scoped reads.
+///
+/// A binding-scoped read must present a binding that is active, belongs to the
+/// same Character, and targets a World owned and active by `owner_creator_id`;
+/// otherwise the row is unavailable (not-found, indistinguishable from
+/// missing).
+///
+/// # Errors
+///
+/// Returns `LocalDbError::ActorNotFound` for a missing, foreign, inactive, or
+/// non-active-World binding; `LocalDbError` on database failure.
+pub(crate) async fn require_active_owned_provenance_pool(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+    character_id: &str,
+    binding_id: &str,
+) -> Result<(), LocalDbError> {
+    let binding = require_active_character_binding_pool(pool, character_id, binding_id).await?;
+    crate::character::require_owned_active_world_pool(pool, owner_creator_id, &binding.world_id)
+        .await?;
+    Ok(())
+}
+
 /// Add a second (or later) active binding for an owned active Character.
 ///
 /// # Errors
@@ -267,7 +382,9 @@ pub async fn count_bindings_for_world_tx(
 /// Authoritative binding removal. Last active binding is a zero-mutation 409.
 ///
 /// Decision order: resolve active binding + ownership → count active bindings
-/// → reject `count <= 1` → delete exactly the target row.
+/// → reject `count <= 1` → reject binding-owned KnowledgeEntry rows → reject
+/// binding-local Character memory (`binding_has_local_memory`) → delete
+/// exactly the target row. Every reject is zero-mutation.
 ///
 /// # Errors
 ///
@@ -299,20 +416,8 @@ async fn remove_binding_tx(
     binding_id: &str,
 ) -> Result<(), LocalDbError> {
     require_owned_character(tx, owner_creator_id, character_id).await?;
-    let binding = load_binding_tx(tx, binding_id).await?;
-    let Some(binding) = binding else {
-        return Err(LocalDbError::ActorNotFound {
-            resource: "actor_world_binding",
-            id: binding_id.to_string(),
-        });
-    };
-    if binding.character_id != character_id || binding.status != "active" {
-        return Err(LocalDbError::ActorNotFound {
-            resource: "actor_world_binding",
-            id: binding_id.to_string(),
-        });
-    }
-    require_owned_world(tx, owner_creator_id, &binding.world_id).await?;
+    let binding = require_active_character_binding_tx(tx, character_id, binding_id).await?;
+    require_owned_active_world(tx, owner_creator_id, &binding.world_id).await?;
 
     let count = sqlx::query_scalar!(
         r#"SELECT COUNT(*) as "count!: i64" FROM actor_world_bindings WHERE character_id = ? AND status = 'active'"#,
@@ -335,6 +440,26 @@ async fn remove_binding_tx(
     if owned > 0 {
         return Err(LocalDbError::ActorContractConflict {
             code: ActorContractConflict::BindingHasOwnedKnowledge,
+        });
+    }
+
+    // v1.184 P3: binding-local Character memory is the final dependency gate.
+    // Pending rows, fragments, or narrative cache rows carrying this binding's
+    // provenance block removal with a stable zero-mutation 409.
+    let local_memory = sqlx::query_scalar!(
+        r#"SELECT (SELECT COUNT(*) FROM character_memory_pending_review WHERE actor_world_binding_id = ?) +
+                  (SELECT COUNT(*) FROM character_memory_fragments WHERE actor_world_binding_id = ?) +
+                  (SELECT COUNT(*) FROM character_soul_narratives WHERE actor_world_binding_id = ?)
+                  as "count!: i64""#,
+        binding_id,
+        binding_id,
+        binding_id
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    if local_memory > 0 {
+        return Err(LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::BindingHasLocalMemory,
         });
     }
 

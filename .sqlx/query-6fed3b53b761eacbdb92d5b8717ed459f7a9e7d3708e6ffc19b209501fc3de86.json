@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR REPLACE INTO character_soul_narratives\n             (character_id, actor_world_binding_id, narrative, generated_at, fragment_count_at_generation,\n              max_fragment_created_at_at_generation,\n              distinct_keyword_count_cache, stats_fingerprint,\n              created_at, updated_at)\n             VALUES (?, ?, NULL, NULL, 0, NULL, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "6fed3b53b761eacbdb92d5b8717ed459f7a9e7d3708e6ffc19b209501fc3de86"
+}

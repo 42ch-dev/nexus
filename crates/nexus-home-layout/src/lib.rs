@@ -364,6 +364,64 @@ pub fn reference_body_path(home: &Path, creator_id: &str, reference_id: &str) ->
     reference_unit_dir(home, creator_id, reference_id).join("body.md")
 }
 
+/// `$HOME/.nexus42/creators/<owner_creator_id>/characters/<character_id>/`
+///
+/// Home root for one Character bearer (v1.184 P3; character-memory spec §2).
+/// Character SOUL and long-term memory files live under this directory,
+/// nested inside the owning Creator's tree — never in a top-level
+/// `characters/` directory and never in the Creator's own SOUL/memory paths.
+///
+/// # Defense-in-depth
+///
+/// Panics if `owner_creator_id` or `character_id` contains path traversal
+/// components. Callers (e.g., `nexus_creator_memory::bearer`) validate both
+/// ids before calling; this is the safety net.
+#[must_use]
+pub fn character_root(home: &Path, owner_creator_id: &str, character_id: &str) -> PathBuf {
+    assert_creator_id_safe(owner_creator_id);
+    assert_character_id_safe(character_id);
+    nexus_root_from_home(home)
+        .join("creators")
+        .join(owner_creator_id)
+        .join("characters")
+        .join(character_id)
+}
+
+/// `$HOME/.nexus42/creators/<owner_creator_id>/characters/<character_id>/SOUL.md`
+///
+/// Character counterpart to [`creator_soul_md_path`] (character-memory spec §2).
+///
+/// # Defense-in-depth
+///
+/// Panics on traversal components in either id (assertions are applied in
+/// [`character_root`]).
+#[must_use]
+pub fn character_soul_md_path(home: &Path, owner_creator_id: &str, character_id: &str) -> PathBuf {
+    character_root(home, owner_creator_id, character_id).join("SOUL.md")
+}
+
+/// `$HOME/.nexus42/creators/<owner_creator_id>/characters/<character_id>/memory/long-term/`
+///
+/// Character long-term memory directory; individual memory files are
+/// `<slug>.md` inside it (slug safety is enforced by
+/// `nexus_creator_memory::long_term_memory::slug_is_safe`, same as the
+/// Creator arm).
+///
+/// # Defense-in-depth
+///
+/// Panics on traversal components in either id (assertions are applied in
+/// [`character_root`]).
+#[must_use]
+pub fn character_long_term_memory_dir(
+    home: &Path,
+    owner_creator_id: &str,
+    character_id: &str,
+) -> PathBuf {
+    character_root(home, owner_creator_id, character_id)
+        .join("memory")
+        .join("long-term")
+}
+
 /// Assert that `creator_id` does not contain path-traversal characters.
 ///
 /// This is a low-overhead sanity check; `nexus-domain::is_valid_creator_id()`
@@ -436,6 +494,76 @@ pub fn validate_creator_id_safe(id: &str) -> std::result::Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// Assert that `character_id` does not contain path-traversal characters.
+///
+/// Same safety checks as [`assert_reference_id_safe`]: rejects empty strings,
+/// `/`, `\`, `..`, and control characters.
+fn assert_character_id_safe(id: &str) {
+    assert!(!id.is_empty(), "character_id must not be empty");
+    for ch in id.chars() {
+        assert!(
+            ch != '/' && ch != '\\',
+            "character_id contains path separator: {id:?} — this would be a path-traversal vulnerability"
+        );
+    }
+    assert!(
+        !id.contains(".."),
+        "character_id contains '..': {id:?} — this would be a path-traversal vulnerability"
+    );
+    assert!(
+        !id.chars().any(char::is_control),
+        "character_id contains control characters: {id:?} — this would be a path-traversal vulnerability"
+    );
+}
+
+/// Non-panicking path-traversal validation for `character_id`.
+///
+/// Returns `Ok(())` if the ID is safe, or `Err` with a description.
+/// Same checks as [`assert_character_id_safe`] but suitable for fallible
+/// call sites where panicking is undesirable.
+///
+/// # Errors
+///
+/// Returns `Err` if the ID is empty or contains `/`, `\`, `..`, or control
+/// characters.
+pub fn validate_character_id_safe(id: &str) -> std::result::Result<(), String> {
+    if id.is_empty() {
+        return Err("character_id must not be empty".to_string());
+    }
+    for ch in id.chars() {
+        if ch == '/' || ch == '\\' {
+            return Err(format!(
+                "character_id contains path separator: {id:?} — rejected for safety"
+            ));
+        }
+    }
+    if id.contains("..") {
+        return Err(format!(
+            "character_id contains '..': {id:?} — rejected for safety"
+        ));
+    }
+    if id.chars().any(char::is_control) {
+        return Err(format!(
+            "character_id contains control characters: {id:?} — rejected for safety"
+        ));
+    }
+    Ok(())
+}
+
+/// Validate a string matches the minted `CharacterId` format
+/// `^chr_[0-9a-f]{32}$` (see `nexus_local_db::character::mint_character_id`).
+///
+/// This is the authoritative Character-id format check for the memory
+/// pipeline; path-traversal safety alone ([`validate_character_id_safe`])
+/// accepts shapes the actor domain never mints.
+#[must_use]
+pub fn is_valid_character_id(s: &str) -> bool {
+    let Some(hex) = s.strip_prefix("chr_") else {
+        return false;
+    };
+    hex.len() == 32 && hex.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 
 /// `$HOME/.nexus42/rules/writing-craft.md` — user override for Layer 1 rules.
@@ -1192,4 +1320,143 @@ mod tests {
             PathBuf::from("/ws/Works/my-novel/Logs/write")
         );
     }
+
+    // ── Character home layout (v1.184 P3 Task 2) ────────────────────────
+    //
+    // Canonical Character bearer paths (character-memory spec §2):
+    //   $HOME/.nexus42/creators/<owner_creator_id>/characters/<character_id>/SOUL.md
+    //   $HOME/.nexus42/creators/<owner_creator_id>/characters/<character_id>/memory/long-term/<slug>.md
+
+    #[test]
+    fn character_root_layout() {
+        let home = PathBuf::from("/h");
+        assert_eq!(
+            character_root(&home, "ctr_owner", "chr_0123456789abcdef0123456789abcdef"),
+            PathBuf::from(
+                "/h/.nexus42/creators/ctr_owner/characters/chr_0123456789abcdef0123456789abcdef"
+            )
+        );
+    }
+
+    #[test]
+    fn character_soul_md_path_layout() {
+        let home = PathBuf::from("/h");
+        assert_eq!(
+            character_soul_md_path(&home, "ctr_owner", "chr_0123456789abcdef0123456789abcdef"),
+            PathBuf::from(
+                "/h/.nexus42/creators/ctr_owner/characters/chr_0123456789abcdef0123456789abcdef/SOUL.md"
+            )
+        );
+    }
+
+    #[test]
+    fn character_long_term_memory_dir_layout() {
+        let home = PathBuf::from("/h");
+        assert_eq!(
+            character_long_term_memory_dir(
+                &home,
+                "ctr_owner",
+                "chr_0123456789abcdef0123456789abcdef"
+            ),
+            PathBuf::from(
+                "/h/.nexus42/creators/ctr_owner/characters/chr_0123456789abcdef0123456789abcdef/memory/long-term"
+            )
+        );
+    }
+
+    #[test]
+    fn character_paths_stay_inside_character_root_for_normal_ids() {
+        let home = PathBuf::from("/h");
+        let root = character_root(&home, "ctr_owner", "chr_aabbccddee00112233445566778899ff");
+        let soul = character_soul_md_path(&home, "ctr_owner", "chr_aabbccddee00112233445566778899ff");
+        let mem =
+            character_long_term_memory_dir(&home, "ctr_owner", "chr_aabbccddee00112233445566778899ff");
+        assert!(soul.starts_with(&root), "SOUL path must stay under the Character root");
+        assert!(mem.starts_with(&root), "memory dir must stay under the Character root");
+        // Character files live under the OWNER's creator tree, never at the
+        // creator root itself or in a sibling creator's tree.
+        let owner_root = PathBuf::from("/h/.nexus42/creators/ctr_owner");
+        assert!(root.starts_with(&owner_root));
+        assert!(!root.starts_with("/h/.nexus42/creators/ctr_other"));
+    }
+
+    #[test]
+    fn character_paths_panic_on_traversal_character_id() {
+        let home = PathBuf::from("/h");
+        let owner = "ctr_owner";
+        for bad in [
+            "..",
+            "../..",
+            "chr_../escape",
+            "chr_a/b",
+            "chr_a\\b",
+            "",
+            "chr_\u{0}null",
+        ] {
+            let result = std::panic::catch_unwind(|| {
+                character_soul_md_path(&home, owner, bad);
+            });
+            assert!(result.is_err(), "character id {bad:?} must be rejected");
+            let result = std::panic::catch_unwind(|| {
+                character_long_term_memory_dir(&home, owner, bad);
+            });
+            assert!(result.is_err(), "character id {bad:?} must be rejected");
+        }
+    }
+
+    #[test]
+    fn character_paths_panic_on_traversal_owner_id() {
+        let home = PathBuf::from("/h");
+        let chr = "chr_0123456789abcdef0123456789abcdef";
+        for bad in ["..", "../ctr_x", "ctr_a/b", "ctr_a\\b", "ctr_\u{7}bell"] {
+            let result = std::panic::catch_unwind(|| {
+                character_soul_md_path(&home, bad, chr);
+            });
+            assert!(result.is_err(), "owner id {bad:?} must be rejected");
+        }
+    }
+
+    #[test]
+    fn validate_character_id_safe_accepts_minted_shape() {
+        assert!(validate_character_id_safe("chr_0123456789abcdef0123456789abcdef").is_ok());
+    }
+
+    #[test]
+    fn validate_character_id_safe_rejects_traversal() {
+        for bad in [
+            "",
+            "..",
+            "chr_../escape",
+            "chr_a/b",
+            "chr_a\\b",
+            "chr_\u{0}null",
+            "chr_\u{7}bell",
+        ] {
+            assert!(
+                validate_character_id_safe(bad).is_err(),
+                "character id {bad:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn is_valid_character_id_matches_minted_format() {
+        // Minted by `nexus_local_db::character::mint_character_id` as
+        // `chr_` + 32 lowercase hex.
+        assert!(is_valid_character_id("chr_0123456789abcdef0123456789abcdef"));
+        assert!(is_valid_character_id("chr_aabbccddee00112233445566778899ff"));
+        assert!(!is_valid_character_id("ctr_0123456789abcdef0123456789abcdef"));
+        assert!(!is_valid_character_id("chr_"));
+        assert!(!is_valid_character_id("chr_0123456789abcdef")); // too short
+        assert!(!is_valid_character_id("chr_0123456789abcdef0123456789abcdef00")); // too long
+        assert!(!is_valid_character_id("chr_0123456789ABCDEF0123456789ABCDEF")); // uppercase
+        assert!(!is_valid_character_id("chr_0123456789abcdef0123456789abcdeg")); // non-hex
+        assert!(!is_valid_character_id("chr_../escape"));
+        assert!(!is_valid_character_id("chr_a/b"));
+        assert!(!is_valid_character_id("chr_a\\b"));
+        assert!(!is_valid_character_id("chr_\u{0}null456789abcdef0123456789ab"));
+        assert!(!is_valid_character_id(""));
+        assert!(!is_valid_character_id("chr_0123456789abcdef0123456789abcdeff"));
+    }
 }
+

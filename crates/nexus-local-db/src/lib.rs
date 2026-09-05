@@ -16,6 +16,10 @@
 pub mod actor_world_binding;
 pub mod cas;
 pub mod character;
+pub mod character_memory_fragment;
+pub mod character_pending_review;
+pub mod character_soul_meta;
+pub mod character_soul_narrative;
 pub mod compute_runs;
 pub mod compute_session;
 pub mod creators;
@@ -111,6 +115,35 @@ pub use soul_narrative::{
     build_stats_fingerprint, get_soul_narrative, soul_narrative_fragment_stats,
     upsert_soul_narrative, SoulNarrativeFragmentStats, SoulNarrativeRecord,
 };
+
+// Re-export character memory types (v1.184 P3 Task 1)
+pub use character_memory_fragment::{
+    create_character_fragment, delete_character_fragment, get_character_fragment,
+    list_character_fragments, promote_character_fragment_to_shared,
+    CharacterMemoryFragmentRecord, NewCharacterMemoryFragment,
+};
+pub use character_pending_review::{
+    count_character_pending_reviews, create_character_pending_review,
+    delete_character_pending_review, get_character_pending_review,
+    list_character_pending_reviews, CharacterPendingReviewRecord,
+};
+pub use character_soul_meta::{
+    delete_character_soul_meta, get_character_soul_meta, upsert_character_soul_meta,
+    CharacterSoulMeta,
+};
+pub use character_soul_narrative::{
+    character_soul_narrative_fragment_stats, get_character_soul_narrative,
+    upsert_character_soul_narrative, CharacterSoulNarrativeRecord,
+};
+
+/// Hard upper bound for Character memory list page sizes.
+///
+/// Every `list_*` read on the Character memory repositories clamps its `limit`
+/// to `1..=MAX_CHARACTER_MEMORY_LIST_LIMIT` before issuing SQL, so a caller
+/// cannot force unbounded materialization (SQLite treats `LIMIT -1` as
+/// "no limit"). Follows the local-db pagination convention (clamp, as in
+/// [`reference_source`](crate::reference_source)).
+pub const MAX_CHARACTER_MEMORY_LIST_LIMIT: i64 = 500;
 
 // Re-export mind_state_store types (V1.164 P2, l5-mind when-axis storage)
 pub use mind_state_store::{

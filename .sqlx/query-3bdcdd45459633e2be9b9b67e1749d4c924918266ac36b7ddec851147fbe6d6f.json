@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM character_memory_pending_review WHERE pending_id = ? AND character_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "3bdcdd45459633e2be9b9b67e1749d4c924918266ac36b7ddec851147fbe6d6f"
+}

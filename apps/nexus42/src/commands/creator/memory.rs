@@ -11,6 +11,7 @@ use clap::Subcommand;
 use nexus_contracts::daemon_api::memory::ReviewResponse;
 use nexus_creator_memory::long_term_memory::LongTermMemory;
 use nexus_creator_memory::memory_io;
+use nexus_creator_memory::MemoryBearerRef;
 use std::io::Write;
 use std::str::FromStr;
 
@@ -153,7 +154,7 @@ pub async fn run(command: MemoryCommand, config: &CliConfig) -> Result<()> {
 
 fn list(_config: &CliConfig, creator_id: &str) -> Result<()> {
     let home = config::user_home_dir()?;
-    let slugs = memory_io::list_memories(&home, creator_id)?;
+    let slugs = memory_io::list_memories(&home, MemoryBearerRef::Creator(creator_id))?;
 
     if slugs.is_empty() {
         println!("No long-term memories for creator '{creator_id}'.");
@@ -167,7 +168,7 @@ fn list(_config: &CliConfig, creator_id: &str) -> Result<()> {
     println!("{}", "-".repeat(80));
 
     for slug in &slugs {
-        match memory_io::load_memory(&home, creator_id, slug) {
+        match memory_io::load_memory(&home, MemoryBearerRef::Creator(creator_id), slug) {
             Ok(mem) => {
                 let kind = &mem.frontmatter.memory_kind;
                 let updated = &mem.frontmatter.updated_at;
@@ -200,7 +201,7 @@ fn create(
     }
 
     // Check if memory already exists
-    if memory_io::load_memory(&home, creator_id, slug).is_ok() {
+    if memory_io::load_memory(&home, MemoryBearerRef::Creator(creator_id), slug).is_ok() {
         return Err(crate::errors::CliError::Other(format!(
             "Memory '{slug}' already exists for creator '{creator_id}'. Use `memory edit {slug}` to modify it."
         )));
@@ -223,20 +224,20 @@ fn create(
 
     let mut memory = LongTermMemory::new(kind);
     memory.set_body(&body);
-    memory_io::save_memory(&home, creator_id, slug, &memory)?;
+    memory_io::save_memory(&home, MemoryBearerRef::Creator(creator_id), slug, &memory)?;
 
     println!("Memory '{slug}' created for creator '{creator_id}'.");
     println!("  Kind: {kind}");
     println!(
         "  Path: {}",
-        memory_io::memory_path(&home, creator_id, slug).display()
+        memory_io::memory_path(&home, MemoryBearerRef::Creator(creator_id), slug).display()
     );
     Ok(())
 }
 
 fn show(_config: &CliConfig, creator_id: &str, slug: &str) -> Result<()> {
     let home = config::user_home_dir()?;
-    let memory = memory_io::load_memory(&home, creator_id, slug)?;
+    let memory = memory_io::load_memory(&home, MemoryBearerRef::Creator(creator_id), slug)?;
 
     // Display frontmatter
     println!("slug: {slug}");
@@ -258,11 +259,11 @@ fn show(_config: &CliConfig, creator_id: &str, slug: &str) -> Result<()> {
 
 fn edit(_config: &CliConfig, creator_id: &str, slug: &str) -> Result<()> {
     let home = config::user_home_dir()?;
-    let mut memory = memory_io::load_memory(&home, creator_id, slug)?;
+    let mut memory = memory_io::load_memory(&home, MemoryBearerRef::Creator(creator_id), slug)?;
 
     let new_body = open_editor_temp("Memory content", &memory.body)?;
     memory.set_body(&new_body);
-    memory_io::save_memory(&home, creator_id, slug, &memory)?;
+    memory_io::save_memory(&home, MemoryBearerRef::Creator(creator_id), slug, &memory)?;
 
     println!("Memory '{slug}' updated.");
     Ok(())
@@ -272,7 +273,7 @@ fn delete(_config: &CliConfig, creator_id: &str, slug: &str, force: bool) -> Res
     let home = config::user_home_dir()?;
 
     // Verify memory exists
-    memory_io::load_memory(&home, creator_id, slug)?;
+    memory_io::load_memory(&home, MemoryBearerRef::Creator(creator_id), slug)?;
 
     if !force {
         // S-005: Confirm deletion. Empty input (just pressing Enter) = cancel.
@@ -291,7 +292,7 @@ fn delete(_config: &CliConfig, creator_id: &str, slug: &str, force: bool) -> Res
         }
     }
 
-    memory_io::delete_memory(&home, creator_id, slug)?;
+    memory_io::delete_memory(&home, MemoryBearerRef::Creator(creator_id), slug)?;
     println!("Memory '{slug}' deleted.");
     Ok(())
 }

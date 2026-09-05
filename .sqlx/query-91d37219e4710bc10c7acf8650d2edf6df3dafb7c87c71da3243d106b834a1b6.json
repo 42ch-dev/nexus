@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO character_soul_meta\n             (character_id, file_path, schema_version, personality_hash, experience_hash, created_at, updated_at)\n             VALUES (?, ?, ?, ?, ?, ?, ?)\n             ON CONFLICT(character_id) DO UPDATE SET\n               file_path = excluded.file_path,\n               schema_version = excluded.schema_version,\n               personality_hash = excluded.personality_hash,\n               experience_hash = excluded.experience_hash,\n               updated_at = excluded.updated_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "91d37219e4710bc10c7acf8650d2edf6df3dafb7c87c71da3243d106b834a1b6"
+}

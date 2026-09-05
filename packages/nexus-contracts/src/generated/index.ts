@@ -11,6 +11,8 @@ export * from './daemon-api/canvas/outline';
 export * from './daemon-api/canvas/strategy';
 export * from './daemon-api/canvas/world-kb';
 export * from './daemon-api/characters';
+export * from './daemon-api/characters/memory';
+export * from './daemon-api/characters/soul';
 export * from './daemon-api/check';
 export * from './daemon-api/common';
 export * from './daemon-api/compute';
@@ -98,6 +100,23 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   ListCharacterBindingsResponse: 1,
   ListCharactersQuery: 1,
   ListCharactersResponse: 1,
+  CaptureCharacterPendingReviewRequest: 1,
+  CaptureCharacterPendingReviewResponse: 1,
+  CharacterMemoryFragmentInfo: 1,
+  CharacterPendingReviewInfo: 1,
+  CountCharacterPendingReviewsQuery: 1,
+  CountCharacterPendingReviewsResponse: 1,
+  DeleteCharacterPendingReviewResponse: 1,
+  ListCharacterMemoryFragmentsQuery: 1,
+  ListCharacterMemoryFragmentsResponse: 1,
+  ListCharacterPendingReviewsQuery: 1,
+  ListCharacterPendingReviewsResponse: 1,
+  PromoteCharacterFragmentRequest: 1,
+  PromoteCharacterFragmentResponse: 1,
+  ReviewCharacterMemoryRequest: 1,
+  ReviewCharacterMemoryResponse: 1,
+  CharacterSoulNarrativeRequest: 1,
+  CharacterSoulNarrativeResponse: 1,
   CheckRequest: 1,
   CheckResponse: 1,
   ErrorResponse: 1,

@@ -676,6 +676,35 @@ fn character_routes() -> Router<WorkspaceState> {
             "/v1/daemon/characters/:character_id/knowledge",
             get(handlers::actor_knowledge::list_character_knowledge),
         )
+        .route(
+            "/v1/daemon/characters/:character_id/memory/pending-review",
+            post(handlers::character_memory::capture_pending_review)
+                .get(handlers::character_memory::list_pending_reviews),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/memory/pending-review/count",
+            get(handlers::character_memory::count_pending_reviews),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/memory/pending-review/:pending_id",
+            delete(handlers::character_memory::delete_pending_review),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/memory/review",
+            post(handlers::character_memory::review),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/memory/fragments",
+            get(handlers::character_memory::list_fragments),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/memory/fragments/:fragment_id",
+            post(handlers::character_memory::promote_fragment),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/soul/reflect",
+            post(handlers::character_memory::reflect_soul),
+        )
 }
 
 fn actor_knowledge_routes() -> Router<WorkspaceState> {

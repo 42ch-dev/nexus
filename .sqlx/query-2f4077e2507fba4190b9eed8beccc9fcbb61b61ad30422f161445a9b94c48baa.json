@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) as \"count!\" FROM character_memory_pending_review\n           WHERE character_id = ? AND actor_world_binding_id IS ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "count!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2f4077e2507fba4190b9eed8beccc9fcbb61b61ad30422f161445a9b94c48baa"
+}

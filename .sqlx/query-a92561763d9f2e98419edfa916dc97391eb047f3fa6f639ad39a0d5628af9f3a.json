@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT keywords as \"keywords!\" FROM character_memory_fragments\n           WHERE character_id = ? AND actor_world_binding_id IS ?\n           ORDER BY created_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "name": "keywords!",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a92561763d9f2e98419edfa916dc97391eb047f3fa6f639ad39a0d5628af9f3a"
+}
