@@ -4,7 +4,15 @@ SQLite-backed persistence using sqlx. Used by the daemon runtime and `nexus-orch
 
 ## Migrations
 
-Migration files under `migrations/` use naming convention `YYYYMMDD_<description>.sql`. All migrations are committed — the schema is fully reproducible.
+Migration files under `migrations/` are committed — the schema is fully reproducible. **sqlx orders migrations numerically** by the leading version prefix (the digits before the first `_` or non-digit separator).
+
+Common filename shapes in this crate:
+
+- `YYYYMMDD_<description>.sql` — e.g. `20260812_drop_legacy_outbox.sql`
+- `YYYYMMDD_<seq>_<description>.sql` — e.g. `20260701_000001_memory_fragments_world_and_soul_narratives.sql`
+- **14-digit** `YYYYMMDDHHMMSS_<description>.sql` — e.g. `20260815000001_create_world_findings.sql`
+
+Use a **14-digit prefix** when the migration must run **after** existing 14-digit versions. A shorter `YYYYMMDD` prefix sorts *before* them (e.g. `20260905` &lt; `20260815000001`) and can run rebuild migrations in the wrong order, dropping columns that later migrations still need. When ordering is sensitive, document the dependency in the migration header (see `20260905000002_actor_knowledge_owners.sql`).
 
 ## Key Rules
 
