@@ -241,9 +241,11 @@ impl ActorSessionRegistry {
                 .by_session
                 .get(&session_id)
                 .is_some_and(|row| row.key == key);
-            host.shutdown_session(session_id.clone())
-                .await
-                .map_err(map_host)?;
+            if let Err(err) = host.shutdown_session(session_id.clone()).await {
+                drop(_guard);
+                self.reclaim(&key, &lock);
+                return Err(map_host(err));
+            }
             if still_indexed {
                 let mut maps = self.maps();
                 Self::evict_locked(&mut maps, &key, &session_id);
@@ -293,7 +295,14 @@ impl ActorSessionRegistry {
             maps.by_key.get(&key).cloned()
         };
         if let Some(existing) = existing {
-            let listed = host.list_sessions().await.map_err(map_host)?;
+            let listed = match host.list_sessions().await {
+                Ok(listed) => listed,
+                Err(err) => {
+                    drop(_guard);
+                    self.reclaim(&key, &lock);
+                    return Err(map_host(err));
+                }
+            };
             {
                 let maps = self.maps();
                 if let Err(err) = Self::reject_if_closed(&maps) {
@@ -310,6 +319,8 @@ impl ActorSessionRegistry {
                     return Ok(session);
                 }
                 Some(session) if session.state.is_busy() => {
+                    drop(_guard);
+                    self.reclaim(&key, &lock);
                     return Err(NexusApiError::ConflictCoded {
                         code: "actor_session_busy".into(),
                         message: "actor session is busy".into(),
@@ -573,6 +584,7 @@ mod tests {
         sessions: Mutex<HashMap<HostSessionId, HostSession>>,
         creates: AtomicU64,
         fail_create: AtomicBool,
+        fail_list: AtomicBool,
         fail_shutdown_remaining: AtomicU64,
         create_delay: Mutex<Duration>,
         list_delay: Mutex<Duration>,
@@ -587,6 +599,7 @@ mod tests {
                 sessions: Mutex::new(HashMap::new()),
                 creates: AtomicU64::new(0),
                 fail_create: AtomicBool::new(false),
+                fail_list: AtomicBool::new(false),
                 fail_shutdown_remaining: AtomicU64::new(0),
                 create_delay: Mutex::new(Duration::from_millis(0)),
                 list_delay: Mutex::new(Duration::from_millis(0)),
@@ -609,6 +622,10 @@ mod tests {
 
         fn fail_next_create(&self) {
             self.fail_create.store(true, Ordering::SeqCst);
+        }
+
+        fn fail_next_list(&self) {
+            self.fail_list.store(true, Ordering::SeqCst);
         }
 
         fn fail_next_shutdowns(&self, count: u64) {
@@ -710,6 +727,9 @@ mod tests {
             let delay = *self.list_delay.lock().expect("list delay");
             if !delay.is_zero() {
                 tokio::time::sleep(delay).await;
+            }
+            if self.fail_list.swap(false, Ordering::SeqCst) {
+                return Err(nexus_agent_host::HostError::internal("injected list failure"));
             }
             Ok(self
                 .sessions
@@ -1219,6 +1239,108 @@ mod tests {
             .await
             .expect("retry host teardown");
         assert!(host.sessions.lock().expect("sessions").is_empty());
+    }
+
+    #[tokio::test]
+    async fn close_races_list_error_reclaims_unindexed_lock() {
+        let host = ScriptedHost::new();
+        let registry = ActorSessionRegistry::new();
+        let cwd = tempfile::tempdir().expect("cwd");
+        let ctx = base_character_ctx();
+        let key = key_with(&ctx, "prov", cwd.path(), None, None);
+        let _first = mint(&registry, &host, key.clone(), ctx.clone()).await;
+        host.set_list_delay(Duration::from_millis(40));
+        host.fail_next_list();
+        let reg = registry.clone();
+        let host_a = host.clone();
+        let lookup = tokio::spawn(async move {
+            reg.resolve_or_create(key, ctx, host_a.as_ref(), || async {
+                panic!("must not create after list error");
+            })
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        registry.close();
+        let err = lookup.await.expect("join").expect_err("list error");
+        assert_eq!(err.error_code(), "internal");
+        assert!(err.to_string().contains("injected list failure"));
+        assert!(registry.is_empty());
+        assert_eq!(registry.lock_entry_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn close_races_busy_list_reclaims_unindexed_lock() {
+        let host = ScriptedHost::new();
+        let registry = ActorSessionRegistry::new();
+        let cwd = tempfile::tempdir().expect("cwd");
+        let ctx = base_character_ctx();
+        let key = key_with(&ctx, "prov", cwd.path(), None, None);
+        let first = mint(&registry, &host, key.clone(), ctx.clone()).await;
+        host.set_state(first.id.clone(), SessionState::Busy(HostOperationId::new()));
+        host.set_list_delay(Duration::from_millis(40));
+        let reg = registry.clone();
+        let host_a = host.clone();
+        let lookup = tokio::spawn(async move {
+            reg.resolve_or_create(key, ctx, host_a.as_ref(), || async {
+                panic!("must not create while listing busy");
+            })
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        registry.close();
+        let err = lookup.await.expect("join").expect_err("busy or closed");
+        assert!(
+            err.error_code() == "actor_session_busy" || err.error_code() == "service_unavailable",
+            "unexpected {}",
+            err.error_code()
+        );
+        assert!(registry.is_empty());
+        assert_eq!(registry.lock_entry_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn busy_without_close_retains_indexed_lock() {
+        let host = ScriptedHost::new();
+        let registry = ActorSessionRegistry::new();
+        let cwd = tempfile::tempdir().expect("cwd");
+        let ctx = base_character_ctx();
+        let key = key_with(&ctx, "prov", cwd.path(), None, None);
+        let first = mint(&registry, &host, key.clone(), ctx.clone()).await;
+        host.set_state(first.id.clone(), SessionState::Busy(HostOperationId::new()));
+        let err = registry
+            .resolve_or_create(key, ctx, host.as_ref(), || async {
+                panic!("must not create while busy");
+            })
+            .await
+            .expect_err("busy");
+        assert_eq!(err.error_code(), "actor_session_busy");
+        assert_eq!(registry.len(), 1);
+        assert_eq!(registry.lock_entry_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn close_races_indexed_shutdown_error_reclaims_lock() {
+        let host = ScriptedHost::new();
+        let registry = ActorSessionRegistry::new();
+        let cwd = tempfile::tempdir().expect("cwd");
+        let ctx = base_character_ctx();
+        let key = key_with(&ctx, "prov", cwd.path(), None, None);
+        let first = mint(&registry, &host, key, ctx).await;
+        host.set_shutdown_delay(Duration::from_millis(40));
+        host.fail_next_shutdowns(8);
+        let reg = registry.clone();
+        let host_a = host.clone();
+        let sid = first.id.clone();
+        let shutdown = tokio::spawn(async move {
+            reg.shutdown_session(sid, host_a.as_ref()).await
+        });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        registry.close();
+        let err = shutdown.await.expect("join").expect_err("shutdown error");
+        assert_eq!(err.error_code(), "internal");
+        assert!(err.to_string().contains("injected shutdown failure"));
+        assert!(registry.is_empty());
+        assert_eq!(registry.lock_entry_count(), 0);
     }
 
     #[test]
