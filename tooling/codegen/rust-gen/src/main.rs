@@ -255,6 +255,7 @@ fn rel_posix(path: &Path) -> String {
 const PRESERVE_PROPERTY_ORDER: &[&str] = &[
     "daemon-api/agent-host/session-response.schema.json",
     "daemon-api/agent-host/create-session-request.schema.json",
+    "daemon-api/agent-host/session-list-response.schema.json",
     "daemon-api/agent-host/session-viewpoint.schema.json",
 ];
 
@@ -394,6 +395,26 @@ fn reorder_root_struct_fields(rust: &str, type_name: &str, order: &[String]) -> 
     rust.to_string()
 }
 
+/// Restore `NexusSessionViewpoint` field order from the source viewpoint schema
+/// whenever typify inlines that type (create/single/list carriers).
+fn apply_nested_session_viewpoint_order(rust: &str, src_schema_path: &Path) -> String {
+    if !rust.contains("pub struct NexusSessionViewpoint {") {
+        return rust.to_string();
+    }
+    let Some(dir) = src_schema_path.parent() else {
+        return rust.to_string();
+    };
+    let viewpoint_schema = dir.join("session-viewpoint.schema.json");
+    let Ok(src_raw) = fs::read_to_string(&viewpoint_schema) else {
+        return rust.to_string();
+    };
+    let Ok(src_json) = serde_json::from_str::<Value>(&src_raw) else {
+        return rust.to_string();
+    };
+    let order = source_property_order(&src_json);
+    reorder_root_struct_fields(rust, "NexusSessionViewpoint", &order)
+}
+
 /// Generate Rust source for a single schema via `typify` and write it to `out_path`.
 ///
 /// `rel` is the schema's path relative to the schemas dir (POSIX or platform); it
@@ -452,19 +473,7 @@ fn generate_schema_rust(
             }
         }
     }
-    if rel_posix_path == "daemon-api/agent-host/session-response.schema.json" {
-        let viewpoint_schema = src_schema_path
-            .parent()
-            .map(|dir| dir.join("session-viewpoint.schema.json"));
-        if let Some(path) = viewpoint_schema {
-            if let Ok(src_raw) = fs::read_to_string(path) {
-                if let Ok(src_json) = serde_json::from_str::<Value>(&src_raw) {
-                    let order = source_property_order(&src_json);
-                    rust = reorder_root_struct_fields(&rust, "NexusSessionViewpoint", &order);
-                }
-            }
-        }
-    }
+    rust = apply_nested_session_viewpoint_order(&rust, src_schema_path);
 
     if let Some(parent) = out_path.parent() {
         fs::create_dir_all(parent).map_err(|err| {
