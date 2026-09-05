@@ -687,3 +687,87 @@ async fn oversize_belief_array_rejects_via_db_probe_without_panic() {
     assert_eq!(resp.status_code(), 409, "oversize record: {}", resp.text());
     assert_eq!(mind_state_count(&ctx.pool).await, 0);
 }
+
+// ── Fix round 3: absent-belief semantics + stale-carrier timestamp scope ──
+
+async fn set_carrier_status(pool: &sqlx::SqlitePool, carrier_id: &str, status: &str) {
+    sqlx::query("UPDATE kb_key_blocks SET status = ? WHERE key_block_id = ?")
+        .bind(status)
+        .bind(carrier_id)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn absent_belief_is_zero_rows_and_legacy_modules_round_trip() {
+    let ctx = ctx().await;
+    let a = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr_a = a["character"]["character_id"].as_str().unwrap().to_string();
+    let bind_a = a["binding"]["binding_id"].as_str().unwrap().to_string();
+
+    // Valid modules JSON with an absent belief member (e.g. `{}` or an object
+    // with only unknown sibling modules) must be treated as zero rows — never
+    // rejected as `carrier_modules_malformed`.
+    let empty = seed_carrier_with_modules(&ctx.pool, &chr_a, "NoBelief", json!({})).await;
+    let resp = record(&ctx.server, &chr_a, l1_body(WORLD_A, &bind_a, &empty, &chr_a, 0)).await;
+    assert_eq!(resp.status_code(), 200, "empty modules record: {}", resp.text());
+
+    let legacy = seed_carrier_with_modules(
+        &ctx.pool,
+        &chr_a,
+        "LegacySibling",
+        json!({"mental": {"identity": {"role": "harbor_master"}}, "x_custom": {"n": 1}}),
+    )
+    .await;
+    let resp = record(&ctx.server, &chr_a, l1_body(WORLD_A, &bind_a, &legacy, &chr_a, 0)).await;
+    assert_eq!(resp.status_code(), 200, "legacy sibling record: {}", resp.text());
+    // Unknown sibling keys survive the CAS write.
+    let after: Value = serde_json::from_str(&carrier_modules_json(&ctx.pool, &legacy).await).unwrap();
+    assert_eq!(after["mental"], json!({"identity": {"role": "harbor_master"}}));
+    assert_eq!(after["x_custom"], json!({"n": 1}));
+    assert_eq!(after["belief"].as_array().unwrap().len(), 1);
+
+    // Listing after the above writes returns rows and never reports the
+    // no-belief carriers as malformed.
+    let resp = list_tom(&ctx.server, &chr_a, WORLD_A, &bind_a).await;
+    assert!(resp["items"].as_array().unwrap().len() >= 1, "alive carriers listed");
+}
+
+#[tokio::test]
+async fn stale_deleted_carrier_histories_do_not_surface_or_error() {
+    let ctx = ctx().await;
+    let a = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr_a = a["character"]["character_id"].as_str().unwrap().to_string();
+    let bind_a = a["binding"]["binding_id"].as_str().unwrap().to_string();
+
+    let alive = seed_carrier(&ctx.pool, &chr_a).await;
+    let resp = record(&ctx.server, &chr_a, l1_body(WORLD_A, &bind_a, &alive, &chr_a, 0)).await;
+    assert_eq!(resp.status_code(), 200, "{}", resp.text());
+
+    // A deleted carrier with a large derivative history must be excluded from
+    // the timestamp aggregation (bounded to admitted active carriers) and from
+    // the response entirely.
+    let deleted = seed_carrier_with_modules(&ctx.pool, &chr_a, "StaleTomCarrier", json!({"belief": []})).await;
+    for i in 0..50 {
+        insert_derivative_mind_state(
+            &ctx.pool,
+            &format!("ms_stale_{i}"),
+            &deleted,
+            &format!("2098-01-{i:02}T00:00:00Z"),
+            &format!("2098-01-{i:02}T00:00:00Z"),
+        )
+        .await;
+    }
+    set_carrier_status(&ctx.pool, &deleted, "deleted").await;
+
+    let page = list_tom(&ctx.server, &chr_a, WORLD_A, &bind_a).await;
+    let items = page["items"].as_array().unwrap();
+    // Only the alive carrier's row appears; stale carrier histories never leak.
+    let holder_ids: Vec<&str> = items
+        .iter()
+        .map(|row| row["carrier_entry_id"].as_str().unwrap())
+        .collect();
+    assert!(holder_ids.iter().all(|h| *h == alive), "only alive carrier emitted");
+    assert!(!holder_ids.contains(&deleted.as_str()), "deleted carrier excluded");
+}

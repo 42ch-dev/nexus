@@ -23,6 +23,8 @@ const CURSOR_SEP: char = '\u{1f}';
 /// only up to these caps; exceeding them fails closed before materialization.
 const MAX_CARRIERS_PER_SCOPE: u32 = 200;
 const MAX_BELIEF_ROWS_PER_CARRIER: usize = 200;
+/// `MAX_BELIEF_ROWS_PER_CARRIER` as `i64` for compile-time SQL bind args.
+const MAX_BELIEF_ROWS_PER_CARRIER_I64: i64 = MAX_BELIEF_ROWS_PER_CARRIER as i64;
 
 /// One belief row in keyset order `(order, carrier_entry_id, row_ordinal)`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,6 +64,26 @@ pub struct CharacterTomRecordInput {
     pub occurred_at: Option<String>,
     pub sort_key: Option<String>,
     pub event_id: Option<String>,
+}
+
+/// Admitted carrier probe row: typed base columns only, never `modules_json`,
+/// so the pre-parse bound holds before any serde materialization.
+#[derive(sqlx::FromRow, Debug, Clone)]
+pub struct ProbeCarrier {
+    pub key_block_id: String,
+    pub revision: Option<i64>,
+    pub status: String,
+    pub character_id: Option<String>,
+    pub actor_world_binding_id: Option<String>,
+}
+
+/// Stored `modules_json` violation category, used to classify a carrier that
+/// fails the probe-ok predicate with the matching fail-closed error.
+#[derive(Debug, Clone, Copy)]
+enum ViolationKind {
+    InvalidJson,
+    Malformed,
+    Oversized,
 }
 
 /// Reusable Character ToM composer (record + query).
@@ -168,13 +190,16 @@ impl CharacterTomService {
         self.admit_viewer(caller_creator_id, viewer_character_id, &query.world_id, &query.binding_id)
             .await?;
         let cursor = Self::decode_cursor(&query.cursor)?;
-        // DB-side pre-parse bounds (fix round 2): carrier counts, belief-array
-        // lengths, and modules JSON validity are enforced in SQLite before any
-        // `modules_json` text is parsed or materialized into records.
-        self.probe_scope_belief_bounds(&KnowledgeOwnerRef::character(viewer_character_id))
-            .await?;
-        self.probe_scope_belief_bounds(&KnowledgeOwnerRef::actor_world_binding(&query.binding_id))
-            .await?;
+        // DB-side pre-parse bounds (fix round 3): carrier counts, belief-array
+        // lengths, and modules JSON validity are enforced with compile-time SQL
+        // before any `modules_json` text is parsed or materialized into records.
+        for owner in [
+            KnowledgeOwnerRef::character(viewer_character_id),
+            KnowledgeOwnerRef::actor_world_binding(&query.binding_id),
+        ] {
+            self.probe_scope_violations(&owner).await?;
+            self.probe_scope_carriers(&owner).await?;
+        }
         let carriers = self.authorized_carriers(viewer_character_id, &query.binding_id).await?;
         let recorded = self
             .carrier_recorded_at_map(viewer_character_id, &query.binding_id)
@@ -230,24 +255,30 @@ impl CharacterTomService {
             self.require_active_subject_binding(caller_creator_id, subject, &input.world_id)
                 .await?;
         }
-        let carrier = self
-            .require_admitted_carrier(
-                viewer_character_id,
-                &input.binding_id,
-                &input.carrier_entry_id,
-            )
-            .await?;
-        // DB-side pre-parse guard (fix round 2): distinguish invalid persisted
-        // `modules_json` text (fail closed, never overwritten) from absent
-        // modules, and bound the belief array before the append payload is
-        // built.
-        match self.probe_carrier_belief_rows(&input.carrier_entry_id).await? {
-            -1 => return Err(invalid_modules_json()),
-            -2 => return Err(modules_malformed()),
-            n if n >= i64::try_from(MAX_BELIEF_ROWS_PER_CARRIER).unwrap_or(i64::MAX) => {
-                return Err(corpus_exceeded("belief rows per carrier"));
-            }
-            _ => {}
+        // Pre-parse carrier probe (fix round 3): the stored `modules_json`
+        // value is type/length/validity checked via compile-time SQL before any
+        // `get_knowledge_entry` / serde parse. Invalid text, a present non-array
+        // `belief`, or an oversized array fail closed without mutation.
+        let probe = self
+            .probe_carrier(&input.carrier_entry_id)
+            .await?
+            .ok_or_else(|| not_found("carrier_entry", &input.carrier_entry_id))?;
+        if matches!(probe.status.as_str(), "deleted" | "merged" | "deprecated") {
+            return Err(not_found("carrier_entry", &input.carrier_entry_id));
+        }
+        match &probe.character_id {
+            Some(id) if id == viewer_character_id => {}
+            _ => match &probe.actor_world_binding_id {
+                Some(id) if id == &input.binding_id => {}
+                _ if probe.character_id.is_none() && probe.actor_world_binding_id.is_none() => {
+                    return Err(NexusApiError::BadRequest {
+                        code: "invalid_input".into(),
+                        message: "World-owned KnowledgeEntry cannot be a Character ToM carrier"
+                            .into(),
+                    });
+                }
+                _ => return Err(not_found("carrier_entry", &input.carrier_entry_id)),
+            },
         }
         if input.expected_revision >= i64::MAX {
             return Err(NexusApiError::BadRequest {
@@ -255,6 +286,13 @@ impl CharacterTomService {
                 message: "expected_revision exceeds the CAS increment domain".into(),
             });
         }
+        let carrier = self
+            .require_admitted_carrier(
+                viewer_character_id,
+                &input.binding_id,
+                &input.carrier_entry_id,
+            )
+            .await?;
         let mut modules = carrier.modules.clone().unwrap_or_else(|| json!({}));
         append_belief_row(&mut modules, &input.belief)?;
         let modules_str = serde_json::to_string(&modules).map_err(internal_wire)?;
@@ -443,6 +481,18 @@ impl CharacterTomService {
                FROM mind_states m
                INNER JOIN kb_key_blocks kb ON kb.key_block_id = m.holder_entry_id
                WHERE (kb.character_id = ? OR kb.actor_world_binding_id = ?)
+                 AND kb.status NOT IN ('deleted', 'merged', 'deprecated')
+                 AND (
+                   kb.modules_json IS NULL
+                   OR (
+                     json_valid(kb.modules_json)
+                     AND (
+                       json_type(kb.modules_json, '$.belief') IS NULL
+                       OR json_type(kb.modules_json, '$.belief') = 'array'
+                     )
+                     AND COALESCE(json_array_length(kb.modules_json, '$.belief'), 0) <= ?
+                   )
+                 )
                  AND NOT EXISTS (
                    SELECT 1 FROM mind_states m2
                    WHERE m2.holder_entry_id = m.holder_entry_id
@@ -451,80 +501,86 @@ impl CharacterTomService {
                               AND m2.mind_state_id > m.mind_state_id))
                  )"#,
             viewer_character_id,
-            binding_id
+            binding_id,
+            MAX_BELIEF_ROWS_PER_CARRIER_I64
         )
         .fetch_all(&self.pool)
         .await
         .map_err(NexusApiError::from)?;
-        // Anti-join picks exactly one row per carrier — the latest derivative
-        // by `(created_at, mind_state_id)` — so derivative history is never
-        // materialized unbounded (one bounded SQL result per carrier).
+        // The anti-join returns exactly one row per admitted probe-ok carrier —
+        // the latest derivative by `(created_at, mind_state_id)` — restricted to
+        // the already-probed active carrier set, so derivative history is never
+        // materialized unbounded and never reads a stale/foreign carrier.
         Ok(rows
             .into_iter()
             .map(|row| (row.carrier_entry_id, row.occurred_at))
             .collect())
     }
 
-    /// Pre-parse storage bound probe (fix round 2): counts each carrier's
-    /// `modules.belief` elements via SQLite JSON functions before any
-    /// `modules_json` text is parsed or materialized into a record.
+    /// Admitted carrier probe row (typed base columns only — never selects or
+    /// parses `modules_json`, so the pre-parse bound holds).
     ///
-    /// `belief_rows` semantics: `>= 0` element count; `-1` non-NULL invalid
-    /// JSON text (fail closed, never coerced to absent); `-2` present
-    /// non-array `belief` member. The `LIMIT` probe of cap + 1 detects
-    /// over-cap carrier corpora without materializing them.
-    async fn probe_scope_belief_bounds(
+    /// A carrier is "probe-ok" when its persisted `modules_json` is either
+    /// NULL (legacy absent modules), or valid JSON whose `$.belief` path is
+    /// absent (treated as zero rows) or an array of at most
+    /// `MAX_BELIEF_ROWS_PER_CARRIER` elements. Non-NULL invalid JSON text,
+    /// a present non-array `belief`, or an oversized array are classified by
+    /// [`Self::probe_scope_violations`] / [`Self::probe_carrier_violation`]
+    /// and fail closed before any materialization.
+    async fn probe_scope_carriers(
         &self,
         owner: &KnowledgeOwnerRef,
-    ) -> Result<(), NexusApiError> {
-        #[derive(sqlx::FromRow)]
-        struct BeliefProbeRow {
-            belief_rows: i64,
-        }
-        let probe = i64::from(MAX_CARRIERS_PER_SCOPE) + 1;
-        // SAFETY: runtime query_as — SQLite cannot provide a declared type for
-        // the JSON1 expression columns (`json_valid` / `json_array_length`) so
-        // the compile-time `query_as!` macro reports a NULL column type. Same
-        // documented JSON1-projection rationale as
-        // `nexus-orchestration::storage::sqlite` (`list_checkpoint_rows`).
-        let rows: Vec<BeliefProbeRow> = match owner {
-            KnowledgeOwnerRef::Character(id) => sqlx::query_as::<_, BeliefProbeRow>(
-                r#"SELECT
-                          CAST(
-                            CASE
-                              WHEN modules_json IS NULL THEN 0
-                              WHEN json_valid(modules_json) = 0 THEN -1
-                              ELSE COALESCE(json_array_length(modules_json, '$.belief'), -2)
-                            END AS INTEGER
-                          ) AS belief_rows
+    ) -> Result<Vec<ProbeCarrier>, NexusApiError> {
+        let rows: Vec<ProbeCarrier> = match owner {
+            KnowledgeOwnerRef::Character(id) => sqlx::query_as!(
+                ProbeCarrier,
+                r#"SELECT key_block_id AS "key_block_id!", revision, status AS "status!",
+                          character_id, actor_world_binding_id
                    FROM kb_key_blocks
                    WHERE character_id = ?
                      AND status NOT IN ('deleted', 'merged', 'deprecated')
+                     AND (
+                       modules_json IS NULL
+                       OR (
+                         json_valid(modules_json)
+                         AND (
+                           json_type(modules_json, '$.belief') IS NULL
+                           OR json_type(modules_json, '$.belief') = 'array'
+                         )
+                         AND COALESCE(json_array_length(modules_json, '$.belief'), 0) <= ?
+                       )
+                     )
                    ORDER BY created_at ASC, key_block_id ASC
-                   LIMIT ?"#,
+                   LIMIT 201"#,
+                id,
+                MAX_BELIEF_ROWS_PER_CARRIER_I64
             )
-            .bind(id)
-            .bind(probe)
             .fetch_all(&self.pool)
             .await
             .map_err(NexusApiError::from)?,
-            KnowledgeOwnerRef::ActorWorldBinding(id) => sqlx::query_as::<_, BeliefProbeRow>(
-                r#"SELECT
-                          CAST(
-                            CASE
-                              WHEN modules_json IS NULL THEN 0
-                              WHEN json_valid(modules_json) = 0 THEN -1
-                              ELSE COALESCE(json_array_length(modules_json, '$.belief'), -2)
-                            END AS INTEGER
-                          ) AS belief_rows
+            KnowledgeOwnerRef::ActorWorldBinding(id) => sqlx::query_as!(
+                ProbeCarrier,
+                r#"SELECT key_block_id AS "key_block_id!", revision, status AS "status!",
+                          character_id, actor_world_binding_id
                    FROM kb_key_blocks
                    WHERE actor_world_binding_id = ?
                      AND status NOT IN ('deleted', 'merged', 'deprecated')
+                     AND (
+                       modules_json IS NULL
+                       OR (
+                         json_valid(modules_json)
+                         AND (
+                           json_type(modules_json, '$.belief') IS NULL
+                           OR json_type(modules_json, '$.belief') = 'array'
+                         )
+                         AND COALESCE(json_array_length(modules_json, '$.belief'), 0) <= ?
+                       )
+                     )
                    ORDER BY created_at ASC, key_block_id ASC
-                   LIMIT ?"#,
+                   LIMIT 201"#,
+                id,
+                MAX_BELIEF_ROWS_PER_CARRIER_I64
             )
-            .bind(id)
-            .bind(probe)
             .fetch_all(&self.pool)
             .await
             .map_err(NexusApiError::from)?,
@@ -541,48 +597,223 @@ impl CharacterTomService {
                 _ => "binding-owned carriers",
             }));
         }
-        for row in rows {
-            match row.belief_rows {
-                -1 => return Err(invalid_modules_json()),
-                -2 => return Err(modules_malformed()),
-                n if n > i64::from(MAX_BELIEF_ROWS_PER_CARRIER as u32) => {
-                    return Err(corpus_exceeded("belief rows per carrier"));
-                }
-                _ => {}
-            }
+        Ok(rows)
+    }
+
+    /// Detect non-probe-ok carriers in an owner scope and map them to the
+    /// matching fail-closed error, before any modules parse. Returns `Ok(())`
+    /// when the whole admitted scope is probe-ok.
+    async fn probe_scope_violations(
+        &self,
+        owner: &KnowledgeOwnerRef,
+    ) -> Result<(), NexusApiError> {
+        let invalid = self.scope_violation_count(owner, ViolationKind::InvalidJson).await?;
+        if invalid > 0 {
+            return Err(invalid_modules_json());
+        }
+        let malformed = self.scope_violation_count(owner, ViolationKind::Malformed).await?;
+        if malformed > 0 {
+            return Err(modules_malformed());
+        }
+        let oversized = self.scope_violation_count(owner, ViolationKind::Oversized).await?;
+        if oversized > 0 {
+            return Err(corpus_exceeded("belief rows per carrier"));
         }
         Ok(())
     }
 
-    /// Single-carrier variant of the bound probe for the record path.
-    async fn probe_carrier_belief_rows(
+    /// One typed `COUNT(*)` over the scope + a violation predicate. Every
+    /// statement is a literal compile-time `query_scalar!` (the JSON functions
+    /// live in the WHERE, never in the SELECT), so schema drift is caught at
+    /// compile time.
+    async fn scope_violation_count(
+        &self,
+        owner: &KnowledgeOwnerRef,
+        kind: ViolationKind,
+    ) -> Result<i64, NexusApiError> {
+        match (owner, kind) {
+            (
+                KnowledgeOwnerRef::Character(id),
+                ViolationKind::InvalidJson,
+            ) => sqlx::query_scalar!(
+                r#"SELECT COUNT(*) FROM kb_key_blocks
+                   WHERE character_id = ?
+                     AND status NOT IN ('deleted', 'merged', 'deprecated')
+                     AND modules_json IS NOT NULL AND NOT json_valid(modules_json)"#,
+                id
+            )
+            .fetch_one(&self.pool)
+            .await
+            .map_err(NexusApiError::from),
+            (
+                KnowledgeOwnerRef::Character(id),
+                ViolationKind::Malformed,
+            ) => sqlx::query_scalar!(
+                r#"SELECT COUNT(*) FROM kb_key_blocks
+                   WHERE character_id = ?
+                     AND status NOT IN ('deleted', 'merged', 'deprecated')
+                     AND json_valid(modules_json)
+                     AND json_type(modules_json, '$.belief') IS NOT NULL
+                     AND json_type(modules_json, '$.belief') <> 'array'"#,
+                id
+            )
+            .fetch_one(&self.pool)
+            .await
+            .map_err(NexusApiError::from),
+            (
+                KnowledgeOwnerRef::Character(id),
+                ViolationKind::Oversized,
+            ) => sqlx::query_scalar!(
+                r#"SELECT COUNT(*) FROM kb_key_blocks
+                   WHERE character_id = ?
+                     AND status NOT IN ('deleted', 'merged', 'deprecated')
+                     AND json_valid(modules_json)
+                     AND json_type(modules_json, '$.belief') = 'array'
+                     AND json_array_length(modules_json, '$.belief') > ?"#,
+                id,
+                MAX_BELIEF_ROWS_PER_CARRIER_I64
+            )
+            .fetch_one(&self.pool)
+            .await
+            .map_err(NexusApiError::from),
+            (
+                KnowledgeOwnerRef::ActorWorldBinding(id),
+                ViolationKind::InvalidJson,
+            ) => sqlx::query_scalar!(
+                r#"SELECT COUNT(*) FROM kb_key_blocks
+                   WHERE actor_world_binding_id = ?
+                     AND status NOT IN ('deleted', 'merged', 'deprecated')
+                     AND modules_json IS NOT NULL AND NOT json_valid(modules_json)"#,
+                id
+            )
+            .fetch_one(&self.pool)
+            .await
+            .map_err(NexusApiError::from),
+            (
+                KnowledgeOwnerRef::ActorWorldBinding(id),
+                ViolationKind::Malformed,
+            ) => sqlx::query_scalar!(
+                r#"SELECT COUNT(*) FROM kb_key_blocks
+                   WHERE actor_world_binding_id = ?
+                     AND status NOT IN ('deleted', 'merged', 'deprecated')
+                     AND json_valid(modules_json)
+                     AND json_type(modules_json, '$.belief') IS NOT NULL
+                     AND json_type(modules_json, '$.belief') <> 'array'"#,
+                id
+            )
+            .fetch_one(&self.pool)
+            .await
+            .map_err(NexusApiError::from),
+            (
+                KnowledgeOwnerRef::ActorWorldBinding(id),
+                ViolationKind::Oversized,
+            ) => sqlx::query_scalar!(
+                r#"SELECT COUNT(*) FROM kb_key_blocks
+                   WHERE actor_world_binding_id = ?
+                     AND status NOT IN ('deleted', 'merged', 'deprecated')
+                     AND json_valid(modules_json)
+                     AND json_type(modules_json, '$.belief') = 'array'
+                     AND json_array_length(modules_json, '$.belief') > ?"#,
+                id,
+                MAX_BELIEF_ROWS_PER_CARRIER_I64
+            )
+            .fetch_one(&self.pool)
+            .await
+            .map_err(NexusApiError::from),
+            (KnowledgeOwnerRef::World(_), _) => Err(NexusApiError::Internal {
+                code: "CHARACTER_TOM_SCOPE_INVALID".into(),
+                message: "ToM carrier scope is never World-owned".into(),
+            }),
+        }
+    }
+
+    /// Single-carrier probe for the record path. Returns the typed admitted
+    /// carrier row when probe-ok, or `None` when the carrier is absent.
+    /// Non-probe-ok carriers are classified and rejected here — before any
+    /// `get_knowledge_entry` / `modules_json` parse.
+    async fn probe_carrier(
         &self,
         carrier_entry_id: &str,
-    ) -> Result<i64, NexusApiError> {
-        #[derive(sqlx::FromRow)]
-        struct BeliefProbeRow {
-            belief_rows: i64,
-        }
-        // SAFETY: runtime query_as — JSON1 expression columns (`json_valid` /
-        // `json_array_length`) have no SQLite declared type, so the compile-time
-        // macro reports NULL. Same rationale as the scope probe above.
-        let rows = sqlx::query_as::<_, BeliefProbeRow>(
-            r#"SELECT CAST(
-                        CASE
-                          WHEN modules_json IS NULL THEN 0
-                          WHEN json_valid(modules_json) = 0 THEN -1
-                          ELSE COALESCE(json_array_length(modules_json, '$.belief'), -2)
-                        END AS INTEGER
-                      ) AS belief_rows
+    ) -> Result<Option<ProbeCarrier>, NexusApiError> {
+        let row = sqlx::query_as!(
+            ProbeCarrier,
+            r#"SELECT key_block_id AS "key_block_id!", revision, status AS "status!",
+                      character_id, actor_world_binding_id
                FROM kb_key_blocks
-               WHERE key_block_id = ?"#,
+               WHERE key_block_id = ?
+                 AND (
+                   modules_json IS NULL
+                   OR (
+                     json_valid(modules_json)
+                     AND (
+                       json_type(modules_json, '$.belief') IS NULL
+                       OR json_type(modules_json, '$.belief') = 'array'
+                     )
+                     AND COALESCE(json_array_length(modules_json, '$.belief'), 0) <= ?
+                   )
+                 )"#,
+            carrier_entry_id,
+            MAX_BELIEF_ROWS_PER_CARRIER_I64
         )
-        .bind(carrier_entry_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(NexusApiError::from)?;
-        // Carrier existence was already established by require_admitted_carrier.
-        Ok(rows.map_or(0, |row| row.belief_rows))
+        if row.is_some() {
+            return Ok(row);
+        }
+        // No probe-ok row: classify the violation or report the carrier as
+        // absent. Each check is a separate typed COUNT query.
+        if self.carrier_violation_count(carrier_entry_id, ViolationKind::InvalidJson).await? > 0 {
+            return Err(invalid_modules_json());
+        }
+        if self.carrier_violation_count(carrier_entry_id, ViolationKind::Malformed).await? > 0 {
+            return Err(modules_malformed());
+        }
+        if self.carrier_violation_count(carrier_entry_id, ViolationKind::Oversized).await? > 0 {
+            return Err(corpus_exceeded("belief rows per carrier"));
+        }
+        Ok(None)
+    }
+
+    async fn carrier_violation_count(
+        &self,
+        carrier_entry_id: &str,
+        kind: ViolationKind,
+    ) -> Result<i64, NexusApiError> {
+        match kind {
+            ViolationKind::InvalidJson => sqlx::query_scalar!(
+                r#"SELECT COUNT(*) FROM kb_key_blocks
+                   WHERE key_block_id = ?
+                     AND modules_json IS NOT NULL AND NOT json_valid(modules_json)"#,
+                carrier_entry_id
+            )
+            .fetch_one(&self.pool)
+            .await
+            .map_err(NexusApiError::from),
+            ViolationKind::Malformed => sqlx::query_scalar!(
+                r#"SELECT COUNT(*) FROM kb_key_blocks
+                   WHERE key_block_id = ?
+                     AND json_valid(modules_json)
+                     AND json_type(modules_json, '$.belief') IS NOT NULL
+                     AND json_type(modules_json, '$.belief') <> 'array'"#,
+                carrier_entry_id
+            )
+            .fetch_one(&self.pool)
+            .await
+            .map_err(NexusApiError::from),
+            ViolationKind::Oversized => sqlx::query_scalar!(
+                r#"SELECT COUNT(*) FROM kb_key_blocks
+                   WHERE key_block_id = ?
+                     AND json_valid(modules_json)
+                     AND json_type(modules_json, '$.belief') = 'array'
+                     AND json_array_length(modules_json, '$.belief') > ?"#,
+                carrier_entry_id,
+                MAX_BELIEF_ROWS_PER_CARRIER_I64
+            )
+            .fetch_one(&self.pool)
+            .await
+            .map_err(NexusApiError::from),
+        }
     }
 }
 
