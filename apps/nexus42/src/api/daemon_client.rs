@@ -177,6 +177,25 @@ impl DaemonClient {
         Ok(data)
     }
 
+    /// Open a streaming GET (no whole-body timeout) for SSE endpoints.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` if the daemon returns a non-success HTTP status,
+    /// or a network error if the request fails.
+    pub async fn stream_get(&self, path: &str) -> Result<reqwest::Response> {
+        let url = format!("{}{}", self.base_url, path);
+        let http = reqwest::Client::builder()
+            .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+            .build()?;
+        let resp = self.send_authenticated(http.get(&url), path).await?;
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            return Err(Self::parse_error_response(&url, status, resp).await);
+        }
+        Ok(resp)
+    }
+
     /// Send a POST request with JSON body.
     ///
     /// # Errors

@@ -12,6 +12,10 @@ use nexus_contracts::daemon_api::actor_knowledge::{
     view_request::ViewRequest,
     view_response::ViewResponse,
 };
+use nexus_contracts::daemon_api::agent_host::{
+    create_session_request::CreateSessionRequest, execute_operation_request::ExecuteOperationRequest,
+    operation_response::OperationResponse, session_response::SessionResponse,
+};
 use nexus_contracts::daemon_api::characters::{
     add_character_binding_request::AddCharacterBindingRequest,
     add_character_binding_response::AddCharacterBindingResponse,
@@ -69,6 +73,33 @@ pub enum CharacterCommand {
     Knowledge {
         #[command(subcommand)]
         command: KnowledgeCommand,
+    },
+    /// Run a Character prompt through the existing Agent Host
+    Run {
+        #[arg(long)]
+        character_id: String,
+        #[arg(long)]
+        world_id: String,
+        #[arg(long)]
+        binding_id: String,
+        /// User prompt submitted as one HostOperation::Prompt
+        #[arg(long)]
+        prompt: String,
+        /// Provider id (deterministic mock in tests)
+        #[arg(long, default_value = "mock-provider")]
+        provider_id: String,
+        #[arg(long)]
+        cwd: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        mode: Option<String>,
+        #[arg(long)]
+        branch_id: Option<String>,
+        #[arg(long)]
+        event_id: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
 }
 
@@ -273,6 +304,35 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                 .await
             }
         },
+        CharacterCommand::Run {
+            character_id,
+            world_id,
+            binding_id,
+            prompt,
+            provider_id,
+            cwd,
+            model,
+            mode,
+            branch_id,
+            event_id,
+            json,
+        } => {
+            run_character(
+                &client,
+                character_id,
+                world_id,
+                binding_id,
+                prompt,
+                provider_id,
+                cwd,
+                model,
+                mode,
+                branch_id,
+                event_id,
+                json,
+            )
+            .await
+        }
     }
 }
 
@@ -618,4 +678,150 @@ async fn view_knowledge(
         }
     }
     Ok(())
+}
+
+async fn run_character(
+    client: &DaemonClient,
+    character_id: String,
+    world_id: String,
+    binding_id: String,
+    prompt: String,
+    provider_id: String,
+    cwd: Option<String>,
+    model: Option<String>,
+    mode: Option<String>,
+    branch_id: Option<String>,
+    event_id: Option<String>,
+    json: bool,
+) -> Result<()> {
+    let mut body = serde_json::json!({
+        "provider_id": provider_id,
+        "actor_ref": {
+            "actor_kind": "character",
+            "character_id": character_id,
+        },
+        "viewpoint": {
+            "world_id": world_id,
+            "binding_id": binding_id,
+        },
+    });
+    if let Some(cwd) = cwd {
+        body["cwd"] = serde_json::Value::String(cwd);
+    }
+    if let Some(model) = model {
+        body["model"] = serde_json::Value::String(model);
+    }
+    if let Some(mode) = mode {
+        body["mode"] = serde_json::Value::String(mode);
+    }
+    if let Some(branch_id) = branch_id {
+        body["viewpoint"]["branch_id"] = serde_json::Value::String(branch_id);
+    }
+    if let Some(event_id) = event_id {
+        body["viewpoint"]["event_id"] = serde_json::Value::String(event_id);
+    }
+    let req: CreateSessionRequest = serde_json::from_value(body)?;
+    let session: SessionResponse = client
+        .post("/v1/daemon/agent-host/sessions", &req)
+        .await?;
+
+    let mut events = client
+        .stream_get(&format!(
+            "/v1/daemon/agent-host/sessions/{}/events",
+            session.session_id
+        ))
+        .await?;
+
+    let op_req = ExecuteOperationRequest::Prompt { content: prompt };
+    let operation: OperationResponse = client
+        .post(
+            &format!(
+                "/v1/daemon/agent-host/sessions/{}/operations",
+                session.session_id
+            ),
+            &op_req,
+        )
+        .await?;
+
+    let (result, event_values) = consume_terminal_events(&mut events).await?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "session": session,
+                "operation": operation,
+                "result": result,
+                "events": event_values,
+            }))?
+        );
+    } else {
+        println!("session_id:   {}", session.session_id);
+        println!("provider_id:  {}", session.provider_id);
+        if let Some(actor) = session.actor_ref.as_ref() {
+            println!(
+                "actor_ref:    {}",
+                serde_json::to_string(actor).unwrap_or_default()
+            );
+        }
+        if let Some(viewpoint) = session.viewpoint.as_ref() {
+            println!(
+                "viewpoint:    {}",
+                serde_json::to_string(viewpoint).unwrap_or_default()
+            );
+        }
+        println!("operation_id: {}", operation.operation_id);
+        println!("result:");
+        println!("{result}");
+    }
+    Ok(())
+}
+
+async fn consume_terminal_events(
+    resp: &mut reqwest::Response,
+) -> Result<(String, Vec<serde_json::Value>)> {
+    let mut buf = String::new();
+    let mut result = String::new();
+    let mut events = Vec::new();
+    loop {
+        let chunk = resp.chunk().await?.ok_or_else(|| {
+            CliError::Other("agent-host event stream closed before a terminal event".into())
+        })?;
+        buf.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(idx) = buf.find("\n\n") {
+            let frame = buf[..idx].to_string();
+            buf = buf[idx + 2..].to_string();
+            let mut data = String::new();
+            for line in frame.lines() {
+                if let Some(rest) = line.strip_prefix("data:") {
+                    data.push_str(rest.trim_start());
+                }
+            }
+            if data.is_empty() {
+                continue;
+            }
+            let value: serde_json::Value = serde_json::from_str(&data)?;
+            if let Some(text) = value
+                .get("MessageDelta")
+                .and_then(|v| v.get("text"))
+                .and_then(serde_json::Value::as_str)
+            {
+                result.push_str(text);
+            }
+            let terminal_fail = value.get("OpFailed").cloned();
+            let finished = value.get("OpFinished").is_some();
+            events.push(value);
+            if let Some(fail) = terminal_fail {
+                let message = fail
+                    .get("error_message")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("operation failed");
+                return Err(CliError::Other(format!(
+                    "agent-host operation failed: {message}"
+                )));
+            }
+            if finished {
+                return Ok((result, events));
+            }
+        }
+    }
 }

@@ -21,6 +21,7 @@
 | [daemon-api/workspace/](daemon-api/workspace/) | 8 | Workspace management CRUD schemas (V1.63) |
 | [daemon-api/creators/](daemon-api/creators/) | 8 | Creator management CRUD schemas (V1.63) |
 | [daemon-api/characters/](daemon-api/characters/) | 9 | Character identity + ActorWorldBinding DTOs (v1.184 P0) |
+| [daemon-api/agent-host/](daemon-api/agent-host/) | 12 | Agent Host scan/session/operation contracts + optional Actor/Viewpoint pair (v1.184 P2) |
 | [daemon-api/orchestration/sessions/](daemon-api/orchestration/sessions/) | 4 | Orchestration engine session READ schemas (V1.63 P3) |
 | [daemon-api/orchestration/capabilities/](daemon-api/orchestration/capabilities/) | 2 | Capability registry READ schemas (V1.63 P3) |
 | [daemon-api/preset-management/](daemon-api/preset-management/) | 7 | Preset management full-surface schemas (V1.63 P3) |
@@ -48,7 +49,7 @@ After any edit under `schemas/`, run **codegen** and commit `crates/nexus-contra
 | Line | Uses `schemas/`? |
 | --- | --- |
 | **Cloud** (CLI `sync` / `platform`, `nexus-cloud-sync`) | **Yes** — `platform/{http-bff,sync}/`, `domain/`, `common/` |
-| **Daemon API** (external WASM modules; future WebApp/Web-UI) | **Yes** — `daemon-api/compute/` (V1.62), `daemon-api/common/` (F-E1 V1.64), `daemon-api/{works,kb,findings,schedule,workspace,creators}/` (V1.63 P1), `daemon-api/{orchestration,preset-management}/` (V1.63 P3) |
+| **Daemon API** (external WASM modules; future WebApp/Web-UI) | **Yes** — `daemon-api/compute/` (V1.62), `daemon-api/common/` (F-E1 V1.64), `daemon-api/{works,kb,findings,schedule,workspace,creators}/` (V1.63 P1), `daemon-api/{orchestration,preset-management}/` (V1.63 P3), `daemon-api/agent-host/` (v1.184 P2) |
 | **Local** (daemon `/v1/daemon/*`, orchestration, ACP) | **No** — `nexus-contracts/src/local/` |
 
 See [local-cloud-crate-architecture.md](../.mstar/specs/local-cloud-crate-architecture.md).
