@@ -326,7 +326,14 @@ impl ActorSessionRegistry {
             }
         }
 
-        let session = create().await?;
+        let session = match create().await {
+            Ok(session) => session,
+            Err(err) => {
+                drop(_guard);
+                self.reclaim(&key, &lock);
+                return Err(err);
+            }
+        };
         let inserted = {
             let mut maps = self.maps();
             if maps.closed {
@@ -344,14 +351,32 @@ impl ActorSessionRegistry {
             }
         };
         if !inserted {
-            let _ = host.shutdown_session(session.id.clone()).await;
+            let cleanup = Self::teardown_minted_host(host, session.id.clone()).await;
             drop(_guard);
             self.reclaim(&key, &lock);
-            return Err(shutting_down());
+            return match cleanup {
+                Ok(()) => Err(shutting_down()),
+                Err(err) => Err(err),
+            };
         }
         drop(_guard);
         self.reclaim(&key, &lock);
         Ok(session)
+    }
+
+    async fn teardown_minted_host(
+        host: &dyn HostFacade,
+        session_id: HostSessionId,
+    ) -> Result<(), NexusApiError> {
+        const ATTEMPTS: u32 = 3;
+        let mut last = None;
+        for _ in 0..ATTEMPTS {
+            match host.shutdown_session(session_id.clone()).await {
+                Ok(()) => return Ok(()),
+                Err(err) => last = Some(err),
+            }
+        }
+        Err(map_host(last.expect("minted host cleanup attempted")))
     }
 }
 
@@ -482,7 +507,7 @@ mod tests {
         HostOperation, HostStartConfig,
     };
     use nexus_agent_host::{HostOperationId, ProviderCatalog};
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::time::Duration;
     use tokio::sync::broadcast;
 
@@ -547,6 +572,8 @@ mod tests {
     struct ScriptedHost {
         sessions: Mutex<HashMap<HostSessionId, HostSession>>,
         creates: AtomicU64,
+        fail_create: AtomicBool,
+        fail_shutdown_remaining: AtomicU64,
         create_delay: Mutex<Duration>,
         list_delay: Mutex<Duration>,
         shutdown_delay: Mutex<Duration>,
@@ -559,6 +586,8 @@ mod tests {
             Arc::new(Self {
                 sessions: Mutex::new(HashMap::new()),
                 creates: AtomicU64::new(0),
+                fail_create: AtomicBool::new(false),
+                fail_shutdown_remaining: AtomicU64::new(0),
                 create_delay: Mutex::new(Duration::from_millis(0)),
                 list_delay: Mutex::new(Duration::from_millis(0)),
                 shutdown_delay: Mutex::new(Duration::from_millis(0)),
@@ -576,6 +605,14 @@ mod tests {
 
         fn set_shutdown_delay(&self, delay: Duration) {
             *self.shutdown_delay.lock().expect("shutdown delay") = delay;
+        }
+
+        fn fail_next_create(&self) {
+            self.fail_create.store(true, Ordering::SeqCst);
+        }
+
+        fn fail_next_shutdowns(&self, count: u64) {
+            self.fail_shutdown_remaining.store(count, Ordering::SeqCst);
         }
 
         fn set_state(&self, id: HostSessionId, state: SessionState) {
@@ -600,6 +637,9 @@ mod tests {
             let delay = *self.create_delay.lock().expect("delay");
             if !delay.is_zero() {
                 tokio::time::sleep(delay).await;
+            }
+            if self.fail_create.swap(false, Ordering::SeqCst) {
+                return Err(nexus_agent_host::HostError::internal("injected create failure"));
             }
             self.creates.fetch_add(1, Ordering::SeqCst);
             let session = HostSession {
@@ -649,6 +689,14 @@ mod tests {
             let delay = *self.shutdown_delay.lock().expect("shutdown delay");
             if !delay.is_zero() {
                 tokio::time::sleep(delay).await;
+            }
+            let remaining = self.fail_shutdown_remaining.load(Ordering::SeqCst);
+            if remaining > 0 {
+                self.fail_shutdown_remaining
+                    .store(remaining.saturating_sub(1), Ordering::SeqCst);
+                return Err(nexus_agent_host::HostError::internal(
+                    "injected shutdown failure",
+                ));
             }
             self.sessions
                 .lock()
@@ -1051,6 +1099,126 @@ mod tests {
         assert_eq!(left.id, right.id);
         assert_eq!(host.creates.load(Ordering::SeqCst), 2);
         assert_eq!(registry.lock_entry_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn failed_create_reclaims_unindexed_key_lock() {
+        let host = ScriptedHost::new();
+        host.fail_next_create();
+        let registry = ActorSessionRegistry::new();
+        let cwd = tempfile::tempdir().expect("cwd");
+        let ctx = base_character_ctx();
+        let key = key_with(&ctx, "prov", cwd.path(), None, None);
+        let err = registry
+            .resolve_or_create(key.clone(), ctx.clone(), host.as_ref(), || async {
+                host.create_session(host_req()).await.map_err(map_host)
+            })
+            .await
+            .expect_err("create fail");
+        assert_eq!(err.error_code(), "internal");
+        assert!(registry.is_empty());
+        assert_eq!(registry.lock_entry_count(), 0);
+        assert!(host.sessions.lock().expect("sessions").is_empty());
+
+        let minted = mint(&registry, &host, key, ctx).await;
+        assert_eq!(host.creates.load(Ordering::SeqCst), 1);
+        assert_eq!(registry.lock_entry_count(), 1);
+        assert_eq!(registry.len(), 1);
+        assert_eq!(minted.state, SessionState::Ready);
+    }
+
+    #[tokio::test]
+    async fn failed_replacement_create_reclaims_lock_after_stale_eviction() {
+        let host = ScriptedHost::new();
+        let registry = ActorSessionRegistry::new();
+        let cwd = tempfile::tempdir().expect("cwd");
+        let ctx = base_character_ctx();
+        let key = key_with(&ctx, "prov", cwd.path(), None, None);
+        let first = mint(&registry, &host, key.clone(), ctx.clone()).await;
+        host.sessions
+            .lock()
+            .expect("sessions")
+            .remove(&first.id);
+        host.fail_next_create();
+        let err = registry
+            .resolve_or_create(key.clone(), ctx.clone(), host.as_ref(), || async {
+                host.create_session(host_req()).await.map_err(map_host)
+            })
+            .await
+            .expect_err("replacement create fail");
+        assert_eq!(err.error_code(), "internal");
+        assert!(registry.is_empty());
+        assert_eq!(registry.lock_entry_count(), 0);
+
+        let replaced = mint(&registry, &host, key, ctx).await;
+        assert_ne!(replaced.id, first.id);
+        assert_eq!(registry.lock_entry_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn closed_minted_cleanup_retries_then_succeeds() {
+        let host = ScriptedHost::new();
+        host.set_delay(Duration::from_millis(40));
+        host.fail_next_shutdowns(2);
+        let registry = ActorSessionRegistry::new();
+        let cwd = tempfile::tempdir().expect("cwd");
+        let ctx = base_character_ctx();
+        let key = key_with(&ctx, "prov", cwd.path(), None, None);
+        let host_a = host.clone();
+        let reg = registry.clone();
+        let create = tokio::spawn(async move {
+            reg.resolve_or_create(key, ctx, host_a.as_ref(), || async {
+                host_a.create_session(host_req()).await.map_err(map_host)
+            })
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        registry.close();
+        let err = create.await.expect("join").expect_err("closed");
+        assert_eq!(err.error_code(), "service_unavailable");
+        assert!(registry.is_empty());
+        assert_eq!(registry.lock_entry_count(), 0);
+        assert!(host.sessions.lock().expect("sessions").is_empty());
+    }
+
+    #[tokio::test]
+    async fn closed_minted_cleanup_failure_is_surfaced_and_host_row_remains() {
+        let host = ScriptedHost::new();
+        host.set_delay(Duration::from_millis(40));
+        host.fail_next_shutdowns(8);
+        let registry = ActorSessionRegistry::new();
+        let cwd = tempfile::tempdir().expect("cwd");
+        let ctx = base_character_ctx();
+        let key = key_with(&ctx, "prov", cwd.path(), None, None);
+        let host_a = host.clone();
+        let reg = registry.clone();
+        let create = tokio::spawn(async move {
+            reg.resolve_or_create(key, ctx, host_a.as_ref(), || async {
+                host_a.create_session(host_req()).await.map_err(map_host)
+            })
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        registry.close();
+        let err = create.await.expect("join").expect_err("cleanup");
+        assert_eq!(err.error_code(), "internal");
+        assert!(err.to_string().contains("injected shutdown failure"));
+        assert!(registry.is_empty());
+        assert_eq!(registry.lock_entry_count(), 0);
+        assert_eq!(host.sessions.lock().expect("sessions").len(), 1);
+        host.fail_next_shutdowns(0);
+        let leftover = host
+            .sessions
+            .lock()
+            .expect("sessions")
+            .keys()
+            .next()
+            .cloned()
+            .expect("leaked host row");
+        host.shutdown_session(leftover)
+            .await
+            .expect("retry host teardown");
+        assert!(host.sessions.lock().expect("sessions").is_empty());
     }
 
     #[test]
