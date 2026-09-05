@@ -846,3 +846,60 @@ async fn foreign_missing_inactive_character_and_binding_fail_before_side_effects
     assert_eq!(count_pending(&ctx.server, &chr, Some(&bind1)).await, 0);
     assert_eq!(count_pending(&ctx.server, &chr_b, Some(&bind_b)).await, 0);
 }
+
+
+#[tokio::test]
+async fn review_is_bounded_at_batch_limit_with_correct_has_more() {
+    let ctx = ctx().await;
+    let (chr, _bind1) = create_character(&ctx.server, "Ava", WORLD_A).await;
+
+    // Seed 53 shared pending rows (short research digests → Drop, cheap).
+    for i in 0..53 {
+        let resp = capture(
+            &ctx.server,
+            &chr,
+            &format!("pend_bulk_{i:03}"),
+            None,
+            Some("research"),
+            "tiny",
+            &format!("2026-01-01T00:00:{i:02}Z"),
+        )
+        .await;
+        assert_eq!(resp.status_code(), 200, "seed {i}: {}", resp.text());
+    }
+
+    // First call processes at most REVIEW_BATCH_LIMIT (50) and reports more.
+    let resp = ctx
+        .server
+        .post(&format!("{}/review", memory_base(&chr)))
+        .json(&json!({}))
+        .await;
+    assert_eq!(resp.status_code(), 200, "review: {}", resp.text());
+    let body = resp.json::<Value>();
+    let processed = body["processed"].as_i64().unwrap();
+    assert_eq!(processed, 50, "one call must process at most the batch bound");
+    assert_eq!(body["has_more"], true, "remaining rows must be signalled");
+
+    // Drain the remainder; the queue empties and has_more goes false.
+    let mut guard = 0;
+    while guard < 10 {
+        guard += 1;
+        let resp = ctx
+            .server
+            .post(&format!("{}/review", memory_base(&chr)))
+            .json(&json!({}))
+            .await;
+        let body = resp.json::<Value>();
+        let more = body["has_more"].as_bool().unwrap_or(false);
+        if !more {
+            break;
+        }
+    }
+    assert_eq!(count_pending(&ctx.server, &chr, None).await, 0, "queue fully drained");
+    // Exactly 53 rows were inspected across calls (50 + 3).
+    let total: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM character_memory_fragments")
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+    assert_eq!(total.0, 0, "short digests are dropped, not fragmented");
+}

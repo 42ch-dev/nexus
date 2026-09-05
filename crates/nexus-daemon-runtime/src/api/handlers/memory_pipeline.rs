@@ -783,38 +783,61 @@ async fn bearer_persist_narrative(
 /// Max fragments fetched per scope before deterministic merge + cap.
 const MIND_PROJECTION_FETCH_LIMIT: i64 = 100;
 
+/// Max Character long-term-memory files projected before deterministic cap.
+const MIND_PROJECTION_LTM_LIMIT: usize = 20;
+
 /// Load the bounded, deterministic Character SOUL/Memory projection for an
 /// admitted Character scope and fold it into a [`CharacterMindInput`].
 ///
-/// Caller guarantees admission (owner/active Character + active binding). The
-/// projection is **honest-empty**: a missing SOUL.md yields `None` (the SOUL
-/// slot stays empty); absent memory yields no lines. Only the executing
-/// Character's shared scope plus the selected binding-local scope are
-/// included — never another Character's or the Creator's data. The merged
-/// memory lines are bounded and deterministically ordered (created_at DESC,
-/// fragment_id DESC) by [`CharacterMindInput::new`].
+/// Caller guarantees admission (owner/active Character + active binding).
+///
+/// **Honest-empty vs fail-closed:** only explicit *absent* optional data is an
+/// honest empty — a missing SOUL.md yields `None` and a missing/empty
+/// long-term-memory directory yields no lines. Any other read/DB error (e.g.
+/// a permission error, malformed home path, or a failed fragment query) is
+/// propagated so the caller aborts **before** host launch rather than
+/// executing with an incomplete Character mind. Only the executing
+/// Character's shared scope + the selected binding-local scope are included —
+/// never another Character's or the Creator's data. The merged memory lines
+/// (fragments + promoted long-term memory files) are bounded and
+/// deterministically ordered by [`CharacterMindInput::new`], which caps and
+/// truncates.
+///
+/// # Errors
+///
+/// Returns an `Internal`/`DATABASE_ERROR`/validation `NexusApiError` on any
+/// projection read failure other than a recognised absent-data condition.
 pub(crate) async fn load_character_mind_projection(
     pool: &SqlitePool,
     nexus_home: &Path,
     owner_creator_id: &str,
     character_id: &str,
     binding_id: Option<&str>,
-) -> CharacterMindInput {
+) -> Result<CharacterMindInput, NexusApiError> {
     let bearer = MemoryBearerRef::Character {
         owner_creator_id,
         character_id,
     };
-    // Honest empty: a missing SOUL.md is not an error. Non-parse is irrelevant —
-    // we read the raw text (bounded at render time), never the parsed tree.
-    let soul = if bearer.validate().is_ok() {
-        let path = bearer.soul_path(nexus_home);
-        std::fs::read_to_string(&path).ok()
-    } else {
-        None
+    bearer.validate().map_err(|e| NexusApiError::InvalidInput {
+        field: "character_id".into(),
+        reason: e.to_string(),
+    })?;
+
+    // SOUL: a missing SOUL.md is honest-empty; any other read error fails closed.
+    let soul = match std::fs::read_to_string(bearer.soul_path(nexus_home)) {
+        Ok(text) => Some(text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => {
+            return Err(NexusApiError::Internal {
+                code: "CHARACTER_SOUL_READ_ERROR".into(),
+                message: format!("failed to read Character SOUL.md: {e}"),
+            });
+        }
     };
 
-    // Shared Character scope + the selected binding-local scope. A binding
-    // read merges both; a shared read (None) fetches the shared scope once.
+    // Fragment rows: shared scope + the selected binding-local scope. A
+    // binding read merges both; a shared read (None) fetches shared once. A
+    // failed query is a fail-closed error, never an empty projection.
     let mut rows: Vec<(String, String, String)> = Vec::new(); // (created_at, fragment_id, summary)
     let mut keywords_by_fragment: Vec<(String, String)> = Vec::new(); // (fragment_id, keywords)
     let mut scopes = vec![None];
@@ -822,7 +845,7 @@ pub(crate) async fn load_character_mind_projection(
         scopes.push(Some(b));
     }
     for scope in scopes {
-        if let Ok(fetched) = nexus_local_db::list_character_fragments(
+        let fetched = nexus_local_db::list_character_fragments(
             pool,
             owner_creator_id,
             character_id,
@@ -831,13 +854,37 @@ pub(crate) async fn load_character_mind_projection(
             0,
         )
         .await
-        {
-            for f in fetched {
-                rows.push((f.created_at.clone(), f.fragment_id.clone(), f.summary));
-                keywords_by_fragment.push((f.fragment_id, f.keywords));
-            }
+        .map_err(map_local_db_error)?;
+        for f in fetched {
+            rows.push((f.created_at.clone(), f.fragment_id.clone(), f.summary));
+            keywords_by_fragment.push((f.fragment_id, f.keywords));
         }
     }
+
+    // Promoted long-term memory files (authoritative pipeline sink): the
+    // capture→review→promote journey must be visible to `character run`.
+    let mut ltm_lines: Vec<String> = Vec::new();
+    let ltm_slugs = nexus_creator_memory::memory_io::list_memories(nexus_home, bearer)
+        .map_err(|e| NexusApiError::Internal {
+            code: "CHARACTER_MEMORY_LIST_ERROR".into(),
+            message: e.to_string(),
+        })?;
+    for slug in ltm_slugs.into_iter().take(MIND_PROJECTION_LTM_LIMIT) {
+        let content = nexus_creator_memory::memory_io::load_memory(nexus_home, bearer, &slug)
+            .map_err(|e| NexusApiError::Internal {
+                code: "CHARACTER_MEMORY_LOAD_ERROR".into(),
+                message: e.to_string(),
+            })?;
+        // Render the frontmatter-body text as a deterministic memory line.
+        let body = content
+            .render()
+            .map_err(|e| NexusApiError::Internal {
+                code: "CHARACTER_MEMORY_RENDER_ERROR".into(),
+                message: e.to_string(),
+            })?;
+        ltm_lines.push(format!("- {body}"));
+    }
+
     // Deterministic merge: created_at DESC, fragment_id DESC (newest first).
     rows.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
     let lines: Vec<String> = rows
@@ -855,7 +902,12 @@ pub(crate) async fn load_character_mind_projection(
             }
         })
         .collect();
-    CharacterMindInput::new(soul, lines)
+    // Long-term memory files join the projection (bounded at the top of the
+    // merged list); ordering is deterministic by the LTM slug sort then the
+    // fragmentation merge order is preserved below the LTM block.
+    let mut all_lines = ltm_lines;
+    all_lines.extend(lines);
+    Ok(CharacterMindInput::new(soul, all_lines))
 }
 
 // ── Synthesis input building (arm-agnostic; V1.81 G2 caps preserved) ──────

@@ -1123,6 +1123,7 @@ async fn memory_review(
     let mut processed: i64 = 0;
     let mut has_more = false;
     let mut stopped_zero_progress = false;
+    let mut cap_exhausted = false;
     for call in 0..CHARACTER_REVIEW_DRAIN_MAX_CALLS {
         let mut body = serde_json::json!({});
         if let Some(b) = binding_id.clone() {
@@ -1145,7 +1146,9 @@ async fn memory_review(
             break;
         }
         if call + 1 >= CHARACTER_REVIEW_DRAIN_MAX_CALLS {
+            // Call cap reached with more rows reported by the server.
             has_more = true;
+            cap_exhausted = true;
             break;
         }
     }
@@ -1159,12 +1162,25 @@ async fn memory_review(
                 "processed": processed,
                 "has_more": has_more,
                 "stopped_zero_progress": stopped_zero_progress,
+                "cap_exhausted": cap_exhausted,
             }))?
         );
     } else if processed == 0 && !has_more {
         println!("No pending memories to review.");
     } else {
         println!("Review completed: promoted={promoted}, fragmented={fragmented}, dropped={dropped}");
+        if stopped_zero_progress {
+            println!(
+                "Note: a review call made zero progress but the daemon still reported \
+                 `has_more`; the queue may contain an unprocessable head row. Re-run \
+                 `creator character memory review` to retry."
+            );
+        } else if has_more {
+            println!(
+                "Note: the queue was not fully drained within {CHARACTER_REVIEW_DRAIN_MAX_CALLS} calls; \
+                 re-run `creator character memory review` to continue."
+            );
+        }
     }
     Ok(())
 }

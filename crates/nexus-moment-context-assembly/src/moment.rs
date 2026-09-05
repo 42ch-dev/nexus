@@ -103,24 +103,19 @@ impl CharacterMindInput {
     }
 }
 
-/// Truncate `text` to at most `max_chars` Unicode scalar chars, appending
-/// `…` when truncated (UTF-8 safe — never splits a multi-byte char).
+/// Truncate `text` to at most `max_chars` Unicode scalar chars.
+///
+/// Counts scalar characters (never bytes) and, when truncating, reserves one
+/// scalar for the `…` marker so the total is exactly `max_chars` — the bound
+/// is a character cap, not a byte cap, and is UTF-8 safe (never splits a
+/// multi-byte code point).
 fn truncate_chars(text: &str, max_chars: usize) -> String {
     if text.chars().count() <= max_chars {
         return text.to_string();
     }
-    let mut truncated_at: Option<usize> = None;
-    for (idx, _ch) in text.char_indices() {
-        if idx as usize >= max_chars {
-            truncated_at = Some(idx);
-            break;
-        }
-    }
-    let end = truncated_at.unwrap_or(text.len());
-    let mut s = text[..end].to_string();
-    if truncated_at.is_some() {
-        s.push('…');
-    }
+    let keep = max_chars.saturating_sub(1);
+    let mut s: String = text.chars().take(keep).collect();
+    s.push('…');
     s
 }
 
@@ -2976,6 +2971,7 @@ mod tests {
     fn mind_input_applies_fixed_bounds_deterministically() {
         let long_soul = "x".repeat(CHARACTER_MIND_MAX_SOUL_CHARS + 500);
         let wide_soul = "é".repeat(CHARACTER_MIND_MAX_SOUL_CHARS + 3);
+        let astral_soul = "🜂".repeat(CHARACTER_MIND_MAX_SOUL_CHARS + 3);
         let entries: Vec<String> = (0..(CHARACTER_MIND_MAX_MEMORY_ENTRIES + 7))
             .map(|i| format!("entry {i} {}", "y".repeat(CHARACTER_MIND_MAX_ENTRY_CHARS + 100)))
             .collect();
@@ -2983,8 +2979,8 @@ mod tests {
         let mind = CharacterMindInput::new(Some(long_soul), entries.clone());
         assert_eq!(
             mind.soul.as_ref().unwrap().chars().count(),
-            CHARACTER_MIND_MAX_SOUL_CHARS + 1,
-            "truncation appends one ellipsis scalar"
+            CHARACTER_MIND_MAX_SOUL_CHARS,
+            "truncation keeps the scalar bound (ellipsis reserved inside the cap)"
         );
         assert!(mind.soul.as_ref().unwrap().ends_with('…'));
         assert_eq!(
@@ -2992,12 +2988,28 @@ mod tests {
             CHARACTER_MIND_MAX_MEMORY_ENTRIES,
             "entry cap applies"
         );
-        assert!(mind.memory.last().unwrap().ends_with('…'));
+        let last = mind.memory.last().unwrap();
+        assert_eq!(
+            last.chars().count(),
+            CHARACTER_MIND_MAX_ENTRY_CHARS,
+            "each memory line is capped at the scalar bound"
+        );
+        assert!(last.ends_with('…'));
 
-        // Multi-byte safe: truncating é-heavy text never splits a char.
+        // Multi-byte safe: truncating é-heavy text hits the same scalar cap
+        // (two-byte chars) and never splits a code point.
         let mind = CharacterMindInput::new(Some(wide_soul), vec![]);
-        assert!(mind.soul.is_some());
-        assert!(mind.soul.as_ref().unwrap().ends_with('…'));
+        let wide = mind.soul.as_ref().unwrap();
+        assert_eq!(wide.chars().count(), CHARACTER_MIND_MAX_SOUL_CHARS);
+        assert!(wide.ends_with('…'));
+        assert!(wide.is_char_boundary(wide.len()));
+
+        // Four-byte (astral) chars hit the same scalar cap and stay valid UTF-8.
+        let mind = CharacterMindInput::new(Some(astral_soul), vec![]);
+        let astral = mind.soul.as_ref().unwrap();
+        assert_eq!(astral.chars().count(), CHARACTER_MIND_MAX_SOUL_CHARS);
+        assert!(astral.ends_with('…'));
+        assert!(astral.is_char_boundary(astral.len()));
 
         // Empty / None keeps is_empty true (legacy empty headings).
         let empty = CharacterMindInput::default();

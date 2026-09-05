@@ -300,8 +300,11 @@ pub async fn review(
 
     let pool = state.pool_or_uninit()?.clone();
     let nexus_home = state.nexus_home().to_owned();
+    // Fetch batch_limit + 1 so the extra row proves more rows exist; truncate
+    // the processing slice back to the documented batch bound (mirrors the
+    // Creator memory review handler — no off-by-one on has_more).
     let fetch_limit = REVIEW_BATCH_LIMIT + 1;
-    let rows = nexus_local_db::list_character_pending_reviews(
+    let mut rows = nexus_local_db::list_character_pending_reviews(
         &pool,
         &creator,
         &character_id,
@@ -310,16 +313,14 @@ pub async fn review(
         0,
     )
     .await?;
-    let more_in_db = usize::try_from(fetch_limit).unwrap_or(usize::MAX) < rows.len();
     let batch_limit = usize::try_from(REVIEW_BATCH_LIMIT).unwrap_or(usize::MAX);
-    let processing = if more_in_db {
-        rows.len().min(batch_limit)
-    } else {
-        rows.len()
-    };
+    let more_in_db = rows.len() > batch_limit;
+    if more_in_db {
+        rows.truncate(batch_limit);
+    }
+    let processing_slice = rows.len();
     let inputs: Vec<PendingReviewInput> = rows
         .into_iter()
-        .take(processing)
         .map(|r| PendingReviewInput {
             pending_id: r.pending_id,
             session_id: r.session_id,
@@ -330,7 +331,6 @@ pub async fn review(
             created_at: r.created_at,
         })
         .collect();
-    let processing_slice = inputs.len();
     let deadline = tokio::time::Instant::now() + REVIEW_CALL_TIMEOUT;
     let ctx = BearerPipelineCtx::character(&pool, &creator, &character_id, binding_id)
         .await?;
@@ -423,6 +423,9 @@ pub async fn promote_fragment(
             message: "expected_revision is out of range".into(),
         }
     })?;
+    // The repository commits and returns the authoritative promoted record
+    // (same fragment id, cleared binding provenance, bumped revision). Map it
+    // directly — no post-commit re-query or panic path.
     let promoted = nexus_local_db::promote_character_fragment_to_shared(
         state.pool_or_uninit()?,
         &creator,
@@ -432,23 +435,6 @@ pub async fn promote_fragment(
     )
     .await
     .map_err(map_local_db_promote_error)?;
-    let fragments = nexus_local_db::list_character_fragments(
-        state.pool_or_uninit()?,
-        &creator,
-        &character_id,
-        None,
-        1,
-        0,
-    )
-    .await
-    .expect("promoted fragment is present in the shared scope");
-    let promoted = fragments
-        .into_iter()
-        .find(|f| f.fragment_id == promoted.fragment_id)
-        .ok_or_else(|| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: "promoted fragment not found after promotion".into(),
-        })?;
     Ok(Json(map_wire::<PromoteCharacterFragmentResponse>(serde_json::json!({
         "fragment": character_fragment_info(&promoted)?,
     }))?))

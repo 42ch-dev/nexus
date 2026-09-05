@@ -514,7 +514,7 @@ async fn assemble_admitted_prompt(
                     character_id,
                     ctx.binding_id.as_deref(),
                 )
-                .await;
+                .await?;
             MomentActorContext::character_with_mind(view, mind)
         }
         AdmittedActor::Creator { .. } => MomentActorContext::creator_with_view(view),

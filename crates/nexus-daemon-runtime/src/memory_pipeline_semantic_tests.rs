@@ -496,7 +496,8 @@ async fn character_mind_projection_is_bounded_scoped_and_honest_empty() {
     let mind = load_character_mind_projection(
         &s.pool, &s.nexus_home, OWNER_A, &s.chr_a, Some(&binding_a1),
     )
-    .await;
+    .await
+    .expect("honest-empty projection ok");
     assert_eq!(mind.memory.len(), 0, "no fragments yet");
     assert!(mind.soul.is_none(), "no SOUL.md yet");
 
@@ -532,7 +533,8 @@ async fn character_mind_projection_is_bounded_scoped_and_honest_empty() {
     let mind = load_character_mind_projection(
         &s.pool, &s.nexus_home, OWNER_A, &s.chr_a, Some(&binding_a1),
     )
-    .await;
+    .await
+    .expect("projection ok");
     assert_eq!(mind.memory.len(), 2);
     assert!(
         mind.memory[0].contains("LOCALPROJ"),
@@ -545,18 +547,20 @@ async fn character_mind_projection_is_bounded_scoped_and_honest_empty() {
     let mind = load_character_mind_projection(
         &s.pool, &s.nexus_home, OWNER_A, &s.chr_a, None,
     )
-    .await;
+    .await
+    .expect("projection ok");
     assert_eq!(mind.memory.len(), 1);
     assert!(mind.memory[0].contains("SHAREDPROJ"));
 
-    // A foreign OWNER_B scope never observes Character A data.
-    let mind = load_character_mind_projection(
+    // A foreign OWNER_B scope never observes Character A data — it fails
+    // closed (repo owner gate) rather than projecting an empty Character mind.
+    let foreign = load_character_mind_projection(
         &s.pool, &s.nexus_home, OWNER_B, &s.chr_a, Some(&binding_a1),
     )
     .await;
     assert!(
-        mind.memory.is_empty() && mind.soul.is_none(),
-        "foreign owner must not observe Character A data"
+        foreign.is_err(),
+        "foreign owner projection must fail closed, got ok"
     );
 
     // Writing SOUL.md makes the soul slot present (raw text, honest).
@@ -570,8 +574,53 @@ async fn character_mind_projection_is_bounded_scoped_and_honest_empty() {
     let mind = load_character_mind_projection(
         &s.pool, &s.nexus_home, OWNER_A, &s.chr_a, Some(&binding_a1),
     )
-    .await;
+    .await
+    .expect("projection ok");
     assert!(mind.soul.is_some(), "SOUL.md present after save");
+
+    drop(s.tmp);
+}
+
+#[tokio::test]
+async fn promoted_character_long_term_memory_is_projected_into_run() {
+    use crate::api::handlers::memory_pipeline::{load_character_mind_projection, process_bearer_review_batch};
+
+    let s = setup().await;
+    let ctx = ctxh(&s.pool, &s.chr_a).await;
+
+    // A high-signal creative digest (>= 80 chars, brainstorm) → PromoteToLongTerm.
+    let promote_digest = format!(
+        "LTM_PROJ_MARKER The tavern ledger records a debt repaid at dawn, and the \
+         character named it aloud for the first time, rewriting the family pact."
+    );
+    let input = pch(
+        "pend_promote_proj",
+        "sess_promote_proj",
+        &promote_digest,
+        "brainstorm",
+        &s.chr_a,
+    );
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    let outcome =
+        process_bearer_review_batch(&[input], &s.nexus_home, &ctx, &s.pool, deadline).await;
+    assert_eq!(outcome.promoted, 1, "high-signal brainstorm must promote");
+    assert_eq!(outcome.fragmented, 0);
+
+    // The promoted long-term-memory file is now projected into the run mind.
+    let mind = load_character_mind_projection(&s.pool, &s.nexus_home, OWNER_A, &s.chr_a, None)
+        .await
+        .expect("projection ok");
+    assert!(
+        !mind.memory.is_empty(),
+        "promoted LTM must appear in the Character mind projection"
+    );
+    // The promoted file's authoritative frontmatter (`memory_kind:`) is the
+    // marker that this came from the pipeline's LTM sink, not a fragment row.
+    assert!(
+        mind.memory.iter().any(|l| l.contains("memory_kind:")),
+        "promoted LTM frontmatter must be visible to character run: {:?}",
+        mind.memory
+    );
 
     drop(s.tmp);
 }
