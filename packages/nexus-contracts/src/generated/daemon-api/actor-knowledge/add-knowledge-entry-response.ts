@@ -59,7 +59,7 @@ export interface WorldKnowledgeOwner {
   /**
    * World-owned KnowledgeEntry.
    */
-  kind: string;
+  kind: "world";
   /**
    * World ID (prefix: 'wld_')
    */
@@ -69,7 +69,7 @@ export interface CharacterKnowledgeOwner {
   /**
    * Character-owned KnowledgeEntry shared across active bindings.
    */
-  kind: string;
+  kind: "character";
   /**
    * Character ID (lowercase prefix chr_ and exactly 32 hex characters)
    */
@@ -79,7 +79,7 @@ export interface BindingKnowledgeOwner {
   /**
    * Binding-local KnowledgeEntry isolated to one ActorWorldBinding.
    */
-  kind: string;
+  kind: "actor_world_binding";
   /**
    * ActorWorldBinding ID (lowercase prefix awb_ and exactly 32 hex characters)
    */

@@ -242,6 +242,7 @@ pub async fn add_entry(
             service
                 .require_owned_character(&creator_id, character_id)
                 .await?;
+            service.require_owned_world(&creator_id, world_id).await?;
             service
                 .require_active_binding(character_id, binding_id, world_id)
                 .await?;

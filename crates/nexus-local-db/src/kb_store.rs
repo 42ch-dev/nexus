@@ -1339,6 +1339,58 @@ impl SqliteKbStore {
 
         rows.iter().map(KeyBlockRow::to_record).collect()
     }
+
+    /// Complete owner listing for Actor KnowledgeView (v1.184 P1 T3 fix1).
+    ///
+    /// Unlike [`Self::list_by_owner`], this path has no silent 500-row cap.
+    /// Rows are ordered by `(created_at, key_block_id)` so keyset pagination
+    /// over the union is deterministic even when timestamps collide.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`KbStoreError::Storage`] on database failure.
+    pub async fn list_by_owner_complete(
+        &self,
+        owner: &KnowledgeOwnerRef,
+    ) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
+        let owner_column = match owner {
+            KnowledgeOwnerRef::World(_) => "world_id",
+            KnowledgeOwnerRef::Character(_) => "character_id",
+            KnowledgeOwnerRef::ActorWorldBinding(_) => "actor_world_binding_id",
+        };
+        let sql = format!(
+            r"SELECT
+                key_block_id,
+                owner_kind,
+                world_id,
+                character_id,
+                actor_world_binding_id,
+                creator_only,
+                block_type,
+                canonical_name,
+                status,
+                revision,
+                body_json,
+                source_anchor_json,
+                created_from_command_id,
+                created_at,
+                updated_at,
+                source_work_id,
+                source_chapter,
+                source_provenance_kind, extensions_nexus_json, modules_json
+            FROM kb_key_blocks
+            WHERE {owner_column} = ?
+              AND status NOT IN ('deleted', 'merged', 'deprecated')
+            ORDER BY created_at ASC, key_block_id ASC"
+        );
+        let rows = sqlx::query_as::<_, KeyBlockRow>(&sql)
+            .bind(owner.id())
+            .fetch_all(&*self.pool)
+            .await
+            .map_err(|e| db_err(&e))?;
+
+        rows.iter().map(KeyBlockRow::to_record).collect()
+    }
 }
 
 // ── V1.73 Canvas World KB: per-row OCC CAS entity edit ──────────────────────
@@ -1976,6 +2028,38 @@ mod tests {
             scoped.entries.len(),
             usize::try_from(LIST_BY_WORLD_LIMIT).unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn test_list_by_owner_complete_has_no_silent_500_cap() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+        let store = SqliteKbStore::new(pool.clone());
+        let n = usize::try_from(LIST_BY_WORLD_LIMIT).unwrap() + 1;
+        for i in 0..n {
+            let kb = KnowledgeEntryRecord::new("wld_1", BlockType::Item, &format!("Cap_{i:03}"));
+            store.insert_knowledge_entry(kb).await.unwrap();
+        }
+        sqlx::query("UPDATE kb_key_blocks SET created_at = '2026-01-01T00:00:00Z'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let capped = store
+            .list_by_owner(&KnowledgeOwnerRef::world("wld_1"))
+            .await
+            .unwrap();
+        assert_eq!(capped.len(), usize::try_from(LIST_BY_WORLD_LIMIT).unwrap());
+
+        let complete = store
+            .list_by_owner_complete(&KnowledgeOwnerRef::world("wld_1"))
+            .await
+            .unwrap();
+        assert_eq!(complete.len(), n);
+        let ids: Vec<&str> = complete.iter().map(|r| r.entry_id.as_str()).collect();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        assert_eq!(ids, sorted, "equal timestamps must tie-break on key_block_id");
     }
 
     #[tokio::test]

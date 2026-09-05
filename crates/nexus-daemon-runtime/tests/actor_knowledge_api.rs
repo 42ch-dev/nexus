@@ -386,18 +386,28 @@ async fn view_orders_and_paginates_with_opaque_k2_cursor() {
     assert_ne!(p1["items"][0]["entry_id"], p2["items"][0]["entry_id"]);
     assert_ne!(p1["items"][1]["entry_id"], p2["items"][0]["entry_id"]);
 
-    let bad = ctx
-        .server
-        .post("/v1/daemon/actor-knowledge/view")
-        .json(&json!({
-            "actor_ref": { "actor_kind": "creator", "creator_id": OWNER },
-            "world_id": WORLD_A,
-            "cursor": "v1:12"
-        }))
-        .await;
-    assert_eq!(bad.status_code(), 422, "{}", bad.text());
-    let body: Value = bad.json();
-    assert_eq!(body["error"]["code"], "invalid_input");
+    for cursor in [
+        "v1:12".to_string(),
+        format!("k2:2026-01-01T00:00:00Z\u{1f}kb_a\u{1f}extra"),
+    ] {
+        let bad = ctx
+            .server
+            .post("/v1/daemon/actor-knowledge/view")
+            .json(&json!({
+                "actor_ref": { "actor_kind": "creator", "creator_id": OWNER },
+                "world_id": WORLD_A,
+                "cursor": cursor
+            }))
+            .await;
+        assert_eq!(
+            bad.status_code(),
+            422,
+            "cursor={cursor} body={}",
+            bad.text()
+        );
+        let body: Value = bad.json();
+        assert_eq!(body["error"]["code"], "invalid_input");
+    }
 }
 
 #[tokio::test]
@@ -516,4 +526,73 @@ async fn character_knowledge_list_is_character_owned_only() {
     assert_eq!(listed.status_code(), 200, "{}", listed.text());
     let names = names(&listed.json());
     assert_eq!(names, vec!["CharRow".to_string()]);
+}
+
+#[tokio::test]
+async fn character_view_and_binding_add_require_owned_target_world() {
+    let ctx = ctx().await;
+    const FOREIGN_WORLD: &str = "wld_foreign";
+    sqlx::query(
+        "INSERT INTO narrative_worlds \
+         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+          time_policy, metadata_json, created_at) \
+         VALUES (?, 'ws', ?, ?, ?, 'active', 'private', 'manual', '{}', datetime('now'))",
+    )
+    .bind(FOREIGN_WORLD)
+    .bind(OTHER)
+    .bind(FOREIGN_WORLD)
+    .bind(FOREIGN_WORLD)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr = created["character"]["character_id"].as_str().unwrap().to_string();
+    let foreign_binding = "awb_cccccccccccccccccccccccccccccccc";
+    sqlx::query(
+        "INSERT INTO actor_world_bindings \
+         (binding_id, character_id, world_id, status, created_at, updated_at) \
+         VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))",
+    )
+    .bind(foreign_binding)
+    .bind(&chr)
+    .bind(FOREIGN_WORLD)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+
+    let view = ctx
+        .server
+        .post("/v1/daemon/actor-knowledge/view")
+        .json(&json!({
+            "actor_ref": { "actor_kind": "character", "character_id": chr },
+            "world_id": FOREIGN_WORLD,
+            "binding_id": foreign_binding
+        }))
+        .await;
+    assert_eq!(view.status_code(), 404, "{}", view.text());
+    let view_body: Value = view.json();
+    assert!(view_body.get("items").is_none());
+
+    let add = ctx
+        .server
+        .post("/v1/daemon/actor-knowledge/entries")
+        .json(&json!({
+            "owner_kind": "actor_world_binding",
+            "character_id": chr,
+            "binding_id": foreign_binding,
+            "world_id": FOREIGN_WORLD,
+            "block_type": "item",
+            "canonical_name": "ShouldNotInsert"
+        }))
+        .await;
+    assert_eq!(add.status_code(), 404, "{}", add.text());
+    let ke: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM kb_key_blocks WHERE actor_world_binding_id = ?",
+    )
+    .bind(foreign_binding)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(ke, 0);
 }

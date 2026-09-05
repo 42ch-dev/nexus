@@ -32,7 +32,7 @@ export interface CreatorActorRef {
   /**
    * Actor kind discriminant for a Creator bearer.
    */
-  actor_kind: string;
+  actor_kind: "creator";
   /**
    * Creator bearer id (`CreatorId`).
    */
@@ -42,7 +42,7 @@ export interface CharacterActorRef {
   /**
    * Actor kind discriminant for a Character bearer. Unrelated to KnowledgeEntry block_type=character.
    */
-  actor_kind: string;
+  actor_kind: "character";
   /**
    * Character ID: lowercase chr_ prefix and exactly 32 hex characters.
    */

@@ -87,11 +87,11 @@ impl ActorKnowledgeViewService {
             None => Ok(None),
             Some(raw) => {
                 let rest = raw.strip_prefix(CURSOR_PREFIX).ok_or_else(invalid_cursor)?;
-                let (created_at, entry_id) = rest.split_once(CURSOR_SEP).ok_or_else(invalid_cursor)?;
-                if created_at.is_empty() || entry_id.is_empty() {
+                let parts: Vec<&str> = rest.split(CURSOR_SEP).collect();
+                if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
                     return Err(invalid_cursor());
                 }
-                Ok(Some((created_at.to_string(), entry_id.to_string())))
+                Ok(Some((parts[0].to_string(), parts[1].to_string())))
             }
         }
     }
@@ -165,6 +165,8 @@ impl ActorKnowledgeViewService {
                     });
                 };
                 self.require_owned_character(caller_creator_id, character_id)
+                    .await?;
+                self.require_owned_world(caller_creator_id, &query.world_id)
                     .await?;
                 self.require_active_binding(character_id, binding_id, &query.world_id)
                     .await?;
@@ -255,7 +257,10 @@ impl ActorKnowledgeViewService {
         &self,
         owner: KnowledgeOwnerRef,
     ) -> Result<Vec<KnowledgeEntryRecord>, NexusApiError> {
-        self.store.list_by_owner(&owner).await.map_err(component_err)
+        self.store
+            .list_by_owner_complete(&owner)
+            .await
+            .map_err(component_err)
     }
 
     pub(crate) async fn require_owned_world(
@@ -396,7 +401,16 @@ mod tests {
 
     #[test]
     fn decode_cursor_rejects_malformed_tokens() {
-        for bad in ["v1:12", "k2:", "k2:only", "", "k2:\u{1f}id", "k2:ts\u{1f}"] {
+        for bad in [
+            "v1:12",
+            "k2:",
+            "k2:only",
+            "",
+            "k2:\u{1f}id",
+            "k2:ts\u{1f}",
+            "k2:ts\u{1f}id\u{1f}unexpected",
+            "k2:ts\u{1f}id\u{1f}",
+        ] {
             let err = ActorKnowledgeViewService::decode_cursor(&Some(bad.into()))
                 .expect_err(bad);
             match err {

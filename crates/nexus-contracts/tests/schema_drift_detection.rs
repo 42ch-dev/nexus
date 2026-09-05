@@ -1245,6 +1245,47 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ListCharacterBindingsResponse
         ),
+        // v1.184 P1 Task 3 / fix1 — Actor KnowledgeView contracts.
+        entry!(
+            "schemas/domain/knowledge-owner-ref.schema.json",
+            Strict,
+            KnowledgeOwnerRef
+        ),
+        entry!(
+            "schemas/daemon-api/actor-knowledge/add-knowledge-entry-request.schema.json",
+            Strict,
+            AddKnowledgeEntryRequest
+        ),
+        entry!(
+            "schemas/daemon-api/actor-knowledge/add-knowledge-entry-response.schema.json",
+            Strict,
+            AddKnowledgeEntryResponse
+        ),
+        entry!(
+            "schemas/daemon-api/actor-knowledge/knowledge-view-item.schema.json",
+            Strict,
+            KnowledgeViewItem
+        ),
+        entry!(
+            "schemas/daemon-api/actor-knowledge/list-character-knowledge-query.schema.json",
+            Strict,
+            ListCharacterKnowledgeQuery
+        ),
+        entry!(
+            "schemas/daemon-api/actor-knowledge/list-character-knowledge-response.schema.json",
+            Strict,
+            ListCharacterKnowledgeResponse
+        ),
+        entry!(
+            "schemas/daemon-api/actor-knowledge/view-request.schema.json",
+            Strict,
+            ViewRequest
+        ),
+        entry!(
+            "schemas/daemon-api/actor-knowledge/view-response.schema.json",
+            Strict,
+            ViewResponse
+        ),
     ]
 }
 
@@ -1538,10 +1579,21 @@ fn make_dummy_value(
                 .get("properties")
                 .and_then(|p| p.as_object())
                 .map_or_else(
-                    // Freeform object (no `properties`): if `additionalProperties`
-                    // specifies a value schema, generate one matching entry so
-                    // typify's typed maps (e.g. `Map<String, Map<…>>`) accept it.
+                    // Freeform object (no `properties`): a root/nested
+                    // `oneOf` object (e.g. the closed ActorRef /
+                    // KnowledgeOwnerRef unions referenced from daemon-api
+                    // schemas, v1.184 P1 T3 fix1) takes its first arm;
+                    // otherwise, if `additionalProperties` specifies a value
+                    // schema, generate one matching entry so typify's typed
+                    // maps (e.g. `Map<String, Map<…>>`) accept it.
                     || {
+                        if let Some(first_arm) = prop_def
+                            .get("oneOf")
+                            .and_then(|a| a.as_array())
+                            .and_then(|a| a.first())
+                        {
+                            return make_dummy_value(first_arm, schema_cache, current_dir);
+                        }
                         let val = prop_def.get("additionalProperties").map_or_else(
                             || Value::String("_".to_string()),
                             |ap| make_dummy_value(ap, schema_cache, current_dir),
