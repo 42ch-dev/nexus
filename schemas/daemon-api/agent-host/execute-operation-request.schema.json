@@ -4,6 +4,7 @@
   "schema_version": 1,
   "title": "Nexus AgentHostExecuteOperationRequest",
   "description": "Request body for POST /v1/daemon/agent-host/sessions/{session_id}/operations. Tagged by kind: prompt, set_model, or set_mode.",
+  "type": "object",
   "oneOf": [
     {
       "title": "Prompt",
