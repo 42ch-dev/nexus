@@ -58,7 +58,6 @@ pub fn list_memories(home: &Path, bearer: MemoryBearerRef<'_>) -> Result<Vec<Str
     // returns false both for a missing path and for an unreadable path. A
     // missing directory is the only honest-empty case; metadata/permission
     // errors must surface to the caller.
-    // codeql[rust/path-injection]: bearer IDs are validated above; `home` is trusted local nexus_home config, so user-provided components cannot escape the bearer root.
     let entries = match std::fs::read_dir(&dir) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),

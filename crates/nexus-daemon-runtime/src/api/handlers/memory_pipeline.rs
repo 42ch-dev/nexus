@@ -975,7 +975,6 @@ pub async fn load_character_mind_projection(
     })?;
 
     // SOUL: a missing SOUL.md is honest-empty; any other read error fails closed.
-    // codeql[rust/path-injection]: bearer validation restricts both IDs to safe path components; `nexus_home` is trusted daemon configuration.
     let soul = match std::fs::read_to_string(bearer.soul_path(nexus_home)) {
         Ok(text) => Some(text),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
