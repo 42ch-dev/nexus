@@ -98,12 +98,13 @@ mod tests {
         // A max_size above the u32 connection domain must fail closed rather
         // than truncate to a smaller pool.
         let huge = usize::try_from(u64::from(u32::MAX)).unwrap() + 1;
-        let err = OutboxPool::new(&db_path, huge)
-            .await
-            .expect_err("oversized max_size must be rejected");
+        let err = match OutboxPool::new(&db_path, huge).await {
+            Ok(_pool) => panic!("oversized max_size must be rejected, not accepted"),
+            Err(err) => err,
+        };
         assert!(
             matches!(err, nexus_local_db::LocalDbError::ValidationError(_)),
-            "got {err:?}"
+            "oversized max_size must produce a ValidationError"
         );
     }
 

@@ -1,7 +1,7 @@
-//! P1 Task 3 — Actor KnowledgeView Daemon routes.
+//! P1 Task 3 — Actor `KnowledgeView` Daemon routes.
 //!
 //! Auth denial, stored-owner admission, union composition, cursor pagination,
-//! and binding-removal KnowledgeEntry dependency 409.
+//! and binding-removal `KnowledgeEntry` dependency 409.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -68,6 +68,8 @@ async fn seed_actor_fixture(pool: &sqlx::SqlitePool) {
     }
 }
 
+// axum-test `AutoFuture` is not `Send` by design; this helper is only awaited on the single-threaded `#[tokio::test]` runtime.
+#[allow(clippy::future_not_send)]
 async fn create_character(server: &TestServer, name: &str, world_id: &str) -> Value {
     let resp = server
         .post("/v1/daemon/characters")
@@ -83,6 +85,8 @@ async fn create_character(server: &TestServer, name: &str, world_id: &str) -> Va
     resp.json()
 }
 
+// axum-test `AutoFuture` is not `Send` by design; this helper is only awaited on the single-threaded `#[tokio::test]` runtime.
+#[allow(clippy::future_not_send)]
 async fn add_entry(server: &TestServer, body: Value) -> Value {
     let resp = server
         .post("/v1/daemon/actor-knowledge/entries")
@@ -393,7 +397,7 @@ async fn view_orders_and_paginates_with_opaque_k2_cursor() {
 
     for cursor in [
         "v1:12".to_string(),
-        format!("k2:2026-01-01T00:00:00Z\u{1f}kb_a\u{1f}extra"),
+        "k2:2026-01-01T00:00:00Z\u{1f}kb_a\u{1f}extra".to_string(),
     ] {
         let bad = ctx
             .server
@@ -539,8 +543,8 @@ async fn character_knowledge_list_is_character_owned_only() {
 
 #[tokio::test]
 async fn character_view_and_binding_add_require_owned_target_world() {
-    let ctx = ctx().await;
     const FOREIGN_WORLD: &str = "wld_foreign";
+    let ctx = ctx().await;
     sqlx::query(
         "INSERT INTO narrative_worlds \
          (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
@@ -862,6 +866,8 @@ async fn view_paginates_same_millisecond_reverse_ids_without_skip_or_duplicate()
 /// PR #240 finding 1: public actor-knowledge operations must reject
 /// owned-but-inactive Worlds and Characters (Host admission parity), not just
 /// foreign/missing ones.
+// Fail-closed matrix across view+add for inactive/foreign actors; one contract.
+#[allow(clippy::too_many_lines)]
 #[tokio::test]
 async fn inactive_world_and_character_fail_closed_on_view_and_add() {
     let ctx = ctx().await;

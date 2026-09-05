@@ -6,7 +6,7 @@
 //! - bounded deterministic pagination
 //! - review drain into Character-only storage (Creator tables untouched)
 //! - revision-checked local→shared promotion (stable 409s, zero mutation)
-//! - SOUL narrative reflect states (insufficient_data/ungenerated/current/stale)
+//! - SOUL narrative reflect states (`insufficient_data/ungenerated/current/stale`)
 //! - fail-closed authorization: foreign/missing/inactive Character and
 //!   foreign/inactive binding reject before any row/file/synthesis side effect
 
@@ -28,10 +28,10 @@ const WORLD_A: &str = "wld_worldA";
 const WORLD_B: &str = "wld_worldB";
 const WORLD_C: &str = "wld_worldC";
 
-/// Digest ≥ 200 chars with unknown task kind → PromoteToLongTerm.
+/// Digest ≥ 200 chars with unknown task kind → `PromoteToLongTerm`.
 const PROMOTE_DIGEST: &str = "The character finally confronted the gatekeeper at the citadel and chose mercy over vengeance, a decision that rewrote the pact binding their lineage and set the third act in motion. The gatekeeper had waited a century for this reckoning, and the choice would echo through every covenant the family had sworn since the river first carried their name.";
 
-/// ≥ 50 chars with research task kind → FragmentOnly.
+/// ≥ 50 chars with research task kind → `FragmentOnly`.
 const FRAGMENT_DIGEST: &str =
     "Researched the tidal customs of the southern ports for scene texture.";
 
@@ -90,7 +90,9 @@ async fn seed_actor_fixture(pool: &sqlx::SqlitePool) {
     }
 }
 
-/// Create a Character through the public route; returns (character_id, binding_id).
+/// Create a Character through the public route; returns (`character_id`, `binding_id`).
+// axum-test `AutoFuture` is not `Send` by design; these helpers are only awaited on the single-threaded `#[tokio::test]` runtime.
+#[allow(clippy::future_not_send)]
 async fn create_character(server: &TestServer, name: &str, world_id: &str) -> (String, String) {
     let resp = server
         .post("/v1/daemon/characters")
@@ -107,6 +109,8 @@ async fn create_character(server: &TestServer, name: &str, world_id: &str) -> (S
     )
 }
 
+// axum-test `AutoFuture` is not `Send` by design; these helpers are only awaited on the single-threaded `#[tokio::test]` runtime.
+#[allow(clippy::future_not_send)]
 async fn add_binding(server: &TestServer, character_id: &str, world_id: &str) -> String {
     let resp = server
         .post(&format!("/v1/daemon/characters/{character_id}/bindings"))
@@ -123,6 +127,8 @@ fn memory_base(character_id: &str) -> String {
     format!("/v1/daemon/characters/{character_id}/memory")
 }
 
+// axum-test `AutoFuture` is not `Send` by design; these helpers are only awaited on the single-threaded `#[tokio::test]` runtime.
+#[allow(clippy::future_not_send)]
 async fn capture(
     server: &TestServer,
     character_id: &str,
@@ -150,14 +156,18 @@ async fn capture(
         .await
 }
 
+// axum-test `AutoFuture` is not `Send` by design; these helpers are only awaited on the single-threaded `#[tokio::test]` runtime.
+#[allow(clippy::future_not_send)]
 async fn count_pending(server: &TestServer, character_id: &str, binding_id: Option<&str>) -> i64 {
-    let path = match binding_id {
-        Some(b) => format!(
-            "{}/pending-review/count?binding_id={b}",
-            memory_base(character_id)
-        ),
-        None => format!("{}/pending-review/count", memory_base(character_id)),
-    };
+    let path = binding_id.map_or_else(
+        || format!("{}/pending-review/count", memory_base(character_id)),
+        |b| {
+            format!(
+                "{}/pending-review/count?binding_id={b}",
+                memory_base(character_id)
+            )
+        },
+    );
     let resp = server.get(&path).await;
     assert_eq!(resp.status_code(), 200, "count: {}", resp.text());
     resp.json::<Value>()["count"].as_i64().unwrap()
@@ -371,19 +381,30 @@ async fn pagination_is_bounded_and_deterministic() {
         .server
         .get(&format!("{}/pending-review?limit=0", memory_base(&chr)))
         .await;
-    if resp.status_code() != 422 {
-        panic!(
-            "limit=0 expected 422 got {} body: {}",
-            resp.status_code(),
-            resp.text()
-        );
-    }
+    assert!(
+        resp.status_code() == 422,
+        "limit=0 expected 422 got {} body: {}",
+        resp.status_code(),
+        resp.text()
+    );
 }
 
 // ─── Review pipeline ──────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn review_drains_queue_into_character_storage_only() {
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().and_then(|e| e.to_str()) == Some("md") {
+                    out.push(p);
+                }
+            }
+        }
+    }
     let ctx = ctx().await;
     let (chr, _bind1) = create_character(&ctx.server, "Ava", WORLD_A).await;
 
@@ -448,18 +469,6 @@ async fn review_drains_queue_into_character_storage_only() {
     // promoted file nests under `<nexus_home>/.nexus42/creators/...`. Search
     // the entire tree to stay robust to that convention.
     let mut promoted_md: Vec<_> = Vec::new();
-    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for e in entries.flatten() {
-                let p = e.path();
-                if p.is_dir() {
-                    walk(&p, out);
-                } else if p.extension().and_then(|e| e.to_str()) == Some("md") {
-                    out.push(p);
-                }
-            }
-        }
-    }
     walk(&ctx.nexus_home, &mut promoted_md);
     assert_eq!(promoted_md.len(), 1, "exactly one promoted LTM file");
 
@@ -591,13 +600,12 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
         .post(&promote_path)
         .json(&json!({ "expected_revision": 7 }))
         .await;
-    if resp.status_code() != 409 {
-        panic!(
-            "stale expected 409 got {}: {}",
-            resp.status_code(),
-            resp.text()
-        );
-    }
+    assert!(
+        resp.status_code() == 409,
+        "stale expected 409 got {}: {}",
+        resp.status_code(),
+        resp.text()
+    );
     assert_eq!(j(&resp)["error"]["code"], "version_mismatch");
     let resp = ctx
         .server
@@ -655,6 +663,8 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
 
 // ─── SOUL narrative reflect ───────────────────────────────────────────────
 
+// Sequential multi-step scenario test; splitting would scatter one contract.
+#[allow(clippy::too_many_lines)]
 #[tokio::test]
 async fn reflect_reports_insufficient_ungenerated_current_and_stale() {
     let ctx = ctx().await;
@@ -778,6 +788,8 @@ async fn reflect_reports_insufficient_ungenerated_current_and_stale() {
 
 // ─── Fail-closed authorization ────────────────────────────────────────────
 
+// Sequential multi-step scenario test; splitting would scatter one contract.
+#[allow(clippy::too_many_lines)]
 #[tokio::test]
 async fn foreign_missing_inactive_character_and_binding_fail_before_side_effects() {
     let ctx = ctx().await;

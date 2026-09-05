@@ -1334,6 +1334,8 @@ mod tests {
     /// PR #240 finding 3: the in-transaction revalidation must reject any
     /// live-scope drift (deactivated binding, archived subject) so the CAS
     /// transaction rolls back instead of committing under a stale viewpoint.
+    // Drift matrix: sequential binding/subject deactivation cases; one contract.
+    #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn revalidate_live_scope_in_tx_rejects_binding_and_subject_drift() {
         let (_tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;

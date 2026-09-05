@@ -243,7 +243,7 @@ mod tests {
         let home = PathBuf::from("/h");
         for bad in ["../ctr_x", "ctr_a/b", "ctr_a\\b", "ctr_\u{7}bell"] {
             let r = std::panic::catch_unwind(|| {
-                MemoryBearerRef::Creator(bad).long_term_memory_dir(&home);
+                let _ = MemoryBearerRef::Creator(bad).long_term_memory_dir(&home);
             });
             assert!(r.is_err(), "creator id {bad:?} must be rejected");
         }
@@ -255,7 +255,7 @@ mod tests {
         let owner = "ctr_ownerx";
         for bad_chr in ["chr_../escape", "chr_a/b", "chr_a\\b", ""] {
             let r = std::panic::catch_unwind(|| {
-                MemoryBearerRef::Character {
+                let _ = MemoryBearerRef::Character {
                     owner_creator_id: owner,
                     character_id: bad_chr,
                 }
@@ -265,7 +265,7 @@ mod tests {
         }
         for bad_owner in ["../ctr_x", "ctr_a/b", "ctr_.."] {
             let r = std::panic::catch_unwind(|| {
-                MemoryBearerRef::Character {
+                let _ = MemoryBearerRef::Character {
                     owner_creator_id: bad_owner,
                     character_id: "chr_0123456789abcdef0123456789abcdef",
                 }
@@ -281,7 +281,7 @@ mod tests {
         let bearer = MemoryBearerRef::Creator("ctr_x");
         for bad in ["../etc", "a/b", "a\\b", "..", "", "with\u{0}null"] {
             let r = std::panic::catch_unwind(|| {
-                bearer.long_term_memory_path(&home, bad);
+                let _ = bearer.long_term_memory_path(&home, bad);
             });
             assert!(r.is_err(), "slug {bad:?} must be rejected");
         }

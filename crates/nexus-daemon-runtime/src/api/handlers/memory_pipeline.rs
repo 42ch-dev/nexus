@@ -1369,10 +1369,7 @@ mod tests {
             .unwrap();
         assert!(result.contains("# character_id: chr_0123456789abcdef0123456789abcdef"));
         assert!(result.contains("# binding_id: bnd_x"), "got: {result}");
-        assert!(
-            result.contains("# creator_id:") == false,
-            "no creator_id key"
-        );
+        assert!(!result.contains("# creator_id:"), "no creator_id key");
     }
 
     #[tokio::test]

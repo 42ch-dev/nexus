@@ -474,7 +474,7 @@ mod tests {
         let cursor = page.next_cursor.expect("next_cursor");
         assert!(cursor.starts_with("k2:"));
         assert!(cursor.contains('\u{1f}'));
-        let decoded = ActorKnowledgeViewService::decode_cursor(&Some(cursor.clone()))
+        let decoded = ActorKnowledgeViewService::decode_cursor(&Some(cursor))
             .expect("decode")
             .expect("pair");
         assert_eq!(decoded, ("2026-01-01T00:00:01Z".into(), "kb_z".into()));

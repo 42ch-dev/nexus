@@ -1882,6 +1882,8 @@ fn drift_time_limit_ms() -> u64 {
 }
 
 #[test]
+// Exhaustive per-schema drift check over every registered contract; one sweep.
+#[allow(clippy::too_many_lines)]
 fn schema_drift_detection() {
     let start = std::time::Instant::now();
 
@@ -2151,8 +2153,8 @@ fn actor_ref_one_of_arms_roundtrip_and_reject() {
         "actor_kind": "character",
         "character_id": "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     });
-    let creator_v: ActorRef = serde_json::from_value(creator.clone()).expect("creator arm");
-    let character_v: ActorRef = serde_json::from_value(character.clone()).expect("character arm");
+    let creator_v: ActorRef = serde_json::from_value(creator).expect("creator arm");
+    let character_v: ActorRef = serde_json::from_value(character).expect("character arm");
     assert_eq!(
         serde_json::to_value(&creator_v).unwrap()["actor_kind"],
         "creator"

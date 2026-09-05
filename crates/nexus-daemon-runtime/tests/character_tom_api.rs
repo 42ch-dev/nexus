@@ -1,4 +1,4 @@
-//! P4 Task 2 — Character ToM record/query Daemon routes.
+//! P4 Task 2 — Character `ToM` record/query Daemon routes.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -64,6 +64,8 @@ async fn seed_world(pool: &sqlx::SqlitePool) {
     .unwrap();
 }
 
+// axum-test `AutoFuture` is not `Send` by design; these helpers are only awaited on the single-threaded `#[tokio::test]` runtime.
+#[allow(clippy::future_not_send)]
 async fn create_character(server: &TestServer, name: &str, world_id: &str) -> Value {
     let resp = server
         .post("/v1/daemon/characters")
@@ -107,6 +109,8 @@ fn l1_body(
     })
 }
 
+// axum-test `AutoFuture` is not `Send` by design; these helpers are only awaited on the single-threaded `#[tokio::test]` runtime.
+#[allow(clippy::future_not_send)]
 async fn add_binding(server: &TestServer, character_id: &str, world_id: &str) -> String {
     let resp = server
         .post(&format!("/v1/daemon/characters/{character_id}/bindings"))
@@ -119,6 +123,8 @@ async fn add_binding(server: &TestServer, character_id: &str, world_id: &str) ->
         .to_string()
 }
 
+// axum-test `AutoFuture` is not `Send` by design; these helpers are only awaited on the single-threaded `#[tokio::test]` runtime.
+#[allow(clippy::future_not_send)]
 async fn record(server: &TestServer, character_id: &str, body: Value) -> axum_test::TestResponse {
     server
         .post(&format!("/v1/daemon/characters/{character_id}/tom"))
@@ -126,6 +132,8 @@ async fn record(server: &TestServer, character_id: &str, body: Value) -> axum_te
         .await
 }
 
+// axum-test `AutoFuture` is not `Send` by design; these helpers are only awaited on the single-threaded `#[tokio::test]` runtime.
+#[allow(clippy::future_not_send)]
 async fn list_tom(
     server: &TestServer,
     character_id: &str,
@@ -927,7 +935,7 @@ async fn absent_belief_is_zero_rows_and_legacy_modules_round_trip() {
     // no-belief carriers as malformed.
     let resp = list_tom(&ctx.server, &chr_a, WORLD_A, &bind_a).await;
     assert!(
-        resp["items"].as_array().unwrap().len() >= 1,
+        !resp["items"].as_array().unwrap().is_empty(),
         "alive carriers listed"
     );
 }

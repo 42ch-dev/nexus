@@ -135,6 +135,7 @@ impl ActorAdmissionService {
     }
 
     #[cfg(test)]
+    #[must_use]
     pub fn pool_for_test(&self) -> SqlitePool {
         self.pool.clone()
     }
@@ -325,7 +326,7 @@ mod tests {
         assert_eq!(ctx.binding_id.as_deref(), Some(binding_id.as_str()));
         match ctx.actor {
             AdmittedActor::Character { character_id: id } => assert_eq!(id, character_id),
-            _ => panic!("expected character"),
+            AdmittedActor::Creator { .. } => panic!("expected character"),
         }
     }
 
@@ -383,6 +384,8 @@ mod tests {
         assert_eq!(err.status_code(), status);
     }
 
+    // Deny matrix: one assertion per mismatch class; splitting scatters the matrix.
+    #[allow(clippy::too_many_lines)]
     #[tokio::test]
     async fn deny_matrix_world_character_binding_mismatches() {
         let (svc, character_id, binding_id) = seed().await;

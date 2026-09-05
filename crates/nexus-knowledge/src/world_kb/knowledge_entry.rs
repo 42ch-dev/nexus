@@ -1095,7 +1095,7 @@ mod tests {
         let l2 = BeliefPropositionRaw {
             holder: Some(other.into()),
             order: Some(2),
-            ..l1.clone()
+            ..l1
         };
         validate_character_tom_belief_row(&l2, viewer).unwrap();
     }

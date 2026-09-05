@@ -1,6 +1,6 @@
 //! P0 Task 3 — Character / binding Daemon routes.
 //!
-//! Covers success, foreign ids, invalid WorldSheet, duplicate binding,
+//! Covers success, foreign ids, invalid `WorldSheet`, duplicate binding,
 //! last-binding 409, cursor pagination, and stable error envelopes.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -90,6 +90,8 @@ async fn seed_sheet(
     .unwrap();
 }
 
+// axum-test `AutoFuture` is not `Send` by design; this helper is only awaited on the single-threaded `#[tokio::test]` runtime.
+#[allow(clippy::future_not_send)]
 async fn create_character(server: &TestServer, name: &str, world_id: &str) -> Value {
     let resp = server
         .post("/v1/daemon/characters")
@@ -564,10 +566,10 @@ async fn list_paginates_large_fixture_with_sql_bounds() {
     let mut seen = Vec::new();
     let mut cursor: Option<String> = None;
     loop {
-        let url = match &cursor {
-            None => "/v1/daemon/characters?limit=10".to_string(),
-            Some(c) => format!("/v1/daemon/characters?limit=10&cursor={c}"),
-        };
+        let url = cursor.as_ref().map_or_else(
+            || "/v1/daemon/characters?limit=10".to_string(),
+            |c| format!("/v1/daemon/characters?limit=10&cursor={c}"),
+        );
         let page = ctx.server.get(&url).await;
         assert_eq!(page.status_code(), 200, "body={}", page.text());
         let p: Value = page.json();

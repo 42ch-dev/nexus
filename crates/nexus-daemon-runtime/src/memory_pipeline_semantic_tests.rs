@@ -77,7 +77,7 @@ async fn setup() -> Sync {
         tmp,
         nexus_home,
         pool,
-        chr_a: created.character.character_id.clone(),
+        chr_a: created.character.character_id,
     }
 }
 
@@ -130,6 +130,8 @@ async fn count_all(pool: &sqlx::SqlitePool, sql: &str) -> i64 {
 }
 
 struct NoSynth;
+// Trait-required `async`; the test double performs no awaits.
+#[allow(clippy::unused_async_trait_impl)]
 impl SoulNarrativeSynthesizer for NoSynth {
     async fn synthesize(
         &self,
@@ -141,6 +143,8 @@ impl SoulNarrativeSynthesizer for NoSynth {
     }
 }
 
+// Sequential multi-step scenario test; splitting would scatter one contract.
+#[allow(clippy::too_many_lines)]
 #[tokio::test]
 async fn review_both_arms_share_classification_and_isolate_storage() {
     let s = setup().await;
@@ -281,13 +285,10 @@ async fn review_both_arms_share_classification_and_isolate_storage() {
 
 #[tokio::test]
 async fn promotion_is_idempotent_for_both_arms() {
-    let s = setup().await;
-    let home = s.nexus_home.clone();
-    let chr = s.chr_a.clone();
-
-    use nexus_creator_memory::review::SessionDigestSummarizer;
     struct Fix;
-    impl SessionDigestSummarizer for Fix {
+    // Trait-required `async`; the fixed test double performs no awaits.
+    #[allow(clippy::unused_async_trait_impl)]
+    impl nexus_creator_memory::review::SessionDigestSummarizer for Fix {
         async fn summarize(
             &self,
             _: &str,
@@ -298,6 +299,10 @@ async fn promotion_is_idempotent_for_both_arms() {
             Ok("fixed body.".to_string())
         }
     }
+
+    let s = setup().await;
+    let home = s.nexus_home.clone();
+    let chr = s.chr_a.clone();
     let fix = Fix;
 
     let ci = pcr("p1", "sess_x", PROMOTE_DIGEST, "brainstorm");
@@ -342,9 +347,9 @@ async fn aggregation_updates_soul_in_the_right_root() {
     nexus_creator_memory::memory_io::save_memory(&home, cb, "adventure", &cmem).unwrap();
 
     nexus_creator_memory::soul_io::create(&home, hb).unwrap();
-    let mut chmem = LongTermMemory::new("story_summary");
-    chmem.set_body("A grand adventure story.");
-    nexus_creator_memory::memory_io::save_memory(&home, hb, "adventure", &chmem).unwrap();
+    let mut chr_mem = LongTermMemory::new("story_summary");
+    chr_mem.set_body("A grand adventure story.");
+    nexus_creator_memory::memory_io::save_memory(&home, hb, "adventure", &chr_mem).unwrap();
 
     let cres = nexus_creator_memory::experience_aggregation::aggregate_experience(&home, cb, None)
         .await
@@ -364,8 +369,31 @@ async fn aggregation_updates_soul_in_the_right_root() {
     drop(s.tmp);
 }
 
+// Sequential multi-step scenario test; splitting would scatter one contract.
+#[allow(clippy::too_many_lines)]
 #[tokio::test]
 async fn reflect_both_arms_report_insufficient_data_and_ungenerated() {
+    struct Mock;
+    // Trait-required `async`; the fixed test double performs no awaits.
+    #[allow(clippy::unused_async_trait_impl)]
+    impl SoulNarrativeSynthesizer for Mock {
+        async fn synthesize(
+            &self,
+            _: MemoryBearerRef<'_>,
+            input: SoulNarrativeSynthesisInput,
+            _: Option<&str>,
+        ) -> Result<SoulNarrativeDraft, MemoryError> {
+            let kw = input
+                .top_keywords
+                .first()
+                .map(|(k, _)| k.clone())
+                .unwrap_or_default();
+            Ok(SoulNarrativeDraft {
+                narrative: format!("A reflective narrative about {kw} and magic, looking ahead."),
+            })
+        }
+    }
+
     let s = setup().await;
     let pool = s.pool.clone();
     let chr = s.chr_a.clone();
@@ -433,25 +461,6 @@ async fn reflect_both_arms_report_insufficient_data_and_ungenerated() {
         .unwrap();
     assert_eq!(o.state, ReflectState::Ungenerated);
     assert_eq!(o.current_fragment_count, 25);
-
-    struct Mock;
-    impl SoulNarrativeSynthesizer for Mock {
-        async fn synthesize(
-            &self,
-            _: MemoryBearerRef<'_>,
-            input: SoulNarrativeSynthesisInput,
-            _: Option<&str>,
-        ) -> Result<SoulNarrativeDraft, MemoryError> {
-            let kw = input
-                .top_keywords
-                .first()
-                .map(|(k, _)| k.clone())
-                .unwrap_or_default();
-            Ok(SoulNarrativeDraft {
-                narrative: format!("A reflective narrative about {kw} and magic, looking ahead."),
-            })
-        }
-    }
     let mock = Mock;
 
     let o = reflect_bearer_soul(&pool, &c_ctx, true, Some(&mock))
@@ -693,10 +702,10 @@ async fn promoted_character_long_term_memory_is_projected_into_run() {
     let ctx = ctxh(&s.pool, &s.chr_a).await;
 
     // A high-signal creative digest (>= 80 chars, brainstorm) → PromoteToLongTerm.
-    let promote_digest = format!(
+    let promote_digest =
         "LTM_PROJ_MARKER The tavern ledger records a debt repaid at dawn, and the \
          character named it aloud for the first time, rewriting the family pact."
-    );
+            .to_string();
     // PR #240 review round 3: claim-first promote requires a real pending
     // row, so seed the queue before processing.
     nexus_local_db::create_character_pending_review(
@@ -793,6 +802,8 @@ async fn inaccessible_ltm_directory_fails_projection_closed() {
     drop(s.tmp);
 }
 
+// Sequential multi-step scenario test; splitting would scatter one contract.
+#[allow(clippy::too_many_lines)]
 #[tokio::test]
 async fn binding_local_promote_stays_binding_local_no_global_ltm() {
     use crate::api::handlers::memory_pipeline::load_character_mind_projection;
@@ -1070,6 +1081,8 @@ async fn tom_projection_fills_both_slots_when_l1_exceeds_single_page() {
 /// (a) roll back the just-created fragment atomically, (b) leave the pending
 /// row visible, and (c) keep the reported success counters untouched so
 /// `has_more`/`any_row_remained_pending` reflect the truth.
+// Sequential multi-step scenario test; splitting would scatter one contract.
+#[allow(clippy::too_many_lines)]
 #[tokio::test]
 async fn review_failed_queue_advance_rolls_back_fragment_and_reports_no_success() {
     let s = setup().await;
@@ -1213,6 +1226,8 @@ async fn review_failed_queue_advance_rolls_back_fragment_and_reports_no_success(
 /// the retry resumes through `AlreadyPromoted` — committing the claim without
 /// rewriting. Exactly one LTM file and exactly one queue advance in both
 /// failure modes, for the Creator and Character-shared arms.
+// Sequential multi-step scenario test; splitting would scatter one contract.
+#[allow(clippy::too_many_lines)]
 #[tokio::test]
 async fn review_promote_claim_first_and_already_promoted_resume() {
     use crate::api::handlers::memory_pipeline::PassthroughSummarizer;
@@ -1257,13 +1272,11 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
     }
     .long_term_memory_dir(&s.nexus_home);
     let count_md = |dir: &std::path::Path| {
-        std::fs::read_dir(dir)
-            .map(|rd| {
-                rd.filter_map(|e| e.ok())
-                    .filter(|e| e.path().extension().is_some_and(|x| x == "md"))
-                    .count()
-            })
-            .unwrap_or(0)
+        std::fs::read_dir(dir).map_or(0, |rd| {
+            rd.filter_map(std::result::Result::ok)
+                .filter(|e| e.path().extension().is_some_and(|x| x == "md"))
+                .count()
+        })
     };
 
     // ── Mode A: forced claim (DELETE) failure — no file write at all ─────
@@ -1605,6 +1618,8 @@ async fn review_stale_zero_delete_rolls_back_fragment_insert() {
 /// retry with the filesystem healthy promotes exactly once. Covered for both
 /// bearers (Creator and Character-shared); the injected failure is identical,
 /// only the per-bearer LTM directory differs.
+// Sequential multi-step scenario test; splitting would scatter one contract.
+#[allow(clippy::too_many_lines)]
 #[tokio::test]
 async fn review_promote_filesystem_failure_rolls_back_claim_and_recovers() {
     let s = setup().await;
@@ -1647,13 +1662,11 @@ async fn review_promote_filesystem_failure_rolls_back_claim_and_recovers() {
     }
     .long_term_memory_dir(&s.nexus_home);
     let count_md = |dir: &std::path::Path| {
-        std::fs::read_dir(dir)
-            .map(|rd| {
-                rd.filter_map(|e| e.ok())
-                    .filter(|e| e.path().extension().is_some_and(|x| x == "md"))
-                    .count()
-            })
-            .unwrap_or(0)
+        std::fs::read_dir(dir).map_or(0, |rd| {
+            rd.filter_map(std::result::Result::ok)
+                .filter(|e| e.path().extension().is_some_and(|x| x == "md"))
+                .count()
+        })
     };
 
     // Inject the filesystem failure: replace each bearer's LTM directory with

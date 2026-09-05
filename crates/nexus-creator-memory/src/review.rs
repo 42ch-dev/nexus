@@ -1121,9 +1121,6 @@ mod tests {
     /// R-V141HYG-01: UTF-8-safe truncation — boundary must not land mid-character.
     #[tokio::test]
     async fn promote_truncates_oversized_raw_digest_at_utf8_boundary() {
-        let home = PathBuf::from("/tmp/test_promotion_utf8_boundary");
-        let _ = std::fs::remove_dir_all(&home);
-
         struct Passthrough;
         #[allow(async_fn_in_trait, clippy::unused_async_trait_impl)]
         impl SessionDigestSummarizer for Passthrough {
@@ -1137,6 +1134,9 @@ mod tests {
                 Ok(raw_digest.to_string())
             }
         }
+
+        let home = PathBuf::from("/tmp/test_promotion_utf8_boundary");
+        let _ = std::fs::remove_dir_all(&home);
 
         // Each CJK char is 3 bytes in UTF-8. Fill to just over 256 KiB so that the
         // byte boundary at MAX_DIGEST_BYTES lands mid-character.
@@ -1187,9 +1187,6 @@ mod tests {
     /// R-V133P4-06: Size guard truncates oversized `raw_digest` before summarization.
     #[tokio::test]
     async fn promote_truncates_oversized_raw_digest() {
-        let home = PathBuf::from("/tmp/test_promotion_size_guard");
-        let _ = std::fs::remove_dir_all(&home);
-
         struct Passthrough;
         #[allow(async_fn_in_trait, clippy::unused_async_trait_impl)]
         impl SessionDigestSummarizer for Passthrough {
@@ -1204,6 +1201,9 @@ mod tests {
                 Ok(raw_digest.to_string())
             }
         }
+
+        let home = PathBuf::from("/tmp/test_promotion_size_guard");
+        let _ = std::fs::remove_dir_all(&home);
 
         // Create a digest larger than 256 KiB
         let big_digest = "x".repeat(300 * 1024);

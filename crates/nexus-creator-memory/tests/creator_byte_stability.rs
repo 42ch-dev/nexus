@@ -117,6 +117,9 @@ async fn creator_experience_aggregation_bytes_are_byte_stable() {
 struct FixedSummarizer;
 
 impl SessionDigestSummarizer for FixedSummarizer {
+    // `async` is required by the `SessionDigestSummarizer` trait signature even
+    // though this fixed test double performs no awaits.
+    #[allow(clippy::unused_async_trait_impl)]
     async fn summarize(
         &self,
         _session_id: &str,

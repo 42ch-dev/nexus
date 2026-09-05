@@ -1178,9 +1178,10 @@ mod tests {
 
         // Read back through the owner-aware store: owner columns must
         // round-trip as a World owner, never fabricated/NULL.
-        use nexus_knowledge::world_kb::KbStore;
         let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
-        let row = store.get_knowledge_entry("kb_spawned").await.unwrap();
+        let row = nexus_knowledge::world_kb::KbStore::get_knowledge_entry(&store, "kb_spawned")
+            .await
+            .unwrap();
         assert_eq!(row.world_id(), Some("wld_accept"));
         assert_eq!(row.canonical_name, "Spawned Item");
 

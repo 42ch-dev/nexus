@@ -181,15 +181,15 @@ fn binding_record() -> serde_json::Value {
 #[test]
 fn character_response_dtos_enforce_display_name_trim_and_unicode() {
     let ok = character_record("Ada");
-    serde_json::from_value::<CharacterDetail>(serde_json::json!({ "character": ok.clone() }))
+    serde_json::from_value::<CharacterDetail>(serde_json::json!({ "character": &ok }))
         .expect("detail accepts trimmed name");
     serde_json::from_value::<CreateCharacterResponse>(serde_json::json!({
-        "character": ok.clone(),
+        "character": &ok,
         "binding": binding_record()
     }))
     .expect("create response accepts trimmed name");
     serde_json::from_value::<ListCharactersResponse>(serde_json::json!({
-        "items": [ok.clone()],
+        "items": [ok],
         "pagination": { "limit": 20, "has_more": false }
     }))
     .expect("list response accepts trimmed name");
@@ -200,12 +200,12 @@ fn character_response_dtos_enforce_display_name_trim_and_unicode() {
 
     let leading = character_record(" Ada");
     assert!(serde_json::from_value::<CharacterDetail>(
-        serde_json::json!({ "character": leading.clone() })
+        serde_json::json!({ "character": &leading })
     )
     .is_err());
     assert!(
         serde_json::from_value::<CreateCharacterResponse>(serde_json::json!({
-            "character": leading.clone(),
+            "character": &leading,
             "binding": binding_record()
         }))
         .is_err()
@@ -220,12 +220,12 @@ fn character_response_dtos_enforce_display_name_trim_and_unicode() {
 
     let trailing = character_record("Ada ");
     assert!(serde_json::from_value::<CharacterDetail>(
-        serde_json::json!({ "character": trailing.clone() })
+        serde_json::json!({ "character": &trailing })
     )
     .is_err());
     assert!(
         serde_json::from_value::<CreateCharacterResponse>(serde_json::json!({
-            "character": trailing.clone(),
+            "character": &trailing,
             "binding": binding_record()
         }))
         .is_err()

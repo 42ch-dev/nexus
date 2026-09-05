@@ -871,6 +871,7 @@ mod tests {
         assert!(matches!(err, SyncError::InvalidInput(_)), "got {err:?}");
     }
 
+    #[tokio::test]
     async fn outbox_failed_with_retry() {
         let outbox = Outbox::new_in_memory().await.expect("create outbox");
         let cmd = make_test_command();

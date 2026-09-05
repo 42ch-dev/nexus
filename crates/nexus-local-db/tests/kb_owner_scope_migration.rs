@@ -849,6 +849,8 @@ async fn upgrade_preserves_exact_sqlite_master_definitions() {
 
 // ── Owner CHECK constraints ─────────────────────────────────────────────
 
+// CHECK-constraint matrix: sequential insert/expect cases; splitting would scatter one contract.
+#[allow(clippy::too_many_lines)]
 #[tokio::test]
 async fn exactly_one_owner_check_rejects_invalid_combinations() {
     let (pool, _dir) = migrated_pool().await;
@@ -1198,6 +1200,8 @@ async fn owner_foreign_keys_enforced_with_actions() {
 
 // ── Owner-scoped active uniqueness ──────────────────────────────────────
 
+// uniqueness matrix: sequential cases per owner scope; splitting would scatter one contract.
+#[allow(clippy::too_many_lines)]
 #[tokio::test]
 async fn owner_scoped_active_uniqueness_enforced() {
     let (pool, _dir) = migrated_pool().await;

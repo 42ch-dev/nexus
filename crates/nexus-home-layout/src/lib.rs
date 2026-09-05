@@ -1407,11 +1407,11 @@ mod tests {
             "chr_\u{0}null",
         ] {
             let result = std::panic::catch_unwind(|| {
-                character_soul_md_path(&home, owner, bad);
+                let _ = character_soul_md_path(&home, owner, bad);
             });
             assert!(result.is_err(), "character id {bad:?} must be rejected");
             let result = std::panic::catch_unwind(|| {
-                character_long_term_memory_dir(&home, owner, bad);
+                let _ = character_long_term_memory_dir(&home, owner, bad);
             });
             assert!(result.is_err(), "character id {bad:?} must be rejected");
         }
@@ -1423,7 +1423,7 @@ mod tests {
         let chr = "chr_0123456789abcdef0123456789abcdef";
         for bad in ["..", "../ctr_x", "ctr_a/b", "ctr_a\\b", "ctr_\u{7}bell"] {
             let result = std::panic::catch_unwind(|| {
-                character_soul_md_path(&home, bad, chr);
+                let _ = character_soul_md_path(&home, bad, chr);
             });
             assert!(result.is_err(), "owner id {bad:?} must be rejected");
         }

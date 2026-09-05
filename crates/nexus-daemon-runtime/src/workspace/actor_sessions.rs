@@ -53,12 +53,16 @@ struct RegistryMaps {
     closed: bool,
 }
 
+/// Test-only hook invoked after a session lock is reclaimed.
+#[cfg(test)]
+type AfterReclaimHook = Arc<Mutex<Option<Arc<dyn Fn() + Send + Sync>>>>;
+
 /// Process-lifetime maps: `key -> HostSessionId` and `HostSessionId -> context`.
 #[derive(Clone)]
 pub struct ActorSessionRegistry {
     maps: Arc<Mutex<RegistryMaps>>,
     #[cfg(test)]
-    after_reclaim: Arc<Mutex<Option<Arc<dyn Fn() + Send + Sync>>>>,
+    after_reclaim: AfterReclaimHook,
 }
 
 impl Default for ActorSessionRegistry {
@@ -709,9 +713,9 @@ mod tests {
             self.fail_shutdown_remaining.store(count, Ordering::SeqCst);
         }
 
-        fn set_state(&self, id: HostSessionId, state: SessionState) {
+        fn set_state(&self, id: &HostSessionId, state: &SessionState) {
             let mut sessions = self.sessions.lock().expect("sessions");
-            if let Some(session) = sessions.get_mut(&id) {
+            if let Some(session) = sessions.get_mut(id) {
                 session.state = state.clone();
                 session.active_op_id = state.active_op_id().cloned();
             }
@@ -884,7 +888,7 @@ mod tests {
             key_with(&branch, "prov-a", cwd.path(), Some("m1"), Some("code"))
         );
 
-        let mut event = ctx.clone();
+        let mut event = ctx;
         event.event_id = Some("evt_anchor1".into());
         assert_ne!(
             base,
@@ -988,10 +992,7 @@ mod tests {
             })
             .await
             .expect("create");
-        host.set_state(
-            created.id.clone(),
-            SessionState::Busy(HostOperationId::new()),
-        );
+        host.set_state(&created.id, &SessionState::Busy(HostOperationId::new()));
 
         let err = registry
             .resolve_or_create(key, ctx, host.as_ref(), || async {
@@ -1020,7 +1021,7 @@ mod tests {
             .await
             .expect("first");
 
-        host.set_state(first.id.clone(), SessionState::Stopped);
+        host.set_state(&first.id, &SessionState::Stopped);
         let replaced = registry
             .resolve_or_create(key.clone(), ctx.clone(), host.as_ref(), || async {
                 host.create_session(host_req())
@@ -1434,7 +1435,7 @@ mod tests {
         let ctx = base_character_ctx();
         let key = key_with(&ctx, "prov", cwd.path(), None, None);
         let first = mint(&registry, &host, key.clone(), ctx.clone()).await;
-        host.set_state(first.id.clone(), SessionState::Busy(HostOperationId::new()));
+        host.set_state(&first.id, &SessionState::Busy(HostOperationId::new()));
         host.set_list_delay(Duration::from_millis(40));
         let reg = registry.clone();
         let host_a = host.clone();
@@ -1464,7 +1465,7 @@ mod tests {
         let ctx = base_character_ctx();
         let key = key_with(&ctx, "prov", cwd.path(), None, None);
         let first = mint(&registry, &host, key.clone(), ctx.clone()).await;
-        host.set_state(first.id.clone(), SessionState::Busy(HostOperationId::new()));
+        host.set_state(&first.id, &SessionState::Busy(HostOperationId::new()));
         let err = registry
             .resolve_or_create(key, ctx, host.as_ref(), || async {
                 panic!("must not create while busy");
