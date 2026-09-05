@@ -40,10 +40,16 @@ pub struct ActorSessionKey {
     pub event_id: Option<String>,
 }
 
+struct IndexedActorSession {
+    key: ActorSessionKey,
+    ctx: AdmittedActorContext,
+}
+
 struct RegistryMaps {
     by_key: HashMap<ActorSessionKey, HostSessionId>,
-    by_session: HashMap<HostSessionId, AdmittedActorContext>,
+    by_session: HashMap<HostSessionId, IndexedActorSession>,
     key_locks: HashMap<ActorSessionKey, Arc<AsyncMutex<()>>>,
+    closed: bool,
 }
 
 /// Process-lifetime maps: `key -> HostSessionId` and `HostSessionId -> context`.
@@ -58,6 +64,12 @@ impl Default for ActorSessionRegistry {
     }
 }
 
+fn shutting_down() -> NexusApiError {
+    NexusApiError::ServiceUnavailable {
+        message: "daemon is shutting down".into(),
+    }
+}
+
 impl ActorSessionRegistry {
     /// Empty process-lifetime registry.
     #[must_use]
@@ -67,6 +79,7 @@ impl ActorSessionRegistry {
                 by_key: HashMap::new(),
                 by_session: HashMap::new(),
                 key_locks: HashMap::new(),
+                closed: false,
             })),
         }
     }
@@ -125,22 +138,25 @@ impl ActorSessionRegistry {
     /// Admitted context for an indexed Actor session, if any.
     #[must_use]
     pub fn context_for(&self, session_id: &HostSessionId) -> Option<AdmittedActorContext> {
-        self.maps().by_session.get(session_id).cloned()
+        self.maps()
+            .by_session
+            .get(session_id)
+            .map(|row| row.ctx.clone())
     }
 
-    /// Drop both indexes for a host session (session shutdown).
-    pub fn remove_session(&self, session_id: &HostSessionId) {
+    /// Close the process-lifetime maps (daemon shutdown). In-flight creates cannot repopulate.
+    pub fn close(&self) {
         let mut maps = self.maps();
-        maps.by_session.remove(session_id);
-        maps.by_key.retain(|_, id| id != session_id);
+        maps.closed = true;
+        maps.by_key.clear();
+        maps.by_session.clear();
+        maps.key_locks
+            .retain(|_, lock| Arc::strong_count(lock) > 1);
     }
 
     /// Drop the process-lifetime maps (daemon shutdown).
     pub fn clear(&self) {
-        let mut maps = self.maps();
-        maps.by_key.clear();
-        maps.by_session.clear();
-        maps.key_locks.clear();
+        self.close();
     }
 
     /// Count indexed Actor sessions (tests / diagnostics).
@@ -155,8 +171,21 @@ impl ActorSessionRegistry {
         self.maps().by_key.is_empty()
     }
 
+    /// Count retained per-key locks (tests).
+    #[must_use]
+    pub fn lock_entry_count(&self) -> usize {
+        self.maps().key_locks.len()
+    }
+
     fn lock_for_key(&self, key: &ActorSessionKey) -> Arc<AsyncMutex<()>> {
         let mut maps = self.maps();
+        if maps.closed {
+            return maps
+                .key_locks
+                .get(key)
+                .cloned()
+                .unwrap_or_else(|| Arc::new(AsyncMutex::new(())));
+        }
         Arc::clone(
             maps.key_locks
                 .entry(key.clone())
@@ -167,6 +196,64 @@ impl ActorSessionRegistry {
     fn evict_locked(maps: &mut RegistryMaps, key: &ActorSessionKey, session_id: &HostSessionId) {
         maps.by_key.remove(key);
         maps.by_session.remove(session_id);
+    }
+
+    fn reclaim(&self, key: &ActorSessionKey, held: &Arc<AsyncMutex<()>>) {
+        let mut maps = self.maps();
+        if maps.by_key.contains_key(key) {
+            return;
+        }
+        if let Some(stored) = maps.key_locks.get(key) {
+            if Arc::ptr_eq(stored, held) && Arc::strong_count(stored) == 2 {
+                maps.key_locks.remove(key);
+            }
+        }
+    }
+
+    fn reject_if_closed(maps: &RegistryMaps) -> Result<(), NexusApiError> {
+        if maps.closed {
+            Err(shutting_down())
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Shut down a host session under the Actor key lock when indexed.
+    ///
+    /// # Errors
+    ///
+    /// Host shutdown errors are mapped to API errors.
+    pub async fn shutdown_session(
+        &self,
+        session_id: HostSessionId,
+        host: &dyn HostFacade,
+    ) -> Result<(), NexusApiError> {
+        let key = self
+            .maps()
+            .by_session
+            .get(&session_id)
+            .map(|row| row.key.clone());
+        if let Some(key) = key {
+            let lock = self.lock_for_key(&key);
+            let _guard = lock.lock().await;
+            let still_indexed = self
+                .maps()
+                .by_session
+                .get(&session_id)
+                .is_some_and(|row| row.key == key);
+            host.shutdown_session(session_id.clone())
+                .await
+                .map_err(map_host)?;
+            if still_indexed {
+                let mut maps = self.maps();
+                Self::evict_locked(&mut maps, &key, &session_id);
+            }
+            drop(_guard);
+            self.reclaim(&key, &lock);
+            Ok(())
+        } else {
+            host.shutdown_session(session_id).await.map_err(map_host)
+        }
     }
 
     /// Reuse a Ready exact match, reject Busy, or mint a replacement after stale eviction.
@@ -185,8 +272,21 @@ impl ActorSessionRegistry {
         F: FnOnce() -> Fut + Send,
         Fut: Future<Output = Result<HostSession, NexusApiError>> + Send,
     {
+        {
+            let maps = self.maps();
+            Self::reject_if_closed(&maps)?;
+        }
         let lock = self.lock_for_key(&key);
         let _guard = lock.lock().await;
+        {
+            let maps = self.maps();
+            if let Err(err) = Self::reject_if_closed(&maps) {
+                drop(maps);
+                drop(_guard);
+                self.reclaim(&key, &lock);
+                return Err(err);
+            }
+        }
 
         let existing = {
             let maps = self.maps();
@@ -194,8 +294,19 @@ impl ActorSessionRegistry {
         };
         if let Some(existing) = existing {
             let listed = host.list_sessions().await.map_err(map_host)?;
+            {
+                let maps = self.maps();
+                if let Err(err) = Self::reject_if_closed(&maps) {
+                    drop(maps);
+                    drop(_guard);
+                    self.reclaim(&key, &lock);
+                    return Err(err);
+                }
+            }
             match listed.into_iter().find(|session| session.id == existing) {
                 Some(session) if matches!(session.state, SessionState::Ready) => {
+                    drop(_guard);
+                    self.reclaim(&key, &lock);
                     return Ok(session);
                 }
                 Some(session) if session.state.is_busy() => {
@@ -216,9 +327,30 @@ impl ActorSessionRegistry {
         }
 
         let session = create().await?;
-        let mut maps = self.maps();
-        maps.by_key.insert(key, session.id.clone());
-        maps.by_session.insert(session.id.clone(), ctx);
+        let inserted = {
+            let mut maps = self.maps();
+            if maps.closed {
+                false
+            } else {
+                maps.by_key.insert(key.clone(), session.id.clone());
+                maps.by_session.insert(
+                    session.id.clone(),
+                    IndexedActorSession {
+                        key: key.clone(),
+                        ctx,
+                    },
+                );
+                true
+            }
+        };
+        if !inserted {
+            let _ = host.shutdown_session(session.id.clone()).await;
+            drop(_guard);
+            self.reclaim(&key, &lock);
+            return Err(shutting_down());
+        }
+        drop(_guard);
+        self.reclaim(&key, &lock);
         Ok(session)
     }
 }
@@ -416,6 +548,8 @@ mod tests {
         sessions: Mutex<HashMap<HostSessionId, HostSession>>,
         creates: AtomicU64,
         create_delay: Mutex<Duration>,
+        list_delay: Mutex<Duration>,
+        shutdown_delay: Mutex<Duration>,
         events: broadcast::Sender<HostEvent>,
     }
 
@@ -426,12 +560,22 @@ mod tests {
                 sessions: Mutex::new(HashMap::new()),
                 creates: AtomicU64::new(0),
                 create_delay: Mutex::new(Duration::from_millis(0)),
+                list_delay: Mutex::new(Duration::from_millis(0)),
+                shutdown_delay: Mutex::new(Duration::from_millis(0)),
                 events,
             })
         }
 
         fn set_delay(&self, delay: Duration) {
             *self.create_delay.lock().expect("delay") = delay;
+        }
+
+        fn set_list_delay(&self, delay: Duration) {
+            *self.list_delay.lock().expect("list delay") = delay;
+        }
+
+        fn set_shutdown_delay(&self, delay: Duration) {
+            *self.shutdown_delay.lock().expect("shutdown delay") = delay;
         }
 
         fn set_state(&self, id: HostSessionId, state: SessionState) {
@@ -502,6 +646,10 @@ mod tests {
             &self,
             session_id: HostSessionId,
         ) -> nexus_agent_host::HostResult<()> {
+            let delay = *self.shutdown_delay.lock().expect("shutdown delay");
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
             self.sessions
                 .lock()
                 .expect("sessions")
@@ -511,6 +659,10 @@ mod tests {
         }
 
         async fn list_sessions(&self) -> nexus_agent_host::HostResult<Vec<HostSession>> {
+            let delay = *self.list_delay.lock().expect("list delay");
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
             Ok(self
                 .sessions
                 .lock()
@@ -744,9 +896,13 @@ mod tests {
             .await
             .expect("create");
         assert_eq!(registry.len(), 1);
-        registry.remove_session(&session.id);
+        registry
+            .shutdown_session(session.id.clone(), host.as_ref())
+            .await
+            .expect("session shutdown");
         assert!(registry.is_empty());
         assert!(registry.context_for(&session.id).is_none());
+        assert_eq!(registry.lock_entry_count(), 0);
 
         let ctx = base_character_ctx();
         let cwd = tempfile::tempdir().expect("cwd");
@@ -759,6 +915,142 @@ mod tests {
             .expect("second");
         registry.clear();
         assert!(registry.is_empty());
+    }
+
+    async fn mint(
+        registry: &ActorSessionRegistry,
+        host: &Arc<ScriptedHost>,
+        key: ActorSessionKey,
+        ctx: AdmittedActorContext,
+    ) -> HostSession {
+        registry
+            .resolve_or_create(key, ctx, host.as_ref(), || async {
+                host.create_session(host_req()).await.map_err(map_host)
+            })
+            .await
+            .expect("mint")
+    }
+
+    #[tokio::test]
+    async fn shutdown_holds_key_lock_across_host_teardown() {
+        let host = ScriptedHost::new();
+        let registry = ActorSessionRegistry::new();
+        let cwd = tempfile::tempdir().expect("cwd");
+        let ctx = base_character_ctx();
+        let key = key_with(&ctx, "prov", cwd.path(), None, None);
+        let first = mint(&registry, &host, key.clone(), ctx.clone()).await;
+        host.set_shutdown_delay(Duration::from_millis(40));
+
+        let reg_shut = registry.clone();
+        let host_shut = host.clone();
+        let first_id = first.id.clone();
+        let shutdown = tokio::spawn(async move {
+            reg_shut
+                .shutdown_session(first_id, host_shut.as_ref())
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        let replaced = mint(&registry, &host, key, ctx).await;
+        shutdown.await.expect("join").expect("shutdown");
+        assert_ne!(replaced.id, first.id);
+        assert!(registry.context_for(&first.id).is_none());
+        assert!(registry.context_for(&replaced.id).is_some());
+        assert_eq!(host.creates.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn reuse_completes_before_overlapping_shutdown() {
+        let host = ScriptedHost::new();
+        let registry = ActorSessionRegistry::new();
+        let cwd = tempfile::tempdir().expect("cwd");
+        let ctx = base_character_ctx();
+        let key = key_with(&ctx, "prov", cwd.path(), None, None);
+        let first = mint(&registry, &host, key.clone(), ctx.clone()).await;
+        host.set_list_delay(Duration::from_millis(40));
+
+        let reg_a = registry.clone();
+        let host_a = host.clone();
+        let key_a = key;
+        let ctx_a = ctx;
+        let reuse = tokio::spawn(async move { mint(&reg_a, &host_a, key_a, ctx_a).await });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        registry
+            .shutdown_session(first.id.clone(), host.as_ref())
+            .await
+            .expect("shutdown after reuse started");
+        let reused = reuse.await.expect("join");
+        assert_eq!(reused.id, first.id);
+        assert!(registry.is_empty());
+        assert_eq!(host.creates.load(Ordering::SeqCst), 1);
+        assert_eq!(registry.lock_entry_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn close_aborts_in_flight_create_without_repopulation() {
+        let host = ScriptedHost::new();
+        host.set_delay(Duration::from_millis(40));
+        let registry = ActorSessionRegistry::new();
+        let cwd = tempfile::tempdir().expect("cwd");
+        let ctx = base_character_ctx();
+        let key = key_with(&ctx, "prov", cwd.path(), None, None);
+        let reg_a = registry.clone();
+        let host_a = host.clone();
+        let create = tokio::spawn(async move {
+            reg_a
+                .resolve_or_create(key, ctx, host_a.as_ref(), || async {
+                    host_a.create_session(host_req()).await.map_err(map_host)
+                })
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        registry.close();
+        let err = create.await.expect("join").expect_err("closed");
+        assert_eq!(err.error_code(), "service_unavailable");
+        assert!(registry.is_empty());
+        assert!(host.sessions.lock().expect("sessions").is_empty());
+        let cwd = tempfile::tempdir().expect("cwd2");
+        let ctx = base_character_ctx();
+        let key = key_with(&ctx, "prov", cwd.path(), None, None);
+        let err = registry
+            .resolve_or_create(key, ctx, host.as_ref(), || async {
+                panic!("must not create after close");
+            })
+            .await
+            .expect_err("still closed");
+        assert_eq!(err.error_code(), "service_unavailable");
+    }
+
+    #[tokio::test]
+    async fn lock_is_reclaimed_without_splitting_live_key() {
+        let host = ScriptedHost::new();
+        let registry = ActorSessionRegistry::new();
+        let cwd = tempfile::tempdir().expect("cwd");
+        let ctx = base_character_ctx();
+        let key = key_with(&ctx, "prov", cwd.path(), None, None);
+        let first = mint(&registry, &host, key.clone(), ctx.clone()).await;
+        assert_eq!(registry.lock_entry_count(), 1);
+        registry
+            .shutdown_session(first.id.clone(), host.as_ref())
+            .await
+            .expect("shutdown");
+        assert_eq!(registry.lock_entry_count(), 0);
+
+        host.set_delay(Duration::from_millis(30));
+        let host_a = host.clone();
+        let host_b = host.clone();
+        let reg_a = registry.clone();
+        let reg_b = registry.clone();
+        let key_a = key.clone();
+        let key_b = key;
+        let ctx_a = ctx.clone();
+        let ctx_b = ctx;
+        let (left, right) = tokio::join!(
+            async move { mint(&reg_a, &host_a, key_a, ctx_a).await },
+            async move { mint(&reg_b, &host_b, key_b, ctx_b).await }
+        );
+        assert_eq!(left.id, right.id);
+        assert_eq!(host.creates.load(Ordering::SeqCst), 2);
+        assert_eq!(registry.lock_entry_count(), 1);
     }
 
     #[test]

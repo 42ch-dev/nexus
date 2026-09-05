@@ -427,10 +427,10 @@ pub async fn shutdown_session(
     let host = get_host(&state)?;
 
     let sid = nexus_agent_host::HostSessionId(uuid);
-    host.shutdown_session(sid.clone())
-        .await
-        .map_err(|e| map_host_error(&e))?;
-    state.actor_sessions().remove_session(&sid);
+    state
+        .actor_sessions()
+        .shutdown_session(sid, host.as_ref())
+        .await?;
 
     Ok(Json(ShutdownSessionResponse {
         session_id,
