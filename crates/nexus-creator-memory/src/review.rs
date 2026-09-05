@@ -647,10 +647,9 @@ pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
 ) -> Result<LongTermMemory, MemoryError> {
     // 1. Check idempotency
     if check_session_already_promoted(home, bearer, &record.session_id)? {
-        return Err(MemoryError::ValidationError(format!(
-            "Session '{}' already promoted to long-term memory",
-            record.session_id
-        )));
+        return Err(MemoryError::AlreadyPromoted {
+            session_id: record.session_id.clone(),
+        });
     }
 
     // R-V133P4-06: Size guard — cap raw_digest before summarization to prevent
