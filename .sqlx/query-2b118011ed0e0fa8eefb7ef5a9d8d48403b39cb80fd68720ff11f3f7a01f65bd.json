@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE kb_key_blocks SET revision = ?, updated_at = ?, modules_json = ?\n           WHERE key_block_id = ? AND COALESCE(revision, 0) = ?\n             AND status NOT IN ('deleted', 'merged', 'deprecated')\n             AND (character_id = ? OR actor_world_binding_id = ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "2b118011ed0e0fa8eefb7ef5a9d8d48403b39cb80fd68720ff11f3f7a01f65bd"
+}

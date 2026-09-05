@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT status AS \"status!\" FROM characters\n                   WHERE character_id = ? AND owner_creator_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "status!",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "bdf6e9c46f11f726fadb5ca8eb06dae527728b59391b8775d20b844df4952104"
+}

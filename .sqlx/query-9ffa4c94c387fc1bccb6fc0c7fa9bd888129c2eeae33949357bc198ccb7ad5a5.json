@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT b.character_id AS \"character_id!\", b.binding_id AS \"binding_id!\"\n              FROM actor_world_bindings b\n              INNER JOIN characters c ON c.character_id = b.character_id\n              WHERE b.world_id = ?\n                AND b.status = 'active'\n                AND c.owner_creator_id = ?\n                AND c.status = 'active'",
+  "describe": {
+    "columns": [
+      {
+        "name": "character_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "binding_id!",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "9ffa4c94c387fc1bccb6fc0c7fa9bd888129c2eeae33949357bc198ccb7ad5a5"
+}

@@ -134,6 +134,48 @@ pub async fn create_character_fragment(
     }
 }
 
+/// Insert a Character memory fragment inside a caller-owned transaction.
+///
+/// Runs the same active-ownership and provenance validation as
+/// [`create_character_fragment`], but executes inside the caller's
+/// transaction (PR #240 finding 2) so the review pipeline can commit the
+/// fragment insert and the pending-row deletion atomically.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::ActorNotFound` for foreign Characters or invalid
+/// bindings; `LocalDbError` on constraint or database failure.
+pub async fn create_character_fragment_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    owner_creator_id: &str,
+    fragment: &NewCharacterMemoryFragment,
+) -> Result<(), LocalDbError> {
+    require_active_owned_character(&mut *tx, owner_creator_id, &fragment.character_id).await?;
+    require_valid_provenance_tx(
+        &mut *tx,
+        owner_creator_id,
+        &fragment.character_id,
+        fragment.actor_world_binding_id.as_deref(),
+    )
+    .await?;
+    sqlx::query!(
+        "INSERT INTO character_memory_fragments
+         (fragment_id, session_id, character_id, actor_world_binding_id, keywords, summary, created_at, ttl, revision)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)",
+        fragment.fragment_id,
+        fragment.session_id,
+        fragment.character_id,
+        fragment.actor_world_binding_id,
+        fragment.keywords,
+        fragment.summary,
+        fragment.created_at,
+        fragment.ttl
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 /// Get a Character fragment by ID, scoped to the owning Character.
 ///
 /// Returns None if the fragment does not exist within this Character.

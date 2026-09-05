@@ -142,6 +142,28 @@ pub async fn delete_pending_review(
     Ok(result.rows_affected() > 0)
 }
 
+/// Delete a pending review row inside a caller-owned transaction.
+///
+/// Used by the review pipeline's atomic fragment-insert + queue-advance
+/// path (PR #240 finding 2).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` on database failure; `Ok(false)` when the row is
+/// already gone.
+pub async fn delete_pending_review_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    pending_id: &str,
+) -> Result<bool, LocalDbError> {
+    let result = sqlx::query!(
+        "DELETE FROM memory_pending_review WHERE pending_id = ?",
+        pending_id
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Count pending reviews for a creator.
 ///
 /// Used for queue depth monitoring and review scheduling.

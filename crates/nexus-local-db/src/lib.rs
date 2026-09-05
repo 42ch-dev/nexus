@@ -99,8 +99,8 @@ pub use soul_meta::{
 
 // Re-export pending_review types
 pub use pending_review::{
-    count_pending_reviews, create_pending_review, delete_pending_review, get_pending_review,
-    list_pending_reviews, PendingReviewRecord,
+    count_pending_reviews, create_pending_review, delete_pending_review,
+    delete_pending_review_in_tx, get_pending_review, list_pending_reviews, PendingReviewRecord,
 };
 
 // Re-export memory_fragment types
@@ -118,14 +118,14 @@ pub use soul_narrative::{
 
 // Re-export character memory types (v1.184 P3 Task 1)
 pub use character_memory_fragment::{
-    create_character_fragment, delete_character_fragment, get_character_fragment,
-    list_character_fragments, promote_character_fragment_to_shared,
+    create_character_fragment, create_character_fragment_in_tx, delete_character_fragment,
+    get_character_fragment, list_character_fragments, promote_character_fragment_to_shared,
     CharacterMemoryFragmentRecord, NewCharacterMemoryFragment,
 };
 pub use character_pending_review::{
     count_character_pending_reviews, create_character_pending_review,
-    delete_character_pending_review, get_character_pending_review,
-    list_character_pending_reviews, CharacterPendingReviewRecord,
+    delete_character_pending_review, delete_character_pending_review_in_tx,
+    get_character_pending_review, list_character_pending_reviews, CharacterPendingReviewRecord,
 };
 pub use character_soul_meta::{
     delete_character_soul_meta, get_character_soul_meta, upsert_character_soul_meta,

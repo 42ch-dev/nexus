@@ -1645,16 +1645,19 @@ pub async fn cas_update_key_block_modules_in_tx(
     let new_revision = expected_revision.checked_add(1).ok_or_else(|| {
         LocalDbError::ValidationError("expected_revision overflow: cannot bump revision".into())
     })?;
-    let result = sqlx::query(
-        "UPDATE kb_key_blocks SET revision = ?, updated_at = ?, modules_json = ?          WHERE key_block_id = ? AND COALESCE(revision, 0) = ?            AND status NOT IN ('deleted', 'merged', 'deprecated')            AND (character_id = ? OR actor_world_binding_id = ?)",
+    let result = sqlx::query!(
+        r#"UPDATE kb_key_blocks SET revision = ?, updated_at = ?, modules_json = ?
+           WHERE key_block_id = ? AND COALESCE(revision, 0) = ?
+             AND status NOT IN ('deleted', 'merged', 'deprecated')
+             AND (character_id = ? OR actor_world_binding_id = ?)"#,
+        new_revision,
+        now,
+        modules_json,
+        key_block_id,
+        expected_revision,
+        owner_character_id,
+        owner_binding_id
     )
-    .bind(new_revision)
-    .bind(&now)
-    .bind(modules_json)
-    .bind(key_block_id)
-    .bind(expected_revision)
-    .bind(owner_character_id)
-    .bind(owner_binding_id)
     .execute(&mut **tx)
     .await?;
 
@@ -1663,8 +1666,7 @@ pub async fn cas_update_key_block_modules_in_tx(
     }
 
     let current: Option<Option<i64>> =
-        sqlx::query_scalar("SELECT revision FROM kb_key_blocks WHERE key_block_id = ?")
-            .bind(key_block_id)
+        sqlx::query_scalar!("SELECT revision FROM kb_key_blocks WHERE key_block_id = ?", key_block_id)
             .fetch_optional(&mut **tx)
             .await?;
     // NULL revision normalizes to 0, matching the COALESCE(revision, 0)

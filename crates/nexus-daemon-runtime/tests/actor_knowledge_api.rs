@@ -844,3 +844,130 @@ async fn view_paginates_same_millisecond_reverse_ids_without_skip_or_duplicate()
     }
     assert_eq!(seen, vec!["kb_a".to_string(), "kb_m".to_string()]);
 }
+
+/// PR #240 finding 1: public actor-knowledge operations must reject
+/// owned-but-inactive Worlds and Characters (Host admission parity), not just
+/// foreign/missing ones.
+#[tokio::test]
+async fn inactive_world_and_character_fail_closed_on_view_and_add() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr = created["character"]["character_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let binding = created["binding"]["binding_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    add_entry(
+        &ctx.server,
+        json!({
+            "owner_kind": "world",
+            "world_id": WORLD_A,
+            "block_type": "item",
+            "canonical_name": "Keystone",
+            "creator_only": false
+        }),
+    )
+    .await;
+
+    // Active scope still works as a control.
+    let ok = ctx
+        .server
+        .post("/v1/daemon/actor-knowledge/view")
+        .json(&json!({
+            "actor_ref": { "actor_kind": "character", "character_id": chr },
+            "world_id": WORLD_A,
+            "binding_id": binding
+        }))
+        .await;
+    assert_eq!(ok.status_code(), 200, "control: {}", ok.text());
+
+    // Archive the Character: view + character-owned add fail closed.
+    sqlx::query("UPDATE characters SET status = 'archived' WHERE character_id = ?")
+        .bind(&chr)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let view_archived_chr = ctx
+        .server
+        .post("/v1/daemon/actor-knowledge/view")
+        .json(&json!({
+            "actor_ref": { "actor_kind": "character", "character_id": chr },
+            "world_id": WORLD_A,
+            "binding_id": binding
+        }))
+        .await;
+    assert_eq!(
+        view_archived_chr.status_code(),
+        409,
+        "{}",
+        view_archived_chr.text()
+    );
+    let body: Value = view_archived_chr.json();
+    assert_eq!(body["error"]["code"], "character_inactive");
+    assert!(body.get("items").is_none());
+
+    let add_archived_chr = ctx
+        .server
+        .post("/v1/daemon/actor-knowledge/entries")
+        .json(&json!({
+            "owner_kind": "character",
+            "character_id": chr,
+            "block_type": "item",
+            "canonical_name": "Nope"
+        }))
+        .await;
+    assert_eq!(
+        add_archived_chr.status_code(),
+        409,
+        "{}",
+        add_archived_chr.text()
+    );
+    let body: Value = add_archived_chr.json();
+    assert_eq!(body["error"]["code"], "character_inactive");
+
+    // Archive the World: even the Creator component of a view fails closed.
+    sqlx::query("UPDATE narrative_worlds SET status = 'archived' WHERE world_id = ?")
+        .bind(WORLD_A)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let view_archived_world = ctx
+        .server
+        .post("/v1/daemon/actor-knowledge/view")
+        .json(&json!({
+            "actor_ref": { "actor_kind": "creator", "creator_id": OWNER },
+            "world_id": WORLD_A
+        }))
+        .await;
+    assert_eq!(
+        view_archived_world.status_code(),
+        409,
+        "{}",
+        view_archived_world.text()
+    );
+    let body: Value = view_archived_world.json();
+    assert_eq!(body["error"]["code"], "world_inactive");
+
+    let add_archived_world = ctx
+        .server
+        .post("/v1/daemon/actor-knowledge/entries")
+        .json(&json!({
+            "owner_kind": "world",
+            "world_id": WORLD_A,
+            "block_type": "item",
+            "canonical_name": "Nope"
+        }))
+        .await;
+    assert_eq!(
+        add_archived_world.status_code(),
+        409,
+        "{}",
+        add_archived_world.text()
+    );
+    let body: Value = add_archived_world.json();
+    assert_eq!(body["error"]["code"], "world_inactive");
+}

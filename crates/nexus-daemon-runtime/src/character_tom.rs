@@ -322,6 +322,27 @@ impl CharacterTomService {
             &input,
         )?;
         let mut tx = self.pool.begin().await.map_err(NexusApiError::from)?;
+        // PR #240 finding 3: the pre-transaction admission can go stale before
+        // commit. Revalidate the complete live scope — active owned viewer
+        // Character, active owned World, active selected binding, and the L2
+        // subject's own active Character + binding — inside the same
+        // transaction as the CAS, so a removed/deactivated binding or
+        // lifecycle flip rolls back instead of committing under a stale
+        // viewpoint.
+        let l2_subject = if input.belief.order == Some(2) {
+            Some(input.belief.holder.as_deref().unwrap_or_default())
+        } else {
+            None
+        };
+        Self::revalidate_live_scope_in_tx(
+            &mut tx,
+            caller_creator_id,
+            viewer_character_id,
+            &input.world_id,
+            &input.binding_id,
+            l2_subject,
+        )
+        .await?;
         let new_revision = atomic_cas_carrier_modules_and_insert_mind_state_in_tx(
             &mut tx,
             &input.carrier_entry_id,
@@ -354,6 +375,107 @@ impl CharacterTomService {
         self.views
             .require_active_binding(viewer_character_id, binding_id, world_id)
             .await?;
+        Ok(())
+    }
+
+    /// In-transaction revalidation of the complete live record scope
+    /// (PR #240 finding 3). Runs inside the CAS transaction; any drift
+    /// (inactive/foreign/missing Character, World, binding, or L2 subject)
+    /// returns an error so the caller drops the transaction uncommitted.
+    async fn revalidate_live_scope_in_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        caller_creator_id: &str,
+        viewer_character_id: &str,
+        world_id: &str,
+        binding_id: &str,
+        l2_subject: Option<&str>,
+    ) -> Result<(), NexusApiError> {
+        let chr = sqlx::query!(
+            r#"SELECT status AS "status!" FROM characters
+               WHERE character_id = ? AND owner_creator_id = ?"#,
+            viewer_character_id,
+            caller_creator_id
+        )
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(NexusApiError::from)?;
+        match chr {
+            Some(row) if row.status == "active" => {}
+            Some(row) => {
+                return Err(NexusApiError::ConflictCoded {
+                    code: "character_inactive".into(),
+                    message: format!("character {viewer_character_id} is {}", row.status),
+                })
+            }
+            None => return Err(not_found("character", viewer_character_id)),
+        }
+        let world = sqlx::query!(
+            r#"SELECT owner_creator_id AS "owner_creator_id!", status AS "status!"
+               FROM narrative_worlds WHERE world_id = ?"#,
+            world_id
+        )
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(NexusApiError::from)?;
+        match world {
+            Some(row) if row.owner_creator_id == caller_creator_id && row.status == "active" => {}
+            Some(row) if row.owner_creator_id == caller_creator_id => {
+                return Err(NexusApiError::ConflictCoded {
+                    code: "world_inactive".into(),
+                    message: format!("world {world_id} is {}", row.status),
+                })
+            }
+            _ => return Err(not_found("world", world_id)),
+        }
+        let binding = sqlx::query!(
+            r#"SELECT character_id AS "character_id!", world_id AS "world_id!",
+                      status AS "status!"
+               FROM actor_world_bindings WHERE binding_id = ?"#,
+            binding_id
+        )
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(NexusApiError::from)?;
+        match binding {
+            Some(row)
+                if row.character_id == viewer_character_id
+                    && row.world_id == world_id
+                    && row.status == "active" => {}
+            _ => return Err(not_found("actor_world_binding", binding_id)),
+        }
+        if let Some(subject) = l2_subject {
+            let subj = sqlx::query!(
+                r#"SELECT status AS "status!" FROM characters
+                   WHERE character_id = ? AND owner_creator_id = ?"#,
+                subject,
+                caller_creator_id
+            )
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(NexusApiError::from)?;
+            match subj {
+                Some(row) if row.status == "active" => {}
+                Some(row) => {
+                    return Err(NexusApiError::ConflictCoded {
+                        code: "character_inactive".into(),
+                        message: format!("character {subject} is {}", row.status),
+                    })
+                }
+                None => return Err(not_found("character", subject)),
+            }
+            let subject_binding = sqlx::query_scalar!(
+                r#"SELECT binding_id AS "binding_id!" FROM actor_world_bindings
+                   WHERE character_id = ? AND world_id = ? AND status = 'active' LIMIT 1"#,
+                subject,
+                world_id
+            )
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(NexusApiError::from)?;
+            if subject_binding.is_none() {
+                return Err(not_found("character_world_binding", subject));
+            }
+        }
         Ok(())
     }
 
@@ -448,10 +570,13 @@ impl CharacterTomService {
             modules_json: Option<String>,
         }
         let ids_json = serde_json::to_string(admitted_ids).map_err(internal_wire)?;
-        let rows: Vec<AdmittedCarrierRow> = sqlx::query_as(
-            "SELECT key_block_id, status, character_id, actor_world_binding_id, modules_json              FROM kb_key_blocks WHERE key_block_id IN (SELECT value FROM json_each(?))",
+        let rows = sqlx::query_as!(
+            AdmittedCarrierRow,
+            r#"SELECT key_block_id AS "key_block_id!", status AS "status!",
+                      character_id, actor_world_binding_id, modules_json
+               FROM kb_key_blocks WHERE key_block_id IN (SELECT value FROM json_each(?))"#,
+            ids_json
         )
-        .bind(&ids_json)
         .fetch_all(&self.pool)
         .await
         .map_err(NexusApiError::from)?;
@@ -1162,5 +1287,146 @@ mod tests {
         let page = CharacterTomService::paginate(rows, decoded, 10);
         assert_eq!(page.items.len(), 1);
         assert_eq!(page.items[0].row_ordinal, 1);
+    }
+
+    /// PR #240 finding 3: the in-transaction revalidation must reject any
+    /// live-scope drift (deactivated binding, archived subject) so the CAS
+    /// transaction rolls back instead of committing under a stale viewpoint.
+    #[tokio::test]
+    async fn revalidate_live_scope_in_tx_rejects_binding_and_subject_drift() {
+        let (_tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
+        let owner = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let world = "wld_scope";
+        nexus_local_db::ensure_creator_row(&pool, owner, "Owner")
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO narrative_worlds \
+             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+              time_policy, metadata_json, created_at) \
+             VALUES (?, 'ws', ?, ?, ?, 'active', 'private', 'manual', '{}', datetime('now'))",
+        )
+        .bind(world)
+        .bind(owner)
+        .bind(world)
+        .bind(world)
+        .execute(&pool)
+        .await
+        .unwrap();
+        for chr in ["chr_a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "chr_b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"] {
+            sqlx::query(
+                "INSERT INTO characters \
+                 (character_id, owner_creator_id, display_name, status, image_uri, persona_json, created_at, updated_at) \
+                 VALUES (?, ?, ?, 'active', NULL, '{}', datetime('now'), datetime('now'))",
+            )
+            .bind(chr)
+            .bind(owner)
+            .bind(chr)
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO actor_world_bindings \
+                 (binding_id, character_id, world_id, status, world_sheet_entry_id, created_at, updated_at) \
+                 VALUES (?, ?, ?, 'active', NULL, datetime('now'), datetime('now'))",
+            )
+            .bind(if chr.contains("a1") { "awb_c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3".to_string() } else { "awb_d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4".to_string() })
+            .bind(chr)
+            .bind(world)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        // Control: fully live scope validates.
+        let mut tx = pool.begin().await.unwrap();
+        CharacterTomService::revalidate_live_scope_in_tx(
+            &mut tx,
+            owner,
+            "chr_a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            world,
+            "awb_c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+            Some("chr_b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"),
+        )
+        .await
+        .expect("live scope must validate");
+        tx.rollback().await.unwrap();
+
+        // Binding deactivated mid-flight -> NotFound, transaction unusable.
+        sqlx::query("UPDATE actor_world_bindings SET status = 'inactive' WHERE binding_id = 'awb_c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        let err = CharacterTomService::revalidate_live_scope_in_tx(
+            &mut tx,
+            owner,
+            "chr_a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            world,
+            "awb_c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+            Some("chr_b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"),
+        )
+        .await
+        .expect_err("deactivated binding must fail in-tx");
+        assert!(
+            matches!(err, NexusApiError::NotFound(_)),
+            "unexpected: {err}"
+        );
+        tx.rollback().await.unwrap();
+        sqlx::query("UPDATE actor_world_bindings SET status = 'active' WHERE binding_id = 'awb_c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // L2 subject archived mid-flight -> 409 character_inactive.
+        sqlx::query("UPDATE characters SET status = 'archived' WHERE character_id = 'chr_b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        let err = CharacterTomService::revalidate_live_scope_in_tx(
+            &mut tx,
+            owner,
+            "chr_a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            world,
+            "awb_c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+            Some("chr_b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"),
+        )
+        .await
+        .expect_err("archived L2 subject must fail in-tx");
+        match err {
+            NexusApiError::ConflictCoded { code, .. } => {
+                assert_eq!(code, "character_inactive");
+            }
+            other => panic!("unexpected: {other}"),
+        }
+        tx.rollback().await.unwrap();
+
+        // L2 subject's own binding removed -> NotFound.
+        sqlx::query("UPDATE characters SET status = 'active' WHERE character_id = 'chr_b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE actor_world_bindings SET status = 'inactive' WHERE binding_id = 'awb_d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        let err = CharacterTomService::revalidate_live_scope_in_tx(
+            &mut tx,
+            owner,
+            "chr_a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            world,
+            "awb_c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+            Some("chr_b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"),
+        )
+        .await
+        .expect_err("subject without active binding to the world must fail in-tx");
+        assert!(
+            matches!(err, NexusApiError::NotFound(_)),
+            "unexpected: {err}"
+        );
+        tx.rollback().await.unwrap();
     }
 }

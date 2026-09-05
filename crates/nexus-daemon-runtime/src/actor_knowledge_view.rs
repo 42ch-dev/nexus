@@ -228,17 +228,17 @@ impl ActorKnowledgeViewService {
         let mut items = self
             .component(KnowledgeOwnerRef::world(world_id), cursor, limit, false)
             .await?;
-        let bindings = sqlx::query_as::<_, (String, String)>(
-            r"SELECT b.character_id, b.binding_id
+        let bindings = sqlx::query!(
+            r#"SELECT b.character_id AS "character_id!", b.binding_id AS "binding_id!"
               FROM actor_world_bindings b
               INNER JOIN characters c ON c.character_id = b.character_id
               WHERE b.world_id = ?
                 AND b.status = 'active'
                 AND c.owner_creator_id = ?
-                AND c.status = 'active'",
+                AND c.status = 'active'"#,
+            world_id,
+            creator_id
         )
-        .bind(world_id)
-        .bind(creator_id)
         .fetch_all(&self.pool)
         .await
         .map_err(|err| NexusApiError::Internal {
@@ -247,7 +247,8 @@ impl ActorKnowledgeViewService {
         })?;
 
         let mut seen_characters = std::collections::BTreeSet::new();
-        for (character_id, binding_id) in bindings {
+        for row in bindings {
+            let (character_id, binding_id) = (row.character_id, row.binding_id);
             if seen_characters.insert(character_id.clone()) {
                 items.extend(
                     self.component(
@@ -322,32 +323,53 @@ impl ActorKnowledgeViewService {
             .map_err(component_err)
     }
 
-        pub(crate) async fn require_owned_world(
+    /// Owned **and active** World admission (PR #240 finding 1): public
+    /// actor-knowledge operations reject foreign/missing Worlds (404) and
+    /// owned-but-inactive Worlds (409 `world_inactive`), matching Host
+    /// admission lifecycle parity.
+    pub(crate) async fn require_owned_world(
         &self,
         creator_id: &str,
         world_id: &str,
     ) -> Result<(), NexusApiError> {
-        let owner: Option<String> =
-            sqlx::query_scalar("SELECT owner_creator_id FROM narrative_worlds WHERE world_id = ?")
-                .bind(world_id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(NexusApiError::from)?;
-        match owner {
-            Some(stored) if stored == creator_id => Ok(()),
+        let row = sqlx::query!(
+            r#"SELECT owner_creator_id AS "owner_creator_id!", status AS "status!"
+               FROM narrative_worlds WHERE world_id = ?"#,
+            world_id
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(NexusApiError::from)?;
+        match row {
+            Some(stored) if stored.owner_creator_id == creator_id && stored.status == "active" => {
+                Ok(())
+            }
+            Some(stored) if stored.owner_creator_id == creator_id => Err(
+                NexusApiError::ConflictCoded {
+                    code: "world_inactive".into(),
+                    message: format!("world {world_id} is {}", stored.status),
+                },
+            ),
             _ => Err(not_found("world", world_id)),
         }
     }
 
+    /// Owned **and active** Character admission (PR #240 finding 1): foreign
+    /// or missing Characters are 404; owned-but-archived Characters are 409
+    /// `character_inactive`.
     pub(crate) async fn require_owned_character(
         &self,
         creator_id: &str,
         character_id: &str,
     ) -> Result<(), NexusApiError> {
-        nexus_local_db::get_character(&self.pool, creator_id, character_id)
-            .await?
-            .ok_or_else(|| not_found("character", character_id))
-            .map(|_| ())
+        match nexus_local_db::get_character(&self.pool, creator_id, character_id).await? {
+            Some(stored) if stored.status == "active" => Ok(()),
+            Some(stored) => Err(NexusApiError::ConflictCoded {
+                code: "character_inactive".into(),
+                message: format!("character {character_id} is {}", stored.status),
+            }),
+            None => Err(not_found("character", character_id)),
+        }
     }
 
     pub(crate) async fn require_active_binding(
@@ -356,19 +378,20 @@ impl ActorKnowledgeViewService {
         binding_id: &str,
         world_id: &str,
     ) -> Result<(), NexusApiError> {
-        let row: Option<(String, String, String)> = sqlx::query_as(
-            r"SELECT character_id, world_id, status
-              FROM actor_world_bindings WHERE binding_id = ?",
+        let row = sqlx::query!(
+            r#"SELECT character_id AS "character_id!", world_id AS "world_id!",
+                      status AS "status!"
+               FROM actor_world_bindings WHERE binding_id = ?"#,
+            binding_id
         )
-        .bind(binding_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(NexusApiError::from)?;
         match row {
-            Some((stored_character, stored_world, status))
-                if stored_character == character_id
-                    && stored_world == world_id
-                    && status == "active" =>
+            Some(stored)
+                if stored.character_id == character_id
+                    && stored.world_id == world_id
+                    && stored.status == "active" =>
             {
                 Ok(())
             }

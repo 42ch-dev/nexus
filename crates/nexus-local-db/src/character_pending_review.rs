@@ -259,6 +259,31 @@ pub async fn delete_character_pending_review(
     Ok(result.rows_affected() > 0)
 }
 
+/// Delete a Character pending review row inside a caller-owned transaction.
+///
+/// Ownership is asserted by the review pipeline's bearer context and by the
+/// fragment insert in the same transaction, so this variant skips the
+/// standalone ownership pre-check (PR #240 finding 2).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` on database failure; `Ok(false)` when the row is
+/// already gone.
+pub async fn delete_character_pending_review_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    character_id: &str,
+    pending_id: &str,
+) -> Result<bool, LocalDbError> {
+    let result = sqlx::query!(
+        "DELETE FROM character_memory_pending_review WHERE pending_id = ? AND character_id = ?",
+        pending_id,
+        character_id
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Count pending reviews for a Character binding scope.
 ///
 /// `binding_id = None` counts the shared Character scope; `Some(b)` counts only

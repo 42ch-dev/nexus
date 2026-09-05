@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT key_block_id AS \"key_block_id!\", status AS \"status!\",\n                      character_id, actor_world_binding_id, modules_json\n               FROM kb_key_blocks WHERE key_block_id IN (SELECT value FROM json_each(?))",
+  "describe": {
+    "columns": [
+      {
+        "name": "key_block_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "status!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "character_id",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "actor_world_binding_id",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "modules_json",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "a2fa49c6a42c3ac2559c3f0feddfd6dcf093f11b5b20f3f07a7c0bd9ee88160c"
+}
