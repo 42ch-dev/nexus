@@ -134,6 +134,11 @@ impl ActorAdmissionService {
         })
     }
 
+    #[cfg(test)]
+    pub fn pool_for_test(&self) -> SqlitePool {
+        self.pool.clone()
+    }
+
     async fn complete_view(
         &self,
         caller_creator_id: &str,
@@ -141,19 +146,47 @@ impl ActorAdmissionService {
         world_id: &str,
         binding_id: Option<String>,
     ) -> Result<ActorKnowledgePage, NexusApiError> {
+        const HARD_CAP: usize = 200;
         let limit = ActorKnowledgeViewService::resolve_limit(Some(100))?;
-        self.views
-            .view(
-                caller_creator_id,
-                actor,
-                ActorKnowledgeViewQuery {
-                    world_id: world_id.to_string(),
-                    binding_id,
+        let mut items = Vec::new();
+        let mut cursor = None;
+        loop {
+            if items.len() >= HARD_CAP {
+                return Err(view_incomplete());
+            }
+            let page = self
+                .views
+                .view(
+                    caller_creator_id,
+                    actor,
+                    ActorKnowledgeViewQuery {
+                        world_id: world_id.to_string(),
+                        binding_id: binding_id.clone(),
+                        limit,
+                        cursor,
+                    },
+                )
+                .await?;
+            if page.has_more && page.next_cursor.is_none() {
+                return Err(view_incomplete());
+            }
+            items.extend(page.items);
+            if items.len() > HARD_CAP {
+                return Err(view_incomplete());
+            }
+            if !page.has_more {
+                return Ok(ActorKnowledgePage {
+                    items,
                     limit,
-                    cursor: None,
-                },
-            )
-            .await
+                    has_more: false,
+                    next_cursor: None,
+                });
+            }
+            if items.len() >= HARD_CAP {
+                return Err(view_incomplete());
+            }
+            cursor = page.next_cursor;
+        }
     }
 
     async fn require_active_owned_world(
@@ -204,10 +237,19 @@ fn not_found(resource: &str, id: &str) -> NexusApiError {
     NexusApiError::NotFound(format!("{resource} {id}"))
 }
 
+fn view_incomplete() -> NexusApiError {
+    NexusApiError::ConflictCoded {
+        code: "view_incomplete".into(),
+        message: "admitted KnowledgeView exceeded the hard entry cap or pagination was malformed"
+            .into(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_utils::create_test_workspace;
+    use nexus_knowledge::world_kb::KbStore;
     use nexus_local_db::{ensure_creator_row, CreateCharacterParams};
 
     const OWNER: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -502,5 +544,64 @@ mod tests {
             axum::http::StatusCode::NOT_FOUND,
         )
         .await;
+    }
+
+    async fn insert_world_entries(pool: &sqlx::SqlitePool, n: usize) {
+        let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
+        for i in 0..n {
+            let mut row = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
+                WORLD,
+                nexus_contracts::BlockType::Item,
+                &format!("WorldRow{i:03}"),
+            );
+            let minute = i / 60;
+            let second = i % 60;
+            row.created_at = format!("2026-01-01T00:{minute:02}:{second:02}Z");
+            store.insert_knowledge_entry(row).await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn complete_view_follows_pages_under_cap() {
+        let (svc, character_id, binding_id) = seed().await;
+        let pool = svc.pool_for_test();
+        insert_world_entries(&pool, 150).await;
+        let ctx = svc
+            .admit(
+                OWNER,
+                AdmittedActor::Character { character_id },
+                ActorViewpoint {
+                    world_id: WORLD.into(),
+                    binding_id: Some(binding_id),
+                    branch_id: None,
+                    event_id: None,
+                },
+            )
+            .await
+            .expect("admit 150");
+        assert_eq!(ctx.view.items.len(), 150);
+        assert!(!ctx.view.has_more);
+    }
+
+    #[tokio::test]
+    async fn complete_view_rejects_when_hard_cap_exceeded() {
+        let (svc, character_id, binding_id) = seed().await;
+        let pool = svc.pool_for_test();
+        insert_world_entries(&pool, 201).await;
+        let err = svc
+            .admit(
+                OWNER,
+                AdmittedActor::Character { character_id },
+                ActorViewpoint {
+                    world_id: WORLD.into(),
+                    binding_id: Some(binding_id),
+                    branch_id: None,
+                    event_id: None,
+                },
+            )
+            .await
+            .expect_err("cap");
+        assert_eq!(err.error_code(), "view_incomplete");
+        assert_eq!(err.status_code(), axum::http::StatusCode::CONFLICT);
     }
 }

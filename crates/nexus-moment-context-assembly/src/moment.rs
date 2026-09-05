@@ -91,7 +91,7 @@ impl MomentActorContext {
         }
     }
 
-    /// Creator actor — unrestricted World KB query remains the legacy path.
+    /// Creator actor without an admitted view (non-Actor/legacy World query).
     #[must_use]
     pub const fn creator() -> Self {
         Self {
@@ -100,8 +100,21 @@ impl MomentActorContext {
         }
     }
 
+    /// Creator actor consuming the admitted P1 omniscient union.
+    #[must_use]
+    pub fn creator_with_view(view: CharacterViewInput) -> Self {
+        Self {
+            kind: MomentActorKind::Creator,
+            character_view: Some(view),
+        }
+    }
+
     fn is_character(&self) -> bool {
         matches!(self.kind, MomentActorKind::Character)
+    }
+
+    fn uses_admitted_view(&self) -> bool {
+        self.character_view.is_some() || self.is_character()
     }
 }
 
@@ -684,8 +697,15 @@ where
         request.stage0.assemble()
     };
 
-    // 2. Narrative context (if world_id provided)
-    let (world_state, timeline) = if let Some(ref world_id) = request.world_id {
+    // 2. Narrative context (if world_id provided). Character Actor mode never
+    // loads unrestricted World State / Timeline.
+    let skip_unrestricted_narrative = request
+        .actor
+        .as_ref()
+        .is_some_and(MomentActorContext::is_character);
+    let (world_state, timeline) = if skip_unrestricted_narrative {
+        (None, None)
+    } else if let Some(ref world_id) = request.world_id {
         match fetch_narrative_context(narrative, world_id, request.branch_id.as_deref()).await {
             Ok((ws, tl)) => (ws, tl),
             Err(_) => (None, None),
@@ -986,7 +1006,7 @@ async fn fetch_world_kb_entries<K: KbStore>(
     if request
         .actor
         .as_ref()
-        .is_some_and(MomentActorContext::is_character)
+        .is_some_and(MomentActorContext::uses_admitted_view)
     {
         let view = request
             .actor
@@ -1277,6 +1297,23 @@ mod tests {
     #[tokio::test]
     async fn character_mode_renders_empty_mind_headings_without_world_fallback() {
         let stores = TestStores::new();
+        let world = nexus_narrative::world::World::new(
+            "wld_1",
+            "ctr_test",
+            "SecretNarrativeWorld",
+            "secret-world",
+            nexus_contracts::Visibility::Private,
+            nexus_contracts::TimePolicy::Manual,
+        );
+        stores.narrative.insert_world(world);
+        let mut event = nexus_narrative::timeline_event::TimelineEvent::new(
+            "wld_1",
+            "fbk_root",
+            nexus_narrative::timeline_event::TimelineEventType::StoryAdvance,
+            1,
+        );
+        event.title = Some("SecretTimelineBeat".to_string());
+        stores.narrative.insert_event(event);
         let secret = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
@@ -1307,12 +1344,66 @@ mod tests {
         assert!(full.contains(CHARACTER_TOM_L2_HEADING));
         assert!(full.contains("AdmittedAda"));
         assert!(!full.contains("SecretWorldRow"));
+        assert!(!full.contains("SecretNarrativeWorld"));
+        assert!(!full.contains("SecretTimelineBeat"));
         assert!(ctx.user_knowledge.is_none());
+        assert!(!full.contains(WORLD_STATE_HEADING));
+        assert!(!full.contains(TIMELINE_HEADING));
         let soul = full.find(CHARACTER_SOUL_HEADING).unwrap();
         let mem = full.find(CHARACTER_MEMORY_HEADING).unwrap();
         let l1 = full.find(CHARACTER_TOM_L1_HEADING).unwrap();
         let l2 = full.find(CHARACTER_TOM_L2_HEADING).unwrap();
         assert!(soul < mem && mem < l1 && l1 < l2);
+    }
+
+    #[tokio::test]
+    async fn creator_actor_mode_renders_admitted_union_not_unrestricted_kb() {
+        let stores = TestStores::new();
+        let secret = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
+            "wld_1",
+            nexus_contracts::BlockType::Item,
+            "SecretWorldRow",
+        );
+        stores.kb.insert_knowledge_entry(secret).await.unwrap();
+        let admitted = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
+            "wld_1",
+            nexus_contracts::BlockType::Item,
+            "AdmittedUnionRow",
+        );
+        let request = MomentRequest::new(minimal_stage0())
+            .with_world("wld_1")
+            .with_actor(MomentActorContext::creator_with_view(
+                CharacterViewInput::from_entries(vec![admitted]),
+            ));
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let full = ctx.to_full_context();
+        assert!(full.contains("AdmittedUnionRow"));
+        assert!(!full.contains("SecretWorldRow"));
+        assert!(!full.contains(CHARACTER_SOUL_HEADING));
+    }
+
+    #[tokio::test]
+    async fn actor_token_budget_truncates_oversized_admitted_content() {
+        let stores = TestStores::new();
+        let mut huge = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
+            "wld_1",
+            nexus_contracts::BlockType::Item,
+            "HugeAdmitted",
+        );
+        huge.body = Some(nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
+            summary: Some("X".repeat(8000)),
+            ..Default::default()
+        });
+        let request = MomentRequest::new(minimal_stage0())
+            .with_world("wld_1")
+            .with_max_tokens(20)
+            .with_actor(MomentActorContext::character(CharacterViewInput::from_entries(
+                vec![huge],
+            )));
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let full = ctx.to_full_context();
+        assert!(full.chars().count() < 8000);
+        assert!(full.contains(CHARACTER_SOUL_HEADING));
     }
 
     #[test]

@@ -1,6 +1,7 @@
 //! v1.184 P2 Task 1 — generated agent-host session pair rules.
 
-use nexus_contracts::generated::daemon_api::agent_host::{CreateSessionRequest, ExecuteOperationRequest, SessionResponse};
+use nexus_contracts::generated::daemon_api::agent_host::{CreateSessionRequest, ExecuteOperationRequest, SessionResponse, SessionViewpoint};
+use nexus_contracts::generated::daemon_api::agent_host::session_response::NexusSessionViewpoint;
 
 #[test]
 fn legacy_create_session_json_roundtrip_omits_actor_fields() {
@@ -67,5 +68,35 @@ fn prompt_operation_kind_is_snake_case() {
     assert_eq!(
         serde_json::to_value(req).unwrap(),
         serde_json::json!({"kind":"prompt","content":"hello"})
+    );
+}
+
+#[test]
+fn session_viewpoint_wire_follows_schema_property_order() {
+    let viewpoint: SessionViewpoint = serde_json::from_value(serde_json::json!({
+        "world_id": "wld_worldA",
+        "binding_id": "awb_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "branch_id": "fbk_root",
+        "event_id": "evt_anchor"
+    }))
+    .expect("viewpoint");
+    assert_eq!(
+        serde_json::to_string(&viewpoint).unwrap(),
+        r#"{"world_id":"wld_worldA","binding_id":"awb_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","branch_id":"fbk_root","event_id":"evt_anchor"}"#
+    );
+}
+
+#[test]
+fn nested_session_viewpoint_wire_follows_schema_property_order() {
+    let viewpoint: NexusSessionViewpoint = serde_json::from_value(serde_json::json!({
+        "world_id": "wld_worldA",
+        "binding_id": "awb_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "branch_id": "fbk_root",
+        "event_id": "evt_anchor"
+    }))
+    .expect("nested viewpoint");
+    assert_eq!(
+        serde_json::to_string(&viewpoint).unwrap(),
+        r#"{"world_id":"wld_worldA","binding_id":"awb_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","branch_id":"fbk_root","event_id":"evt_anchor"}"#
     );
 }

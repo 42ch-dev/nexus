@@ -26,6 +26,7 @@ use nexus_local_db::narrative_gateway::SqliteNarrativeGateway;
 use nexus_local_db::SqliteKnowledgeStore;
 use nexus_moment_context_assembly::{
     assemble_moment, CharacterViewInput, MomentActorContext, MomentRequest, Stage0Assembly,
+    DEFAULT_WORLD_CONTEXT_TOKEN_BUDGET,
 };
 use nexus_spoke_adapter::SpokeBackedKbStore;
 use crate::api::handlers::world_kb_guards::require_creator;
@@ -444,14 +445,33 @@ pub async fn shutdown_session(
     }))
 }
 
+fn actor_shutting_down() -> NexusApiError {
+    NexusApiError::ServiceUnavailable {
+        message: "daemon is shutting down".into(),
+    }
+}
+
+fn actor_model_mode_rejected() -> NexusApiError {
+    NexusApiError::ConflictCoded {
+        code: "actor_session_immutable".into(),
+        message: "SetModel and SetMode are rejected on Actor-indexed sessions".into(),
+    }
+}
+
 /// Rebuild prompt text for an Actor session: re-admit, then one `assemble_moment`.
 ///
-/// Legacy sessions (not in the Actor registry) keep the raw user prompt bytes.
+/// Legacy sessions (never indexed) keep the raw user prompt bytes.
 async fn assemble_prompt_content(
     state: &WorkspaceState,
     session_id: &nexus_agent_host::HostSessionId,
     content: String,
 ) -> Result<String, NexusApiError> {
+    if state.shutdown_requested()
+        || (state.actor_sessions().is_actor_session(session_id)
+            && state.actor_sessions().context_for(session_id).is_none())
+    {
+        return Err(actor_shutting_down());
+    }
     let Some(stored) = state.actor_sessions().context_for(session_id) else {
         return Ok(content);
     };
@@ -469,30 +489,27 @@ async fn assemble_prompt_content(
             },
         )
         .await?;
-    Ok(assemble_admitted_prompt(state, &ctx, content).await)
+    assemble_admitted_prompt(state, &ctx, content).await
 }
 
 async fn assemble_admitted_prompt(
     state: &WorkspaceState,
     ctx: &AdmittedActorContext,
     user_prompt: String,
-) -> String {
-    let pool = match state.pool() {
-        Some(pool) => pool.clone(),
-        None => return user_prompt,
-    };
+) -> Result<String, NexusApiError> {
+    let pool = state.pool().cloned().ok_or(NexusApiError::Uninitialized)?;
+    let view = CharacterViewInput::from_entries(ctx.view.items.clone());
     let actor = match &ctx.actor {
-        AdmittedActor::Character { .. } => MomentActorContext::character(
-            CharacterViewInput::from_entries(ctx.view.items.clone()),
-        ),
-        AdmittedActor::Creator { .. } => MomentActorContext::creator(),
+        AdmittedActor::Character { .. } => MomentActorContext::character(view),
+        AdmittedActor::Creator { .. } => MomentActorContext::creator_with_view(view),
     };
     let mut request = MomentRequest::new(Stage0Assembly {
         user_prompt,
         ..Stage0Assembly::default()
     })
     .with_world(ctx.world_id.clone())
-    .with_actor(actor);
+    .with_actor(actor)
+    .with_max_tokens(DEFAULT_WORLD_CONTEXT_TOKEN_BUDGET);
     if let Some(branch) = ctx.branch_id.clone() {
         request = request.with_branch(branch);
     }
@@ -508,7 +525,7 @@ async fn assemble_admitted_prompt(
     let kb = SpokeBackedKbStore::new(pool.clone());
     let knowledge = SqliteKnowledgeStore::new(pool);
     let assembled = assemble_moment(&request, &narrative, &kb, &knowledge).await;
-    assembled.to_full_context()
+    Ok(assembled.to_full_context())
 }
 
 /// POST /v1/daemon/agent-host/sessions/{session_id}/operations
@@ -521,9 +538,20 @@ pub async fn execute_operation(
     Json(req): Json<ExecuteOperationRequest>,
 ) -> Result<Json<OperationResponse>, NexusApiError> {
     let uuid = parse_session_id(&session_id)?;
+    if state.shutdown_requested() {
+        return Err(actor_shutting_down());
+    }
     let host = get_host(&state)?;
 
     let sid = nexus_agent_host::HostSessionId(uuid);
+    if state.actor_sessions().is_actor_session(&sid)
+        && matches!(
+            req,
+            ExecuteOperationRequest::SetModel { .. } | ExecuteOperationRequest::SetMode { .. }
+        )
+    {
+        return Err(actor_model_mode_rejected());
+    }
     let op_id = nexus_agent_host::HostOperationId::new();
 
     let host_op = match req {
@@ -2257,4 +2285,73 @@ mod tests {
         assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
+
+    #[tokio::test]
+    async fn shutdown_rejects_actor_prompt_before_host_exec() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let (character_id, binding_id) = seed_owned_character(&state).await;
+        let created = create_session(
+            State(state.clone()),
+            Json(serde_json::from_value(serde_json::json!({
+                "provider_id": "prov",
+                "cwd": "/tmp",
+                "actor_ref": {"actor_kind":"character","character_id": character_id},
+                "viewpoint": {"world_id":"wld_worldA","binding_id": binding_id}
+            }))
+            .unwrap()),
+        )
+        .await
+        .expect("create");
+        state.request_shutdown();
+        let err = execute_operation(
+            State(state),
+            Path(created.session_id.clone()),
+            Json(ExecuteOperationRequest::Prompt {
+                content: "Act now.".to_string(),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.error_code(), "service_unavailable");
+        assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn set_model_and_set_mode_reject_on_actor_session() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let (character_id, binding_id) = seed_owned_character(&state).await;
+        let created = create_session(
+            State(state.clone()),
+            Json(serde_json::from_value(serde_json::json!({
+                "provider_id": "prov",
+                "cwd": "/tmp",
+                "actor_ref": {"actor_kind":"character","character_id": character_id},
+                "viewpoint": {"world_id":"wld_worldA","binding_id": binding_id}
+            }))
+            .unwrap()),
+        )
+        .await
+        .expect("create");
+        let err = execute_operation(
+            State(state.clone()),
+            Path(created.session_id.clone()),
+            Json(ExecuteOperationRequest::SetModel {
+                model: "opus".into(),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.error_code(), "actor_session_immutable");
+        let err = execute_operation(
+            State(state),
+            Path(created.session_id.clone()),
+            Json(ExecuteOperationRequest::SetMode {
+                mode: "plan".into(),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.error_code(), "actor_session_immutable");
+        assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
 }

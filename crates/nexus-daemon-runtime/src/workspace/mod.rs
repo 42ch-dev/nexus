@@ -854,7 +854,15 @@ impl WorkspaceState {
         // Gate FIRST: a consumer loading the flag around the broadcast
         // observes shutdown one way or the other (refusal or wake-up).
         self.shutdown_requested.store(true, Ordering::SeqCst);
-        self.actor_sessions.clear();
+        self.actor_sessions.close();
+        if let Some(host) = self.agent_host() {
+            let registry = self.actor_sessions.clone();
+            tokio::spawn(async move {
+                if let Err(err) = registry.drain_host_sessions(host.as_ref()).await {
+                    tracing::warn!("actor host drain on shutdown failed: {err}");
+                }
+            });
+        }
         self.shutdown_notify.notify_waiters();
     }
 

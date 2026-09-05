@@ -3,7 +3,7 @@
 //! Indexes only Actor-mode sessions. Legacy creates never enter these maps.
 //! Concurrent creates for one exact key serialize on a per-key lock.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -49,6 +49,7 @@ struct RegistryMaps {
     by_key: HashMap<ActorSessionKey, HostSessionId>,
     by_session: HashMap<HostSessionId, IndexedActorSession>,
     key_locks: HashMap<ActorSessionKey, Arc<AsyncMutex<()>>>,
+    retired: HashSet<HostSessionId>,
     closed: bool,
 }
 
@@ -81,6 +82,7 @@ impl ActorSessionRegistry {
                 by_key: HashMap::new(),
                 by_session: HashMap::new(),
                 key_locks: HashMap::new(),
+                retired: HashSet::new(),
                 closed: false,
             })),
             #[cfg(test)]
@@ -148,6 +150,13 @@ impl ActorSessionRegistry {
             .map(|row| row.ctx.clone())
     }
 
+    /// True when the id is currently indexed or was retired (never treated as legacy).
+    #[must_use]
+    pub fn is_actor_session(&self, session_id: &HostSessionId) -> bool {
+        let maps = self.maps();
+        maps.by_session.contains_key(session_id) || maps.retired.contains(session_id)
+    }
+
     /// Close the process-lifetime maps (daemon shutdown). In-flight creates cannot repopulate.
     ///
     /// `key_locks` is cleared unconditionally. Closed admission never reinserts a
@@ -155,9 +164,37 @@ impl ActorSessionRegistry {
     pub fn close(&self) {
         let mut maps = self.maps();
         maps.closed = true;
+        let ids: Vec<_> = maps.by_session.keys().cloned().collect();
+        for id in ids {
+            maps.retired.insert(id);
+        }
         maps.by_key.clear();
         maps.by_session.clear();
         maps.key_locks.clear();
+    }
+
+    /// Shut down every retired Actor host session (daemon drain).
+    ///
+    /// # Errors
+    ///
+    /// Returns the first host shutdown error after attempting remaining ids.
+    pub async fn drain_host_sessions(&self, host: &dyn HostFacade) -> Result<(), NexusApiError> {
+        let ids = {
+            let maps = self.maps();
+            maps.retired.iter().cloned().collect::<Vec<_>>()
+        };
+        let mut first_err = None;
+        for id in ids {
+            if let Err(err) = host.shutdown_session(id).await {
+                if first_err.is_none() {
+                    first_err = Some(map_host(err));
+                }
+            }
+        }
+        match first_err {
+            Some(err) => Err(err),
+            None => Ok(()),
+        }
     }
 
     /// Drop the process-lifetime maps (daemon shutdown).
@@ -202,6 +239,7 @@ impl ActorSessionRegistry {
     fn evict_locked(maps: &mut RegistryMaps, key: &ActorSessionKey, session_id: &HostSessionId) {
         maps.by_key.remove(key);
         maps.by_session.remove(session_id);
+        maps.retired.insert(session_id.clone());
     }
 
     fn reclaim(&self, key: &ActorSessionKey, held: &Arc<AsyncMutex<()>>) {
@@ -359,6 +397,11 @@ impl ActorSessionRegistry {
                     });
                 }
                 Some(session) => {
+                    if let Err(err) = host.shutdown_session(session.id.clone()).await {
+                        drop(_guard);
+                        self.reclaim(&key, &lock);
+                        return Err(map_host(err));
+                    }
                     let mut maps = self.maps();
                     Self::evict_locked(&mut maps, &key, &session.id);
                 }
@@ -980,6 +1023,42 @@ mod tests {
             .expect("replace missing");
         assert_ne!(after_missing.id, replaced.id);
         assert_eq!(host.creates.load(Ordering::SeqCst), 3);
+        assert!(registry.is_actor_session(&first.id));
+        assert!(host.sessions.lock().expect("sessions").get(&first.id).is_none());
+    }
+
+    #[tokio::test]
+    async fn close_drains_indexed_host_sessions() {
+        let host = ScriptedHost::new();
+        let registry = ActorSessionRegistry::new();
+        let cwd = tempfile::tempdir().expect("cwd");
+        let ctx = base_character_ctx();
+        let key = key_with(&ctx, "prov", cwd.path(), None, None);
+        let session = registry
+            .resolve_or_create(key, ctx, host.as_ref(), || async {
+                host.create_session(host_req()).await.map_err(map_host)
+            })
+            .await
+            .expect("create");
+        registry.close();
+        assert!(registry.is_empty());
+        assert!(registry.is_actor_session(&session.id));
+        registry
+            .drain_host_sessions(host.as_ref())
+            .await
+            .expect("drain");
+        let live = host.list_sessions().await.expect("list");
+        assert!(live.is_empty());
+        let err = registry
+            .resolve_or_create(
+                key_with(&base_character_ctx(), "prov", cwd.path(), None, None),
+                base_character_ctx(),
+                host.as_ref(),
+                || async { panic!("must not mint after close"); },
+            )
+            .await
+            .expect_err("closed");
+        assert_eq!(err.error_code(), "service_unavailable");
     }
 
     #[tokio::test]

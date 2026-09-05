@@ -255,6 +255,7 @@ fn rel_posix(path: &Path) -> String {
 const PRESERVE_PROPERTY_ORDER: &[&str] = &[
     "daemon-api/agent-host/session-response.schema.json",
     "daemon-api/agent-host/create-session-request.schema.json",
+    "daemon-api/agent-host/session-viewpoint.schema.json",
 ];
 
 /// Property names from a source schema object, in JSON insertion order
@@ -448,6 +449,19 @@ fn generate_schema_rust(
             if let Ok(src_json) = serde_json::from_str::<Value>(&src_raw) {
                 let order = source_property_order(&src_json);
                 rust = reorder_root_struct_fields(&rust, &type_name, &order);
+            }
+        }
+    }
+    if rel_posix_path == "daemon-api/agent-host/session-response.schema.json" {
+        let viewpoint_schema = src_schema_path
+            .parent()
+            .map(|dir| dir.join("session-viewpoint.schema.json"));
+        if let Some(path) = viewpoint_schema {
+            if let Ok(src_raw) = fs::read_to_string(path) {
+                if let Ok(src_json) = serde_json::from_str::<Value>(&src_raw) {
+                    let order = source_property_order(&src_json);
+                    rust = reorder_root_struct_fields(&rust, "NexusSessionViewpoint", &order);
+                }
             }
         }
     }
