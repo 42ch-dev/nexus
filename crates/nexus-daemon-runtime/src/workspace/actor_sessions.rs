@@ -56,6 +56,8 @@ struct RegistryMaps {
 #[derive(Clone)]
 pub struct ActorSessionRegistry {
     maps: Arc<Mutex<RegistryMaps>>,
+    #[cfg(test)]
+    after_reclaim: Arc<Mutex<Option<Arc<dyn Fn() + Send + Sync>>>>,
 }
 
 impl Default for ActorSessionRegistry {
@@ -81,6 +83,8 @@ impl ActorSessionRegistry {
                 key_locks: HashMap::new(),
                 closed: false,
             })),
+            #[cfg(test)]
+            after_reclaim: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -145,13 +149,15 @@ impl ActorSessionRegistry {
     }
 
     /// Close the process-lifetime maps (daemon shutdown). In-flight creates cannot repopulate.
+    ///
+    /// `key_locks` is cleared unconditionally. Closed admission never reinserts a
+    /// replacement map entry; in-flight local `Arc`s keep serializing waiters.
     pub fn close(&self) {
         let mut maps = self.maps();
         maps.closed = true;
         maps.by_key.clear();
         maps.by_session.clear();
-        maps.key_locks
-            .retain(|_, lock| Arc::strong_count(lock) > 1);
+        maps.key_locks.clear();
     }
 
     /// Drop the process-lifetime maps (daemon shutdown).
@@ -199,14 +205,40 @@ impl ActorSessionRegistry {
     }
 
     fn reclaim(&self, key: &ActorSessionKey, held: &Arc<AsyncMutex<()>>) {
-        let mut maps = self.maps();
-        if maps.by_key.contains_key(key) {
-            return;
-        }
-        if let Some(stored) = maps.key_locks.get(key) {
-            if Arc::ptr_eq(stored, held) && Arc::strong_count(stored) == 2 {
-                maps.key_locks.remove(key);
+        {
+            let mut maps = self.maps();
+            if !maps.by_key.contains_key(key) {
+                if let Some(stored) = maps.key_locks.get(key) {
+                    if Arc::ptr_eq(stored, held) && Arc::strong_count(stored) == 2 {
+                        maps.key_locks.remove(key);
+                    }
+                }
             }
+        }
+        #[cfg(test)]
+        self.fire_after_reclaim();
+    }
+
+    #[cfg(test)]
+    fn set_after_reclaim(&self, hook: impl Fn() + Send + Sync + 'static) {
+        *self.after_reclaim.lock().unwrap_or_else(|poisoned| {
+            tracing::warn!("actor_sessions after_reclaim mutex poisoned, recovering");
+            poisoned.into_inner()
+        }) = Some(Arc::new(hook));
+    }
+
+    #[cfg(test)]
+    fn fire_after_reclaim(&self) {
+        let hook = self
+            .after_reclaim
+            .lock()
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!("actor_sessions after_reclaim mutex poisoned, recovering");
+                poisoned.into_inner()
+            })
+            .take();
+        if let Some(hook) = hook {
+            hook();
         }
     }
 
@@ -518,7 +550,7 @@ mod tests {
         HostOperation, HostStartConfig,
     };
     use nexus_agent_host::{HostOperationId, ProviderCatalog};
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
     use std::time::Duration;
     use tokio::sync::broadcast;
 
@@ -1341,6 +1373,37 @@ mod tests {
         assert!(err.to_string().contains("injected shutdown failure"));
         assert!(registry.is_empty());
         assert_eq!(registry.lock_entry_count(), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn close_after_final_reclaim_before_owner_return_clears_key_locks() {
+        let host = ScriptedHost::new();
+        let registry = ActorSessionRegistry::new();
+        let cwd = tempfile::tempdir().expect("cwd");
+        let ctx = base_character_ctx();
+        let key = key_with(&ctx, "prov", cwd.path(), None, None);
+        let first = mint(&registry, &host, key.clone(), ctx.clone()).await;
+        assert_eq!(registry.lock_entry_count(), 1);
+
+        let during_owner_hold = Arc::new(AtomicUsize::new(usize::MAX));
+        let during_owner_hold_hook = Arc::clone(&during_owner_hold);
+        let closed_registry = registry.clone();
+        registry.set_after_reclaim(move || {
+            closed_registry.close();
+            during_owner_hold_hook.store(closed_registry.lock_entry_count(), Ordering::SeqCst);
+        });
+
+        let reused = registry
+            .resolve_or_create(key, ctx, host.as_ref(), || async {
+                panic!("must reuse Ready before close hook");
+            })
+            .await
+            .expect("reuse then close");
+        assert_eq!(reused.id, first.id);
+        assert_eq!(during_owner_hold.load(Ordering::SeqCst), 0);
+        assert!(registry.is_empty());
+        assert_eq!(registry.lock_entry_count(), 0);
+        assert_eq!(host.creates.load(Ordering::SeqCst), 1);
     }
 
     #[test]
