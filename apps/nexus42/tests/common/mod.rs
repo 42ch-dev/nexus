@@ -10,6 +10,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use nexus_agent_host::HostFacade;
 use nexus_daemon_runtime::api;
 use nexus_daemon_runtime::api::auth_middleware::DaemonApiConfig;
 use nexus_daemon_runtime::test_utils;
@@ -75,6 +76,15 @@ fn wire_orchestration_engine(
 impl LiveDaemon {
     /// Boot the daemon and write the hermetic HOME config.
     pub async fn start() -> Self {
+        Self::start_with_optional_host(None).await
+    }
+
+    /// Boot the daemon with a deterministic `HostFacade` (Character run E2E).
+    pub async fn start_with_agent_host(host: Arc<dyn HostFacade>) -> Self {
+        Self::start_with_optional_host(Some(host)).await
+    }
+
+    async fn start_with_optional_host(host: Option<Arc<dyn HostFacade>>) -> Self {
         let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
 
         // Bind the HTTP listener BEFORE writing `daemon_url` into config.
@@ -99,6 +109,9 @@ impl LiveDaemon {
         std::fs::write(&config_path, config).expect("write config.toml");
 
         let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        if let Some(host) = host {
+            state.set_agent_host(host);
+        }
         let pool = state.pool().expect("pool").clone();
         test_utils::seed_test_creator_and_world(&pool).await;
         let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool);
