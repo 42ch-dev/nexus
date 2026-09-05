@@ -51,6 +51,10 @@ pub struct CharacterTomListQuery {
     pub binding_id: String,
     pub limit: u32,
     pub cursor: Option<String>,
+    /// Optional order filter (`1` = L1, `2` = L2) so MCA can fill each slot
+    /// with an independent bounded fetch (QC fix round 1, F-003). The public
+    /// list route always passes `None`.
+    pub order: Option<i64>,
 }
 
 /// Admitted record mutation (after wire DTO mapping).
@@ -190,6 +194,7 @@ impl CharacterTomService {
         self.admit_viewer(caller_creator_id, viewer_character_id, &query.world_id, &query.binding_id)
             .await?;
         let cursor = Self::decode_cursor(&query.cursor)?;
+        let order_filter = query.order;
         // DB-side pre-parse bounds (fix round 3): carrier counts, belief-array
         // lengths, and modules JSON validity are enforced with compile-time SQL
         // before any `modules_json` text is parsed or materialized into records.
@@ -206,11 +211,17 @@ impl CharacterTomService {
         // carrier-id snapshot — never an owner-scope rescan — so carriers
         // inserted/changed after the probe cannot enter the result (fix round 4).
         let recorded = self.carrier_recorded_at_map(&admitted_ids).await?;
-        let carriers = self.authorized_carriers(viewer_character_id, &query.binding_id).await?;
+        // Materialize exactly the probe-admitted id snapshot — never a second
+        // owner-scope rescan (QC fix round 1, F-001). Status/ownership drift,
+        // invalid `modules_json`, and oversized belief arrays discovered here
+        // fail closed instead of entering or silently dropping rows.
+        let carriers = self
+            .materialize_admitted_carriers(&admitted_ids, viewer_character_id, &query.binding_id)
+            .await?;
         let mut keyed = Vec::new();
-        for carrier in carriers {
-            let recorded_at = recorded.get(&carrier.entry_id).cloned().flatten();
-            let rows = carrier_belief_elements(carrier.modules.as_ref())?;
+        for (entry_id, modules) in carriers {
+            let recorded_at = recorded.get(&entry_id).cloned().flatten();
+            let rows = carrier_belief_elements(modules.as_ref())?;
             for (ordinal, element) in rows.iter().enumerate() {
                 let Ok(belief) = serde_json::from_value::<BeliefPropositionRaw>(element.clone())
                 else {
@@ -220,13 +231,18 @@ impl CharacterTomService {
                     continue;
                 }
                 let order = belief.order.unwrap_or(0);
+                if let Some(want) = order_filter {
+                    if order != want {
+                        continue;
+                    }
+                }
                 let ordinal = u32::try_from(ordinal).map_err(|_| corpus_exceeded("belief rows per carrier"))?;
                 keyed.push((
                     order,
-                    carrier.entry_id.clone(),
+                    entry_id.clone(),
                     ordinal,
                     CharacterTomBeliefRow {
-                        carrier_entry_id: carrier.entry_id.clone(),
+                        carrier_entry_id: entry_id.clone(),
                         row_ordinal: ordinal,
                         belief,
                         carrier_recorded_at: recorded_at.clone(),
@@ -312,6 +328,8 @@ impl CharacterTomService {
             input.expected_revision,
             &modules_str,
             &mind_state_wire,
+            viewer_character_id,
+            &input.binding_id,
         )
         .await
         .map_err(map_local_db)?;
@@ -404,33 +422,68 @@ impl CharacterTomService {
         }
     }
 
-    /// Bounded carrier enumeration: each owner scope admits at most
-    /// `MAX_CARRIERS_PER_SCOPE` rows (fetched as cap + 1 to detect overflow);
-    /// exceeding the cap fails closed before any row is materialized into the
-    /// belief-row working set.
-    async fn authorized_carriers(
+    /// Materialize exactly the probe-admitted carrier ids (QC fix round 1,
+    /// F-001) in probe-admission order. Each row is revalidated at
+    /// materialization: still live, still owned by the admitted
+    /// Character/binding, `modules_json` still valid JSON, belief array still
+    /// within the row cap. Any drift fails closed with
+    /// `carrier_scope_drifted` / `carrier_modules_invalid_json` /
+    /// `carrier_modules_malformed` / `view_incomplete` — never a silent
+    /// omission, never an unadmitted carrier.
+    async fn materialize_admitted_carriers(
         &self,
+        admitted_ids: &[String],
         viewer_character_id: &str,
         binding_id: &str,
-    ) -> Result<Vec<KnowledgeEntryRecord>, NexusApiError> {
-        let probe = MAX_CARRIERS_PER_SCOPE + 1;
-        let mut out = self
-            .store
-            .list_by_owner_keyset(&KnowledgeOwnerRef::character(viewer_character_id), None, probe, false)
-            .await
-            .map_err(map_kb_store)?;
-        if out.len() > MAX_CARRIERS_PER_SCOPE as usize {
-            return Err(corpus_exceeded("character-owned carriers"));
+    ) -> Result<Vec<(String, Option<Value>)>, NexusApiError> {
+        if admitted_ids.is_empty() {
+            return Ok(Vec::new());
         }
-        let binding_carriers = self
-            .store
-            .list_by_owner_keyset(&KnowledgeOwnerRef::actor_world_binding(binding_id), None, probe, false)
-            .await
-            .map_err(map_kb_store)?;
-        if binding_carriers.len() > MAX_CARRIERS_PER_SCOPE as usize {
-            return Err(corpus_exceeded("binding-owned carriers"));
+        #[derive(sqlx::FromRow)]
+        struct AdmittedCarrierRow {
+            key_block_id: String,
+            status: String,
+            character_id: Option<String>,
+            actor_world_binding_id: Option<String>,
+            modules_json: Option<String>,
         }
-        out.extend(binding_carriers);
+        let ids_json = serde_json::to_string(admitted_ids).map_err(internal_wire)?;
+        let rows: Vec<AdmittedCarrierRow> = sqlx::query_as(
+            "SELECT key_block_id, status, character_id, actor_world_binding_id, modules_json              FROM kb_key_blocks WHERE key_block_id IN (SELECT value FROM json_each(?))",
+        )
+        .bind(&ids_json)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(NexusApiError::from)?;
+        let mut by_id: std::collections::HashMap<String, AdmittedCarrierRow> =
+            rows.into_iter().map(|row| (row.key_block_id.clone(), row)).collect();
+        let mut out = Vec::with_capacity(admitted_ids.len());
+        for id in admitted_ids {
+            let row = by_id
+                .remove(id)
+                .ok_or_else(|| carrier_scope_drifted(id))?;
+            if matches!(row.status.as_str(), "deleted" | "merged" | "deprecated") {
+                return Err(carrier_scope_drifted(id));
+            }
+            let owner_ok = row.character_id.as_deref() == Some(viewer_character_id)
+                || row.actor_world_binding_id.as_deref() == Some(binding_id);
+            if !owner_ok {
+                return Err(carrier_scope_drifted(id));
+            }
+            let modules = match &row.modules_json {
+                None => None,
+                Some(text) => Some(
+                    serde_json::from_str::<Value>(text).map_err(|_| invalid_modules_json())?,
+                ),
+            };
+            // Re-check the per-carrier row cap on the materialized array: a
+            // carrier admitted by the probe but appended before this read must
+            // still fail closed instead of materializing oversized work.
+            if carrier_belief_elements(modules.as_ref())?.len() > MAX_BELIEF_ROWS_PER_CARRIER {
+                return Err(corpus_exceeded("belief rows per carrier"));
+            }
+            out.push((id.clone(), modules));
+        }
         Ok(out)
     }
 
@@ -846,6 +899,17 @@ fn modules_malformed() -> NexusApiError {
     }
 }
 
+/// A probe-admitted carrier changed status or ownership before
+/// materialization (QC fix round 1, F-001): refuse the inconsistent snapshot.
+fn carrier_scope_drifted(id: &str) -> NexusApiError {
+    NexusApiError::ConflictCoded {
+        code: "carrier_scope_drifted".into(),
+        message: format!(
+            "admitted carrier {id} changed status or ownership before materialization;              refusing an inconsistent ToM snapshot"
+        ),
+    }
+}
+
 fn corpus_exceeded(what: &str) -> NexusApiError {
     NexusApiError::ConflictCoded {
         code: "view_incomplete".into(),
@@ -869,10 +933,14 @@ fn append_belief_row(modules: &mut Value, row: &BeliefPropositionRaw) -> Result<
         }
     }
     let belief = obj.entry("belief").or_insert_with(|| json!([]));
-    belief
-        .as_array_mut()
-        .expect("checked is_array above")
-        .push(serde_json::to_value(row).map_err(internal_wire)?);
+    let rows = belief.as_array_mut().expect("checked is_array above");
+    // QC fix round 1 (F-002): never append the row that would exceed the
+    // per-carrier cap — a carrier at the cap rejects here, before any CAS or
+    // MindState write, so the corpus can never become un-listable.
+    if rows.len() >= MAX_BELIEF_ROWS_PER_CARRIER {
+        return Err(corpus_exceeded("belief rows per carrier"));
+    }
+    rows.push(serde_json::to_value(row).map_err(internal_wire)?);
     Ok(())
 }
 

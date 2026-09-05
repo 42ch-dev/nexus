@@ -123,6 +123,8 @@ async fn atomic_write_commits_carrier_cas_and_derivative_mind_state() {
         0,
         &modules_str,
         &wire,
+        CHARACTER,
+        "awb_seam_unused",
     )
     .await
     .unwrap();
@@ -150,6 +152,8 @@ async fn atomic_write_rolls_back_on_mind_state_validation_failure() {
         0,
         r#"{"belief":[]}"#,
         &wire,
+        CHARACTER,
+        "awb_seam_unused",
     )
     .await
     .unwrap_err();
@@ -175,6 +179,8 @@ async fn atomic_write_rolls_back_on_cas_miss() {
         99,
         r#"{"belief":[]}"#,
         &wire,
+        CHARACTER,
+        "awb_seam_unused",
     )
     .await
     .unwrap_err();
@@ -199,10 +205,96 @@ async fn rejects_chr_subject_on_mind_state_holder_entry_id() {
         0,
         r#"{"belief":[]}"#,
         &wire,
+        CHARACTER,
+        "awb_seam_unused",
     )
     .await
     .unwrap_err();
     let _ = tx.rollback().await;
 
     assert!(matches!(err, LocalDbError::ValidationError(_)));
+}
+
+
+#[tokio::test]
+async fn atomic_write_rejects_concurrent_soft_delete_without_revision_bump() {
+    // QC fix round 1 (F-004): soft-delete flips status without bumping
+    // revision; the in-transaction CAS predicate must revalidate non-deleted
+    // status so the write cannot commit onto a deleted carrier.
+    let (pool, _dir) = setup_db().await;
+    let carrier = seed_character_carrier(&pool).await;
+    let before = modules_json(&pool, &carrier).await;
+    let rev = revision(&pool, &carrier).await;
+    sqlx::query(
+        "UPDATE kb_key_blocks SET status = 'deleted', updated_at = '2026-09-05T00:00:00Z' \
+         WHERE key_block_id = ?",
+    )
+    .bind(&carrier)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let wire = mind_state_for_carrier(&carrier, "ms_softdelete_race");
+    let mut tx = pool.begin().await.unwrap();
+    let err = atomic_cas_carrier_modules_and_insert_mind_state_in_tx(
+        &mut tx,
+        &carrier,
+        rev,
+        r#"{"belief":[]}"#,
+        &wire,
+        CHARACTER,
+        "awb_seam_unused",
+    )
+    .await
+    .expect_err("soft-deleted carrier must miss the in-transaction CAS predicate");
+    let _ = tx.rollback().await;
+
+    assert_eq!(modules_json(&pool, &carrier).await, before);
+    assert!(get_mind_state(&pool, "ms_softdelete_race").await.unwrap().is_none());
+    drop(err);
+}
+
+#[tokio::test]
+async fn atomic_write_rejects_concurrent_owner_drift() {
+    // QC fix round 1 (F-004): ownership drift to another Character between
+    // admission and commit must miss the CAS predicate inside the transaction.
+    let (pool, _dir) = setup_db().await;
+    let carrier = seed_character_carrier(&pool).await;
+    let before = modules_json(&pool, &carrier).await;
+    let rev = revision(&pool, &carrier).await;
+    sqlx::query(
+        "INSERT INTO characters \
+         (character_id, owner_creator_id, display_name, status, image_uri, persona_json, \
+          created_at, updated_at) \
+         VALUES ('chr_cccccccccccccccccccccccccccccccc', ?, 'Drifted', 'active', NULL, '{}', \
+          '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')",
+    )
+    .bind(CREATOR)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE kb_key_blocks SET character_id = 'chr_cccccccccccccccccccccccccccccccc' WHERE key_block_id = ?")
+        .bind(&carrier)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let wire = mind_state_for_carrier(&carrier, "ms_owner_drift");
+    let mut tx = pool.begin().await.unwrap();
+    let err = atomic_cas_carrier_modules_and_insert_mind_state_in_tx(
+        &mut tx,
+        &carrier,
+        rev,
+        r#"{"belief":[]}"#,
+        &wire,
+        CHARACTER,
+        "awb_seam_unused",
+    )
+    .await
+    .expect_err("owner-drifted carrier must miss the in-transaction CAS predicate");
+    let _ = tx.rollback().await;
+
+    assert_eq!(modules_json(&pool, &carrier).await, before);
+    assert!(get_mind_state(&pool, "ms_owner_drift").await.unwrap().is_none());
+    drop(err);
 }

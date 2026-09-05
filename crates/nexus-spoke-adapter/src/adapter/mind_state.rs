@@ -92,6 +92,10 @@ pub async fn validate_and_store_mind_state_in_tx(
 /// carrier KnowledgeEntry, then insert a spoke-validated derivative
 /// `MindState` whose `holder_entry_id` equals the carrier id.
 ///
+/// The CAS predicate revalidates non-deleted status and the admitted
+/// Character/binding ownership (`owner_character_id` / `owner_binding_id`)
+/// inside this transaction (QC fix round 1, F-004).
+///
 /// Callers own the outer `sqlx::Transaction` and must `commit()` only after
 /// this returns `Ok`. Any CAS, product, validation, or insert error leaves
 /// the transaction uncommitted so both writes roll back together.
@@ -107,6 +111,8 @@ pub async fn atomic_cas_carrier_modules_and_insert_mind_state_in_tx(
     expected_revision: i64,
     modules_json: &str,
     mind_state_wire: &Value,
+    owner_character_id: &str,
+    owner_binding_id: &str,
 ) -> Result<u64, LocalDbError> {
     assert_derivative_holder_is_carrier(carrier_entry_id, mind_state_wire)?;
 
@@ -115,6 +121,8 @@ pub async fn atomic_cas_carrier_modules_and_insert_mind_state_in_tx(
         carrier_entry_id,
         modules_json,
         expected_revision,
+        owner_character_id,
+        owner_binding_id,
     )
     .await?;
 

@@ -123,6 +123,7 @@ pub async fn list_tom(
                 binding_id: query.binding_id.to_string(),
                 limit: CharacterTomService::resolve_limit(query.limit)?,
                 cursor: query.cursor.clone(),
+                order: None,
             },
         )
         .await?;

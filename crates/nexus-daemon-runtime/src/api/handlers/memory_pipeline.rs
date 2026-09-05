@@ -939,8 +939,10 @@ pub(crate) async fn load_character_mind_projection(
     Ok(CharacterMindInput::new(soul, all_lines))
 }
 
-/// Max ToM rows fetched for MCA projection (bounded before formatting).
-const MIND_PROJECTION_TOM_FETCH_LIMIT: u32 = 100;
+/// Per-order MCA ToM fetch bound: L1 and L2 are fetched independently at the
+/// `CharacterMindInput` slot cap so neither order can starve the other
+/// (QC fix round 1, F-003).
+const MIND_PROJECTION_TOM_ORDER_LIMIT: u32 = 20;
 
 /// One deterministic human line for a projected ToM belief row (v1.184 P4).
 fn format_tom_belief_line(row: &crate::character_tom::CharacterTomBeliefRow) -> String {
@@ -969,23 +971,26 @@ pub(crate) async fn load_character_mind_projection_with_tom(
     )
     .await?;
     let service = CharacterTomService::new(pool.clone());
-    let query = CharacterTomListQuery {
-        world_id: world_id.to_string(),
-        binding_id: binding_id.to_string(),
-        limit: MIND_PROJECTION_TOM_FETCH_LIMIT,
-        cursor: None,
-    };
-    let page = service
-        .list(owner_creator_id, character_id, query)
-        .await?;
+    // Independent bounded fill per order through the same query service: an
+    // L1-heavy corpus can never crowd the L2 rows out of a mixed page.
     let mut tom_l1 = Vec::new();
     let mut tom_l2 = Vec::new();
-    for row in page.items {
-        let line = format_tom_belief_line(&row);
-        match row.belief.order {
-            Some(1) => tom_l1.push(line),
-            Some(2) => tom_l2.push(line),
-            _ => {}
+    for (order, slot) in [(1_i64, &mut tom_l1), (2_i64, &mut tom_l2)] {
+        let page = service
+            .list(
+                owner_creator_id,
+                character_id,
+                CharacterTomListQuery {
+                    world_id: world_id.to_string(),
+                    binding_id: binding_id.to_string(),
+                    limit: MIND_PROJECTION_TOM_ORDER_LIMIT,
+                    cursor: None,
+                    order: Some(order),
+                },
+            )
+            .await?;
+        for row in page.items {
+            slot.push(format_tom_belief_line(&row));
         }
     }
     Ok(mind.with_tom(tom_l1, tom_l2))

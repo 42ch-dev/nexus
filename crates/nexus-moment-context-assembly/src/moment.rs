@@ -133,6 +133,7 @@ impl CharacterMindInput {
 
     /// Whether neither slot carries content (used by tests to assert the
     /// legacy/honest-empty path).
+    #[cfg(test)]
     fn is_empty(&self) -> bool {
         self.soul.as_deref().map_or(true, str::is_empty)
             && self.memory.is_empty()

@@ -858,3 +858,82 @@ async fn timestamp_lookup_is_scoped_to_selected_binding_admitted_ids() {
     assert_eq!(carrier_ids, vec![selected_carrier.as_str()]);
     assert!(!carrier_ids.contains(&unselected_carrier.as_str()));
 }
+
+
+#[tokio::test]
+async fn record_rejects_201st_belief_row_without_mutation() {
+    // QC fix round 1 (F-002): a carrier already at MAX_BELIEF_ROWS_PER_CARRIER
+    // (200) must reject the 201st belief with zero KE/MindState mutation, and
+    // the corpus must stay listable afterwards.
+    let c = ctx().await;
+    let chr = create_character(&c.server, "AvaCap", WORLD_A).await;
+    let chr_id = chr["character"]["character_id"].as_str().unwrap().to_string();
+    let binding_id = chr["binding"]["binding_id"].as_str().unwrap().to_string();
+
+    let store = SqliteKbStore::new(c.pool.clone());
+    let rows: Vec<Value> = (0..200)
+        .map(|i| {
+            json!({
+                "holder": chr_id,
+                "proposition": format!("seeded belief {i}"),
+                "order": 1,
+                "truth": "True",
+                "access": "Private",
+                "representation": "Explicit",
+                "content_type": "Location",
+                "source": "Perception",
+                "context": "Neutral"
+            })
+        })
+        .collect();
+    let mut kb =
+        KnowledgeEntryRecord::for_character(&chr_id, BlockType::Character, "FullCarrier");
+    kb.modules = Some(json!({ "belief": rows }));
+    let carrier = kb.entry_id.clone();
+    store.insert_knowledge_entry(kb).await.unwrap();
+
+    let before_ms: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM mind_states")
+        .fetch_one(&c.pool)
+        .await
+        .unwrap();
+
+    let resp = record(
+        &c.server,
+        &chr_id,
+        l1_body(WORLD_A, &binding_id, &carrier, &chr_id, 0),
+    )
+    .await;
+    assert_eq!(
+        resp.status_code(),
+        409,
+        "201st belief must fail closed: {}",
+        resp.text()
+    );
+    assert!(resp.text().contains("view_incomplete"), "{}", resp.text());
+
+    let after_ms: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM mind_states")
+        .fetch_one(&c.pool)
+        .await
+        .unwrap();
+    assert_eq!(before_ms, after_ms, "rejected record must not insert MindState");
+    let len: (i64,) = sqlx::query_as(
+        "SELECT json_array_length(modules_json, '$.belief') FROM kb_key_blocks WHERE key_block_id = ?",
+    )
+    .bind(&carrier)
+    .fetch_one(&c.pool)
+    .await
+    .unwrap();
+    assert_eq!(len.0, 200, "rejected record must not append");
+
+    // Corpus is not poisoned: list still serves the 200 rows bounded.
+    let resp = c
+        .server
+        .get(&format!(
+            "/v1/daemon/characters/{chr_id}/tom?world_id={WORLD_A}&binding_id={binding_id}&limit=100"
+        ))
+        .await;
+    assert_eq!(resp.status_code(), 200, "list must not 409: {}", resp.text());
+    let page = resp.json::<Value>();
+    assert_eq!(page["items"].as_array().unwrap().len(), 100);
+    assert_eq!(page["pagination"]["has_more"], true);
+}
