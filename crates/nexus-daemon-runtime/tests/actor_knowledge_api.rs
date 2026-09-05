@@ -596,3 +596,192 @@ async fn character_view_and_binding_add_require_owned_target_world() {
     .unwrap();
     assert_eq!(ke, 0);
 }
+
+async fn insert_legacy_default_world_row(pool: &sqlx::SqlitePool, world_id: &str, entry_id: &str, name: &str) {
+    sqlx::query(
+        "INSERT INTO kb_key_blocks \
+         (key_block_id, owner_kind, world_id, block_type, canonical_name, status) \
+         VALUES (?, 'world', ?, 'item', ?, 'confirmed')",
+    )
+    .bind(entry_id)
+    .bind(world_id)
+    .bind(name)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn insert_owned_row(
+    pool: &sqlx::SqlitePool,
+    entry_id: &str,
+    owner_kind: &str,
+    owner_column: &str,
+    owner_id: &str,
+    name: &str,
+    created_at: &str,
+) {
+    let sql = format!(
+        "INSERT INTO kb_key_blocks \
+         (key_block_id, owner_kind, {owner_column}, block_type, canonical_name, status, created_at) \
+         VALUES (?, ?, ?, 'item', ?, 'confirmed', ?)"
+    );
+    sqlx::query(&sql)
+        .bind(entry_id)
+        .bind(owner_kind)
+        .bind(owner_id)
+        .bind(name)
+        .bind(created_at)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn view_projects_legacy_sqlite_datetime_without_rewriting_bytes() {
+    let ctx = ctx().await;
+    insert_legacy_default_world_row(
+        &ctx.pool,
+        WORLD_A,
+        "kb_legacydefault000000000000000001",
+        "LegacyDefault",
+    )
+    .await;
+    let stored: String = sqlx::query_scalar(
+        "SELECT created_at FROM kb_key_blocks WHERE key_block_id = ?",
+    )
+    .bind("kb_legacydefault000000000000000001")
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert!(
+        stored.contains(' ') && !stored.contains('T'),
+        "legacy bytes must stay SQLite datetime: {stored}"
+    );
+
+    let page = ctx
+        .server
+        .post("/v1/daemon/actor-knowledge/view")
+        .json(&json!({
+            "actor_ref": { "actor_kind": "creator", "creator_id": OWNER },
+            "world_id": WORLD_A
+        }))
+        .await;
+    assert_eq!(page.status_code(), 200, "{}", page.text());
+    let body: Value = page.json();
+    let item = body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["canonical_name"] == "LegacyDefault")
+        .expect("legacy row");
+    let wire = item["created_at"].as_str().expect("rfc3339 string");
+    assert!(
+        wire.contains('T'),
+        "wire created_at must be canonical RFC3339: {wire}"
+    );
+    let stored_after: String = sqlx::query_scalar(
+        "SELECT created_at FROM kb_key_blocks WHERE key_block_id = ?",
+    )
+    .bind("kb_legacydefault000000000000000001")
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(stored_after, stored);
+}
+
+#[tokio::test]
+async fn view_paginates_large_multi_owner_union_without_skip_or_duplicate() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr = created["character"]["character_id"].as_str().unwrap();
+    let bind = created["binding"]["binding_id"].as_str().unwrap();
+
+    let mut expected = Vec::new();
+    for i in 0..40 {
+        let id = format!("kb_worldpad{i:032}");
+        let name = format!("WorldPad{i:03}");
+        insert_owned_row(
+            &ctx.pool,
+            &id,
+            "world",
+            "world_id",
+            WORLD_A,
+            &name,
+            "2026-01-01 00:00:00",
+        )
+        .await;
+        expected.push(id);
+    }
+    for i in 0..40 {
+        let id = format!("kb_charpad{i:033}");
+        let name = format!("CharPad{i:03}");
+        insert_owned_row(
+            &ctx.pool,
+            &id,
+            "character",
+            "character_id",
+            chr,
+            &name,
+            &format!("2026-01-01T00:00:{i:02}Z"),
+        )
+        .await;
+        expected.push(id);
+    }
+    for i in 0..40 {
+        let id = format!("kb_bindpad{i:033}");
+        let name = format!("BindPad{i:03}");
+        insert_owned_row(
+            &ctx.pool,
+            &id,
+            "actor_world_binding",
+            "actor_world_binding_id",
+            bind,
+            &name,
+            &format!("2026-01-02T00:00:{i:02}Z"),
+        )
+        .await;
+        expected.push(id);
+    }
+
+    let mut seen = Vec::new();
+    let mut cursor = None;
+    for _ in 0..40 {
+        let mut body = json!({
+            "actor_ref": { "actor_kind": "creator", "creator_id": OWNER },
+            "world_id": WORLD_A,
+            "limit": 10
+        });
+        if let Some(c) = &cursor {
+            body["cursor"] = json!(c);
+        }
+        let page = ctx
+            .server
+            .post("/v1/daemon/actor-knowledge/view")
+            .json(&body)
+            .await;
+        assert_eq!(page.status_code(), 200, "{}", page.text());
+        let payload: Value = page.json();
+        for item in payload["items"].as_array().unwrap() {
+            seen.push(item["entry_id"].as_str().unwrap().to_string());
+        }
+        if payload["pagination"]["has_more"] == false {
+            assert!(payload["pagination"]["next_cursor"].is_null());
+            break;
+        }
+        cursor = Some(
+            payload["pagination"]["next_cursor"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+    }
+
+    expected.sort();
+    let mut unique = seen.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(seen.len(), unique.len(), "pagination must not duplicate");
+    unique.sort();
+    expected.sort();
+    assert_eq!(unique, expected, "pagination must not skip union members");
+}

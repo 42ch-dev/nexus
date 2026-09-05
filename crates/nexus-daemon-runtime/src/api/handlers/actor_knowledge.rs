@@ -34,7 +34,7 @@ use nexus_contracts::daemon_api::actor_knowledge::{
         ViewResponse,
     },
 };
-use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryRecord, KnowledgeOwnerRef};
+use nexus_knowledge::world_kb::knowledge_entry::{parse_stored_created_at, KnowledgeEntryRecord, KnowledgeOwnerRef};
 use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
 use nexus_local_db::kb_store::SqliteKbStore;
 use serde::de::DeserializeOwned;
@@ -68,9 +68,7 @@ fn optional_str(value: Option<&impl std::ops::Deref<Target = String>>) -> Option
 }
 
 fn parse_rfc3339(raw: &str) -> Result<DateTime<Utc>, NexusApiError> {
-    DateTime::parse_from_rfc3339(raw)
-        .map(|dt| dt.with_timezone(&Utc))
-        .map_err(wire_err)
+    parse_stored_created_at(raw).map_err(wire_err)
 }
 
 fn item_from_record(record: &KnowledgeEntryRecord) -> Result<KnowledgeViewItem, NexusApiError> {

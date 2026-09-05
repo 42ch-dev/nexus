@@ -227,6 +227,31 @@ pub struct KnowledgeEntryRecord {
     pub modules: Option<serde_json::Value>,
 }
 
+/// Parse a stored `kb_key_blocks.created_at` value without rewriting bytes.
+///
+/// Production inserts bind RFC3339. The table DEFAULT (`datetime('now')`) and
+/// preserved pre-v1.184 rows use SQLite `YYYY-MM-DD HH:MM:SS` (UTC, space
+/// separator). Both forms project to UTC so ordering and wire timestamps are
+/// chronological rather than lexical.
+///
+/// # Errors
+///
+/// Returns a display string when `raw` matches neither shipped form.
+pub fn parse_stored_created_at(raw: &str) -> Result<chrono::DateTime<chrono::Utc>, String> {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(raw) {
+        return Ok(dt.with_timezone(&chrono::Utc));
+    }
+    let naive = chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S").or_else(|_| {
+        chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S%.f")
+    });
+    match naive {
+        Ok(ndt) => Ok(ndt.and_utc()),
+        Err(_) => Err(format!(
+            "created_at is not RFC3339 or SQLite datetime: {raw}"
+        )),
+    }
+}
+
 impl KnowledgeEntryRecord {
     /// Create a new provisional World-owned `KnowledgeEntryRecord`.
     ///
@@ -859,5 +884,14 @@ mod tests {
         assert!(emitted.get("actor").is_none());
         assert!(emitted.get("knowledge_access").is_none());
         assert!(emitted.get("mental_source").is_none());
+    }
+
+    #[test]
+    fn parse_stored_created_at_accepts_rfc3339_and_sqlite_datetime() {
+        let rfc = parse_stored_created_at("2026-01-01T10:00:00Z").expect("rfc");
+        let sqlite = parse_stored_created_at("2026-01-01 09:00:00").expect("sqlite");
+        assert!(sqlite < rfc);
+        assert_eq!(sqlite.timestamp(), 1_767_258_000);
+        assert!(parse_stored_created_at("not-a-time").is_err());
     }
 }

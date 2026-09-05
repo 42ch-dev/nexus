@@ -1391,6 +1391,80 @@ impl SqliteKbStore {
 
         rows.iter().map(KeyBlockRow::to_record).collect()
     }
+
+    /// SQL-side owner keyset for Actor KnowledgeView (v1.184 P1 QC W2).
+    ///
+    /// Each component is bounded to `limit` rows (`limit` is already `page
+    /// size + 1` at the call site). Chronological order uses SQLite
+    /// `strftime` so RFC3339 and `datetime('now')` bytes compare as instants.
+    /// Stored `created_at` bytes are not rewritten.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`KbStoreError::Storage`] on database failure.
+    pub async fn list_by_owner_keyset(
+        &self,
+        owner: &KnowledgeOwnerRef,
+        after: Option<&(String, String)>,
+        limit: u32,
+        exclude_creator_only: bool,
+    ) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
+        let owner_column = match owner {
+            KnowledgeOwnerRef::World(_) => "world_id",
+            KnowledgeOwnerRef::Character(_) => "character_id",
+            KnowledgeOwnerRef::ActorWorldBinding(_) => "actor_world_binding_id",
+        };
+        let created_key = "strftime('%Y-%m-%d %H:%M:%f', created_at)";
+        let visibility = if exclude_creator_only {
+            " AND creator_only = 0"
+        } else {
+            ""
+        };
+        let cursor_sql = if after.is_some() {
+            format!(
+                " AND ({created_key} > strftime('%Y-%m-%d %H:%M:%f', ?) \
+                   OR ({created_key} = strftime('%Y-%m-%d %H:%M:%f', ?) \
+                       AND key_block_id > ?))"
+            )
+        } else {
+            String::new()
+        };
+        let sql = format!(
+            r"SELECT
+                key_block_id,
+                owner_kind,
+                world_id,
+                character_id,
+                actor_world_binding_id,
+                creator_only,
+                block_type,
+                canonical_name,
+                status,
+                revision,
+                body_json,
+                source_anchor_json,
+                created_from_command_id,
+                created_at,
+                updated_at,
+                source_work_id,
+                source_chapter,
+                source_provenance_kind, extensions_nexus_json, modules_json
+            FROM kb_key_blocks
+            WHERE {owner_column} = ?
+              AND status NOT IN ('deleted', 'merged', 'deprecated'){visibility}{cursor_sql}
+            ORDER BY {created_key} ASC, key_block_id ASC
+            LIMIT {limit}"
+        );
+        let mut query = sqlx::query_as::<_, KeyBlockRow>(&sql).bind(owner.id());
+        if let Some((created_at, entry_id)) = after {
+            query = query.bind(created_at).bind(created_at).bind(entry_id);
+        }
+        let rows = query
+            .fetch_all(&*self.pool)
+            .await
+            .map_err(|e| db_err(&e))?;
+        rows.iter().map(KeyBlockRow::to_record).collect()
+    }
 }
 
 // ── V1.73 Canvas World KB: per-row OCC CAS entity edit ──────────────────────
@@ -2060,6 +2134,71 @@ mod tests {
         let mut sorted = ids.clone();
         sorted.sort();
         assert_eq!(ids, sorted, "equal timestamps must tie-break on key_block_id");
+    }
+
+    #[tokio::test]
+    async fn test_list_by_owner_keyset_bounds_and_mixed_timestamp_order() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+        let store = SqliteKbStore::new(pool.clone());
+        let rows = [
+            ("kb_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1", "2026-01-01 00:00:02"),
+            ("kb_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb1", "2026-01-01T00:00:00Z"),
+            ("kb_ccccccccccccccccccccccccccccccc1", "2026-01-01T00:00:01Z"),
+        ];
+        for (id, ts) in rows {
+            let mut kb = KnowledgeEntryRecord::new("wld_1", BlockType::Item, id);
+            kb.entry_id = id.to_string();
+            store.insert_knowledge_entry(kb).await.unwrap();
+            sqlx::query("UPDATE kb_key_blocks SET created_at = ? WHERE key_block_id = ?")
+                .bind(ts)
+                .bind(id)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        for i in 0..8 {
+            let kb = KnowledgeEntryRecord::new("wld_1", BlockType::Item, &format!("Pad_{i}"));
+            store.insert_knowledge_entry(kb).await.unwrap();
+            sqlx::query(
+                "UPDATE kb_key_blocks SET created_at = '2026-01-02T00:00:00Z' WHERE canonical_name = ?",
+            )
+            .bind(format!("Pad_{i}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let owner = KnowledgeOwnerRef::world("wld_1");
+        let first = store
+            .list_by_owner_keyset(&owner, None, 3, false)
+            .await
+            .unwrap();
+        assert_eq!(first.len(), 3, "SQL LIMIT must bound the component");
+        assert_eq!(
+            first.iter().map(|r| r.entry_id.as_str()).collect::<Vec<_>>(),
+            vec![
+                "kb_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb1",
+                "kb_ccccccccccccccccccccccccccccccc1",
+                "kb_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+            ]
+        );
+        let stored_space: String = sqlx::query_scalar(
+            "SELECT created_at FROM kb_key_blocks WHERE key_block_id = ?",
+        )
+        .bind("kb_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(stored_space, "2026-01-01 00:00:02");
+
+        let after = (first[1].created_at.clone(), first[1].entry_id.clone());
+        let page = store
+            .list_by_owner_keyset(&owner, Some(&after), 2, false)
+            .await
+            .unwrap();
+        assert!(page.len() <= 2);
+        assert_eq!(page[0].entry_id, "kb_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1");
     }
 
     #[tokio::test]

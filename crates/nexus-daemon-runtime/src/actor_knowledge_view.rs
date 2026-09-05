@@ -5,7 +5,7 @@
 //! query returns an error and no partial page.
 
 use crate::api::errors::NexusApiError;
-use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryRecord, KnowledgeOwnerRef};
+use nexus_knowledge::world_kb::knowledge_entry::{parse_stored_created_at, KnowledgeEntryRecord, KnowledgeOwnerRef};
 use nexus_knowledge::world_kb::store::KbStoreError;
 use nexus_local_db::kb_store::SqliteKbStore;
 use sqlx::SqlitePool;
@@ -102,37 +102,43 @@ impl ActorKnowledgeViewService {
         format!("{CURSOR_PREFIX}{created_at}{CURSOR_SEP}{entry_id}")
     }
 
-    /// Apply keyset pagination to an already-merged owner union.
-    #[must_use]
+    /// Merge already-fetched owner components and take the first `limit` rows
+    /// in chronological `(created_at, entry_id)` order.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ACTOR_KNOWLEDGE_WIRE_INVALID` when a stored timestamp is neither
+    /// RFC3339 nor SQLite `datetime('now')`.
     pub fn paginate(
-        mut items: Vec<KnowledgeEntryRecord>,
+        items: Vec<KnowledgeEntryRecord>,
         cursor: Option<(String, String)>,
         limit: u32,
-    ) -> ActorKnowledgePage {
-        items.sort_by(|a, b| {
-            a.created_at
-                .cmp(&b.created_at)
-                .then_with(|| a.entry_id.cmp(&b.entry_id))
-        });
+    ) -> Result<ActorKnowledgePage, NexusApiError> {
+        let mut keyed = Vec::with_capacity(items.len());
+        for row in items {
+            let ts = parse_stored_created_at(&row.created_at).map_err(timestamp_err)?;
+            keyed.push((ts, row.entry_id.clone(), row));
+        }
+        keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
         if let Some((created_at, entry_id)) = cursor {
-            items.retain(|row| {
-                (row.created_at.as_str(), row.entry_id.as_str()) > (created_at.as_str(), entry_id.as_str())
-            });
+            let cursor_ts = parse_stored_created_at(&created_at).map_err(|_| invalid_cursor())?;
+            keyed.retain(|(ts, id, _)| (*ts, id.as_str()) > (cursor_ts, entry_id.as_str()));
         }
         let limit_us = usize::try_from(limit).unwrap_or(usize::MAX);
-        let has_more = items.len() > limit_us;
-        items.truncate(limit_us);
+        let has_more = keyed.len() > limit_us;
+        keyed.truncate(limit_us);
+        let items: Vec<KnowledgeEntryRecord> = keyed.into_iter().map(|(_, _, row)| row).collect();
         let next_cursor = if has_more {
             items.last().map(|row| Self::encode_cursor(&row.created_at, &row.entry_id))
         } else {
             None
         };
-        ActorKnowledgePage {
+        Ok(ActorKnowledgePage {
             items,
             limit,
             has_more,
             next_cursor,
-        }
+        })
     }
 
     /// Admit `actor_ref` from stored rows and compose the locked view.
@@ -154,8 +160,10 @@ impl ActorKnowledgeViewService {
                 }
                 self.require_owned_world(caller_creator_id, &query.world_id)
                     .await?;
-                let items = self.creator_union(caller_creator_id, &query.world_id).await?;
-                Ok(Self::paginate(items, cursor, query.limit))
+                let parts = self
+                    .creator_union(caller_creator_id, &query.world_id, cursor.as_ref(), query.limit)
+                    .await?;
+                Self::paginate(parts, None, query.limit)
             }
             AdmittedActor::Character { character_id } => {
                 let Some(binding_id) = query.binding_id.as_deref() else {
@@ -170,10 +178,16 @@ impl ActorKnowledgeViewService {
                     .await?;
                 self.require_active_binding(character_id, binding_id, &query.world_id)
                     .await?;
-                let items = self
-                    .character_union(&query.world_id, character_id, binding_id)
+                let parts = self
+                    .character_union(
+                        &query.world_id,
+                        character_id,
+                        binding_id,
+                        cursor.as_ref(),
+                        query.limit,
+                    )
                     .await?;
-                Ok(Self::paginate(items, cursor, query.limit))
+                Self::paginate(parts, None, query.limit)
             }
         }
     }
@@ -194,17 +208,26 @@ impl ActorKnowledgeViewService {
             .await?;
         let cursor = Self::decode_cursor(&cursor)?;
         let items = self
-            .component(KnowledgeOwnerRef::character(character_id))
+            .component(
+                KnowledgeOwnerRef::character(character_id),
+                cursor.as_ref(),
+                limit,
+                false,
+            )
             .await?;
-        Ok(Self::paginate(items, cursor, limit))
+        Self::paginate(items, None, limit)
     }
 
     async fn creator_union(
         &self,
         creator_id: &str,
         world_id: &str,
+        cursor: Option<&(String, String)>,
+        limit: u32,
     ) -> Result<Vec<KnowledgeEntryRecord>, NexusApiError> {
-        let mut items = self.component(KnowledgeOwnerRef::world(world_id)).await?;
+        let mut items = self
+            .component(KnowledgeOwnerRef::world(world_id), cursor, limit, false)
+            .await?;
         let bindings = sqlx::query_as::<_, (String, String)>(
             r"SELECT b.character_id, b.binding_id
               FROM actor_world_bindings b
@@ -226,11 +249,24 @@ impl ActorKnowledgeViewService {
         let mut seen_characters = std::collections::BTreeSet::new();
         for (character_id, binding_id) in bindings {
             if seen_characters.insert(character_id.clone()) {
-                items.extend(self.component(KnowledgeOwnerRef::character(&character_id)).await?);
+                items.extend(
+                    self.component(
+                        KnowledgeOwnerRef::character(&character_id),
+                        cursor,
+                        limit,
+                        false,
+                    )
+                    .await?,
+                );
             }
             items.extend(
-                self.component(KnowledgeOwnerRef::actor_world_binding(&binding_id))
-                    .await?,
+                self.component(
+                    KnowledgeOwnerRef::actor_world_binding(&binding_id),
+                    cursor,
+                    limit,
+                    false,
+                )
+                .await?,
             );
         }
         Ok(items)
@@ -241,14 +277,29 @@ impl ActorKnowledgeViewService {
         world_id: &str,
         character_id: &str,
         binding_id: &str,
+        cursor: Option<&(String, String)>,
+        limit: u32,
     ) -> Result<Vec<KnowledgeEntryRecord>, NexusApiError> {
-        let mut world = self.component(KnowledgeOwnerRef::world(world_id)).await?;
-        world.retain(|row| !row.creator_only);
-        let mut items = world;
-        items.extend(self.component(KnowledgeOwnerRef::character(character_id)).await?);
+        let mut items = self
+            .component(KnowledgeOwnerRef::world(world_id), cursor, limit, true)
+            .await?;
         items.extend(
-            self.component(KnowledgeOwnerRef::actor_world_binding(binding_id))
-                .await?,
+            self.component(
+                KnowledgeOwnerRef::character(character_id),
+                cursor,
+                limit,
+                false,
+            )
+            .await?,
+        );
+        items.extend(
+            self.component(
+                KnowledgeOwnerRef::actor_world_binding(binding_id),
+                cursor,
+                limit,
+                false,
+            )
+            .await?,
         );
         Ok(items)
     }
@@ -256,14 +307,22 @@ impl ActorKnowledgeViewService {
     async fn component(
         &self,
         owner: KnowledgeOwnerRef,
+        cursor: Option<&(String, String)>,
+        limit: u32,
+        exclude_creator_only: bool,
     ) -> Result<Vec<KnowledgeEntryRecord>, NexusApiError> {
         self.store
-            .list_by_owner_complete(&owner)
+            .list_by_owner_keyset(
+                &owner,
+                cursor,
+                limit.saturating_add(1),
+                exclude_creator_only,
+            )
             .await
             .map_err(component_err)
     }
 
-    pub(crate) async fn require_owned_world(
+        pub(crate) async fn require_owned_world(
         &self,
         creator_id: &str,
         world_id: &str,
@@ -325,6 +384,13 @@ fn invalid_cursor() -> NexusApiError {
     }
 }
 
+fn timestamp_err(err: String) -> NexusApiError {
+    NexusApiError::Internal {
+        code: "ACTOR_KNOWLEDGE_WIRE_INVALID".into(),
+        message: err,
+    }
+}
+
 fn not_found(resource: &str, id: &str) -> NexusApiError {
     NexusApiError::NotFound(format!("{resource} {id}"))
 }
@@ -360,7 +426,8 @@ mod tests {
             ],
             None,
             2,
-        );
+        )
+        .expect("page1");
         assert_eq!(
             page.items
                 .iter()
@@ -386,7 +453,8 @@ mod tests {
             ],
             Some(decoded),
             2,
-        );
+        )
+        .expect("page2");
         assert_eq!(
             page2
                 .items
@@ -421,5 +489,47 @@ mod tests {
         assert!(ActorKnowledgeViewService::decode_cursor(&None)
             .expect("none")
             .is_none());
+    }
+
+    #[test]
+    fn paginate_orders_mixed_sqlite_and_rfc3339_chronologically() {
+        let page = ActorKnowledgeViewService::paginate(
+            vec![
+                rec("2026-01-01 00:00:02", "kb_space_late"),
+                rec("2026-01-01T00:00:01Z", "kb_rfc_early"),
+                rec("2026-01-01T00:00:02+00:00", "kb_rfc_tie"),
+            ],
+            None,
+            2,
+        )
+        .expect("mixed");
+        assert_eq!(
+            page.items
+                .iter()
+                .map(|r| r.entry_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["kb_rfc_early", "kb_rfc_tie"]
+        );
+        assert!(page.has_more);
+        let cursor = page.next_cursor.expect("cursor");
+        let page2 = ActorKnowledgeViewService::paginate(
+            vec![
+                rec("2026-01-01 00:00:02", "kb_space_late"),
+                rec("2026-01-01T00:00:01Z", "kb_rfc_early"),
+                rec("2026-01-01T00:00:02+00:00", "kb_rfc_tie"),
+            ],
+            ActorKnowledgeViewService::decode_cursor(&Some(cursor)).unwrap(),
+            2,
+        )
+        .expect("mixed2");
+        assert_eq!(
+            page2
+                .items
+                .iter()
+                .map(|r| r.entry_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["kb_space_late"]
+        );
+        assert!(!page2.has_more);
     }
 }
