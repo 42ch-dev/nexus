@@ -145,8 +145,10 @@ pub async fn get_timeline_overview(
             })
             .collect(),
         cursor,
-        #[allow(clippy::cast_sign_loss)]
-        total_worlds: u64::try_from(total_worlds).unwrap_or(0),
+        total_worlds: u64::try_from(total_worlds).map_err(|_| NexusApiError::Internal {
+            code: "TIMELINE_TOTAL_WORLDS_OVERFLOW".into(),
+            message: format!("total_worlds {total_worlds} is negative"),
+        })?,
     }))
 }
 

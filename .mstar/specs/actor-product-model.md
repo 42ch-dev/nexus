@@ -40,7 +40,7 @@ Each Actor kind has its **own bearer** — the storage/identity aggregate that c
 | **Creator profile** | Shipped operational identity aggregate (`creator_id`): admission boundary, ownership, SOUL/Memory bearer | The *Creator Actor kind's bearer* — the profile is storage; Actor is the narrative-identity reading of it |
 | **Orchestration role** | Workflow-function routing inside presets (`GraphNode.agent` / `WorkerAgentConfig.role`) | Names which worker executes a step; never names *who* in the story |
 | **ACP session** (`HostSessionId`) | Transport conversation identity between Nexus and an agent | A session is a pipe: isolated per Actor/World view, but carries no identity semantics |
-| **V1.164 holder** | The l5 MindState/belief/observation `holder` field — an in-world epistemic subject reference (today: a World-scoped character KnowledgeEntry id, or `"world"`) | A ToM data pointer; holder→Character mapping is additive roadmap work, not an existing identity join |
+| **V1.164 l5 carriers** | `MindState.holder_entry_id` names the carrier KnowledgeEntry; `modules.belief[*].holder` names the epistemic subject; `TimelineEvent.modules.observation` names event observation metadata | ToM data axes, not identity joins. Character mapping is additive on belief `holder`; the carrier KE and observation placement remain unchanged |
 | **`actor_kind=character`** | `ActorRef` discriminant value marking a first-class Character identity row | This one *is* Actor vocabulary — the identity axis; it does not denote a KB lore row |
 | **`block_type=character`** | Shipped World KB lore taxonomy value on KnowledgeEntry | Lore *about* a person inside a World (a WorldSheet, §4.3) — a separate axis from `actor_kind=character`: taxonomy vs identity |
 
@@ -61,7 +61,7 @@ The second Actor kind: a durable, **Creator-owned** narrative identity that **li
 ### 4.1 Bearer: SOUL, Memory, ToM, image
 
 - **SOUL + Memory** on a **distinct bearer** from Creator memory: Character writes never enter Creator memory rows. The pipeline semantics of the shipped Creator memory system are reused — this is not a second mind stack.
-- **ToM** built **additively** on the shipped V1.164–V1.166 l5 MindState/belief/observation carriers: L1 (self) and L2 (other); holder→Character mapping is additive. ToM L3 and any new ToM engine replacing the l5 carriers are out (§9).
+- **ToM** built **additively** on the shipped V1.164–V1.166 l5 carriers: L1 (self) and L2 (other). Character mapping extends the epistemic-subject `modules.belief[*].holder`; `MindState.holder_entry_id` remains the carrier KnowledgeEntry id. ToM L3 and any new ToM engine replacing the l5 carriers are out (§9).
 - **Image/persona assets** attached to the Character record.
 
 ### 4.2 ActorWorldBinding — 1..n Worlds, atomic initial binding
@@ -69,7 +69,7 @@ The second Actor kind: a durable, **Creator-owned** narrative identity that **li
 A Character associates with Worlds **only** through explicit **ActorWorldBinding** records.
 
 - Cardinality is exactly **one-or-more**: an active Character has **1..n** bindings, each to exactly one World.
-- **Character creation establishes an initial ActorWorldBinding atomically.** An active Character never has zero active bindings: removing the last binding must fail or transition the Character out of active state per the later lifecycle contract — never an active orphan.
+- **Character creation establishes an initial ActorWorldBinding atomically.** An active Character never has zero active bindings. **Removing the last active binding fails** (no mutation). Transitioning a Character out of active state is a **separate later lifecycle contract** (explicit archive) — never an implicit effect of last-binding removal, and never an active orphan.
 - A binding carries the **binding-local isolated** Character KE scope (§5.1) and may link optional WorldSheets (§4.3).
 - **Naming:** `WorldMembership` is reserved for the shipped Creator↔World aggregate and MUST NOT name Character↔World — ActorWorldBinding is the only Character↔World term.
 
@@ -90,14 +90,14 @@ KnowledgeEntry stays **one primitive**, and each entry has **exactly one canonic
 | Owner scope | Semantics | Status |
 | --- | --- | --- |
 | **World-owned** | World-local truth | Shipped — the only owner scope with storage today; every World KB entry is World-owned |
-| **Character-owned** | Lives in the Character knowledge space; **explicitly shared** — mounted into multiple of that Character's active bindings **without copying** | Accepted direction; not shipped |
+| **Character-owned** | Lives in the Character knowledge space; **explicitly shared** by owner scope — visible in every active binding of that Character **without copying** (no separate mount join) | Accepted direction; not shipped |
 | **ActorWorldBinding-owned** (binding-local) | Belongs to one binding; **isolated** from the Character's other Worlds — private to that World life | Accepted direction; not shipped |
 
 Cross-World sharing is always explicit — it never implicitly copies all World facts or memories.
 
 ### 5.2 Creator omniscient read
 
-The Creator's read over its ownership boundary is **omniscient**: it covers every KnowledgeEntry whose canonical owner is a **World it owns**, a **Character it owns**, or an **ActorWorldBinding joining those owned entities** — across all three owner scopes — **including creator-only facts** (entries marked creator-only never enter any Character KnowledgeView).
+The Creator's **capability** over its ownership boundary is omniscient: it covers every KnowledgeEntry whose canonical owner is a **World it owns**, a **Character it owns**, or an **ActorWorldBinding joining those owned entities** — across all three owner scopes — **including creator-only facts**. Creator-only is an explicit boolean marker on KnowledgeEntry (v1: valid on World-owned KE only). Entries marked creator-only never enter any Character KnowledgeView. A product surface may require an explicit World selection for bounded pagination (v1.184 does); that selector narrows one request, not the underlying ownership capability. This marker is not a generalized visibility taxonomy.
 
 ### 5.3 Character KnowledgeView
 
@@ -105,8 +105,8 @@ A Character **reads only its authorized composed KnowledgeView**, per (Character
 
 ```text
 KnowledgeView(Character, Binding) =
-    authorized World-owned KE          (as authorized by the binding)
-  + Character-owned KE mounted into this binding
+    authorized World-owned KE          (v1: all World-owned KE of binding.world_id except creator-only)
+  + Character-owned KE of this Character
   + ActorWorldBinding-owned KE of this binding
 ```
 
@@ -122,7 +122,7 @@ KnowledgeView(Character, Binding) =
 
 ## 7. Viewpoint — subordinate execution context
 
-**Viewpoint** is subordinate **execution context** — logically `{actor_id, world_id, optional branch_id/event_id}` — describing *from where* an Actor acts or reads within a session. Viewpoint is **not** an identity, **not** an Actor kind, and **not** the name of any Character↔World association. The earlier Viewpoint-as-identity direction is superseded (§0).
+**Viewpoint** is subordinate **execution context** paired with an `ActorRef` — logically `{world_id, optional binding_id/branch_id/event_id}` — describing *from where* that Actor acts or reads within a session. Character execution requires the binding id; Creator execution omits it. Viewpoint does not repeat an actor id, is **not** identity, is **not** an Actor kind, and is **not** the name of any Character↔World association. The earlier Viewpoint-as-identity direction is superseded (§0).
 
 ## 8. Current vs planned (migration contract)
 
@@ -134,7 +134,7 @@ KnowledgeView(Character, Binding) =
 | Character↔World association | — | ActorWorldBinding; 1..n per active Character; atomic initial binding at creation | New record type; `WorldMembership` stays Creator↔World only |
 | World character lore | `KnowledgeEntry(block_type=character)` rows, World-owned | WorldSheets, optionally linked from bindings | Existing rows stay WorldSheets; binding links are explicit; **no silent migration** |
 | KE ownership | Single owner scope: World | Exactly one canonical owner per entry: World \| Character \| ActorWorldBinding | Additive schema/codegen work; existing rows remain World-owned |
-| ToM carriers | V1.164–V1.166 l5 MindState/belief/observation with `holder` (World-scoped character KE id, or `"world"`) | Character ToM L1+L2 on the same carriers | holder→Character mapping is additive; no new ToM engine |
+| ToM carriers | V1.164–V1.166 l5 authority on holder KE `modules.mental` / `modules.belief`, derivative `MindState` keyed by `holder_entry_id`, and event observation metadata | Character ToM L1+L2 on the same carriers | Character mapping is additive on belief-row `holder`; `MindState.holder_entry_id` remains the carrier KE id; no new ToM engine |
 | Execution gate | n/a | Creator owns both ends + active binding; fail closed | New gate; never fall back to Creator/god context or a default ACP session |
 
 ## 9. Non-goals (v1)
@@ -143,7 +143,7 @@ KnowledgeView(Character, Binding) =
 - A second runtime or process plane, a companion Character app, an NPC swarm.
 - Per-Character copied World KB; implicit cross-World sharing of World facts or memories.
 - `WorldMembership` naming or reuse for Character↔World.
-- An active Character stored with zero active bindings; any fallback to the Creator/god context or a default ACP session when a binding or view is missing/invalid.
+- An active Character stored with zero active bindings; last-active-binding removal that mutates state or implicitly archives/deletes the Character; any fallback to the Creator/god context or a default ACP session when a binding or view is missing/invalid.
 - ToM L3, or replacing the V1.164–V1.166 l5 carriers with a new ToM engine.
 - A first-party player (PD-09 unchanged) or any new consumption end.
 - Any public Actor API before the contract and bearer stage lands (specs, vocabulary, and codegen first).
@@ -155,8 +155,8 @@ Dependency-ordered stages; each stage lands only on top of a working product. Ex
 1. **Actor/Character contract + durable Character bearer** — atomic initial ActorWorldBinding; specs/vocabulary/codegen before any public API.
 2. **ActorWorldBinding + Character KnowledgeView** — owner scopes, WorldSheet linkage, shared-vs-isolated KE, creator-only marker. (Dep: 1.)
 3. **Execute Actor on the existing Agent Host** — optional actor identity in Moment context; same process plane; isolated sessions; bounded fail-closed views. (Dep: 1, 2. Harness-owned mechanics.)
-4. **Multi-World binding proof** — Character-owned KE mounts across bindings without copying; binding-local KE stays isolated. (Dep: 2.)
-5. **Character SOUL/Memory bearer lifecycle** — distinct bearer tables, reused pipeline semantics. (Dep: 1.)
-6. **Character ToM L1+L2** on the V1.164–V1.166 l5 carriers; holder→Character mapping additive. (Dep: 2, 5.)
+4. **Multi-World binding proof** — Character-owned KE is visible across that Character's bindings without copying; binding-local KE stays isolated. (Dep: 2.)
+5. **Character SOUL/Memory bearer lifecycle** — distinct bearer tables/files, reused pipeline semantics; execution projection consumes stage 3 without creating another runtime. (Bearer dep: 1; projection dep: 3.)
+6. **Character ToM L1+L2** on the V1.164–V1.166 l5 carriers; Character mapping applies to belief `holder`, while MindState keeps the carrier KE id. (Dep: 2, 3, 5.)
 7. **Canvas persona surface** — image, SOUL summary, bindings; after stage 1 plus observed need. (Dep: 1.)
 8. **Visibility/interoperability dialect evaluation** — trigger-gated and spec-only; only if bindings + l5 carriers + a minimal creator-only marker prove insufficient for real needs (audience sets, target linkage, discovery time, fork applicability, order-2+ semantics). No engine commitment. (Dep: evidence after stage 2 dogfood.)

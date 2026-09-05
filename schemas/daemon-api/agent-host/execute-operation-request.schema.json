@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/agent-host/execute-operation-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus AgentHostExecuteOperationRequest",
+  "description": "Request body for POST /v1/daemon/agent-host/sessions/{session_id}/operations. Tagged by kind: prompt, set_model, or set_mode.",
+  "type": "object",
+  "oneOf": [
+    {
+      "title": "Prompt",
+      "type": "object",
+      "required": ["kind", "content"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string", "enum": ["prompt"] },
+        "content": { "type": "string" }
+      }
+    },
+    {
+      "title": "SetModel",
+      "type": "object",
+      "required": ["kind", "model"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string", "enum": ["set_model"] },
+        "model": { "type": "string" }
+      }
+    },
+    {
+      "title": "SetMode",
+      "type": "object",
+      "required": ["kind", "mode"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string", "enum": ["set_mode"] },
+        "mode": { "type": "string" }
+      }
+    }
+  ]
+}

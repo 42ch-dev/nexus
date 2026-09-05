@@ -27,6 +27,18 @@ Narrative universe with time_policy (manual/owner_driven/event_driven), visibili
 ### WorldMembership (`world-membership.schema.json`)
 Creator-World bridge with role, permissions, and membership status. §5.4
 
+### ActorRef (`actor-ref.schema.json`)
+Closed Creator | Character identity sum (`actor_kind` discriminant; exact prefixed ids).
+
+### Character (`character.schema.json`)
+Durable Creator-owned Character bearer (v1.184). Distinct from KnowledgeEntry `block_type=character`.
+
+### ActorWorldBinding (`actor-world-binding.schema.json`)
+Character↔World association (1..n active bindings). Distinct from WorldMembership.
+
+### KnowledgeOwnerRef (`knowledge-owner-ref.schema.json`)
+Closed World | Character | ActorWorldBinding owner union for KnowledgeEntry wire metadata.
+
 ### TimelineEvent (`timeline-event.schema.json`)
 Canonical timeline event with causality, sequence, and affected knowledge entries. §5.6
 

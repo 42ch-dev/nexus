@@ -78,7 +78,7 @@ const MAX_RELATIONSHIPS_PER_PASS: usize = 20;
 pub struct KbCandidate {
     /// Canonical entity name (heuristic: matched phrase; LLM: extracted name).
     pub canonical_name_guess: String,
-    /// Proposed `WorldKbBody` serialized as JSON.
+    /// Proposed `KnowledgeEntryBody` serialized as JSON.
     pub proposed_payload: String,
     /// `block_type` (`snake_case` wire value). Heuristic: always `character`;
     /// LLM: the model's judgement.
@@ -97,7 +97,7 @@ pub struct KbCandidate {
 ///
 /// Produced by the `nexus.llm.extract` capability alongside entity
 /// [`KbCandidate`]s. Endpoints are referenced by `canonical_name` (+ optional
-/// `block_type`) and resolved to `WorldKbEntry` ids at persist time by
+/// `block_type`) and resolved to `KnowledgeEntryRecord` ids at persist time by
 /// [`persist_relationship_candidates`]. A candidate whose endpoints cannot
 /// resolve to existing non-deleted `KnowledgeEntry` rows is skipped + logged (entities are
 /// NOT confirmed in the same extraction pass — architect lock).
@@ -317,7 +317,7 @@ pub struct AggregatedCandidate {
     /// (e.g. `[3, 5, 7]`). Injected into `proposed_payload` as a
     /// `source_chapters` JSON array by the aggregator.
     pub source_chapters: Vec<i32>,
-    /// Merged `WorldKbBody` JSON. Based on the first contributing
+    /// Merged `KnowledgeEntryBody` JSON. Based on the first contributing
     /// candidate's payload, with a `source_chapters` array injected so the
     /// upserted row records cross-chapter reuse (entity-scope-model §5.5.1).
     pub proposed_payload: String,
@@ -539,7 +539,7 @@ pub async fn extract_kb_candidates_for_review(
 /// Finalize-time missing-KB detection hook (V1.51 T-A P2).
 ///
 /// When a `novel-writing` schedule completes, scan the finalized chapter prose
-/// for entity references, diff against confirmed `WorldKbEntry` rows in the Work's
+/// for entity references, diff against confirmed `KnowledgeEntryRecord` rows in the Work's
 /// World, and write an advisory log file under
 /// `Works/<work_ref>/Logs/kb/missing/<date>-ch<chapter>.md`. The log is
 /// **advisory only**: missing candidates are not inserted into `kb_extract_jobs`.
@@ -874,7 +874,7 @@ pub(crate) fn candidate_from_llm_json_for_profile(
         "confidence": confidence.unwrap_or(0.0),
     });
     // If the LLM gave no explicit summary, drop the placeholder so the
-    // WorldKbBody summary is None (cleaner adopt surface).
+    // KnowledgeEntryBody summary is None (cleaner adopt surface).
     if summary.is_none() {
         if let Some(obj) = payload.as_object_mut() {
             obj.remove("summary");
@@ -1338,7 +1338,7 @@ async fn persist_candidates(
 ///
 /// Implements the architect-locked entity-existence prerequisite: a
 /// relationship candidate whose source or target endpoint cannot resolve to a
-/// non-deleted `WorldKbEntry` in the same world is **skipped + logged** (entities
+/// non-deleted `KnowledgeEntryRecord` in the same world is **skipped + logged** (entities
 /// are NOT confirmed in the same extraction pass). Resolved candidates are
 /// upserted via [`upsert_extraction_relationship`] with
 /// `needs_review = 1` + `source = 'extraction'`; the dedup composite key
@@ -1432,7 +1432,7 @@ async fn persist_relationship_candidates(
 
 /// Fetch the set of active `canonical_name` values for a world.
 ///
-/// Used to filter heuristic candidates that already exist as `WorldKbEntry`s
+/// Used to filter heuristic candidates that already exist as `KnowledgeEntryRecord`s
 /// (avoids offering the author a duplicate they will reject).
 ///
 /// R-V150-WLA-10 (V1.50 P-last WL-A / kb-auto-promotion qc3 S-001): errors

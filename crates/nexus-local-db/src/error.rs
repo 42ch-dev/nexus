@@ -80,6 +80,68 @@ pub enum LocalDbError {
     },
     /// Input validation failed before reaching the database.
     ValidationError(String),
+    /// Character / binding / world row is missing for the scoped caller.
+    ActorNotFound { resource: &'static str, id: String },
+    /// Stable actor-contract product conflict (HTTP 409 at the Daemon).
+    ActorContractConflict { code: ActorContractConflict },
+}
+
+/// Stable actor-contract conflict codes (wire `error.code` at HTTP 409).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActorContractConflict {
+    LastActiveBinding,
+    DuplicateActiveBinding,
+    DuplicateCharacterDisplayName,
+    InvalidWorldSheet,
+    WorldHasActorBindings,
+    BindingHasOwnedKnowledge,
+    BindingHasLocalMemory,
+    CharacterFragmentAlreadyShared,
+}
+
+impl ActorContractConflict {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LastActiveBinding => "last_active_actor_world_binding",
+            Self::DuplicateActiveBinding => "duplicate_active_actor_world_binding",
+            Self::DuplicateCharacterDisplayName => "duplicate_character_display_name",
+            Self::InvalidWorldSheet => "invalid_world_sheet",
+            Self::WorldHasActorBindings => "world_has_actor_bindings",
+            Self::BindingHasOwnedKnowledge => "binding_has_owned_knowledge",
+            Self::BindingHasLocalMemory => "binding_has_local_memory",
+            Self::CharacterFragmentAlreadyShared => "character_fragment_already_shared",
+        }
+    }
+
+    /// Human-readable API message for this conflict code.
+    #[must_use]
+    pub const fn message(self) -> &'static str {
+        match self {
+            Self::LastActiveBinding => {
+                "Cannot remove the last active world binding from a Character"
+            }
+            Self::DuplicateActiveBinding => {
+                "An active binding already exists for this Character and World"
+            }
+            Self::DuplicateCharacterDisplayName => {
+                "An active Character with this display name already exists for this Creator"
+            }
+            Self::InvalidWorldSheet => {
+                "WorldSheet is missing, deleted, the wrong type, or belongs to another World"
+            }
+            Self::WorldHasActorBindings => "World has Character bindings that prevent deletion",
+            Self::BindingHasOwnedKnowledge => {
+                "Cannot remove a binding that still owns KnowledgeEntry rows"
+            }
+            Self::BindingHasLocalMemory => {
+                "Cannot remove a binding that still has binding-local Character memory"
+            }
+            Self::CharacterFragmentAlreadyShared => {
+                "Character memory fragment is already shared (no binding provenance to clear)"
+            }
+        }
+    }
 }
 
 impl LocalDbError {
@@ -208,6 +270,12 @@ impl fmt::Display for LocalDbError {
             } => Self::fmt_world_conflict(f, table, id, expected_world, actual_world),
             Self::ValidationError(msg) => {
                 write!(f, "validation error: {msg}")
+            }
+            Self::ActorNotFound { resource, id } => {
+                write!(f, "{resource} '{id}' not found")
+            }
+            Self::ActorContractConflict { code } => {
+                write!(f, "{}", code.message())
             }
         }
     }

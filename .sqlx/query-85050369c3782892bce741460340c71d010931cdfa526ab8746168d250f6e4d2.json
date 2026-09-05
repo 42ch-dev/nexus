@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT character_id as \"character_id!\", actor_world_binding_id, narrative, generated_at,\n                  fragment_count_at_generation as \"fragment_count_at_generation!\",\n                  max_fragment_created_at_at_generation,\n                  distinct_keyword_count_cache as \"distinct_keyword_count_cache!\",\n                  stats_fingerprint,\n                  created_at as \"created_at!\", updated_at as \"updated_at!\"\n           FROM character_soul_narratives WHERE character_id = ? AND actor_world_binding_id IS ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "character_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "actor_world_binding_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "narrative",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "generated_at",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "fragment_count_at_generation!",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "max_fragment_created_at_at_generation",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "distinct_keyword_count_cache!",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "stats_fingerprint",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at!",
+        "ordinal": 9,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "85050369c3782892bce741460340c71d010931cdfa526ab8746168d250f6e4d2"
+}

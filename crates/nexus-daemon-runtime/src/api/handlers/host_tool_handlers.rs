@@ -1275,19 +1275,21 @@ async fn execute_kb_snapshot_write(
     })?;
 
     for block_val in blocks {
-        let kb: nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry =
+        let kb: nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord =
             serde_json::from_value(block_val.clone()).map_err(|e| NexusApiError::InvalidInput {
                 field: "parameters.blocks[]".into(),
                 reason: format!("invalid key block: {e}"),
             })?;
         // C-001: reject blocks whose embedded world_id does not match the
         // request-level world_id (prevents cross-world block payload bypass).
-        if kb.world_id != world_id {
+        if kb.world_id() != Some(world_id) {
             return Err(NexusApiError::Forbidden {
                 resource: "knowledge_entry.world_id".to_string(),
                 reason: format!(
                     "block {} targets world '{}' but request targets world '{}'",
-                    kb.entry_id, kb.world_id, world_id
+                    kb.entry_id,
+                    kb.world_id().unwrap_or_default(),
+                    world_id
                 ),
             });
         }
@@ -1486,13 +1488,17 @@ async fn execute_manuscript_chapter_update(
             message: format!("chapter update tx begin: {e}"),
         })?;
         // SAFETY: dynamic SQL for chapter update — runtime fields.
-        #[allow(clippy::cast_possible_wrap)]
         sqlx::query(
             "UPDATE work_chapters SET body_path = ?, actual_word_count = ?, updated_at = ? \
              WHERE work_id = ? AND chapter = ? AND volume = ?",
         )
         .bind(bp)
-        .bind(word_count as i64)
+        .bind(
+            i64::try_from(word_count).map_err(|_| NexusApiError::Internal {
+                code: "WORK_WORD_COUNT_OVERFLOW".into(),
+                message: format!("word_count {word_count} exceeds i64"),
+            })?,
+        )
         .bind(&now)
         .bind(work_id)
         .bind(chapter)
@@ -2307,12 +2313,16 @@ async fn execute_manuscript_write(
         message: format!("manuscript.write tx begin: {e}"),
     })?;
     // SAFETY: UPDATE against work_chapters — runtime query.
-    #[allow(clippy::cast_possible_wrap)]
     sqlx::query(
         "UPDATE work_chapters SET actual_word_count = ?, updated_at = ? \
          WHERE work_id = ? AND chapter = ? AND volume = ?",
     )
-    .bind(word_count as i64)
+    .bind(
+        i64::try_from(word_count).map_err(|_| NexusApiError::Internal {
+            code: "WORK_WORD_COUNT_OVERFLOW".into(),
+            message: format!("word_count {word_count} exceeds i64"),
+        })?,
+    )
     .bind(&now)
     .bind(work_id)
     .bind(chapter)

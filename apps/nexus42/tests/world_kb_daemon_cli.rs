@@ -3,7 +3,7 @@
 //! V1.73 route, end-to-end against a live daemon fixture with hermetic `HOME`
 //! (AR-83 #6 / AR-85).
 //!
-//! Each test seeds one owned World + a `WorldKbEntry` row (revision 0), then
+//! Each test seeds one owned World + a `KnowledgeEntryRecord` row (revision 0), then
 //! drives the REAL `nexus42` binary. Failure paths: the stale-revision path
 //! (stale `--expected-version` → 409 `world_kb_conflict` rendering
 //! `current_version` + `entity_id` + recovery hint) and the empty-patch
@@ -14,7 +14,7 @@ mod common;
 
 use common::LiveDaemon;
 use nexus_contracts::BlockType;
-use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_store::SqliteKbStore;
 use std::process::Output;
@@ -27,12 +27,12 @@ fn stderr(out: &Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
-/// Seed one owned World (the fixture's `wld_test_world`) + a `WorldKbEntry`
+/// Seed one owned World (the fixture's `wld_test_world`) + a `KnowledgeEntryRecord`
 /// with a valid novel body at revision 0, and return the `entry_id`.
 async fn seed_entity(d: &LiveDaemon) -> String {
     let store = SqliteKbStore::new(d.pool.clone());
-    let mut kb = WorldKbEntry::new("wld_test_world", BlockType::Character, "Hero");
-    kb.body = Some(WorldKbBody {
+    let mut kb = KnowledgeEntryRecord::new("wld_test_world", BlockType::Character, "Hero");
+    kb.body = Some(KnowledgeEntryBody {
         summary: Some("Original summary".to_string()),
         attributes: Some(serde_json::json!({"novel_category": "character"})),
         tags: Some(vec!["novel".to_string()]),

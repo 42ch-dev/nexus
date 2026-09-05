@@ -73,6 +73,76 @@ pub struct MindStateRow {
 /// Returns [`LocalDbError::Sqlx`] on database failure — including a
 /// duplicate `mind_state_id` primary key and an unknown
 /// `holder_entry_id` foreign key.
+/// Pinned pre-v1.184 P4 `MindState` wire envelope (field names + shapes).
+pub const LEGACY_MIND_STATE_WIRE_FIXTURE: &str = r#"{
+        "schema_version": 1,
+        "mind_state_id": "ms_001",
+        "holder_entry_id": "kb_holder",
+        "canonical_name": "Bo at the transfer",
+        "occurred_at": "2026-08-14T10:00:00Z",
+        "sort_key": "0001",
+        "snapshot": {
+            "attention": "the box",
+            "emotions": [{ "emotion": "hope", "intensity": 0.6 }]
+        },
+        "deltas": [{ "path": "attention", "previous": null, "next": "the box" }],
+        "source_anchor": { "event_id": "evt_transfer" },
+        "created_at": "2026-08-14T10:00:00Z",
+        "updated_at": "2026-08-14T10:00:00Z",
+        "extensions": { "nexus": { "note": "derivative snapshot" } }
+    }"#;
+
+/// Insert a `MindState` row inside a caller-owned transaction (v1.184 P4).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` on database failure.
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_mind_state_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    mind_state_id: &str,
+    schema_version: i64,
+    holder_entry_id: &str,
+    canonical_name: Option<&str>,
+    occurred_at: Option<&str>,
+    sort_key: Option<&str>,
+    snapshot_json: Option<&str>,
+    deltas_json: Option<&str>,
+    source_anchor_json: Option<&str>,
+    extensions_json: Option<&str>,
+) -> Result<(), LocalDbError> {
+    let created_at = chrono::Utc::now().to_rfc3339();
+    let updated_at = created_at.clone();
+
+    sqlx::query!(
+        "INSERT INTO mind_states (
+            mind_state_id, schema_version, holder_entry_id, canonical_name,
+            occurred_at, sort_key, snapshot_json, deltas_json, source_anchor_json,
+            created_at, updated_at, extensions_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        mind_state_id,
+        schema_version,
+        holder_entry_id,
+        canonical_name,
+        occurred_at,
+        sort_key,
+        snapshot_json,
+        deltas_json,
+        source_anchor_json,
+        created_at,
+        updated_at,
+        extensions_json,
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// Insert a `MindState` row from raw column values.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` on database failure.
 #[allow(clippy::too_many_arguments)] // raw column values — the full row shape
 pub async fn insert_mind_state(
     pool: &SqlitePool,

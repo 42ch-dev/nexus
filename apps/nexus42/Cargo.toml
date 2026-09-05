@@ -80,6 +80,7 @@ nexus-cloud-sync = { path = "../../crates/nexus-cloud-sync", features = ["legacy
 nexus-home-layout = { path = "../../crates/nexus-home-layout" }
 nexus-local-db = { path = "../../crates/nexus-local-db" }
 nexus-acp-host = { path = "../../crates/nexus-acp-host" }
+nexus-agent-host = { path = "../../crates/nexus-agent-host" }
 # V1.153 P2 (DF-73): `default-features = false` + explicit `web-embed`
 # forwarding (see [features]) — the slim `nexus-runtime` artifact
 # (`--no-default-features --features connect-host`) compiles the embedded

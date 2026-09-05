@@ -3,8 +3,8 @@
 //! [`SpokeBackedKbStore`] is the [`KbStore`] implementation injected at the
 //! `assemble_moment` wiring site ([`NexusAdapter`]'s MCA fetch) so the
 //! `WorldKB` read crosses the spoke-adapter boundary: storage rows → spoke
-//! `KnowledgeEntry` (via the [`conversion`] seam) → [`WorldKbEntry`] (via
-//! [`spoke_to_world_kb`]).
+//! `KnowledgeEntry` (via the [`conversion`] seam) → [`KnowledgeEntryRecord`] (via
+//! [`spoke_to_knowledge_record`]).
 //!
 //! # `scope.extensions["nexus"]` (spoke-native, ≥ 0.6.0)
 //!
@@ -29,13 +29,13 @@
 //! reject serves spoke orchestrators, not MCA).
 //!
 //! [`conversion`]: crate::conversion
-//! [`spoke_to_world_kb`]: crate::conversion::spoke_to_world_kb
-//! [`world_kb_to_spoke`]: crate::conversion::world_kb_to_spoke
+//! [`spoke_to_knowledge_record`]: crate::conversion::spoke_to_knowledge_record
+//! [`knowledge_record_to_spoke`]: crate::conversion::knowledge_record_to_spoke
 use super::NexusAdapter;
-use crate::conversion::{spoke_to_world_kb, world_kb_to_spoke};
+use crate::conversion::{knowledge_record_to_spoke, spoke_to_knowledge_record};
 use crate::extensions::set_nexus_body;
 use crate::{KnowledgeEntry, Scope, ScopeExtensionsKey};
-use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
+use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use nexus_knowledge::world_kb::query::{KbQuery, KbQueryResult};
 use nexus_knowledge::world_kb::source_anchor::SourceAnchor;
 use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
@@ -47,7 +47,7 @@ use sqlx::SqlitePool;
 
 /// Result of [`NexusAdapter::list_knowledge_entries_scoped`] — the
 /// spoke-wire analogue of [`KbQueryResult`] (items are spoke
-/// [`KnowledgeEntry`] instead of [`WorldKbEntry`]).
+/// [`KnowledgeEntry`] instead of [`KnowledgeEntryRecord`]).
 #[derive(Debug, Clone)]
 pub struct ScopedKbRead {
     /// Matching spoke `KnowledgeEntry`s (after pagination).
@@ -86,8 +86,8 @@ impl NexusAdapter<'_> {
     /// separate — the extensions mechanism changes WHERE the MCA filters ride,
     /// not the limit contract.
     ///
-    /// Each [`WorldKbEntry`] row is projected to a spoke [`KnowledgeEntry`]
-    /// via the sole conversion seam ([`world_kb_to_spoke`]); the lossless
+    /// Each [`KnowledgeEntryRecord`] row is projected to a spoke [`KnowledgeEntry`]
+    /// via the sole conversion seam ([`knowledge_record_to_spoke`]); the lossless
     /// `_nexus_body` carrier is stashed so the reverse conversion in
     /// [`SpokeBackedKbStore`] recovers the exact body (V1.143 body-fidelity
     /// mechanism, applied to the read path).
@@ -109,8 +109,8 @@ impl NexusAdapter<'_> {
             .items
             .iter()
             .map(|entry| {
-                let mut spoke = world_kb_to_spoke(entry);
-                // Stash the lossless body carrier so `spoke_to_world_kb` in
+                let mut spoke = knowledge_record_to_spoke(entry);
+                // Stash the lossless body carrier so `spoke_to_knowledge_record` in
                 // `SpokeBackedKbStore` recovers the exact body (attributes,
                 // computable, etc.) instead of the spoke-truncated fallback.
                 // Only the MCA read path sets this; the spoke orchestrator
@@ -142,7 +142,7 @@ impl NexusAdapter<'_> {
 /// (native `entry_types` from [`KbQuery::block_type`] + the nexus-specific
 /// filters under `scope.extensions["nexus"]`) from the inbound [`KbQuery`],
 /// calls the adapter's scoped read, and converts each spoke [`KnowledgeEntry`]
-/// back to a [`WorldKbEntry`] via [`spoke_to_world_kb`]. The result is
+/// back to a [`KnowledgeEntryRecord`] via [`spoke_to_knowledge_record`]. The result is
 /// byte-identical to [`SqliteKbStore::query`] (see the module docs).
 ///
 /// The remaining read methods (`get_knowledge_entry` / `list_by_world` /
@@ -225,7 +225,17 @@ impl KbStore for SpokeBackedKbStore {
         // Cross the spoke-adapter boundary: storage → spoke KnowledgeEntry,
         // then convert back to the domain type via the sole conversion seam.
         let read = self.adapter.list_knowledge_entries_scoped(&scope).await?;
-        let items: Vec<WorldKbEntry> = read.items.into_iter().map(spoke_to_world_kb).collect();
+        // v1.184 P1: the reverse seam is fallible (fails closed on missing
+        // owner metadata). Rows originate from storage (always owned), so an
+        // error here is a malformed-row signal — surface it as a storage error
+        // rather than fabricating a World owner.
+        let items: Vec<KnowledgeEntryRecord> = read
+            .items
+            .into_iter()
+            .map(|spoke| {
+                spoke_to_knowledge_record(spoke).map_err(|e| KbStoreError::Storage(e.to_string()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(KbQueryResult {
             items,
             total_count: read.total_count,
@@ -235,12 +245,15 @@ impl KbStore for SpokeBackedKbStore {
 
     async fn insert_knowledge_entry(
         &self,
-        _kb: WorldKbEntry,
+        _kb: KnowledgeEntryRecord,
     ) -> Result<nexus_knowledge::world_kb::query::KbInsertResult, KbStoreError> {
         Err(read_only_error("insert_knowledge_entry"))
     }
 
-    async fn get_knowledge_entry(&self, entry_id: &str) -> Result<WorldKbEntry, KbStoreError> {
+    async fn get_knowledge_entry(
+        &self,
+        entry_id: &str,
+    ) -> Result<KnowledgeEntryRecord, KbStoreError> {
         // Delegate to SqliteKbStore (MCA does not call this; the daemon CRUD
         // path uses SqliteKbStore directly — unchanged).
         SqliteKbStore::new(self.pool.clone())
@@ -248,7 +261,10 @@ impl KbStore for SpokeBackedKbStore {
             .await
     }
 
-    async fn list_by_world(&self, world_id: &str) -> Result<Vec<WorldKbEntry>, KbStoreError> {
+    async fn list_by_world(
+        &self,
+        world_id: &str,
+    ) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
         SqliteKbStore::new(self.pool.clone())
             .list_by_world(world_id)
             .await
@@ -268,7 +284,7 @@ impl KbStore for SpokeBackedKbStore {
             .await
     }
 
-    async fn update_knowledge_entry(&self, _kb: WorldKbEntry) -> Result<(), KbStoreError> {
+    async fn update_knowledge_entry(&self, _kb: KnowledgeEntryRecord) -> Result<(), KbStoreError> {
         Err(read_only_error("update_knowledge_entry"))
     }
 
@@ -424,7 +440,7 @@ fn kb_query_from_scope(scope: &Scope) -> KbQuery {
 mod tests {
     use super::*;
     use nexus_contracts::BlockType;
-    use nexus_knowledge::world_kb::knowledge_entry::WorldKbBody;
+    use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody;
     use nexus_knowledge::world_kb::KbStore;
     use nexus_local_db::{open_pool, run_migrations};
 
@@ -436,7 +452,9 @@ mod tests {
         (pool, dir)
     }
 
-    async fn seed_world_with_entries(pool: &sqlx::SqlitePool) -> (String, Vec<WorldKbEntry>) {
+    async fn seed_world_with_entries(
+        pool: &sqlx::SqlitePool,
+    ) -> (String, Vec<KnowledgeEntryRecord>) {
         // SAFETY: test-only static INSERTs with bind params.
         sqlx::query(
             "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
@@ -464,9 +482,9 @@ mod tests {
         .into_iter()
         .enumerate()
         {
-            let mut entry = WorldKbEntry::new("wld_mca", block_type, name);
+            let mut entry = KnowledgeEntryRecord::new("wld_mca", block_type, name);
             entry.entry_id = format!("kb_mca_{idx}");
-            entry.body = Some(WorldKbBody {
+            entry.body = Some(KnowledgeEntryBody {
                 summary: Some(format!("{name} summary")),
                 ..Default::default()
             });
@@ -539,9 +557,9 @@ mod tests {
 
         // Re-seed one entry with an integer attribute that the spoke typed body
         // alone would round-trip as a float.
-        let mut entry = WorldKbEntry::new(&world_id, BlockType::Character, "Numeric");
+        let mut entry = KnowledgeEntryRecord::new(&world_id, BlockType::Character, "Numeric");
         entry.entry_id = "kb_mca_num".to_string();
-        entry.body = Some(WorldKbBody {
+        entry.body = Some(KnowledgeEntryBody {
             summary: Some("Numeric body".to_string()),
             attributes: Some(serde_json::json!({"age": 28})),
             ..Default::default()
@@ -563,7 +581,7 @@ mod tests {
     async fn write_methods_return_read_only_error() {
         let (pool, _dir) = fresh_pool().await;
         let store = SpokeBackedKbStore::new(pool);
-        let entry = WorldKbEntry::new("wld_mca", BlockType::Character, "Ghost");
+        let entry = KnowledgeEntryRecord::new("wld_mca", BlockType::Character, "Ghost");
         let err = store.insert_knowledge_entry(entry).await.unwrap_err();
         assert!(matches!(err, KbStoreError::Storage(ref s) if s.contains("read-only")));
     }
@@ -594,7 +612,8 @@ mod tests {
         // Seed beyond the 500-row window.
         let sqlite = SqliteKbStore::new(pool.clone());
         for i in 0..(nexus_local_db::kb_store::LIST_BY_WORLD_LIMIT + 50) {
-            let mut entry = WorldKbEntry::new("wld_big", BlockType::Item, &format!("Row_{i:04}"));
+            let mut entry =
+                KnowledgeEntryRecord::new("wld_big", BlockType::Item, &format!("Row_{i:04}"));
             entry.entry_id = format!("kb_big_{i:04}");
             sqlite.insert_knowledge_entry(entry).await.unwrap();
         }

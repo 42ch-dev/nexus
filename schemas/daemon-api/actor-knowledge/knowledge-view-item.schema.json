@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/actor-knowledge/knowledge-view-item.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ActorKnowledgeViewItem",
+  "description": "One KnowledgeEntry in an Actor KnowledgeView or Character knowledge list, with deterministic stored-owner metadata.",
+  "type": "object",
+  "required": [
+    "entry_id",
+    "owner",
+    "creator_only",
+    "block_type",
+    "canonical_name",
+    "status",
+    "created_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "entry_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "owner": {
+      "$ref": "https://nexus42.invalid/schemas/domain/knowledge-owner-ref.schema.json"
+    },
+    "creator_only": { "type": "boolean" },
+    "block_type": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/BlockType"
+    },
+    "canonical_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "status": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/KeyBlockStatus"
+    },
+    "created_at": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
+    }
+  }
+}

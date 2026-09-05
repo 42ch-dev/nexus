@@ -80,9 +80,9 @@ fn resolve_module_id(
     // `body.computable`).
     //
     // NOTE (P2 QC fix wave FW-1 — dead-code tier): under the current
-    // conversion seam this tier can never fire — `world_kb_to_spoke` emits
+    // conversion seam this tier can never fire — `knowledge_record_to_spoke` emits
     // only the marker map `{"_computable": true}` from the nexus
-    // `Option<bool>`, and `spoke_to_world_kb` collapses spoke maps back to
+    // `Option<bool>`, and `spoke_to_knowledge_record` collapses spoke maps back to
     // `Some(true)`, so `entry.body.computable.get("module_id")` is always
     // `None` today. The tier is retained as the documented resolution
     // precedence (spec §2.2) and as defense if body.computable maps ever
@@ -1083,7 +1083,7 @@ mod tests {
     use crate::ComputablePort;
     use crate::KnowledgeEntryPort;
     use nexus_contracts::BlockType;
-    use nexus_knowledge::world_kb::{WorldKbBody, WorldKbEntry};
+    use nexus_knowledge::world_kb::{KnowledgeEntryBody, KnowledgeEntryRecord};
     use nexus_local_db::{open_pool, run_migrations};
 
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
@@ -1125,11 +1125,11 @@ mod tests {
         base_def: i64,
         current_hp: i64,
     ) -> crate::KnowledgeEntry {
-        use crate::conversion::world_kb_to_spoke;
-        let mut world = WorldKbEntry::new("wld_cmp", BlockType::Character, canonical_name);
+        use crate::conversion::knowledge_record_to_spoke;
+        let mut world = KnowledgeEntryRecord::new("wld_cmp", BlockType::Character, canonical_name);
         world.entry_id = entry_id.to_string();
         world.revision = Some(1);
-        world.body = Some(WorldKbBody {
+        world.body = Some(KnowledgeEntryBody {
             summary: Some(format!("{canonical_name} the warrior")),
             attributes: Some({
                 let mut attrs = Map::new();
@@ -1148,7 +1148,7 @@ mod tests {
             }),
             ..Default::default()
         });
-        world_kb_to_spoke(&world)
+        knowledge_record_to_spoke(&world)
     }
 
     fn unwrap_ok<T>(result: SpokeResult<T>, label: &str) -> T {
@@ -2336,9 +2336,9 @@ mod tests {
     /// world B.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cross_world_defender_rejects_invalid_input() {
-        use crate::conversion::world_kb_to_spoke;
+        use crate::conversion::knowledge_record_to_spoke;
         use nexus_contracts::BlockType;
-        use nexus_knowledge::world_kb::{WorldKbBody, WorldKbEntry};
+        use nexus_knowledge::world_kb::{KnowledgeEntryBody, KnowledgeEntryRecord};
         let (pool, _dir) = fresh_pool().await;
         // Seed two distinct worlds.
         seed_world(&pool).await;
@@ -2361,12 +2361,12 @@ mod tests {
         );
 
         // Create a character in world B (wld_other).
-        // spoke_character_entry hardcodes wld_cmp; we create a WorldKbEntry
+        // spoke_character_entry hardcodes wld_cmp; we create a KnowledgeEntryRecord
         // for wld_other explicitly and convert.
-        let mut world_b = WorldKbEntry::new("wld_other", BlockType::Character, "OtherF003");
+        let mut world_b = KnowledgeEntryRecord::new("wld_other", BlockType::Character, "OtherF003");
         world_b.entry_id = "kb_other_f003".to_string();
         world_b.revision = Some(1);
-        world_b.body = Some(WorldKbBody {
+        world_b.body = Some(KnowledgeEntryBody {
             summary: Some("Other world character".into()),
             attributes: Some({
                 let mut attrs = Map::new();
@@ -2385,7 +2385,7 @@ mod tests {
             }),
             ..Default::default()
         });
-        let other_spoke = world_kb_to_spoke(&world_b);
+        let other_spoke = knowledge_record_to_spoke(&world_b);
         unwrap_ok(
             adapter.put_knowledge_entry(other_spoke, None).await,
             "create other_world char",

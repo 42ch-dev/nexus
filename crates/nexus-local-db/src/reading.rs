@@ -368,10 +368,10 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .expect("connect");
-        sqlx::migrate!("../nexus-local-db/migrations")
-            .run(&pool)
-            .await
-            .expect("migrate");
+        // Route through the central runner: a raw `sqlx::migrate!().run()`
+        // bypasses the FK-suspension scoping and the post-migration
+        // foreign_key_check that crate::run_migrations guarantees.
+        crate::run_migrations(&pool).await.expect("migrate");
         pool
     }
 

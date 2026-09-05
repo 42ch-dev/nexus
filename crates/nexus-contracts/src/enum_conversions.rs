@@ -452,6 +452,26 @@ impl BindingStatus {
     }
 }
 
+impl crate::generated::domain::character::CharacterStatus {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Archived => "archived",
+        }
+    }
+}
+
+impl crate::generated::domain::actor_world_binding::ActorWorldBindingStatus {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Inactive => "inactive",
+        }
+    }
+}
+
 impl ProfileKind {
     #[must_use]
     pub const fn as_str(&self) -> &'static str {

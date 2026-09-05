@@ -33,7 +33,7 @@
 #![allow(clippy::unwrap_used)]
 
 use nexus_contracts::BlockType;
-use nexus_knowledge::world_kb::{WorldKbBody, WorldKbEntry};
+use nexus_knowledge::world_kb::{KnowledgeEntryBody, KnowledgeEntryRecord};
 use nexus_local_db::{open_pool, run_migrations};
 // V1.145 P1b — adapter rehomed to nexus-spoke-adapter (spec §7.4).
 use nexus_spoke_adapter::NexusAdapter;
@@ -87,7 +87,7 @@ async fn seed_world(pool: &sqlx::SqlitePool) {
     .unwrap();
 }
 
-/// Build a spoke `KnowledgeEntry` via the production `WorldKbEntry → spoke`
+/// Build a spoke `KnowledgeEntry` via the production `KnowledgeEntryRecord → spoke`
 /// conversion seam (spec §7.1) so it satisfies the `kb_key_blocks` storage
 /// shape (`world_id` under `extensions.nexus`, `canonical_name` format-valid,
 /// `entry_type` derived from `BlockType`). Mirrors the production adapter's
@@ -98,15 +98,15 @@ fn spoke_entry(
     revision: Option<u64>,
     status: &str,
 ) -> nexus_spoke_adapter::KnowledgeEntry {
-    let mut world = WorldKbEntry::new(WORLD_ID, BlockType::Character, canonical_name);
+    let mut world = KnowledgeEntryRecord::new(WORLD_ID, BlockType::Character, canonical_name);
     world.entry_id = entry_id.to_string();
     world.revision = revision;
     world.status = status.to_string();
-    world.body = Some(WorldKbBody {
+    world.body = Some(KnowledgeEntryBody {
         summary: Some(format!("{canonical_name} summary")),
         ..Default::default()
     });
-    nexus_spoke_adapter::conversion::world_kb_to_spoke(&world)
+    nexus_spoke_adapter::conversion::knowledge_record_to_spoke(&world)
 }
 
 /// Build an `UpsertRequest` from a single spoke `KnowledgeEntry`. The entry is

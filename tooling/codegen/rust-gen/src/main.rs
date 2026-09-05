@@ -185,8 +185,60 @@ fn output_path(out_root: &Path, rel: &Path) -> PathBuf {
         .join(format!("{}.rs", to_rust_module_name(stem)))
 }
 
+/// typify's `maxLength`/`minLength` checks use UTF-8 `value.len()`. JSON Schema
+/// draft-07 counts Unicode scalars, so rewrite every generated length check.
+/// Trim rejection is not a JSON Schema keyword. Inject it only into Character
+/// `display_name` newtypes — including copies typify emits when a response DTO
+/// inlines Character — so every occurrence matches the domain parser. Other
+/// length-bounded strings stay untrimmed.
+fn is_character_display_name_type(type_name: &str) -> bool {
+    type_name.contains("Character") && type_name.ends_with("DisplayName")
+}
+
+fn inject_character_display_name_trim(rust: &str) -> String {
+    const IMPL: &str = "impl :: std :: str :: FromStr for ";
+    const FROM_STR_OPEN: &str =
+        "fn from_str (value : & str) -> :: std :: result :: Result < Self , self :: error :: ConversionError > { ";
+    const TRIM_GUARD: &str =
+        "if value . trim () != value { return Err (\"must be trimmed\" . into ()) ; } ";
+
+    let mut out = String::with_capacity(rust.len() + 256);
+    let mut cursor = 0;
+    while let Some(rel) = rust[cursor..].find(IMPL) {
+        let impl_at = cursor + rel;
+        out.push_str(&rust[cursor..impl_at]);
+        let name_start = impl_at + IMPL.len();
+        let Some(name_len) = rust[name_start..].find(' ') else {
+            out.push_str(&rust[impl_at..]);
+            return out;
+        };
+        let name_end = name_start + name_len;
+        let type_name = &rust[name_start..name_end];
+        out.push_str(&rust[impl_at..name_end]);
+        cursor = name_end;
+        if !is_character_display_name_type(type_name) {
+            continue;
+        }
+        if let Some(open_rel) = rust[cursor..].find(FROM_STR_OPEN) {
+            let insert_at = cursor + open_rel + FROM_STR_OPEN.len();
+            out.push_str(&rust[cursor..insert_at]);
+            if !rust[insert_at..].starts_with(TRIM_GUARD) {
+                out.push_str(TRIM_GUARD);
+            }
+            cursor = insert_at;
+        }
+    }
+    out.push_str(&rust[cursor..]);
+    out
+}
+
+fn rewrite_unicode_scalar_length_checks(rust: &str) -> String {
+    inject_character_display_name_trim(&rust.replace("value . len ()", "value . chars () . count ()"))
+}
+
 /// A path relative to the schemas dir, rendered with POSIX separators, for
 /// skip-list matching (independent of platform path separators).
+
 fn rel_posix(path: &Path) -> String {
     path.components()
         .filter_map(|c| match c {
@@ -197,11 +249,182 @@ fn rel_posix(path: &Path) -> String {
         .join("/")
 }
 
+/// Wire schemas whose serialized object-key order is part of a compatibility pin.
+/// `typify` emits fields in BTreeMap (alphabetical) order; we restore the source
+/// schema `properties` insertion order so omitted-optional JSON stays byte-stable.
+const PRESERVE_PROPERTY_ORDER: &[&str] = &[
+    "daemon-api/agent-host/session-response.schema.json",
+    "daemon-api/agent-host/create-session-request.schema.json",
+    "daemon-api/agent-host/session-list-response.schema.json",
+    "daemon-api/agent-host/session-viewpoint.schema.json",
+];
+
+/// Property names from a source schema object, in JSON insertion order
+/// (`serde_json` `preserve_order`).
+fn source_property_order(schema: &Value) -> Vec<String> {
+    schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .map(|props| props.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+fn field_ident(field: &str) -> Option<String> {
+    let idx = field.rfind(" pub ")?;
+    let rest = field[idx + 5..].trim_start();
+    let ident: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect();
+    if ident.is_empty() {
+        None
+    } else {
+        Some(ident)
+    }
+}
+
+fn split_struct_fields(body: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut current = String::new();
+    let mut brace = 0i32;
+    let mut angle = 0i32;
+    let mut paren = 0i32;
+    let mut bracket = 0i32;
+    for ch in body.chars() {
+        match ch {
+            '{' => brace += 1,
+            '}' => brace -= 1,
+            '<' => angle += 1,
+            '>' => angle -= 1,
+            '(' => paren += 1,
+            ')' => paren -= 1,
+            '[' => bracket += 1,
+            ']' => bracket -= 1,
+            ',' if brace == 0 && angle == 0 && paren == 0 && bracket == 0 => {
+                fields.push(std::mem::take(&mut current));
+                current.push(ch);
+                fields.push(std::mem::take(&mut current));
+                continue;
+            }
+            _ => {}
+        }
+        current.push(ch);
+    }
+    if !current.is_empty() {
+        fields.push(current);
+    }
+    fields
+}
+
+fn reorder_struct_body(body: &str, order: &[String]) -> String {
+    let chunks = split_struct_fields(body);
+    let mut named: Vec<(String, String)> = Vec::new();
+    for chunk in &chunks {
+        if let Some(name) = field_ident(chunk) {
+            named.push((name, chunk.clone()));
+        }
+    }
+    if named.is_empty() {
+        return body.to_string();
+    }
+    let mut used = vec![false; named.len()];
+    let mut ordered_fields: Vec<String> = Vec::new();
+    for want in order {
+        if let Some(slot) = named
+            .iter()
+            .enumerate()
+            .find(|(i, (name, _))| !used[*i] && name == want)
+            .map(|(i, _)| i)
+        {
+            used[slot] = true;
+            ordered_fields.push(named[slot].1.clone());
+        }
+    }
+    for (i, used_flag) in used.iter().enumerate() {
+        if !*used_flag {
+            ordered_fields.push(named[i].1.clone());
+        }
+    }
+    let mut separators: Vec<String> = chunks
+        .iter()
+        .filter(|c| field_ident(c).is_none())
+        .cloned()
+        .collect();
+    let mut out = String::new();
+    for (i, field) in ordered_fields.iter().enumerate() {
+        out.push_str(field);
+        if i + 1 < ordered_fields.len() {
+            if let Some(pos) = separators.iter().position(|s| s.contains(',')) {
+                out.push_str(&separators.remove(pos));
+            } else {
+                out.push(',');
+            }
+        }
+    }
+    for sep in separators {
+        out.push_str(&sep);
+    }
+    out
+}
+
+fn reorder_root_struct_fields(rust: &str, type_name: &str, order: &[String]) -> String {
+    if order.is_empty() {
+        return rust.to_string();
+    }
+    let needle = format!("pub struct {type_name} {{");
+    let Some(start) = rust.find(&needle) else {
+        return rust.to_string();
+    };
+    let body_start = start + needle.len();
+    let bytes = rust.as_bytes();
+    let mut depth = 1i32;
+    let mut i = body_start;
+    while i < rust.len() {
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' if depth == 1 => {
+                let body = &rust[body_start..i];
+                let reordered = reorder_struct_body(body, order);
+                return format!("{}{}{}", &rust[..body_start], reordered, &rust[i..]);
+            }
+            b'}' => depth -= 1,
+            _ => {}
+        }
+        i += 1;
+    }
+    rust.to_string()
+}
+
+/// Restore `NexusSessionViewpoint` field order from the source viewpoint schema
+/// whenever typify inlines that type (create/single/list carriers).
+fn apply_nested_session_viewpoint_order(rust: &str, src_schema_path: &Path) -> String {
+    if !rust.contains("pub struct NexusSessionViewpoint {") {
+        return rust.to_string();
+    }
+    let Some(dir) = src_schema_path.parent() else {
+        return rust.to_string();
+    };
+    let viewpoint_schema = dir.join("session-viewpoint.schema.json");
+    let Ok(src_raw) = fs::read_to_string(&viewpoint_schema) else {
+        return rust.to_string();
+    };
+    let Ok(src_json) = serde_json::from_str::<Value>(&src_raw) else {
+        return rust.to_string();
+    };
+    let order = source_property_order(&src_json);
+    reorder_root_struct_fields(rust, "NexusSessionViewpoint", &order)
+}
+
 /// Generate Rust source for a single schema via `typify` and write it to `out_path`.
 ///
 /// `rel` is the schema's path relative to the schemas dir (POSIX or platform); it
 /// is rendered verbatim into the file header as the canonical source pointer.
-fn generate_schema_rust(schema_path: &Path, rel: &Path, out_path: &Path) -> Result<(), String> {
+fn generate_schema_rust(
+    schema_path: &Path,
+    rel: &Path,
+    out_path: &Path,
+    src_schema_path: &Path,
+) -> Result<(), String> {
     let content = fs::read_to_string(schema_path)
         .map_err(|err| format!("failed to read {}: {err}", schema_path.display()))?;
     let mut schema: RootSchema = serde_json::from_str(&content)
@@ -222,7 +445,7 @@ fn generate_schema_rust(schema_path: &Path, rel: &Path, out_path: &Path) -> Resu
     let type_name = schema_type_name(file_name);
     {
         let metadata = schema.schema.metadata.get_or_insert_with(Box::default);
-        metadata.title = Some(type_name);
+        metadata.title = Some(type_name.clone());
     }
 
     let mut settings = TypeSpaceSettings::default();
@@ -234,13 +457,23 @@ fn generate_schema_rust(schema_path: &Path, rel: &Path, out_path: &Path) -> Resu
         .add_root_schema(schema)
         .map_err(|err| format!("typify failed for {}: {err}", schema_path.display()))?;
 
-    let rust = type_space.to_stream().to_string();
+    let mut rust = rewrite_unicode_scalar_length_checks(&type_space.to_stream().to_string());
     if rust.trim().is_empty() {
         return Err(format!(
             "typify produced empty output for {}",
             schema_path.display()
         ));
     }
+    let rel_posix_path = rel_posix(rel);
+    if PRESERVE_PROPERTY_ORDER.contains(&rel_posix_path.as_str()) {
+        if let Ok(src_raw) = fs::read_to_string(src_schema_path) {
+            if let Ok(src_json) = serde_json::from_str::<Value>(&src_raw) {
+                let order = source_property_order(&src_json);
+                rust = reorder_root_struct_fields(&rust, &type_name, &order);
+            }
+        }
+    }
+    rust = apply_nested_session_viewpoint_order(&rust, src_schema_path);
 
     if let Some(parent) = out_path.parent() {
         fs::create_dir_all(parent).map_err(|err| {
@@ -487,7 +720,7 @@ fn main() {
         }
 
         let out_path = output_path(&out_root, rel);
-        if let Err(err) = generate_schema_rust(schema_path, rel, &out_path) {
+        if let Err(err) = generate_schema_rust(schema_path, rel, &out_path, &src_dir.join(rel)) {
             failures.push(err);
             continue;
         }

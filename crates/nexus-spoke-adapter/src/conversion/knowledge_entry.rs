@@ -1,16 +1,16 @@
-//! `WorldKbEntry ↔ spoke KnowledgeEntry` conversion seam + lifecycle delegation.
+//! `KnowledgeEntryRecord ↔ spoke KnowledgeEntry` conversion seam + lifecycle delegation.
 //!
 //! This is the **sole conversion seam** between the nexus domain aggregate
-//! [`WorldKbEntry`] and the spoke standard wire type [`SpokeKnowledgeEntry`]
+//! [`KnowledgeEntryRecord`] and the spoke standard wire type [`SpokeKnowledgeEntry`]
 //! (spec `spoke-adapter-architecture.md` §7.1), and the home of the nexus
 //! lifecycle methods that delegate status-transition validity to
 //! spoke-operations (spec §1.5 / §7).
 //!
-//! Both [`WorldKbEntry`] and [`SpokeKnowledgeEntry`] are foreign to this crate,
+//! Both [`KnowledgeEntryRecord`] and [`SpokeKnowledgeEntry`] are foreign to this crate,
 //! so the orphan rule forbids `impl From<...>` here. The seam is therefore
-//! expressed as the free functions [`world_kb_to_spoke`] /
-//! [`spoke_to_world_kb`], and the lifecycle delegation lives on the local
-//! [`WorldKbEntrySpokeExt`] trait. See the parent [`conversion`](super) module
+//! expressed as the free functions [`knowledge_record_to_spoke`] /
+//! [`spoke_to_knowledge_record`], and the lifecycle delegation lives on the local
+//! [`KnowledgeEntryRecordSpokeExt`] trait. See the parent [`conversion`](super) module
 //! doc for the dependency-direction rationale.
 //!
 //! # Body alignment (spoke 0.4.0)
@@ -25,7 +25,7 @@
 //! adopts spoke's typed body shape natively (roadmap). Both directions map all
 //! 5 fields (see field-level doc comments on the helpers).
 //!
-//! Unknown `extensions.nexus` keys ride as [`WorldKbEntry::extensions_nexus_extras`]
+//! Unknown `extensions.nexus` keys ride as [`KnowledgeEntryRecord::extensions_nexus_extras`]
 //! and are preserved verbatim across the seam (spec §2.2).
 
 use std::collections::HashMap;
@@ -34,7 +34,7 @@ use std::num::NonZeroU64;
 use nexus_contracts::{BlockType, KeyBlockStatus};
 use nexus_knowledge::world_kb::errors::KbError;
 use nexus_knowledge::world_kb::knowledge_entry::{
-    ConflictCheckResult, MembershipPermissionCheck, WorldKbBody, WorldKbEntry,
+    ConflictCheckResult, KnowledgeEntryBody, KnowledgeEntryRecord, MembershipPermissionCheck,
 };
 use nexus_knowledge::world_kb::source_anchor::SourceAnchor;
 use serde_json::{Map, Value};
@@ -46,8 +46,8 @@ use spoke_schemas::knowledge_entry::{
 };
 
 use crate::extensions::{
-    get_created_from_command_id, get_nexus_extras, get_provenance, get_world_id,
-    set_created_from_command_id, set_nexus_extras, set_provenance, set_world_id, take_nexus_body,
+    get_created_from_command_id, get_creator_only, get_nexus_extras, get_owner, get_provenance,
+    set_created_from_command_id, set_nexus_extras, set_owner, set_provenance, take_nexus_body,
 };
 // Test-only: simulates the persist-path carrier stash in `build_spoke_upsert_
 // request` (production code sets the carrier in nexus-daemon-runtime, not here).
@@ -58,11 +58,11 @@ use crate::{SpokeReject, SpokeResult};
 
 // ── Free-function conversion seam (orphan-rule compliant) ────────────────
 
-/// Forward: nexus domain [`WorldKbEntry`] → spoke standard
+/// Forward: nexus domain [`KnowledgeEntryRecord`] → spoke standard
 /// [`SpokeKnowledgeEntry`] (spec §7.1 sole conversion seam).
 ///
 /// Borrows the domain entry (callers no longer need to `.clone()` the whole
-/// struct before converting — the previous `From<WorldKbEntry>` consumed it).
+/// struct before converting — the previous `From<KnowledgeEntryRecord>` consumed it).
 /// Behavior is byte-identical to the former `From` impl; only the owned fields
 /// are cloned internally.
 ///
@@ -71,10 +71,10 @@ use crate::{SpokeReject, SpokeResult};
 /// Panics if `canonical_name` fails the spoke newtype's regex validation or
 /// `schema_version` is `0`. Both are nexus-validated invariants
 /// (`validate_canonical_name` runs at construction; `schema_version` defaults
-/// to `1` in [`WorldKbEntry::new`]), so a panic here indicates a wire-shape
+/// to `1` in [`KnowledgeEntryRecord::new`]), so a panic here indicates a wire-shape
 /// drift, not a runtime input error.
 #[must_use]
-pub fn world_kb_to_spoke(entry: &WorldKbEntry) -> SpokeKnowledgeEntry {
+pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledgeEntry {
     // Body: map all 5 typed body fields (spoke 0.4.0 closed body). Each nexus
     // field maps onto its spoke counterpart; computable bool→map and attributes
     // object→Vec<BodyAttribute> are shape conversions (see module doc).
@@ -143,9 +143,10 @@ pub fn world_kb_to_spoke(entry: &WorldKbEntry) -> SpokeKnowledgeEntry {
         }),
     };
 
-    // Identity fields → extensions.nexus (via adapter accessors; preserves
-    // unknown keys per spec §2.2).
-    set_world_id(&mut spoke, entry.world_id.clone());
+    // Canonical owner + creator_only → extensions.nexus (v1.184 P1). World
+    // owners emit `world_id`; Character/binding owners emit their typed key
+    // and never a fabricated `world_id`. Preserves unknown keys per spec §2.2.
+    set_owner(&mut spoke, &entry.owner, entry.creator_only);
     set_created_from_command_id(&mut spoke, entry.created_from_command_id.clone());
     set_provenance(
         &mut spoke,
@@ -161,13 +162,22 @@ pub fn world_kb_to_spoke(entry: &WorldKbEntry) -> SpokeKnowledgeEntry {
 }
 
 /// Reverse: spoke standard [`SpokeKnowledgeEntry`] → nexus domain
-/// [`WorldKbEntry`] (spec §7.1 sole conversion seam).
+/// [`KnowledgeEntryRecord`] (spec §7.1 sole conversion seam).
 ///
 /// Consumes the spoke entry: the reverse conversion must [`take_nexus_body`]
 /// (a `&mut` carrier extraction) and destructure the spoke body, so it cannot
-/// borrow. Behavior is byte-identical to the former
-/// `From<SpokeKnowledgeEntry> for WorldKbEntry` impl.
-pub fn spoke_to_world_kb(entry: SpokeKnowledgeEntry) -> WorldKbEntry {
+/// borrow. Returns [`KbError::MissingOwner`] when no canonical owner key is
+/// present on the spoke type — the seam fails closed instead of fabricating
+/// a World owner (v1.184 P1; the pre-cutover reverse defaulted `world_id` to
+/// an empty string).
+///
+/// # Errors
+///
+/// Returns [`KbError::MissingOwner`] when no canonical owner key is present
+/// on the spoke type.
+pub fn spoke_to_knowledge_record(
+    entry: SpokeKnowledgeEntry,
+) -> Result<KnowledgeEntryRecord, KbError> {
     let mut s = entry;
     // Extract the lossless body carrier FIRST — a reserved nexus key — so it
     // never leaks into product-local extras ([`get_nexus_extras`]) or the
@@ -177,9 +187,18 @@ pub fn spoke_to_world_kb(entry: SpokeKnowledgeEntry) -> WorldKbEntry {
     // authoritative, lossless nexus body that the persist writes (V1.143
     // Greptile P1 — body fidelity).
     let lossless_body_value = take_nexus_body(&mut s);
+    // Canonical owner from the typed extension keys (v1.184 P1). Fail closed
+    // when absent, ambiguous, or malformed (non-string/null owner key) — a
+    // spoke entry with anything other than exactly one valid owner claim is
+    // rejected, never resolved by precedence.
+    let owner = get_owner(&s)?;
+    let creator_only = get_creator_only(&s);
+    // creator_only is World-only (v1.184 P1 fix): a Character/binding-owned
+    // wire entry that sets the flag is rejected here, matching both store
+    // implementations and the SQLite CHECK.
+    nexus_knowledge::world_kb::knowledge_entry::validate_creator_only_owner(&owner, creator_only)?;
     // Extract borrowed accessor data into owned values FIRST, so subsequent
     // field moves out of `s` are not blocked by outstanding borrows.
-    let world_id = get_world_id(&s).unwrap_or_default().to_string();
     let created_from_command_id = get_created_from_command_id(&s).map(String::from);
     let (source_work_id, source_chapter, source_provenance_kind) = get_provenance(&s);
     let source_work_id = source_work_id.map(String::from);
@@ -189,12 +208,15 @@ pub fn spoke_to_world_kb(entry: SpokeKnowledgeEntry) -> WorldKbEntry {
     let extensions_nexus_extras = get_nexus_extras(&s).map(Value::Object);
     let entry_type = s.entry_type.clone();
     let canonical_name = s.canonical_name.to_string();
-    let schema_version = u32::try_from(s.schema_version.get()).unwrap_or(1);
+    // Lossless reverse conversion (v1.184 P1 fix): a wire schema_version that
+    // exceeds the domain u32 range is rejected, never silently normalized to 1.
+    let schema_version = u32::try_from(s.schema_version.get())
+        .map_err(|_| KbError::UnsupportedSchemaVersion(s.schema_version.get()))?;
 
     // Reverse body (fallback): spoke closed body → nexus body. All 5 fields
     // map back; body is `None` only when every field is empty/None. Used only
     // when no lossless carrier is present (e.g. spoke entries that did not
-    // originate from a `WorldKbEntry` forward conversion).
+    // originate from a `KnowledgeEntryRecord` forward conversion).
     let SpokeKnowledgeEntryBody {
         attributes,
         computable,
@@ -214,7 +236,7 @@ pub fn spoke_to_world_kb(entry: SpokeKnowledgeEntry) -> WorldKbEntry {
     {
         None
     } else {
-        Some(WorldKbBody {
+        Some(KnowledgeEntryBody {
             summary,
             attributes: attributes_opt,
             tags: has_tags.then_some(tags),
@@ -225,14 +247,15 @@ pub fn spoke_to_world_kb(entry: SpokeKnowledgeEntry) -> WorldKbEntry {
     // Prefer the lossless carrier; fall back to the spoke-typed-body
     // reconstruction when no carrier was stashed.
     let body = lossless_body_value
-        .and_then(|v| serde_json::from_value::<WorldKbBody>(v).ok())
+        .and_then(|v| serde_json::from_value::<KnowledgeEntryBody>(v).ok())
         .or(spoke_derived_body);
 
-    WorldKbEntry {
+    Ok(KnowledgeEntryRecord {
         schema_version,
         entry_id: s.entry_id,
-        world_id,
-        block_type: entry_type_to_block_type(&entry_type),
+        owner,
+        creator_only,
+        block_type: entry_type_to_block_type(&entry_type)?,
         canonical_name,
         status: s.status,
         revision: s.revision,
@@ -248,7 +271,7 @@ pub fn spoke_to_world_kb(entry: SpokeKnowledgeEntry) -> WorldKbEntry {
         source_provenance_kind,
         extensions_nexus_extras,
         modules: spoke_modules_to_nexus(&s.modules),
-    }
+    })
 }
 
 // ── Private attribute / anchor shape helpers ─────────────────────────────
@@ -261,9 +284,14 @@ fn block_type_to_entry_type(bt: BlockType) -> String {
         .unwrap_or_else(|| "character".to_string())
 }
 
-/// Parse spoke `entry_type` back to nexus `BlockType` (unknown values → default).
-fn entry_type_to_block_type(s: &str) -> BlockType {
-    serde_json::from_value(Value::String(s.to_string())).unwrap_or_default()
+/// Parse spoke `entry_type` back to nexus `BlockType` (v1.184 P1 fix).
+///
+/// The wire contract leaves `entry_type` an open string while the domain
+/// `BlockType` is closed; an unrecognized value is a conversion error, never
+/// silently normalized to the default block type.
+fn entry_type_to_block_type(s: &str) -> Result<BlockType, KbError> {
+    serde_json::from_value(Value::String(s.to_string()))
+        .map_err(|_| KbError::UnknownEntryType(s.to_string()))
 }
 
 /// Forward attribute shape: nexus JSON object member → spoke `BodyAttribute`.
@@ -343,7 +371,7 @@ fn spoke_anchor_to_nexus(a: &SpokeSourceAnchor) -> SourceAnchor {
 
 // ── Modules conversion helpers ────────────────────────────────────────────
 //
-// V1.146 P4 T1: `WorldKbEntry.modules` ↔ spoke `KnowledgeEntry.modules`
+// V1.146 P4 T1: `KnowledgeEntryRecord.modules` ↔ spoke `KnowledgeEntry.modules`
 // round-trip. The nexus domain carries modules as a JSON object
 // (`Option<Value>`); the spoke wire type uses `HashMap<ModulesKey,
 // ModulesValue>`. These helpers convert between the two representations,
@@ -400,7 +428,7 @@ fn spoke_modules_to_nexus(
 
 // ── Lifecycle delegation (local trait on a foreign type) ─────────────────
 
-/// Nexus lifecycle methods on [`WorldKbEntry`] that delegate status-transition
+/// Nexus lifecycle methods on [`KnowledgeEntryRecord`] that delegate status-transition
 /// validity to spoke-operations.
 ///
 /// This trait lives in the spoke adapter (not `nexus-knowledge`) because every
@@ -411,10 +439,10 @@ fn spoke_modules_to_nexus(
 /// the transition cross-product + revision assertion are delegated to spoke
 /// (spec §1.5 / §7).
 ///
-/// Callers must `use nexus_spoke_adapter::conversion::WorldKbEntrySpokeExt;`
+/// Callers must `use nexus_spoke_adapter::conversion::KnowledgeEntryRecordSpokeExt;`
 /// to invoke these methods (Rust method-resolution requires the trait in
 /// scope).
-pub trait WorldKbEntrySpokeExt {
+pub trait KnowledgeEntryRecordSpokeExt {
     /// Transition provisional → confirmed.
     ///
     /// Gate requirements (consistency-rules-v1.md §3.2):
@@ -434,26 +462,26 @@ pub trait WorldKbEntrySpokeExt {
         visible_manifests: &[&str],
     ) -> Result<(), KbError>;
 
-    /// Deprecate this `WorldKbEntry` (mark as superseded).
+    /// Deprecate this `KnowledgeEntryRecord` (mark as superseded).
     ///
     /// # Errors
     /// Returns `Err(KbError::...)` if validation fails.
     fn deprecate(&mut self, replacement_kb_id: Option<&str>) -> Result<(), KbError>;
 
-    /// Merge this `WorldKbEntry` into another.
+    /// Merge this `KnowledgeEntryRecord` into another.
     ///
     /// # Errors
     /// Returns `Err(KbError::...)` if validation fails.
     fn merge_into(&mut self, target_kb_id: &str) -> Result<(), KbError>;
 
-    /// Soft-delete this `WorldKbEntry`.
+    /// Soft-delete this `KnowledgeEntryRecord`.
     ///
     /// # Errors
     /// Returns `Err(KbError::...)` if validation fails.
     fn delete(&mut self) -> Result<(), KbError>;
 }
 
-impl WorldKbEntrySpokeExt for WorldKbEntry {
+impl KnowledgeEntryRecordSpokeExt for KnowledgeEntryRecord {
     fn confirm(
         &mut self,
         membership: &MembershipPermissionCheck,
@@ -491,10 +519,13 @@ impl WorldKbEntrySpokeExt for WorldKbEntry {
 
         // Gate 4: Source anchor traceability (consistency-rules-v1.md §3.2).
         // When a source_anchor is present, all its story_summary_refs must
-        // point to visible manifests in the same world.
+        // point to visible manifests in the same world. The lifecycle lane is
+        // World-owned only (v1.184 P1), so `world_id()` is `Some` for any row
+        // that reaches this gate; a non-World row fails closed on the anchor
+        // refs check (anchor refs never validate against an empty world).
         if let Some(ref anchor) = self.source_anchor {
             anchor
-                .validate_refs(&self.world_id, visible_manifests)
+                .validate_refs(self.world_id().unwrap_or_default(), visible_manifests)
                 .map_err(|e| KbError::ValidationError(format!("{e}")))?;
         }
 
@@ -550,8 +581,11 @@ impl WorldKbEntrySpokeExt for WorldKbEntry {
 /// result back wholesale — only the status field, to keep the nexus
 /// timestamp/revision convention authoritative). `updated_at` follows the
 /// nexus timestamp convention.
-fn apply_spoke_status_transition(entry: &mut WorldKbEntry, to: &str) -> Result<(), KbError> {
-    let spoke = world_kb_to_spoke(entry);
+fn apply_spoke_status_transition(
+    entry: &mut KnowledgeEntryRecord,
+    to: &str,
+) -> Result<(), KbError> {
+    let spoke = knowledge_record_to_spoke(entry);
     let result = map_spoke_reject(transition_status(&spoke, to))?;
     entry.status = result.status;
     entry.updated_at = Some(chrono::Utc::now().to_rfc3339());
@@ -596,7 +630,7 @@ mod tests {
 
     #[test]
     fn test_confirm_with_permission() {
-        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero");
         kb.confirm(&owner_membership(), 0, &no_conflicts(), &[])
             .unwrap();
         assert_eq!(kb.status, "confirmed");
@@ -605,14 +639,14 @@ mod tests {
 
     #[test]
     fn test_confirm_without_permission() {
-        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero");
         let result = kb.confirm(&collaborator_membership(), 0, &no_conflicts(), &[]);
         assert!(matches!(result, Err(KbError::PermissionDenied(_))));
     }
 
     #[test]
     fn test_confirm_with_conflict() {
-        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero");
         let conflict = ConflictCheckResult::hard_conflict("conflicting KB entry");
         let result = kb.confirm(&owner_membership(), 0, &conflict, &[]);
         assert!(matches!(result, Err(KbError::UnresolvedConflict(_))));
@@ -620,7 +654,7 @@ mod tests {
 
     #[test]
     fn test_confirm_with_revision_mismatch() {
-        let mut kb = WorldKbEntry::new("wld_test", BlockType::Event, "Battle");
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Event, "Battle");
         // kb.revision is None (i.e., 0 internally), but base_revision is 1
         let result = kb.confirm(&owner_membership(), 1, &no_conflicts(), &[]);
         assert!(matches!(result, Err(KbError::RevisionMismatch { .. })));
@@ -628,10 +662,10 @@ mod tests {
 
     #[test]
     fn test_modify_confirmed_body_rejected() {
-        let mut kb = WorldKbEntry::new("wld_test", BlockType::Scene, "Forest");
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Scene, "Forest");
         kb.confirm(&owner_membership(), 0, &no_conflicts(), &[])
             .unwrap();
-        let result = kb.set_body(WorldKbBody {
+        let result = kb.set_body(KnowledgeEntryBody {
             summary: Some("new summary".to_string()),
             attributes: None,
             tags: None,
@@ -642,7 +676,7 @@ mod tests {
 
     #[test]
     fn test_deprecate_keyblock() {
-        let mut kb = WorldKbEntry::new("wld_test", BlockType::Item, "Old Sword");
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Item, "Old Sword");
         kb.confirm(&owner_membership(), 0, &no_conflicts(), &[])
             .unwrap();
         kb.deprecate(Some("kb_new_sword")).unwrap();
@@ -651,7 +685,7 @@ mod tests {
 
     #[test]
     fn test_merge_keyblock() {
-        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero v1");
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero v1");
         kb.confirm(&owner_membership(), 0, &no_conflicts(), &[])
             .unwrap();
         kb.merge_into("kb_hero_v2").unwrap();
@@ -660,14 +694,14 @@ mod tests {
 
     #[test]
     fn test_delete_keyblock() {
-        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Temp");
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Temp");
         kb.delete().unwrap();
         assert_eq!(kb.status, "deleted");
     }
 
     #[test]
     fn test_is_confirmed() {
-        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero");
         assert!(!kb.is_confirmed());
         kb.confirm(&owner_membership(), 0, &no_conflicts(), &[])
             .unwrap();
@@ -678,7 +712,7 @@ mod tests {
     /// When `source_anchor` references a non-visible manifest, `confirm()` should fail.
     #[test]
     fn test_confirm_without_valid_source_anchor_fails() {
-        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero");
         // Set source_anchor pointing to a non-visible manifest
         let anchor = SourceAnchor::new("stm_hidden", "sum_1", None);
         kb.set_source_anchor(anchor).unwrap();
@@ -693,7 +727,7 @@ mod tests {
     /// C-1: `confirm()` succeeds when `source_anchor` references visible manifests.
     #[test]
     fn test_confirm_with_valid_source_anchor_succeeds() {
-        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero");
         let anchor = SourceAnchor::new("stm_visible1", "sum_1", None);
         kb.set_source_anchor(anchor).unwrap();
 
@@ -704,15 +738,15 @@ mod tests {
 
     // ── V1.139 spoke 0.4.0 full body alignment (conversion seam round-trip) ─
     //
-    // Proves the conversion seam (`world_kb_to_spoke` / `spoke_to_world_kb`)
+    // Proves the conversion seam (`knowledge_record_to_spoke` / `spoke_to_knowledge_record`)
     // round-trips ALL 5 typed body fields plus unknown `extensions.nexus`
     // extras in both directions. Each field that previously dropped
     // (summary / attributes / tags / computable) now survives.
 
     #[test]
     fn spoke_seam_roundtrips_all_five_body_fields() {
-        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
-        kb.body = Some(WorldKbBody {
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero");
+        kb.body = Some(KnowledgeEntryBody {
             summary: Some("Protagonist; reluctant cartographer.".to_string()),
             attributes: Some(serde_json::json!({
                 "role": "protagonist",
@@ -725,8 +759,8 @@ mod tests {
         });
 
         // Forward → spoke, reverse → nexus.
-        let spoke = world_kb_to_spoke(&kb);
-        let roundtripped = spoke_to_world_kb(spoke);
+        let spoke = knowledge_record_to_spoke(&kb);
+        let roundtripped = spoke_to_knowledge_record(spoke).unwrap();
         let body = roundtripped
             .body
             .as_ref()
@@ -768,8 +802,8 @@ mod tests {
         // (`build_spoke_upsert_request` → orchestrator → `put_update`) carries
         // the full body losslessly via the `_nexus_body` carrier instead — see
         // `spoke_seam_carrier_preserves_full_body_on_reverse`.
-        let mut kb = WorldKbEntry::new("wld_test", BlockType::Item, "Backpack");
-        kb.body = Some(WorldKbBody {
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Item, "Backpack");
+        kb.body = Some(KnowledgeEntryBody {
             attributes: Some(serde_json::json!({
                 "weight": 5,
                 "named": null,
@@ -777,8 +811,8 @@ mod tests {
             })),
             ..Default::default()
         });
-        let spoke = world_kb_to_spoke(&kb);
-        let roundtripped = spoke_to_world_kb(spoke);
+        let spoke = knowledge_record_to_spoke(&kb);
+        let roundtripped = spoke_to_knowledge_record(spoke).unwrap();
         let attrs = roundtripped
             .body
             .unwrap()
@@ -801,7 +835,7 @@ mod tests {
         // fidelity). This proves the recovery: a spoke entry carrying the full
         // body round-trips null/array/object attribute values that the spoke
         // typed body alone cannot represent.
-        let full_body = WorldKbBody {
+        let full_body = KnowledgeEntryBody {
             summary: Some("Backpack summary".to_string()),
             attributes: Some(serde_json::json!({
                 "weight": 5,
@@ -812,13 +846,16 @@ mod tests {
             tags: Some(vec!["gear".to_string()]),
             ..Default::default()
         };
-        let mut spoke =
-            world_kb_to_spoke(&WorldKbEntry::new("wld_test", BlockType::Item, "Backpack"));
+        let mut spoke = knowledge_record_to_spoke(&KnowledgeEntryRecord::new(
+            "wld_test",
+            BlockType::Item,
+            "Backpack",
+        ));
         // Simulate the persist-path carrier stash (build_spoke_upsert_request).
         let body_value = serde_json::to_value(&full_body).unwrap_or_default();
         set_nexus_body(&mut spoke, Some(&body_value));
 
-        let roundtripped = spoke_to_world_kb(spoke);
+        let roundtripped = spoke_to_knowledge_record(spoke).unwrap();
         let body = roundtripped.body.expect("carrier recovers the full body");
         assert_eq!(body.summary.as_deref(), Some("Backpack summary"));
         assert_eq!(body.tags.as_deref(), Some(["gear".to_string()].as_slice()));
@@ -837,9 +874,9 @@ mod tests {
     #[test]
     fn spoke_seam_body_none_when_all_fields_empty() {
         // An entry with no body content round-trips to body = None.
-        let kb = WorldKbEntry::new("wld_test", BlockType::Scene, "Empty");
-        let spoke = world_kb_to_spoke(&kb);
-        let roundtripped = spoke_to_world_kb(spoke);
+        let kb = KnowledgeEntryRecord::new("wld_test", BlockType::Scene, "Empty");
+        let spoke = knowledge_record_to_spoke(&kb);
+        let roundtripped = spoke_to_knowledge_record(spoke).unwrap();
         assert!(roundtripped.body.is_none(), "no body fields → body is None");
     }
 
@@ -847,13 +884,13 @@ mod tests {
     fn spoke_seam_summary_only_roundtrips_without_state_or_computable() {
         // Previously the reverse direction set body=None unless state/computable
         // were non-empty, dropping a summary-only body. Now summary alone survives.
-        let mut kb = WorldKbEntry::new("wld_test", BlockType::Scene, "Forest");
-        kb.body = Some(WorldKbBody {
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Scene, "Forest");
+        kb.body = Some(KnowledgeEntryBody {
             summary: Some("A dark forest".to_string()),
             ..Default::default()
         });
-        let spoke = world_kb_to_spoke(&kb);
-        let roundtripped = spoke_to_world_kb(spoke);
+        let spoke = knowledge_record_to_spoke(&kb);
+        let roundtripped = spoke_to_knowledge_record(spoke).unwrap();
         assert_eq!(
             roundtripped.body.unwrap().summary.as_deref(),
             Some("A dark forest")
@@ -863,15 +900,15 @@ mod tests {
     #[test]
     fn spoke_seam_extensions_nexus_extras_roundtrip() {
         // Unknown extensions.nexus keys (outside the 5 typed fields) ride on
-        // WorldKbEntry.extensions_nexus_extras and survive the spoke seam both
+        // KnowledgeEntryRecord.extensions_nexus_extras and survive the spoke seam both
         // ways (spec §2.2 round-trip rule 2).
-        let mut kb = WorldKbEntry::new("wld_test", BlockType::Character, "Hero");
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero");
         kb.extensions_nexus_extras =
             Some(serde_json::json!({"custom_label": "villain-arc", "priority": 7}));
 
-        let spoke = world_kb_to_spoke(&kb);
+        let spoke = knowledge_record_to_spoke(&kb);
         // The unknown keys land under extensions.nexus on the spoke type.
-        let roundtripped = spoke_to_world_kb(spoke);
+        let roundtripped = spoke_to_knowledge_record(spoke).unwrap();
         let extras = roundtripped
             .extensions_nexus_extras
             .as_ref()

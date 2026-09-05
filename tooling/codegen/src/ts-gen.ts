@@ -87,6 +87,30 @@ const COMPILE_OPTS = {
   ignoreMinAndMaxItems: true,
 };
 
+/** Exact-string patterns (`^literal$`) become singleton enums so TS emits literals.
+ * Rust typify still consumes the source `pattern` discriminants (it panics on
+ * per-arm `enum`/`const` inside oneOf). This rewrite is TypeScript-compile only.
+ */
+export function rewriteExactStringPatterns(node: unknown): void {
+  if (Array.isArray(node)) {
+    for (const item of node) rewriteExactStringPatterns(item);
+    return;
+  }
+  if (node === null || typeof node !== 'object') {
+    return;
+  }
+  const rec = node as Record<string, unknown>;
+  const pattern = rec.pattern;
+  if (typeof pattern === 'string' && rec.type === 'string') {
+    const exact = pattern.match(/^\^([A-Za-z0-9_]+)\$$/);
+    if (exact) {
+      rec.enum = [exact[1]];
+      delete rec.pattern;
+    }
+  }
+  for (const value of Object.values(rec)) rewriteExactStringPatterns(value);
+}
+
 /** POSIX-relative schema paths (relative to the localized tree root). */
 function posix(rel: string): string {
   return rel.split(path.sep).join('/');
@@ -102,7 +126,17 @@ export async function generateTSTypes(): Promise<void> {
   const outDir = resolveFromRoot('packages', 'nexus-contracts', 'src', 'generated');
   logger.info(`Generating TypeScript types to: ${outDir}`);
 
+  // v1.184 P1 T3 fix1: rewrite exact-string pattern discriminants across the
+  // whole localized tree BEFORE compiling. compile() resolves cross-file $ref
+  // bodies from disk, so rewriting only the root schema left nested oneOf
+  // discriminants (actor_kind / owner kind) widened to plain `string`.
   const allRel = (await glob('**/*.schema.json', { cwd: localizedDir })).map(posix).sort();
+  for (const rel of allRel) {
+    const abs = path.join(localizedDir, ...rel.split('/'));
+    const raw = readJSON<Record<string, unknown>>(abs);
+    rewriteExactStringPatterns(raw);
+    fs.writeFileSync(abs, `${JSON.stringify(raw, null, 2)}\n`);
+  }
   const emitRel = allRel.filter(rel => !SKIP_LIST.has(rel));
   const skipped = allRel.filter(rel => SKIP_LIST.has(rel));
 
@@ -143,6 +177,7 @@ async function compileSchema(localizedDir: string, rel: string, typeName: string
   const schema = readJSON<Record<string, unknown>>(abs) as JsonSchema;
   // Override `Nexus <Name>` product prefix → canonical basename-derived name.
   (schema as Record<string, unknown>).title = typeName;
+  rewriteExactStringPatterns(schema);
   const ts = await compile(schema, typeName, { ...COMPILE_OPTS, cwd: path.dirname(abs) });
   return `${BANNER}\n\n${ts.trim()}\n`;
 }

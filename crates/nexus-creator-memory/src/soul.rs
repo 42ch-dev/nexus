@@ -108,6 +108,11 @@ impl SoulDocument {
     }
 
     /// Validate that all required sections exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::ValidationError`] when a required section is
+    /// missing or a parser error occurs.
     pub fn validate(&self) -> Result<(), MemoryError> {
         for section in REQUIRED_SECTIONS {
             let has_section = match *section {
@@ -185,11 +190,9 @@ fn extract_frontmatter(content: &str) -> String {
         return String::new();
     }
     // Find closing ---
-    if let Some(end) = trimmed[3..].find("\n---") {
-        trimmed[3..3 + end].trim().to_string()
-    } else {
-        String::new()
-    }
+    trimmed[3..]
+        .find("\n---")
+        .map_or_else(String::new, |end| trimmed[3..3 + end].trim().to_string())
 }
 
 /// Extract all H2 (`## Title`) sections from markdown content.

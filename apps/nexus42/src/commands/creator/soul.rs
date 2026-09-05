@@ -5,6 +5,7 @@ use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::Subcommand;
 use nexus_creator_memory::soul_io;
+use nexus_creator_memory::MemoryBearerRef;
 use nexus_local_db::{
     get_soul_meta as db_get_soul_meta, upsert_soul_meta as db_upsert_soul_meta, SoulMeta,
 };
@@ -58,17 +59,17 @@ pub async fn run(command: SoulCommand, config: &CliConfig) -> Result<()> {
 
 async fn init(_config: &CliConfig, creator_id: &str) -> Result<()> {
     let home = config::user_home_dir()?;
-    if soul_io::exists(&home, creator_id) {
+    if soul_io::exists(&home, MemoryBearerRef::Creator(creator_id)) {
         return Err(crate::errors::CliError::Other(format!(
             "SOUL.md already exists for creator '{creator_id}'. Use `soul show` to view it."
         )));
     }
-    let doc = soul_io::create(&home, creator_id)?;
+    let doc = soul_io::create(&home, MemoryBearerRef::Creator(creator_id))?;
     doc.validate()?;
 
     // Persist metadata to DB (best-effort; file I/O is the primary action).
     if let Some(pool) = open_global_db().await? {
-        let path = soul_io::soul_path(&home, creator_id);
+        let path = soul_io::soul_path(&home, MemoryBearerRef::Creator(creator_id));
         let now = chrono::Utc::now().to_rfc3339();
         let meta = SoulMeta {
             creator_id: creator_id.to_string(),
@@ -85,13 +86,16 @@ async fn init(_config: &CliConfig, creator_id: &str) -> Result<()> {
     }
 
     println!("SOUL.md initialized for creator '{creator_id}'.");
-    println!("Path: {}", soul_io::soul_path(&home, creator_id).display());
+    println!(
+        "Path: {}",
+        soul_io::soul_path(&home, MemoryBearerRef::Creator(creator_id)).display()
+    );
     Ok(())
 }
 
 fn show(_config: &CliConfig, creator_id: &str) -> Result<()> {
     let home = config::user_home_dir()?;
-    let doc = soul_io::load(&home, creator_id)?;
+    let doc = soul_io::load(&home, MemoryBearerRef::Creator(creator_id))?;
     println!("{}", doc.render());
     Ok(())
 }
@@ -102,7 +106,7 @@ async fn edit_personality(
     content: Option<String>,
 ) -> Result<()> {
     let home = config::user_home_dir()?;
-    let mut doc = soul_io::load(&home, creator_id)?;
+    let mut doc = soul_io::load(&home, MemoryBearerRef::Creator(creator_id))?;
     let new_content = match content.as_deref() {
         Some("-") => {
             use std::io::Read;
@@ -118,11 +122,11 @@ async fn edit_personality(
         }
     };
     doc.set_personality(new_content);
-    soul_io::save(&home, creator_id, &doc)?;
+    soul_io::save(&home, MemoryBearerRef::Creator(creator_id), &doc)?;
 
     // Update metadata in DB (best-effort).
     if let Some(pool) = open_global_db().await? {
-        let path = soul_io::soul_path(&home, creator_id);
+        let path = soul_io::soul_path(&home, MemoryBearerRef::Creator(creator_id));
         let now = chrono::Utc::now().to_rfc3339();
         let existing_created_at = db_get_soul_meta(&pool, creator_id)
             .await
@@ -149,7 +153,7 @@ async fn edit_personality(
 
 fn validate(_config: &CliConfig, creator_id: &str) -> Result<()> {
     let home = config::user_home_dir()?;
-    let doc = soul_io::validate(&home, creator_id)?;
+    let doc = soul_io::validate(&home, MemoryBearerRef::Creator(creator_id))?;
     println!("SOUL.md for creator '{creator_id}' is valid.");
     println!("  Sections: Personality ✓, Experience ✓");
     if !doc.extra_sections.is_empty() {
@@ -167,10 +171,12 @@ fn validate(_config: &CliConfig, creator_id: &str) -> Result<()> {
 
 fn push_personality(_config: &CliConfig, creator_id: &str) -> Result<()> {
     let home = config::user_home_dir()?;
-    let soul = soul_io::load(&home, creator_id)?;
+    let soul = soul_io::load(&home, MemoryBearerRef::Creator(creator_id))?;
 
     let memory = nexus_creator_memory::personality_sync::push_personality_to_memory(
-        &home, creator_id, &soul,
+        &home,
+        MemoryBearerRef::Creator(creator_id),
+        &soul,
     )?;
 
     println!("Personality pushed to long-term memory for creator '{creator_id}'.");
@@ -192,20 +198,22 @@ async fn refresh_experience(_config: &CliConfig, creator_id: &str) -> Result<()>
     let home = config::user_home_dir()?;
 
     let result = nexus_creator_memory::experience_aggregation::aggregate_experience(
-        &home, creator_id, None, // No synthesizer — deterministic path only
+        &home,
+        MemoryBearerRef::Creator(creator_id),
+        None, // No synthesizer — deterministic path only
     )
     .await?;
 
     // Update metadata in DB (best-effort).
     if let Some(pool) = open_global_db().await? {
-        let path = soul_io::soul_path(&home, creator_id);
+        let path = soul_io::soul_path(&home, MemoryBearerRef::Creator(creator_id));
         let now = chrono::Utc::now().to_rfc3339();
         let existing_created_at = db_get_soul_meta(&pool, creator_id)
             .await
             .ok()
             .flatten()
             .map(|m| m.created_at);
-        let soul = soul_io::load(&home, creator_id)?;
+        let soul = soul_io::load(&home, MemoryBearerRef::Creator(creator_id))?;
         let meta = SoulMeta {
             creator_id: creator_id.to_string(),
             file_path: path.display().to_string(),

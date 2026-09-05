@@ -1,6 +1,6 @@
 //! `creator kb rescan` — refreshable KB scan (V1.50 T-B P2).
 //!
-//! Re-syncs `kb_extract_jobs` candidates and confirmed `WorldKbEntry` rows from a
+//! Re-syncs `kb_extract_jobs` candidates and confirmed `KnowledgeEntryRecord` rows from a
 //! chapter's current text. Plan: `2026-06-18-v1.50-kb-refreshable-scan`;
 //! spec: `entity-scope-model.md` §5.5; compass §0.1 decision 7.
 //!
@@ -16,7 +16,7 @@
 //! 5. Idempotently upsert pending `kb_extract_jobs` candidates (keyed on
 //!    `(creator, world, canonical_name)` per the V1.50 P1 DB uniqueness) and
 //!    remove stale pending candidates sourced from this chapter.
-//! 6. Refresh confirmed `WorldKbEntry` bodies via `nexus_knowledge::world_kb::diff_and_apply` so KB
+//! 6. Refresh confirmed `KnowledgeEntryRecord` bodies via `nexus_knowledge::world_kb::diff_and_apply` so KB
 //!    rows reflect the current text (inserts/deletes stay with adopt/edit/delete
 //!    per §5.5).
 //!
@@ -28,7 +28,7 @@
 
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
-use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
 use nexus_knowledge::world_kb::validation::ValidationMode;
 use nexus_knowledge::world_kb::{compute_kb_diff, diff_and_apply, KbStore};
 use nexus_local_db::kb_extract_job::{
@@ -64,11 +64,11 @@ pub struct RescanReport {
     pub candidates_removed: Vec<String>,
     /// Pending candidates whose payload was unchanged.
     pub candidates_unchanged: usize,
-    /// Names extracted but with no active `WorldKbEntry` (advisory; adopt to promote).
+    /// Names extracted but with no active `KnowledgeEntryRecord` (advisory; adopt to promote).
     pub kb_inserted_advisory: Vec<String>,
-    /// Active `WorldKbEntry`s whose body was refreshed.
+    /// Active `KnowledgeEntryRecord`s whose body was refreshed.
     pub kb_updated: Vec<String>,
-    /// Active `WorldKbEntry`s whose name vanished from extraction (advisory).
+    /// Active `KnowledgeEntryRecord`s whose name vanished from extraction (advisory).
     pub kb_removed_advisory: Vec<String>,
 }
 
@@ -87,14 +87,14 @@ impl RescanReport {
 ///
 /// One per aggregate. Surfaced in `--dry-run` output so the author can see, per
 /// canonical entity, which chapters referenced it and whether an active
-/// `WorldKbEntry` already exists (entity-scope-model §5.5.1).
+/// `KnowledgeEntryRecord` already exists (entity-scope-model §5.5.1).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CrossChapterReuse {
     /// Canonical entity name (first-seen case).
     pub canonical_name: String,
     /// Chapters that referenced this entity, ascending + deduped.
     pub source_chapters: Vec<i32>,
-    /// `true` when an active `WorldKbEntry` already exists for this name in the
+    /// `true` when an active `KnowledgeEntryRecord` already exists for this name in the
     /// work's world (advisory "no new candidate needed").
     pub existing_kb_row: bool,
 }
@@ -121,11 +121,11 @@ pub struct WorkRescanReport {
     pub candidates_unchanged: usize,
     /// Cross-chapter reuse summary, one entry per aggregate.
     pub cross_chapter_reuse: Vec<CrossChapterReuse>,
-    /// Names extracted but with no active `WorldKbEntry` (advisory; adopt to promote).
+    /// Names extracted but with no active `KnowledgeEntryRecord` (advisory; adopt to promote).
     pub kb_inserted_advisory: Vec<String>,
-    /// Active `WorldKbEntry`s whose body was refreshed.
+    /// Active `KnowledgeEntryRecord`s whose body was refreshed.
     pub kb_updated: Vec<String>,
-    /// Active `WorldKbEntry`s whose name vanished from extraction (advisory).
+    /// Active `KnowledgeEntryRecord`s whose name vanished from extraction (advisory).
     pub kb_removed_advisory: Vec<String>,
 }
 
@@ -374,7 +374,7 @@ pub async fn kb_rescan_work_hermetic(
     // Pure cross-chapter aggregation (group by canonical_name).
     let aggregates = aggregate_candidates_by_canonical_name(&per_chapter);
 
-    // Existing active WorldKbEntry names (for the reuse summary + KB refresh).
+    // Existing active KnowledgeEntryRecord names (for the reuse summary + KB refresh).
     let store = SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
     let old_kb_rows = store
         .list_by_world(&world_id)
@@ -443,7 +443,7 @@ pub async fn kb_rescan_work_hermetic(
     )
     .await?;
 
-    // Refresh confirmed WorldKbEntry bodies (same §5.5 invariant as chapter-scope).
+    // Refresh confirmed KnowledgeEntryRecord bodies (same §5.5 invariant as chapter-scope).
     // Non-dry path applies via diff_and_apply; dry path computes only.
     sync_work_kb_rows(
         &mut report,
@@ -659,7 +659,7 @@ async fn delete_pending_for_chapter_work(
     Ok(result.rows_affected() > 0)
 }
 
-/// Refresh confirmed `WorldKbEntry` bodies from the cross-chapter aggregates
+/// Refresh confirmed `KnowledgeEntryRecord` bodies from the cross-chapter aggregates
 /// (same §5.5 invariant as the chapter-scoped path; inserts/deletes stay with
 /// adopt/edit/delete). Pure half (`compute_kb_diff`) in dry mode; non-dry
 /// applies via [`nexus_knowledge::world_kb::diff_and_apply`].
@@ -669,19 +669,20 @@ async fn sync_work_kb_rows(
     report: &mut WorkRescanReport,
     store: &SqliteKbStore,
     world_id: &str,
-    old_kb_rows: &[WorldKbEntry],
+    old_kb_rows: &[KnowledgeEntryRecord],
     aggregates: &[AggregatedCandidate],
     dry_run: bool,
 ) -> Result<()> {
-    // Parse each aggregate's payload into a WorldKbBody for the delta.
-    let mut new_bodies: Vec<(String, WorldKbBody)> = Vec::with_capacity(aggregates.len());
+    // Parse each aggregate's payload into a KnowledgeEntryBody for the delta.
+    let mut new_bodies: Vec<(String, KnowledgeEntryBody)> = Vec::with_capacity(aggregates.len());
     for agg in aggregates {
-        let body: WorldKbBody = serde_json::from_str(&agg.proposed_payload).map_err(|e| {
-            CliError::Other(format!(
-                "Aggregate produced invalid proposed_payload for '{}': {e}",
-                agg.canonical_name
-            ))
-        })?;
+        let body: KnowledgeEntryBody =
+            serde_json::from_str(&agg.proposed_payload).map_err(|e| {
+                CliError::Other(format!(
+                    "Aggregate produced invalid proposed_payload for '{}': {e}",
+                    agg.canonical_name
+                ))
+            })?;
         new_bodies.push((agg.canonical_name.clone(), body));
     }
 
@@ -865,7 +866,7 @@ async fn sync_candidates(
     Ok(())
 }
 
-/// Refresh confirmed `WorldKbEntry` bodies via the nexus-kb delta.
+/// Refresh confirmed `KnowledgeEntryRecord` bodies via the nexus-kb delta.
 ///
 /// Fills `report.kb_*`. In `dry_run` mode the diff is computed (pure) but not
 /// applied; otherwise [`nexus_knowledge::world_kb::diff_and_apply`] refreshes matching rows.
@@ -1063,12 +1064,12 @@ fn preview_candidate_outcome(
     }
 }
 
-/// Parse each candidate's `proposed_payload` JSON into a `WorldKbBody` for
+/// Parse each candidate's `proposed_payload` JSON into a `KnowledgeEntryBody` for
 /// the nexus-kb delta.
-fn parse_candidate_bodies(candidates: &[KbCandidate]) -> Result<Vec<(String, WorldKbBody)>> {
+fn parse_candidate_bodies(candidates: &[KbCandidate]) -> Result<Vec<(String, KnowledgeEntryBody)>> {
     let mut out = Vec::with_capacity(candidates.len());
     for c in candidates {
-        let body: WorldKbBody = serde_json::from_str(&c.proposed_payload).map_err(|e| {
+        let body: KnowledgeEntryBody = serde_json::from_str(&c.proposed_payload).map_err(|e| {
             CliError::Other(format!(
                 "Heuristic produced invalid proposed_payload for '{}': {e}",
                 c.canonical_name_guess

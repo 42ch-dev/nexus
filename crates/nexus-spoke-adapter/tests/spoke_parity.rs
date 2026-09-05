@@ -2,8 +2,8 @@
 //! identical transition outcomes to the pre-refactor nexus hand-rolled rules.
 //!
 //! **V1.145 P1a:** relocated from `nexus-knowledge/tests/` to
-//! `nexus-spoke-adapter/tests/` — the conversion seam (`world_kb_to_spoke`) and
-//! the lifecycle trait (`WorldKbEntrySpokeExt`) now live in this crate (spec
+//! `nexus-spoke-adapter/tests/` — the conversion seam (`knowledge_record_to_spoke`) and
+//! the lifecycle trait (`KnowledgeEntryRecordSpokeExt`) now live in this crate (spec
 //! §8 dep-graph reversal), so the parity tests exercise them here.
 //!
 //! Two complementary proof strategies:
@@ -12,9 +12,9 @@
 //!    the accept/reject edges match the table the architect review confirmed spoke
 //!    exposes (the 6 edges nexus uses, plus `deprecated → merged` correctly
 //!    excluded, plus terminal-state enforcement).
-//! 2. **End-to-end routing** — exercise the `WorldKbEntry` domain methods
+//! 2. **End-to-end routing** — exercise the `KnowledgeEntryRecord` domain methods
 //!    (`confirm` / `deprecate` / `merge_into` / `delete`) — now on the
-//!    `WorldKbEntrySpokeExt` trait — which route through spoke via the
+//!    `KnowledgeEntryRecordSpokeExt` trait — which route through spoke via the
 //!    conversion seam, and assert the same accept/reject + final status the
 //!    prior nexus hand-rolled rules produced.
 //!
@@ -24,18 +24,18 @@
 
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::{ConflictCheckResult, MembershipPermissionCheck};
-use nexus_knowledge::world_kb::{KbError, WorldKbEntry};
-use nexus_spoke_adapter::conversion::{world_kb_to_spoke, WorldKbEntrySpokeExt};
+use nexus_knowledge::world_kb::{KbError, KnowledgeEntryRecord};
+use nexus_spoke_adapter::conversion::{knowledge_record_to_spoke, KnowledgeEntryRecordSpokeExt};
 use nexus_spoke_adapter::ops::{assert_revision, transition_status};
 use nexus_spoke_adapter::KnowledgeEntry;
 use nexus_spoke_adapter::SpokeResult;
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
 
-/// Build a `WorldKbEntry` seeded directly into `status` (bypassing the lifecycle
+/// Build a `KnowledgeEntryRecord` seeded directly into `status` (bypassing the lifecycle
 /// methods) so parity cases can start from any state.
-fn entry_in(status: &str) -> WorldKbEntry {
-    let mut e = WorldKbEntry::new("wld_test", BlockType::Character, "Test Hero");
+fn entry_in(status: &str) -> KnowledgeEntryRecord {
+    let mut e = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Test Hero");
     e.status = status.to_string();
     e
 }
@@ -54,7 +54,7 @@ const fn no_conflicts() -> ConflictCheckResult {
 /// Convert a domain entry (seeded into `from`) to the spoke type and ask spoke
 /// whether the `from → to` transition is allowed.
 fn spoke_allows(from: &str, to: &str) -> bool {
-    let spoke: KnowledgeEntry = world_kb_to_spoke(&entry_in(from));
+    let spoke: KnowledgeEntry = knowledge_record_to_spoke(&entry_in(from));
     transition_status(&spoke, to).is_ok()
 }
 
@@ -111,7 +111,7 @@ fn spoke_rejects_unknown_status() {
     assert!(!spoke_allows("frobnicated", "confirmed"));
 }
 
-// ── 2. End-to-end routing via WorldKbEntry domain methods (T3) ──────────────
+// ── 2. End-to-end routing via KnowledgeEntryRecord domain methods (T3) ──────────────
 
 #[test]
 fn confirm_routes_provisional_to_confirmed_and_bumps_revision() {

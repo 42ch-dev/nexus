@@ -9,6 +9,15 @@ pub enum MemoryError {
     #[error("entity is already in state: {0}")]
     AlreadyInState(String),
 
+    /// Session was already promoted to long-term memory by an earlier
+    /// (possibly crashed-after-write) attempt; callers may treat this as an
+    /// idempotent success and advance their queue.
+    #[error("Session '{session_id}' already promoted to long-term memory")]
+    AlreadyPromoted {
+        /// The session that already has a long-term memory file.
+        session_id: String,
+    },
+
     /// Validation error.
     #[error("validation error: {0}")]
     ValidationError(String),

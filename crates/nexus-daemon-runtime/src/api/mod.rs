@@ -653,6 +653,75 @@ fn pack_routes() -> Router<WorkspaceState> {
         )
 }
 
+fn character_routes() -> Router<WorkspaceState> {
+    Router::new()
+        .route(
+            "/v1/daemon/characters",
+            get(handlers::characters::list_characters).post(handlers::characters::create_character),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id",
+            get(handlers::characters::get_character),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/bindings",
+            get(handlers::characters::list_bindings).post(handlers::characters::add_binding),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/bindings/:binding_id",
+            delete(handlers::characters::remove_binding),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/knowledge",
+            get(handlers::actor_knowledge::list_character_knowledge),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/memory/pending-review",
+            post(handlers::character_memory::capture_pending_review)
+                .get(handlers::character_memory::list_pending_reviews),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/memory/pending-review/count",
+            get(handlers::character_memory::count_pending_reviews),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/memory/pending-review/:pending_id",
+            delete(handlers::character_memory::delete_pending_review),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/memory/review",
+            post(handlers::character_memory::review),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/memory/fragments",
+            get(handlers::character_memory::list_fragments),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/memory/fragments/:fragment_id",
+            post(handlers::character_memory::promote_fragment),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/soul/reflect",
+            post(handlers::character_memory::reflect_soul),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/tom",
+            get(handlers::character_tom::list_tom).post(handlers::character_tom::record_tom),
+        )
+}
+
+fn actor_knowledge_routes() -> Router<WorkspaceState> {
+    Router::new()
+        .route(
+            "/v1/daemon/actor-knowledge/view",
+            post(handlers::actor_knowledge::view),
+        )
+        .route(
+            "/v1/daemon/actor-knowledge/entries",
+            post(handlers::actor_knowledge::add_entry),
+        )
+}
+
 /// Profile-scoped (Tier-2) routes — require active creator + lazy-open pool.
 fn tier2_routes() -> Router<WorkspaceState> {
     Router::new()
@@ -661,6 +730,8 @@ fn tier2_routes() -> Router<WorkspaceState> {
             "/v1/daemon/monitoring/pool",
             get(handlers::monitoring::pool_status),
         )
+        .merge(character_routes())
+        .merge(actor_knowledge_routes())
         .merge(kb_routes())
         .merge(memory_routes())
         .merge(works_routes())

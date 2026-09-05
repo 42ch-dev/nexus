@@ -13,6 +13,7 @@
 //! - **Maintenance**: `demo-seed`, `logout`
 
 pub mod bootstrap;
+pub mod character;
 pub mod inspector;
 pub mod kb;
 pub mod knowledge;
@@ -596,6 +597,11 @@ pub enum CreatorCommand {
         #[command(subcommand)]
         command: world::WorldCommand,
     },
+    /// Character identity and World bindings (daemon-only)
+    Character {
+        #[command(subcommand)]
+        command: character::CharacterCommand,
+    },
 
     /// Reading-depth data CRUD (V1.175 P1, group 3) — progress + annotations.
     ///
@@ -767,6 +773,7 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::Reference { command } => reference::run(command, config).await,
         CreatorCommand::Kb { command } => kb::run(command, config).await,
         CreatorCommand::World { command } => world::run(command, config).await,
+        CreatorCommand::Character { command } => character::run(command, config).await,
         CreatorCommand::Reading { command } => reading::run(command, config).await,
         CreatorCommand::Inspector { command } => inspector::run(command, config).await,
         CreatorCommand::Knowledge { command } => knowledge::run(command, config).await,
@@ -863,17 +870,19 @@ async fn run_demo_seed(config: &CliConfig, force: bool) -> Result<()> {
     println!("✓ Demo event: {}", event.event_id);
 
     // 3. Create demo KB block
-    let mut kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+    let mut kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
         &world.world_id,
         nexus_contracts::BlockType::Character,
         "Hero",
     );
-    kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::WorldKbBody {
-        summary: Some("The protagonist of the demo world.".to_string()),
-        attributes: None,
-        tags: Some(vec!["protagonist".to_string(), "demo".to_string()]),
-        ..Default::default()
-    });
+    kb.body = Some(
+        nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
+            summary: Some("The protagonist of the demo world.".to_string()),
+            attributes: None,
+            tags: Some(vec!["protagonist".to_string(), "demo".to_string()]),
+            ..Default::default()
+        },
+    );
     let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
     let kb_result = kb_store
         .insert_knowledge_entry(kb)

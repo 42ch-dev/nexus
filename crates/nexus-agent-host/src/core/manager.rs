@@ -166,17 +166,49 @@ impl Default for HostManager {
 impl crate::HostFacade for HostManager {
     async fn start(&self, config: HostStartConfig) -> HostResult<()> {
         // Validate config_path does not escape its parent directory.
+        //
         // We canonicalize the parent dir first, then validate the config path
         // is under it — no TOCTOU from checking .exists() separately (QC2 F-003).
+        //
+        // Path-boundary rules, applied BEFORE any read:
+        //   - the path must be absolute and non-empty (empty/relative paths
+        //     cannot pass through `parent()` matching),
+        //   - lexical `ParentDir` (`..`) components are rejected before
+        //     canonicalization (matches `validate_workspace_path`),
+        //   - when the config file exists, it must resolve under its parent
+        //     directory (rejects symlink escapes), and the CANONICAL path is
+        //     what is handed to `load_config_from_path` (no re-read of a raw
+        //     path that could have been swapped after validation — TOCTOU),
+        //   - a genuinely absent optional config (NotFound) is tolerated so
+        //     `load_config_from_path` returns defaults.
+        if !config.config_path.is_absolute() {
+            return Err(HostError::policy_denied(format!(
+                "config path must be an absolute, non-empty path: {}",
+                config.config_path.display()
+            )));
+        }
+        if config
+            .config_path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return Err(HostError::policy_denied(format!(
+                "config path must not contain '..': {}",
+                config.config_path.display()
+            )));
+        }
+        let mut resolved_config_path = config.config_path.clone();
         if let Some(expected_dir) = config.config_path.parent() {
-            // Only validate containment if the parent directory exists on disk.
-            // If the parent doesn't exist, the config file can't either, so
-            // load_config_from_path will simply return defaults.
-            if let Ok(canonical_dir) = std::path::Path::canonicalize(expected_dir) {
-                // Lexical containment check before attempting to canonicalize
-                // the config path — reject obvious escapes early.
-                let normalized_config = crate::config::validate_workspace_path(&config.config_path);
-                if let Ok(canonical_config) = normalized_config {
+            match std::path::Path::canonicalize(&config.config_path) {
+                Ok(canonical_config) => {
+                    let canonical_dir =
+                        std::path::Path::canonicalize(expected_dir).map_err(|e| {
+                            HostError::policy_denied(format!(
+                                "config directory cannot be resolved: {} ({})",
+                                expected_dir.display(),
+                                e
+                            ))
+                        })?;
                     if !canonical_config.starts_with(&canonical_dir) {
                         return Err(HostError::policy_denied(format!(
                             "config path '{}' escapes config directory '{}'",
@@ -184,9 +216,21 @@ impl crate::HostFacade for HostManager {
                             expected_dir.display()
                         )));
                     }
+                    // Retain the canonical resolved path for the load, so a
+                    // raw-path swap between validation and read cannot change
+                    // what is loaded.
+                    resolved_config_path = canonical_config;
                 }
-                // If canonicalize of config_path fails, the file doesn't exist
-                // (optional config) — load_config_from_path handles this correctly.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    // Optional config absent — load_config_from_path returns defaults.
+                }
+                Err(e) => {
+                    return Err(HostError::policy_denied(format!(
+                        "config path cannot be resolved: {} ({})",
+                        config.config_path.display(),
+                        e
+                    )));
+                }
             }
         }
 
@@ -199,9 +243,10 @@ impl crate::HostFacade for HostManager {
             admission.check_workspace_root(&config.workspace_root)?;
         }
 
-        // Load config using TOCTOU-safe direct read (QC2 F-003).
-        // load_config_from_path reads the file directly — NotFound → defaults.
-        let host_config = crate::config::load_config_from_path(&config.config_path)?;
+        // Load config using the resolved (when the file exists) canonical
+        // path — a raw-path re-read after validation would be a TOCTOU window
+        // (QC2 F-003); `NotFound` → defaults for the absent optional config.
+        let host_config = crate::config::load_config_from_path(&resolved_config_path)?;
         *self.config.write().await = Some(host_config.clone());
 
         // Store canonical workspace boundary for session cwd validation.
@@ -978,6 +1023,105 @@ mod tests {
             max_ops_per_session: 1,
             timeouts: crate::config::TimeoutConfig::default(),
         }
+    }
+    #[tokio::test]
+    async fn absent_optional_config_path_returns_defaults() {
+        // An absent optional config whose parent exists is tolerated and
+        // `load_config_from_path` supplies defaults.
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let config_path = temp_dir.path().join("absent-config.toml");
+        let cfg = HostStartConfig {
+            config_path,
+            workspace_root: temp_dir.path().to_path_buf(),
+            ..start_config()
+        };
+        let manager = HostManager::new();
+        manager
+            .register_provider(Arc::new(MockProvider {
+                provider_id: ProviderId::new("mock"),
+            }))
+            .await;
+        manager
+            .start(cfg)
+            .await
+            .expect("absent optional config must be tolerated (defaults recorded)");
+    }
+
+    #[tokio::test]
+    async fn relative_and_escaping_config_paths_rejected_before_read() {
+        // Relative config path → rejected outright (PolicyDenied), never read.
+        let rel = HostStartConfig {
+            config_path: std::path::PathBuf::from("../escape.toml"),
+            ..start_config()
+        };
+        let manager = HostManager::new();
+        manager
+            .register_provider(Arc::new(MockProvider {
+                provider_id: ProviderId::new("mock"),
+            }))
+            .await;
+        let err = manager
+            .start(rel)
+            .await
+            .expect_err("relative path rejected");
+        assert!(matches!(err, HostError::PolicyDenied { .. }), "got {err:?}");
+
+        // Empty config path → rejected before any parent()/read path.
+        let empty = HostStartConfig {
+            config_path: std::path::PathBuf::from(""),
+            ..start_config()
+        };
+        let manager = HostManager::new();
+        manager
+            .register_provider(Arc::new(MockProvider {
+                provider_id: ProviderId::new("mock"),
+            }))
+            .await;
+        let err = manager.start(empty).await.expect_err("empty path rejected");
+        assert!(matches!(err, HostError::PolicyDenied { .. }), "got {err:?}");
+
+        // Symlink escape: config path resolves outside its own parent dir.
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let outside = temp_dir.path().join("outside-config.toml");
+
+        // Absolute in-root path with lexical `..` → rejected BEFORE
+        // canonicalization (validate_workspace_path contract).
+        let parentdir = HostStartConfig {
+            config_path: temp_dir.path().join("cfg").join("..").join("escape.toml"),
+            ..start_config()
+        };
+        let manager = HostManager::new();
+        manager
+            .register_provider(Arc::new(MockProvider {
+                provider_id: ProviderId::new("mock"),
+            }))
+            .await;
+        let err = manager
+            .start(parentdir)
+            .await
+            .expect_err("ParentDir component rejected");
+        assert!(matches!(err, HostError::PolicyDenied { .. }), "got {err:?}");
+        std::fs::write(&outside, "max_sessions = 2\n").expect("write outside config");
+        let parent = temp_dir.path().join("cfg");
+        std::fs::create_dir_all(&parent).expect("make cfg dir");
+        let link = parent.join("config.toml");
+        std::os::unix::fs::symlink(&outside, &link).expect("symlink escape");
+        let esc = HostStartConfig {
+            config_path: link,
+            workspace_root: temp_dir.path().to_path_buf(),
+            ..start_config()
+        };
+        let manager = HostManager::new();
+        manager
+            .register_provider(Arc::new(MockProvider {
+                provider_id: ProviderId::new("mock"),
+            }))
+            .await;
+        let err = manager
+            .start(esc)
+            .await
+            .expect_err("symlink escape rejected");
+        assert!(matches!(err, HostError::PolicyDenied { .. }), "got {err:?}");
     }
 
     #[tokio::test]

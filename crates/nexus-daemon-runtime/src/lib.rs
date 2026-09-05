@@ -10,11 +10,14 @@
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
 
+pub mod actor_admission;
+pub mod actor_knowledge_view;
 pub mod api;
 pub mod auth;
 pub mod auto_chronology;
 pub mod boot;
 pub mod capability_registry;
+pub mod character_tom;
 pub mod check;
 pub mod config;
 // V1.174 P0 T1 (AR-57/AR-61): peer-tools Connect client stack — WS
@@ -55,3 +58,10 @@ pub mod test_support;
 /// for the intended dependency graph of this crate.
 #[cfg(test)]
 mod architecture_assertions;
+
+/// Dual-bearer memory-pipeline semantic suite. Lives outside
+/// `memory_pipeline` so it cannot fabricate a `BearerPipelineCtx` (whose
+/// fields are private); every Character context goes through the validated
+/// `BearerPipelineCtx::character` constructor.
+#[cfg(test)]
+mod memory_pipeline_semantic_tests;

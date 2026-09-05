@@ -11,6 +11,7 @@
 
 use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
+use nexus_creator_memory::MemoryBearerRef;
 use serde_json::{json, Value};
 
 /// The `soul.experience.aggregate` capability.
@@ -90,7 +91,9 @@ impl Capability for SoulExperienceAggregate {
         // side-effect-free. The preset orchestrator or CLI is responsible for
         // writing the result to SOUL.md.
         let result = nexus_creator_memory::experience_aggregation::aggregate_experience_preview(
-            home, creator_id, None, // Deterministic path only — no LLM synthesizer
+            home,
+            MemoryBearerRef::Creator(creator_id),
+            None, // Deterministic path only — no LLM synthesizer
         )
         .await
         .map_err(|e| CapabilityError::Internal(format!("experience aggregation failed: {e}")))?;
@@ -164,7 +167,8 @@ mod tests {
         let home = tmp.path();
 
         // Create SOUL first so preview can load it
-        nexus_creator_memory::soul_io::create(home, "ctr_captest").unwrap();
+        nexus_creator_memory::soul_io::create(home, MemoryBearerRef::Creator("ctr_captest"))
+            .unwrap();
 
         let cap = SoulExperienceAggregate;
         let result = cap
@@ -185,13 +189,19 @@ mod tests {
         let home = tmp.path();
 
         // Create SOUL
-        nexus_creator_memory::soul_io::create(home, "ctr_captest2").unwrap();
+        nexus_creator_memory::soul_io::create(home, MemoryBearerRef::Creator("ctr_captest2"))
+            .unwrap();
 
         // Create an experience-kind memory
         let mut mem = nexus_creator_memory::LongTermMemory::new("story_summary");
         mem.set_body("An epic tale of courage and determination.");
-        nexus_creator_memory::memory_io::save_memory(home, "ctr_captest2", "epic-tale", &mem)
-            .unwrap();
+        nexus_creator_memory::memory_io::save_memory(
+            home,
+            MemoryBearerRef::Creator("ctr_captest2"),
+            "epic-tale",
+            &mem,
+        )
+        .unwrap();
 
         let cap = SoulExperienceAggregate;
         let result = cap

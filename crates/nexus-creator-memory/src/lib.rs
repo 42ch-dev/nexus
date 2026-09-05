@@ -1,33 +1,12 @@
-//! Nexus Creator Memory — SOUL, LTM, review, personality IO.
+//! Nexus memory pipeline — SOUL, LTM, review, personality IO.
 //!
-//! This crate owns creator-scoped memory operations: SOUL document parsing,
-//! long-term memory management, review/promotion, personality sync, and
-//! experience aggregation. Depends on `nexus-creator` for Creator types.
+//! This crate owns the bearer-scoped memory operations: SOUL document
+//! parsing, long-term memory management, review/promotion, personality sync,
+//! and experience aggregation. Every stage dispatches through the closed
+//! [`MemoryBearerRef`] (Creator | Character); the Creator arm reproduces the
+//! legacy layout and bytes exactly.
 
-#![allow(clippy::missing_errors_doc)]
-#![allow(clippy::must_use_candidate)]
-#![allow(clippy::uninlined_format_args)]
-#![allow(clippy::redundant_clone)]
-#![allow(clippy::clone_on_copy)]
-#![allow(clippy::cast_precision_loss)]
-#![allow(clippy::cast_possible_truncation)]
-#![allow(clippy::cast_possible_wrap)]
-#![allow(clippy::needless_collect)]
-#![allow(clippy::single_char_pattern)]
-#![allow(clippy::similar_names)]
-#![allow(clippy::manual_string_new)]
-#![allow(clippy::single_match_else)]
-#![allow(clippy::manual_let_else)]
-#![allow(clippy::if_not_else)]
-#![allow(clippy::match_same_arms)]
-#![allow(clippy::items_after_statements)]
-#![allow(clippy::missing_const_for_fn)]
-#![allow(clippy::option_if_let_else)]
-#![allow(clippy::doc_markdown)]
-#![allow(clippy::float_cmp)]
-#![allow(clippy::redundant_closure_for_method_calls)]
-#![allow(clippy::derive_partial_eq_without_eq)]
-
+pub mod bearer;
 pub mod errors;
 pub mod experience_aggregation;
 pub mod long_term_memory;
@@ -40,6 +19,7 @@ pub mod soul;
 pub mod soul_io;
 pub mod soul_narrative;
 
+pub use bearer::{BearerIdentity, MemoryBearerRef};
 pub use errors::MemoryError;
 pub use long_term_memory::LongTermMemory;
 pub use review::{check_session_already_promoted, promote_to_long_term, SessionDigestSummarizer};

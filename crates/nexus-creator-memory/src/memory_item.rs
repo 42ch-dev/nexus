@@ -30,8 +30,8 @@ impl MemoryStatus {
 
 /// Memory kind enum - matches v1-spec §5.8 and ADR-001.
 ///
-/// Schema defines: `story_summary`, `research_material`, review_note, character_note,
-/// `world_building`, `plot_outline`, theme_analysis, personality_core, custom.
+/// Schema defines: `story_summary`, `research_material`, `review_note`, `character_note`,
+/// `world_building`, `plot_outline`, `theme_analysis`, `personality_core`, custom.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, strum::Display)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
@@ -113,7 +113,7 @@ impl FromStr for MemoryKind {
 }
 
 /// Source reference for provenance.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SourceRef {
     pub kind: String,
     pub id: String,
@@ -138,7 +138,7 @@ impl Default for CreatorQuota {
 }
 
 /// `MemoryItem` aggregate — structured memory entity.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MemoryItem {
     pub schema_version: u32,
     pub memory_item_id: String,
@@ -180,7 +180,7 @@ impl MemoryItem {
             creator_id: creator_id.to_string(),
             world_id: world_id.to_string(),
             memory_type,
-            memory_kind: memory_kind.map(|s| s.to_string()),
+            memory_kind: memory_kind.map(std::string::ToString::to_string),
             status: MemoryStatus::Active.as_str().to_string(),
             summary: None,
             embedding_ref: None,
@@ -193,6 +193,11 @@ impl MemoryItem {
     }
 
     /// Transition status: active → superseded.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::InvalidState`] when the current status is not
+    /// active.
     pub fn supersede(&mut self, _replacement_id: &str) -> Result<(), MemoryError> {
         if self.status != MemoryStatus::Active.as_str() {
             return Err(MemoryError::InvalidState {
@@ -526,7 +531,7 @@ mod tests {
             "personality_core",
             "custom",
         ] {
-            let json = format!(r#""{}""#, kind_str);
+            let json = format!(r#""{kind_str}""#);
             let parsed: MemoryKind = serde_json::from_str(&json).unwrap();
             let serialized = serde_json::to_string(&parsed).unwrap();
             assert_eq!(serialized, json);

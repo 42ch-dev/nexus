@@ -27,7 +27,7 @@ use nexus_contracts::generated::daemon_api::kb::{
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_relationships::list_relationships_for_world;
 use nexus_local_db::kb_store::SqliteKbStore;
-use nexus_spoke_adapter::conversion::{kb_relationship_row_to_spoke, world_kb_to_spoke};
+use nexus_spoke_adapter::conversion::{kb_relationship_row_to_spoke, knowledge_record_to_spoke};
 use nexus_spoke_adapter::pack::{build_pack, parse_pack};
 use std::collections::HashSet;
 
@@ -153,7 +153,7 @@ pub async fn pack_export(
     relations.sort_by(|a, b| a.relation_id.cmp(&b.relation_id));
 
     let spoke_entries: Vec<nexus_spoke_adapter::KnowledgeEntry> =
-        entries.iter().map(world_kb_to_spoke).collect();
+        entries.iter().map(knowledge_record_to_spoke).collect();
 
     let anchor_vec = if req.include_anchors {
         load_pack_anchors(pool, &entry_ids).await?

@@ -1,7 +1,7 @@
 //! `narrative.compute` capability (V1.61 P3 — compass Q7).
 //!
 //! Orchestration-scope capability that bridges the orchestration engine with
-//! the WASM compute host. Reads computable `WorldKbEntry`s from the KB layer,
+//! the WASM compute host. Reads computable `KnowledgeEntryRecord`s from the KB layer,
 //! passes them to a sandboxed WASM module via [`nexus_wasm_host::WasmEngine`],
 //! and applies the resulting 4-part output envelope (`state_delta`,
 //! `timeline_events`, `new_key_blocks`, `battle_report`).
@@ -23,7 +23,7 @@
 //! | `add/sub` | Non-numeric | Return `CapabilityError::InputInvalid`. |
 //!
 //! Paths use dot-notation (e.g. `character.current_hp`) mapping to the nested
-//! `body.state.<block_type_state_key>.<rest>` in a `WorldKbEntry`. The first
+//! `body.state.<block_type_state_key>.<rest>` in a `KnowledgeEntryRecord`. The first
 //! segment identifies the per-`block_type` state namespace per compass Q5
 //! (e.g. `character` → `state.character.current_hp`).
 //!
@@ -55,7 +55,7 @@ use crate::state_delta;
 use async_trait::async_trait;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_narrative::NarrativeGateway;
-use nexus_spoke_adapter::conversion::{spoke_to_world_kb, world_kb_to_spoke};
+use nexus_spoke_adapter::conversion::{knowledge_record_to_spoke, spoke_to_knowledge_record};
 use nexus_wasm_host::{ComputeInput, ModuleCache, WasmEngine};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -85,7 +85,7 @@ fn default_module_id() -> String {
     String::from("basic-combat")
 }
 
-/// Execute a WASM compute module for a world's computable `WorldKbEntry`s.
+/// Execute a WASM compute module for a world's computable `KnowledgeEntryRecord`s.
 #[derive(Clone)]
 pub struct NarrativeCompute {
     pool: Option<Arc<sqlx::SqlitePool>>,
@@ -254,15 +254,15 @@ impl Capability for NarrativeCompute {
                 .items
                 .into_iter()
                 .map(
-                    |kb: nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry| {
+                    |kb: nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord| {
                         // V1.139 P0: ComputeInput.key_blocks is opaque spoke-
                         // KnowledgeEntry JSON (the spoke $ref is unresolved at
-                        // codegen). Convert domain WorldKbEntry → spoke
+                        // codegen). Convert domain KnowledgeEntryRecord → spoke
                         // KnowledgeEntry (sole conversion seam, now a free
                         // function in nexus-spoke-adapter — V1.145 P1a) → JSON
                         // object map.
                         let spoke: nexus_knowledge::world_kb::KnowledgeEntry =
-                            world_kb_to_spoke(&kb);
+                            knowledge_record_to_spoke(&kb);
                         serde_json::to_value(&spoke)
                             .ok()
                             .and_then(|v| v.as_object().cloned())
@@ -372,9 +372,9 @@ impl Capability for NarrativeCompute {
     }
 }
 
-// ─── New WorldKbEntry creation ─────────────────────────────────────────────────
+// ─── New KnowledgeEntryRecord creation ─────────────────────────────────────────────────
 
-/// Create new `WorldKbEntry`s emitted by the compute module. Each block is inserted
+/// Create new `KnowledgeEntryRecord`s emitted by the compute module. Each block is inserted
 /// with `provisional` status via the KB store.
 ///
 /// # Security: `world_id` re-assertion (R-V161P3-CORR-002)
@@ -398,17 +398,20 @@ async fn create_new_key_blocks(
     for kb_map in blocks {
         // V1.139 P0: compute output `new_key_blocks` is opaque spoke-
         // KnowledgeEntry JSON. Convert Map → spoke KnowledgeEntry → domain
-        // WorldKbEntry (sole conversion seam, now a free function in
+        // KnowledgeEntryRecord (sole conversion seam, now a free function in
         // nexus-spoke-adapter — V1.145 P1a) before persisting.
         let spoke: nexus_knowledge::world_kb::KnowledgeEntry =
             serde_json::from_value(serde_json::Value::Object(kb_map.clone()))
                 .map_err(|e| CapabilityError::Internal(format!("decode new_key_block: {e}")))?;
-        let kb = spoke_to_world_kb(spoke);
-        if kb.world_id != world_id {
+        let kb = spoke_to_knowledge_record(spoke)
+            .map_err(|e| CapabilityError::Internal(format!("decode new_key_block owner: {e}")))?;
+        if kb.world_id() != Some(world_id) {
             return Err(CapabilityError::InputInvalid(format!(
                 "new_key_block '{}' targets world '{}' but admitted world is '{}'; \
                  cross-world block injection rejected",
-                kb.entry_id, kb.world_id, world_id
+                kb.entry_id,
+                kb.world_id().unwrap_or_default(),
+                world_id
             )));
         }
         kb_store
@@ -509,7 +512,7 @@ async fn handle_compute_error(
 mod tests {
     use super::*;
     use crate::state_delta;
-    use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+    use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
     use nexus_knowledge::world_kb::KbStore;
     use nexus_local_db::{open_pool, run_migrations};
 
@@ -581,12 +584,11 @@ mod tests {
         canonical_name: &str,
         max_hp: i64,
         current_hp: i64,
-    ) -> WorldKbEntry {
-        let kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry {
-            world_id: world_id.to_string(),
+    ) -> KnowledgeEntryRecord {
+        let kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord {
             block_type: nexus_contracts::BlockType::Character,
             canonical_name: canonical_name.to_string(),
-            body: Some(WorldKbBody {
+            body: Some(KnowledgeEntryBody {
                 summary: Some(format!("{canonical_name} character")),
                 attributes: Some(json!({"max_hp": max_hp, "base_atk": 20})),
                 computable: Some(true),
@@ -600,7 +602,7 @@ mod tests {
                 })),
                 ..Default::default()
             }),
-            ..WorldKbEntry::new(
+            ..KnowledgeEntryRecord::new(
                 world_id,
                 nexus_contracts::BlockType::Character,
                 canonical_name,

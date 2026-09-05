@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/actor-knowledge/list-character-knowledge-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListCharacterKnowledgeQuery",
+  "description": "Query parameters for GET /v1/daemon/characters/:character_id/knowledge. Character-owned listing without a World filter; not an unbounded all-World Creator view.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "limit": { "type": "integer" },
+    "cursor": { "type": "string" }
+  }
+}

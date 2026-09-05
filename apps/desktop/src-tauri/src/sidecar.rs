@@ -1011,8 +1011,11 @@ fn listener_pid(port: u16) -> Option<u32> {
 async fn stop_external_daemon(port: u16, pid: u32) {
     #[cfg(unix)]
     {
-        #[allow(clippy::cast_possible_wrap)]
-        let nix_pid = nix::unistd::Pid::from_raw(pid as i32);
+        let Ok(pid_i32) = i32::try_from(pid) else {
+            tracing::warn!(pid, "invalid PID beyond i32; skipping external daemon stop");
+            return;
+        };
+        let nix_pid = nix::unistd::Pid::from_raw(pid_i32);
         let _ = nix::sys::signal::kill(nix_pid, nix::sys::signal::Signal::SIGTERM);
         let deadline = Instant::now() + Duration::from_secs(2);
         while Instant::now() < deadline {

@@ -732,7 +732,10 @@ pub async fn list_schedules(
         message: format!("database error: {e}"),
     })?;
 
-    let items: Vec<ScheduleSummary> = rows.into_iter().map(ListRow::into_summary).collect();
+    let items: Vec<ScheduleSummary> = rows
+        .into_iter()
+        .map(ListRow::into_summary)
+        .collect::<Result<Vec<_>, _>>()?;
 
     let has_more = u64::from(total) > u64::from(offset).saturating_add(u64::from(limit));
     let next_cursor = if has_more {
@@ -807,7 +810,7 @@ pub async fn inspect_schedule(
     let concurrency_kind = row.concurrency_kind.clone();
 
     Ok(Json(InspectScheduleResponse {
-        schedule: row.into_summary(),
+        schedule: row.into_summary()?,
         depends_on: deps,
         concurrency_kind,
     }))
@@ -950,16 +953,19 @@ pub async fn get_core_context_history(
     // added via query parameter in a future iteration.
     let entries: Vec<CoreContextHistoryEntry> = rows
         .iter()
-        .map(|r| CoreContextHistoryEntry {
-            // SAFETY: version is a monotonic counter, always non-negative and well within u32 range
-            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-            version: r.version as u32,
-            payload_kind: r.payload_kind.clone(),
-            content: None,
-            derivation_kind: r.derivation_kind.clone(),
-            created_at: r.created_at.to_string(),
+        .map(|r| -> Result<CoreContextHistoryEntry, NexusApiError> {
+            Ok(CoreContextHistoryEntry {
+                version: u32::try_from(r.version).map_err(|_| NexusApiError::Internal {
+                    code: "SCHEDULE_CORE_CONTEXT_VERSION_OVERFLOW".into(),
+                    message: format!("core context version {} exceeds u32", r.version),
+                })?,
+                payload_kind: r.payload_kind.clone(),
+                content: None,
+                derivation_kind: r.derivation_kind.clone(),
+                created_at: r.created_at.to_string(),
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(Json(CoreContextHistoryResponse { entries }))
 }
@@ -1380,7 +1386,7 @@ pub async fn edit_schedule(
         message: format!("database error: {e}"),
     })?;
 
-    Ok((StatusCode::OK, Json(row.into_summary())))
+    Ok((StatusCode::OK, Json(row.into_summary()?)))
 }
 
 // ---------------------------------------------------------------------------
@@ -1746,19 +1752,24 @@ struct ListRow {
 }
 
 impl ListRow {
-    fn into_summary(self) -> ScheduleSummary {
-        ScheduleSummary {
+    fn into_summary(self) -> Result<ScheduleSummary, NexusApiError> {
+        Ok(ScheduleSummary {
             schedule_id: self.schedule_id,
             creator_id: self.creator_id,
             preset_id: self.preset_id,
             status: self.status,
             label: self.label,
-            // SAFETY: version is a monotonic counter, always non-negative and well within u32 range
-            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-            current_core_context_version: self.current_core_context_version as u32,
+            current_core_context_version: u32::try_from(self.current_core_context_version)
+                .map_err(|_| NexusApiError::Internal {
+                    code: "SCHEDULE_CORE_CONTEXT_VERSION_OVERFLOW".into(),
+                    message: format!(
+                        "core context version {} exceeds u32",
+                        self.current_core_context_version
+                    ),
+                })?,
             created_at: self.created_at.to_string(),
             updated_at: self.updated_at.to_string(),
-        }
+        })
     }
 }
 
@@ -1780,19 +1791,24 @@ struct InspectRow {
 }
 
 impl InspectRow {
-    fn into_summary(self) -> ScheduleSummary {
-        ScheduleSummary {
+    fn into_summary(self) -> Result<ScheduleSummary, NexusApiError> {
+        Ok(ScheduleSummary {
             schedule_id: self.schedule_id,
             creator_id: self.creator_id,
             preset_id: self.preset_id,
             status: self.status,
             label: self.label,
-            // SAFETY: version is a monotonic counter, always non-negative and well within u32 range
-            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-            current_core_context_version: self.current_core_context_version as u32,
+            current_core_context_version: u32::try_from(self.current_core_context_version)
+                .map_err(|_| NexusApiError::Internal {
+                    code: "SCHEDULE_CORE_CONTEXT_VERSION_OVERFLOW".into(),
+                    message: format!(
+                        "core context version {} exceeds u32",
+                        self.current_core_context_version
+                    ),
+                })?,
             created_at: self.created_at.to_string(),
             updated_at: self.updated_at.to_string(),
-        }
+        })
     }
 }
 
