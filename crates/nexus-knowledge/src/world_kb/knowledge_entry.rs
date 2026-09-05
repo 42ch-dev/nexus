@@ -571,6 +571,156 @@ pub struct BeliefPropositionRaw {
     pub context: Option<String>,
 }
 
+/// Returns true when `id` is a Character subject id (`chr_*` wire prefix).
+#[must_use]
+pub fn is_character_subject_id(id: &str) -> bool {
+    id.starts_with("chr_")
+}
+
+fn belief_label_in_closed_space(value: &str, allowed: &[&str], field: &str) -> Result<(), KbError> {
+    if allowed.contains(&value) {
+        Ok(())
+    } else {
+        Err(KbError::ValidationError(format!(
+            "belief {field} must be one of the handbook closed labels (got {value:?})"
+        )))
+    }
+}
+
+fn validate_closed_belief_labels(row: &BeliefPropositionRaw) -> Result<(), KbError> {
+    const TRUTH: &[&str] = &["True", "False", "Unknown"];
+    const ACCESS: &[&str] = &["Private", "Shared", "Public"];
+    const REPRESENTATION: &[&str] = &["Explicit", "Implicit"];
+    const CONTENT_TYPE: &[&str] = &[
+        "Location",
+        "Contents/Physical State",
+        "Identity/Relation",
+        "Epistemic",
+        "Desire/Intention",
+        "Emotion",
+        "Trait/Value",
+        "Action/Event",
+    ];
+    const SOURCE: &[&str] = &[
+        "Narration",
+        "Perception",
+        "Memory",
+        "Testimony",
+        "Inference",
+        "Imagination",
+        "Unknown",
+    ];
+    const CONTEXT: &[&str] = &["Deceptive", "Temporal", "Counterfactual", "Neutral"];
+
+    if let Some(v) = row.truth.as_deref() {
+        belief_label_in_closed_space(v, TRUTH, "truth")?;
+    }
+    if let Some(v) = row.access.as_deref() {
+        belief_label_in_closed_space(v, ACCESS, "access")?;
+    }
+    if let Some(v) = row.representation.as_deref() {
+        belief_label_in_closed_space(v, REPRESENTATION, "representation")?;
+    }
+    if let Some(v) = row.content_type.as_deref() {
+        belief_label_in_closed_space(v, CONTENT_TYPE, "content_type")?;
+    }
+    if let Some(v) = row.source.as_deref() {
+        belief_label_in_closed_space(v, SOURCE, "source")?;
+    }
+    if let Some(v) = row.context.as_deref() {
+        belief_label_in_closed_space(v, CONTEXT, "context")?;
+    }
+    Ok(())
+}
+
+/// Validate one Character ToM belief row for the v1.184 P4 record API.
+pub fn validate_character_tom_belief_row(
+    row: &BeliefPropositionRaw,
+    viewer_character_id: &str,
+) -> Result<(), KbError> {
+    if !is_character_subject_id(viewer_character_id) {
+        return Err(KbError::ValidationError(
+            "viewer_character_id must be a Character id (chr_* prefix)".into(),
+        ));
+    }
+
+    let order = row.order.ok_or_else(|| {
+        KbError::ValidationError("Character ToM belief row requires order".into())
+    })?;
+    if order == 0 || order > 2 {
+        return Err(KbError::ValidationError(format!(
+            "Character ToM belief order must be 1 (L1) or 2 (L2), got {order}"
+        )));
+    }
+
+    let holder = row.holder.as_deref().ok_or_else(|| {
+        KbError::ValidationError("Character ToM belief row requires holder".into())
+    })?;
+
+    match order {
+        1 => {
+            if holder != viewer_character_id {
+                return Err(KbError::ValidationError(format!(
+                    "L1 belief holder must equal viewer Character id (expected {viewer_character_id}, got {holder})"
+                )));
+            }
+        }
+        2 => {
+            if !is_character_subject_id(holder) {
+                return Err(KbError::ValidationError(format!(
+                    "L2 belief holder must be a Character id (chr_*), got {holder}"
+                )));
+            }
+            if holder == viewer_character_id {
+                return Err(KbError::ValidationError(
+                    "L2 belief holder must name a different Character than the viewer".into(),
+                ));
+            }
+        }
+        _ => unreachable!("order guarded above"),
+    }
+
+    validate_closed_belief_labels(row)
+}
+
+/// Pinned pre-v1.184 P4 `modules.mental` + `modules.belief` fixture.
+pub const LEGACY_MENTAL_BELIEF_MODULES_FIXTURE: &str = r#"{
+            "mental": {
+                "identity": { "role": "harbor_master" },
+                "beliefs": { "ref": "kb_bo_beliefs", "count": 12 },
+                "attention": { "target": "kb_tw_dawn_dock", "modality": "visual" },
+                "goals": [{ "goal": "clear the dawn berths", "status": "active" }],
+                "emotions": [{ "emotion": "alert", "intensity": 0.6 }],
+                "norms": ["greet arriving captains"],
+                "constraints": ["cannot waive dockside law"]
+            },
+            "belief": [
+                {
+                    "holder": "kb_bo",
+                    "proposition": "The marble is in the box",
+                    "order": 1,
+                    "truth": "False",
+                    "access": "Private",
+                    "representation": "Implicit",
+                    "content_type": "Location",
+                    "source": "Perception",
+                    "context": "Temporal"
+                },
+                {
+                    "holder": "world",
+                    "proposition": "The marble is in the basket",
+                    "order": 0,
+                    "truth": "True",
+                    "access": "Public",
+                    "representation": "Explicit",
+                    "content_type": "Location",
+                    "source": "Narration",
+                    "context": "Temporal"
+                }
+            ]
+        }"#;
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -909,5 +1059,52 @@ mod tests {
         let early = stored_created_at_order_millis("2026-01-01T10:00:00.123200Z").unwrap();
         let late = stored_created_at_order_millis("2026-01-01T10:00:00.123300Z").unwrap();
         assert_eq!(early, late);
+    }
+
+    // ── v1.184 P4 T1: legacy pin + Character ToM belief admission ─────
+
+    #[test]
+    fn legacy_mental_belief_modules_fixture_round_trips_unchanged() {
+        let pinned: serde_json::Value =
+            serde_json::from_str(LEGACY_MENTAL_BELIEF_MODULES_FIXTURE).unwrap();
+        let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Bo");
+        kb.entry_id = "kb_bo".to_string();
+        kb.modules = Some(pinned.clone());
+        let round = serde_json::to_value(kb.modules.as_ref().unwrap()).unwrap();
+        assert_eq!(round, pinned);
+        assert_eq!(kb.parse_belief_rows().len(), 2);
+    }
+
+    #[test]
+    fn legacy_world_fact_belief_row_still_parses_without_character_validation() {
+        let kb = mental_dialect_entry("kb_bo", BlockType::Character);
+        let world_row = &kb.parse_belief_rows()[1];
+        assert_eq!(world_row.order, Some(0));
+        assert_eq!(world_row.holder.as_deref(), Some("world"));
+        assert!(validate_character_tom_belief_row(world_row, "chr_viewer").is_err());
+    }
+
+    #[test]
+    fn character_tom_belief_validation_accepts_l1_and_l2() {
+        let viewer = "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let other = "chr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let l1 = BeliefPropositionRaw {
+            holder: Some(viewer.into()),
+            proposition: Some("I am here".into()),
+            order: Some(1),
+            truth: Some("True".into()),
+            access: Some("Private".into()),
+            representation: Some("Explicit".into()),
+            content_type: Some("Location".into()),
+            source: Some("Perception".into()),
+            context: Some("Neutral".into()),
+        };
+        validate_character_tom_belief_row(&l1, viewer).unwrap();
+        let l2 = BeliefPropositionRaw {
+            holder: Some(other.into()),
+            order: Some(2),
+            ..l1.clone()
+        };
+        validate_character_tom_belief_row(&l2, viewer).unwrap();
     }
 }
