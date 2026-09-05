@@ -8,6 +8,7 @@
 //! may be in an inconsistent state, but for a local development tool this is
 //! preferable to a hard crash.
 
+pub mod actor_sessions;
 pub mod manager;
 pub mod session;
 
@@ -15,6 +16,7 @@ use crate::api::errors::NexusApiError;
 use crate::db::pool::{DbPool, PoolConfig};
 use crate::db::SqliteNarrativeGateway;
 use crate::lifecycle::{Lifecycle, LifecycleState, StatigLifecycle};
+use crate::workspace::actor_sessions::ActorSessionRegistry;
 use crate::workspace::session::WorkspaceSessionManager;
 use nexus_agent_host::config::AgentHostConfig;
 use nexus_contracts::local::domain::RuntimeMode;
@@ -88,6 +90,8 @@ pub struct WorkspaceState {
     schedule_supervisor: Arc<Option<Arc<ScheduleSupervisor>>>,
     /// Agent host facade (set at daemon startup when agent host subsystem is wired).
     agent_host: Arc<Option<Arc<dyn nexus_agent_host::HostFacade>>>,
+    /// Process-lifetime Actor session indexes over `HostFacade` (v1.184 P2).
+    actor_sessions: ActorSessionRegistry,
     /// Agent host configuration loaded at boot from `agent-host/config.toml`.
     agent_host_config: Arc<AgentHostConfig>,
     /// Shutdown notification — fired when the daemon enters Stopping state.
@@ -198,6 +202,7 @@ impl WorkspaceState {
             capability_registry: Arc::new(None),
             schedule_supervisor: Arc::new(None),
             agent_host: Arc::new(None),
+            actor_sessions: ActorSessionRegistry::new(),
             agent_host_config: Arc::new(AgentHostConfig::default()),
             shutdown_notify: Arc::new(Notify::new()),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
@@ -294,6 +299,7 @@ impl WorkspaceState {
             capability_registry: Arc::new(None),
             schedule_supervisor: Arc::new(None),
             agent_host: Arc::new(None),
+            actor_sessions: ActorSessionRegistry::new(),
             agent_host_config: Arc::new(agent_host_config),
             shutdown_notify: Arc::new(Notify::new()),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
@@ -848,9 +854,16 @@ impl WorkspaceState {
         // Gate FIRST: a consumer loading the flag around the broadcast
         // observes shutdown one way or the other (refusal or wake-up).
         self.shutdown_requested.store(true, Ordering::SeqCst);
+        self.actor_sessions.clear();
         self.shutdown_notify.notify_waiters();
     }
 
+
+    /// Process-lifetime Actor session registry.
+    #[must_use]
+    pub fn actor_sessions(&self) -> &ActorSessionRegistry {
+        &self.actor_sessions
+    }
     /// Workspace session manager (DF-31 skeleton).
     /// Returns `None` when no creator DB is open (boot before Profile attach).
     #[must_use]

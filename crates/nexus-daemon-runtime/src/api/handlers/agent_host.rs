@@ -23,6 +23,7 @@ use futures_util::StreamExt;
 use crate::actor_admission::{ActorAdmissionService, ActorPairMode, ActorViewpoint};
 use crate::actor_knowledge_view::AdmittedActor;
 use crate::api::handlers::world_kb_guards::require_creator;
+use crate::workspace::actor_sessions::{echo_actor_pair, ActorSessionRegistry};
 use nexus_contracts::generated::daemon_api::agent_host::{
     AgentHostListSessionsQuery, AgentScanEntry, CancelOperationResponse, CreateSessionRequest,
     ExecuteOperationRequest, OperationResponse, ScanRequest, ScanResponse, SessionListResponse,
@@ -197,7 +198,7 @@ pub async fn create_session(
                 AdmittedActor::Character { character_id: character_id.to_string() }
             }
         };
-        let _ctx = admission
+        let ctx = admission
             .admit(
                 &creator_id,
                 actor,
@@ -209,6 +210,40 @@ pub async fn create_session(
                 },
             )
             .await?;
+        let host = get_host(&state)?;
+        let cwd = session_cwd_path(&req);
+        let key = ActorSessionRegistry::key_for(
+            &req.provider_id,
+            &cwd,
+            req.model.clone(),
+            req.mode.clone(),
+            &ctx,
+        )?;
+        let host_req = host_create_request(&req);
+        let host_for_create = Arc::clone(&host);
+        let session = state
+            .actor_sessions()
+            .resolve_or_create(key, ctx.clone(), host.as_ref(), move || {
+                let host_for_create = host_for_create;
+                let host_req = host_req;
+                async move {
+                    host_for_create
+                        .create_session(host_req)
+                        .await
+                        .map_err(|e| map_host_error(&e))
+                }
+            })
+            .await?;
+        let (actor_ref, viewpoint) = echo_actor_pair(&ctx)?;
+        return Ok(Json(session_wire(
+            session.id.to_string(),
+            session.provider_id.to_string(),
+            format!("{:?}", session.state),
+            None,
+            req.model.clone(),
+            actor_ref,
+            viewpoint,
+        )));
     }
 
     let host = get_host(&state)?;
@@ -226,7 +261,16 @@ pub async fn create_session(
         format!("{:?}", session.state),
         None,
         model,
+        None,
+        None,
     )))
+}
+
+fn session_cwd_path(req: &CreateSessionRequest) -> std::path::PathBuf {
+    req.cwd.as_ref().map_or_else(
+        || std::path::PathBuf::from("/tmp"),
+        std::path::PathBuf::from,
+    )
 }
 
 /// Legacy host request: empty MCP list and `metadata: null`.
@@ -235,10 +279,7 @@ fn host_create_request(
 ) -> nexus_agent_host::capability::CreateSessionRequest {
     nexus_agent_host::capability::CreateSessionRequest {
         provider_id: nexus_agent_host::ProviderId::new(&req.provider_id),
-        cwd: req.cwd.as_ref().map_or_else(
-            || std::path::PathBuf::from("/tmp"),
-            std::path::PathBuf::from,
-        ),
+        cwd: session_cwd_path(req),
         model: req.model.clone(),
         mode: req.mode.clone(),
         mcp_servers: vec![],
@@ -252,6 +293,12 @@ fn session_wire(
     state: String,
     active_op_id: Option<String>,
     model: Option<String>,
+    actor_ref: Option<
+        nexus_contracts::generated::daemon_api::agent_host::session_response::NexusActorRef,
+    >,
+    viewpoint: Option<
+        nexus_contracts::generated::daemon_api::agent_host::session_response::NexusSessionViewpoint,
+    >,
 ) -> SessionResponse {
     SessionResponse {
         session_id,
@@ -259,8 +306,28 @@ fn session_wire(
         state,
         active_op_id,
         model,
-        actor_ref: None,
-        viewpoint: None,
+        actor_ref,
+        viewpoint,
+    }
+}
+
+fn overlay_actor_pair(
+    state: &WorkspaceState,
+    session_id: &nexus_agent_host::HostSessionId,
+) -> Result<
+    (
+        Option<
+            nexus_contracts::generated::daemon_api::agent_host::session_response::NexusActorRef,
+        >,
+        Option<
+            nexus_contracts::generated::daemon_api::agent_host::session_response::NexusSessionViewpoint,
+        >,
+    ),
+    NexusApiError,
+> {
+    match state.actor_sessions().context_for(session_id) {
+        Some(ctx) => echo_actor_pair(&ctx),
+        None => Ok((None, None)),
     }
 }
 
@@ -293,15 +360,18 @@ pub async fn list_sessions(
         })
         .take(limit_us)
         .map(|s| {
-            session_wire(
+            let (actor_ref, viewpoint) = overlay_actor_pair(&state, &s.id)?;
+            Ok(session_wire(
                 s.id.to_string(),
                 s.provider_id.to_string(),
                 format!("{:?}", s.state),
                 active_op_display(&s),
                 None,
-            )
+                actor_ref,
+                viewpoint,
+            ))
         })
-        .collect();
+        .collect::<Result<Vec<_>, NexusApiError>>()?;
 
     let next_cursor = if items.len() == limit_us {
         items.last().map(|i| i.session_id.clone())
@@ -333,12 +403,15 @@ pub async fn get_session(
         .find(|s| s.id.0 == uuid)
         .ok_or_else(|| NexusApiError::NotFound(format!("session {session_id}")))?;
 
+    let (actor_ref, viewpoint) = overlay_actor_pair(&state, &session.id)?;
     Ok(Json(session_wire(
         session.id.to_string(),
         session.provider_id.to_string(),
         format!("{:?}", session.state),
         active_op_display(&session),
         None,
+        actor_ref,
+        viewpoint,
     )))
 }
 
@@ -354,9 +427,10 @@ pub async fn shutdown_session(
     let host = get_host(&state)?;
 
     let sid = nexus_agent_host::HostSessionId(uuid);
-    host.shutdown_session(sid)
+    host.shutdown_session(sid.clone())
         .await
         .map_err(|e| map_host_error(&e))?;
+    state.actor_sessions().remove_session(&sid);
 
     Ok(Json(ShutdownSessionResponse {
         session_id,
@@ -1550,6 +1624,8 @@ mod tests {
             "Ready".into(),
             None,
             None,
+            None,
+            None,
         );
         assert_eq!(
             serde_json::to_string(&resp).expect("json"),
@@ -1561,6 +1637,8 @@ mod tests {
             "Busy".into(),
             Some("op".into()),
             Some("m".into()),
+            None,
+            None,
         );
         assert_eq!(
             serde_json::to_string(&with_optionals).expect("json"),
