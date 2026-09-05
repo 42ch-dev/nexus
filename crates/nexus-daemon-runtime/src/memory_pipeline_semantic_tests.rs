@@ -438,8 +438,8 @@ async fn character_provenance_rejects_inactive_character_before_side_effects() {
     assert!(res.is_err());
     assert!(matches!(res, Err(NexusApiError::Forbidden { .. })));
 
-    // No file mutation happened for the archived Character: the pipeline never
-    // got a context, so no SOUL/LTM file was created.
+    // No side effect happened for the archived Character: the pipeline never
+    // got a context, so no SOUL/LTM file and no DB row is created.
     let hdir = MemoryBearerRef::Character {
         owner_creator_id: OWNER_A,
         character_id: &charted,
@@ -449,6 +449,24 @@ async fn character_provenance_rejects_inactive_character_before_side_effects() {
         !hdir.exists(),
         "no file side effect for an archived Character context"
     );
+    let hsoul = MemoryBearerRef::Character {
+        owner_creator_id: OWNER_A,
+        character_id: &charted,
+    }
+    .soul_path(&s.nexus_home);
+    assert!(!hsoul.exists(), "no SOUL.md for an archived Character");
+
+    // No DB rows for the archived Character in any Character memory table.
+    let schema_checks = [
+        ("SELECT COUNT(*) FROM character_memory_pending_review WHERE character_id = ?", "pending"),
+        ("SELECT COUNT(*) FROM character_memory_fragments WHERE character_id = ?", "fragments"),
+        ("SELECT COUNT(*) FROM character_soul_narratives WHERE character_id = ?", "narratives"),
+        ("SELECT COUNT(*) FROM character_soul_meta WHERE character_id = ?", "soul_meta"),
+    ];
+    for (sql, label) in schema_checks {
+        let n = count(&s.pool, sql, &charted).await;
+        assert_eq!(n, 0, "no {label} row for an archived Character");
+    }
 
     drop(s.tmp);
 }

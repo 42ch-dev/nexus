@@ -44,17 +44,28 @@ impl AcpSoulNarrativeSynthesizer {
 
         let mut prompt = String::new();
 
-        // Header
-        prompt.push_str(&format!(
-            "You are a reflective creative-writing mentor synthesizing a {subject}-SOUL narrative.\n\n"
-        ));
-        prompt.push_str(&format!(
-            "The {subject} has accumulated the following creative fragments. "
-        ));
-        prompt.push_str(&format!(
-            "Synthesize a coherent, reflective narrative of their creative identity — \
-             who they are becoming as a {subject}. The narrative must:\n",
-        ));
+        // Header. The subject-specific strings are selected by an exhaustive
+        // branch so the Creator arm is byte-for-byte identical to the legacy
+        // prompt (capitalized "Creator-SOUL", "as a writer", "this creator is
+        // becoming"), and the Character arm never references the Creator.
+        let (header, body_intro, final_instruction) = match subject {
+            "character" => (
+                "You are a reflective creative-writing mentor synthesizing a Character-SOUL narrative.\n\n",
+                "The character has accumulated the following creative fragments. "
+                    .to_string()
+                    + "Synthesize a coherent, reflective narrative of their creative identity — who they are becoming as a character. The narrative must:\n",
+                "Now, write a reflective Character-SOUL narrative (2-4 paragraphs) synthesizing who this character is becoming.",
+            ),
+            _ => (
+                "You are a reflective creative-writing mentor synthesizing a Creator-SOUL narrative.\n\n",
+                "The creator has accumulated the following creative fragments. "
+                    .to_string()
+                    + "Synthesize a coherent, reflective narrative of their creative identity — who they are becoming as a writer. The narrative must:\n",
+                "Now, write a reflective Creator-SOUL narrative (2-4 paragraphs) synthesizing who this creator is becoming.",
+            ),
+        };
+        prompt.push_str(header);
+        prompt.push_str(&body_intro);
         prompt.push_str("1. Reference at least two distinct theme keywords from their work.\n");
         prompt.push_str("2. Reference at least one shift or development over time.\n");
         prompt.push_str("3. End with a forward-looking reflection or question.\n\n");
@@ -109,10 +120,7 @@ impl AcpSoulNarrativeSynthesizer {
             prompt.push('\n');
         }
 
-        prompt.push_str(
-            "Now, write a reflective Creator-SOUL narrative (2-4 paragraphs) \
-             synthesizing who this creator is becoming.",
-        );
+        prompt.push_str(final_instruction);
 
         prompt
     }
@@ -220,17 +228,61 @@ mod tests {
         assert!(prompt.contains("forward-looking"));
     }
 
+    /// The Creator arm prompt is byte-for-byte identical to the legacy
+    /// prompt (capitalized "Creator-SOUL", "as a writer", "this creator is
+    /// becoming").
     #[test]
-    fn build_prompt_is_subject_aware() {
+    fn creator_prompt_is_byte_identical_to_legacy() {
         let creator = AcpSoulNarrativeSynthesizer::build_prompt(&sample_input(), "creator");
-        assert!(creator.contains("Creator-SOUL narrative"));
-        assert!(creator.contains("who they are becoming as a creator"));
+        assert!(creator.contains(
+            "You are a reflective creative-writing mentor synthesizing a Creator-SOUL narrative.\n\n"
+        ));
+        assert!(creator.contains(
+            "The creator has accumulated the following creative fragments. "
+        ));
+        assert!(creator.contains(
+            "Synthesize a coherent, reflective narrative of their creative identity — \
+             who they are becoming as a writer. The narrative must:\n"
+        ));
+        assert!(creator.ends_with(
+            "Now, write a reflective Creator-SOUL narrative (2-4 paragraphs) \
+             synthesizing who this creator is becoming."
+        ));
+        // No Character wording leaks into the Creator arm.
+        assert!(!creator.contains("Character-SOUL"));
+        assert!(!creator.contains("as a character"));
+    }
 
+    /// The Character arm prompt is fully Character-subject-aware and carries
+    /// NO Creator-SOUL or "this creator" wording anywhere.
+    #[test]
+    fn character_prompt_has_no_creator_wording() {
         let character = AcpSoulNarrativeSynthesizer::build_prompt(&sample_input(), "character");
-        assert!(character.contains("character-SOUL narrative"));
-        assert!(character.contains("who they are becoming as a character"));
-        // A character prompt must never ask about "this creator is becoming".
-        assert!(!character.contains("who they are becoming as a writer"));
+        assert!(character.contains(
+            "You are a reflective creative-writing mentor synthesizing a Character-SOUL narrative.\n\n"
+        ));
+        assert!(character.contains(
+            "The character has accumulated the following creative fragments. "
+        ));
+        assert!(character.contains(
+            "Synthesize a coherent, reflective narrative of their creative identity — \
+             who they are becoming as a character. The narrative must:\n"
+        ));
+        assert!(character.ends_with(
+            "Now, write a reflective Character-SOUL narrative (2-4 paragraphs) \
+             synthesizing who this character is becoming."
+        ));
+        // The Character instruction contains no Creator-SOUL or "this creator"
+        // wording (acceptance criterion).
+        assert!(
+            !character.contains("Creator-SOUL"),
+            "Character prompt must not reference Creator-SOUL: {character}"
+        );
+        assert!(
+            !character.contains("this creator"),
+            "Character prompt must not reference 'this creator': {character}"
+        );
+        assert!(!character.contains("as a writer"));
     }
 
     /// A Character bearer's synthesis is routed by its owner Creator id
