@@ -1,0 +1,240 @@
+//! Character pending-review storage (v1.184 P3 Task 1).
+//!
+//! Character counterpart to [`crate::pending_review`]: session-end capture
+//! queue rows on the dedicated `character_memory_pending_review` table.
+//! Rows key `character_id` only — authorization derives the owner from
+//! `characters`. A non-null `actor_world_binding_id` marks binding-local
+//! (one World life) provenance; the write path validates that the binding is
+//! active, belongs to the same Character, and targets an owned active World
+//! before any row is written.
+
+use sqlx::SqlitePool;
+
+use crate::actor_world_binding::require_valid_provenance_tx;
+use crate::character::{require_active_owned_character, require_owned_character_pool};
+use crate::error::LocalDbError;
+
+/// Character pending review record — mirrors DB row.
+#[derive(Debug, Clone)]
+pub struct CharacterPendingReviewRecord {
+    /// Unique identifier for this pending entry.
+    pub pending_id: String,
+    /// ACP session ID that triggered the capture.
+    pub session_id: String,
+    /// Character ID for bearer ownership.
+    pub character_id: String,
+    /// Binding-local provenance; `None` = shared Character scope.
+    pub actor_world_binding_id: Option<String>,
+    /// Task kind heuristic (brainstorm, outline, chapter, research, unknown).
+    pub task_kind: String,
+    /// Raw digest extracted from session.
+    pub raw_digest: String,
+    /// Creation timestamp.
+    pub created_at: String,
+}
+
+fn record_from_row(
+    pending_id: String,
+    session_id: String,
+    character_id: String,
+    actor_world_binding_id: Option<String>,
+    task_kind: String,
+    raw_digest: String,
+    created_at: String,
+) -> CharacterPendingReviewRecord {
+    CharacterPendingReviewRecord {
+        pending_id,
+        session_id,
+        character_id,
+        actor_world_binding_id,
+        task_kind,
+        raw_digest,
+        created_at,
+    }
+}
+
+
+/// Create a Character pending review record.
+///
+/// Runs in a write-serialized transaction: validates Character ownership and
+/// binding provenance first, so foreign Characters and invalid bindings
+/// reject before any row is written.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::ActorNotFound` for foreign Characters or invalid
+/// bindings; `LocalDbError` on constraint or database failure.
+pub async fn create_character_pending_review(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+    record: &CharacterPendingReviewRecord,
+) -> Result<(), LocalDbError> {
+    let mut tx = crate::begin_immediate(pool).await?;
+    let result = async {
+        require_active_owned_character(&mut tx, owner_creator_id, &record.character_id).await?;
+        require_valid_provenance_tx(
+            &mut tx,
+            owner_creator_id,
+            &record.character_id,
+            record.actor_world_binding_id.as_deref(),
+        )
+        .await?;
+        sqlx::query!(
+            "INSERT INTO character_memory_pending_review
+             (pending_id, session_id, character_id, actor_world_binding_id, task_kind, raw_digest, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            record.pending_id,
+            record.session_id,
+            record.character_id,
+            record.actor_world_binding_id,
+            record.task_kind,
+            record.raw_digest,
+            record.created_at
+        )
+        .execute(&mut *tx)
+        .await?;
+        Ok(())
+    }
+    .await;
+    match result {
+        Ok(()) => {
+            tx.commit().await?;
+            Ok(())
+        }
+        Err(err) => {
+            let _ = tx.rollback().await;
+            Err(err)
+        }
+    }
+}
+
+/// Get a Character pending review by ID, scoped to the owning Character.
+///
+/// Returns None if the record does not exist within this Character.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::ActorNotFound` when the Character is missing or
+/// owned by another Creator; `LocalDbError` on database failure.
+pub async fn get_character_pending_review(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+    character_id: &str,
+    pending_id: &str,
+) -> Result<Option<CharacterPendingReviewRecord>, LocalDbError> {
+    require_owned_character_pool(pool, owner_creator_id, character_id).await?;
+    let row = sqlx::query!(
+        r#"SELECT pending_id as "pending_id!", session_id as "session_id!",
+                  character_id as "character_id!", actor_world_binding_id,
+                  task_kind as "task_kind!", raw_digest as "raw_digest!",
+                  created_at as "created_at!"
+           FROM character_memory_pending_review
+           WHERE pending_id = ? AND character_id = ?"#,
+        pending_id,
+        character_id
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| {
+        record_from_row(
+            r.pending_id,
+            r.session_id,
+            r.character_id,
+            r.actor_world_binding_id,
+            r.task_kind,
+            r.raw_digest,
+            r.created_at,
+        )
+    }))
+}
+
+/// List a bounded page of pending reviews for a Character, newest first.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::ActorNotFound` when the Character is missing or
+/// owned by another Creator; `LocalDbError` on database failure.
+pub async fn list_character_pending_reviews(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+    character_id: &str,
+    limit: i64,
+) -> Result<Vec<CharacterPendingReviewRecord>, LocalDbError> {
+    require_owned_character_pool(pool, owner_creator_id, character_id).await?;
+    let rows = sqlx::query!(
+        r#"SELECT pending_id as "pending_id!", session_id as "session_id!",
+                  character_id as "character_id!", actor_world_binding_id,
+                  task_kind as "task_kind!", raw_digest as "raw_digest!",
+                  created_at as "created_at!"
+           FROM character_memory_pending_review
+           WHERE character_id = ? ORDER BY created_at DESC LIMIT ?"#,
+        character_id,
+        limit
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            record_from_row(
+                r.pending_id,
+                r.session_id,
+                r.character_id,
+                r.actor_world_binding_id,
+                r.task_kind,
+                r.raw_digest,
+                r.created_at,
+            )
+        })
+        .collect())
+}
+
+/// Delete a Character pending review by ID, scoped to the owning Character.
+///
+/// Returns true if a record was deleted, false if it didn't exist.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::ActorNotFound` when the Character is missing or
+/// owned by another Creator; `LocalDbError` on database failure.
+pub async fn delete_character_pending_review(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+    character_id: &str,
+    pending_id: &str,
+) -> Result<bool, LocalDbError> {
+    require_owned_character_pool(pool, owner_creator_id, character_id).await?;
+    let result = sqlx::query!(
+        "DELETE FROM character_memory_pending_review WHERE pending_id = ? AND character_id = ?",
+        pending_id,
+        character_id
+    )
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Count pending reviews for a Character.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::ActorNotFound` when the Character is missing or
+/// owned by another Creator; `LocalDbError` on database failure.
+///
+/// # Panics
+///
+/// Panics if the count is negative (database invariant violation).
+pub async fn count_character_pending_reviews(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+    character_id: &str,
+) -> Result<usize, LocalDbError> {
+    require_owned_character_pool(pool, owner_creator_id, character_id).await?;
+    let count = sqlx::query_scalar!(
+        r#"SELECT COUNT(*) as "count!" FROM character_memory_pending_review WHERE character_id = ?"#,
+        character_id
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(usize::try_from(count).expect("count is non-negative and fits in usize"))
+}

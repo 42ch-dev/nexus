@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT MAX(created_at) as \"max_created_at?: String\" FROM character_memory_fragments\n           WHERE character_id = ? AND actor_world_binding_id IS ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "max_created_at?: String",
+        "ordinal": 0,
+        "type_info": "Null"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "50acc50eb12eaf306a26f4d0653650e8bc258d6b03d04052f350919aa3b6814d"
+}

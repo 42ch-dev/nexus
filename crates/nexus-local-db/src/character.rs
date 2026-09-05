@@ -347,6 +347,33 @@ pub(crate) async fn require_active_owned_character(
     Ok(row)
 }
 
+/// Pool-scoped ownership check for read paths that do not hold a write
+/// transaction. Foreign ids are not distinguished from missing.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::ActorNotFound` when the Character is missing or
+/// owned by another Creator; `LocalDbError` on database failure.
+pub(crate) async fn require_owned_character_pool(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+    character_id: &str,
+) -> Result<(), LocalDbError> {
+    let owned = sqlx::query_scalar!(
+        r#"SELECT owner_creator_id as "owner_creator_id!" FROM characters WHERE character_id = ?"#,
+        character_id
+    )
+    .fetch_optional(pool)
+    .await?;
+    match owned {
+        Some(stored) if stored == owner_creator_id => Ok(()),
+        Some(_) | None => Err(LocalDbError::ActorNotFound {
+            resource: "character",
+            id: character_id.to_string(),
+        }),
+    }
+}
+
 /// Map unique/check failures onto stable actor conflicts when possible.
 pub(crate) fn map_actor_constraint<T>(result: Result<T, sqlx::Error>) -> Result<T, LocalDbError> {
     match result {

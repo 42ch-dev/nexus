@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT pending_id as \"pending_id!\", session_id as \"session_id!\",\n                  character_id as \"character_id!\", actor_world_binding_id,\n                  task_kind as \"task_kind!\", raw_digest as \"raw_digest!\",\n                  created_at as \"created_at!\"\n           FROM character_memory_pending_review\n           WHERE character_id = ? ORDER BY created_at DESC LIMIT ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "pending_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "session_id!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "character_id!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "actor_world_binding_id",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "task_kind!",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "raw_digest!",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!",
+        "ordinal": 6,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4fca5ec9a48b816d0753b92e6f322e0f625275c8ec03064272c8d32c1a193d27"
+}

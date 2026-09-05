@@ -1,0 +1,68 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT fragment_id as \"fragment_id!\", session_id as \"session_id!\",\n                      character_id as \"character_id!\", actor_world_binding_id,\n                      keywords as \"keywords!\", summary as \"summary!\",\n                      created_at as \"created_at!\", ttl,\n                      revision as \"revision!\"\n               FROM character_memory_fragments\n               WHERE character_id = ? AND actor_world_binding_id IS NULL\n               ORDER BY created_at DESC LIMIT ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "fragment_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "session_id!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "character_id!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "actor_world_binding_id",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "keywords!",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "summary!",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "ttl",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "revision!",
+        "ordinal": 8,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "8a2a5d799a3668037970857d07817a993c13dfeea03bd82341c8260eaadeaa20"
+}
