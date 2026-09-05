@@ -103,6 +103,23 @@ impl MemoryBearerRef<'_> {
         }
     }
 
+    /// Resolve the long-term memory directory after validating bearer ids.
+    ///
+    /// Prefer this over [`Self::long_term_memory_dir`] at public I/O entrypoints
+    /// so path construction is gated on closed Creator/Character id formats.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::InvalidIdFormat`] when either id component is
+    /// malformed or path-unsafe.
+    pub fn validated_long_term_memory_dir(
+        &self,
+        home: &Path,
+    ) -> Result<PathBuf, MemoryError> {
+        self.validate()?;
+        Ok(self.long_term_memory_dir(home))
+    }
+
     /// Resolve the long-term memory directory for this bearer.
     ///
     /// The Creator arm is byte-identical to the legacy
@@ -208,6 +225,17 @@ fn validate_creator_id(creator_id: &str) -> Result<(), MemoryError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validated_long_term_memory_dir_rejects_invalid_bearer() {
+        let home = PathBuf::from("/h");
+        let result = MemoryBearerRef::Creator("../../etc").validated_long_term_memory_dir(&home);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("invalid ID format"));
+    }
 
     #[test]
     fn creator_path_builder_rejects_traversal_id() {
