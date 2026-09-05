@@ -1395,9 +1395,9 @@ impl SqliteKbStore {
     /// SQL-side owner keyset for Actor KnowledgeView (v1.184 P1 QC W2).
     ///
     /// Each component is bounded to `limit` rows (`limit` is already `page
-    /// size + 1` at the call site). Chronological order uses SQLite
-    /// `strftime` so RFC3339 and `datetime('now')` bytes compare as instants.
-    /// Stored `created_at` bytes are not rewritten.
+    /// size + 1` at the call site). Chronological order uses millisecond unix
+    /// time (`strftime('%s')` plus `%f` millis) matching
+    /// `stored_created_at_order_millis`. Stored `created_at` bytes are not rewritten.
     ///
     /// # Errors
     ///
@@ -1414,7 +1414,8 @@ impl SqliteKbStore {
             KnowledgeOwnerRef::Character(_) => "character_id",
             KnowledgeOwnerRef::ActorWorldBinding(_) => "actor_world_binding_id",
         };
-        let created_key = "strftime('%Y-%m-%d %H:%M:%f', created_at)";
+        let created_key = "(CAST(strftime('%s', created_at) AS INTEGER) * 1000 + CAST(substr(strftime('%f', created_at), 4) AS INTEGER))";
+        let cursor_millis = "(CAST(strftime('%s', ?) AS INTEGER) * 1000 + CAST(substr(strftime('%f', ?), 4) AS INTEGER))";
         let visibility = if exclude_creator_only {
             " AND creator_only = 0"
         } else {
@@ -1422,8 +1423,8 @@ impl SqliteKbStore {
         };
         let cursor_sql = if after.is_some() {
             format!(
-                " AND ({created_key} > strftime('%Y-%m-%d %H:%M:%f', ?) \
-                   OR ({created_key} = strftime('%Y-%m-%d %H:%M:%f', ?) \
+                " AND ({created_key} > {cursor_millis} \
+                   OR ({created_key} = {cursor_millis} \
                        AND key_block_id > ?))"
             )
         } else {
@@ -1457,7 +1458,12 @@ impl SqliteKbStore {
         );
         let mut query = sqlx::query_as::<_, KeyBlockRow>(&sql).bind(owner.id());
         if let Some((created_at, entry_id)) = after {
-            query = query.bind(created_at).bind(created_at).bind(entry_id);
+            query = query
+                .bind(created_at)
+                .bind(created_at)
+                .bind(created_at)
+                .bind(created_at)
+                .bind(entry_id);
         }
         let rows = query
             .fetch_all(&*self.pool)
@@ -2199,6 +2205,45 @@ mod tests {
             .unwrap();
         assert!(page.len() <= 2);
         assert_eq!(page[0].entry_id, "kb_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1");
+    }
+
+    #[tokio::test]
+    async fn test_list_by_owner_keyset_same_millisecond_reverse_ids() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+        let store = SqliteKbStore::new(pool.clone());
+        let rows = [
+            ("kb_m", "2026-01-01T10:00:00.123200Z"),
+            ("kb_a", "2026-01-01T10:00:00.123300Z"),
+            ("kb_z", "2026-01-01T10:00:01Z"),
+        ];
+        for (id, ts) in rows {
+            let mut kb = KnowledgeEntryRecord::new("wld_1", BlockType::Item, id);
+            kb.entry_id = id.to_string();
+            store.insert_knowledge_entry(kb).await.unwrap();
+            sqlx::query("UPDATE kb_key_blocks SET created_at = ? WHERE key_block_id = ?")
+                .bind(ts)
+                .bind(id)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        let owner = KnowledgeOwnerRef::world("wld_1");
+        let first = store
+            .list_by_owner_keyset(&owner, None, 1, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            first.iter().map(|r| r.entry_id.as_str()).collect::<Vec<_>>(),
+            vec!["kb_a"]
+        );
+        let after = (first[0].created_at.clone(), first[0].entry_id.clone());
+        let page = store
+            .list_by_owner_keyset(&owner, Some(&after), 2, false)
+            .await
+            .unwrap();
+        let ids: Vec<&str> = page.iter().map(|r| r.entry_id.as_str()).collect();
+        assert_eq!(ids, vec!["kb_m", "kb_z"]);
     }
 
     #[tokio::test]

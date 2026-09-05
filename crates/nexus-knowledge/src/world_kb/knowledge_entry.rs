@@ -252,6 +252,19 @@ pub fn parse_stored_created_at(raw: &str) -> Result<chrono::DateTime<chrono::Utc
     }
 }
 
+/// Millisecond unix timestamp for Actor KnowledgeView / SQL keyset order.
+///
+/// Matches SQLite `strftime('%s') * 1000 + substr(strftime('%f'), 4)` so SQL
+/// predicates and the Rust merge compare the same total-order key. Sub-ms
+/// fractions collapse; ties break on `key_block_id`.
+///
+/// # Errors
+///
+/// Returns the same display string as [`parse_stored_created_at`].
+pub fn stored_created_at_order_millis(raw: &str) -> Result<i64, String> {
+    Ok(parse_stored_created_at(raw)?.timestamp_millis())
+}
+
 impl KnowledgeEntryRecord {
     /// Create a new provisional World-owned `KnowledgeEntryRecord`.
     ///
@@ -893,5 +906,8 @@ mod tests {
         assert!(sqlite < rfc);
         assert_eq!(sqlite.timestamp(), 1_767_258_000);
         assert!(parse_stored_created_at("not-a-time").is_err());
+        let early = stored_created_at_order_millis("2026-01-01T10:00:00.123200Z").unwrap();
+        let late = stored_created_at_order_millis("2026-01-01T10:00:00.123300Z").unwrap();
+        assert_eq!(early, late);
     }
 }

@@ -785,3 +785,62 @@ async fn view_paginates_large_multi_owner_union_without_skip_or_duplicate() {
     expected.sort();
     assert_eq!(unique, expected, "pagination must not skip union members");
 }
+
+#[tokio::test]
+async fn view_paginates_same_millisecond_reverse_ids_without_skip_or_duplicate() {
+    let ctx = ctx().await;
+    insert_owned_row(
+        &ctx.pool,
+        "kb_m",
+        "world",
+        "world_id",
+        WORLD_A,
+        "MsLateId",
+        "2026-01-01T10:00:00.123200Z",
+    )
+    .await;
+    insert_owned_row(
+        &ctx.pool,
+        "kb_a",
+        "world",
+        "world_id",
+        WORLD_A,
+        "MsEarlyId",
+        "2026-01-01T10:00:00.123300Z",
+    )
+    .await;
+
+    let mut seen = Vec::new();
+    let mut cursor = None;
+    for _ in 0..8 {
+        let mut body = json!({
+            "actor_ref": { "actor_kind": "creator", "creator_id": OWNER },
+            "world_id": WORLD_A,
+            "limit": 1
+        });
+        if let Some(c) = &cursor {
+            body["cursor"] = json!(c);
+        }
+        let page = ctx
+            .server
+            .post("/v1/daemon/actor-knowledge/view")
+            .json(&body)
+            .await;
+        assert_eq!(page.status_code(), 200, "{}", page.text());
+        let payload: Value = page.json();
+        for item in payload["items"].as_array().unwrap() {
+            seen.push(item["entry_id"].as_str().unwrap().to_string());
+        }
+        if payload["pagination"]["has_more"] == false {
+            assert!(payload["pagination"]["next_cursor"].is_null());
+            break;
+        }
+        cursor = Some(
+            payload["pagination"]["next_cursor"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+    }
+    assert_eq!(seen, vec!["kb_a".to_string(), "kb_m".to_string()]);
+}

@@ -5,7 +5,7 @@
 //! query returns an error and no partial page.
 
 use crate::api::errors::NexusApiError;
-use nexus_knowledge::world_kb::knowledge_entry::{parse_stored_created_at, KnowledgeEntryRecord, KnowledgeOwnerRef};
+use nexus_knowledge::world_kb::knowledge_entry::{stored_created_at_order_millis, KnowledgeEntryRecord, KnowledgeOwnerRef};
 use nexus_knowledge::world_kb::store::KbStoreError;
 use nexus_local_db::kb_store::SqliteKbStore;
 use sqlx::SqlitePool;
@@ -103,7 +103,7 @@ impl ActorKnowledgeViewService {
     }
 
     /// Merge already-fetched owner components and take the first `limit` rows
-    /// in chronological `(created_at, entry_id)` order.
+    /// in `(timestamp_millis, entry_id)` order, matching SQL keyset precision.
     ///
     /// # Errors
     ///
@@ -116,13 +116,13 @@ impl ActorKnowledgeViewService {
     ) -> Result<ActorKnowledgePage, NexusApiError> {
         let mut keyed = Vec::with_capacity(items.len());
         for row in items {
-            let ts = parse_stored_created_at(&row.created_at).map_err(timestamp_err)?;
-            keyed.push((ts, row.entry_id.clone(), row));
+            let millis = stored_created_at_order_millis(&row.created_at).map_err(timestamp_err)?;
+            keyed.push((millis, row.entry_id.clone(), row));
         }
         keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
         if let Some((created_at, entry_id)) = cursor {
-            let cursor_ts = parse_stored_created_at(&created_at).map_err(|_| invalid_cursor())?;
-            keyed.retain(|(ts, id, _)| (*ts, id.as_str()) > (cursor_ts, entry_id.as_str()));
+            let cursor_ms = stored_created_at_order_millis(&created_at).map_err(|_| invalid_cursor())?;
+            keyed.retain(|(ms, id, _)| (*ms, id.as_str()) > (cursor_ms, entry_id.as_str()));
         }
         let limit_us = usize::try_from(limit).unwrap_or(usize::MAX);
         let has_more = keyed.len() > limit_us;
@@ -529,6 +529,29 @@ mod tests {
                 .map(|r| r.entry_id.as_str())
                 .collect::<Vec<_>>(),
             vec!["kb_space_late"]
+        );
+        assert!(!page2.has_more);
+    }
+
+    #[test]
+    fn paginate_same_millisecond_reverse_ids_does_not_skip() {
+        let rows = vec![
+            rec("2026-01-01T10:00:00.123200Z", "kb_m"),
+            rec("2026-01-01T10:00:00.123300Z", "kb_a"),
+        ];
+        let page1 = ActorKnowledgeViewService::paginate(rows.clone(), None, 1).expect("p1");
+        assert_eq!(
+            page1.items.iter().map(|r| r.entry_id.as_str()).collect::<Vec<_>>(),
+            vec!["kb_a"]
+        );
+        assert!(page1.has_more);
+        let cursor = ActorKnowledgeViewService::decode_cursor(&page1.next_cursor)
+            .unwrap()
+            .expect("cursor");
+        let page2 = ActorKnowledgeViewService::paginate(rows, Some(cursor), 1).expect("p2");
+        assert_eq!(
+            page2.items.iter().map(|r| r.entry_id.as_str()).collect::<Vec<_>>(),
+            vec!["kb_m"]
         );
         assert!(!page2.has_more);
     }
