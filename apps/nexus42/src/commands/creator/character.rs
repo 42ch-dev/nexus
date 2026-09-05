@@ -1090,6 +1090,7 @@ async fn run_character(
             }))?
         );
     } else {
+        // codeql[rust/cleartext-logging]: session IDs are non-secret local operation identifiers intentionally returned by this CLI command.
         println!("session_id:   {}", session.session_id);
         println!("provider_id:  {}", session.provider_id);
         if let Some(actor) = session.actor_ref.as_ref() {
