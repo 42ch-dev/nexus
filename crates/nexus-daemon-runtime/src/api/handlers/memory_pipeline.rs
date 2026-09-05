@@ -226,25 +226,50 @@ async fn process_single_review_row(
 
     match decision.action {
         ReviewAction::PromoteToLongTerm => {
-            let summarizer = PassthroughSummarizer::new(ctx.bearer);
-            match nexus_creator_memory::review::promote_to_long_term(
-                nexus_home,
-                ctx.bearer,
-                input,
-                &summarizer,
-            )
-            .await
-            {
-                Ok(_) => {
-                    counts.promoted = 1;
-                    delete_pending_row(pool, ctx, &input.pending_id).await;
-                }
-                Err(e) => {
+            // Binding-local Character pending must stay binding-local: a
+            // Promote decision on a World-life (binding) scope is coerced to
+            // the fragment path so it retains binding provenance (blocking
+            // binding removal via `binding_has_local_memory`) and only becomes
+            // Character-shared after the explicit revision-checked fragment
+            // promotion. Shared Character scope and the whole Creator arm are
+            // unchanged.
+            let binding_local = matches!(ctx.bearer, MemoryBearerRef::Character { .. })
+                && input.scope_id.is_some();
+            if binding_local {
+                let fragment = nexus_creator_memory::review::create_fragment_from_review(input);
+                if let Err(e) =
+                    insert_bearer_fragment(pool, ctx, &fragment, input.scope_id.as_deref()).await
+                {
                     tracing::warn!(
                         pending_id = %input.pending_id,
                         error = %e,
-                        "Failed to promote pending review; skipping"
+                        "Failed to create binding-local fragment from Promote decision; skipping"
                     );
+                } else {
+                    counts.fragmented = 1;
+                    delete_pending_row(pool, ctx, &input.pending_id).await;
+                }
+            } else {
+                let summarizer = PassthroughSummarizer::new(ctx.bearer);
+                match nexus_creator_memory::review::promote_to_long_term(
+                    nexus_home,
+                    ctx.bearer,
+                    input,
+                    &summarizer,
+                )
+                .await
+                {
+                    Ok(_) => {
+                        counts.promoted = 1;
+                        delete_pending_row(pool, ctx, &input.pending_id).await;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            pending_id = %input.pending_id,
+                            error = %e,
+                            "Failed to promote pending review; skipping"
+                        );
+                    }
                 }
             }
         }
@@ -550,7 +575,7 @@ pub(crate) async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer + ?Sized>(
     let top_keywords = input.top_keywords.clone();
 
     let draft = synth
-        .synthesize(ctx.bearer, input)
+        .synthesize(ctx.bearer, input, ctx.scope_id)
         .await
         .map_err(map_soul_narrative_memory_error)?;
 
@@ -905,8 +930,11 @@ pub(crate) async fn load_character_mind_projection(
     // Long-term memory files join the projection (bounded at the top of the
     // merged list); ordering is deterministic by the LTM slug sort then the
     // fragmentation merge order is preserved below the LTM block.
-    let mut all_lines = ltm_lines;
-    all_lines.extend(lines);
+    // Reserve the Character-mind entry budget for the admitted fragment scopes
+    // first (shared + selected binding), so a full global LTM never crowds out
+    // binding-local fragments. LTM files fill only the remaining capacity.
+    let mut all_lines = lines;
+    all_lines.extend(ltm_lines);
     Ok(CharacterMindInput::new(soul, all_lines))
 }
 

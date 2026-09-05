@@ -849,6 +849,73 @@ async fn foreign_missing_inactive_character_and_binding_fail_before_side_effects
 
 
 #[tokio::test]
+async fn capture_is_idempotent_for_duplicate_pending_and_session() {
+    let ctx = ctx().await;
+    let (chr, _bind1) = create_character(&ctx.server, "Ava", WORLD_A).await;
+
+    // First capture succeeds and lands one row.
+    let resp = capture(
+        &ctx.server,
+        &chr,
+        "pend_idem_1",
+        None,
+        Some("research"),
+        FRAGMENT_DIGEST,
+        "2026-01-01T00:00:01Z",
+    )
+    .await;
+    assert_eq!(resp.status_code(), 200, "first capture: {}", resp.text());
+    assert_eq!(count_pending(&ctx.server, &chr, None).await, 1);
+
+    // Re-capturing the same pending_id (PK) is a no-op success (Creator parity),
+    // with no extra mutation — no 500 on the unique constraint.
+    let resp = capture(
+        &ctx.server,
+        &chr,
+        "pend_idem_1",
+        None,
+        Some("research"),
+        FRAGMENT_DIGEST,
+        "2026-01-01T00:00:01Z",
+    )
+    .await;
+    assert_eq!(resp.status_code(), 200, "duplicate pending_id: {}", resp.text());
+    assert_eq!(count_pending(&ctx.server, &chr, None).await, 1, "no extra row");
+
+    // Re-capturing the same (character_id, session_id) is also idempotent even
+    // with a different pending id — the unique (character_id, session_id) index
+    // makes it a no-op success rather than a constraint error.
+    let resp = ctx
+        .server
+        .post(&format!("{}/pending-review", memory_base(&chr)))
+        .json(&json!({
+            "pending_id": "pend_idem_2",
+            "session_id": "sess_pend_idem_1",   // same session as row 1
+            "raw_digest": FRAGMENT_DIGEST,
+            "task_kind": "research",
+            "created_at": "2026-01-01T00:00:02Z",
+        }))
+        .await;
+    assert_eq!(resp.status_code(), 200, "duplicate session: {}", resp.text());
+    assert_eq!(count_pending(&ctx.server, &chr, None).await, 1, "session-scoped idempotency");
+
+    // A genuinely new pending id + session still lands a second row.
+    let resp = capture(
+        &ctx.server,
+        &chr,
+        "pend_idem_3",
+        None,
+        Some("research"),
+        FRAGMENT_DIGEST,
+        "2026-01-01T00:00:03Z",
+    )
+    .await;
+    assert_eq!(resp.status_code(), 200);
+    assert_eq!(count_pending(&ctx.server, &chr, None).await, 2);
+}
+
+
+#[tokio::test]
 async fn review_is_bounded_at_batch_limit_with_correct_has_more() {
     let ctx = ctx().await;
     let (chr, _bind1) = create_character(&ctx.server, "Ava", WORLD_A).await;

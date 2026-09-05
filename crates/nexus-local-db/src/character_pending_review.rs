@@ -57,16 +57,18 @@ fn record_from_row(
 }
 
 
-/// Create a Character pending review record.
+/// Create a Character pending review record (idempotent on retry).
 ///
 /// Runs in a write-serialized transaction: validates Character ownership and
 /// binding provenance first, so foreign Characters and invalid bindings
-/// reject before any row is written.
+/// reject before any row is written. Insertion uses `INSERT OR IGNORE`, so a
+/// duplicate `pending_id` (PK) or `(character_id, session_id)` (unique index)
+/// is a no-op success rather than a constraint error — Creator capture parity.
 ///
 /// # Errors
 ///
 /// Returns `LocalDbError::ActorNotFound` for foreign Characters or invalid
-/// bindings; `LocalDbError` on constraint or database failure.
+/// bindings; `LocalDbError` on database failure.
 pub async fn create_character_pending_review(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -82,8 +84,13 @@ pub async fn create_character_pending_review(
             record.actor_world_binding_id.as_deref(),
         )
         .await?;
+        // Creator-parity idempotent capture: `INSERT OR IGNORE` so retrying a
+        // capture with the same `pending_id` (PK) or `(character_id,
+        // session_id)` (unique index) is a no-op success rather than surfacing
+        // a constraint error. Mirrors the Creator `memory_pending_review`
+        // handler. No extra row/mutation is produced on a duplicate.
         sqlx::query!(
-            "INSERT INTO character_memory_pending_review
+            "INSERT OR IGNORE INTO character_memory_pending_review
              (pending_id, session_id, character_id, actor_world_binding_id, task_kind, raw_digest, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?)",
             record.pending_id,

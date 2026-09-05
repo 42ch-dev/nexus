@@ -306,9 +306,17 @@ pub fn create_fragment_from_review(record: &PendingReviewInput) -> MemoryFragmen
     // Extract keywords from raw_digest
     let keywords = extract_keywords(&record.raw_digest);
 
-    // Generate summary (truncate to 200 chars max)
+    // Generate summary (truncate to 200 bytes max, UTF-8 safe). The raw digest
+    // may contain multibyte code points (CJK, emoji); slicing at a fixed byte
+    // offset can land mid-codepoint and panic. Walk back to the nearest char
+    // boundary (same discipline as `promote_to_long_term`'s MAX_DIGEST_BYTES
+    // cap, R-V141HYG-01).
     let summary = if record.raw_digest.len() > 200 {
-        format!("{}...", &record.raw_digest[..197])
+        let mut end = 197;
+        while !record.raw_digest.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &record.raw_digest[..end])
     } else {
         record.raw_digest.clone()
     };
@@ -1201,5 +1209,58 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&home);
+    }
+}
+
+#[cfg(test)]
+mod utf8_fragment_tests {
+    use super::create_fragment_from_review;
+
+    fn pending(digest: &str) -> crate::review::PendingReviewInput {
+        crate::review::PendingReviewInput {
+            pending_id: "pending_utf8".to_string(),
+            session_id: "sess_utf8".to_string(),
+            bearer_id: "chr_test".to_string(),
+            scope_id: None,
+            task_kind: "research".to_string(),
+            raw_digest: digest.to_string(),
+            created_at: "2026-04-14T10:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn fragment_summary_is_utf8_safe_for_cjk_and_emoji() {
+        // A multibyte digest over 200 bytes where byte offset 197 lands
+        // mid-codepoint; the old `&text[..197]` would panic.
+        let cjk = "字".repeat(200); // 3-byte chars -> byte 197 is mid-codepoint
+        let frag = create_fragment_from_review(&pending(&cjk));
+        assert!(
+            frag.summary.ends_with("..."),
+            "truncated summary appends ellipsis"
+        );
+        assert!(
+            frag.summary.is_char_boundary(frag.summary.len()),
+            "summary must be valid UTF-8"
+        );
+
+        // Emoji (4-byte) digest.
+        let emoji = "🫠".repeat(200); // 4-byte astral chars
+        let frag = create_fragment_from_review(&pending(&emoji));
+        assert!(frag.summary.ends_with("..."));
+        assert!(frag.summary.is_char_boundary(frag.summary.len()));
+
+        // A short multibyte digest under 200 bytes is not truncated.
+        let short = "猫".repeat(50); // 150 bytes
+        let frag = create_fragment_from_review(&pending(&short));
+        assert!(!frag.summary.ends_with("..."));
+        assert_eq!(frag.summary, short);
+    }
+
+    #[test]
+    fn fragment_summary_truncation_never_splits_ascii() {
+        let ascii = "a".repeat(300);
+        let frag = create_fragment_from_review(&pending(&ascii));
+        assert!(frag.summary.ends_with("..."));
+        assert_eq!(frag.summary.len(), 200, "197 content + 3 ellipsis");
     }
 }

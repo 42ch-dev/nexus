@@ -330,13 +330,18 @@ async fn pending_review_session_unique_per_character() {
     create_character_pending_review(&pool, OWNER, &pending("pend_1", &s.char_a, None))
         .await
         .unwrap();
-    // Same session for the same Character conflicts; for Character B it is fine.
+    // Same session for the same Character is an idempotent no-op success
+    // (Creator capture parity, `INSERT OR IGNORE`); no extra row is written.
     let dup = CharacterPendingReviewRecord {
         pending_id: "pend_dup".to_string(),
         session_id: "sess_pend_1".to_string(),
         ..pending("pend_dup", &s.char_a, None)
     };
-    assert!(create_character_pending_review(&pool, OWNER, &dup).await.is_err());
+    create_character_pending_review(&pool, OWNER, &dup)
+        .await
+        .unwrap();
+    assert_eq!(table_count(&pool, "character_memory_pending_review").await, 1);
+    // Same session for Character B is a distinct unique key → OK.
     let shared_session = CharacterPendingReviewRecord {
         pending_id: "pend_b".to_string(),
         session_id: "sess_pend_1".to_string(),
@@ -345,6 +350,7 @@ async fn pending_review_session_unique_per_character() {
     create_character_pending_review(&pool, OWNER, &shared_session)
         .await
         .unwrap();
+    assert_eq!(table_count(&pool, "character_memory_pending_review").await, 2);
 }
 
 // ── Restrictive foreign keys ─────────────────────────────────────────────

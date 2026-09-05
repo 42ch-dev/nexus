@@ -124,6 +124,23 @@ impl AcpSoulNarrativeSynthesizer {
 
         prompt
     }
+
+    /// Deterministic ACP worker session key for a reflection.
+    ///
+    /// `character_id` is `Some` for a Character bearer, `None` for the Creator
+    /// arm. A Character reflection is namespaced as
+    /// `soul_narrative_reflect:{character_id}` and, when reflecting a
+    /// binding-local scope, additionally `:{binding}` so two World lives never
+    /// share a conversation. The Creator arm returns the legacy
+    /// `soul_narrative_reflect` key (the owner `_creator_id` is already part of
+    /// the IPC worker key).
+    fn session_id(character_id: Option<&str>, binding: Option<&str>) -> String {
+        match (character_id, binding) {
+            (Some(chr), Some(binding)) => format!("soul_narrative_reflect:{chr}:{binding}"),
+            (Some(chr), None) => format!("soul_narrative_reflect:{chr}"),
+            (None, _) => "soul_narrative_reflect".to_string(),
+        }
+    }
 }
 
 impl SoulNarrativeSynthesizer for AcpSoulNarrativeSynthesizer {
@@ -131,6 +148,7 @@ impl SoulNarrativeSynthesizer for AcpSoulNarrativeSynthesizer {
         &self,
         bearer: MemoryBearerRef<'_>,
         input: SoulNarrativeSynthesisInput,
+        session_scope: Option<&str>,
     ) -> Result<SoulNarrativeDraft, MemoryError> {
         // Worker routing identity: the owner Creator whose ACP worker is
         // registered. For a Character bearer this is `owner_creator_id`, NOT
@@ -151,11 +169,17 @@ impl SoulNarrativeSynthesizer for AcpSoulNarrativeSynthesizer {
 
         let prompt = Self::build_prompt(&input, subject);
 
+        // Namespace the ACP worker session by bearer identity (and binding
+        // scope, where local) so a Character/binding reflection never resumes
+        // another bearer's or scope's conversation. The Creator arm keeps the
+        // legacy global `soul_narrative_reflect` key (its `_creator_id` is
+        // already part of the IPC key) so Creator reflect history is unchanged.
+        let session_id = Self::session_id(identity.character_id, session_scope);
         let mut payload = json!({
             "prompt": prompt,
             "tool_policy": "deny_all",
             "_creator_id": identity.creator_id,
-            "_session_id": "soul_narrative_reflect"
+            "_session_id": session_id,
         });
         if let Some(chr) = character_id {
             payload["_character_id"] = json!(chr);
@@ -305,5 +329,42 @@ mod tests {
         let ident = bearer.identity();
         assert_eq!(ident.creator_id, owner);
         assert_eq!(ident.character_id, None);
+    }
+}
+
+#[cfg(test)]
+mod session_id_tests {
+    use super::AcpSoulNarrativeSynthesizer;
+
+    #[test]
+    fn session_id_is_namespaced_by_bearer_and_binding() {
+        // Creator arm keeps the legacy global key.
+        assert_eq!(AcpSoulNarrativeSynthesizer::session_id(None, None), "soul_narrative_reflect");
+        assert_eq!(
+            AcpSoulNarrativeSynthesizer::session_id(None, Some("binding")),
+            "soul_narrative_reflect",
+            "Creator scope is not a binding namespace"
+        );
+
+        // Character bearer is namespaced by character id.
+        assert_eq!(
+            AcpSoulNarrativeSynthesizer::session_id(Some("chrA"), None),
+            "soul_narrative_reflect:chrA"
+        );
+        // Binding-local reflection adds the binding scope.
+        assert_eq!(
+            AcpSoulNarrativeSynthesizer::session_id(Some("chrA"), Some("bind1")),
+            "soul_narrative_reflect:chrA:bind1"
+        );
+
+        // Distinctive both across bearers and across scopes.
+        assert_ne!(
+            AcpSoulNarrativeSynthesizer::session_id(Some("chrA"), None),
+            AcpSoulNarrativeSynthesizer::session_id(Some("chrB"), None)
+        );
+        assert_ne!(
+            AcpSoulNarrativeSynthesizer::session_id(Some("chrA"), Some("bind1")),
+            AcpSoulNarrativeSynthesizer::session_id(Some("chrA"), Some("bind2"))
+        );
     }
 }

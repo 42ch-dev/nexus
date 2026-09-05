@@ -128,6 +128,7 @@ impl SoulNarrativeSynthesizer for NoSynth {
         &self,
         _: MemoryBearerRef<'_>,
         _: SoulNarrativeSynthesisInput,
+        _: Option<&str>,
     ) -> Result<SoulNarrativeDraft, MemoryError> {
         Err(MemoryError::WorkerUnavailable)
     }
@@ -361,6 +362,7 @@ async fn reflect_both_arms_report_insufficient_data_and_ungenerated() {
             &self,
             _: MemoryBearerRef<'_>,
             input: SoulNarrativeSynthesisInput,
+            _: Option<&str>,
         ) -> Result<SoulNarrativeDraft, MemoryError> {
             let kw = input
                 .top_keywords
@@ -673,6 +675,182 @@ async fn inaccessible_ltm_directory_fails_projection_closed() {
     assert!(
         msg.contains("CHARACTER_MEMORY_LIST_ERROR") || msg.contains("cannot read memory directory"),
         "unexpected error: {msg}"
+    );
+
+    drop(s.tmp);
+}
+
+#[tokio::test]
+async fn binding_local_promote_stays_binding_local_no_global_ltm() {
+    use crate::api::handlers::memory_pipeline::load_character_mind_projection;
+    let s = setup().await;
+    let binding_a1 = nexus_local_db::list_bindings_for_character(
+        &s.pool,
+        OWNER_A,
+        &s.chr_a,
+        10,
+        0,
+    )
+    .await
+    .unwrap()
+    .into_iter()
+    .next()
+    .unwrap()
+    .binding_id;
+    let ctx = ctxh(&s.pool, &s.chr_a).await;
+    let marker = "BINDING_LOCAL_PROMOTE_MARKER";
+
+    // High-signal creative digest on a binding-local (World-life) scope. The
+    // classifier yields PromoteToLongTerm for the shared scope, but a binding
+    // local review must stay binding-local (fragment path) rather than writing
+    // a Character-global LTM file that leaks across bindings.
+    let digest = format!(
+        "{marker} The session traced the consequence through three scenes, each \
+         returning to the same ledger of debts, until the pattern was undeniable \
+         and the character named it plainly for the first time."
+    );
+    assert!(digest.len() > 200, "precondition: promote-grade digest");
+    let input = PendingReviewInput {
+        pending_id: "pend_bind_local_promote".to_string(),
+        session_id: "sess_bind_local_promote".to_string(),
+        bearer_id: s.chr_a.clone(),
+        scope_id: Some(binding_a1.clone()),
+        task_kind: "brainstorm".to_string(),
+        raw_digest: digest.clone(),
+        created_at: "2026-01-01T00:00:01Z".to_string(),
+    };
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    let outcome =
+        process_bearer_review_batch(&[input], &s.nexus_home, &ctx, &s.pool, deadline).await;
+    assert_eq!(outcome.promoted, 0, "binding-local Promote must not write global LTM");
+    assert_eq!(outcome.fragmented, 1, "must land as a binding-local fragment");
+
+    // No global Character LTM file was written (no cross-binding leak).
+    let ltm_slugs = nexus_creator_memory::memory_io::list_memories(
+        &s.nexus_home,
+        MemoryBearerRef::Character {
+            owner_creator_id: OWNER_A,
+            character_id: &s.chr_a,
+        },
+    )
+    .unwrap();
+    assert!(
+        ltm_slugs.is_empty(),
+        "binding-local Promote must not create a global LTM file: {ltm_slugs:?}"
+    );
+
+    // The fragment is binding-local (carries the binding provenance).
+    let frags = nexus_local_db::list_character_fragments(
+        &s.pool,
+        OWNER_A,
+        &s.chr_a,
+        Some(&binding_a1),
+        10,
+        0,
+    )
+    .await
+    .unwrap();
+    assert_eq!(frags.len(), 1);
+    assert_eq!(frags[0].actor_world_binding_id.as_deref(), Some(binding_a1.as_str()));
+
+    // run projection for that binding shows the marker; the shared projection
+    // must NOT see it (no implicit promotion / cross-binding leak).
+    let mind_binding =
+        load_character_mind_projection(&s.pool, &s.nexus_home, OWNER_A, &s.chr_a, Some(&binding_a1))
+            .await
+            .expect("binding projection ok");
+    assert!(
+        mind_binding.memory.iter().any(|l| l.contains(marker)),
+        "binding-local fragment must appear in that binding's run: {:?}",
+        mind_binding.memory
+    );
+    let mind_shared =
+        load_character_mind_projection(&s.pool, &s.nexus_home, OWNER_A, &s.chr_a, None)
+            .await
+            .expect("shared projection ok");
+    assert!(
+        !mind_shared.memory.iter().any(|l| l.contains(marker)),
+        "no cross-binding leak into the shared scope: {:?}",
+        mind_shared.memory
+    );
+
+    drop(s.tmp);
+}
+
+#[tokio::test]
+async fn admitted_binding_fragments_retain_capacity_when_ltm_is_full() {
+    use crate::api::handlers::memory_pipeline::load_character_mind_projection;
+    use nexus_creator_memory::memory_io::{self, save_memory};
+    use nexus_creator_memory::long_term_memory::LongTermMemory;
+
+    let s = setup().await;
+    let binding_a1 = nexus_local_db::list_bindings_for_character(
+        &s.pool,
+        OWNER_A,
+        &s.chr_a,
+        10,
+        0,
+    )
+    .await
+    .unwrap()
+    .into_iter()
+    .next()
+    .unwrap()
+    .binding_id;
+    let bearer = MemoryBearerRef::Character {
+        owner_creator_id: OWNER_A,
+        character_id: &s.chr_a,
+    };
+
+    // Fill the global LTM sink beyond the projection LTM cap (20).
+    for i in 0..25 {
+        let mut mem = LongTermMemory::new("story_summary");
+        mem.set_body(&format!("ltm file {i} content"));
+        save_memory(&s.nexus_home, bearer, &format!("ltm_{i:02}"), &mem).unwrap();
+    }
+    assert!(
+        memory_io::list_memories(&s.nexus_home, bearer).unwrap().len() >= 20,
+        "precondition: LTM is full"
+    );
+
+    // Two binding-local fragments for the selected World life.
+    for (fid, marker) in [("frag_cap_1", "CAPRESERVED1"), ("frag_cap_2", "CAPRESERVED2")] {
+        nexus_local_db::create_character_fragment(
+            &s.pool,
+            OWNER_A,
+            &nexus_local_db::NewCharacterMemoryFragment {
+                fragment_id: fid.to_string(),
+                session_id: format!("sess_{fid}"),
+                character_id: s.chr_a.clone(),
+                actor_world_binding_id: Some(binding_a1.clone()),
+                keywords: r#"["reserved"]"#.to_string(),
+                summary: format!("{marker} binding-local detail."),
+                created_at: "2026-01-01T00:00:01Z".to_string(),
+                ttl: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    let mind = load_character_mind_projection(
+        &s.pool,
+        &s.nexus_home,
+        OWNER_A,
+        &s.chr_a,
+        Some(&binding_a1),
+    )
+    .await
+    .expect("projection ok");
+    assert!(
+        mind.memory.len() <= nexus_moment_context_assembly::CHARACTER_MIND_MAX_MEMORY_ENTRIES,
+        "projection stays within the mind entry cap"
+    );
+    assert!(
+        mind.memory.iter().any(|l| l.contains("CAPRESERVED1"))
+            && mind.memory.iter().any(|l| l.contains("CAPRESERVED2")),
+        "admitted binding-local fragments retain capacity even when LTM is full: {:?}",
+        mind.memory
     );
 
     drop(s.tmp);
