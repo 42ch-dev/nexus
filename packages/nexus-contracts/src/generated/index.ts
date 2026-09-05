@@ -13,6 +13,7 @@ export * from './daemon-api/canvas/world-kb';
 export * from './daemon-api/characters';
 export * from './daemon-api/characters/memory';
 export * from './daemon-api/characters/soul';
+export * from './daemon-api/characters/tom';
 export * from './daemon-api/check';
 export * from './daemon-api/common';
 export * from './daemon-api/compute';
@@ -117,6 +118,11 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   ReviewCharacterMemoryResponse: 1,
   CharacterSoulNarrativeRequest: 1,
   CharacterSoulNarrativeResponse: 1,
+  ListCharacterTomQuery: 1,
+  ListCharacterTomResponse: 1,
+  RecordCharacterTomRequest: 1,
+  RecordCharacterTomResponse: 1,
+  TomBeliefItem: 1,
   CheckRequest: 1,
   CheckResponse: 1,
   ErrorResponse: 1,

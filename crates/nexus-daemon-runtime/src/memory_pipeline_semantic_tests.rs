@@ -25,6 +25,7 @@ use std::path::PathBuf;
 const OWNER_A: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const OWNER_B: &str = "ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const WORLD_A: &str = "wld_worldA";
+const OWNER_B_CHR: &str = "chr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
 const PROMOTE_DIGEST: &str =
     "The chapter pivots from betrayal to alliance, with causal consequences for three factions.";
@@ -854,4 +855,77 @@ async fn admitted_binding_fragments_retain_capacity_when_ltm_is_full() {
     );
 
     drop(s.tmp);
+}
+
+
+#[tokio::test]
+async fn tom_projection_fills_both_slots_when_l1_exceeds_single_page() {
+    // QC fix round 1 (F-003): L1 and L2 are fetched through the same bounded
+    // query service but as independent per-order fills, so an L1 corpus larger
+    // than one page cannot starve the L2 slot.
+    use nexus_contracts::BlockType;
+    use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
+    use nexus_knowledge::world_kb::store::KbStore;
+    use nexus_local_db::kb_store::SqliteKbStore;
+    use serde_json::json;
+
+    let s = setup().await;
+    let binding: String = sqlx::query_scalar(
+        "SELECT binding_id FROM actor_world_bindings \
+         WHERE character_id = ? AND status = 'active' LIMIT 1",
+    )
+    .bind(&s.chr_a)
+    .fetch_one(&s.pool)
+    .await
+    .unwrap();
+
+    let store = SqliteKbStore::new(s.pool.clone());
+    let mut rows: Vec<serde_json::Value> = (0..150)
+        .map(|i| {
+            json!({
+                "holder": s.chr_a,
+                "proposition": format!("L1 heavy belief {i}"),
+                "order": 1,
+                "truth": "True",
+                "access": "Private",
+                "representation": "Explicit",
+                "content_type": "Location",
+                "source": "Perception",
+                "context": "Neutral"
+            })
+        })
+        .collect();
+    rows.push(json!({
+        "holder": OWNER_B_CHR,
+        "proposition": "L2STARVEMARKER models the other",
+        "order": 2,
+        "truth": "True",
+        "access": "Private",
+        "representation": "Explicit",
+        "content_type": "Location",
+        "source": "Perception",
+        "context": "Neutral"
+    }));
+    let mut kb =
+        KnowledgeEntryRecord::for_character(&s.chr_a, BlockType::Character, "HeavyCarrier");
+    kb.modules = Some(json!({ "belief": rows }));
+    store.insert_knowledge_entry(kb).await.unwrap();
+
+    let mind = crate::api::handlers::memory_pipeline::load_character_mind_projection_with_tom(
+        &s.pool,
+        &s.nexus_home,
+        OWNER_A,
+        &s.chr_a,
+        WORLD_A,
+        &binding,
+    )
+    .await
+    .unwrap();
+    assert_eq!(mind.tom_l1.len(), 20, "L1 slot bounded at 20");
+    assert_eq!(
+        mind.tom_l2.len(),
+        1,
+        "L2 row must be projected even with 150 L1 rows"
+    );
+    assert!(mind.tom_l2[0].contains("L2STARVEMARKER"));
 }

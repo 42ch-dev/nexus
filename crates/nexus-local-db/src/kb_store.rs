@@ -1614,6 +1614,72 @@ pub async fn cas_update_key_block_fields(
     })
 }
 
+/// Character ToM carrier CAS: replaces `modules_json` and bumps `revision`.
+///
+/// Used by the v1.184 P4 Character ToM seam for Character- or binding-owned
+/// carrier KnowledgeEntries that cannot use the World-scoped
+/// [`cas_update_key_block_fields`] predicate.
+///
+/// Beyond OCC revision, the predicate revalidates inside the write
+/// transaction (QC fix round 1, F-004) that the carrier is still live
+/// (`status NOT IN ('deleted','merged','deprecated')` — soft-delete does not
+/// bump `revision`) and still owned by the admitted Character or binding
+/// (`owner_character_id` / `owner_binding_id`). A concurrent soft-delete or
+/// ownership drift therefore misses the CAS and rolls back.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::VersionMismatch`] on stale OCC, lost liveness, or
+/// ownership drift, and [`LocalDbError::Sqlx`] on database failure.
+pub async fn cas_update_key_block_modules_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    key_block_id: &str,
+    modules_json: &str,
+    expected_revision: i64,
+    owner_character_id: &str,
+    owner_binding_id: &str,
+) -> Result<u64, LocalDbError> {
+    let now = chrono::Utc::now().to_rfc3339();
+    // Checked increment (v1.184 P4 T2 fix): an `i64::MAX` expected revision
+    // must reject deterministically instead of overflowing the bump.
+    let new_revision = expected_revision.checked_add(1).ok_or_else(|| {
+        LocalDbError::ValidationError("expected_revision overflow: cannot bump revision".into())
+    })?;
+    let result = sqlx::query(
+        "UPDATE kb_key_blocks SET revision = ?, updated_at = ?, modules_json = ?          WHERE key_block_id = ? AND COALESCE(revision, 0) = ?            AND status NOT IN ('deleted', 'merged', 'deprecated')            AND (character_id = ? OR actor_world_binding_id = ?)",
+    )
+    .bind(new_revision)
+    .bind(&now)
+    .bind(modules_json)
+    .bind(key_block_id)
+    .bind(expected_revision)
+    .bind(owner_character_id)
+    .bind(owner_binding_id)
+    .execute(&mut **tx)
+    .await?;
+
+    if result.rows_affected() == 1 {
+        return Ok(u64::try_from(new_revision).unwrap_or(0));
+    }
+
+    let current: Option<Option<i64>> =
+        sqlx::query_scalar("SELECT revision FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(key_block_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    // NULL revision normalizes to 0, matching the COALESCE(revision, 0)
+    // predicate and the established cas_update_key_block_fields reporting;
+    // `None` means the row itself is absent.
+    let actual = current.map(|rev| rev.unwrap_or(0));
+    Err(LocalDbError::VersionMismatch {
+        table: "kb_key_blocks".to_string(),
+        id: key_block_id.to_string(),
+        expected: expected_revision,
+        actual,
+    })
+}
+
+
 /// Persist the non-CAS fields of a `kb_key_blocks` row inside a caller-owned
 /// transaction.
 ///
@@ -2951,6 +3017,82 @@ mod tests {
             }
             other => panic!("world mismatch must classify as WorldConflict, got {other:?}"),
         }
+    }
+
+    async fn seed_character_key_block(pool: &SqlitePool, canonical_name: &str) -> String {
+        // ToM-scoped CAS requires an admitted Character/binding owner.
+        crate::ensure_creator_row(pool, "ctr_cas", "Cas").await.unwrap();
+        sqlx::query(
+            "INSERT OR IGNORE INTO characters \
+             (character_id, owner_creator_id, display_name, status, image_uri, persona_json, \
+              created_at, updated_at) \
+             VALUES ('chr_cccccccccccccccccccccccccccccccc', 'ctr_cas', 'CasOwner', 'active', NULL, '{}', \
+              '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        let store = SqliteKbStore::new(pool.clone());
+        let kb = KnowledgeEntryRecord::for_character("chr_cccccccccccccccccccccccccccccccc", BlockType::Character, canonical_name);
+        let id = kb.entry_id.clone();
+        let mut tx = pool.begin().await.unwrap();
+        store.insert_key_block_in_tx(&mut tx, kb).await.unwrap();
+        tx.commit().await.unwrap();
+        id
+    }
+
+    #[tokio::test]
+    async fn cas_update_key_block_modules_in_tx_null_revision_reports_actual_zero() {
+        // v1.184 P4 T1 fix (review I1): an existing row whose revision is
+        // NULL (pre-bump legacy/seed shape) must report `actual: Some(0)` on
+        // a stale CAS — matching the COALESCE(revision, 0) predicate and the
+        // established cas_update_key_block_fields normalization — never the
+        // `actual: None` "row absent" classification.
+        let (pool, _dir) = fresh_pool().await;
+        let id = seed_character_key_block(&pool, "NullRev").await;
+        // Seed path leaves revision NULL (V1.73 NULL-normalization rule).
+        let raw: Option<i64> =
+            sqlx::query_scalar("SELECT revision FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind(&id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(raw.is_none(), "seed row must carry NULL revision");
+
+        let mut tx = pool.begin().await.unwrap();
+        let err = cas_update_key_block_modules_in_tx(
+            &mut tx,
+            &id,
+            r#"{"belief":[]}"#,
+            5,
+            "chr_cccccccccccccccccccccccccccccccc",
+            "awb_cas_unused",
+        )
+        .await
+        .expect_err("stale expected revision must miss the CAS");
+        let _ = tx.rollback().await;
+        match err {
+            LocalDbError::VersionMismatch { actual, expected, .. } => {
+                assert_eq!(expected, 5);
+                assert_eq!(actual, Some(0), "NULL revision normalizes to actual 0");
+            }
+            other => panic!("expected VersionMismatch, got {other:?}"),
+        }
+
+        // Happy path from the normalized 0 preimage succeeds.
+        let mut tx = pool.begin().await.unwrap();
+        let new_rev = cas_update_key_block_modules_in_tx(
+            &mut tx,
+            &id,
+            r#"{"belief":[]}"#,
+            0,
+            "chr_cccccccccccccccccccccccccccccccc",
+            "awb_cas_unused",
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(new_rev, 1);
     }
 
     #[tokio::test]

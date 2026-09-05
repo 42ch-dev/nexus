@@ -506,15 +506,22 @@ async fn assemble_admitted_prompt(
             // v1.184 P3: project only the admitted Character's SOUL/Memory
             // (shared scope + the selected binding scope) into the reserved
             // mind slots. Honest-empty when optional data is absent.
-            let mind =
-                crate::api::handlers::memory_pipeline::load_character_mind_projection(
-                    &pool,
-                    state.nexus_home(),
-                    &creator_id,
-                    character_id,
-                    ctx.binding_id.as_deref(),
-                )
-                .await?;
+            let binding_id = ctx
+                .binding_id
+                .as_deref()
+                .ok_or_else(|| NexusApiError::InvalidInput {
+                    field: "binding_id".into(),
+                    reason: "Character host launch requires an active binding".into(),
+                })?;
+            let mind = crate::api::handlers::memory_pipeline::load_character_mind_projection_with_tom(
+                &pool,
+                state.nexus_home(),
+                &creator_id,
+                character_id,
+                &ctx.world_id,
+                binding_id,
+            )
+            .await?;
             MomentActorContext::character_with_mind(view, mind)
         }
         AdmittedActor::Creator { .. } => MomentActorContext::creator_with_view(view),

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) FROM kb_key_blocks\n                   WHERE actor_world_binding_id = ?\n                     AND status NOT IN ('deleted', 'merged', 'deprecated')\n                     AND json_valid(modules_json)\n                     AND json_type(modules_json, '$.belief') IS NOT NULL\n                     AND json_type(modules_json, '$.belief') <> 'array'",
+  "describe": {
+    "columns": [
+      {
+        "name": "COUNT(*)",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4bd0fa3808432bd98059975880f08ce080fbbca0e5a951f9166483561d175213"
+}

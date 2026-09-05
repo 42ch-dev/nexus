@@ -10,14 +10,17 @@
 //! parameters, and delegates persistence to
 //! [`nexus_local_db::mind_state_store`] — which stays spoke-free.
 //!
-//! A wire-shape rejection surfaces as [`LocalDbError::ValidationError`]
-//! carrying the spoke reject code/message; nothing reaches the database.
+//! v1.184 P4 adds [`atomic_cas_carrier_modules_and_insert_mind_state_in_tx`]:
+//! one SQLite transaction CAS-patches the carrier `modules_json` and inserts
+//! a validated derivative `MindState` row (both-or-neither).
 
+use nexus_knowledge::world_kb::is_character_subject_id;
+use nexus_local_db::kb_store::cas_update_key_block_modules_in_tx;
 use nexus_local_db::mind_state_store;
 use nexus_local_db::LocalDbError;
 use serde_json::Value;
 use spoke_operations::{validate_mind_state, SpokeResult};
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool, Transaction};
 
 /// Validate a `MindState` wire envelope against spoke `validate_mind_state`
 /// and persist it when accepted.
@@ -46,6 +49,126 @@ pub async fn validate_and_store_mind_state(
     pool: &SqlitePool,
     value: &Value,
 ) -> Result<(), LocalDbError> {
+    let columns = validated_mind_state_columns(value)?;
+    mind_state_store::insert_mind_state(
+        pool,
+        columns.mind_state_id,
+        columns.schema_version,
+        columns.holder_entry_id,
+        columns.canonical_name,
+        columns.occurred_at,
+        columns.sort_key,
+        columns.snapshot_json.as_deref(),
+        columns.deltas_json.as_deref(),
+        columns.source_anchor_json.as_deref(),
+        columns.extensions_json.as_deref(),
+    )
+    .await
+}
+
+/// Transaction-aware variant of [`validate_and_store_mind_state`].
+pub async fn validate_and_store_mind_state_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    value: &Value,
+) -> Result<(), LocalDbError> {
+    let columns = validated_mind_state_columns(value)?;
+    mind_state_store::insert_mind_state_in_tx(
+        tx,
+        columns.mind_state_id,
+        columns.schema_version,
+        columns.holder_entry_id,
+        columns.canonical_name,
+        columns.occurred_at,
+        columns.sort_key,
+        columns.snapshot_json.as_deref(),
+        columns.deltas_json.as_deref(),
+        columns.source_anchor_json.as_deref(),
+        columns.extensions_json.as_deref(),
+    )
+    .await
+}
+
+/// Atomic Character ToM carrier write: CAS-patch `modules_json` on the
+/// carrier KnowledgeEntry, then insert a spoke-validated derivative
+/// `MindState` whose `holder_entry_id` equals the carrier id.
+///
+/// The CAS predicate revalidates non-deleted status and the admitted
+/// Character/binding ownership (`owner_character_id` / `owner_binding_id`)
+/// inside this transaction (QC fix round 1, F-004).
+///
+/// Callers own the outer `sqlx::Transaction` and must `commit()` only after
+/// this returns `Ok`. Any CAS, product, validation, or insert error leaves
+/// the transaction uncommitted so both writes roll back together.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::ValidationError`] for product invariants or spoke
+/// rejections, [`LocalDbError::VersionMismatch`] on stale carrier revision,
+/// and [`LocalDbError::Sqlx`] on database failure.
+pub async fn atomic_cas_carrier_modules_and_insert_mind_state_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    carrier_entry_id: &str,
+    expected_revision: i64,
+    modules_json: &str,
+    mind_state_wire: &Value,
+    owner_character_id: &str,
+    owner_binding_id: &str,
+) -> Result<u64, LocalDbError> {
+    assert_derivative_holder_is_carrier(carrier_entry_id, mind_state_wire)?;
+
+    let new_revision = cas_update_key_block_modules_in_tx(
+        tx,
+        carrier_entry_id,
+        modules_json,
+        expected_revision,
+        owner_character_id,
+        owner_binding_id,
+    )
+    .await?;
+
+    if let Err(e) = validate_and_store_mind_state_in_tx(tx, mind_state_wire).await {
+        return Err(e);
+    }
+
+    Ok(new_revision)
+}
+
+fn assert_derivative_holder_is_carrier(
+    carrier_entry_id: &str,
+    mind_state_wire: &Value,
+) -> Result<(), LocalDbError> {
+    let holder = mind_state_wire
+        .get("holder_entry_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if holder != carrier_entry_id {
+        return Err(LocalDbError::ValidationError(format!(
+            "mind_state holder_entry_id must equal carrier KnowledgeEntry id \
+             (expected {carrier_entry_id}, got {holder})"
+        )));
+    }
+    if is_character_subject_id(holder) {
+        return Err(LocalDbError::ValidationError(
+            "mind_state holder_entry_id must be a KnowledgeEntry carrier id, not a Character subject (chr_*)".into(),
+        ));
+    }
+    Ok(())
+}
+
+struct MindStateColumnValues<'a> {
+    mind_state_id: &'a str,
+    schema_version: i64,
+    holder_entry_id: &'a str,
+    canonical_name: Option<&'a str>,
+    occurred_at: Option<&'a str>,
+    sort_key: Option<&'a str>,
+    snapshot_json: Option<String>,
+    deltas_json: Option<String>,
+    source_anchor_json: Option<String>,
+    extensions_json: Option<String>,
+}
+
+fn validated_mind_state_columns(value: &Value) -> Result<MindStateColumnValues<'_>, LocalDbError> {
     match validate_mind_state(value) {
         SpokeResult::Ok(()) => {}
         SpokeResult::Reject(reject) => {
@@ -56,16 +179,12 @@ pub async fn validate_and_store_mind_state(
         }
     }
 
-    // The gate above guarantees a non-null plain object; keep this branch
-    // fail-closed (defensive) instead of panicking on an impossible shape.
     let Some(state) = value.as_object() else {
         return Err(LocalDbError::ValidationError(
             "mind_state must be a non-null plain object".to_string(),
         ));
     };
 
-    // `schema_version` was validated as an integer >= 1; the f64 → i64 cast
-    // is exact for whole numbers in the validated range.
     #[allow(clippy::cast_possible_truncation)]
     let schema_version = state
         .get("schema_version")
@@ -87,18 +206,16 @@ pub async fn validate_and_store_mind_state(
     let source_anchor_json = state.get("source_anchor").map(Value::to_string);
     let extensions_json = state.get("extensions").map(Value::to_string);
 
-    mind_state_store::insert_mind_state(
-        pool,
+    Ok(MindStateColumnValues {
         mind_state_id,
         schema_version,
         holder_entry_id,
         canonical_name,
         occurred_at,
         sort_key,
-        snapshot_json.as_deref(),
-        deltas_json.as_deref(),
-        source_anchor_json.as_deref(),
-        extensions_json.as_deref(),
-    )
-    .await
+        snapshot_json,
+        deltas_json,
+        source_anchor_json,
+        extensions_json,
+    })
 }

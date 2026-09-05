@@ -15,6 +15,7 @@
 //! before any DB read, file write, or synthesis).
 
 use crate::api::errors::NexusApiError;
+use crate::character_tom::{CharacterTomListQuery, CharacterTomService};
 use nexus_creator_memory::bearer::MemoryBearerRef;
 use nexus_moment_context_assembly::CharacterMindInput;
 use nexus_creator_memory::errors::MemoryError;
@@ -936,6 +937,63 @@ pub(crate) async fn load_character_mind_projection(
     let mut all_lines = lines;
     all_lines.extend(ltm_lines);
     Ok(CharacterMindInput::new(soul, all_lines))
+}
+
+/// Per-order MCA ToM fetch bound: L1 and L2 are fetched independently at the
+/// `CharacterMindInput` slot cap so neither order can starve the other
+/// (QC fix round 1, F-003).
+const MIND_PROJECTION_TOM_ORDER_LIMIT: u32 = 20;
+
+/// One deterministic human line for a projected ToM belief row (v1.184 P4).
+fn format_tom_belief_line(row: &crate::character_tom::CharacterTomBeliefRow) -> String {
+    let holder = row.belief.holder.as_deref().unwrap_or("?");
+    let proposition = row.belief.proposition.as_deref().unwrap_or("");
+    let order = row.belief.order.unwrap_or(0);
+    let truth = row.belief.truth.as_deref().unwrap_or("Unknown");
+    format!("- [{order}] holder={holder} truth={truth} {proposition}")
+}
+
+/// Load bounded SOUL/Memory plus L1-then-L2 ToM for an admitted Character run.
+pub(crate) async fn load_character_mind_projection_with_tom(
+    pool: &SqlitePool,
+    nexus_home: &Path,
+    owner_creator_id: &str,
+    character_id: &str,
+    world_id: &str,
+    binding_id: &str,
+) -> Result<CharacterMindInput, NexusApiError> {
+    let mind = load_character_mind_projection(
+        pool,
+        nexus_home,
+        owner_creator_id,
+        character_id,
+        Some(binding_id),
+    )
+    .await?;
+    let service = CharacterTomService::new(pool.clone());
+    // Independent bounded fill per order through the same query service: an
+    // L1-heavy corpus can never crowd the L2 rows out of a mixed page.
+    let mut tom_l1 = Vec::new();
+    let mut tom_l2 = Vec::new();
+    for (order, slot) in [(1_i64, &mut tom_l1), (2_i64, &mut tom_l2)] {
+        let page = service
+            .list(
+                owner_creator_id,
+                character_id,
+                CharacterTomListQuery {
+                    world_id: world_id.to_string(),
+                    binding_id: binding_id.to_string(),
+                    limit: MIND_PROJECTION_TOM_ORDER_LIMIT,
+                    cursor: None,
+                    order: Some(order),
+                },
+            )
+            .await?;
+        for row in page.items {
+            slot.push(format_tom_belief_line(&row));
+        }
+    }
+    Ok(mind.with_tom(tom_l1, tom_l2))
 }
 
 // ── Synthesis input building (arm-agnostic; V1.81 G2 caps preserved) ──────

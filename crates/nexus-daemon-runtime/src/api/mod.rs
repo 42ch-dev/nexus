@@ -705,6 +705,10 @@ fn character_routes() -> Router<WorkspaceState> {
             "/v1/daemon/characters/:character_id/soul/reflect",
             post(handlers::character_memory::reflect_soul),
         )
+        .route(
+            "/v1/daemon/characters/:character_id/tom",
+            get(handlers::character_tom::list_tom).post(handlers::character_tom::record_tom),
+        )
 }
 
 fn actor_knowledge_routes() -> Router<WorkspaceState> {

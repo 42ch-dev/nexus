@@ -34,8 +34,9 @@ pub use errors::{KbError, ValidationError, ValidationKind};
 pub use extract_finalize::{finalize_extract, ExtractFinalizeInput};
 pub use extract_sync::{compute_kb_diff, diff_and_apply, KbSyncDiff, KbSyncUpdate};
 pub use knowledge_entry::{
-    BeliefPropositionRaw, KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef,
-    MentalFieldsRaw,
+    is_character_subject_id, validate_character_tom_belief_row, BeliefPropositionRaw,
+    KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef, MentalFieldsRaw,
+    LEGACY_MENTAL_BELIEF_MODULES_FIXTURE,
 };
 pub use query::{KbInsertResult, KbQuery, KbQueryResult};
 pub use store::{InMemoryKbStore, KbStore, KbStoreError};
