@@ -10,9 +10,6 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::process::Output;
 
-/// Canonical Creator id that satisfies `CreatorId` (`ctr_*`) for view DTOs.
-pub const CREATOR_ID: &str = "ctr_rnact4aaaaaaaaaaaaaaaaaaaaaa";
-
 pub const NAME_W1_PUBLIC: &str = "W1Public";
 pub const NAME_W1_SECRET: &str = "W1Secret";
 pub const NAME_W2_PUBLIC: &str = "W2Public";
@@ -49,31 +46,6 @@ pub fn stderr(out: &Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
-/// Point the live daemon + CLI at a `CreatorId`-valid active creator.
-pub async fn activate_creator(d: &LiveDaemon) {
-    nexus_local_db::ensure_creator_row(&d.pool, CREATOR_ID, "RN-ACT-4 Creator")
-        .await
-        .unwrap();
-    let config_path = d.home.path().join(".nexus42").join("config.toml");
-    let existing = std::fs::read_to_string(&config_path).unwrap();
-    let daemon_url = existing
-        .lines()
-        .find_map(|line| line.strip_prefix("daemon_url = "))
-        .map(str::to_string)
-        .expect("daemon_url");
-    std::fs::write(
-        &config_path,
-        format!(
-            "active_creator_id = \"{CREATOR_ID}\"\n\
-             daemon_url = {daemon_url}\n\
-             \n\
-             [active_workspace_slug_by_creator]\n\
-             \"{CREATOR_ID}\" = \"default\"\n"
-        ),
-    )
-    .unwrap();
-}
-
 async fn http_json(d: &LiveDaemon, method: reqwest::Method, path: &str, body: Value) -> Value {
     let method_label = method.clone();
     let resp = reqwest::Client::new()
@@ -91,9 +63,14 @@ async fn http_json(d: &LiveDaemon, method: reqwest::Method, path: &str, body: Va
     serde_json::from_str(&text).unwrap_or_else(|_| panic!("json from {path}: {text}"))
 }
 
-async fn cli_json(d: &LiveDaemon, args: &[&str]) -> Value {
+async fn cli_ok(d: &LiveDaemon, args: &[&str]) -> Output {
     let out = d.cli(args).await;
     assert!(out.status.success(), "cli {args:?}: {}", stderr(&out));
+    out
+}
+
+async fn cli_json(d: &LiveDaemon, args: &[&str]) -> Value {
+    let out = cli_ok(d, args).await;
     serde_json::from_str(&stdout(&out)).unwrap_or_else(|_| panic!("cli json {args:?}: {}", stdout(&out)))
 }
 
@@ -101,9 +78,39 @@ fn entry_id(value: &Value) -> String {
     value["item"]["entry_id"].as_str().unwrap().to_string()
 }
 
+/// Create a Creator on `POST /v1/daemon/creators` and activate it with public CLI.
+pub async fn activate_creator(d: &LiveDaemon) -> String {
+    let created = http_json(
+        d,
+        reqwest::Method::POST,
+        "/v1/daemon/creators",
+        json!({ "display_name": "RN-ACT-4 Creator" }),
+    )
+    .await;
+    let creator_id = created["creator_id"].as_str().unwrap().to_string();
+    assert!(
+        creator_id.starts_with("ctr_"),
+        "public create must return CreatorId, got {creator_id}"
+    );
+
+    cli_ok(
+        d,
+        &[
+            "system",
+            "config",
+            "set",
+            "active_creator_id",
+            &creator_id,
+        ],
+    )
+    .await;
+
+    creator_id
+}
+
 /// Build the full RN-ACT-4 graph through public HTTP routes and CLI verbs.
 pub async fn seed(d: &LiveDaemon) -> RnAct4Graph {
-    activate_creator(d).await;
+    let creator_id = activate_creator(d).await;
 
     let w1 = http_json(
         d,
@@ -333,7 +340,7 @@ pub async fn seed(d: &LiveDaemon) -> RnAct4Graph {
         .to_string();
 
     RnAct4Graph {
-        creator_id: CREATOR_ID.to_string(),
+        creator_id,
         world_w1,
         world_w2,
         world_w3,
@@ -379,7 +386,7 @@ pub async fn view_character_cli(
     .await
 }
 
-pub async fn view_creator_cli(d: &LiveDaemon, world_id: &str) -> Value {
+pub async fn view_creator_cli(d: &LiveDaemon, creator_id: &str, world_id: &str) -> Value {
     cli_json(
         d,
         &[
@@ -390,7 +397,7 @@ pub async fn view_creator_cli(d: &LiveDaemon, world_id: &str) -> Value {
             "--actor",
             "creator",
             "--creator-id",
-            CREATOR_ID,
+            creator_id,
             "--world-id",
             world_id,
             "--json",
@@ -399,22 +406,38 @@ pub async fn view_creator_cli(d: &LiveDaemon, world_id: &str) -> Value {
     .await
 }
 
+/// Index a view page by stable `entry_id`. Duplicate ids mean a copied row.
 pub fn page_index(page: &Value) -> BTreeMap<String, Value> {
     let mut map = BTreeMap::new();
     for item in page["items"].as_array().unwrap() {
-        let name = item["canonical_name"].as_str().unwrap().to_string();
+        let id = item["entry_id"].as_str().unwrap().to_string();
         assert!(
-            map.insert(name.clone(), item.clone()).is_none(),
-            "duplicate canonical_name {name} (copy or remount)"
+            map.insert(id.clone(), item.clone()).is_none(),
+            "duplicate entry_id {id} (copied KnowledgeEntry row)"
         );
     }
     map
 }
 
-pub fn names(page: &Value) -> BTreeSet<String> {
+pub fn entry_ids(page: &Value) -> BTreeSet<String> {
     page_index(page).into_keys().collect()
 }
 
-pub fn expected(names: &[&str]) -> BTreeSet<String> {
-    names.iter().map(|name| (*name).to_string()).collect()
+pub fn expected_ids(ids: &[String]) -> BTreeSet<String> {
+    ids.iter().cloned().collect()
+}
+
+/// Fixture-name lookup. Owner-scoped duplicate names are allowed; this helper
+/// is only for this fixture's unique display names.
+pub fn named_item<'a>(index: &'a BTreeMap<String, Value>, canonical_name: &str) -> &'a Value {
+    let matches: Vec<&Value> = index
+        .values()
+        .filter(|item| item["canonical_name"] == canonical_name)
+        .collect();
+    assert_eq!(
+        matches.len(),
+        1,
+        "expected exactly one {canonical_name} in this fixture page"
+    );
+    matches[0]
 }
