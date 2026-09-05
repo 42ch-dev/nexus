@@ -20,8 +20,14 @@ use axum::extract::{Path, Query, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::Json;
 use futures_util::StreamExt;
-use crate::actor_admission::{ActorAdmissionService, ActorPairMode, ActorViewpoint};
+use crate::actor_admission::{ActorAdmissionService, ActorPairMode, ActorViewpoint, AdmittedActorContext};
 use crate::actor_knowledge_view::AdmittedActor;
+use nexus_local_db::narrative_gateway::SqliteNarrativeGateway;
+use nexus_local_db::SqliteKnowledgeStore;
+use nexus_moment_context_assembly::{
+    assemble_moment, CharacterViewInput, MomentActorContext, MomentRequest, Stage0Assembly,
+};
+use nexus_spoke_adapter::SpokeBackedKbStore;
 use crate::api::handlers::world_kb_guards::require_creator;
 use crate::workspace::actor_sessions::{echo_actor_pair, ActorSessionRegistry};
 use nexus_contracts::generated::daemon_api::agent_host::{
@@ -438,6 +444,73 @@ pub async fn shutdown_session(
     }))
 }
 
+/// Rebuild prompt text for an Actor session: re-admit, then one `assemble_moment`.
+///
+/// Legacy sessions (not in the Actor registry) keep the raw user prompt bytes.
+async fn assemble_prompt_content(
+    state: &WorkspaceState,
+    session_id: &nexus_agent_host::HostSessionId,
+    content: String,
+) -> Result<String, NexusApiError> {
+    let Some(stored) = state.actor_sessions().context_for(session_id) else {
+        return Ok(content);
+    };
+    let creator_id = require_creator(state)?;
+    let admission = ActorAdmissionService::new(state.pool_or_uninit()?.clone());
+    let ctx = admission
+        .admit(
+            &creator_id,
+            stored.actor.clone(),
+            ActorViewpoint {
+                world_id: stored.world_id.clone(),
+                binding_id: stored.binding_id.clone(),
+                branch_id: stored.branch_id.clone(),
+                event_id: stored.event_id.clone(),
+            },
+        )
+        .await?;
+    Ok(assemble_admitted_prompt(state, &ctx, content).await)
+}
+
+async fn assemble_admitted_prompt(
+    state: &WorkspaceState,
+    ctx: &AdmittedActorContext,
+    user_prompt: String,
+) -> String {
+    let pool = match state.pool() {
+        Some(pool) => pool.clone(),
+        None => return user_prompt,
+    };
+    let actor = match &ctx.actor {
+        AdmittedActor::Character { .. } => MomentActorContext::character(
+            CharacterViewInput::from_entries(ctx.view.items.clone()),
+        ),
+        AdmittedActor::Creator { .. } => MomentActorContext::creator(),
+    };
+    let mut request = MomentRequest::new(Stage0Assembly {
+        user_prompt,
+        ..Stage0Assembly::default()
+    })
+    .with_world(ctx.world_id.clone())
+    .with_actor(actor);
+    if let Some(branch) = ctx.branch_id.clone() {
+        request = request.with_branch(branch);
+    }
+    if let Some(event) = ctx.event_id.clone() {
+        request = request.with_event(event);
+    }
+    if matches!(ctx.actor, AdmittedActor::Creator { .. }) {
+        if let Ok(creator_id) = require_creator(state) {
+            request = request.with_user(creator_id);
+        }
+    }
+    let narrative = SqliteNarrativeGateway::new(pool.clone());
+    let kb = SpokeBackedKbStore::new(pool.clone());
+    let knowledge = SqliteKnowledgeStore::new(pool);
+    let assembled = assemble_moment(&request, &narrative, &kb, &knowledge).await;
+    assembled.to_full_context()
+}
+
 /// POST /v1/daemon/agent-host/sessions/{session_id}/operations
 ///
 /// Execute a normalized host operation (prompt, `set_model`, `set_mode`).
@@ -455,6 +528,7 @@ pub async fn execute_operation(
 
     let host_op = match req {
         ExecuteOperationRequest::Prompt { content } => {
+            let content = assemble_prompt_content(&state, &sid, content).await?;
             nexus_agent_host::capability::model::HostOperation::Prompt {
                 op_id: op_id.clone(),
                 content: vec![
@@ -1935,6 +2009,251 @@ mod tests {
         assert_eq!(err.error_code(), "not_found");
 
         assert_eq!(host.create_sessions.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    struct PromptHost {
+        sessions: std::sync::Mutex<std::collections::HashMap<nexus_agent_host::HostSessionId, nexus_agent_host::HostSession>>,
+        ops: std::sync::Mutex<Vec<nexus_agent_host::capability::model::HostOperation>>,
+        execs: std::sync::atomic::AtomicU64,
+        events: tokio::sync::broadcast::Sender<nexus_agent_host::capability::model::HostEvent>,
+    }
+
+    impl PromptHost {
+        fn new() -> Arc<Self> {
+            let (events, _) = tokio::sync::broadcast::channel(16);
+            Arc::new(Self {
+                sessions: std::sync::Mutex::new(std::collections::HashMap::new()),
+                ops: std::sync::Mutex::new(Vec::new()),
+                execs: std::sync::atomic::AtomicU64::new(0),
+                events,
+            })
+        }
+
+        fn last_prompt_text(&self) -> String {
+            match self.ops.lock().expect("ops").last() {
+                Some(nexus_agent_host::capability::model::HostOperation::Prompt { content, .. }) => {
+                    match content.as_slice() {
+                        [nexus_agent_host::capability::model::HostContentBlock::Text { text }] => {
+                            text.clone()
+                        }
+                        _ => panic!("expected one text block"),
+                    }
+                }
+                other => panic!("expected prompt, got {other:?}"),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl nexus_agent_host::HostFacade for PromptHost {
+        async fn start(
+            &self,
+            _config: nexus_agent_host::capability::model::HostStartConfig,
+        ) -> nexus_agent_host::HostResult<()> {
+            Ok(())
+        }
+
+        async fn create_session(
+            &self,
+            request: nexus_agent_host::capability::CreateSessionRequest,
+        ) -> nexus_agent_host::HostResult<nexus_agent_host::HostSession> {
+            let session = nexus_agent_host::HostSession {
+                id: nexus_agent_host::HostSessionId::new(),
+                provider_id: request.provider_id,
+                state: nexus_agent_host::SessionState::Ready,
+                created_at: chrono::Utc::now(),
+                active_op_id: None,
+                negotiated_capabilities: nexus_agent_host::capability::model::CapabilityDescriptor::native_cli_limited(),
+            };
+            self.sessions
+                .lock()
+                .expect("sessions")
+                .insert(session.id.clone(), session.clone());
+            Ok(session)
+        }
+
+        async fn exec(
+            &self,
+            _session_id: nexus_agent_host::HostSessionId,
+            op: nexus_agent_host::capability::model::HostOperation,
+        ) -> nexus_agent_host::HostResult<nexus_agent_host::capability::model::HostEventStream>
+        {
+            self.execs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.ops.lock().expect("ops").push(op);
+            Ok(Box::pin(futures_util::stream::empty()))
+        }
+
+        async fn cancel(
+            &self,
+            _op_id: nexus_agent_host::HostOperationId,
+        ) -> nexus_agent_host::HostResult<()> {
+            Ok(())
+        }
+
+        async fn health(&self) -> nexus_agent_host::HostResult<nexus_agent_host::capability::model::HostHealth> {
+            Ok(nexus_agent_host::capability::model::HostHealth {
+                running: true,
+                active_sessions: self.sessions.lock().expect("sessions").len(),
+                active_operations: 0,
+            })
+        }
+
+        async fn shutdown(&self) -> nexus_agent_host::HostResult<()> {
+            Ok(())
+        }
+
+        async fn shutdown_session(
+            &self,
+            session_id: nexus_agent_host::HostSessionId,
+        ) -> nexus_agent_host::HostResult<()> {
+            self.sessions
+                .lock()
+                .expect("sessions")
+                .remove(&session_id)
+                .ok_or_else(|| nexus_agent_host::HostError::internal("session"))?;
+            Ok(())
+        }
+
+        async fn list_sessions(&self) -> nexus_agent_host::HostResult<Vec<nexus_agent_host::HostSession>> {
+            Ok(self.sessions.lock().expect("sessions").values().cloned().collect())
+        }
+
+        async fn provider_catalog(&self) -> nexus_agent_host::HostResult<nexus_agent_host::ProviderCatalog> {
+            Ok(nexus_agent_host::ProviderCatalog::new())
+        }
+
+        fn subscribe_events(
+            &self,
+            _session_id: nexus_agent_host::HostSessionId,
+        ) -> tokio::sync::broadcast::Receiver<nexus_agent_host::capability::model::HostEvent> {
+            self.events.subscribe()
+        }
+    }
+
+    async fn state_with_prompt_host() -> (crate::test_utils::TestTempRoot, WorkspaceState, Arc<PromptHost>) {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        std::fs::write(
+            nexus_home.join("config.toml"),
+            "active_creator_id = \"ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\n[active_workspace_slug_by_creator]\n\"ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" = \"default\"\n",
+        )
+        .unwrap();
+        let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let host = PromptHost::new();
+        let facade: Arc<dyn nexus_agent_host::HostFacade> = host.clone();
+        state.set_agent_host(facade);
+        (tmp, state, host)
+    }
+
+    #[test]
+    fn legacy_prompt_json_bytes_are_kind_and_content_only() {
+        let req: ExecuteOperationRequest = serde_json::from_str(r#"{"kind":"prompt","content":"hello"}"#)
+            .expect("legacy prompt");
+        let json = serde_json::to_string(&req).expect("json");
+        assert_eq!(json, r#"{"kind":"prompt","content":"hello"}"#);
+    }
+
+    #[tokio::test]
+    async fn legacy_prompt_submits_raw_bytes_unchanged() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let created = create_session(
+            State(state.clone()),
+            Json(serde_json::from_value(serde_json::json!({
+                "provider_id": "prov",
+                "cwd": "/tmp"
+            }))
+            .unwrap()),
+        )
+        .await
+        .expect("legacy create");
+        let result = execute_operation(
+            State(state),
+            Path(created.session_id.clone()),
+            Json(ExecuteOperationRequest::Prompt {
+                content: "hello".to_string(),
+            }),
+        )
+        .await
+        .expect("legacy prompt");
+        assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(host.last_prompt_text(), "hello");
+        assert_eq!(host.ops.lock().expect("ops").len(), 1);
+        assert_eq!(result.session_id, created.session_id.clone());
+    }
+
+    #[tokio::test]
+    async fn character_prompt_re_admits_empty_headings_and_one_prompt() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let (character_id, binding_id) = seed_owned_character(&state).await;
+        let created = create_session(
+            State(state.clone()),
+            Json(serde_json::from_value(serde_json::json!({
+                "provider_id": "prov",
+                "cwd": "/tmp",
+                "actor_ref": {"actor_kind":"character","character_id": character_id},
+                "viewpoint": {"world_id":"wld_worldA","binding_id": binding_id}
+            }))
+            .unwrap()),
+        )
+        .await
+        .expect("create actor session");
+        let _ = execute_operation(
+            State(state),
+            Path(created.session_id.clone()),
+            Json(ExecuteOperationRequest::Prompt {
+                content: "Act now.".to_string(),
+            }),
+        )
+        .await
+        .expect("prompt");
+        assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let text = host.last_prompt_text();
+        assert!(text.contains("## Character SOUL"));
+        assert!(text.contains("## Character Memory"));
+        assert!(text.contains("## Character ToM — L1"));
+        assert!(text.contains("## Character ToM — L2"));
+        assert!(text.contains("Act now."));
+        assert!(!text.contains("## Personality"));
+        let ops = host.ops.lock().expect("ops");
+        match ops.as_slice() {
+            [nexus_agent_host::capability::model::HostOperation::Prompt { content, .. }] => {
+                assert_eq!(content.len(), 1);
+            }
+            other => panic!("expected one prompt, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn removed_binding_blocks_prompt_before_host_exec() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let (character_id, binding_id) = seed_owned_character(&state).await;
+        let created = create_session(
+            State(state.clone()),
+            Json(serde_json::from_value(serde_json::json!({
+                "provider_id": "prov",
+                "cwd": "/tmp",
+                "actor_ref": {"actor_kind":"character","character_id": character_id},
+                "viewpoint": {"world_id":"wld_worldA","binding_id": binding_id}
+            }))
+            .unwrap()),
+        )
+        .await
+        .expect("create");
+        sqlx::query("UPDATE actor_world_bindings SET status = 'inactive' WHERE binding_id = ?")
+            .bind(&binding_id)
+            .execute(state.pool().unwrap())
+            .await
+            .unwrap();
+        let err = execute_operation(
+            State(state),
+            Path(created.session_id.clone()),
+            Json(ExecuteOperationRequest::Prompt {
+                content: "Act now.".to_string(),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.error_code(), "not_found");
         assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 

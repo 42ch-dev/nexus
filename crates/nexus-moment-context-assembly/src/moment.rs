@@ -27,7 +27,7 @@ use crate::directive::{
 use crate::generation::GenerationStage;
 use crate::slots::{self, SlotMapEntry};
 use crate::stage0::{Stage0Assembly, STAGE0_PERSONALITY_END, STAGE0_PERSONALITY_START};
-use crate::world_context::WorldKbQueryBuilder;
+use crate::world_context::{CharacterViewInput, WorldKbQueryBuilder};
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use nexus_knowledge::world_kb::KbStore;
@@ -54,6 +54,56 @@ const USER_KNOWLEDGE_HEADING: &str = "## User Knowledge";
 /// `## World Knowledge Base`. P0 reserves the position but never renders it
 /// (no directive active); P1 fills the slot.
 const MOMENT_DIRECTIVE_HEADING: &str = "## Moment Directive";
+
+/// P2 Character mind headings (empty rows; P3/P4 fill the same slots).
+const CHARACTER_SOUL_HEADING: &str = "## Character SOUL";
+const CHARACTER_MEMORY_HEADING: &str = "## Character Memory";
+const CHARACTER_TOM_L1_HEADING: &str = "## Character ToM — L1";
+const CHARACTER_TOM_L2_HEADING: &str = "## Character ToM — L2";
+
+/// Actor discriminant for internal MCA context. Authorization is caller-owned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MomentActorKind {
+    /// Explicit Creator actor (no Character mind headings).
+    Creator,
+    /// Character actor: bounded view + four fixed empty mind headings.
+    Character,
+}
+
+/// Internal Actor context carried into [`assemble_moment`].
+///
+/// MCA does not authorize; the daemon admission service must populate this.
+#[derive(Debug, Clone)]
+pub struct MomentActorContext {
+    /// Admitted actor kind.
+    pub kind: MomentActorKind,
+    /// Character view rows. Required for [`MomentActorKind::Character`]; ignored otherwise.
+    pub character_view: Option<CharacterViewInput>,
+}
+
+impl MomentActorContext {
+    /// Character actor with a bounded admitted view (may be empty rows).
+    #[must_use]
+    pub fn character(view: CharacterViewInput) -> Self {
+        Self {
+            kind: MomentActorKind::Character,
+            character_view: Some(view),
+        }
+    }
+
+    /// Creator actor — unrestricted World KB query remains the legacy path.
+    #[must_use]
+    pub const fn creator() -> Self {
+        Self {
+            kind: MomentActorKind::Creator,
+            character_view: None,
+        }
+    }
+
+    fn is_character(&self) -> bool {
+        matches!(self.kind, MomentActorKind::Character)
+    }
+}
 
 /// Parameters for a single moment context assembly request.
 ///
@@ -129,6 +179,8 @@ pub struct MomentRequest {
     /// the preset runner / schedule path threads the executing stage when it
     /// drives assembly (see `guides/generation-trigger-wiring.md`).
     pub generation_stage: Option<GenerationStage>,
+    /// Optional admitted Actor context (v1.184 P2). `None` is exact legacy.
+    pub actor: Option<MomentActorContext>,
 }
 
 impl MomentRequest {
@@ -152,6 +204,7 @@ impl MomentRequest {
             hop_edges: None,
             hop_max_tokens: None,
             generation_stage: None,
+            actor: None,
         }
     }
 
@@ -266,6 +319,13 @@ impl MomentRequest {
         self.generation_stage = Some(stage);
         self
     }
+
+    /// Attach admitted Actor context (Character or Creator).
+    #[must_use]
+    pub fn with_actor(mut self, actor: MomentActorContext) -> Self {
+        self.actor = Some(actor);
+        self
+    }
 }
 
 /// Assembled context from all domain sources for a single moment.
@@ -322,6 +382,10 @@ pub struct MomentContext {
     /// ran (no World-KB, activation off, or all entries gated off).
     /// Additive — never part of `to_full_context()` (AC-I6).
     pub hygiene_trace: Option<Vec<crate::hygiene::HygieneTraceEntry>>,
+    /// When true, `to_full_context` emits the four fixed Character mind headings
+    /// even with empty bodies. Legacy assemblies leave this false so empty
+    /// sections stay omitted.
+    pub character_mind: bool,
 }
 
 impl MomentContext {
@@ -356,8 +420,9 @@ impl MomentContext {
         let directive = section(self.moment_directive.as_ref(), MOMENT_DIRECTIVE_HEADING);
         let world_kb = section(self.world_kb.as_ref(), WORLD_KB_HEADING);
         let user_knowledge = section(self.user_knowledge.as_ref(), USER_KNOWLEDGE_HEADING);
+        let character_mind = self.character_mind.then(render_character_mind_headings);
 
-        let mut parts: Vec<Option<String>> = vec![stage0];
+        let mut parts: Vec<Option<String>> = vec![stage0, character_mind];
         match self.moment_directive_depth {
             DirectiveDepth::Head => {
                 parts.push(directive);
@@ -742,8 +807,15 @@ where
         None
     };
 
-    // 4. User knowledge (if user_id provided)
-    let user_knowledge = if let Some(ref user_id) = request.user_id {
+    // 4. User knowledge (if user_id provided). Character mode omits Creator
+    //    user-knowledge fallback entirely.
+    let user_knowledge = if request
+        .actor
+        .as_ref()
+        .is_some_and(MomentActorContext::is_character)
+    {
+        None
+    } else if let Some(ref user_id) = request.user_id {
         match fetch_user_knowledge(knowledge, user_id, request.knowledge_limit).await {
             Ok(Some(uk_text)) => Some(uk_text),
             _ => None,
@@ -790,6 +862,10 @@ where
         activation_budget,
         moment_directive_meta: directive.as_ref().map(MomentDirectiveStatus::from),
         hygiene_trace,
+        character_mind: request
+            .actor
+            .as_ref()
+            .is_some_and(MomentActorContext::is_character),
     };
 
     // 6. Cross-domain truncation if max_tokens set (the directive section is
@@ -869,6 +945,13 @@ fn render_gated_slots(
     (slots::render_slots(&routing), map, trace)
 }
 
+
+fn render_character_mind_headings() -> String {
+    format!(
+        "{CHARACTER_SOUL_HEADING}\n\n{CHARACTER_MEMORY_HEADING}\n\n{CHARACTER_TOM_L1_HEADING}\n\n{CHARACTER_TOM_L2_HEADING}\n"
+    )
+}
+
 /// Fetch narrative context (world state + timeline) from the gateway.
 // Traits use async fn in trait without Send bounds — same pattern as nexus-narrative.
 #[allow(clippy::future_not_send)]
@@ -900,6 +983,17 @@ async fn fetch_world_kb_entries<K: KbStore>(
     world_id: &str,
     request: &MomentRequest,
 ) -> Result<Vec<KnowledgeEntryRecord>, nexus_knowledge::world_kb::KbStoreError> {
+    if request
+        .actor
+        .as_ref()
+        .is_some_and(MomentActorContext::is_character)
+    {
+        let view = request
+            .actor
+            .as_ref()
+            .and_then(|actor| actor.character_view.as_ref());
+        return Ok(WorldKbQueryBuilder::character_view_or_unrestricted(view).unwrap_or_default());
+    }
     let builder = WorldKbQueryBuilder::new(world_id);
     let mut query = builder.query_all();
     if let Some(limit) = request.kb_limit {
@@ -1174,6 +1268,65 @@ mod tests {
         assert!(!full.contains(TIMELINE_HEADING));
         assert!(!full.contains(WORLD_KB_HEADING));
         assert!(!full.contains(USER_KNOWLEDGE_HEADING));
+        assert!(!full.contains(CHARACTER_SOUL_HEADING));
+        assert!(!full.contains(CHARACTER_MEMORY_HEADING));
+        assert!(!full.contains(CHARACTER_TOM_L1_HEADING));
+        assert!(!full.contains(CHARACTER_TOM_L2_HEADING));
+    }
+
+    #[tokio::test]
+    async fn character_mode_renders_empty_mind_headings_without_world_fallback() {
+        let stores = TestStores::new();
+        let secret = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
+            "wld_1",
+            nexus_contracts::BlockType::Character,
+            "SecretWorldRow",
+        );
+        stores.kb.insert_knowledge_entry(secret).await.unwrap();
+        let allowed = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
+            "wld_1",
+            nexus_contracts::BlockType::Character,
+            "AdmittedAda",
+        );
+        let request = MomentRequest::new(Stage0Assembly {
+            user_prompt: "Act.".to_string(),
+            personality: "Creator SOUL must not leak.".to_string(),
+            ..Stage0Assembly::default()
+        })
+        .with_world("wld_1")
+        .with_user("user_1")
+        .with_actor(MomentActorContext::character(CharacterViewInput::from_entries(
+            vec![allowed],
+        )));
+
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let full = ctx.to_full_context();
+        assert!(full.contains(CHARACTER_SOUL_HEADING));
+        assert!(full.contains(CHARACTER_MEMORY_HEADING));
+        assert!(full.contains(CHARACTER_TOM_L1_HEADING));
+        assert!(full.contains(CHARACTER_TOM_L2_HEADING));
+        assert!(full.contains("AdmittedAda"));
+        assert!(!full.contains("SecretWorldRow"));
+        assert!(ctx.user_knowledge.is_none());
+        let soul = full.find(CHARACTER_SOUL_HEADING).unwrap();
+        let mem = full.find(CHARACTER_MEMORY_HEADING).unwrap();
+        let l1 = full.find(CHARACTER_TOM_L1_HEADING).unwrap();
+        let l2 = full.find(CHARACTER_TOM_L2_HEADING).unwrap();
+        assert!(soul < mem && mem < l1 && l1 < l2);
+    }
+
+    #[test]
+    fn stage0_legacy_empty_section_omission_unchanged() {
+        let output = Stage0Assembly {
+            personality: String::new(),
+            experience: String::new(),
+            user_prompt: "Task.".to_string(),
+            ..Stage0Assembly::default()
+        }
+        .assemble();
+        assert!(!output.contains("## Personality"));
+        assert!(!output.contains(CHARACTER_SOUL_HEADING));
+        assert!(output.contains("Task."));
     }
 
     // ── V1.150 P0: reserved Moment Directive slot (spec §2 / Q1) ──────
@@ -1731,6 +1884,7 @@ mod tests {
             activation_budget: None,
             moment_directive_meta: None,
             hygiene_trace: None,
+            character_mind: false,
         };
 
         let (personality, rest) = ctx.split_stage0_personality();
@@ -1774,6 +1928,7 @@ mod tests {
             activation_budget: None,
             moment_directive_meta: None,
             hygiene_trace: None,
+            character_mind: false,
         };
 
         // apply_cross_domain_truncation uses split_stage0_personality internally

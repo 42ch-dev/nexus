@@ -46,9 +46,12 @@ pub use directive::{
 };
 pub use generation::GenerationStage;
 pub use inspector::build_inspector_packet;
-pub use moment::{assemble_moment, assemble_moment_with_directive, MomentContext, MomentRequest};
+pub use moment::{
+    assemble_moment, assemble_moment_with_directive, MomentActorContext, MomentActorKind,
+    MomentContext, MomentRequest,
+};
 pub use stage0::Stage0Assembly;
 pub use world_context::{
-    build_chapter_kb_block, ChapterKbBlockParams, WorldContextBlock, WorldContextItem,
-    WorldKbQueryBuilder, DEFAULT_WORLD_CONTEXT_TOKEN_BUDGET,
+    build_chapter_kb_block, ChapterKbBlockParams, CharacterViewInput, WorldContextBlock,
+    WorldContextItem, WorldKbQueryBuilder, DEFAULT_WORLD_CONTEXT_TOKEN_BUDGET,
 };

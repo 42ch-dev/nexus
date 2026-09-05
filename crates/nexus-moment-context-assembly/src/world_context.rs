@@ -18,7 +18,32 @@
 #![allow(clippy::doc_markdown)]
 
 use nexus_contracts::BlockType;
+use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use nexus_knowledge::world_kb::{KbQuery, KbStore};
+
+/// Bounded Character KnowledgeView already admitted by the caller.
+///
+/// When this input is present, MCA must use these entries instead of an
+/// unrestricted World `KbStore::query` (`list_by_world`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CharacterViewInput {
+    /// Admitted P1 view rows for this Character + binding + World.
+    pub entries: Vec<KnowledgeEntryRecord>,
+}
+
+impl CharacterViewInput {
+    /// Wrap already-admitted view rows.
+    #[must_use]
+    pub fn from_entries(entries: Vec<KnowledgeEntryRecord>) -> Self {
+        Self { entries }
+    }
+
+    /// Entries the moment assembly may render (never a World-wide scan).
+    #[must_use]
+    pub fn admitted_entries(&self) -> &[KnowledgeEntryRecord] {
+        &self.entries
+    }
+}
 
 /// Default token budget for the World context block (~1500 tokens ≈ 6000 chars).
 pub const DEFAULT_WORLD_CONTEXT_TOKEN_BUDGET: usize = 1500;
@@ -188,6 +213,16 @@ impl<'a> WorldKbQueryBuilder<'a> {
     #[must_use]
     pub fn query_all(&self) -> KbQuery {
         KbQuery::new(self.world_id)
+    }
+
+    /// Resolve World-KB rows: admitted Character view wins over `query_all`.
+    ///
+    /// Character mode never constructs an unrestricted World query.
+    #[must_use]
+    pub fn character_view_or_unrestricted(
+        view: Option<&CharacterViewInput>,
+    ) -> Option<Vec<KnowledgeEntryRecord>> {
+        view.map(|v| v.admitted_entries().to_vec())
     }
 }
 
@@ -921,6 +956,21 @@ mod tests {
         let q = builder.query_all();
         assert_eq!(q.world_id, "wld_test");
         assert!(q.block_type.is_none());
+    }
+
+    #[test]
+    fn character_view_bypasses_unrestricted_world_query() {
+        let entry = KnowledgeEntryRecord::new(
+            "wld_test",
+            BlockType::Character,
+            "Ada",
+        );
+        let view = CharacterViewInput::from_entries(vec![entry.clone()]);
+        let resolved = WorldKbQueryBuilder::character_view_or_unrestricted(Some(&view))
+            .expect("character view");
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].canonical_name, "Ada");
+        assert!(WorldKbQueryBuilder::character_view_or_unrestricted(None).is_none());
     }
 
     // R-V141HYG-02: to_yaml must produce parseable YAML for strings with metacharacters.
