@@ -36,6 +36,10 @@ use nexus_contracts::daemon_api::characters::memory::review_character_memory_req
 use nexus_contracts::daemon_api::characters::memory::review_character_memory_response::ReviewCharacterMemoryResponse;
 use nexus_contracts::daemon_api::characters::soul::character_soul_narrative_request::CharacterSoulNarrativeRequest;
 use nexus_contracts::daemon_api::characters::soul::character_soul_narrative_response::CharacterSoulNarrativeResponse;
+use nexus_contracts::daemon_api::characters::tom::list_character_tom_response::ListCharacterTomResponse;
+use nexus_contracts::daemon_api::characters::tom::list_character_tom_response::NexusCharacterTomBeliefItem;
+use nexus_contracts::daemon_api::characters::tom::record_character_tom_request::RecordCharacterTomRequest;
+use nexus_contracts::daemon_api::characters::tom::record_character_tom_response::RecordCharacterTomResponse;
 
 /// `creator character` subcommands.
 #[derive(Debug, Subcommand)]
@@ -95,6 +99,11 @@ pub enum CharacterCommand {
     Soul {
         #[command(subcommand)]
         command: CharacterSoulCommand,
+    },
+    /// Character ToM L1/L2 record and show (v1.184 P4)
+    Tom {
+        #[command(subcommand)]
+        command: CharacterTomCommand,
     },
     /// Run a Character prompt through the existing Agent Host
     Run {
@@ -306,6 +315,65 @@ pub enum CharacterMemoryCommand {
     },
 }
 
+/// `creator character tom` subcommands (v1.184 P4).
+#[derive(Debug, Subcommand)]
+pub enum CharacterTomCommand {
+    /// Record one L1 or L2 belief on an authorized carrier
+    Record {
+        #[arg(long)]
+        character_id: String,
+        #[arg(long)]
+        world_id: String,
+        #[arg(long)]
+        binding_id: String,
+        #[arg(long)]
+        carrier_entry_id: String,
+        #[arg(long)]
+        expected_revision: u64,
+        #[arg(long)]
+        holder: String,
+        #[arg(long)]
+        proposition: String,
+        #[arg(long)]
+        order: i64,
+        #[arg(long)]
+        truth: Option<String>,
+        #[arg(long)]
+        access: Option<String>,
+        #[arg(long)]
+        representation: Option<String>,
+        #[arg(long)]
+        content_type: Option<String>,
+        #[arg(long)]
+        source: Option<String>,
+        #[arg(long)]
+        context: Option<String>,
+        #[arg(long)]
+        occurred_at: Option<String>,
+        #[arg(long)]
+        sort_key: Option<String>,
+        #[arg(long)]
+        event_id: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// List bounded ToM rows (L1 before L2 in keyset order)
+    Show {
+        #[arg(long)]
+        character_id: String,
+        #[arg(long)]
+        world_id: String,
+        #[arg(long)]
+        binding_id: String,
+        #[arg(long)]
+        limit: Option<i64>,
+        #[arg(long)]
+        cursor: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+}
+
 /// `creator character soul` subcommands (v1.184 P3).
 #[derive(Debug, Subcommand)]
 pub enum CharacterSoulCommand {
@@ -499,6 +567,68 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                 force,
                 json,
             } => soul_reflect(&client, &character_id, binding_id, force, json).await,
+        },
+        CharacterCommand::Tom { command } => match command {
+            CharacterTomCommand::Record {
+                character_id,
+                world_id,
+                binding_id,
+                carrier_entry_id,
+                expected_revision,
+                holder,
+                proposition,
+                order,
+                truth,
+                access,
+                representation,
+                content_type,
+                source,
+                context,
+                occurred_at,
+                sort_key,
+                event_id,
+                json,
+            } => {
+                tom_record(
+                    &client,
+                    &character_id,
+                    world_id,
+                    binding_id,
+                    carrier_entry_id,
+                    expected_revision,
+                    holder,
+                    proposition,
+                    order,
+                    truth,
+                    access,
+                    representation,
+                    content_type,
+                    source,
+                    context,
+                    occurred_at,
+                    sort_key,
+                    event_id,
+                    json,
+                )
+                .await
+            }
+            CharacterTomCommand::Show {
+                character_id,
+                world_id,
+                binding_id,
+                limit,
+                cursor,
+                json,
+            } => tom_show(
+                &client,
+                &character_id,
+                &world_id,
+                &binding_id,
+                limit,
+                cursor,
+                json,
+            )
+            .await,
         },
         CharacterCommand::Run {
             character_id,
@@ -1270,6 +1400,162 @@ async fn soul_reflect(
         }
     }
     Ok(())
+}
+
+
+// ─── Character ToM helpers (v1.184 P4) ─────────────────────────────────────
+
+fn character_tom_base(character_id: &str) -> String {
+    format!("/v1/daemon/characters/{character_id}/tom")
+}
+
+fn merge_tom_json_field(body: &mut serde_json::Value, key: &str, value: Option<String>) {
+    if let Some(v) = value {
+        body[key] = serde_json::Value::String(v);
+    }
+}
+
+async fn tom_record(
+    client: &DaemonClient,
+    character_id: &str,
+    world_id: String,
+    binding_id: String,
+    carrier_entry_id: String,
+    expected_revision: u64,
+    holder: String,
+    proposition: String,
+    order: i64,
+    truth: Option<String>,
+    access: Option<String>,
+    representation: Option<String>,
+    content_type: Option<String>,
+    source: Option<String>,
+    context: Option<String>,
+    occurred_at: Option<String>,
+    sort_key: Option<String>,
+    event_id: Option<String>,
+    json: bool,
+) -> Result<()> {
+    let mut body = serde_json::json!({
+        "world_id": world_id,
+        "binding_id": binding_id,
+        "carrier_entry_id": carrier_entry_id,
+        "expected_revision": expected_revision,
+        "holder": holder,
+        "proposition": proposition,
+        "order": order,
+    });
+    merge_tom_json_field(&mut body, "truth", truth);
+    merge_tom_json_field(&mut body, "access", access);
+    merge_tom_json_field(&mut body, "representation", representation);
+    merge_tom_json_field(&mut body, "content_type", content_type);
+    merge_tom_json_field(&mut body, "source", source);
+    merge_tom_json_field(&mut body, "context", context);
+    merge_tom_json_field(&mut body, "occurred_at", occurred_at);
+    merge_tom_json_field(&mut body, "sort_key", sort_key);
+    merge_tom_json_field(&mut body, "event_id", event_id);
+    let req: RecordCharacterTomRequest = serde_json::from_value(body)?;
+    let resp: RecordCharacterTomResponse = client
+        .post(&character_tom_base(character_id), &req)
+        .await?;
+    print_tom_record(&resp, json);
+    Ok(())
+}
+
+fn print_tom_record(resp: &RecordCharacterTomResponse, json: bool) {
+    if json {
+        println!("{}", serde_json::to_string_pretty(resp).unwrap_or_default());
+    } else {
+        println!("Recorded ToM belief:");
+        println!("  carrier_entry_id: {}", &*resp.carrier_entry_id);
+        println!("  revision: {}", resp.revision);
+        println!("  mind_state_id: {}", &*resp.mind_state_id);
+    }
+}
+
+async fn tom_show(
+    client: &DaemonClient,
+    character_id: &str,
+    world_id: &str,
+    binding_id: &str,
+    limit: Option<i64>,
+    cursor: Option<String>,
+    json: bool,
+) -> Result<()> {
+    let mut pairs: Vec<(&str, String)> = vec![
+        ("world_id", world_id.to_string()),
+        ("binding_id", binding_id.to_string()),
+    ];
+    if let Some(n) = limit {
+        pairs.push(("limit", n.to_string()));
+    }
+    if let Some(c) = cursor {
+        pairs.push(("cursor", c));
+    }
+    let path = query_path(
+        &character_tom_base(character_id),
+        &pairs
+            .iter()
+            .map(|(k, v)| (*k, v.as_str()))
+            .collect::<Vec<_>>(),
+    );
+    let resp: ListCharacterTomResponse = client.get(&path).await?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+    } else if resp.items.is_empty() {
+        println!("No ToM beliefs.");
+    } else {
+        let mut l1 = Vec::new();
+        let mut l2 = Vec::new();
+        for row in &resp.items {
+            let line = format_tom_item_human(row);
+            match row.order {
+                1 => l1.push(line),
+                2 => l2.push(line),
+                _ => {}
+            }
+        }
+        println!("## Character ToM — L1");
+        if l1.is_empty() {
+            println!();
+        } else {
+            for line in l1 {
+                println!("{line}");
+            }
+        }
+        println!("## Character ToM — L2");
+        if l2.is_empty() {
+            println!();
+        } else {
+            for line in l2 {
+                println!("{line}");
+            }
+        }
+        if resp.pagination.has_more {
+            if let Some(next) = &resp.pagination.next_cursor {
+                println!("next_cursor: {next}");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn format_tom_item_human(row: &NexusCharacterTomBeliefItem) -> String {
+    let holder = row.holder.to_string();
+    let proposition = row.proposition.as_deref().unwrap_or("");
+    let truth = row
+        .truth
+        .as_ref()
+        .map(|t| t.to_string())
+        .unwrap_or_else(|| "Unknown".to_string());
+    format!(
+        "- [{}] holder={} truth={} {} (carrier={})",
+        row.order,
+        holder,
+        truth,
+        proposition,
+        &*row.carrier_entry_id
+    )
 }
 
 async fn consume_terminal_events(

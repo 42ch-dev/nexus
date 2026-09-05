@@ -61,18 +61,24 @@ const CHARACTER_MEMORY_HEADING: &str = "## Character Memory";
 const CHARACTER_TOM_L1_HEADING: &str = "## Character ToM — L1";
 const CHARACTER_TOM_L2_HEADING: &str = "## Character ToM — L2";
 
-/// P3 Character SOUL/Memory projection into the two reserved mind slots.
+/// P3/P4 Character SOUL/Memory/ToM projection into the four fixed mind slots.
 ///
 /// Immutable once built: [`Self::new`] applies fixed deterministic bounds
 /// (UTF-8-safe truncation + entry cap) so the projected slots are stable and
 /// bounded when rendered. `None`/empty keep the P2 empty-heading bytes
-/// identical (missing optional memory is an honest empty section).
+/// identical (missing optional memory/ToM is an honest empty section).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CharacterMindInput {
     /// SOUL.md text for the executing Character, bounded and truncated.
     pub soul: Option<String>,
     /// Memory lines for the admitted scope, bounded and caller-ordered.
     pub memory: Vec<String>,
+    /// L1 self-belief lines for the executing Character, bounded and in the
+    /// Task 2 service's deterministic keyset order (v1.184 P4).
+    pub tom_l1: Vec<String>,
+    /// L2 lines: the executing Character's recorded model of other
+    /// Characters, bounded and in the same keyset order (v1.184 P4).
+    pub tom_l2: Vec<String>,
 }
 
 /// Max Unicode scalar chars for the projected SOUL slot (4 KiB).
@@ -81,6 +87,10 @@ pub const CHARACTER_MIND_MAX_SOUL_CHARS: usize = 4096;
 pub const CHARACTER_MIND_MAX_MEMORY_ENTRIES: usize = 20;
 /// Max Unicode scalar chars per projected memory line.
 pub const CHARACTER_MIND_MAX_ENTRY_CHARS: usize = 280;
+/// Max L1/L2 ToM lines projected into each `## Character ToM` slot.
+pub const CHARACTER_MIND_MAX_TOM_ENTRIES: usize = 20;
+/// Max Unicode scalar chars per projected ToM line.
+pub const CHARACTER_MIND_MAX_TOM_CHARS: usize = 280;
 
 impl CharacterMindInput {
     /// Build a bounded, deterministic mind input.
@@ -92,14 +102,42 @@ impl CharacterMindInput {
             .take(CHARACTER_MIND_MAX_MEMORY_ENTRIES)
             .map(|line| truncate_chars(&line, CHARACTER_MIND_MAX_ENTRY_CHARS))
             .collect();
-        Self { soul, memory }
+        Self {
+            soul,
+            memory,
+            tom_l1: Vec::new(),
+            tom_l2: Vec::new(),
+        }
+    }
+
+    /// Attach bounded, deterministic L1/L2 ToM lines (v1.184 P4).
+    ///
+    /// L1 is projected before L2 by construction: the caller passes the
+    /// already keyset-ordered `(order, carrier_entry_id, row_ordinal)` split;
+    /// this builder only caps and truncates. Empty vecs keep the P2/P3
+    /// empty-heading bytes identical (honest empty sections).
+    #[must_use]
+    pub fn with_tom(mut self, tom_l1: Vec<String>, tom_l2: Vec<String>) -> Self {
+        self.tom_l1 = tom_l1
+            .into_iter()
+            .take(CHARACTER_MIND_MAX_TOM_ENTRIES)
+            .map(|line| truncate_chars(&line, CHARACTER_MIND_MAX_TOM_CHARS))
+            .collect();
+        self.tom_l2 = tom_l2
+            .into_iter()
+            .take(CHARACTER_MIND_MAX_TOM_ENTRIES)
+            .map(|line| truncate_chars(&line, CHARACTER_MIND_MAX_TOM_CHARS))
+            .collect();
+        self
     }
 
     /// Whether neither slot carries content (used by tests to assert the
     /// legacy/honest-empty path).
-    #[cfg(test)]
     fn is_empty(&self) -> bool {
-        self.soul.as_deref().map_or(true, str::is_empty) && self.memory.is_empty()
+        self.soul.as_deref().map_or(true, str::is_empty)
+            && self.memory.is_empty()
+            && self.tom_l1.is_empty()
+            && self.tom_l2.is_empty()
     }
 }
 
@@ -1050,8 +1088,22 @@ fn render_character_mind_headings(mind: &CharacterMindInput) -> String {
         let lines = mind.memory.join("\n");
         format!("{lines}\n")
     };
+    // ToM bodies (v1.184 P4): absent rows keep the exact P2/P3 empty-heading
+    // bytes (`heading\n\n` straight into the next heading).
+    let tom_l1 = if mind.tom_l1.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", mind.tom_l1.join("\n"))
+    };
+    // L2 section keeps the legacy trailing bytes exactly: empty renders
+    // `heading\n`; filled renders `heading\n\n<lines>\n` (memory pattern).
+    let tom_l2_section = if mind.tom_l2.is_empty() {
+        format!("{CHARACTER_TOM_L2_HEADING}\n")
+    } else {
+        format!("{CHARACTER_TOM_L2_HEADING}\n\n{}\n", mind.tom_l2.join("\n"))
+    };
     format!(
-        "{CHARACTER_SOUL_HEADING}\n\n{soul}{CHARACTER_MEMORY_HEADING}\n\n{memory}{CHARACTER_TOM_L1_HEADING}\n\n{CHARACTER_TOM_L2_HEADING}\n"
+        "{CHARACTER_SOUL_HEADING}\n\n{soul}{CHARACTER_MEMORY_HEADING}\n\n{memory}{CHARACTER_TOM_L1_HEADING}\n\n{tom_l1}{tom_l2_section}"
     )
 }
 
@@ -3036,6 +3088,25 @@ mod tests {
         assert!(soul_pos < mem_pos && mem_pos < tom1);
         assert!(!rendered.contains("ToM — L1\n\nsome L1"));
         assert!(!rendered.contains("ToM — L2\n\nsome L2"));
+    }
+
+
+    #[test]
+    fn render_mind_slots_fills_tom_l1_before_l2() {
+        let mind = CharacterMindInput::new(None, vec![])
+            .with_tom(vec!["- L1 line".to_string()], vec!["- L2 line".to_string()]);
+        let rendered = render_character_mind_headings(&mind);
+        assert!(rendered.contains("## Character ToM — L1
+
+- L1 line
+"));
+        assert!(rendered.contains("## Character ToM — L2
+
+- L2 line
+"));
+        let l1 = rendered.find("## Character ToM — L1").unwrap();
+        let l2 = rendered.find("## Character ToM — L2").unwrap();
+        assert!(l1 < l2);
     }
 
     #[tokio::test]

@@ -15,6 +15,7 @@
 //! before any DB read, file write, or synthesis).
 
 use crate::api::errors::NexusApiError;
+use crate::character_tom::{CharacterTomListQuery, CharacterTomService};
 use nexus_creator_memory::bearer::MemoryBearerRef;
 use nexus_moment_context_assembly::CharacterMindInput;
 use nexus_creator_memory::errors::MemoryError;
@@ -936,6 +937,58 @@ pub(crate) async fn load_character_mind_projection(
     let mut all_lines = lines;
     all_lines.extend(ltm_lines);
     Ok(CharacterMindInput::new(soul, all_lines))
+}
+
+/// Max ToM rows fetched for MCA projection (bounded before formatting).
+const MIND_PROJECTION_TOM_FETCH_LIMIT: u32 = 100;
+
+/// One deterministic human line for a projected ToM belief row (v1.184 P4).
+fn format_tom_belief_line(row: &crate::character_tom::CharacterTomBeliefRow) -> String {
+    let holder = row.belief.holder.as_deref().unwrap_or("?");
+    let proposition = row.belief.proposition.as_deref().unwrap_or("");
+    let order = row.belief.order.unwrap_or(0);
+    let truth = row.belief.truth.as_deref().unwrap_or("Unknown");
+    format!("- [{order}] holder={holder} truth={truth} {proposition}")
+}
+
+/// Load bounded SOUL/Memory plus L1-then-L2 ToM for an admitted Character run.
+pub(crate) async fn load_character_mind_projection_with_tom(
+    pool: &SqlitePool,
+    nexus_home: &Path,
+    owner_creator_id: &str,
+    character_id: &str,
+    world_id: &str,
+    binding_id: &str,
+) -> Result<CharacterMindInput, NexusApiError> {
+    let mind = load_character_mind_projection(
+        pool,
+        nexus_home,
+        owner_creator_id,
+        character_id,
+        Some(binding_id),
+    )
+    .await?;
+    let service = CharacterTomService::new(pool.clone());
+    let query = CharacterTomListQuery {
+        world_id: world_id.to_string(),
+        binding_id: binding_id.to_string(),
+        limit: MIND_PROJECTION_TOM_FETCH_LIMIT,
+        cursor: None,
+    };
+    let page = service
+        .list(owner_creator_id, character_id, query)
+        .await?;
+    let mut tom_l1 = Vec::new();
+    let mut tom_l2 = Vec::new();
+    for row in page.items {
+        let line = format_tom_belief_line(&row);
+        match row.belief.order {
+            Some(1) => tom_l1.push(line),
+            Some(2) => tom_l2.push(line),
+            _ => {}
+        }
+    }
+    Ok(mind.with_tom(tom_l1, tom_l2))
 }
 
 // ── Synthesis input building (arm-agnostic; V1.81 G2 caps preserved) ──────

@@ -493,3 +493,64 @@ async fn character_run_isolation_and_legacy_outside_lookup() {
     assert_eq!(still_actor["session"]["session_id"], first_id);
     assert_ne!(still_actor["session"]["session_id"], legacy_id);
 }
+
+const TOM_L1_MARKER: &str = "TOMRUNL1MARKER dock safety";
+const TOM_L2_MARKER: &str = "TOMRUNL2MARKER models Ben";
+
+async fn seed_tom_carrier_run(d: &LiveDaemon, character_id: &str) -> String {
+    use nexus_contracts::BlockType;
+    use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
+    use nexus_knowledge::world_kb::store::KbStore;
+    use nexus_local_db::kb_store::SqliteKbStore;
+    use serde_json::json;
+    let store = SqliteKbStore::new(d.pool.clone());
+    let mut kb = KnowledgeEntryRecord::for_character(character_id, BlockType::Character, "TomRunCarrier");
+    kb.modules = Some(json!({ "belief": [] }));
+    let id = kb.entry_id.clone();
+    store.insert_knowledge_entry(kb).await.unwrap();
+    id
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn character_run_includes_tom_l1_l2_after_cli_record() {
+    let host = MockHost::new();
+    let d = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let g = seed(&d).await;
+    let carrier = seed_tom_carrier_run(&d, &g.character_a).await;
+    let before = host.execs.load(Ordering::SeqCst);
+
+    for (holder, order, rev, prop) in [
+        (&g.character_a, "1", "0", TOM_L1_MARKER),
+        (&g.character_b, "2", "1", TOM_L2_MARKER),
+    ] {
+        let out = d.cli(&[
+            "creator", "character", "tom", "record",
+            "--character-id", &g.character_a,
+            "--world-id", &g.world_w1,
+            "--binding-id", &g.bind_a_w1,
+            "--carrier-entry-id", &carrier,
+            "--expected-revision", rev,
+            "--holder", holder,
+            "--proposition", prop,
+            "--order", order,
+            "--truth", "True",
+            "--access", "Private",
+            "--representation", "Explicit",
+            "--content-type", "Location",
+            "--source", "Perception",
+            "--context", "Neutral",
+        ]).await;
+        assert!(out.status.success(), "record: {}", stderr(&out));
+    }
+    assert_eq!(host.execs.load(Ordering::SeqCst), before);
+
+    let out = d.cli(&run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &[])).await;
+    assert!(out.status.success(), "run: {}", stderr(&out));
+    assert_eq!(host.execs.load(Ordering::SeqCst), before + 1);
+    let prompt = host.last_prompt();
+    assert!(prompt.contains(TOM_L1_MARKER), "{prompt}");
+    assert!(prompt.contains(TOM_L2_MARKER), "{prompt}");
+    assert!(prompt.contains("## Character ToM — L1"));
+    assert!(prompt.contains("## Character ToM — L2"));
+}
+
