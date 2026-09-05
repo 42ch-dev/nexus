@@ -1286,6 +1286,67 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ViewResponse
         ),
+        // v1.184 P2 Task 1 — agent-host session/operation/scan contracts.
+        entry!(
+            "schemas/daemon-api/agent-host/agent-host-list-sessions-query.schema.json",
+            Strict,
+            AgentHostListSessionsQuery
+        ),
+        entry!(
+            "schemas/daemon-api/agent-host/agent-scan-entry.schema.json",
+            Strict,
+            AgentScanEntry
+        ),
+        entry!(
+            "schemas/daemon-api/agent-host/cancel-operation-response.schema.json",
+            Strict,
+            CancelOperationResponse
+        ),
+        entry!(
+            "schemas/daemon-api/agent-host/create-session-request.schema.json",
+            Strict,
+            CreateSessionRequest
+        ),
+        entry!(
+            "schemas/daemon-api/agent-host/execute-operation-request.schema.json",
+            Strict,
+            ExecuteOperationRequest
+        ),
+        entry!(
+            "schemas/daemon-api/agent-host/operation-response.schema.json",
+            Strict,
+            OperationResponse
+        ),
+        entry!(
+            "schemas/daemon-api/agent-host/scan-request.schema.json",
+            Strict,
+            ScanRequest
+        ),
+        entry!(
+            "schemas/daemon-api/agent-host/scan-response.schema.json",
+            Strict,
+            ScanResponse
+        ),
+        entry!(
+            "schemas/daemon-api/agent-host/session-list-response.schema.json",
+            Strict,
+            SessionListResponse
+        ),
+        entry!(
+            "schemas/daemon-api/agent-host/session-response.schema.json",
+            Strict,
+            SessionResponse
+        ),
+        entry!(
+            "schemas/daemon-api/agent-host/session-viewpoint.schema.json",
+            Strict,
+            SessionViewpoint
+        ),
+        entry!(
+            "schemas/daemon-api/agent-host/shutdown-session-response.schema.json",
+            Strict,
+            ShutdownSessionResponse
+        ),
     ]
 }
 

@@ -161,19 +161,24 @@ impl ActorAdmissionService {
         creator_id: &str,
         world_id: &str,
     ) -> Result<(), NexusApiError> {
-        let row: Option<(String, String)> = sqlx::query_as(
-            "SELECT owner_creator_id, status FROM narrative_worlds WHERE world_id = ?",
+        let row = sqlx::query!(
+            r#"SELECT owner_creator_id as "owner_creator_id!", status as "status!"
+               FROM narrative_worlds WHERE world_id = ?"#,
+            world_id
         )
-        .bind(world_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(NexusApiError::from)?;
         match row {
-            Some((owner, status)) if owner == creator_id && status == "active" => Ok(()),
-            Some((owner, status)) if owner == creator_id => Err(NexusApiError::ConflictCoded {
-                code: "world_inactive".into(),
-                message: format!("world {world_id} is {status}"),
-            }),
+            Some(stored) if stored.owner_creator_id == creator_id && stored.status == "active" => {
+                Ok(())
+            }
+            Some(stored) if stored.owner_creator_id == creator_id => {
+                Err(NexusApiError::ConflictCoded {
+                    code: "world_inactive".into(),
+                    message: format!("world {world_id} is {}", stored.status),
+                })
+            }
             _ => Err(not_found("world", world_id)),
         }
     }
@@ -322,5 +327,180 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.error_code(), "not_found");
+    }
+
+    async fn assert_deny(
+        svc: &ActorAdmissionService,
+        actor: AdmittedActor,
+        viewpoint: ActorViewpoint,
+        code: &str,
+        status: axum::http::StatusCode,
+    ) {
+        let err = svc.admit(OWNER, actor, viewpoint).await.unwrap_err();
+        assert_eq!(err.error_code(), code);
+        assert_eq!(err.status_code(), status);
+    }
+
+    #[tokio::test]
+    async fn deny_matrix_world_character_binding_mismatches() {
+        let (svc, character_id, binding_id) = seed().await;
+        let pool = &svc.pool;
+
+        sqlx::query(
+            "INSERT INTO narrative_worlds              (world_id, workspace_id, owner_creator_id, title, slug, status, visibility,               time_policy, metadata_json, created_at)              VALUES ('wld_foreign', 'ws', ?, 'f', 'f', 'active', 'private', 'manual', '{}', datetime('now'))",
+        )
+        .bind(OTHER)
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO narrative_worlds              (world_id, workspace_id, owner_creator_id, title, slug, status, visibility,               time_policy, metadata_json, created_at)              VALUES ('wld_inactive', 'ws', ?, 'i', 'i', 'archived', 'private', 'manual', '{}', datetime('now'))",
+        )
+        .bind(OWNER)
+        .execute(pool)
+        .await
+        .unwrap();
+        let other_char = nexus_local_db::create_character_with_initial_binding(
+            pool,
+            CreateCharacterParams {
+                owner_creator_id: OWNER,
+                display_name: "Other",
+                image_uri: None,
+                persona_json: "{}",
+                world_id: WORLD,
+                world_sheet_entry_id: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_deny(
+            &svc,
+            AdmittedActor::Creator {
+                creator_id: OWNER.into(),
+            },
+            ActorViewpoint {
+                world_id: "wld_missing".into(),
+                binding_id: None,
+                branch_id: None,
+                event_id: None,
+            },
+            "not_found",
+            axum::http::StatusCode::NOT_FOUND,
+        )
+        .await;
+        assert_deny(
+            &svc,
+            AdmittedActor::Creator {
+                creator_id: OWNER.into(),
+            },
+            ActorViewpoint {
+                world_id: "wld_foreign".into(),
+                binding_id: None,
+                branch_id: None,
+                event_id: None,
+            },
+            "not_found",
+            axum::http::StatusCode::NOT_FOUND,
+        )
+        .await;
+        assert_deny(
+            &svc,
+            AdmittedActor::Creator {
+                creator_id: OWNER.into(),
+            },
+            ActorViewpoint {
+                world_id: "wld_inactive".into(),
+                binding_id: None,
+                branch_id: None,
+                event_id: None,
+            },
+            "world_inactive",
+            axum::http::StatusCode::CONFLICT,
+        )
+        .await;
+
+        sqlx::query("UPDATE characters SET status = 'archived' WHERE character_id = ?")
+            .bind(&character_id)
+            .execute(pool)
+            .await
+            .unwrap();
+        assert_deny(
+            &svc,
+            AdmittedActor::Character {
+                character_id: character_id.clone(),
+            },
+            ActorViewpoint {
+                world_id: WORLD.into(),
+                binding_id: Some(binding_id.clone()),
+                branch_id: None,
+                event_id: None,
+            },
+            "character_inactive",
+            axum::http::StatusCode::CONFLICT,
+        )
+        .await;
+        sqlx::query("UPDATE characters SET status = 'active' WHERE character_id = ?")
+            .bind(&character_id)
+            .execute(pool)
+            .await
+            .unwrap();
+
+        sqlx::query("UPDATE actor_world_bindings SET status = 'inactive' WHERE binding_id = ?")
+            .bind(&binding_id)
+            .execute(pool)
+            .await
+            .unwrap();
+        assert_deny(
+            &svc,
+            AdmittedActor::Character {
+                character_id: character_id.clone(),
+            },
+            ActorViewpoint {
+                world_id: WORLD.into(),
+                binding_id: Some(binding_id.clone()),
+                branch_id: None,
+                event_id: None,
+            },
+            "not_found",
+            axum::http::StatusCode::NOT_FOUND,
+        )
+        .await;
+        sqlx::query("UPDATE actor_world_bindings SET status = 'active' WHERE binding_id = ?")
+            .bind(&binding_id)
+            .execute(pool)
+            .await
+            .unwrap();
+
+        assert_deny(
+            &svc,
+            AdmittedActor::Character {
+                character_id: character_id.clone(),
+            },
+            ActorViewpoint {
+                world_id: WORLD.into(),
+                binding_id: Some(other_char.binding.binding_id),
+                branch_id: None,
+                event_id: None,
+            },
+            "not_found",
+            axum::http::StatusCode::NOT_FOUND,
+        )
+        .await;
+        assert_deny(
+            &svc,
+            AdmittedActor::Character {
+                character_id,
+            },
+            ActorViewpoint {
+                world_id: "wld_foreign".into(),
+                binding_id: Some(binding_id),
+                branch_id: None,
+                event_id: None,
+            },
+            "not_found",
+            axum::http::StatusCode::NOT_FOUND,
+        )
+        .await;
     }
 }

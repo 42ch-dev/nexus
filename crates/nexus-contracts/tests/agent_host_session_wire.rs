@@ -28,17 +28,34 @@ fn both_present_is_actor_mode_payload() {
 #[test]
 fn session_response_omits_optional_pair_when_absent() {
     let resp = SessionResponse {
+        session_id: "s".into(),
+        provider_id: "p".into(),
+        state: "Ready".into(),
         active_op_id: None,
         actor_ref: None,
         model: None,
-        provider_id: "p".into(),
-        session_id: "s".into(),
-        state: "Ready".into(),
         viewpoint: None,
     };
     assert_eq!(
-        serde_json::to_value(resp).unwrap(),
-        serde_json::json!({"session_id":"s","provider_id":"p","state":"Ready"})
+        serde_json::to_string(&resp).unwrap(),
+        r#"{"session_id":"s","provider_id":"p","state":"Ready"}"#
+    );
+}
+
+#[test]
+fn session_response_optional_host_fields_keep_legacy_key_order() {
+    let resp = SessionResponse {
+        session_id: "sid".into(),
+        provider_id: "prov".into(),
+        state: "Ready".into(),
+        active_op_id: Some("op1".into()),
+        model: Some("opus".into()),
+        actor_ref: None,
+        viewpoint: None,
+    };
+    assert_eq!(
+        serde_json::to_string(&resp).unwrap(),
+        r#"{"session_id":"sid","provider_id":"prov","state":"Ready","active_op_id":"op1","model":"opus"}"#
     );
 }
 

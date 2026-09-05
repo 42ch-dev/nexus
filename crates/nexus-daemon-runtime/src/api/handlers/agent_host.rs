@@ -254,12 +254,12 @@ fn session_wire(
     model: Option<String>,
 ) -> SessionResponse {
     SessionResponse {
-        active_op_id,
-        actor_ref: None,
-        model,
-        provider_id,
         session_id,
+        provider_id,
         state,
+        active_op_id,
+        model,
+        actor_ref: None,
         viewpoint: None,
     }
 }
@@ -1552,12 +1552,19 @@ mod tests {
             None,
         );
         assert_eq!(
-            serde_json::to_value(&resp).expect("json"),
-            serde_json::json!({
-                "session_id": "sid",
-                "provider_id": "prov",
-                "state": "Ready"
-            })
+            serde_json::to_string(&resp).expect("json"),
+            r#"{"session_id":"sid","provider_id":"prov","state":"Ready"}"#
+        );
+        let with_optionals = session_wire(
+            "sid".into(),
+            "prov".into(),
+            "Busy".into(),
+            Some("op".into()),
+            Some("m".into()),
+        );
+        assert_eq!(
+            serde_json::to_string(&with_optionals).expect("json"),
+            r#"{"session_id":"sid","provider_id":"prov","state":"Busy","active_op_id":"op","model":"m"}"#
         );
     }
 
@@ -1573,9 +1580,10 @@ mod tests {
         let host_req = host_create_request(&req);
         assert!(host_req.metadata.is_null());
         assert!(host_req.mcp_servers.is_empty());
+        let host_json = serde_json::to_string(&host_req).expect("host json");
         assert_eq!(
-            serde_json::to_value(&host_req).expect("host json")["metadata"],
-            serde_json::Value::Null
+            host_json,
+            r#"{"provider_id":"claude-native","cwd":"/tmp","model":null,"mode":null,"mcp_servers":[],"metadata":null}"#
         );
     }
 
@@ -1720,6 +1728,134 @@ mod tests {
         let result = create_session(State(state), Json(req)).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().error_code(), "not_found");
+        assert_eq!(host.create_sessions.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+
+    async fn seed_owned_character(state: &WorkspaceState) -> (String, String) {
+        let pool = state.pool().unwrap();
+        nexus_local_db::ensure_creator_row(pool, "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "Owner")
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO narrative_worlds \
+             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+              time_policy, metadata_json, created_at) \
+             VALUES ('wld_worldA', 'ws', 'ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'w', 'w', 'active', 'private', 'manual', '{}', datetime('now'))",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        let created = nexus_local_db::create_character_with_initial_binding(
+            pool,
+            nexus_local_db::CreateCharacterParams {
+                owner_creator_id: "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                display_name: "Ada",
+                image_uri: None,
+                persona_json: "{}",
+                world_id: "wld_worldA",
+                world_sheet_entry_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        (created.character.character_id, created.binding.binding_id)
+    }
+
+    fn character_session_req(character_id: &str, world_id: &str, binding_id: &str) -> CreateSessionRequest {
+        serde_json::from_value(serde_json::json!({
+            "provider_id": "nonexistent",
+            "actor_ref": {"actor_kind":"character","character_id": character_id},
+            "viewpoint": {"world_id": world_id, "binding_id": binding_id}
+        }))
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn ownership_status_denies_before_host_side_effects() {
+        let (_tmp, state, host) = state_with_counting_host().await;
+        let (character_id, binding_id) = seed_owned_character(&state).await;
+        let pool = state.pool().unwrap();
+
+        let missing_world = serde_json::from_value(serde_json::json!({
+            "provider_id": "nonexistent",
+            "actor_ref": {"actor_kind":"creator","creator_id":"ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+            "viewpoint": {"world_id":"wld_missing"}
+        }))
+        .unwrap();
+        let err = create_session(State(state.clone()), Json(missing_world))
+            .await
+            .unwrap_err();
+        assert_eq!(err.error_code(), "not_found");
+        assert_eq!(err.status_code(), axum::http::StatusCode::NOT_FOUND);
+
+        sqlx::query("UPDATE narrative_worlds SET status = 'archived' WHERE world_id = 'wld_worldA'")
+            .execute(pool)
+            .await
+            .unwrap();
+        let err = create_session(
+            State(state.clone()),
+            Json(character_session_req(&character_id, "wld_worldA", &binding_id)),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.error_code(), "world_inactive");
+        assert_eq!(err.status_code(), axum::http::StatusCode::CONFLICT);
+        sqlx::query("UPDATE narrative_worlds SET status = 'active' WHERE world_id = 'wld_worldA'")
+            .execute(pool)
+            .await
+            .unwrap();
+
+        sqlx::query("UPDATE characters SET status = 'archived' WHERE character_id = ?")
+            .bind(&character_id)
+            .execute(pool)
+            .await
+            .unwrap();
+        let err = create_session(
+            State(state.clone()),
+            Json(character_session_req(&character_id, "wld_worldA", &binding_id)),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.error_code(), "character_inactive");
+        assert_eq!(err.status_code(), axum::http::StatusCode::CONFLICT);
+        sqlx::query("UPDATE characters SET status = 'active' WHERE character_id = ?")
+            .bind(&character_id)
+            .execute(pool)
+            .await
+            .unwrap();
+
+        sqlx::query("UPDATE actor_world_bindings SET status = 'inactive' WHERE binding_id = ?")
+            .bind(&binding_id)
+            .execute(pool)
+            .await
+            .unwrap();
+        let err = create_session(
+            State(state.clone()),
+            Json(character_session_req(&character_id, "wld_worldA", &binding_id)),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.error_code(), "not_found");
+        sqlx::query("UPDATE actor_world_bindings SET status = 'active' WHERE binding_id = ?")
+            .bind(&binding_id)
+            .execute(pool)
+            .await
+            .unwrap();
+
+        let err = create_session(
+            State(state.clone()),
+            Json(character_session_req(
+                &character_id,
+                "wld_worldA",
+                "awb_dddddddddddddddddddddddddddddddd",
+            )),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.error_code(), "not_found");
+
         assert_eq!(host.create_sessions.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
