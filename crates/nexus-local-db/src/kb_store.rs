@@ -1652,7 +1652,10 @@ pub async fn cas_update_key_block_modules_in_tx(
             .bind(key_block_id)
             .fetch_optional(&mut **tx)
             .await?;
-    let actual = current.flatten();
+    // NULL revision normalizes to 0, matching the COALESCE(revision, 0)
+    // predicate and the established cas_update_key_block_fields reporting;
+    // `None` means the row itself is absent.
+    let actual = current.map(|rev| rev.unwrap_or(0));
     Err(LocalDbError::VersionMismatch {
         table: "kb_key_blocks".to_string(),
         id: key_block_id.to_string(),
@@ -2999,6 +3002,47 @@ mod tests {
             }
             other => panic!("world mismatch must classify as WorldConflict, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn cas_update_key_block_modules_in_tx_null_revision_reports_actual_zero() {
+        // v1.184 P4 T1 fix (review I1): an existing row whose revision is
+        // NULL (pre-bump legacy/seed shape) must report `actual: Some(0)` on
+        // a stale CAS — matching the COALESCE(revision, 0) predicate and the
+        // established cas_update_key_block_fields normalization — never the
+        // `actual: None` "row absent" classification.
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+        let id = seed_key_block(&pool, "NullRev").await;
+        // Seed path leaves revision NULL (V1.73 NULL-normalization rule).
+        let raw: Option<i64> =
+            sqlx::query_scalar("SELECT revision FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind(&id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(raw.is_none(), "seed row must carry NULL revision");
+
+        let mut tx = pool.begin().await.unwrap();
+        let err = cas_update_key_block_modules_in_tx(&mut tx, &id, r#"{"belief":[]}"#, 5)
+            .await
+            .expect_err("stale expected revision must miss the CAS");
+        let _ = tx.rollback().await;
+        match err {
+            LocalDbError::VersionMismatch { actual, expected, .. } => {
+                assert_eq!(expected, 5);
+                assert_eq!(actual, Some(0), "NULL revision normalizes to actual 0");
+            }
+            other => panic!("expected VersionMismatch, got {other:?}"),
+        }
+
+        // Happy path from the normalized 0 preimage succeeds.
+        let mut tx = pool.begin().await.unwrap();
+        let new_rev = cas_update_key_block_modules_in_tx(&mut tx, &id, r#"{"belief":[]}"#, 0)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(new_rev, 1);
     }
 
     #[tokio::test]

@@ -647,7 +647,9 @@ pub fn validate_character_tom_belief_row(
     let order = row.order.ok_or_else(|| {
         KbError::ValidationError("Character ToM belief row requires order".into())
     })?;
-    if order == 0 || order > 2 {
+    // Closed order space: every value outside 1..=2 (including negatives)
+    // rejects deterministically — no unreachable arm, no panic path.
+    if !(1..=2).contains(&order) {
         return Err(KbError::ValidationError(format!(
             "Character ToM belief order must be 1 (L1) or 2 (L2), got {order}"
         )));
@@ -657,27 +659,24 @@ pub fn validate_character_tom_belief_row(
         KbError::ValidationError("Character ToM belief row requires holder".into())
     })?;
 
-    match order {
-        1 => {
-            if holder != viewer_character_id {
-                return Err(KbError::ValidationError(format!(
-                    "L1 belief holder must equal viewer Character id (expected {viewer_character_id}, got {holder})"
-                )));
-            }
+    if order == 1 {
+        if holder != viewer_character_id {
+            return Err(KbError::ValidationError(format!(
+                "L1 belief holder must equal viewer Character id (expected {viewer_character_id}, got {holder})"
+            )));
         }
-        2 => {
-            if !is_character_subject_id(holder) {
-                return Err(KbError::ValidationError(format!(
-                    "L2 belief holder must be a Character id (chr_*), got {holder}"
-                )));
-            }
-            if holder == viewer_character_id {
-                return Err(KbError::ValidationError(
-                    "L2 belief holder must name a different Character than the viewer".into(),
-                ));
-            }
+    } else {
+        // order == 2 (guard above closed the space to 1..=2).
+        if !is_character_subject_id(holder) {
+            return Err(KbError::ValidationError(format!(
+                "L2 belief holder must be a Character id (chr_*), got {holder}"
+            )));
         }
-        _ => unreachable!("order guarded above"),
+        if holder == viewer_character_id {
+            return Err(KbError::ValidationError(
+                "L2 belief holder must name a different Character than the viewer".into(),
+            ));
+        }
     }
 
     validate_closed_belief_labels(row)
@@ -1106,5 +1105,37 @@ mod tests {
             ..l1.clone()
         };
         validate_character_tom_belief_row(&l2, viewer).unwrap();
+    }
+
+    #[test]
+    fn character_tom_belief_validation_rejects_all_invalid_orders_without_panic() {
+        let viewer = "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let base = BeliefPropositionRaw {
+            holder: Some(viewer.into()),
+            proposition: Some("p".into()),
+            order: None,
+            truth: Some("True".into()),
+            access: Some("Private".into()),
+            representation: Some("Explicit".into()),
+            content_type: Some("Location".into()),
+            source: Some("Perception".into()),
+            context: Some("Neutral".into()),
+        };
+        // Missing order rejects.
+        assert!(validate_character_tom_belief_row(&base, viewer).is_err());
+        // Negative, zero, and above-2 orders reject deterministically (C1:
+        // no unreachable!/panic path — every value outside 1..=2 errors).
+        for bad in [-2, -1, 0, 3, 4, i64::MIN, i64::MAX] {
+            let row = BeliefPropositionRaw {
+                order: Some(bad),
+                ..base.clone()
+            };
+            let err = validate_character_tom_belief_row(&row, viewer)
+                .expect_err("order outside 1..=2 must reject");
+            assert!(
+                matches!(err, KbError::ValidationError(_)),
+                "order {bad} must be a validation error: {err:?}"
+            );
+        }
     }
 }
