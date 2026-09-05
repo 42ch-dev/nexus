@@ -15,8 +15,8 @@ use sqlx::SqlitePool;
 use crate::actor_world_binding::{
     require_active_owned_provenance_pool, require_valid_provenance_tx,
 };
-use crate::character::{require_active_owned_character, require_owned_character_pool};
 use crate::cas::cas_check_with_version_column;
+use crate::character::{require_active_owned_character, require_owned_character_pool};
 use crate::error::{ActorContractConflict, LocalDbError};
 use crate::MAX_CHARACTER_MEMORY_LIST_LIMIT;
 
@@ -56,7 +56,8 @@ pub struct NewCharacterMemoryFragment {
     pub ttl: Option<String>,
 }
 
-fn record_from_row(
+#[allow(clippy::too_many_arguments)] // raw column values — the full row shape
+const fn record_from_row(
     fragment_id: String,
     session_id: String,
     character_id: String,
@@ -235,6 +236,7 @@ async fn load_fragment(
 }
 
 /// List a bounded page of Character fragments in a single scope.
+///
 /// `binding_id = None` reads the shared Character scope (`actor_world_binding_id
 /// IS NULL`); `Some(b)` reads only that binding-local scope. Binding-local
 /// reads require the exact active binding for the Character.
@@ -280,17 +282,22 @@ pub async fn list_character_fragments(
         )
         .fetch_all(pool)
         .await?;
-        Ok(rows.into_iter().map(|r| record_from_row(
-            r.fragment_id,
-            r.session_id,
-            r.character_id,
-            r.actor_world_binding_id,
-            r.keywords,
-            r.summary,
-            r.created_at,
-            r.ttl,
-            r.revision,
-        )).collect())
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                record_from_row(
+                    r.fragment_id,
+                    r.session_id,
+                    r.character_id,
+                    r.actor_world_binding_id,
+                    r.keywords,
+                    r.summary,
+                    r.created_at,
+                    r.ttl,
+                    r.revision,
+                )
+            })
+            .collect())
     } else {
         let rows = sqlx::query!(
             r#"SELECT fragment_id as "fragment_id!", session_id as "session_id!",
@@ -307,17 +314,22 @@ pub async fn list_character_fragments(
         )
         .fetch_all(pool)
         .await?;
-        Ok(rows.into_iter().map(|r| record_from_row(
-            r.fragment_id,
-            r.session_id,
-            r.character_id,
-            r.actor_world_binding_id,
-            r.keywords,
-            r.summary,
-            r.created_at,
-            r.ttl,
-            r.revision,
-        )).collect())
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                record_from_row(
+                    r.fragment_id,
+                    r.session_id,
+                    r.character_id,
+                    r.actor_world_binding_id,
+                    r.keywords,
+                    r.summary,
+                    r.created_at,
+                    r.ttl,
+                    r.revision,
+                )
+            })
+            .collect())
     }
 }
 

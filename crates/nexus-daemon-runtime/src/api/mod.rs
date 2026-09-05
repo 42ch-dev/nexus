@@ -657,8 +657,7 @@ fn character_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
             "/v1/daemon/characters",
-            get(handlers::characters::list_characters)
-                .post(handlers::characters::create_character),
+            get(handlers::characters::list_characters).post(handlers::characters::create_character),
         )
         .route(
             "/v1/daemon/characters/:character_id",

@@ -34,7 +34,7 @@ pub struct CharacterViewInput {
 impl CharacterViewInput {
     /// Wrap already-admitted view rows.
     #[must_use]
-    pub fn from_entries(entries: Vec<KnowledgeEntryRecord>) -> Self {
+    pub const fn from_entries(entries: Vec<KnowledgeEntryRecord>) -> Self {
         Self { entries }
     }
 
@@ -219,6 +219,7 @@ impl<'a> WorldKbQueryBuilder<'a> {
     ///
     /// Character mode never constructs an unrestricted World query.
     #[must_use]
+    #[allow(clippy::single_option_map)] // named seam keeps the call-site contract readable
     pub fn character_view_or_unrestricted(
         view: Option<&CharacterViewInput>,
     ) -> Option<Vec<KnowledgeEntryRecord>> {
@@ -242,7 +243,9 @@ fn extract_novel_category(
 }
 
 /// Convert a KnowledgeEntryRecord to a WorldContextItem.
-fn kb_to_item(kb: nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord) -> WorldContextItem {
+fn kb_to_item(
+    kb: nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord,
+) -> WorldContextItem {
     let descriptor = kb
         .body
         .as_ref()
@@ -960,12 +963,8 @@ mod tests {
 
     #[test]
     fn character_view_bypasses_unrestricted_world_query() {
-        let entry = KnowledgeEntryRecord::new(
-            "wld_test",
-            BlockType::Character,
-            "Ada",
-        );
-        let view = CharacterViewInput::from_entries(vec![entry.clone()]);
+        let entry = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Ada");
+        let view = CharacterViewInput::from_entries(vec![entry]);
         let resolved = WorldKbQueryBuilder::character_view_or_unrestricted(Some(&view))
             .expect("character view");
         assert_eq!(resolved.len(), 1);

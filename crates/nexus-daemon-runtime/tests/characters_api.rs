@@ -282,9 +282,7 @@ async fn add_binding_duplicate_and_remove_last_are_stable_conflicts() {
 
     let removed = ctx
         .server
-        .delete(&format!(
-            "/v1/daemon/characters/{chr}/bindings/{second_id}"
-        ))
+        .delete(&format!("/v1/daemon/characters/{chr}/bindings/{second_id}"))
         .await;
     assert_eq!(removed.status_code(), 204);
 
@@ -331,7 +329,9 @@ fn assert_canonical_invalid_input(resp: &axum_test::TestResponse) {
     assert_eq!(body["success"], false, "body={body}");
     assert_eq!(body["error"]["code"], "invalid_input", "body={body}");
     assert!(
-        body["error"]["message"].as_str().is_some_and(|m| !m.is_empty()),
+        body["error"]["message"]
+            .as_str()
+            .is_some_and(|m| !m.is_empty()),
         "body={body}"
     );
 }
@@ -399,13 +399,12 @@ async fn foreign_binding_routes_are_404_and_do_not_mutate() {
     let listed_body: Value = listed.json();
     assert_eq!(listed_body["error"]["code"], "not_found");
 
-    let binding_id: String = sqlx::query_scalar(
-        "SELECT binding_id FROM actor_world_bindings WHERE character_id = ?",
-    )
-    .bind(&chr)
-    .fetch_one(&ctx.pool)
-    .await
-    .unwrap();
+    let binding_id: String =
+        sqlx::query_scalar("SELECT binding_id FROM actor_world_bindings WHERE character_id = ?")
+            .bind(&chr)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
     let removed = ctx
         .server
         .delete(&format!(
@@ -439,7 +438,8 @@ async fn switching_active_creator_hides_owned_characters() {
 }
 
 #[tokio::test]
-async fn create_rejects_malformed_json_unknown_properties_and_invalid_ids_with_canonical_envelope() {
+async fn create_rejects_malformed_json_unknown_properties_and_invalid_ids_with_canonical_envelope()
+{
     let ctx = ctx().await;
 
     let malformed = ctx
@@ -471,7 +471,6 @@ async fn create_rejects_malformed_json_unknown_properties_and_invalid_ids_with_c
         .await;
     assert_canonical_invalid_input(&invalid_id);
 }
-
 
 #[tokio::test]
 async fn duplicate_display_name_is_stable_409() {
@@ -555,7 +554,12 @@ async fn list_paginates_large_fixture_with_sql_bounds() {
     let mut ids = Vec::new();
     for i in 0..25 {
         let body = create_character(&ctx.server, &format!("Char{i:02}"), WORLD_A).await;
-        ids.push(body["character"]["character_id"].as_str().unwrap().to_string());
+        ids.push(
+            body["character"]["character_id"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
     }
     let mut seen = Vec::new();
     let mut cursor: Option<String> = None;

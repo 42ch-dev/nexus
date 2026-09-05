@@ -87,9 +87,9 @@ pub const CHARACTER_MIND_MAX_SOUL_CHARS: usize = 4096;
 pub const CHARACTER_MIND_MAX_MEMORY_ENTRIES: usize = 20;
 /// Max Unicode scalar chars per projected memory line.
 pub const CHARACTER_MIND_MAX_ENTRY_CHARS: usize = 280;
-/// Max L1/L2 ToM lines projected into each `## Character ToM` slot.
+/// Max L1/L2 `ToM` lines projected into each `## Character ToM` slot.
 pub const CHARACTER_MIND_MAX_TOM_ENTRIES: usize = 20;
-/// Max Unicode scalar chars per projected ToM line.
+/// Max Unicode scalar chars per projected `ToM` line.
 pub const CHARACTER_MIND_MAX_TOM_CHARS: usize = 280;
 
 impl CharacterMindInput {
@@ -110,7 +110,7 @@ impl CharacterMindInput {
         }
     }
 
-    /// Attach bounded, deterministic L1/L2 ToM lines (v1.184 P4).
+    /// Attach bounded, deterministic L1/L2 `ToM` lines (v1.184 P4).
     ///
     /// L1 is projected before L2 by construction: the caller passes the
     /// already keyset-ordered `(order, carrier_entry_id, row_ordinal)` split;
@@ -135,7 +135,7 @@ impl CharacterMindInput {
     /// legacy/honest-empty path).
     #[cfg(test)]
     fn is_empty(&self) -> bool {
-        self.soul.as_deref().map_or(true, str::is_empty)
+        self.soul.as_deref().is_none_or(str::is_empty)
             && self.memory.is_empty()
             && self.tom_l1.is_empty()
             && self.tom_l2.is_empty()
@@ -190,7 +190,7 @@ impl MomentActorContext {
 
     /// Character actor with a bounded admitted SOUL/Memory projection.
     #[must_use]
-    pub fn character_with_mind(view: CharacterViewInput, mind: CharacterMindInput) -> Self {
+    pub const fn character_with_mind(view: CharacterViewInput, mind: CharacterMindInput) -> Self {
         Self {
             kind: MomentActorKind::Character,
             character_view: Some(view),
@@ -210,7 +210,7 @@ impl MomentActorContext {
 
     /// Creator actor consuming the admitted P1 omniscient union.
     #[must_use]
-    pub fn creator_with_view(view: CharacterViewInput) -> Self {
+    pub const fn creator_with_view(view: CharacterViewInput) -> Self {
         Self {
             kind: MomentActorKind::Creator,
             character_view: Some(view),
@@ -218,11 +218,11 @@ impl MomentActorContext {
         }
     }
 
-    fn is_character(&self) -> bool {
+    const fn is_character(&self) -> bool {
         matches!(self.kind, MomentActorKind::Character)
     }
 
-    fn uses_admitted_view(&self) -> bool {
+    const fn uses_admitted_view(&self) -> bool {
         self.character_view.is_some() || self.is_character()
     }
 }
@@ -506,7 +506,7 @@ pub struct MomentContext {
     pub hygiene_trace: Option<Vec<crate::hygiene::HygieneTraceEntry>>,
     /// P3 SOUL/Memory projection into the four fixed Character mind headings.
     /// `Some(mind)` emits the headings (SOUL/Memory bodies when present; the
-    /// two ToM headings always empty); `None` is legacy — empty sections stay
+    /// two `ToM` headings always empty); `None` is legacy — empty sections stay
     /// omitted.
     pub character_mind: Option<CharacterMindInput>,
 }
@@ -543,7 +543,10 @@ impl MomentContext {
         let directive = section(self.moment_directive.as_ref(), MOMENT_DIRECTIVE_HEADING);
         let world_kb = section(self.world_kb.as_ref(), WORLD_KB_HEADING);
         let user_knowledge = section(self.user_knowledge.as_ref(), USER_KNOWLEDGE_HEADING);
-        let character_mind = self.character_mind.as_ref().map(render_character_mind_headings);
+        let character_mind = self
+            .character_mind
+            .as_ref()
+            .map(render_character_mind_headings);
 
         let mut parts: Vec<Option<String>> = vec![stage0, character_mind];
         match self.moment_directive_depth {
@@ -1075,7 +1078,6 @@ fn render_gated_slots(
     (slots::render_slots(&routing), map, trace)
 }
 
-
 fn render_character_mind_headings(mind: &CharacterMindInput) -> String {
     let soul = mind
         .soul
@@ -1468,9 +1470,9 @@ mod tests {
         })
         .with_world("wld_1")
         .with_user("user_1")
-        .with_actor(MomentActorContext::character(CharacterViewInput::from_entries(
-            vec![allowed],
-        )));
+        .with_actor(MomentActorContext::character(
+            CharacterViewInput::from_entries(vec![allowed]),
+        ));
 
         let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
         let full = ctx.to_full_context();
@@ -1526,16 +1528,18 @@ mod tests {
             nexus_contracts::BlockType::Item,
             "HugeAdmitted",
         );
-        huge.body = Some(nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
-            summary: Some("X".repeat(8000)),
-            ..Default::default()
-        });
+        huge.body = Some(
+            nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
+                summary: Some("X".repeat(8000)),
+                ..Default::default()
+            },
+        );
         let request = MomentRequest::new(minimal_stage0())
             .with_world("wld_1")
             .with_max_tokens(20)
-            .with_actor(MomentActorContext::character(CharacterViewInput::from_entries(
-                vec![huge],
-            )));
+            .with_actor(MomentActorContext::character(
+                CharacterViewInput::from_entries(vec![huge]),
+            ));
         let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
         let full = ctx.to_full_context();
         assert!(full.chars().count() < 8000);
@@ -2441,15 +2445,18 @@ mod tests {
         // The transform applies to the emitted `body.summary` text; the
         // stored World-KB body stays byte-identical (read-path invariant).
         let stores = TestStores::new();
-        let mut kb = KnowledgeEntryRecord::new("wld_1", nexus_contracts::BlockType::Character, "Hero");
+        let mut kb =
+            KnowledgeEntryRecord::new("wld_1", nexus_contracts::BlockType::Character, "Hero");
         kb.entry_id = "kb_hygiene".to_string();
-        kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
-            summary: Some("The hero fights the dragon".to_string()),
-            attributes: Some(serde_json::json!({
-                "hygiene": [{ "pattern": "dragon", "replacement": "wyrm" }]
-            })),
-            ..Default::default()
-        });
+        kb.body = Some(
+            nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
+                summary: Some("The hero fights the dragon".to_string()),
+                attributes: Some(serde_json::json!({
+                    "hygiene": [{ "pattern": "dragon", "replacement": "wyrm" }]
+                })),
+                ..Default::default()
+            },
+        );
         kb.modules =
             Some(serde_json::json!({"activation": {"keys": ["hero"], "logic": "and_any"}}));
         stores.kb.insert_knowledge_entry(kb).await.unwrap();
@@ -2496,12 +2503,15 @@ mod tests {
         // block (byte-identical to the no-hygiene path).
         let stores = TestStores::new();
         for (id, name) in [("kb_a", "Hero"), ("kb_b", "Castle")] {
-            let mut kb = KnowledgeEntryRecord::new("wld_1", nexus_contracts::BlockType::Character, name);
+            let mut kb =
+                KnowledgeEntryRecord::new("wld_1", nexus_contracts::BlockType::Character, name);
             kb.entry_id = id.to_string();
-            kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
-                summary: Some(format!("{name} summary")),
-                ..Default::default()
-            });
+            kb.body = Some(
+                nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
+                    summary: Some(format!("{name} summary")),
+                    ..Default::default()
+                },
+            );
             stores.kb.insert_knowledge_entry(kb).await.unwrap();
         }
 
@@ -2524,12 +2534,15 @@ mod tests {
         // The `attributes.hygiene` carrier must survive the store round-trip
         // and drive the emission transform.
         let stores = TestStores::new();
-        let mut kb = KnowledgeEntryRecord::new("wld_1", nexus_contracts::BlockType::Character, "Hero");
+        let mut kb =
+            KnowledgeEntryRecord::new("wld_1", nexus_contracts::BlockType::Character, "Hero");
         kb.entry_id = "kb_hygiene".to_string();
-        kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
-            summary: Some("The hero fights the dragon".to_string()),
-            ..Default::default()
-        });
+        kb.body = Some(
+            nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
+                summary: Some("The hero fights the dragon".to_string()),
+                ..Default::default()
+            },
+        );
         kb.modules =
             Some(serde_json::json!({"activation": {"keys": ["hero"], "logic": "and_any"}}));
         stores.kb.insert_knowledge_entry(kb).await.unwrap();
@@ -3026,10 +3039,15 @@ mod tests {
         let wide_soul = "é".repeat(CHARACTER_MIND_MAX_SOUL_CHARS + 3);
         let astral_soul = "🜂".repeat(CHARACTER_MIND_MAX_SOUL_CHARS + 3);
         let entries: Vec<String> = (0..(CHARACTER_MIND_MAX_MEMORY_ENTRIES + 7))
-            .map(|i| format!("entry {i} {}", "y".repeat(CHARACTER_MIND_MAX_ENTRY_CHARS + 100)))
+            .map(|i| {
+                format!(
+                    "entry {i} {}",
+                    "y".repeat(CHARACTER_MIND_MAX_ENTRY_CHARS + 100)
+                )
+            })
             .collect();
 
-        let mind = CharacterMindInput::new(Some(long_soul), entries.clone());
+        let mind = CharacterMindInput::new(Some(long_soul), entries);
         assert_eq!(
             mind.soul.as_ref().unwrap().chars().count(),
             CHARACTER_MIND_MAX_SOUL_CHARS,
@@ -3091,20 +3109,23 @@ mod tests {
         assert!(!rendered.contains("ToM — L2\n\nsome L2"));
     }
 
-
     #[test]
     fn render_mind_slots_fills_tom_l1_before_l2() {
         let mind = CharacterMindInput::new(None, vec![])
             .with_tom(vec!["- L1 line".to_string()], vec!["- L2 line".to_string()]);
         let rendered = render_character_mind_headings(&mind);
-        assert!(rendered.contains("## Character ToM — L1
+        assert!(rendered.contains(
+            "## Character ToM — L1
 
 - L1 line
-"));
-        assert!(rendered.contains("## Character ToM — L2
+"
+        ));
+        assert!(rendered.contains(
+            "## Character ToM — L2
 
 - L2 line
-"));
+"
+        ));
         let l1 = rendered.find("## Character ToM — L1").unwrap();
         let l2 = rendered.find("## Character ToM — L2").unwrap();
         assert!(l1 < l2);
@@ -3125,9 +3146,9 @@ mod tests {
             ..Stage0Assembly::default()
         })
         .with_world("wld_1")
-        .with_actor(MomentActorContext::character(CharacterViewInput::from_entries(
-            vec![allowed.clone()],
-        )));
+        .with_actor(MomentActorContext::character(
+            CharacterViewInput::from_entries(vec![allowed.clone()]),
+        ));
         let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
         let empty_full = ctx.to_full_context();
         assert!(empty_full.contains("## Character SOUL\n\n## Character Memory\n\n"));
@@ -3135,7 +3156,10 @@ mod tests {
         // Projected mind: SOUL + Memory bodies present; ToM stays empty.
         let projected = CharacterMindInput::new(
             Some("# Ava\nSOUL".to_string()),
-            vec!["- SHAREDMEMORYMARKER".to_string(), "- LOCALMEMORYMARKER".to_string()],
+            vec![
+                "- SHAREDMEMORYMARKER".to_string(),
+                "- LOCALMEMORYMARKER".to_string(),
+            ],
         );
         let request = MomentRequest::new(Stage0Assembly {
             user_prompt: "Act.".to_string(),

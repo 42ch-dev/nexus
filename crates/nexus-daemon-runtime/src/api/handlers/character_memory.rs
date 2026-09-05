@@ -71,12 +71,12 @@ fn parse_canonical_json<T: DeserializeOwned>(bytes: &Bytes) -> Result<T, NexusAp
 fn resolve_limit(raw: Option<i64>) -> Result<u32, NexusApiError> {
     match raw {
         None => Ok(DEFAULT_LIMIT),
-        Some(n) if n > 0 && n <= i64::from(MAX_LIMIT) => u32::try_from(n).map_err(|_| {
-            NexusApiError::BadRequest {
+        Some(n) if n > 0 && n <= i64::from(MAX_LIMIT) => {
+            u32::try_from(n).map_err(|_| NexusApiError::BadRequest {
                 code: "invalid_input".into(),
                 message: "limit is out of range".into(),
-            }
-        }),
+            })
+        }
         Some(_) => Err(NexusApiError::BadRequest {
             code: "invalid_input".into(),
             message: format!("limit must be between 1 and {MAX_LIMIT}"),
@@ -88,7 +88,7 @@ fn optional_str(value: Option<&impl std::ops::Deref<Target = String>>) -> Option
     value.map(|s| s.as_str())
 }
 
-fn pagination_info(limit: u32, has_more: bool, next_cursor: Option<String>) -> serde_json::Value {
+fn pagination_info(limit: u32, has_more: bool, next_cursor: Option<&str>) -> serde_json::Value {
     serde_json::json!({
         "limit": limit,
         "has_more": has_more,
@@ -139,8 +139,7 @@ pub async fn capture_pending_review(
     let raw_digest = req.raw_digest.as_str().to_string();
     let created_at = req
         .created_at
-        .map(|t| t.to_rfc3339())
-        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+        .map_or_else(|| chrono::Utc::now().to_rfc3339(), |t| t.to_rfc3339());
 
     validate_capture_input(&req, &raw_digest)?;
 
@@ -156,10 +155,12 @@ pub async fn capture_pending_review(
     nexus_local_db::create_character_pending_review(state.pool_or_uninit()?, &creator, &record)
         .await?;
 
-    Ok(Json(map_wire::<CaptureCharacterPendingReviewResponse>(serde_json::json!({
-        "success": true,
-        "pending_id": pending_id,
-    }))?))
+    Ok(Json(map_wire::<CaptureCharacterPendingReviewResponse>(
+        serde_json::json!({
+            "success": true,
+            "pending_id": pending_id,
+        }),
+    )?))
 }
 
 fn validate_capture_input(
@@ -235,10 +236,12 @@ pub async fn list_pending_reviews(
             }))
         })
         .collect::<Result<_, _>>()?;
-    Ok(Json(map_wire::<ListCharacterPendingReviewsResponse>(serde_json::json!({
-        "items": items,
-        "pagination": pagination_info(limit, has_more, next_cursor),
-    }))?))
+    Ok(Json(map_wire::<ListCharacterPendingReviewsResponse>(
+        serde_json::json!({
+            "items": items,
+            "pagination": pagination_info(limit, has_more, next_cursor.as_deref()),
+        }),
+    )?))
 }
 
 /// `GET /v1/daemon/characters/{character_id}/memory/pending-review/count`
@@ -257,9 +260,11 @@ pub async fn count_pending_reviews(
         binding_id,
     )
     .await?;
-    Ok(Json(map_wire::<CountCharacterPendingReviewsResponse>(serde_json::json!({
-        "count": count as i64,
-    }))?))
+    Ok(Json(map_wire::<CountCharacterPendingReviewsResponse>(
+        serde_json::json!({
+            "count": i64::try_from(count).unwrap_or(i64::MAX),
+        }),
+    )?))
 }
 
 /// `DELETE /v1/daemon/characters/{character_id}/memory/pending-review/{pending_id}`
@@ -281,10 +286,12 @@ pub async fn delete_pending_review(
             "pending review '{pending_id}'"
         )));
     }
-    Ok(Json(map_wire::<DeleteCharacterPendingReviewResponse>(serde_json::json!({
-        "success": true,
-        "pending_id": pending_id,
-    }))?))
+    Ok(Json(map_wire::<DeleteCharacterPendingReviewResponse>(
+        serde_json::json!({
+            "success": true,
+            "pending_id": pending_id,
+        }),
+    )?))
 }
 
 /// `POST /v1/daemon/characters/{character_id}/memory/review`
@@ -332,8 +339,7 @@ pub async fn review(
         })
         .collect();
     let deadline = tokio::time::Instant::now() + REVIEW_CALL_TIMEOUT;
-    let ctx = BearerPipelineCtx::character(&pool, &creator, &character_id, binding_id)
-        .await?;
+    let ctx = BearerPipelineCtx::character(&pool, &creator, &character_id, binding_id).await?;
     let mut outcome =
         process_bearer_review_batch(&inputs, &nexus_home, &ctx, &pool, deadline).await;
     let deadline_stopped = outcome.processed < processing_slice;
@@ -341,13 +347,15 @@ pub async fn review(
     outcome.more_in_db = more_in_db;
     outcome.processing_slice = processing_slice;
 
-    Ok(Json(map_wire::<ReviewCharacterMemoryResponse>(serde_json::json!({
-        "promoted": outcome.promoted,
-        "fragmented": outcome.fragmented,
-        "dropped": outcome.dropped,
-        "has_more": outcome.has_more,
-        "processed": outcome.processed as i64,
-    }))?))
+    Ok(Json(map_wire::<ReviewCharacterMemoryResponse>(
+        serde_json::json!({
+            "promoted": outcome.promoted,
+            "fragmented": outcome.fragmented,
+            "dropped": outcome.dropped,
+            "has_more": outcome.has_more,
+            "processed": i64::try_from(outcome.processed).unwrap_or(i64::MAX),
+        }),
+    )?))
 }
 
 /// `GET /v1/daemon/characters/{character_id}/memory/fragments`
@@ -390,10 +398,12 @@ pub async fn list_fragments(
             }))
         })
         .collect::<Result<_, _>>()?;
-    Ok(Json(map_wire::<ListCharacterMemoryFragmentsResponse>(serde_json::json!({
-        "fragments": fragments,
-        "pagination": pagination_info(limit, has_more, next_cursor),
-    }))?))
+    Ok(Json(map_wire::<ListCharacterMemoryFragmentsResponse>(
+        serde_json::json!({
+            "fragments": fragments,
+            "pagination": pagination_info(limit, has_more, next_cursor.as_deref()),
+        }),
+    )?))
 }
 
 fn decode_fragment_keywords(raw: &str) -> Vec<String> {
@@ -411,18 +421,19 @@ pub async fn promote_fragment(
     let fragment_id = segment
         .strip_suffix(":promote")
         .ok_or_else(|| {
-            NexusApiError::NotFound(format!("Character memory fragment route '{segment}' not found"))
+            NexusApiError::NotFound(format!(
+                "Character memory fragment route '{segment}' not found"
+            ))
         })?
         .to_string();
     let req: PromoteCharacterFragmentRequest = parse_canonical_json(&body)?;
     let creator = require_creator(&state)?;
     require_character_ctx(&state, &creator, &character_id, None).await?;
-    let expected_revision = i64::try_from(req.expected_revision).map_err(|_| {
-        NexusApiError::BadRequest {
+    let expected_revision =
+        i64::try_from(req.expected_revision).map_err(|_| NexusApiError::BadRequest {
             code: "invalid_input".into(),
             message: "expected_revision is out of range".into(),
-        }
-    })?;
+        })?;
     // The repository commits and returns the authoritative promoted record
     // (same fragment id, cleared binding provenance, bumped revision). Map it
     // directly — no post-commit re-query or panic path.
@@ -435,9 +446,11 @@ pub async fn promote_fragment(
     )
     .await
     .map_err(map_local_db_promote_error)?;
-    Ok(Json(map_wire::<PromoteCharacterFragmentResponse>(serde_json::json!({
-        "fragment": character_fragment_info(&promoted)?,
-    }))?))
+    Ok(Json(map_wire::<PromoteCharacterFragmentResponse>(
+        serde_json::json!({
+            "fragment": character_fragment_info(&promoted)?,
+        }),
+    )?))
 }
 
 fn map_local_db_promote_error(e: nexus_local_db::LocalDbError) -> NexusApiError {
@@ -478,11 +491,12 @@ pub async fn reflect_soul(
     require_character_ctx(&state, &creator, &character_id, binding_id).await?;
 
     let synthesizer = if req.force_regenerate {
-        let registry = state
-            .capability_registry()
-            .ok_or_else(|| NexusApiError::ServiceUnavailable {
-                message: "capability registry not available".to_string(),
-            })?;
+        let registry =
+            state
+                .capability_registry()
+                .ok_or_else(|| NexusApiError::ServiceUnavailable {
+                    message: "capability registry not available".to_string(),
+                })?;
         Some(AcpSoulNarrativeSynthesizer::new(registry))
     } else {
         None
@@ -490,14 +504,14 @@ pub async fn reflect_soul(
 
     let pool = state.pool_or_uninit()?;
     let ctx = BearerPipelineCtx::character(pool, &creator, &character_id, binding_id).await?;
-    let outcome = reflect_bearer_soul(pool, &ctx, req.force_regenerate, synthesizer.as_ref())
-        .await?;
-    Ok(Json(map_character_reflect_outcome(character_id, outcome)))
+    let outcome =
+        reflect_bearer_soul(pool, &ctx, req.force_regenerate, synthesizer.as_ref()).await?;
+    Ok(Json(map_character_reflect_outcome(&character_id, &outcome)))
 }
 
 fn map_character_reflect_outcome(
-    character_id: String,
-    o: ReflectOutcome,
+    character_id: &str,
+    o: &ReflectOutcome,
 ) -> CharacterSoulNarrativeResponse {
     let state_str = match o.state {
         crate::api::handlers::memory_pipeline::ReflectState::InsufficientData => {

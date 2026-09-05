@@ -40,11 +40,16 @@ impl OutboxPool {
         max_size: usize,
     ) -> Result<Self, nexus_local_db::LocalDbError> {
         let url = format!("sqlite://{}?mode=rwc", db_path.display());
-        // SAFETY: max_size is clamped to a small positive value (DEFAULT_POOL_SIZE = 4 or less),
-        // so it fits safely in u32.
-        #[allow(clippy::cast_possible_truncation)]
+        // Checked conversion: `max_size` is usize from the caller; a value
+        // beyond the `u32` connection domain is rejected rather than
+        // truncated (fail-closed).
+        let max_connections = u32::try_from(max_size).map_err(|_| {
+            nexus_local_db::LocalDbError::ValidationError(format!(
+                "pool max_size {max_size} exceeds the u32 connection domain"
+            ))
+        })?;
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(max_size as u32)
+            .max_connections(max_connections)
             .connect(&url)
             .await
             .map_err(nexus_local_db::LocalDbError::from)?;
@@ -85,6 +90,21 @@ mod tests {
         std::fs::File::create(&db_path).unwrap();
 
         (tmp, db_path)
+    }
+
+    #[tokio::test]
+    async fn pool_max_size_beyond_u32_is_rejected_not_truncated() {
+        let (_tmp, db_path) = create_test_db();
+        // A max_size above the u32 connection domain must fail closed rather
+        // than truncate to a smaller pool.
+        let huge = usize::try_from(u64::from(u32::MAX)).unwrap() + 1;
+        let err = OutboxPool::new(&db_path, huge)
+            .await
+            .expect_err("oversized max_size must be rejected");
+        assert!(
+            matches!(err, nexus_local_db::LocalDbError::ValidationError(_)),
+            "got {err:?}"
+        );
     }
 
     #[tokio::test]

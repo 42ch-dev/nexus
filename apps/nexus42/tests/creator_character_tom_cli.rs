@@ -31,6 +31,7 @@ async fn seed_tom_carrier(d: &LiveDaemon, character_id: &str) -> String {
     id
 }
 
+#[allow(clippy::too_many_arguments)] // CLI argv mapping
 fn record_argv(
     character_id: &str,
     world_id: &str,
@@ -210,5 +211,8 @@ async fn character_tom_fail_closed_no_mutation() {
         .fetch_one(&d.pool)
         .await
         .unwrap();
-    assert_eq!(before_ms.0, after_ms.0, "deny matrix must not insert MindState");
+    assert_eq!(
+        before_ms.0, after_ms.0,
+        "deny matrix must not insert MindState"
+    );
 }

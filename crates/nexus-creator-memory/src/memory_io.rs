@@ -48,10 +48,11 @@ pub fn memory_path(home: &Path, bearer: MemoryBearerRef<'_>, slug: &str) -> Path
 /// malformed-path failure is propagated as a [`MemoryError`], so callers
 /// (e.g. the Character mind projection) can distinguish honest-empty absence
 /// from an inability to read the directory and fail closed before host launch.
-pub fn list_memories(
-    home: &Path,
-    bearer: MemoryBearerRef<'_>,
-) -> Result<Vec<String>, MemoryError> {
+///
+/// # Errors
+///
+/// Returns [`MemoryError`] on a permission, I/O, or malformed-path failure.
+pub fn list_memories(home: &Path, bearer: MemoryBearerRef<'_>) -> Result<Vec<String>, MemoryError> {
     let dir = bearer.validated_long_term_memory_dir(home)?;
     // Attempt the read directly rather than gating on `Path::exists()`, which
     // returns false both for a missing path and for an unreadable path. A
@@ -119,8 +120,7 @@ pub fn load_memory(
     bearer.validate()?;
     if !slug_is_safe(slug) {
         return Err(MemoryError::ValidationError(format!(
-            "slug '{}' is not path-safe (rejected: contains '..', '/', '\\', or control characters)",
-            slug
+            "slug '{slug}' is not path-safe (rejected: contains '..', '/', '\\', or control characters)"
         )));
     }
     let path = memory_path(home, bearer, slug);
@@ -157,8 +157,7 @@ pub fn save_memory(
     bearer.validate()?;
     if !slug_is_safe(slug) {
         return Err(MemoryError::ValidationError(format!(
-            "slug '{}' is not path-safe (rejected: contains '..', '/', '\\', or control characters)",
-            slug
+            "slug '{slug}' is not path-safe (rejected: contains '..', '/', '\\', or control characters)"
         )));
     }
     ensure_memory_dir(home, bearer)?;
@@ -181,12 +180,15 @@ pub fn save_memory(
 /// # Errors
 /// Returns `Err(MemoryError::...)` if validation fails.
 /// Delete a long-term memory file.
-pub fn delete_memory(home: &Path, bearer: MemoryBearerRef<'_>, slug: &str) -> Result<(), MemoryError> {
+pub fn delete_memory(
+    home: &Path,
+    bearer: MemoryBearerRef<'_>,
+    slug: &str,
+) -> Result<(), MemoryError> {
     bearer.validate()?;
     if !slug_is_safe(slug) {
         return Err(MemoryError::ValidationError(format!(
-            "slug '{}' is not path-safe (rejected: contains '..', '/', '\\', or control characters)",
-            slug
+            "slug '{slug}' is not path-safe (rejected: contains '..', '/', '\\', or control characters)"
         )));
     }
     let path = memory_path(home, bearer, slug);
@@ -252,8 +254,19 @@ mod tests {
         mem.set_body("Chapter 1 analysis: the protagonist discovers the truth.");
         mem.add_source_session("sess_001");
 
-        save_memory(&home, MemoryBearerRef::Creator("ctr_test"), "chapter1-analysis", &mem).unwrap();
-        let loaded = load_memory(&home, MemoryBearerRef::Creator("ctr_test"), "chapter1-analysis").unwrap();
+        save_memory(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            "chapter1-analysis",
+            &mem,
+        )
+        .unwrap();
+        let loaded = load_memory(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            "chapter1-analysis",
+        )
+        .unwrap();
 
         assert_eq!(loaded.frontmatter.memory_id, mem.frontmatter.memory_id);
         assert_eq!(loaded.frontmatter.memory_kind, "story_summary");
@@ -279,8 +292,20 @@ mod tests {
         let mem1 = LongTermMemory::new("story_summary");
         let mem2 = LongTermMemory::new("character_note");
 
-        save_memory(&home, MemoryBearerRef::Creator("ctr_test"), "alpha-memory", &mem1).unwrap();
-        save_memory(&home, MemoryBearerRef::Creator("ctr_test"), "beta-memory", &mem2).unwrap();
+        save_memory(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            "alpha-memory",
+            &mem1,
+        )
+        .unwrap();
+        save_memory(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            "beta-memory",
+            &mem2,
+        )
+        .unwrap();
 
         let slugs = list_memories(&home, MemoryBearerRef::Creator("ctr_test")).unwrap();
         assert_eq!(slugs, vec!["alpha-memory", "beta-memory"]);
@@ -292,7 +317,13 @@ mod tests {
         let home = fake_home();
         cleanup(&home);
         let mem = LongTermMemory::new("story_summary");
-        save_memory(&home, MemoryBearerRef::Creator("ctr_test"), "to-delete", &mem).unwrap();
+        save_memory(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            "to-delete",
+            &mem,
+        )
+        .unwrap();
 
         assert!(load_memory(&home, MemoryBearerRef::Creator("ctr_test"), "to-delete").is_ok());
         delete_memory(&home, MemoryBearerRef::Creator("ctr_test"), "to-delete").unwrap();
@@ -430,7 +461,11 @@ mod tests {
     #[test]
     fn load_rejects_path_traversal_creator_id() {
         let home = fake_home();
-        let result = load_memory(&home, MemoryBearerRef::Creator("../../etc/passwd"), "safe-slug");
+        let result = load_memory(
+            &home,
+            MemoryBearerRef::Creator("../../etc/passwd"),
+            "safe-slug",
+        );
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -514,14 +549,28 @@ mod tests {
         cleanup(&home);
         let mut mem = LongTermMemory::new("story_summary");
         mem.set_body("Original content");
-        save_memory(&home, MemoryBearerRef::Creator("ctr_test"), "update-test", &mem).unwrap();
+        save_memory(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            "update-test",
+            &mem,
+        )
+        .unwrap();
 
         // Load, modify, save
-        let mut loaded = load_memory(&home, MemoryBearerRef::Creator("ctr_test"), "update-test").unwrap();
+        let mut loaded =
+            load_memory(&home, MemoryBearerRef::Creator("ctr_test"), "update-test").unwrap();
         loaded.set_body("Updated content");
-        save_memory(&home, MemoryBearerRef::Creator("ctr_test"), "update-test", &loaded).unwrap();
+        save_memory(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            "update-test",
+            &loaded,
+        )
+        .unwrap();
 
-        let reloaded = load_memory(&home, MemoryBearerRef::Creator("ctr_test"), "update-test").unwrap();
+        let reloaded =
+            load_memory(&home, MemoryBearerRef::Creator("ctr_test"), "update-test").unwrap();
         assert!(reloaded.body.contains("Updated content"));
         cleanup(&home);
     }

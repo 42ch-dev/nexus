@@ -1,14 +1,14 @@
-//! ActorWorldBinding storage and the authoritative last-binding removal transaction.
+//! `ActorWorldBinding` storage and the authoritative last-binding removal transaction.
 
 use sqlx::{Sqlite, SqlitePool, Transaction};
 use uuid::Uuid;
 
+use crate::begin_immediate;
 use crate::character::{
     map_actor_constraint, require_active_owned_character, require_owned_active_world,
     require_owned_character, require_owned_world,
 };
 use crate::error::{ActorContractConflict, LocalDbError};
-use crate::begin_immediate;
 
 /// Persisted binding row (storage shape; not a wire DTO).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,7 +37,7 @@ pub fn mint_binding_id() -> String {
     format!("awb_{}", Uuid::new_v4().simple())
 }
 
-fn record_from_query(
+const fn record_from_query(
     binding_id: String,
     character_id: String,
     world_id: String,
@@ -201,17 +201,15 @@ pub(crate) async fn require_active_character_binding_pool(
     .fetch_optional(pool)
     .await?;
     match row {
-        Some(r) if r.character_id == character_id && r.status == "active" => {
-            Ok(record_from_query(
-                r.binding_id,
-                r.character_id,
-                r.world_id,
-                r.status,
-                r.world_sheet_entry_id,
-                r.created_at,
-                r.updated_at,
-            ))
-        }
+        Some(r) if r.character_id == character_id && r.status == "active" => Ok(record_from_query(
+            r.binding_id,
+            r.character_id,
+            r.world_id,
+            r.status,
+            r.world_sheet_entry_id,
+            r.created_at,
+            r.updated_at,
+        )),
         _ => Err(LocalDbError::ActorNotFound {
             resource: "actor_world_binding",
             id: binding_id.to_string(),
@@ -272,7 +270,7 @@ pub(crate) async fn require_active_owned_provenance_pool(
 ///
 /// # Errors
 ///
-/// Returns `LocalDbError` on ownership, WorldSheet, duplicate, or SQL failure.
+/// Returns `LocalDbError` on ownership, `WorldSheet`, duplicate, or SQL failure.
 pub async fn add_actor_world_binding(
     pool: &SqlitePool,
     params: CreateBindingParams<'_>,
@@ -382,7 +380,7 @@ pub async fn count_bindings_for_world_tx(
 /// Authoritative binding removal. Last active binding is a zero-mutation 409.
 ///
 /// Decision order: resolve active binding + ownership → count active bindings
-/// → reject `count <= 1` → reject binding-owned KnowledgeEntry rows → reject
+/// → reject `count <= 1` → reject binding-owned `KnowledgeEntry` rows → reject
 /// binding-local Character memory (`binding_has_local_memory`) → delete
 /// exactly the target row. Every reject is zero-mutation.
 ///

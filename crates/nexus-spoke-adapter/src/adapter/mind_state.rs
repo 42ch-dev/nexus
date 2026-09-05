@@ -67,6 +67,10 @@ pub async fn validate_and_store_mind_state(
 }
 
 /// Transaction-aware variant of [`validate_and_store_mind_state`].
+///
+/// # Errors
+///
+/// Returns `LocalDbError` on validation or database failure.
 pub async fn validate_and_store_mind_state_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     value: &Value,
@@ -88,8 +92,8 @@ pub async fn validate_and_store_mind_state_in_tx(
     .await
 }
 
-/// Atomic Character ToM carrier write: CAS-patch `modules_json` on the
-/// carrier KnowledgeEntry, then insert a spoke-validated derivative
+/// Atomic Character `ToM` carrier write: CAS-patch `modules_json` on the
+/// carrier `KnowledgeEntry`, then insert a spoke-validated derivative
 /// `MindState` whose `holder_entry_id` equals the carrier id.
 ///
 /// The CAS predicate revalidates non-deleted status and the admitted
@@ -126,9 +130,7 @@ pub async fn atomic_cas_carrier_modules_and_insert_mind_state_in_tx(
     )
     .await?;
 
-    if let Err(e) = validate_and_store_mind_state_in_tx(tx, mind_state_wire).await {
-        return Err(e);
-    }
+    validate_and_store_mind_state_in_tx(tx, mind_state_wire).await?;
 
     Ok(new_revision)
 }
@@ -185,11 +187,32 @@ fn validated_mind_state_columns(value: &Value) -> Result<MindStateColumnValues<'
         ));
     };
 
-    #[allow(clippy::cast_possible_truncation)]
-    let schema_version = state
-        .get("schema_version")
-        .and_then(Value::as_f64)
-        .unwrap_or(0.0) as i64;
+    // Checked conversion: `schema_version` must be a JSON integer within the
+    // i64 domain (fail-closed) — a fractional, NaN, or huge value is rejected
+    // rather than truncated or wrapped into a schema version.
+    let schema_version = match state.get("schema_version") {
+        Some(Value::Number(n)) => {
+            if let Some(i) = n.as_i64() {
+                i
+            } else if let Some(u) = n.as_u64() {
+                i64::try_from(u).map_err(|_| {
+                    LocalDbError::ValidationError(
+                        "mind_state schema_version exceeds the i64 domain".to_string(),
+                    )
+                })?
+            } else {
+                return Err(LocalDbError::ValidationError(
+                    "mind_state schema_version must be an integer".to_string(),
+                ));
+            }
+        }
+        Some(_) => {
+            return Err(LocalDbError::ValidationError(
+                "mind_state schema_version must be an integer".to_string(),
+            ));
+        }
+        None => 0,
+    };
     let mind_state_id = state
         .get("mind_state_id")
         .and_then(Value::as_str)

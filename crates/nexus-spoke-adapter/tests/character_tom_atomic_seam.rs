@@ -1,4 +1,4 @@
-//! v1.184 P4 Task 1 — atomic carrier CAS + derivative MindState seam tests.
+//! v1.184 P4 Task 1 — atomic carrier CAS + derivative `MindState` seam tests.
 
 #![allow(clippy::unwrap_used)]
 
@@ -55,8 +55,7 @@ async fn setup_db() -> (sqlx::SqlitePool, tempfile::TempDir) {
 
 async fn seed_character_carrier(pool: &sqlx::SqlitePool) -> String {
     let store = SqliteKbStore::new(pool.clone());
-    let mut kb =
-        KnowledgeEntryRecord::for_character(CHARACTER, BlockType::Character, "Carrier");
+    let mut kb = KnowledgeEntryRecord::for_character(CHARACTER, BlockType::Character, "Carrier");
     kb.modules = Some(json!({ "belief": [] }));
     let id = kb.entry_id.clone();
     store.insert_knowledge_entry(kb).await.unwrap();
@@ -79,12 +78,14 @@ async fn modules_json(pool: &sqlx::SqlitePool, carrier_id: &str) -> String {
 }
 
 async fn revision(pool: &sqlx::SqlitePool, carrier_id: &str) -> i64 {
-    sqlx::query_scalar::<_, Option<i64>>("SELECT revision FROM kb_key_blocks WHERE key_block_id = ?")
-        .bind(carrier_id)
-        .fetch_one(pool)
-        .await
-        .unwrap()
-        .unwrap_or(0)
+    sqlx::query_scalar::<_, Option<i64>>(
+        "SELECT revision FROM kb_key_blocks WHERE key_block_id = ?",
+    )
+    .bind(carrier_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+    .unwrap_or(0)
 }
 
 #[tokio::test]
@@ -93,7 +94,10 @@ async fn legacy_mind_state_wire_fixture_still_validates_through_gate() {
     let carrier = seed_character_carrier(&pool).await;
     let wire = mind_state_for_carrier(&carrier, "ms_legacy_pin");
     validate_and_store_mind_state(&pool, &wire).await.unwrap();
-    assert!(get_mind_state(&pool, "ms_legacy_pin").await.unwrap().is_some());
+    assert!(get_mind_state(&pool, "ms_legacy_pin")
+        .await
+        .unwrap()
+        .is_some());
 }
 
 #[tokio::test]
@@ -132,8 +136,13 @@ async fn atomic_write_commits_carrier_cas_and_derivative_mind_state() {
 
     assert_eq!(new_rev, 1);
     assert_eq!(revision(&pool, &carrier).await, 1);
-    assert!(modules_json(&pool, &carrier).await.contains("I know the dock"));
-    let row = get_mind_state(&pool, "ms_atomic_ok").await.unwrap().unwrap();
+    assert!(modules_json(&pool, &carrier)
+        .await
+        .contains("I know the dock"));
+    let row = get_mind_state(&pool, "ms_atomic_ok")
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(row.holder_entry_id, carrier);
 }
 
@@ -188,7 +197,10 @@ async fn atomic_write_rolls_back_on_cas_miss() {
 
     assert!(matches!(err, LocalDbError::VersionMismatch { .. }));
     assert_eq!(modules_json(&pool, &carrier).await, before);
-    assert!(get_mind_state(&pool, "ms_cas_miss").await.unwrap().is_none());
+    assert!(get_mind_state(&pool, "ms_cas_miss")
+        .await
+        .unwrap()
+        .is_none());
 }
 
 #[tokio::test]
@@ -214,7 +226,6 @@ async fn rejects_chr_subject_on_mind_state_holder_entry_id() {
 
     assert!(matches!(err, LocalDbError::ValidationError(_)));
 }
-
 
 #[tokio::test]
 async fn atomic_write_rejects_concurrent_soft_delete_without_revision_bump() {
@@ -250,7 +261,10 @@ async fn atomic_write_rejects_concurrent_soft_delete_without_revision_bump() {
     let _ = tx.rollback().await;
 
     assert_eq!(modules_json(&pool, &carrier).await, before);
-    assert!(get_mind_state(&pool, "ms_softdelete_race").await.unwrap().is_none());
+    assert!(get_mind_state(&pool, "ms_softdelete_race")
+        .await
+        .unwrap()
+        .is_none());
     drop(err);
 }
 
@@ -295,6 +309,9 @@ async fn atomic_write_rejects_concurrent_owner_drift() {
     let _ = tx.rollback().await;
 
     assert_eq!(modules_json(&pool, &carrier).await, before);
-    assert!(get_mind_state(&pool, "ms_owner_drift").await.unwrap().is_none());
+    assert!(get_mind_state(&pool, "ms_owner_drift")
+        .await
+        .unwrap()
+        .is_none());
     drop(err);
 }

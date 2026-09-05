@@ -1,4 +1,4 @@
-//! Actor KnowledgeView HTTP handlers (v1.184 P1 Task 3).
+//! Actor `KnowledgeView` HTTP handlers (v1.184 P1 Task 3).
 //!
 //! Routes call [`ActorKnowledgeViewService`] directly. Admission is stored
 //! owners only; clients never send `owner_creator_id`.
@@ -16,7 +16,6 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use chrono::{DateTime, Utc};
-use nexus_contracts::BlockType;
 use nexus_contracts::daemon_api::actor_knowledge::{
     add_knowledge_entry_request::{AddKnowledgeEntryRequest, AddKnowledgeEntryRequestOwnerKind},
     add_knowledge_entry_response::{
@@ -34,7 +33,10 @@ use nexus_contracts::daemon_api::actor_knowledge::{
         ViewResponse,
     },
 };
-use nexus_knowledge::world_kb::knowledge_entry::{parse_stored_created_at, KnowledgeEntryRecord, KnowledgeOwnerRef};
+use nexus_contracts::BlockType;
+use nexus_knowledge::world_kb::knowledge_entry::{
+    parse_stored_created_at, KnowledgeEntryRecord, KnowledgeOwnerRef,
+};
 use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
 use nexus_local_db::kb_store::SqliteKbStore;
 use serde::de::DeserializeOwned;
@@ -80,7 +82,7 @@ fn item_from_record(record: &KnowledgeEntryRecord) -> Result<KnowledgeViewItem, 
         "entry_id": record.entry_id,
         "owner": owner,
         "creator_only": record.creator_only,
-        "block_type": serde_json::to_value(&record.block_type).map_err(wire_err)?,
+        "block_type": serde_json::to_value(record.block_type).map_err(wire_err)?,
         "canonical_name": record.canonical_name,
         "status": record.status,
         "created_at": parse_rfc3339(&record.created_at)?,
@@ -88,9 +90,7 @@ fn item_from_record(record: &KnowledgeEntryRecord) -> Result<KnowledgeViewItem, 
     serde_json::from_value(value).map_err(wire_err)
 }
 
-fn view_pagination(
-    page: &ActorKnowledgePage,
-) -> Result<ViewPagination, NexusApiError> {
+fn view_pagination(page: &ActorKnowledgePage) -> Result<ViewPagination, NexusApiError> {
     finish_builder(
         ViewPagination::builder()
             .limit(i64::from(page.limit))
@@ -100,9 +100,7 @@ fn view_pagination(
     )
 }
 
-fn listed_pagination(
-    page: &ActorKnowledgePage,
-) -> Result<ListedPagination, NexusApiError> {
+fn listed_pagination(page: &ActorKnowledgePage) -> Result<ListedPagination, NexusApiError> {
     finish_builder(
         ListedPagination::builder()
             .limit(i64::from(page.limit))
@@ -125,12 +123,12 @@ fn admit_actor(actor_ref: &NexusActorRef) -> AdmittedActor {
 
 fn map_insert_err(err: KbStoreError) -> NexusApiError {
     match err {
-        KbStoreError::Duplicate { .. } | KbStoreError::Validation(_) | KbStoreError::ValidationLegacy(_) => {
-            NexusApiError::BadRequest {
-                code: "invalid_input".into(),
-                message: err.to_string(),
-            }
-        }
+        KbStoreError::Duplicate { .. }
+        | KbStoreError::Validation(_)
+        | KbStoreError::ValidationLegacy(_) => NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: err.to_string(),
+        },
         other => NexusApiError::Internal {
             code: "ACTOR_KNOWLEDGE_INSERT_FAILED".into(),
             message: other.to_string(),
@@ -172,6 +170,7 @@ pub async fn view(
 }
 
 /// `POST /v1/daemon/actor-knowledge/entries`
+#[allow(clippy::too_many_lines)] // single validated create path
 pub async fn add_entry(
     State(state): State<WorkspaceState>,
     body: Bytes,
@@ -183,15 +182,12 @@ pub async fn add_entry(
     let creator_only = req.creator_only.unwrap_or(false);
     let owner = match req.owner_kind {
         AddKnowledgeEntryRequestOwnerKind::World => {
-            let world_id = optional_str(req.world_id.as_ref()).ok_or_else(|| {
-                NexusApiError::BadRequest {
+            let world_id =
+                optional_str(req.world_id.as_ref()).ok_or_else(|| NexusApiError::BadRequest {
                     code: "invalid_input".into(),
                     message: "world_id is required for world-owned knowledge".into(),
-                }
-            })?;
-            service
-                .require_owned_world(&creator_id, world_id)
-                .await?;
+                })?;
+            service.require_owned_world(&creator_id, world_id).await?;
             KnowledgeOwnerRef::world(world_id)
         }
         AddKnowledgeEntryRequestOwnerKind::Character => {
@@ -225,18 +221,16 @@ pub async fn add_entry(
                     message: "character_id is required for binding-owned knowledge".into(),
                 }
             })?;
-            let binding_id = optional_str(req.binding_id.as_ref()).ok_or_else(|| {
-                NexusApiError::BadRequest {
+            let binding_id =
+                optional_str(req.binding_id.as_ref()).ok_or_else(|| NexusApiError::BadRequest {
                     code: "invalid_input".into(),
                     message: "binding_id is required for binding-owned knowledge".into(),
-                }
-            })?;
-            let world_id = optional_str(req.world_id.as_ref()).ok_or_else(|| {
-                NexusApiError::BadRequest {
+                })?;
+            let world_id =
+                optional_str(req.world_id.as_ref()).ok_or_else(|| NexusApiError::BadRequest {
                     code: "invalid_input".into(),
                     message: "world_id is required for binding-owned knowledge".into(),
-                }
-            })?;
+                })?;
             service
                 .require_owned_character(&creator_id, character_id)
                 .await?;
@@ -247,9 +241,11 @@ pub async fn add_entry(
             KnowledgeOwnerRef::actor_world_binding(binding_id)
         }
     };
-    let block_type: BlockType = map_wire(req.block_type.clone())?;
+    let block_type: BlockType = map_wire(req.block_type)?;
     let mut record = match &owner {
-        KnowledgeOwnerRef::World(id) => KnowledgeEntryRecord::new(id, block_type, req.canonical_name.as_str()),
+        KnowledgeOwnerRef::World(id) => {
+            KnowledgeEntryRecord::new(id, block_type, req.canonical_name.as_str())
+        }
         KnowledgeOwnerRef::Character(id) => {
             KnowledgeEntryRecord::for_character(id, block_type, req.canonical_name.as_str())
         }

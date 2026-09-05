@@ -13,6 +13,11 @@
 //! unchanged.
 
 use crate::api::errors::NexusApiError;
+use crate::api::handlers::memory_pipeline::BearerPipelineCtx;
+use crate::api::handlers::memory_pipeline::{
+    process_bearer_review_batch, reflect_bearer_soul, MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
+    MIN_SOUL_NARRATIVE_FRAGMENTS, REVIEW_BATCH_LIMIT,
+};
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -23,11 +28,6 @@ pub use nexus_contracts::{
     ListPendingReviewsResponse, MemoryFragmentInfo, PaginationInfo, PendingReviewInfo,
     ReviewRequest, ReviewResponse, SoulNarrativeRequest, SoulNarrativeResponse,
 };
-use crate::api::handlers::memory_pipeline::{
-    process_bearer_review_batch, reflect_bearer_soul, REVIEW_BATCH_LIMIT,
-    MIN_SOUL_NARRATIVE_FRAGMENTS, MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
-};
-use crate::api::handlers::memory_pipeline::BearerPipelineCtx;
 use nexus_creator_memory::review::PendingReviewInput;
 use tracing::{debug, info};
 
@@ -828,8 +828,7 @@ pub async fn reflect_soul(
     if !nexus_creator::local_identity::is_valid_creator_id(&req.creator_id) {
         return Err(NexusApiError::InvalidInput {
             field: "creator_id".into(),
-            reason: "creator_id must start with 'ctr_' followed by alphanumeric characters"
-                .into(),
+            reason: "creator_id must start with 'ctr_' followed by alphanumeric characters".into(),
         });
     }
 
@@ -863,11 +862,12 @@ pub async fn reflect_soul(
     // Build the ACP synthesizer only when force=true; the core returns the
     // canonical `ServiceUnavailable` when no capability registry is present.
     let synthesizer = if req.force_regenerate {
-        let registry = state
-            .capability_registry()
-            .ok_or_else(|| NexusApiError::ServiceUnavailable {
-                message: "capability registry not available".to_string(),
-            })?;
+        let registry =
+            state
+                .capability_registry()
+                .ok_or_else(|| NexusApiError::ServiceUnavailable {
+                    message: "capability registry not available".to_string(),
+                })?;
         Some(
             crate::api::handlers::soul_narrative_synthesizer::AcpSoulNarrativeSynthesizer::new(
                 registry,
@@ -879,8 +879,8 @@ pub async fn reflect_soul(
 
     let pool = state.pool_or_uninit()?;
     let ctx = BearerPipelineCtx::creator(&active_creator, world_id);
-    let outcome = reflect_bearer_soul(pool, &ctx, req.force_regenerate, synthesizer.as_ref())
-        .await?;
+    let outcome =
+        reflect_bearer_soul(pool, &ctx, req.force_regenerate, synthesizer.as_ref()).await?;
 
     Ok(Json(map_reflect_outcome(active_creator, outcome)))
 }
@@ -1011,10 +1011,8 @@ mod tests {
 
         // Deadline already in the past.
         let deadline = tokio::time::Instant::now();
-        let ctx = crate::api::handlers::memory_pipeline::BearerPipelineCtx::creator(
-            "ctr_testuser",
-            None,
-        );
+        let ctx =
+            crate::api::handlers::memory_pipeline::BearerPipelineCtx::creator("ctr_testuser", None);
         let outcome = crate::api::handlers::memory_pipeline::process_bearer_review_batch(
             &inputs,
             &nexus_home,
@@ -1501,6 +1499,4 @@ mod tests {
 
         drop(tmp);
     }
-
-
 }

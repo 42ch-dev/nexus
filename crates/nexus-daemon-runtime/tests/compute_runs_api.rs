@@ -137,7 +137,9 @@ async fn seed_character_in_world(
     max_hp: i64,
 ) {
     use nexus_contracts::BlockType;
-    use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef};
+    use nexus_knowledge::world_kb::knowledge_entry::{
+        KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef,
+    };
     use nexus_knowledge::world_kb::KbStore;
     use nexus_local_db::kb_store::SqliteKbStore;
 
@@ -1281,7 +1283,9 @@ async fn run_with_other_world_branch_returns_422() {
 /// state is the honest manifest violation.
 async fn seed_broken_character(pool: &sqlx::SqlitePool, entry_id: &str) {
     use nexus_contracts::BlockType;
-    use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef};
+    use nexus_knowledge::world_kb::knowledge_entry::{
+        KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef,
+    };
     use nexus_knowledge::world_kb::KbStore;
     use nexus_local_db::kb_store::SqliteKbStore;
 

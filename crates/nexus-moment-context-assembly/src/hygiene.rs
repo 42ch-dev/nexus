@@ -119,7 +119,9 @@ pub struct HygieneTraceEntry {
 /// stored World-KB rows are never touched. Entries without a `hygiene`
 /// carrier pass through unchanged and produce no trace rows.
 #[must_use]
-pub fn apply_hygiene(entries: Vec<KnowledgeEntryRecord>) -> (Vec<KnowledgeEntryRecord>, Vec<HygieneTraceEntry>) {
+pub fn apply_hygiene(
+    entries: Vec<KnowledgeEntryRecord>,
+) -> (Vec<KnowledgeEntryRecord>, Vec<HygieneTraceEntry>) {
     let mut trace = Vec::new();
     let mut out = Vec::with_capacity(entries.len());
     for mut entry in entries {

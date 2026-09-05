@@ -12,8 +12,8 @@ use nexus_agent_host::capability::model::{
     HostStartConfig, OperationFinishedEvent, OperationStartedEvent, TextDeltaEvent,
 };
 use nexus_agent_host::{
-    HostError, HostFacade, HostOperationId, HostResult, HostSession, HostSessionId, ProviderCatalog,
-    SessionState,
+    HostError, HostFacade, HostOperationId, HostResult, HostSession, HostSessionId,
+    ProviderCatalog, SessionState,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -219,18 +219,9 @@ async fn character_run_authorized_view_empty_headings_human_json() {
     let g = seed(&d).await;
 
     let json_run = d
-        .cli(&run_args(
-            &g.character_a,
-            &g.world_w1,
-            &g.bind_a_w1,
-            &[],
-        ))
+        .cli(&run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &[]))
         .await;
-    assert!(
-        json_run.status.success(),
-        "json run: {}",
-        stderr(&json_run)
-    );
+    assert!(json_run.status.success(), "json run: {}", stderr(&json_run));
     let payload = json_out(&json_run);
     assert_eq!(payload["result"], MOCK_RESULT);
     assert_eq!(payload["session"]["provider_id"], "mock-provider");
@@ -315,12 +306,7 @@ async fn character_run_deny_matrix_moves_no_host_counters() {
     assert!(!bad_binding.status.success());
 
     let cross_world = d
-        .cli(&run_args(
-            &g.character_a,
-            &g.world_w1,
-            &g.bind_a_w2,
-            &[],
-        ))
+        .cli(&run_args(&g.character_a, &g.world_w1, &g.bind_a_w2, &[]))
         .await;
     assert!(!cross_world.status.success());
 
@@ -329,11 +315,28 @@ async fn character_run_deny_matrix_moves_no_host_counters() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[allow(
+    clippy::too_many_lines,
+    clippy::items_after_statements, // nested fixture fn follows seed statements
+    clippy::similar_names // A/B roles
+)]
 async fn character_run_isolation_and_legacy_outside_lookup() {
     let host = MockHost::new();
     let d = LiveDaemon::start_with_agent_host(host.clone()).await;
     let g = seed(&d).await;
     let cwd_a = d.home.path().join("cwd-a");
+
+    async fn isolated(d: &LiveDaemon, args: &[&str], first_id: &str, seen: &mut Vec<String>) {
+        let out = d.cli(args).await;
+        assert!(out.status.success(), "isolation run: {}", stderr(&out));
+        let id = json_out(&out)["session"]["session_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_ne!(id, first_id);
+        assert!(!seen.contains(&id), "duplicate isolated session {id}");
+        seen.push(id);
+    }
     let cwd_b = d.home.path().join("cwd-b");
     std::fs::create_dir_all(&cwd_a).unwrap();
     std::fs::create_dir_all(&cwd_b).unwrap();
@@ -365,35 +368,39 @@ async fn character_run_isolation_and_legacy_outside_lookup() {
     let reuse = json_out(&reuse_out);
     assert_eq!(reuse["session"]["session_id"], first_id);
 
-    async fn isolated(d: &LiveDaemon, args: &[&str], first_id: &str, seen: &mut Vec<String>) {
-        let out = d.cli(args).await;
-        assert!(out.status.success(), "isolation run: {}", stderr(&out));
-        let id = json_out(&out)["session"]["session_id"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        assert_ne!(id, first_id);
-        assert!(!seen.contains(&id), "duplicate isolated session {id}");
-        seen.push(id);
-    }
     let mut other_ids = Vec::new();
     isolated(
         &d,
-        &run_args(&g.character_b, &g.world_w1, &g.bind_b_w1, &["--cwd", &cwd_a]),
+        &run_args(
+            &g.character_b,
+            &g.world_w1,
+            &g.bind_b_w1,
+            &["--cwd", &cwd_a],
+        ),
         &first_id,
         &mut other_ids,
     )
     .await;
     isolated(
         &d,
-        &run_args(&g.character_a, &g.world_w2, &g.bind_a_w2, &["--cwd", &cwd_a]),
+        &run_args(
+            &g.character_a,
+            &g.world_w2,
+            &g.bind_a_w2,
+            &["--cwd", &cwd_a],
+        ),
         &first_id,
         &mut other_ids,
     )
     .await;
     isolated(
         &d,
-        &run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &["--cwd", &cwd_b]),
+        &run_args(
+            &g.character_a,
+            &g.world_w1,
+            &g.bind_a_w1,
+            &["--cwd", &cwd_b],
+        ),
         &first_id,
         &mut other_ids,
     )
@@ -440,7 +447,12 @@ async fn character_run_isolation_and_legacy_outside_lookup() {
             &g.character_a,
             &g.world_w1,
             &g.bind_a_w1,
-            &["--cwd", &cwd_a, "--branch-id", "fbk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+            &[
+                "--cwd",
+                &cwd_a,
+                "--branch-id",
+                "fbk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            ],
         ),
         &first_id,
         &mut other_ids,
@@ -452,7 +464,12 @@ async fn character_run_isolation_and_legacy_outside_lookup() {
             &g.character_a,
             &g.world_w1,
             &g.bind_a_w1,
-            &["--cwd", &cwd_a, "--event-id", "evt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+            &[
+                "--cwd",
+                &cwd_a,
+                "--event-id",
+                "evt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            ],
         ),
         &first_id,
         &mut other_ids,
@@ -507,7 +524,8 @@ async fn seed_tom_carrier_run(d: &LiveDaemon, character_id: &str) -> String {
     use nexus_local_db::kb_store::SqliteKbStore;
     use serde_json::json;
     let store = SqliteKbStore::new(d.pool.clone());
-    let mut kb = KnowledgeEntryRecord::for_character(character_id, BlockType::Character, "TomRunCarrier");
+    let mut kb =
+        KnowledgeEntryRecord::for_character(character_id, BlockType::Character, "TomRunCarrier");
     kb.modules = Some(json!({ "belief": [] }));
     let id = kb.entry_id.clone();
     store.insert_knowledge_entry(kb).await.unwrap();
@@ -521,7 +539,8 @@ async fn seed_binding_tom_carrier(d: &LiveDaemon, binding_id: &str) -> String {
     use nexus_local_db::kb_store::SqliteKbStore;
     use serde_json::json;
     let store = SqliteKbStore::new(d.pool.clone());
-    let mut kb = KnowledgeEntryRecord::for_binding(binding_id, BlockType::Character, "TomBindingCarrier");
+    let mut kb =
+        KnowledgeEntryRecord::for_binding(binding_id, BlockType::Character, "TomBindingCarrier");
     kb.modules = Some(json!({ "belief": [] }));
     let id = kb.entry_id.clone();
     store.insert_knowledge_entry(kb).await.unwrap();
@@ -538,8 +557,9 @@ async fn cli_ok(d: &LiveDaemon, args: &[&str]) -> Output {
     out
 }
 
-/// RN-ACT-4 + P3 memory + P4 ToM full-mind dogfood (v1.184 P4 Task 3).
+/// RN-ACT-4 + P3 memory + P4 `ToM` full-mind dogfood (v1.184 P4 Task 3).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[allow(clippy::too_many_lines)] // single P0-P4 full-mind dogfood proof
 async fn character_tom_full_mind_p0_p4_dogfood() {
     let host = MockHost::new();
     let d = LiveDaemon::start_with_agent_host(host.clone()).await;
@@ -585,7 +605,14 @@ async fn character_tom_full_mind_p0_p4_dogfood() {
     .await;
     cli_ok(
         &d,
-        &["creator", "character", "memory", "review", "--character-id", chr],
+        &[
+            "creator",
+            "character",
+            "memory",
+            "review",
+            "--character-id",
+            chr,
+        ],
     )
     .await;
 
@@ -809,13 +836,20 @@ async fn character_tom_full_mind_p0_p4_dogfood() {
         .await,
     );
     let a_id = a_run["session"]["session_id"].as_str().unwrap();
-    assert_eq!(host.execs.load(Ordering::SeqCst), before_execs + 1, "one host prompt for A");
+    assert_eq!(
+        host.execs.load(Ordering::SeqCst),
+        before_execs + 1,
+        "one host prompt for A"
+    );
     let a_prompt = host.last_prompt();
     assert!(a_prompt.contains(TOM_SOUL_MARKER), "SOUL: {a_prompt}");
     assert!(a_prompt.contains(TOM_MEM_MARKER), "memory: {a_prompt}");
     assert!(a_prompt.contains(TOM_L1_MARKER), "L1: {a_prompt}");
     assert!(a_prompt.contains(TOM_L2_MARKER), "L2: {a_prompt}");
-    assert!(a_prompt.contains(TOM_W1_BINDING_MARKER), "binding tom: {a_prompt}");
+    assert!(
+        a_prompt.contains(TOM_W1_BINDING_MARKER),
+        "binding tom: {a_prompt}"
+    );
     assert!(a_prompt.contains("## Character ToM — L1"));
     assert!(a_prompt.contains("## Character ToM — L2"));
     assert!(a_prompt.contains(NAME_W1_PUBLIC));
@@ -827,12 +861,7 @@ async fn character_tom_full_mind_p0_p4_dogfood() {
     let b_run = json_out(
         &cli_ok(
             &d,
-            &run_args(
-                &g.character_b,
-                &g.world_w1,
-                &g.bind_b_w1,
-                &["--cwd", &cwd],
-            ),
+            &run_args(&g.character_b, &g.world_w1, &g.bind_b_w1, &["--cwd", &cwd]),
         )
         .await,
     );
@@ -840,7 +869,8 @@ async fn character_tom_full_mind_p0_p4_dogfood() {
     assert_ne!(a_id, b_id, "Character session isolation");
     assert_eq!(host.execs.load(Ordering::SeqCst), before_execs + 2);
     let b_prompt = host.last_prompt();
-    assert!(!b_prompt.contains(TOM_L1_MARKER), "B prompt must not include A ToM");
+    assert!(
+        !b_prompt.contains(TOM_L1_MARKER),
+        "B prompt must not include A ToM"
+    );
 }
-
-

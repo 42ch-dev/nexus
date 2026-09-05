@@ -930,7 +930,10 @@ pub async fn kb_adopt(
     } else {
         println!("✓ KB candidate adopted: {extract_job_id}");
         println!("  Key block:   {}", insert_result.entry_id);
-        println!("  World:       {}", insert_result.owner.world_id().unwrap_or_default());
+        println!(
+            "  World:       {}",
+            insert_result.owner.world_id().unwrap_or_default()
+        );
         println!("  Status:      confirmed");
         // Confidence is shown as 2-decimal or '-' for heuristic rows; source
         // quote is truncated for terminal width (full text in --json).
@@ -1383,7 +1386,11 @@ pub async fn kb_reject(
 // ── Helpers ───────────────────────────────────────────────────────────
 
 /// Verify the referenced `KnowledgeEntryRecord` actually belongs to the requested world.
-fn require_block_in_world(block: &KnowledgeEntryRecord, world_id: &str, block_id: &str) -> Result<()> {
+fn require_block_in_world(
+    block: &KnowledgeEntryRecord,
+    world_id: &str,
+    block_id: &str,
+) -> Result<()> {
     if block.world_id() != Some(world_id) {
         return Err(CliError::Other(format!(
             "Key block '{block_id}' does not belong to world '{world_id}' \

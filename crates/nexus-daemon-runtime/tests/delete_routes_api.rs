@@ -397,11 +397,12 @@ async fn delete_world_blocked_when_inactive_actor_binding_exists() {
         .await
         .unwrap();
 
-    let jobs_before: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM kb_extract_jobs WHERE world_id = 'wld_test_world'")
-            .fetch_one(pool)
-            .await
-            .unwrap();
+    let jobs_before: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM kb_extract_jobs WHERE world_id = 'wld_test_world'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
     assert_eq!(jobs_before, 1);
 
     let err = delete_world(State(state.clone()), Path("wld_test_world".to_string()))
@@ -425,11 +426,12 @@ async fn delete_world_blocked_when_inactive_actor_binding_exists() {
             .fetch_one(pool)
             .await
             .unwrap();
-    let jobs_after: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM kb_extract_jobs WHERE world_id = 'wld_test_world'")
-            .fetch_one(pool)
-            .await
-            .unwrap();
+    let jobs_after: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM kb_extract_jobs WHERE world_id = 'wld_test_world'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
     let bind_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM actor_world_bindings WHERE binding_id = ?")
             .bind(&created.binding.binding_id)
@@ -445,4 +447,3 @@ async fn delete_world_blocked_when_inactive_actor_binding_exists() {
     assert_eq!(jobs_after, 1, "extract job queue must be unchanged");
     assert_eq!(bind_count, 1, "binding must remain");
 }
-

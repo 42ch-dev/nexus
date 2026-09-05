@@ -71,7 +71,7 @@ use nexus_spoke_adapter::NexusAdapter;
 // on Surface A (spoke `RelationPort` has no delete).
 // These spoke types are re-exported through `nexus_spoke_adapter` (the
 // single boundary that crosses into spoke standard objects; spec §7).
-use nexus_spoke_adapter::conversion::{spoke_to_knowledge_record, knowledge_record_to_spoke};
+use nexus_spoke_adapter::conversion::{knowledge_record_to_spoke, spoke_to_knowledge_record};
 use nexus_spoke_adapter::extensions::set_nexus_body;
 use nexus_spoke_adapter::{
     is_world_conflict_reject, orchestrate_promote, orchestrate_relate, orchestrate_upsert,
@@ -1844,7 +1844,10 @@ async fn promote_merge(
 /// the target has no summary. Returns the serialized body JSON string.
 /// Extracted from [`promote_merge`] to keep that handler under the
 /// `too_many_lines` budget.
-fn merge_candidate_summary(target_body: &KnowledgeEntryBody, candidate: &KbExtractPromotion) -> String {
+fn merge_candidate_summary(
+    target_body: &KnowledgeEntryBody,
+    candidate: &KbExtractPromotion,
+) -> String {
     let candidate_summary = candidate
         .proposed_payload
         .as_deref()

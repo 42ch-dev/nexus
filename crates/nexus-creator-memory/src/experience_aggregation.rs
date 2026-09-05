@@ -78,6 +78,11 @@ pub struct ExperienceEntry {
 /// 5. Replace `## Experience` section in SOUL.md
 ///
 /// If no synthesizer is provided, falls back to deterministic concat.
+///
+/// # Errors
+///
+/// Returns [`MemoryError`] when experience entries cannot be collected or
+/// the SOUL document cannot be updated.
 pub async fn aggregate_experience(
     home: &Path,
     bearer: MemoryBearerRef<'_>,
@@ -219,10 +224,9 @@ fn format_kind_label(kind: &str) -> String {
     kind.split('_')
         .map(|word| {
             let mut chars = word.chars();
-            match chars.next() {
-                None => String::new(),
-                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-            }
+            chars.next().map_or_else(String::new, |first| {
+                first.to_uppercase().collect::<String>() + chars.as_str()
+            })
         })
         .collect::<Vec<_>>()
         .join(" ")
@@ -238,11 +242,8 @@ fn truncate_body(body: &str, max_chars: usize) -> String {
     // Take first max_chars characters (char-safe, not byte-safe)
     let end: String = body.chars().take(max_chars).collect();
     // Break at last space before limit
-    if let Some(pos) = end.rfind(' ') {
-        format!("{}...", &end[..pos])
-    } else {
-        format!("{}...", end)
-    }
+    end.rfind(' ')
+        .map_or_else(|| format!("{end}..."), |pos| format!("{}...", &end[..pos]))
 }
 
 #[cfg(test)]
@@ -401,7 +402,9 @@ mod tests {
         // Create soul first
         crate::soul_io::create(&home, MemoryBearerRef::Creator("ctr_test")).unwrap();
 
-        let result = aggregate_experience(&home, MemoryBearerRef::Creator("ctr_test"), None).await.unwrap();
+        let result = aggregate_experience(&home, MemoryBearerRef::Creator("ctr_test"), None)
+            .await
+            .unwrap();
         assert_eq!(result.memories_processed, 0);
         assert!(!result.used_acp);
         assert!(result.experience_markdown.is_empty());
@@ -424,20 +427,40 @@ mod tests {
         // Create experience memories
         let mut mem1 = LongTermMemory::new("story_summary");
         mem1.set_body("A grand adventure story about heroes saving the world from darkness.");
-        memory_io::save_memory(&home, MemoryBearerRef::Creator("ctr_test"), "adventure-story", &mem1).unwrap();
+        memory_io::save_memory(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            "adventure-story",
+            &mem1,
+        )
+        .unwrap();
 
         let mut mem2 = LongTermMemory::new("character_note");
         mem2.set_body(
             "Alice is a brave and resourceful protagonist who overcomes great obstacles.",
         );
-        memory_io::save_memory(&home, MemoryBearerRef::Creator("ctr_test"), "alice-note", &mem2).unwrap();
+        memory_io::save_memory(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            "alice-note",
+            &mem2,
+        )
+        .unwrap();
 
         // Create a non-experience memory (should be ignored)
         let mut mem3 = LongTermMemory::new("research_material");
         mem3.set_body("Research on medieval castles.");
-        memory_io::save_memory(&home, MemoryBearerRef::Creator("ctr_test"), "castle-research", &mem3).unwrap();
+        memory_io::save_memory(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            "castle-research",
+            &mem3,
+        )
+        .unwrap();
 
-        let result = aggregate_experience(&home, MemoryBearerRef::Creator("ctr_test"), None).await.unwrap();
+        let result = aggregate_experience(&home, MemoryBearerRef::Creator("ctr_test"), None)
+            .await
+            .unwrap();
 
         assert_eq!(result.memories_processed, 2);
         assert!(!result.used_acp);
@@ -484,12 +507,19 @@ mod tests {
 
         let mut mem = LongTermMemory::new("story_summary");
         mem.set_body("An epic tale of courage.");
-        memory_io::save_memory(&home, MemoryBearerRef::Creator("ctr_test"), "epic-tale", &mem).unwrap();
+        memory_io::save_memory(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            "epic-tale",
+            &mem,
+        )
+        .unwrap();
 
         let synth = MockSynthesizer;
-        let result = aggregate_experience(&home, MemoryBearerRef::Creator("ctr_test"), Some(&synth))
-            .await
-            .unwrap();
+        let result =
+            aggregate_experience(&home, MemoryBearerRef::Creator("ctr_test"), Some(&synth))
+                .await
+                .unwrap();
 
         assert!(result.used_acp);
         assert_eq!(result.memories_processed, 1);
@@ -521,12 +551,19 @@ mod tests {
 
         let mut mem = LongTermMemory::new("story_summary");
         mem.set_body("A test story summary.");
-        memory_io::save_memory(&home, MemoryBearerRef::Creator("ctr_test"), "test-story", &mem).unwrap();
+        memory_io::save_memory(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            "test-story",
+            &mem,
+        )
+        .unwrap();
 
         let synth = FailingSynthesizer;
-        let result = aggregate_experience(&home, MemoryBearerRef::Creator("ctr_test"), Some(&synth))
-            .await
-            .unwrap();
+        let result =
+            aggregate_experience(&home, MemoryBearerRef::Creator("ctr_test"), Some(&synth))
+                .await
+                .unwrap();
 
         assert!(!result.used_acp);
         assert_eq!(result.memories_processed, 1);
@@ -556,11 +593,18 @@ mod tests {
         // Create experience memories
         let mut mem1 = LongTermMemory::new("theme_analysis");
         mem1.set_body("Themes of isolation and connection in modern fiction.");
-        memory_io::save_memory(&home, MemoryBearerRef::Creator(creator_id), "isolation-theme", &mem1)
-            .unwrap();
+        memory_io::save_memory(
+            &home,
+            MemoryBearerRef::Creator(creator_id),
+            "isolation-theme",
+            &mem1,
+        )
+        .unwrap();
 
         // Aggregate
-        let result = aggregate_experience(&home, MemoryBearerRef::Creator(creator_id), None).await.unwrap();
+        let result = aggregate_experience(&home, MemoryBearerRef::Creator(creator_id), None)
+            .await
+            .unwrap();
         assert_eq!(result.memories_processed, 1);
         assert!(result.experience_markdown.contains("isolation-theme"));
 
@@ -587,18 +631,31 @@ mod tests {
         crate::soul_io::save(&home, MemoryBearerRef::Creator(creator_id), &soul).unwrap();
 
         // Push personality to memory
-        let memory =
-            crate::personality_sync::push_personality_to_memory(&home, MemoryBearerRef::Creator(creator_id), &soul).unwrap();
+        let memory = crate::personality_sync::push_personality_to_memory(
+            &home,
+            MemoryBearerRef::Creator(creator_id),
+            &soul,
+        )
+        .unwrap();
 
         // Verify file exists and is valid
-        let loaded = memory_io::load_memory(&home, MemoryBearerRef::Creator(creator_id), "personality-core").unwrap();
+        let loaded = memory_io::load_memory(
+            &home,
+            MemoryBearerRef::Creator(creator_id),
+            "personality-core",
+        )
+        .unwrap();
         assert_eq!(loaded.frontmatter.memory_kind, "personality_core");
         assert!(loaded.body.contains("minimalist prose style"));
         assert!(loaded.validate().is_ok());
 
         // Re-push should preserve memory_id
-        let memory2 =
-            crate::personality_sync::push_personality_to_memory(&home, MemoryBearerRef::Creator(creator_id), &soul).unwrap();
+        let memory2 = crate::personality_sync::push_personality_to_memory(
+            &home,
+            MemoryBearerRef::Creator(creator_id),
+            &soul,
+        )
+        .unwrap();
         assert_eq!(
             memory.frontmatter.memory_id, memory2.frontmatter.memory_id,
             "re-push should preserve memory_id"

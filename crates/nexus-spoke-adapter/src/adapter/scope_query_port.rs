@@ -219,7 +219,9 @@ mod tests {
         (pool, dir)
     }
 
-    async fn seed_world_with_entries(pool: &sqlx::SqlitePool) -> (String, Vec<KnowledgeEntryRecord>) {
+    async fn seed_world_with_entries(
+        pool: &sqlx::SqlitePool,
+    ) -> (String, Vec<KnowledgeEntryRecord>) {
         // SAFETY: test-only static INSERTs with bind params.
         sqlx::query(
             "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
@@ -402,7 +404,8 @@ mod tests {
 
         let store = SqliteKbStore::new(pool.clone());
         for i in 0..=LIST_BY_WORLD_LIMIT {
-            let mut entry = KnowledgeEntryRecord::new("wld_big", BlockType::Item, &format!("Row_{i:03}"));
+            let mut entry =
+                KnowledgeEntryRecord::new("wld_big", BlockType::Item, &format!("Row_{i:03}"));
             entry.entry_id = format!("kb_big_{i:03}");
             store.insert_knowledge_entry(entry).await.unwrap();
         }

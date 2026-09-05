@@ -202,7 +202,11 @@ mod tests {
         }
     }
 
-    fn confirmed_block(world_id: &str, name: &str, body: KnowledgeEntryBody) -> KnowledgeEntryRecord {
+    fn confirmed_block(
+        world_id: &str,
+        name: &str,
+        body: KnowledgeEntryBody,
+    ) -> KnowledgeEntryRecord {
         let mut kb = KnowledgeEntryRecord::new(world_id, BlockType::Character, name);
         kb.status = "confirmed".to_string();
         kb.body = Some(body);

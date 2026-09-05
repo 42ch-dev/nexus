@@ -10,14 +10,14 @@
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
 
-pub mod api;
 pub mod actor_admission;
 pub mod actor_knowledge_view;
-pub mod character_tom;
+pub mod api;
 pub mod auth;
 pub mod auto_chronology;
 pub mod boot;
 pub mod capability_registry;
+pub mod character_tom;
 pub mod check;
 pub mod config;
 // V1.174 P0 T1 (AR-57/AR-61): peer-tools Connect client stack — WS

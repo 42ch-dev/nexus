@@ -35,7 +35,8 @@ pub struct CharacterSoulNarrativeRecord {
     pub updated_at: String,
 }
 
-fn record_from_row(
+#[allow(clippy::too_many_arguments)] // raw column values — the full row shape
+const fn record_from_row(
     character_id: String,
     actor_world_binding_id: Option<String>,
     narrative: Option<String>,
@@ -282,7 +283,13 @@ pub async fn character_soul_narrative_fragment_stats(
     owner_creator_id: &str,
     character_id: &str,
     binding_id: Option<&str>,
-) -> Result<(SoulNarrativeFragmentStats, Option<CharacterSoulNarrativeRecord>), LocalDbError> {
+) -> Result<
+    (
+        SoulNarrativeFragmentStats,
+        Option<CharacterSoulNarrativeRecord>,
+    ),
+    LocalDbError,
+> {
     require_owned_character_pool(pool, owner_creator_id, character_id).await?;
     if let Some(binding_id) = binding_id {
         require_active_owned_provenance_pool(pool, owner_creator_id, character_id, binding_id)

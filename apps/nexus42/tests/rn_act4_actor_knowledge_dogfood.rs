@@ -9,6 +9,7 @@ use common::rn_act4::{
 use common::LiveDaemon;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[allow(clippy::too_many_lines)] // dogfood proof
 async fn rn_act4_five_views_share_row_identity_without_copies() {
     let d = LiveDaemon::start().await;
     let g = seed(&d).await;
@@ -21,7 +22,11 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
 
     assert_eq!(
         entry_ids(&a_w1),
-        expected_ids(&[g.ke_w1_public.clone(), g.ke_a_share.clone(), g.ke_a_w1_local.clone()])
+        expected_ids(&[
+            g.ke_w1_public.clone(),
+            g.ke_a_share.clone(),
+            g.ke_a_w1_local.clone()
+        ])
     );
     assert_eq!(
         entry_ids(&a_w2),
@@ -31,7 +36,10 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
         entry_ids(&b_w1),
         expected_ids(&[g.ke_w1_public.clone(), g.ke_b_share.clone()])
     );
-    assert_eq!(entry_ids(&later), expected_ids(&[g.ke_a_share.clone()]));
+    assert_eq!(
+        entry_ids(&later),
+        expected_ids(std::slice::from_ref(&g.ke_a_share))
+    );
     assert_eq!(
         entry_ids(&creator),
         expected_ids(&[
@@ -49,17 +57,47 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
 
     assert_eq!(a_w1_i[&g.ke_a_share]["canonical_name"], NAME_A_SHARE);
     assert_eq!(a_w2_i[&g.ke_a_share]["canonical_name"], NAME_A_SHARE);
-    assert_eq!(named_item(&creator_i, NAME_W1_SECRET)["entry_id"], g.ke_w1_secret);
+    assert_eq!(
+        named_item(&creator_i, NAME_W1_SECRET)["entry_id"],
+        g.ke_w1_secret
+    );
     assert_eq!(named_item(&creator_i, NAME_W1_SECRET)["creator_only"], true);
-    assert_eq!(named_item(&a_w1_i, NAME_W1_PUBLIC)["entry_id"], g.ke_w1_public);
-    assert_eq!(named_item(&a_w1_i, NAME_A_W1_LOCAL)["owner"]["kind"], "actor_world_binding");
-    assert_eq!(named_item(&a_w1_i, NAME_A_W1_LOCAL)["owner"]["id"], g.bind_a_w1);
-    assert_eq!(named_item(&a_w1_i, NAME_A_SHARE)["owner"]["kind"], "character");
-    assert_eq!(named_item(&a_w1_i, NAME_A_SHARE)["owner"]["id"], g.character_a);
-    assert_eq!(named_item(&a_w1_i, NAME_W1_PUBLIC)["owner"]["kind"], "world");
-    assert_eq!(named_item(&a_w1_i, NAME_W1_PUBLIC)["owner"]["id"], g.world_w1);
-    assert_eq!(named_item(&a_w2_i, NAME_W2_PUBLIC)["entry_id"], g.ke_w2_public);
-    assert_eq!(named_item(&creator_i, NAME_B_SHARE)["entry_id"], g.ke_b_share);
+    assert_eq!(
+        named_item(&a_w1_i, NAME_W1_PUBLIC)["entry_id"],
+        g.ke_w1_public
+    );
+    assert_eq!(
+        named_item(&a_w1_i, NAME_A_W1_LOCAL)["owner"]["kind"],
+        "actor_world_binding"
+    );
+    assert_eq!(
+        named_item(&a_w1_i, NAME_A_W1_LOCAL)["owner"]["id"],
+        g.bind_a_w1
+    );
+    assert_eq!(
+        named_item(&a_w1_i, NAME_A_SHARE)["owner"]["kind"],
+        "character"
+    );
+    assert_eq!(
+        named_item(&a_w1_i, NAME_A_SHARE)["owner"]["id"],
+        g.character_a
+    );
+    assert_eq!(
+        named_item(&a_w1_i, NAME_W1_PUBLIC)["owner"]["kind"],
+        "world"
+    );
+    assert_eq!(
+        named_item(&a_w1_i, NAME_W1_PUBLIC)["owner"]["id"],
+        g.world_w1
+    );
+    assert_eq!(
+        named_item(&a_w2_i, NAME_W2_PUBLIC)["entry_id"],
+        g.ke_w2_public
+    );
+    assert_eq!(
+        named_item(&creator_i, NAME_B_SHARE)["entry_id"],
+        g.ke_b_share
+    );
 
     let character_owned: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM kb_key_blocks WHERE owner_kind = 'character' AND character_id = ?",

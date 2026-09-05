@@ -233,12 +233,14 @@ active_workspace_slug_by_creator = { ctr_alias_test = "default" }
             nexus_contracts::BlockType::Character,
             "char_alias_cmd",
         );
-        kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
-            summary: Some("Alias command test summary".to_string()),
-            attributes: Some(serde_json::json!({"novel_category": "character"})),
-            tags: Some(vec!["alias-test".to_string()]),
-            ..Default::default()
-        });
+        kb.body = Some(
+            nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
+                summary: Some("Alias command test summary".to_string()),
+                attributes: Some(serde_json::json!({"novel_category": "character"})),
+                tags: Some(vec!["alias-test".to_string()]),
+                ..Default::default()
+            },
+        );
         let _result = store.insert_knowledge_entry(kb).await.unwrap();
     });
 

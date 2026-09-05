@@ -676,12 +676,13 @@ async fn sync_work_kb_rows(
     // Parse each aggregate's payload into a KnowledgeEntryBody for the delta.
     let mut new_bodies: Vec<(String, KnowledgeEntryBody)> = Vec::with_capacity(aggregates.len());
     for agg in aggregates {
-        let body: KnowledgeEntryBody = serde_json::from_str(&agg.proposed_payload).map_err(|e| {
-            CliError::Other(format!(
-                "Aggregate produced invalid proposed_payload for '{}': {e}",
-                agg.canonical_name
-            ))
-        })?;
+        let body: KnowledgeEntryBody =
+            serde_json::from_str(&agg.proposed_payload).map_err(|e| {
+                CliError::Other(format!(
+                    "Aggregate produced invalid proposed_payload for '{}': {e}",
+                    agg.canonical_name
+                ))
+            })?;
         new_bodies.push((agg.canonical_name.clone(), body));
     }
 

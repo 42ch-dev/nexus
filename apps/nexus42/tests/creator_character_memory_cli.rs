@@ -18,8 +18,8 @@ use nexus_agent_host::capability::model::{
     HostStartConfig, OperationFinishedEvent, OperationStartedEvent, TextDeltaEvent,
 };
 use nexus_agent_host::{
-    HostError, HostFacade, HostOperationId, HostResult, HostSession, HostSessionId, ProviderCatalog,
-    SessionState,
+    HostError, HostFacade, HostOperationId, HostResult, HostSession, HostSessionId,
+    ProviderCatalog, SessionState,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -31,7 +31,8 @@ const MOCK_RESULT: &str = "mock-host-result";
 
 /// Deterministic marker strings seeded through public operations only.
 const SOUL_MARKER: &str = "AVASOULMARKER keeps a ledger of every debt owed to the river.";
-const SHARED_MEMORY_MARKER: &str = "SHAREDMEMORYMARKER the harbor accord holds because Ava keeps it";
+const SHARED_MEMORY_MARKER: &str =
+    "SHAREDMEMORYMARKER the harbor accord holds because Ava keeps it";
 const LOCAL_MEMORY_MARKER: &str = "LOCALMEMORYMARKER only W1 saw the lantern signal at dusk";
 
 struct MockHost {
@@ -197,6 +198,7 @@ fn fragment_digest(marker: &str) -> String {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[allow(clippy::too_many_lines)] // single lifecycle parity proof
 async fn character_memory_lifecycle_json_and_human_parity() {
     let d = LiveDaemon::start().await;
     let g = seed(&d).await;
@@ -259,7 +261,13 @@ async fn character_memory_lifecycle_json_and_human_parity() {
     let out = cli_ok(
         &d,
         &[
-            "creator", "character", "memory", "pending-count", "--character-id", chr, "--json",
+            "creator",
+            "character",
+            "memory",
+            "pending-count",
+            "--character-id",
+            chr,
+            "--json",
         ],
     )
     .await;
@@ -267,7 +275,12 @@ async fn character_memory_lifecycle_json_and_human_parity() {
     let out = cli_ok(
         &d,
         &[
-            "creator", "character", "memory", "pending-count", "--character-id", chr,
+            "creator",
+            "character",
+            "memory",
+            "pending-count",
+            "--character-id",
+            chr,
         ],
     )
     .await;
@@ -293,7 +306,13 @@ async fn character_memory_lifecycle_json_and_human_parity() {
     let out = cli_ok(
         &d,
         &[
-            "creator", "character", "memory", "pending-list", "--character-id", chr, "--json",
+            "creator",
+            "character",
+            "memory",
+            "pending-list",
+            "--character-id",
+            chr,
+            "--json",
         ],
     )
     .await;
@@ -307,7 +326,13 @@ async fn character_memory_lifecycle_json_and_human_parity() {
     let out = cli_ok(
         &d,
         &[
-            "creator", "character", "memory", "review", "--character-id", chr, "--json",
+            "creator",
+            "character",
+            "memory",
+            "review",
+            "--character-id",
+            chr,
+            "--json",
         ],
     )
     .await;
@@ -405,7 +430,13 @@ async fn character_memory_lifecycle_json_and_human_parity() {
     let out = cli_ok(
         &d,
         &[
-            "creator", "character", "soul", "reflect", "--character-id", chr, "--json",
+            "creator",
+            "character",
+            "soul",
+            "reflect",
+            "--character-id",
+            chr,
+            "--json",
         ],
     )
     .await;
@@ -414,7 +445,14 @@ async fn character_memory_lifecycle_json_and_human_parity() {
     assert_eq!(payload["state"], "insufficient_data");
     let out = cli_ok(
         &d,
-        &["creator", "character", "soul", "reflect", "--character-id", chr],
+        &[
+            "creator",
+            "character",
+            "soul",
+            "reflect",
+            "--character-id",
+            chr,
+        ],
     )
     .await;
     let human = stdout(&out);
@@ -423,6 +461,7 @@ async fn character_memory_lifecycle_json_and_human_parity() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[allow(clippy::too_many_lines)] // fail-closed proof
 async fn character_memory_fail_closed_no_mutation() {
     let d = LiveDaemon::start().await;
     let g = seed(&d).await;
@@ -431,12 +470,43 @@ async fn character_memory_fail_closed_no_mutation() {
     let missing = "chr_ffffffffffffffffffffffffffffffff";
     for args in [
         vec![
-            "creator", "character", "memory", "capture", "--character-id", missing,
-            "--pending-id", "pend_x", "--session-id", "sess_x", "--digest", "irrelevant digest text",
+            "creator",
+            "character",
+            "memory",
+            "capture",
+            "--character-id",
+            missing,
+            "--pending-id",
+            "pend_x",
+            "--session-id",
+            "sess_x",
+            "--digest",
+            "irrelevant digest text",
         ],
-        vec!["creator", "character", "memory", "pending-count", "--character-id", missing],
-        vec!["creator", "character", "memory", "review", "--character-id", missing],
-        vec!["creator", "character", "soul", "reflect", "--character-id", missing],
+        vec![
+            "creator",
+            "character",
+            "memory",
+            "pending-count",
+            "--character-id",
+            missing,
+        ],
+        vec![
+            "creator",
+            "character",
+            "memory",
+            "review",
+            "--character-id",
+            missing,
+        ],
+        vec![
+            "creator",
+            "character",
+            "soul",
+            "reflect",
+            "--character-id",
+            missing,
+        ],
     ] {
         let out = d.cli(&args).await;
         assert!(
@@ -508,6 +578,7 @@ async fn character_memory_fail_closed_no_mutation() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[allow(clippy::too_many_lines)] // single admitted-projection proof
 async fn character_run_projects_only_admitted_soul_and_memory() {
     let host = MockHost::new();
     let d = LiveDaemon::start_with_agent_host(host.clone()).await;
@@ -537,7 +608,11 @@ async fn character_run_projects_only_admitted_soul_and_memory() {
     // One shared fragment and one W1-binding-local fragment via public CLI.
     for (pending, binding, marker) in [
         ("pend_shared", None, SHARED_MEMORY_MARKER),
-        ("pend_local", Some(g.bind_a_w1.as_str()), LOCAL_MEMORY_MARKER),
+        (
+            "pend_local",
+            Some(g.bind_a_w1.as_str()),
+            LOCAL_MEMORY_MARKER,
+        ),
     ] {
         let session_id = format!("sess_{pending}");
         let digest = fragment_digest(marker);
@@ -565,7 +640,14 @@ async fn character_run_projects_only_admitted_soul_and_memory() {
     }
     cli_ok(
         &d,
-        &["creator", "character", "memory", "review", "--character-id", chr],
+        &[
+            "creator",
+            "character",
+            "memory",
+            "review",
+            "--character-id",
+            chr,
+        ],
     )
     .await;
     cli_ok(

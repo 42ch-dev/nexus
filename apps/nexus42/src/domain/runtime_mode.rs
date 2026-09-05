@@ -15,7 +15,7 @@ pub struct DomainRuntimeMode(pub RuntimeMode);
 
 impl DomainRuntimeMode {
     /// V1.2 default runtime mode.
-    pub const DEFAULT: DomainRuntimeMode = DomainRuntimeMode(RuntimeMode::LocalOnly);
+    pub const DEFAULT: Self = Self(RuntimeMode::LocalOnly);
     #[must_use]
     /// Create from generated enum.
     pub const fn new(mode: RuntimeMode) -> Self {
@@ -37,7 +37,7 @@ impl DomainRuntimeMode {
     #[must_use]
     /// Whether this mode allows optional platform use.
     /// `local_first` and `cloud_enhanced` return true.
-    pub fn allows_platform(&self) -> bool {
+    pub const fn allows_platform(&self) -> bool {
         !self.is_local_only()
     }
 
@@ -58,40 +58,47 @@ impl DomainRuntimeMode {
     }
 
     /// Downgrade to a more local-first mode.
-    /// Chain: `cloud_enhanced` → `local_first` → local_only
+    /// Chain: `cloud_enhanced` → `local_first` → `local_only`
     /// Returns None if already at `local_only` (cannot downgrade further).
     #[must_use]
-    pub const fn downgrade(&self) -> Option<DomainRuntimeMode> {
+    pub const fn downgrade(&self) -> Option<Self> {
         match self.0 {
-            RuntimeMode::CloudEnhanced => Some(DomainRuntimeMode(RuntimeMode::LocalFirst)),
-            RuntimeMode::LocalFirst => Some(DomainRuntimeMode(RuntimeMode::LocalOnly)),
+            RuntimeMode::CloudEnhanced => Some(Self(RuntimeMode::LocalFirst)),
+            RuntimeMode::LocalFirst => Some(Self(RuntimeMode::LocalOnly)),
             RuntimeMode::LocalOnly => None,
         }
     }
 
     /// Upgrade to a more cloud-enhanced mode.
-    /// Chain: `local_only` → `local_first` → cloud_enhanced
+    /// Chain: `local_only` → `local_first` → `cloud_enhanced`
     /// Returns None if already at `cloud_enhanced` (cannot upgrade further).
     #[must_use]
-    pub const fn upgrade(&self) -> Option<DomainRuntimeMode> {
+    pub const fn upgrade(&self) -> Option<Self> {
         match self.0 {
-            RuntimeMode::LocalOnly => Some(DomainRuntimeMode(RuntimeMode::LocalFirst)),
-            RuntimeMode::LocalFirst => Some(DomainRuntimeMode(RuntimeMode::CloudEnhanced)),
+            RuntimeMode::LocalOnly => Some(Self(RuntimeMode::LocalFirst)),
+            RuntimeMode::LocalFirst => Some(Self(RuntimeMode::CloudEnhanced)),
             RuntimeMode::CloudEnhanced => None,
         }
     }
 
     /// Calculate degradation depth from a target mode.
     /// 0 = same mode, 1 = one level down, 2 = two levels down.
-    pub const fn degradation_depth_to(&self, target: &DomainRuntimeMode) -> u32 {
+    #[must_use]
+    // Or-patterns group the mode-pairs that share a depth value; the grouped
+    // arms are the only way to express the depth table without duplicate
+    // match-arm bodies, and no further nesting is possible for these tuples.
+    #[allow(clippy::unnested_or_patterns)]
+    pub const fn degradation_depth_to(&self, target: &Self) -> u32 {
         match (self.0, target.0) {
-            (RuntimeMode::CloudEnhanced, RuntimeMode::CloudEnhanced) => 0,
-            (RuntimeMode::CloudEnhanced, RuntimeMode::LocalFirst) => 1,
+            (RuntimeMode::CloudEnhanced, RuntimeMode::CloudEnhanced)
+            | (RuntimeMode::LocalFirst, RuntimeMode::LocalFirst)
+            | (RuntimeMode::LocalOnly, RuntimeMode::LocalOnly)
+            | (RuntimeMode::LocalFirst, RuntimeMode::CloudEnhanced)
+            | (RuntimeMode::LocalOnly, RuntimeMode::CloudEnhanced)
+            | (RuntimeMode::LocalOnly, RuntimeMode::LocalFirst) => 0,
+            (RuntimeMode::CloudEnhanced, RuntimeMode::LocalFirst)
+            | (RuntimeMode::LocalFirst, RuntimeMode::LocalOnly) => 1,
             (RuntimeMode::CloudEnhanced, RuntimeMode::LocalOnly) => 2,
-            (RuntimeMode::LocalFirst, RuntimeMode::LocalFirst) => 0,
-            (RuntimeMode::LocalFirst, RuntimeMode::LocalOnly) => 1,
-            (RuntimeMode::LocalOnly, RuntimeMode::LocalOnly) => 0,
-            _ => 0, // Upgrades or invalid combinations
         }
     }
 }

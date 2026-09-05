@@ -81,10 +81,7 @@ pub enum LocalDbError {
     /// Input validation failed before reaching the database.
     ValidationError(String),
     /// Character / binding / world row is missing for the scoped caller.
-    ActorNotFound {
-        resource: &'static str,
-        id: String,
-    },
+    ActorNotFound { resource: &'static str, id: String },
     /// Stable actor-contract product conflict (HTTP 409 at the Daemon).
     ActorContractConflict { code: ActorContractConflict },
 }
@@ -133,9 +130,7 @@ impl ActorContractConflict {
             Self::InvalidWorldSheet => {
                 "WorldSheet is missing, deleted, the wrong type, or belongs to another World"
             }
-            Self::WorldHasActorBindings => {
-                "World has Character bindings that prevent deletion"
-            }
+            Self::WorldHasActorBindings => "World has Character bindings that prevent deletion",
             Self::BindingHasOwnedKnowledge => {
                 "Cannot remove a binding that still owns KnowledgeEntry rows"
             }

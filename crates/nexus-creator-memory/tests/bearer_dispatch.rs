@@ -18,14 +18,17 @@ const CHR_A: &str = "chr_0123456789abcdef0123456789abcdef";
 const CHR_B: &str = "chr_aabbccddee00112233445566778899ff";
 
 fn tmp(tag: &str) -> PathBuf {
-    PathBuf::from(format!("/tmp/test_bearer_dispatch_{tag}_{}", std::process::id()))
+    PathBuf::from(format!(
+        "/tmp/test_bearer_dispatch_{tag}_{}",
+        std::process::id()
+    ))
 }
 
-fn creator() -> MemoryBearerRef<'static> {
+const fn creator() -> MemoryBearerRef<'static> {
     MemoryBearerRef::Creator(OWNER)
 }
 
-fn character() -> MemoryBearerRef<'static> {
+const fn character() -> MemoryBearerRef<'static> {
     MemoryBearerRef::Character {
         owner_creator_id: OWNER,
         character_id: CHR_A,
@@ -200,7 +203,9 @@ fn character_memory_roundtrip_and_scope_isolation() {
 
     // Isolation: the owning Creator, a sibling Character, and a foreign
     // owner all see nothing.
-    assert!(memory_io::list_memories(&home, creator()).unwrap().is_empty());
+    assert!(memory_io::list_memories(&home, creator())
+        .unwrap()
+        .is_empty());
     let sibling = MemoryBearerRef::Character {
         owner_creator_id: OWNER,
         character_id: CHR_B,

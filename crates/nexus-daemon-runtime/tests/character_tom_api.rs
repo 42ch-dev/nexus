@@ -75,7 +75,8 @@ async fn create_character(server: &TestServer, name: &str, world_id: &str) -> Va
 
 async fn seed_carrier(pool: &sqlx::SqlitePool, character_id: &str) -> String {
     let store = SqliteKbStore::new(pool.clone());
-    let mut kb = KnowledgeEntryRecord::for_character(character_id, BlockType::Character, "TomCarrier");
+    let mut kb =
+        KnowledgeEntryRecord::for_character(character_id, BlockType::Character, "TomCarrier");
     kb.modules = Some(json!({ "belief": [] }));
     let id = kb.entry_id.clone();
     store.insert_knowledge_entry(kb).await.unwrap();
@@ -290,7 +291,12 @@ async fn order_outside_closed_space_and_invalid_labels_reject() {
         let mut body = l1_body(WORLD_A, bind_a, &carrier, chr_a, 0);
         body["order"] = json!(bad_order);
         let resp = record(&ctx.server, chr_a, body).await;
-        assert_eq!(resp.status_code(), 422, "order {bad_order}: {}", resp.text());
+        assert_eq!(
+            resp.status_code(),
+            422,
+            "order {bad_order}: {}",
+            resp.text()
+        );
     }
 
     let mut bad_label = l1_body(WORLD_A, bind_a, &carrier, chr_a, 0);
@@ -354,7 +360,12 @@ async fn set_world_status(pool: &sqlx::SqlitePool, world_id: &str, status: &str)
         .unwrap();
 }
 
-async fn seed_carrier_with_modules(pool: &sqlx::SqlitePool, character_id: &str, name: &str, modules: Value) -> String {
+async fn seed_carrier_with_modules(
+    pool: &sqlx::SqlitePool,
+    character_id: &str,
+    name: &str,
+    modules: Value,
+) -> String {
     let store = SqliteKbStore::new(pool.clone());
     let mut kb = KnowledgeEntryRecord::for_character(character_id, BlockType::Character, name);
     kb.modules = Some(modules);
@@ -363,7 +374,12 @@ async fn seed_carrier_with_modules(pool: &sqlx::SqlitePool, character_id: &str, 
     id
 }
 
-async fn seed_binding_carrier_with_modules(pool: &sqlx::SqlitePool, binding_id: &str, name: &str, modules: Value) -> String {
+async fn seed_binding_carrier_with_modules(
+    pool: &sqlx::SqlitePool,
+    binding_id: &str,
+    name: &str,
+    modules: Value,
+) -> String {
     let store = SqliteKbStore::new(pool.clone());
     let mut kb = KnowledgeEntryRecord::for_binding(binding_id, BlockType::Character, name);
     kb.modules = Some(modules);
@@ -381,14 +397,15 @@ async fn carrier_modules_json(pool: &sqlx::SqlitePool, carrier_id: &str) -> Stri
 }
 
 async fn carrier_revision(pool: &sqlx::SqlitePool, carrier_id: &str) -> i64 {
-    sqlx::query_scalar::<_, Option<i64>>("SELECT revision FROM kb_key_blocks WHERE key_block_id = ?")
-        .bind(carrier_id)
-        .fetch_one(pool)
-        .await
-        .unwrap()
-        .unwrap_or(0)
+    sqlx::query_scalar::<_, Option<i64>>(
+        "SELECT revision FROM kb_key_blocks WHERE key_block_id = ?",
+    )
+    .bind(carrier_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+    .unwrap_or(0)
 }
-
 
 #[tokio::test]
 async fn inactive_viewer_world_and_subject_fail_closed() {
@@ -400,16 +417,36 @@ async fn inactive_viewer_world_and_subject_fail_closed() {
 
     // Archived viewer: record and list reject 409 before any mutation.
     set_character_status(&ctx.pool, &chr_a, "archived").await;
-    let resp = record(&ctx.server, &chr_a, l1_body(WORLD_A, &bind_a, &carrier, &chr_a, 0)).await;
-    assert_eq!(resp.status_code(), 409, "archived viewer record: {}", resp.text());
+    let resp = record(
+        &ctx.server,
+        &chr_a,
+        l1_body(WORLD_A, &bind_a, &carrier, &chr_a, 0),
+    )
+    .await;
+    assert_eq!(
+        resp.status_code(),
+        409,
+        "archived viewer record: {}",
+        resp.text()
+    );
     let path = format!("/v1/daemon/characters/{chr_a}/tom?world_id={WORLD_A}&binding_id={bind_a}");
     let resp = ctx.server.get(&path).await;
-    assert_eq!(resp.status_code(), 409, "archived viewer list: {}", resp.text());
+    assert_eq!(
+        resp.status_code(),
+        409,
+        "archived viewer list: {}",
+        resp.text()
+    );
     set_character_status(&ctx.pool, &chr_a, "active").await;
 
     // Inactive world: record rejects 409.
     set_world_status(&ctx.pool, WORLD_A, "paused").await;
-    let resp = record(&ctx.server, &chr_a, l1_body(WORLD_A, &bind_a, &carrier, &chr_a, 0)).await;
+    let resp = record(
+        &ctx.server,
+        &chr_a,
+        l1_body(WORLD_A, &bind_a, &carrier, &chr_a, 0),
+    )
+    .await;
     assert_eq!(resp.status_code(), 409, "inactive world: {}", resp.text());
     set_world_status(&ctx.pool, WORLD_A, "active").await;
 
@@ -436,14 +473,30 @@ async fn malformed_modules_reject_without_rewrite_and_unknown_keys_survive() {
     // Non-object modules: deterministic reject, no panic, bytes unchanged.
     let c1 = seed_carrier_with_modules(&ctx.pool, &chr_a, "ArrModules", json!([1, 2, 3])).await;
     let before = carrier_modules_json(&ctx.pool, &c1).await;
-    let resp = record(&ctx.server, &chr_a, l1_body(WORLD_A, &bind_a, &c1, &chr_a, 0)).await;
+    let resp = record(
+        &ctx.server,
+        &chr_a,
+        l1_body(WORLD_A, &bind_a, &c1, &chr_a, 0),
+    )
+    .await;
     assert_eq!(resp.status_code(), 409, "array modules: {}", resp.text());
     assert_eq!(carrier_modules_json(&ctx.pool, &c1).await, before);
 
     // Non-array belief member: reject, never silently replaced with [].
-    let c2 = seed_carrier_with_modules(&ctx.pool, &chr_a, "ObjBelief", json!({"belief": {"legacy": true}})).await;
+    let c2 = seed_carrier_with_modules(
+        &ctx.pool,
+        &chr_a,
+        "ObjBelief",
+        json!({"belief": {"legacy": true}}),
+    )
+    .await;
     let before = carrier_modules_json(&ctx.pool, &c2).await;
-    let resp = record(&ctx.server, &chr_a, l1_body(WORLD_A, &bind_a, &c2, &chr_a, 0)).await;
+    let resp = record(
+        &ctx.server,
+        &chr_a,
+        l1_body(WORLD_A, &bind_a, &c2, &chr_a, 0),
+    )
+    .await;
     assert_eq!(resp.status_code(), 409, "object belief: {}", resp.text());
     assert_eq!(carrier_modules_json(&ctx.pool, &c2).await, before);
 
@@ -456,10 +509,18 @@ async fn malformed_modules_reject_without_rewrite_and_unknown_keys_survive() {
         json!({"belief": [], "mental": {"identity": {"role": "harbor_master"}}, "x_custom": {"n": 1}}),
     )
     .await;
-    let resp = record(&ctx.server, &chr_a, l1_body(WORLD_A, &bind_a, &c3, &chr_a, 0)).await;
+    let resp = record(
+        &ctx.server,
+        &chr_a,
+        l1_body(WORLD_A, &bind_a, &c3, &chr_a, 0),
+    )
+    .await;
     assert_eq!(resp.status_code(), 200, "mixed modules: {}", resp.text());
     let after: Value = serde_json::from_str(&carrier_modules_json(&ctx.pool, &c3).await).unwrap();
-    assert_eq!(after["mental"], json!({"identity": {"role": "harbor_master"}}));
+    assert_eq!(
+        after["mental"],
+        json!({"identity": {"role": "harbor_master"}})
+    );
     assert_eq!(after["x_custom"], json!({"n": 1}));
     assert_eq!(after["belief"].as_array().unwrap().len(), 1);
 
@@ -495,18 +556,23 @@ async fn physical_row_ordinal_survives_malformed_elements_and_cursor_pages() {
     )
     .await;
 
-    let path = format!(
-        "/v1/daemon/characters/{chr_a}/tom?world_id={WORLD_A}&binding_id={bind_a}&limit=1"
-    );
+    let path =
+        format!("/v1/daemon/characters/{chr_a}/tom?world_id={WORLD_A}&binding_id={bind_a}&limit=1");
     let page1: Value = {
         let resp = ctx.server.get(&path).await;
         assert_eq!(resp.status_code(), 200, "{}", resp.text());
         resp.json()
     };
     assert_eq!(page1["items"].as_array().unwrap().len(), 1);
-    assert_eq!(page1["items"][0]["row_ordinal"], 0, "first row keeps physical ordinal 0");
+    assert_eq!(
+        page1["items"][0]["row_ordinal"], 0,
+        "first row keeps physical ordinal 0"
+    );
     assert_eq!(page1["pagination"]["has_more"], true);
-    let cursor = page1["pagination"]["next_cursor"].as_str().unwrap().to_string();
+    let cursor = page1["pagination"]["next_cursor"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let cursor = cursor.replace('\u{1f}', "%1F");
 
     let page2: Value = {
@@ -516,7 +582,10 @@ async fn physical_row_ordinal_survives_malformed_elements_and_cursor_pages() {
     };
     let items = page2["items"].as_array().unwrap();
     assert_eq!(items.len(), 1, "exactly one remaining valid row: {page2}");
-    assert_eq!(items[0]["row_ordinal"], 2, "row after malformed element keeps physical ordinal 2");
+    assert_eq!(
+        items[0]["row_ordinal"], 2,
+        "row after malformed element keeps physical ordinal 2"
+    );
     assert_eq!(items[0]["carrier_entry_id"], carrier);
     assert_eq!(items[0]["proposition"], "third");
     assert_eq!(page2["pagination"]["has_more"], false);
@@ -533,7 +602,8 @@ async fn corpus_and_row_caps_fail_closed_before_materialization() {
     // Carrier corpus above the documented per-scope cap rejects deterministically.
     let store = SqliteKbStore::new(ctx.pool.clone());
     for i in 0..=200 {
-        let mut kb = KnowledgeEntryRecord::for_character(&chr_a, BlockType::Character, &format!("Bulk{i}"));
+        let mut kb =
+            KnowledgeEntryRecord::for_character(&chr_a, BlockType::Character, &format!("Bulk{i}"));
         kb.modules = Some(json!({"belief": []}));
         store.insert_knowledge_entry(kb).await.unwrap();
     }
@@ -543,15 +613,21 @@ async fn corpus_and_row_caps_fail_closed_before_materialization() {
     // Belief rows above the per-carrier cap reject deterministically.
     let ctx2 = crate::ctx().await;
     let a2 = create_character(&ctx2.server, "Ava", WORLD_A).await;
-    let chr_a2 = a2["character"]["character_id"].as_str().unwrap().to_string();
+    let chr_a2 = a2["character"]["character_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let bind_a2 = a2["binding"]["binding_id"].as_str().unwrap().to_string();
     let rows: Vec<Value> = (0..=200)
         .map(|i| json!({"holder": chr_a2, "proposition": format!("p{i}"), "order": 1}))
         .collect();
-    let _carrier = seed_carrier_with_modules(&ctx2.pool, &chr_a2, "BigBelief", json!({"belief": rows})).await;
+    let _carrier =
+        seed_carrier_with_modules(&ctx2.pool, &chr_a2, "BigBelief", json!({"belief": rows})).await;
     let resp = ctx2
         .server
-        .get(&format!("/v1/daemon/characters/{chr_a2}/tom?world_id={WORLD_A}&binding_id={bind_a2}"))
+        .get(&format!(
+            "/v1/daemon/characters/{chr_a2}/tom?world_id={WORLD_A}&binding_id={bind_a2}"
+        ))
         .await;
     assert_eq!(resp.status_code(), 409, "row cap: {}", resp.text());
 }
@@ -568,8 +644,18 @@ async fn storage_failure_is_internal_not_not_found() {
         .execute(&ctx.pool)
         .await
         .unwrap();
-    let resp = record(&ctx.server, &chr_a, l1_body(WORLD_A, &bind_a, &carrier, &chr_a, 0)).await;
-    assert_eq!(resp.status_code(), 500, "storage failure must not be a 404: {}", resp.text());
+    let resp = record(
+        &ctx.server,
+        &chr_a,
+        l1_body(WORLD_A, &bind_a, &carrier, &chr_a, 0),
+    )
+    .await;
+    assert_eq!(
+        resp.status_code(),
+        500,
+        "storage failure must not be a 404: {}",
+        resp.text()
+    );
 }
 
 #[tokio::test]
@@ -584,13 +670,23 @@ async fn extreme_expected_revision_rejects_without_panic_or_mutation() {
         let mut body = l1_body(WORLD_A, &bind_a, &carrier, &chr_a, 0);
         body["expected_revision"] = json!(extreme);
         let resp = record(&ctx.server, &chr_a, body).await;
-        assert_eq!(resp.status_code(), 422, "revision {extreme}: {}", resp.text());
+        assert_eq!(
+            resp.status_code(),
+            422,
+            "revision {extreme}: {}",
+            resp.text()
+        );
     }
     // i64::MAX - 1 is representable; CAS misses normally as a 409, never a panic.
     let mut body = l1_body(WORLD_A, &bind_a, &carrier, &chr_a, 0);
     body["expected_revision"] = json!(i64::MAX - 1);
     let resp = record(&ctx.server, &chr_a, body).await;
-    assert_eq!(resp.status_code(), 409, "near-max revision: {}", resp.text());
+    assert_eq!(
+        resp.status_code(),
+        409,
+        "near-max revision: {}",
+        resp.text()
+    );
 
     assert_eq!(mind_state_count(&ctx.pool).await, 0);
     assert_eq!(carrier_revision(&ctx.pool, &carrier).await, 0);
@@ -640,22 +736,42 @@ async fn invalid_json_modules_fails_closed_and_never_overwritten() {
     let carrier = seed_carrier(&ctx.pool, &chr_a).await;
     set_carrier_modules_text(&ctx.pool, &carrier, "{\"belief\": [").await; // invalid JSON text
 
-    let resp = record(&ctx.server, &chr_a, l1_body(WORLD_A, &bind_a, &carrier, &chr_a, 0)).await;
-    assert_eq!(resp.status_code(), 409, "invalid json record: {}", resp.text());
+    let resp = record(
+        &ctx.server,
+        &chr_a,
+        l1_body(WORLD_A, &bind_a, &carrier, &chr_a, 0),
+    )
+    .await;
     assert_eq!(
-        resp.json::<Value>()["error"]["code"], "carrier_modules_invalid_json",
+        resp.status_code(),
+        409,
+        "invalid json record: {}",
+        resp.text()
+    );
+    assert_eq!(
+        resp.json::<Value>()["error"]["code"],
+        "carrier_modules_invalid_json",
         "must be distinguishable from shape-malformed / absent"
     );
     // Bytes are preserved: never coerced to absent or overwritten.
-    assert_eq!(carrier_modules_json(&ctx.pool, &carrier).await, "{\"belief\": [");
+    assert_eq!(
+        carrier_modules_json(&ctx.pool, &carrier).await,
+        "{\"belief\": ["
+    );
     assert_eq!(mind_state_count(&ctx.pool).await, 0);
     assert_eq!(carrier_revision(&ctx.pool, &carrier).await, 0);
 
     let path = format!("/v1/daemon/characters/{chr_a}/tom?world_id={WORLD_A}&binding_id={bind_a}");
     let resp = ctx.server.get(&path).await;
-    assert_eq!(resp.status_code(), 409, "invalid json list: {}", resp.text());
     assert_eq!(
-        resp.json::<Value>()["error"]["code"], "carrier_modules_invalid_json",
+        resp.status_code(),
+        409,
+        "invalid json list: {}",
+        resp.text()
+    );
+    assert_eq!(
+        resp.json::<Value>()["error"]["code"],
+        "carrier_modules_invalid_json",
         "list must also fail closed on invalid persisted JSON"
     );
 }
@@ -668,16 +784,42 @@ async fn derivative_history_uses_one_grouped_row_per_carrier() {
     let bind_a = a["binding"]["binding_id"].as_str().unwrap().to_string();
     let carrier = seed_carrier(&ctx.pool, &chr_a).await;
 
-    let resp = record(&ctx.server, &chr_a, l1_body(WORLD_A, &bind_a, &carrier, &chr_a, 0)).await;
+    let resp = record(
+        &ctx.server,
+        &chr_a,
+        l1_body(WORLD_A, &bind_a, &carrier, &chr_a, 0),
+    )
+    .await;
     assert_eq!(resp.status_code(), 200, "{}", resp.text());
 
     // Add out-of-band derivatives with far-future created_at (the anti-join
     // orders by created_at / mind_state_id) plus a run of older history; only
     // the single latest row's occurred_at must surface — never a concatenated
     // or unbounded list.
-    insert_derivative_mind_state(&ctx.pool, "ms_bg_old", &carrier, "2099-01-01T00:00:00Z", "2099-01-01T00:00:00Z").await;
-    insert_derivative_mind_state(&ctx.pool, "ms_bg_old2", &carrier, "2099-01-02T00:00:00Z", "2099-01-02T00:00:00Z").await;
-    insert_derivative_mind_state(&ctx.pool, "ms_bg_latest", &carrier, "2099-01-03T00:00:00Z", "2099-01-03T00:00:00Z").await;
+    insert_derivative_mind_state(
+        &ctx.pool,
+        "ms_bg_old",
+        &carrier,
+        "2099-01-01T00:00:00Z",
+        "2099-01-01T00:00:00Z",
+    )
+    .await;
+    insert_derivative_mind_state(
+        &ctx.pool,
+        "ms_bg_old2",
+        &carrier,
+        "2099-01-02T00:00:00Z",
+        "2099-01-02T00:00:00Z",
+    )
+    .await;
+    insert_derivative_mind_state(
+        &ctx.pool,
+        "ms_bg_latest",
+        &carrier,
+        "2099-01-03T00:00:00Z",
+        "2099-01-03T00:00:00Z",
+    )
+    .await;
 
     let page = list_tom(&ctx.server, &chr_a, WORLD_A, &bind_a).await;
     let items = page["items"].as_array().unwrap();
@@ -696,16 +838,23 @@ async fn oversize_belief_array_rejects_via_db_probe_without_panic() {
     let rows: Vec<Value> = (0..=200)
         .map(|i| json!({"holder": chr_a, "proposition": format!("p{i}"), "order": 1}))
         .collect();
-    let carrier = seed_carrier_with_modules(&ctx.pool, &chr_a, "Huge", json!({"belief": rows})).await;
+    let carrier =
+        seed_carrier_with_modules(&ctx.pool, &chr_a, "Huge", json!({"belief": rows})).await;
     let path = format!("/v1/daemon/characters/{chr_a}/tom?world_id={WORLD_A}&binding_id={bind_a}");
     let resp = ctx.server.get(&path).await;
     assert_eq!(resp.status_code(), 409, "oversize list: {}", resp.text());
     assert_eq!(
-        resp.json::<Value>()["error"]["code"], "view_incomplete",
+        resp.json::<Value>()["error"]["code"],
+        "view_incomplete",
         "must be a bounded-work rejection, not a read of all rows"
     );
     // Record on the same oversize carrier rejects before appending a 201st row.
-    let resp = record(&ctx.server, &chr_a, l1_body(WORLD_A, &bind_a, &carrier, &chr_a, 0)).await;
+    let resp = record(
+        &ctx.server,
+        &chr_a,
+        l1_body(WORLD_A, &bind_a, &carrier, &chr_a, 0),
+    )
+    .await;
     assert_eq!(resp.status_code(), 409, "oversize record: {}", resp.text());
     assert_eq!(mind_state_count(&ctx.pool).await, 0);
 }
@@ -732,8 +881,18 @@ async fn absent_belief_is_zero_rows_and_legacy_modules_round_trip() {
     // with only unknown sibling modules) must be treated as zero rows — never
     // rejected as `carrier_modules_malformed`.
     let empty = seed_carrier_with_modules(&ctx.pool, &chr_a, "NoBelief", json!({})).await;
-    let resp = record(&ctx.server, &chr_a, l1_body(WORLD_A, &bind_a, &empty, &chr_a, 0)).await;
-    assert_eq!(resp.status_code(), 200, "empty modules record: {}", resp.text());
+    let resp = record(
+        &ctx.server,
+        &chr_a,
+        l1_body(WORLD_A, &bind_a, &empty, &chr_a, 0),
+    )
+    .await;
+    assert_eq!(
+        resp.status_code(),
+        200,
+        "empty modules record: {}",
+        resp.text()
+    );
 
     let legacy = seed_carrier_with_modules(
         &ctx.pool,
@@ -742,18 +901,35 @@ async fn absent_belief_is_zero_rows_and_legacy_modules_round_trip() {
         json!({"mental": {"identity": {"role": "harbor_master"}}, "x_custom": {"n": 1}}),
     )
     .await;
-    let resp = record(&ctx.server, &chr_a, l1_body(WORLD_A, &bind_a, &legacy, &chr_a, 0)).await;
-    assert_eq!(resp.status_code(), 200, "legacy sibling record: {}", resp.text());
+    let resp = record(
+        &ctx.server,
+        &chr_a,
+        l1_body(WORLD_A, &bind_a, &legacy, &chr_a, 0),
+    )
+    .await;
+    assert_eq!(
+        resp.status_code(),
+        200,
+        "legacy sibling record: {}",
+        resp.text()
+    );
     // Unknown sibling keys survive the CAS write.
-    let after: Value = serde_json::from_str(&carrier_modules_json(&ctx.pool, &legacy).await).unwrap();
-    assert_eq!(after["mental"], json!({"identity": {"role": "harbor_master"}}));
+    let after: Value =
+        serde_json::from_str(&carrier_modules_json(&ctx.pool, &legacy).await).unwrap();
+    assert_eq!(
+        after["mental"],
+        json!({"identity": {"role": "harbor_master"}})
+    );
     assert_eq!(after["x_custom"], json!({"n": 1}));
     assert_eq!(after["belief"].as_array().unwrap().len(), 1);
 
     // Listing after the above writes returns rows and never reports the
     // no-belief carriers as malformed.
     let resp = list_tom(&ctx.server, &chr_a, WORLD_A, &bind_a).await;
-    assert!(resp["items"].as_array().unwrap().len() >= 1, "alive carriers listed");
+    assert!(
+        resp["items"].as_array().unwrap().len() >= 1,
+        "alive carriers listed"
+    );
 }
 
 #[tokio::test]
@@ -764,13 +940,20 @@ async fn stale_deleted_carrier_histories_do_not_surface_or_error() {
     let bind_a = a["binding"]["binding_id"].as_str().unwrap().to_string();
 
     let alive = seed_carrier(&ctx.pool, &chr_a).await;
-    let resp = record(&ctx.server, &chr_a, l1_body(WORLD_A, &bind_a, &alive, &chr_a, 0)).await;
+    let resp = record(
+        &ctx.server,
+        &chr_a,
+        l1_body(WORLD_A, &bind_a, &alive, &chr_a, 0),
+    )
+    .await;
     assert_eq!(resp.status_code(), 200, "{}", resp.text());
 
     // A deleted carrier with a large derivative history must be excluded from
     // the timestamp aggregation (bounded to admitted active carriers) and from
     // the response entirely.
-    let deleted = seed_carrier_with_modules(&ctx.pool, &chr_a, "StaleTomCarrier", json!({"belief": []})).await;
+    let deleted =
+        seed_carrier_with_modules(&ctx.pool, &chr_a, "StaleTomCarrier", json!({"belief": []}))
+            .await;
     for i in 0..50 {
         insert_derivative_mind_state(
             &ctx.pool,
@@ -790,8 +973,14 @@ async fn stale_deleted_carrier_histories_do_not_surface_or_error() {
         .iter()
         .map(|row| row["carrier_entry_id"].as_str().unwrap())
         .collect();
-    assert!(holder_ids.iter().all(|h| *h == alive), "only alive carrier emitted");
-    assert!(!holder_ids.contains(&deleted.as_str()), "deleted carrier excluded");
+    assert!(
+        holder_ids.iter().all(|h| *h == alive),
+        "only alive carrier emitted"
+    );
+    assert!(
+        !holder_ids.contains(&deleted.as_str()),
+        "deleted carrier excluded"
+    );
 }
 
 #[tokio::test]
@@ -823,8 +1012,13 @@ async fn timestamp_lookup_is_scoped_to_selected_binding_admitted_ids() {
     let bind_b = add_binding(&ctx.server, &chr_a, WORLD_B).await;
 
     // Selected-binding carrier with a valid L1 row + its derivative.
-    let selected_carrier =
-        seed_binding_carrier_with_modules(&ctx.pool, &bind_a, "SelectedBinding", json!({"belief": []})).await;
+    let selected_carrier = seed_binding_carrier_with_modules(
+        &ctx.pool,
+        &bind_a,
+        "SelectedBinding",
+        json!({"belief": []}),
+    )
+    .await;
     let resp = record(
         &ctx.server,
         &chr_a,
@@ -834,8 +1028,13 @@ async fn timestamp_lookup_is_scoped_to_selected_binding_admitted_ids() {
     assert_eq!(resp.status_code(), 200, "{}", resp.text());
 
     // Unselected-binding carrier with a large derivative history.
-    let unselected_carrier =
-        seed_binding_carrier_with_modules(&ctx.pool, &bind_b, "UnselectedBinding", json!({"belief": []})).await;
+    let unselected_carrier = seed_binding_carrier_with_modules(
+        &ctx.pool,
+        &bind_b,
+        "UnselectedBinding",
+        json!({"belief": []}),
+    )
+    .await;
     for i in 0..40 {
         insert_derivative_mind_state(
             &ctx.pool,
@@ -859,7 +1058,6 @@ async fn timestamp_lookup_is_scoped_to_selected_binding_admitted_ids() {
     assert!(!carrier_ids.contains(&unselected_carrier.as_str()));
 }
 
-
 #[tokio::test]
 async fn record_rejects_201st_belief_row_without_mutation() {
     // QC fix round 1 (F-002): a carrier already at MAX_BELIEF_ROWS_PER_CARRIER
@@ -867,7 +1065,10 @@ async fn record_rejects_201st_belief_row_without_mutation() {
     // the corpus must stay listable afterwards.
     let c = ctx().await;
     let chr = create_character(&c.server, "AvaCap", WORLD_A).await;
-    let chr_id = chr["character"]["character_id"].as_str().unwrap().to_string();
+    let chr_id = chr["character"]["character_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let binding_id = chr["binding"]["binding_id"].as_str().unwrap().to_string();
 
     let store = SqliteKbStore::new(c.pool.clone());
@@ -886,8 +1087,7 @@ async fn record_rejects_201st_belief_row_without_mutation() {
             })
         })
         .collect();
-    let mut kb =
-        KnowledgeEntryRecord::for_character(&chr_id, BlockType::Character, "FullCarrier");
+    let mut kb = KnowledgeEntryRecord::for_character(&chr_id, BlockType::Character, "FullCarrier");
     kb.modules = Some(json!({ "belief": rows }));
     let carrier = kb.entry_id.clone();
     store.insert_knowledge_entry(kb).await.unwrap();
@@ -915,7 +1115,10 @@ async fn record_rejects_201st_belief_row_without_mutation() {
         .fetch_one(&c.pool)
         .await
         .unwrap();
-    assert_eq!(before_ms, after_ms, "rejected record must not insert MindState");
+    assert_eq!(
+        before_ms, after_ms,
+        "rejected record must not insert MindState"
+    );
     let len: (i64,) = sqlx::query_as(
         "SELECT json_array_length(modules_json, '$.belief') FROM kb_key_blocks WHERE key_block_id = ?",
     )
@@ -932,7 +1135,12 @@ async fn record_rejects_201st_belief_row_without_mutation() {
             "/v1/daemon/characters/{chr_id}/tom?world_id={WORLD_A}&binding_id={binding_id}&limit=100"
         ))
         .await;
-    assert_eq!(resp.status_code(), 200, "list must not 409: {}", resp.text());
+    assert_eq!(
+        resp.status_code(),
+        200,
+        "list must not 409: {}",
+        resp.text()
+    );
     let page = resp.json::<Value>();
     assert_eq!(page["items"].as_array().unwrap().len(), 100);
     assert_eq!(page["pagination"]["has_more"], true);

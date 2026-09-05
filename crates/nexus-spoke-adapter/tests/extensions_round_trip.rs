@@ -7,8 +7,8 @@
 //!   round-trip.
 //! - Empty `extensions.nexus` is valid.
 
-use std::collections::HashMap;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeOwnerRef;
+use std::collections::HashMap;
 use std::num::NonZeroU64;
 
 use nexus_spoke_adapter::extensions::{
@@ -252,7 +252,15 @@ fn build_extensions_nexus_omits_optional_fields_when_none_and_removes_stale() {
         }
     }));
 
-    let value = build_extensions_nexus(&KnowledgeOwnerRef::world("wld_abc"), false, None, None, None, None, &existing);
+    let value = build_extensions_nexus(
+        &KnowledgeOwnerRef::world("wld_abc"),
+        false,
+        None,
+        None,
+        None,
+        None,
+        &existing,
+    );
 
     let ns = value.as_object().expect("nexus namespace is an object");
     assert_eq!(

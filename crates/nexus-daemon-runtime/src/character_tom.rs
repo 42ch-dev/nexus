@@ -1,14 +1,15 @@
-//! Character ToM L1/L2 record and bounded query (v1.184 P4 Task 2).
+//! Character `ToM` L1/L2 record and bounded query (v1.184 P4 Task 2).
 //!
 //! Composes P1 [`ActorKnowledgeViewService`] admission, P2 stored-owner checks,
-//! and the Task 1 atomic carrier CAS + derivative MindState seam. Record and
+//! and the Task 1 atomic carrier CAS + derivative `MindState` seam. Record and
 //! query make zero provider calls.
 
 use crate::actor_knowledge_view::ActorKnowledgeViewService;
 use crate::api::errors::NexusApiError;
 use nexus_contracts::daemon_api::characters::tom::record_character_tom_request::RecordCharacterTomRequest;
 use nexus_knowledge::world_kb::knowledge_entry::{
-    validate_character_tom_belief_row, BeliefPropositionRaw, KnowledgeEntryRecord, KnowledgeOwnerRef,
+    validate_character_tom_belief_row, BeliefPropositionRaw, KnowledgeEntryRecord,
+    KnowledgeOwnerRef,
 };
 use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
 use nexus_local_db::kb_store::SqliteKbStore;
@@ -24,7 +25,9 @@ const CURSOR_SEP: char = '\u{1f}';
 const MAX_CARRIERS_PER_SCOPE: u32 = 200;
 const MAX_BELIEF_ROWS_PER_CARRIER: usize = 200;
 /// `MAX_BELIEF_ROWS_PER_CARRIER` as `i64` for compile-time SQL bind args.
-const MAX_BELIEF_ROWS_PER_CARRIER_I64: i64 = MAX_BELIEF_ROWS_PER_CARRIER as i64;
+// `MAX_BELIEF_ROWS_PER_CARRIER` is a compile-time literal (200); the i64
+// constant mirrors it exactly so SQL bind args never cast from usize.
+const MAX_BELIEF_ROWS_PER_CARRIER_I64: i64 = 200;
 
 /// One belief row in keyset order `(order, carrier_entry_id, row_ordinal)`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,7 +93,7 @@ enum ViolationKind {
     Oversized,
 }
 
-/// Reusable Character ToM composer (record + query).
+/// Reusable Character `ToM` composer (record + query).
 pub struct CharacterTomService {
     views: ActorKnowledgeViewService,
     store: SqliteKbStore,
@@ -109,26 +112,36 @@ impl CharacterTomService {
     }
 
     /// Resolve limit (1..=100, default 50).
+    ///
+    /// # Errors
+    ///
+    /// Returns `invalid_input` when `raw` is outside `1..=100`.
     pub fn resolve_limit(raw: Option<i64>) -> Result<u32, NexusApiError> {
         ActorKnowledgeViewService::resolve_limit(raw)
     }
 
     /// Decode opaque `(order, carrier_entry_id, row_ordinal)` cursor.
-    pub fn decode_cursor(cursor: &Option<String>) -> Result<Option<(i64, String, u32)>, NexusApiError> {
+    ///
+    /// # Errors
+    ///
+    /// Returns `invalid_input` when the cursor is malformed.
+    pub fn decode_cursor(
+        cursor: &Option<String>,
+    ) -> Result<Option<(i64, String, u32)>, NexusApiError> {
         match cursor {
             None => Ok(None),
             Some(raw) => {
                 let rest = raw.strip_prefix(CURSOR_PREFIX).ok_or_else(invalid_cursor)?;
                 let parts: Vec<&str> = rest.split(CURSOR_SEP).collect();
-                if parts.len() != 3 || parts[0].is_empty() || parts[1].is_empty() || parts[2].is_empty() {
+                if parts.len() != 3
+                    || parts[0].is_empty()
+                    || parts[1].is_empty()
+                    || parts[2].is_empty()
+                {
                     return Err(invalid_cursor());
                 }
-                let order = parts[0]
-                    .parse::<i64>()
-                    .map_err(|_| invalid_cursor())?;
-                let ordinal = parts[2]
-                    .parse::<u32>()
-                    .map_err(|_| invalid_cursor())?;
+                let order = parts[0].parse::<i64>().map_err(|_| invalid_cursor())?;
+                let ordinal = parts[2].parse::<u32>().map_err(|_| invalid_cursor())?;
                 Ok(Some((order, parts[1].to_string(), ordinal)))
             }
         }
@@ -141,6 +154,7 @@ impl CharacterTomService {
     }
 
     /// Keyset page over pre-sorted rows.
+    #[must_use]
     pub fn paginate(
         mut rows: Vec<(i64, String, u32, CharacterTomBeliefRow)>,
         cursor: Option<(i64, String, u32)>,
@@ -152,12 +166,15 @@ impl CharacterTomService {
                 .then_with(|| a.2.cmp(&b.2))
         });
         if let Some((order, carrier, ordinal)) = cursor {
-            rows.retain(|(o, c, ord, _)| (*o, c.as_str(), *ord) > (order, carrier.as_str(), ordinal));
+            rows.retain(|(o, c, ord, _)| {
+                (*o, c.as_str(), *ord) > (order, carrier.as_str(), ordinal)
+            });
         }
         let limit_us = usize::try_from(limit).unwrap_or(usize::MAX);
         let has_more = rows.len() > limit_us;
         rows.truncate(limit_us);
-        let items: Vec<CharacterTomBeliefRow> = rows.into_iter().map(|(_, _, _, row)| row).collect();
+        let items: Vec<CharacterTomBeliefRow> =
+            rows.into_iter().map(|(_, _, _, row)| row).collect();
         let next_cursor = if has_more {
             items.last().map(|row| {
                 Self::encode_cursor(
@@ -177,7 +194,11 @@ impl CharacterTomService {
         }
     }
 
-    /// List Character ToM rows from authorized carriers only.
+    /// List Character `ToM` rows from authorized carriers only.
+    ///
+    /// # Errors
+    ///
+    /// Returns an admission/validation `NexusApiError` on unauthorized or invalid input.
     ///
     /// Work is bounded before materialization: each owner scope admits at
     /// most `MAX_CARRIERS_PER_SCOPE` carriers and each carrier at most
@@ -191,8 +212,13 @@ impl CharacterTomService {
         viewer_character_id: &str,
         query: CharacterTomListQuery,
     ) -> Result<CharacterTomPage, NexusApiError> {
-        self.admit_viewer(caller_creator_id, viewer_character_id, &query.world_id, &query.binding_id)
-            .await?;
+        self.admit_viewer(
+            caller_creator_id,
+            viewer_character_id,
+            &query.world_id,
+            &query.binding_id,
+        )
+        .await?;
         let cursor = Self::decode_cursor(&query.cursor)?;
         let order_filter = query.order;
         // DB-side pre-parse bounds (fix round 3): carrier counts, belief-array
@@ -236,7 +262,8 @@ impl CharacterTomService {
                         continue;
                     }
                 }
-                let ordinal = u32::try_from(ordinal).map_err(|_| corpus_exceeded("belief rows per carrier"))?;
+                let ordinal = u32::try_from(ordinal)
+                    .map_err(|_| corpus_exceeded("belief rows per carrier"))?;
                 keyed.push((
                     order,
                     entry_id.clone(),
@@ -253,7 +280,12 @@ impl CharacterTomService {
         Ok(Self::paginate(keyed, cursor, query.limit))
     }
 
-    /// Record one L1/L2 belief on an authorized carrier (atomic CAS + MindState).
+    /// Record one L1/L2 belief on an authorized carrier (atomic CAS + `MindState`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `invalid_input`/`not_found`/`conflict` on bad input, stale
+    /// scopes, or CAS/ownership drift.
     pub async fn record(
         &self,
         caller_creator_id: &str,
@@ -268,7 +300,7 @@ impl CharacterTomService {
         )
         .await?;
         validate_character_tom_belief_row(&input.belief, viewer_character_id)
-            .map_err(map_kb_validation)?;
+            .map_err(|e| map_kb_validation(&e))?;
         if input.belief.order == Some(2) {
             let subject = input.belief.holder.as_deref().unwrap_or_default();
             self.require_active_subject_binding(caller_creator_id, subject, &input.world_id)
@@ -299,7 +331,11 @@ impl CharacterTomService {
                 _ => return Err(not_found("carrier_entry", &input.carrier_entry_id)),
             },
         }
-        if input.expected_revision >= i64::MAX {
+        // The CAS bump is a checked `+ 1` on this i64 revision; only the exact
+        // `i64::MAX` input can overflow it, so reject that single value
+        // deterministically (equality form also satisfies
+        // clippy::absurd_extreme_comparisons).
+        if input.expected_revision == i64::MAX {
             return Err(NexusApiError::BadRequest {
                 code: "invalid_input".into(),
                 message: "expected_revision exceeds the CAS increment domain".into(),
@@ -314,13 +350,10 @@ impl CharacterTomService {
             .await?;
         let mut modules = carrier.modules.clone().unwrap_or_else(|| json!({}));
         append_belief_row(&mut modules, &input.belief)?;
-        let modules_str = serde_json::to_string(&modules).map_err(internal_wire)?;
+        let modules_str = serde_json::to_string(&modules).map_err(|e| internal_wire(&e))?;
         let mind_state_id = format!("ms_{}", uuid::Uuid::new_v4().simple());
-        let mind_state_wire = build_derivative_mind_state_wire(
-            &input.carrier_entry_id,
-            &mind_state_id,
-            &input,
-        )?;
+        let mind_state_wire =
+            build_derivative_mind_state_wire(&input.carrier_entry_id, &mind_state_id, &input)?;
         let mut tx = self.pool.begin().await.map_err(NexusApiError::from)?;
         // PR #240 finding 3: the pre-transaction admission can go stale before
         // commit. Revalidate the complete live scope — active owned viewer
@@ -558,9 +591,6 @@ impl CharacterTomService {
         viewer_character_id: &str,
         binding_id: &str,
     ) -> Result<Vec<(String, Option<Value>)>, NexusApiError> {
-        if admitted_ids.is_empty() {
-            return Ok(Vec::new());
-        }
         #[derive(sqlx::FromRow)]
         struct AdmittedCarrierRow {
             key_block_id: String,
@@ -569,7 +599,10 @@ impl CharacterTomService {
             actor_world_binding_id: Option<String>,
             modules_json: Option<String>,
         }
-        let ids_json = serde_json::to_string(admitted_ids).map_err(internal_wire)?;
+        if admitted_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids_json = serde_json::to_string(admitted_ids).map_err(|e| internal_wire(&e))?;
         let rows = sqlx::query_as!(
             AdmittedCarrierRow,
             r#"SELECT key_block_id AS "key_block_id!", status AS "status!",
@@ -580,13 +613,13 @@ impl CharacterTomService {
         .fetch_all(&self.pool)
         .await
         .map_err(NexusApiError::from)?;
-        let mut by_id: std::collections::HashMap<String, AdmittedCarrierRow> =
-            rows.into_iter().map(|row| (row.key_block_id.clone(), row)).collect();
+        let mut by_id: std::collections::HashMap<String, AdmittedCarrierRow> = rows
+            .into_iter()
+            .map(|row| (row.key_block_id.clone(), row))
+            .collect();
         let mut out = Vec::with_capacity(admitted_ids.len());
         for id in admitted_ids {
-            let row = by_id
-                .remove(id)
-                .ok_or_else(|| carrier_scope_drifted(id))?;
+            let row = by_id.remove(id).ok_or_else(|| carrier_scope_drifted(id))?;
             if matches!(row.status.as_str(), "deleted" | "merged" | "deprecated") {
                 return Err(carrier_scope_drifted(id));
             }
@@ -597,9 +630,9 @@ impl CharacterTomService {
             }
             let modules = match &row.modules_json {
                 None => None,
-                Some(text) => Some(
-                    serde_json::from_str::<Value>(text).map_err(|_| invalid_modules_json())?,
-                ),
+                Some(text) => {
+                    Some(serde_json::from_str::<Value>(text).map_err(|_| invalid_modules_json())?)
+                }
             };
             // Re-check the per-carrier row cap on the materialized array: a
             // carrier admitted by the probe but appended before this read must
@@ -624,7 +657,7 @@ impl CharacterTomService {
             .await
             .map_err(|err| match err {
                 KbStoreError::NotFound(_) => not_found("carrier_entry", carrier_entry_id),
-                other => map_kb_store(other),
+                other => map_kb_store(&other),
             })?;
         if matches!(carrier.status.as_str(), "deleted" | "merged" | "deprecated") {
             return Err(not_found("carrier_entry", carrier_entry_id));
@@ -640,7 +673,7 @@ impl CharacterTomService {
         }
     }
 
-    /// Latest derivative MindState `occurred_at` per carrier in the concrete
+    /// Latest derivative `MindState` `occurred_at` per carrier in the concrete
     /// admitted carrier-id set (fix round 4).
     ///
     /// The query constrains `holder_entry_id` to the exact admitted id snapshot
@@ -654,15 +687,15 @@ impl CharacterTomService {
         &self,
         admitted_ids: &[String],
     ) -> Result<std::collections::HashMap<String, Option<String>>, NexusApiError> {
-        if admitted_ids.is_empty() {
-            return Ok(std::collections::HashMap::new());
-        }
         #[derive(sqlx::FromRow)]
         struct LatestDerivative {
             carrier_entry_id: String,
             occurred_at: Option<String>,
         }
-        let ids_json = serde_json::to_string(admitted_ids).map_err(internal_wire)?;
+        if admitted_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let ids_json = serde_json::to_string(admitted_ids).map_err(|e| internal_wire(&e))?;
         let rows = sqlx::query_as!(
             LatestDerivative,
             r#"SELECT m.holder_entry_id AS "carrier_entry_id!", m.occurred_at
@@ -774,19 +807,22 @@ impl CharacterTomService {
     /// Detect non-probe-ok carriers in an owner scope and map them to the
     /// matching fail-closed error, before any modules parse. Returns `Ok(())`
     /// when the whole admitted scope is probe-ok.
-    async fn probe_scope_violations(
-        &self,
-        owner: &KnowledgeOwnerRef,
-    ) -> Result<(), NexusApiError> {
-        let invalid = self.scope_violation_count(owner, ViolationKind::InvalidJson).await?;
+    async fn probe_scope_violations(&self, owner: &KnowledgeOwnerRef) -> Result<(), NexusApiError> {
+        let invalid = self
+            .scope_violation_count(owner, ViolationKind::InvalidJson)
+            .await?;
         if invalid > 0 {
             return Err(invalid_modules_json());
         }
-        let malformed = self.scope_violation_count(owner, ViolationKind::Malformed).await?;
+        let malformed = self
+            .scope_violation_count(owner, ViolationKind::Malformed)
+            .await?;
         if malformed > 0 {
             return Err(modules_malformed());
         }
-        let oversized = self.scope_violation_count(owner, ViolationKind::Oversized).await?;
+        let oversized = self
+            .scope_violation_count(owner, ViolationKind::Oversized)
+            .await?;
         if oversized > 0 {
             return Err(corpus_exceeded("belief rows per carrier"));
         }
@@ -803,10 +839,7 @@ impl CharacterTomService {
         kind: ViolationKind,
     ) -> Result<i64, NexusApiError> {
         match (owner, kind) {
-            (
-                KnowledgeOwnerRef::Character(id),
-                ViolationKind::InvalidJson,
-            ) => sqlx::query_scalar!(
+            (KnowledgeOwnerRef::Character(id), ViolationKind::InvalidJson) => sqlx::query_scalar!(
                 r#"SELECT COUNT(*) FROM kb_key_blocks
                    WHERE character_id = ?
                      AND status NOT IN ('deleted', 'merged', 'deprecated')
@@ -816,10 +849,7 @@ impl CharacterTomService {
             .fetch_one(&self.pool)
             .await
             .map_err(NexusApiError::from),
-            (
-                KnowledgeOwnerRef::Character(id),
-                ViolationKind::Malformed,
-            ) => sqlx::query_scalar!(
+            (KnowledgeOwnerRef::Character(id), ViolationKind::Malformed) => sqlx::query_scalar!(
                 r#"SELECT COUNT(*) FROM kb_key_blocks
                    WHERE character_id = ?
                      AND status NOT IN ('deleted', 'merged', 'deprecated')
@@ -831,10 +861,7 @@ impl CharacterTomService {
             .fetch_one(&self.pool)
             .await
             .map_err(NexusApiError::from),
-            (
-                KnowledgeOwnerRef::Character(id),
-                ViolationKind::Oversized,
-            ) => sqlx::query_scalar!(
+            (KnowledgeOwnerRef::Character(id), ViolationKind::Oversized) => sqlx::query_scalar!(
                 r#"SELECT COUNT(*) FROM kb_key_blocks
                    WHERE character_id = ?
                      AND status NOT IN ('deleted', 'merged', 'deprecated')
@@ -847,50 +874,47 @@ impl CharacterTomService {
             .fetch_one(&self.pool)
             .await
             .map_err(NexusApiError::from),
-            (
-                KnowledgeOwnerRef::ActorWorldBinding(id),
-                ViolationKind::InvalidJson,
-            ) => sqlx::query_scalar!(
-                r#"SELECT COUNT(*) FROM kb_key_blocks
+            (KnowledgeOwnerRef::ActorWorldBinding(id), ViolationKind::InvalidJson) => {
+                sqlx::query_scalar!(
+                    r#"SELECT COUNT(*) FROM kb_key_blocks
                    WHERE actor_world_binding_id = ?
                      AND status NOT IN ('deleted', 'merged', 'deprecated')
                      AND modules_json IS NOT NULL AND NOT json_valid(modules_json)"#,
-                id
-            )
-            .fetch_one(&self.pool)
-            .await
-            .map_err(NexusApiError::from),
-            (
-                KnowledgeOwnerRef::ActorWorldBinding(id),
-                ViolationKind::Malformed,
-            ) => sqlx::query_scalar!(
-                r#"SELECT COUNT(*) FROM kb_key_blocks
+                    id
+                )
+                .fetch_one(&self.pool)
+                .await
+                .map_err(NexusApiError::from)
+            }
+            (KnowledgeOwnerRef::ActorWorldBinding(id), ViolationKind::Malformed) => {
+                sqlx::query_scalar!(
+                    r#"SELECT COUNT(*) FROM kb_key_blocks
                    WHERE actor_world_binding_id = ?
                      AND status NOT IN ('deleted', 'merged', 'deprecated')
                      AND json_valid(modules_json)
                      AND json_type(modules_json, '$.belief') IS NOT NULL
                      AND json_type(modules_json, '$.belief') <> 'array'"#,
-                id
-            )
-            .fetch_one(&self.pool)
-            .await
-            .map_err(NexusApiError::from),
-            (
-                KnowledgeOwnerRef::ActorWorldBinding(id),
-                ViolationKind::Oversized,
-            ) => sqlx::query_scalar!(
-                r#"SELECT COUNT(*) FROM kb_key_blocks
+                    id
+                )
+                .fetch_one(&self.pool)
+                .await
+                .map_err(NexusApiError::from)
+            }
+            (KnowledgeOwnerRef::ActorWorldBinding(id), ViolationKind::Oversized) => {
+                sqlx::query_scalar!(
+                    r#"SELECT COUNT(*) FROM kb_key_blocks
                    WHERE actor_world_binding_id = ?
                      AND status NOT IN ('deleted', 'merged', 'deprecated')
                      AND json_valid(modules_json)
                      AND json_type(modules_json, '$.belief') = 'array'
                      AND json_array_length(modules_json, '$.belief') > ?"#,
-                id,
-                MAX_BELIEF_ROWS_PER_CARRIER_I64
-            )
-            .fetch_one(&self.pool)
-            .await
-            .map_err(NexusApiError::from),
+                    id,
+                    MAX_BELIEF_ROWS_PER_CARRIER_I64
+                )
+                .fetch_one(&self.pool)
+                .await
+                .map_err(NexusApiError::from)
+            }
             (KnowledgeOwnerRef::World(_), _) => Err(NexusApiError::Internal {
                 code: "CHARACTER_TOM_SCOPE_INVALID".into(),
                 message: "ToM carrier scope is never World-owned".into(),
@@ -934,13 +958,25 @@ impl CharacterTomService {
         }
         // No probe-ok row: classify the violation or report the carrier as
         // absent. Each check is a separate typed COUNT query.
-        if self.carrier_violation_count(carrier_entry_id, ViolationKind::InvalidJson).await? > 0 {
+        if self
+            .carrier_violation_count(carrier_entry_id, ViolationKind::InvalidJson)
+            .await?
+            > 0
+        {
             return Err(invalid_modules_json());
         }
-        if self.carrier_violation_count(carrier_entry_id, ViolationKind::Malformed).await? > 0 {
+        if self
+            .carrier_violation_count(carrier_entry_id, ViolationKind::Malformed)
+            .await?
+            > 0
+        {
             return Err(modules_malformed());
         }
-        if self.carrier_violation_count(carrier_entry_id, ViolationKind::Oversized).await? > 0 {
+        if self
+            .carrier_violation_count(carrier_entry_id, ViolationKind::Oversized)
+            .await?
+            > 0
+        {
             return Err(corpus_exceeded("belief rows per carrier"));
         }
         Ok(None)
@@ -999,10 +1035,15 @@ fn carrier_belief_elements(modules: Option<&Value>) -> Result<&[Value], NexusApi
         return Ok(&[]);
     };
     let obj = modules.as_object().ok_or_else(modules_malformed)?;
-    match obj.get("belief") {
-        None => Ok(&[]),
-        Some(value) => value.as_array().map(Vec::as_slice).ok_or_else(modules_malformed),
-    }
+    obj.get("belief").map_or_else(
+        || Ok(&[][..]),
+        |value| {
+            value
+                .as_array()
+                .map(Vec::as_slice)
+                .ok_or_else(modules_malformed)
+        },
+    )
 }
 
 /// Non-NULL `modules_json` that is not valid JSON text — distinguishable from
@@ -1065,7 +1106,7 @@ fn append_belief_row(modules: &mut Value, row: &BeliefPropositionRaw) -> Result<
     if rows.len() >= MAX_BELIEF_ROWS_PER_CARRIER {
         return Err(corpus_exceeded("belief rows per carrier"));
     }
-    rows.push(serde_json::to_value(row).map_err(internal_wire)?);
+    rows.push(serde_json::to_value(row).map_err(|e| internal_wire(&e))?);
     Ok(())
 }
 
@@ -1086,7 +1127,7 @@ fn build_derivative_mind_state_wire(
         "occurred_at": occurred_at,
         "sort_key": input.sort_key.clone().unwrap_or_else(|| "0001".to_string()),
         "snapshot": {
-            "belief": serde_json::to_value(&input.belief).map_err(internal_wire)?
+            "belief": serde_json::to_value(&input.belief).map_err(|e| internal_wire(&e))?
         },
         "deltas": [],
         "extensions": { "nexus": { "character_tom": true } }
@@ -1098,6 +1139,10 @@ fn build_derivative_mind_state_wire(
 }
 
 /// Map a generated record request into domain input + belief row.
+///
+/// # Errors
+///
+/// Returns `invalid_input` when the wire record is malformed.
 pub fn record_input_from_request(
     req: &RecordCharacterTomRequest,
     expected_revision: i64,
@@ -1121,10 +1166,7 @@ pub fn record_input_from_request(
         belief,
         occurred_at: req.occurred_at.map(|dt| dt.to_rfc3339()),
         sort_key: req.sort_key.clone(),
-        event_id: req
-            .event_id
-            .as_ref()
-            .map(newtype_wire_string),
+        event_id: req.event_id.as_ref().map(newtype_wire_string),
     })
 }
 
@@ -1153,21 +1195,21 @@ fn not_found(resource: &str, id: &str) -> NexusApiError {
     NexusApiError::NotFound(format!("{resource} {id}"))
 }
 
-fn internal_wire(err: serde_json::Error) -> NexusApiError {
+fn internal_wire(err: &serde_json::Error) -> NexusApiError {
     NexusApiError::Internal {
         code: "CHARACTER_TOM_WIRE_INVALID".into(),
         message: err.to_string(),
     }
 }
 
-fn map_kb_validation(err: nexus_knowledge::world_kb::KbError) -> NexusApiError {
+fn map_kb_validation(err: &nexus_knowledge::world_kb::KbError) -> NexusApiError {
     NexusApiError::BadRequest {
         code: "invalid_input".into(),
         message: err.to_string(),
     }
 }
 
-fn map_kb_store(err: KbStoreError) -> NexusApiError {
+fn map_kb_store(err: &KbStoreError) -> NexusApiError {
     NexusApiError::Internal {
         code: "CHARACTER_TOM_KB_FAILED".into(),
         message: err.to_string(),
@@ -1314,7 +1356,10 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        for chr in ["chr_a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "chr_b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"] {
+        for chr in [
+            "chr_a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "chr_b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        ] {
             sqlx::query(
                 "INSERT INTO characters \
                  (character_id, owner_creator_id, display_name, status, image_uri, persona_json, created_at, updated_at) \

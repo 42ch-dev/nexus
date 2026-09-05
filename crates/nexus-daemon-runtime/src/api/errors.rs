@@ -353,7 +353,7 @@ impl NexusApiError {
                     _ => "bad_request",
                 }
             }
-            Self::PeerToolDenied { code, .. } => code.as_str(),
+            Self::PeerToolDenied { code, .. } | Self::ConflictCoded { code, .. } => code.as_str(),
             Self::StrategyConflict { .. } => "strategy_conflict",
             Self::StrategyValidationFailed { .. } => "strategy_validation_failed",
             Self::OutlineConflict { .. } => "outline_conflict",
@@ -362,7 +362,6 @@ impl NexusApiError {
             Self::WorldKbValidationFailed { .. } => "world_kb_validation_failed",
             Self::SessionExpired => "session_expired",
             Self::Conflict(_) => "conflict",
-            Self::ConflictCoded { code, .. } => code.as_str(),
             Self::Locked { .. } => "locked",
             Self::ServiceUnavailable { .. } => "service_unavailable",
             Self::PresetGatesFailed { .. } => "preset_gates_failed",
@@ -708,16 +707,16 @@ mod tests {
             ActorContractConflict::BindingHasOwnedKnowledge,
         ];
         for code in cases {
-            let err = NexusApiError::from(nexus_local_db::LocalDbError::ActorContractConflict {
-                code,
-            });
+            let err =
+                NexusApiError::from(nexus_local_db::LocalDbError::ActorContractConflict { code });
             assert_eq!(err.status_code(), StatusCode::CONFLICT);
             assert_eq!(err.error_code(), code.as_str());
             let body = err.to_response_body();
             assert_eq!(body.error.code, code.as_str());
             assert_eq!(body.error.message, code.message());
             assert_ne!(
-                body.error.message, code.as_str(),
+                body.error.message,
+                code.as_str(),
                 "message must not be the wire code"
             );
         }

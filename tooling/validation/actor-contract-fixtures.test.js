@@ -27,7 +27,7 @@ function loadSchema(rel) {
 
 function resolveRef(ref, schemaCache) {
   const [id, fragment] = ref.split('#');
-  const schema = schemaCache.get(id) || schemaCache.get(id.replace(/\/$/, ''));
+  const schema = schemaCache.get(id) ?? schemaCache.get(id.replace(/\/$/, ''));
   if (!schema) {
     throw new Error(`unresolved $ref: ${ref}`);
   }
@@ -64,14 +64,14 @@ function matches(schema, data, cache) {
     if (data === null || typeof data !== 'object' || Array.isArray(data)) {
       return false;
     }
-    const required = schema.required || [];
+    const required = schema.required ?? [];
     for (const key of required) {
       if (!(key in data)) {
         return false;
       }
     }
     if (schema.additionalProperties === false) {
-      const allowed = new Set(Object.keys(schema.properties || {}));
+      const allowed = new Set(Object.keys(schema.properties ?? {}));
       for (const key of Object.keys(data)) {
         if (!allowed.has(key)) {
           return false;
@@ -79,7 +79,7 @@ function matches(schema, data, cache) {
       }
     }
     for (const [key, value] of Object.entries(data)) {
-      const prop = schema.properties && schema.properties[key];
+      const prop = schema.properties?.[key];
       if (prop && !matches(prop, value, cache)) {
         return false;
       }

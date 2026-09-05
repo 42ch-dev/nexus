@@ -1,7 +1,7 @@
 //! Degradation policy for runtime mode fallback behavior.
 //!
 //! When platform becomes unavailable, the system gracefully degrades
-//! from `cloud_enhanced` → `local_first` → local_only.
+//! from `cloud_enhanced` → `local_first` → `local_only`.
 //!
 //! Spec reference: `local-first-runtime-policy-v1.md` §5.3, §6
 //!
@@ -22,10 +22,10 @@ use nexus_contracts::local::domain::RuntimeMode;
 /// Degradation policy for runtime mode fallback behavior.
 ///
 /// When platform becomes unavailable, the system gracefully degrades
-/// from `cloud_enhanced` → `local_first` → local_only.
+/// from `cloud_enhanced` → `local_first` → `local_only`.
 ///
 /// Spec reference: `local-first-runtime-policy-v1.md` §5.3, §6
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DegradationPolicy {
     /// Timeout for platform health check (milliseconds).
     /// Default: 5000ms
@@ -45,7 +45,7 @@ pub struct DegradationPolicy {
 
     /// Maximum degradation depth (how many levels can degrade).
     /// 0 = no degradation allowed, 1 = one level down, 2 = two levels down.
-    /// Default: 2 (`cloud_enhanced` → `local_first` → local_only)
+    /// Default: 2 (`cloud_enhanced` → `local_first` → `local_only`)
     pub max_degradation_depth: u32,
 }
 
@@ -109,30 +109,31 @@ impl DegradationState {
     #[must_use]
     pub const fn depth(&self) -> u32 {
         match self {
-            DegradationState::Normal => 0,
-            DegradationState::DegradedLevel1 => 1,
-            DegradationState::DegradedLevel2 | DegradationState::ForcedLocalOnly => 2,
+            Self::Normal => 0,
+            Self::DegradedLevel1 => 1,
+            Self::DegradedLevel2 | Self::ForcedLocalOnly => 2,
         }
     }
     #[must_use]
     /// Check if further degradation is possible given the max depth.
-    pub fn can_degrade_more(&self, max_depth: u32) -> bool {
+    pub const fn can_degrade_more(&self, max_depth: u32) -> bool {
         self.depth() < max_depth
     }
 
     /// Whether this state represents any form of degradation.
     #[must_use]
     pub const fn is_degraded(&self) -> bool {
-        !matches!(self, DegradationState::Normal)
+        !matches!(self, Self::Normal)
     }
 
     /// Human-readable label for CLI output.
+    #[must_use]
     pub const fn display_label(&self) -> &'static str {
         match self {
-            DegradationState::Normal => "Normal",
-            DegradationState::DegradedLevel1 => "Degraded (Level 1)",
-            DegradationState::DegradedLevel2 => "Degraded (Level 2)",
-            DegradationState::ForcedLocalOnly => "Forced local_only",
+            Self::Normal => "Normal",
+            Self::DegradedLevel1 => "Degraded (Level 1)",
+            Self::DegradedLevel2 => "Degraded (Level 2)",
+            Self::ForcedLocalOnly => "Forced local_only",
         }
     }
 }
@@ -140,10 +141,10 @@ impl DegradationState {
 impl std::fmt::Display for DegradationState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DegradationState::Normal => write!(f, "normal"),
-            DegradationState::DegradedLevel1 => write!(f, "degraded_level_1"),
-            DegradationState::DegradedLevel2 => write!(f, "degraded_level_2"),
-            DegradationState::ForcedLocalOnly => write!(f, "forced_local_only"),
+            Self::Normal => write!(f, "normal"),
+            Self::DegradedLevel1 => write!(f, "degraded_level_1"),
+            Self::DegradedLevel2 => write!(f, "degraded_level_2"),
+            Self::ForcedLocalOnly => write!(f, "forced_local_only"),
         }
     }
 }
@@ -163,6 +164,7 @@ pub struct HealthCheckResult {
 
 impl HealthCheckResult {
     /// Create a healthy check result.
+    #[must_use]
     pub fn healthy(response_time_ms: u64) -> Self {
         Self {
             is_healthy: true,
@@ -189,7 +191,7 @@ impl HealthCheckResult {
 /// and can be stored inline in `config.json` (V1.2 MVP strategy).
 /// It is decoupled from the full [`DegradationGuard`] which holds runtime policy
 /// and mutable state not suitable for simple persistence.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct DegradationSnapshot {
     /// Current degradation state.
     pub state: DegradationState,
@@ -204,7 +206,7 @@ pub struct DegradationSnapshot {
 }
 
 /// Serializable record of a platform health check for config persistence.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct HealthCheckSnapshot {
     /// Whether the platform responded successfully.
     pub is_healthy: bool,
@@ -214,6 +216,7 @@ pub struct HealthCheckSnapshot {
 
 impl DegradationSnapshot {
     /// Create a new snapshot with the given state and failure count.
+    #[must_use]
     pub const fn new(state: DegradationState, failure_count: u32) -> Self {
         Self {
             state,
@@ -224,6 +227,7 @@ impl DegradationSnapshot {
     }
 
     /// Create a new snapshot with an explicit `last_upgrade_attempt`.
+    #[must_use]
     pub const fn with_upgrade_attempt(
         state: DegradationState,
         failure_count: u32,
@@ -238,6 +242,7 @@ impl DegradationSnapshot {
     }
 
     /// Create a snapshot from a live [`DegradationGuard`].
+    #[must_use]
     pub fn from_guard(guard: &DegradationGuard) -> Self {
         Self {
             state: guard.degradation_state(),
@@ -277,6 +282,7 @@ const _: () = {
 
 impl DegradationGuard {
     /// Create a new guard with the given policy and initial runtime mode.
+    #[must_use]
     pub const fn new(policy: DegradationPolicy, initial_mode: DomainRuntimeMode) -> Self {
         Self {
             policy,
@@ -289,6 +295,7 @@ impl DegradationGuard {
     }
 
     /// Create a new guard with default policy and the given initial mode.
+    #[must_use]
     pub fn with_defaults(initial_mode: DomainRuntimeMode) -> Self {
         Self::new(DegradationPolicy::default(), initial_mode)
     }
@@ -341,38 +348,49 @@ impl DegradationGuard {
     }
 
     /// Access the current runtime mode (may have been downgraded by degradation).
+    #[must_use]
     pub const fn current_mode(&self) -> &DomainRuntimeMode {
         &self.current_mode
     }
 
     /// Access the current degradation state.
+    #[must_use]
     pub const fn degradation_state(&self) -> DegradationState {
         self.degradation_state
     }
 
     /// Access the current degradation state (convenience alias).
+    #[must_use]
     pub const fn state(&self) -> DegradationState {
         self.degradation_state
     }
 
     /// Access the degradation policy.
+    #[must_use]
     pub const fn policy(&self) -> &DegradationPolicy {
         &self.policy
     }
 
     /// Access the last health check result (if any).
+    #[must_use]
     pub const fn last_health_check(&self) -> Option<&HealthCheckResult> {
         self.last_health_check.as_ref()
     }
 
     /// Access the last upgrade attempt timestamp (if any).
+    #[must_use]
     pub const fn last_upgrade_attempt(&self) -> Option<chrono::DateTime<chrono::Utc>> {
         self.last_upgrade_attempt
     }
 
     /// Access the current failure count (number of timestamps in window).
-    pub const fn failure_count(&self) -> u32 {
-        self.failure_timestamps.len() as u32
+    ///
+    /// The count is the length of the in-memory failure-timestamp buffer,
+    /// which is bounded in practice; a value beyond `u32` saturates to
+    /// `u32::MAX` (documented clamp) rather than wrapping.
+    #[must_use]
+    pub fn failure_count(&self) -> u32 {
+        u32::try_from(self.failure_timestamps.len()).unwrap_or(u32::MAX)
     }
     ///
     /// # Errors
@@ -408,13 +426,13 @@ impl DegradationGuard {
     pub fn record_health_check(&mut self, result: HealthCheckResult) {
         let is_healthy = result.is_healthy;
         self.last_health_check = Some(result);
-        if !is_healthy {
+        if is_healthy {
+            self.failure_timestamps.clear();
+        } else {
             self.failure_timestamps.push(chrono::Utc::now());
             if self.should_degrade() {
                 self.degrade();
             }
-        } else {
-            self.failure_timestamps.clear();
         }
     }
 
@@ -423,15 +441,17 @@ impl DegradationGuard {
     /// Prunes timestamps older than `failure_window_secs`, then checks if
     /// the remaining count meets or exceeds `failure_threshold`.
     fn should_degrade(&self) -> bool {
-        let cutoff =
-            chrono::Utc::now() - chrono::Duration::seconds(self.policy.failure_window_secs as i64);
-        let within_window: Vec<_> = self
+        let cutoff = chrono::Utc::now()
+            - chrono::Duration::seconds(
+                i64::try_from(self.policy.failure_window_secs).unwrap_or(i64::MAX),
+            );
+        let within_window_count = self
             .failure_timestamps
             .iter()
             .filter(|ts| **ts >= cutoff)
-            .collect();
+            .count();
 
-        if within_window.len() as u32 >= self.policy.failure_threshold {
+        if u32::try_from(within_window_count).unwrap_or(u32::MAX) >= self.policy.failure_threshold {
             return self
                 .degradation_state
                 .can_degrade_more(self.policy.max_degradation_depth);
@@ -485,7 +505,7 @@ impl DegradationGuard {
         // Check cooldown
         if let Some(last) = self.last_upgrade_attempt {
             let elapsed = chrono::Utc::now().signed_duration_since(last).num_seconds();
-            if elapsed < self.policy.upgrade_cooldown_secs as i64 {
+            if elapsed < i64::try_from(self.policy.upgrade_cooldown_secs).unwrap_or(i64::MAX) {
                 return false;
             }
         }
@@ -535,7 +555,7 @@ impl DegradationGuard {
 
     /// Set degradation state directly for testing purposes.
     #[cfg(test)]
-    pub(crate) fn set_state_for_testing(&mut self, state: DegradationState) {
+    pub(crate) const fn set_state_for_testing(&mut self, state: DegradationState) {
         self.degradation_state = state;
     }
 

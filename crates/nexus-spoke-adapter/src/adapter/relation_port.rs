@@ -357,15 +357,18 @@ async fn put_relation_create(pool: &sqlx::SqlitePool, relation: Relation) -> Spo
     let mut deleted = Vec::new();
     for id in endpoint_ids.iter().copied() {
         match endpoint_rows.iter().find(|(k, _)| k == id) {
-            None => missing.push(id.to_string()),
-            Some((_, status)) if status == "deleted" => deleted.push(id.to_string()),
+            None => missing.push((*id).clone()),
+            Some((_, status)) if status == "deleted" => deleted.push((*id).clone()),
             Some(_) => {}
         }
     }
     if !missing.is_empty() {
         return reject(
             SpokeRejectCode::InvalidInput,
-            format!("relation endpoints are not World-owned in world {world_id}: {}", missing.join(", ")),
+            format!(
+                "relation endpoints are not World-owned in world {world_id}: {}",
+                missing.join(", ")
+            ),
             json!({ "relation_id": relation_id, "missing": missing }),
         );
     }
@@ -2077,7 +2080,7 @@ mod tests {
         .unwrap();
     }
 
-    /// Assert a create rejects with INVALID_INPUT and persists nothing.
+    /// Assert a create rejects with `INVALID_INPUT` and persists nothing.
     async fn assert_create_rejected_invalid_input(pool: &sqlx::SqlitePool, relation: Relation) {
         let adapter = NexusAdapter::new(pool.clone());
         match adapter.put_relation(relation, None).await {

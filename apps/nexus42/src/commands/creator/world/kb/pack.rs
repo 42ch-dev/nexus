@@ -2185,7 +2185,11 @@ mod tests {
         let (pool2, _dir2) = empty_world_pool().await;
         let store = SqliteKbStore::new(pool2.clone());
         store
-            .insert_knowledge_entry(KnowledgeEntryRecord::new(WORLD, BlockType::Character, "Carol"))
+            .insert_knowledge_entry(KnowledgeEntryRecord::new(
+                WORLD,
+                BlockType::Character,
+                "Carol",
+            ))
             .await
             .unwrap();
         let pre = count_entries(&pool2, WORLD).await;
@@ -2218,7 +2222,11 @@ mod tests {
         let (pool2, _dir2) = empty_world_pool().await;
         let store = SqliteKbStore::new(pool2.clone());
         store
-            .insert_knowledge_entry(KnowledgeEntryRecord::new(WORLD, BlockType::Character, "Carol"))
+            .insert_knowledge_entry(KnowledgeEntryRecord::new(
+                WORLD,
+                BlockType::Character,
+                "Carol",
+            ))
             .await
             .unwrap();
         let pre = count_entries(&pool2, WORLD).await;
@@ -2250,7 +2258,11 @@ mod tests {
         let (pool, _dir) = empty_world_pool().await;
         let store = SqliteKbStore::new(pool.clone());
         store
-            .insert_knowledge_entry(KnowledgeEntryRecord::new(WORLD, BlockType::Character, &long_name))
+            .insert_knowledge_entry(KnowledgeEntryRecord::new(
+                WORLD,
+                BlockType::Character,
+                &long_name,
+            ))
             .await
             .unwrap();
         let pack_json = json!({
@@ -2297,7 +2309,11 @@ mod tests {
         let mut target_ids = Vec::new();
         for name in ["Alice", "Bob", "Carol"] {
             let res = store
-                .insert_knowledge_entry(KnowledgeEntryRecord::new(WORLD, BlockType::Character, name))
+                .insert_knowledge_entry(KnowledgeEntryRecord::new(
+                    WORLD,
+                    BlockType::Character,
+                    name,
+                ))
                 .await
                 .unwrap();
             target_ids.push(res.entry_id);
@@ -2354,7 +2370,11 @@ mod tests {
         let (pool_rename, _dir_r) = empty_world_pool().await;
         let store_r = SqliteKbStore::new(pool_rename.clone());
         store_r
-            .insert_knowledge_entry(KnowledgeEntryRecord::new(WORLD, BlockType::Character, "Dragon"))
+            .insert_knowledge_entry(KnowledgeEntryRecord::new(
+                WORLD,
+                BlockType::Character,
+                "Dragon",
+            ))
             .await
             .unwrap();
         let parsed = parse_pack(

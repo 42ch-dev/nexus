@@ -63,20 +63,17 @@ pub fn push_personality_to_memory(
     let existing = load_memory(home, bearer, PERSONALITY_MEMORY_SLUG).ok();
 
     // 3. Create or update LongTermMemory
-    let mut memory = match existing {
-        Some(mut existing_mem) => {
-            // Preserve memory_id and source_session_ids from existing
-            existing_mem.set_body(personality_content);
-            // Personality is user-written, not session-derived:
-            // clear any source_session_ids that may have been added externally
-            existing_mem.frontmatter.source_session_ids.clear();
-            existing_mem
-        }
-        None => {
-            let mut new_mem = LongTermMemory::new("personality_core");
-            new_mem.set_body(personality_content);
-            new_mem
-        }
+    let mut memory = if let Some(mut existing_mem) = existing {
+        // Preserve memory_id and source_session_ids from existing
+        existing_mem.set_body(personality_content);
+        // Personality is user-written, not session-derived:
+        // clear any source_session_ids that may have been added externally
+        existing_mem.frontmatter.source_session_ids.clear();
+        existing_mem
+    } else {
+        let mut new_mem = LongTermMemory::new("personality_core");
+        new_mem.set_body(personality_content);
+        new_mem
     };
 
     // 4. Save to disk
@@ -150,7 +147,8 @@ mod tests {
         cleanup(&home);
         let soul = make_soul_with_personality("A thoughtful narrator.");
 
-        let memory = push_personality_to_memory(&home, MemoryBearerRef::Creator("ctr_test"), &soul).unwrap();
+        let memory =
+            push_personality_to_memory(&home, MemoryBearerRef::Creator("ctr_test"), &soul).unwrap();
 
         // Validate frontmatter fields
         assert!(
@@ -171,7 +169,12 @@ mod tests {
         );
 
         // Verify the file passes LongTermMemory validation
-        let loaded = load_memory(&home, MemoryBearerRef::Creator("ctr_test"), PERSONALITY_MEMORY_SLUG).unwrap();
+        let loaded = load_memory(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            PERSONALITY_MEMORY_SLUG,
+        )
+        .unwrap();
         assert!(loaded.validate().is_ok());
         cleanup(&home);
     }
@@ -183,12 +186,14 @@ mod tests {
 
         // First push
         let soul1 = make_soul_with_personality("Original personality.");
-        let mem1 = push_personality_to_memory(&home, MemoryBearerRef::Creator("ctr_test"), &soul1).unwrap();
-        let original_id = mem1.frontmatter.memory_id.clone();
+        let mem1 = push_personality_to_memory(&home, MemoryBearerRef::Creator("ctr_test"), &soul1)
+            .unwrap();
+        let original_id = mem1.frontmatter.memory_id;
 
         // Second push with different content
         let soul2 = make_soul_with_personality("Updated personality v2.");
-        let mem2 = push_personality_to_memory(&home, MemoryBearerRef::Creator("ctr_test"), &soul2).unwrap();
+        let mem2 = push_personality_to_memory(&home, MemoryBearerRef::Creator("ctr_test"), &soul2)
+            .unwrap();
 
         // memory_id should be preserved (SOUL wins but keeps same memory)
         assert_eq!(
@@ -201,7 +206,12 @@ mod tests {
         );
 
         // Verify on disk
-        let loaded = load_memory(&home, MemoryBearerRef::Creator("ctr_test"), PERSONALITY_MEMORY_SLUG).unwrap();
+        let loaded = load_memory(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            PERSONALITY_MEMORY_SLUG,
+        )
+        .unwrap();
         assert!(loaded.body.contains("Updated personality v2."));
         assert_eq!(loaded.frontmatter.memory_id, original_id);
         cleanup(&home);
@@ -214,17 +224,30 @@ mod tests {
 
         // First push
         let soul1 = make_soul_with_personality("Initial.");
-        let _mem1 = push_personality_to_memory(&home, MemoryBearerRef::Creator("ctr_test"), &soul1).unwrap();
+        let _mem1 = push_personality_to_memory(&home, MemoryBearerRef::Creator("ctr_test"), &soul1)
+            .unwrap();
 
         // Manually add session IDs (simulating external edit)
-        let mut loaded = load_memory(&home, MemoryBearerRef::Creator("ctr_test"), PERSONALITY_MEMORY_SLUG).unwrap();
+        let mut loaded = load_memory(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            PERSONALITY_MEMORY_SLUG,
+        )
+        .unwrap();
         loaded.add_source_session("sess_external_1");
         loaded.add_source_session("sess_external_2");
-        save_memory(&home, MemoryBearerRef::Creator("ctr_test"), PERSONALITY_MEMORY_SLUG, &loaded).unwrap();
+        save_memory(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            PERSONALITY_MEMORY_SLUG,
+            &loaded,
+        )
+        .unwrap();
 
         // Re-push should clear session IDs
         let soul2 = make_soul_with_personality("Re-pushed personality.");
-        let mem2 = push_personality_to_memory(&home, MemoryBearerRef::Creator("ctr_test"), &soul2).unwrap();
+        let mem2 = push_personality_to_memory(&home, MemoryBearerRef::Creator("ctr_test"), &soul2)
+            .unwrap();
 
         assert!(
             mem2.frontmatter.source_session_ids.is_empty(),
@@ -276,7 +299,8 @@ mod tests {
         cleanup(&home);
         let soul = make_soul_with_personality("Test personality.");
 
-        let result = push_personality_to_memory(&home, MemoryBearerRef::Creator("../../etc"), &soul);
+        let result =
+            push_personality_to_memory(&home, MemoryBearerRef::Creator("../../etc"), &soul);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()

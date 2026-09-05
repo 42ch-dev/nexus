@@ -381,7 +381,10 @@ impl Capability for WorldDeltaPropose {
 }
 
 /// Extract a serializable field value from a `KnowledgeEntryRecord` for the lost-update guard.
-fn field_of(kb: &nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord, field: &str) -> Value {
+fn field_of(
+    kb: &nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord,
+    field: &str,
+) -> Value {
     match field {
         "canonical_name" => json!(kb.canonical_name),
         "status" => json!(kb.status),
@@ -647,9 +650,10 @@ impl Capability for WorldDeltaApply {
                             serde_json::from_value::<nexus_contracts::BlockType>(v.clone()).ok()
                         })
                         .unwrap_or(nexus_contracts::BlockType::Character);
-                    let mut kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
-                        &world_id, block_type, canonical,
-                    );
+                    let mut kb =
+                        nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
+                            &world_id, block_type, canonical,
+                        );
                     if let Some(body) = ch.new_value.get("body_json").and_then(|v| {
                         serde_json::from_value::<
                             nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody,

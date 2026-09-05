@@ -1,4 +1,4 @@
-//! Character identity and ActorWorldBinding Daemon API handlers (v1.184 P0).
+//! Character identity and `ActorWorldBinding` Daemon API handlers (v1.184 P0).
 //!
 //! Active-Creator admission is stored-config only; request bodies never carry
 //! `owner_creator_id`. Responses are generated DTOs constructed from typed builders.
@@ -49,12 +49,12 @@ const MAX_LIMIT: u32 = 100;
 fn resolve_limit(raw: Option<i64>) -> Result<u32, NexusApiError> {
     match raw {
         None => Ok(DEFAULT_LIMIT),
-        Some(n) if n > 0 && n <= i64::from(MAX_LIMIT) => u32::try_from(n).map_err(|_| {
-            NexusApiError::BadRequest {
+        Some(n) if n > 0 && n <= i64::from(MAX_LIMIT) => {
+            u32::try_from(n).map_err(|_| NexusApiError::BadRequest {
                 code: "invalid_input".into(),
                 message: "limit is out of range".into(),
-            }
-        }),
+            })
+        }
         Some(_) => Err(NexusApiError::BadRequest {
             code: "invalid_input".into(),
             message: format!("limit must be between 1 and {MAX_LIMIT}"),
@@ -84,12 +84,12 @@ fn finish_builder<T, E: std::fmt::Display>(value: Result<T, E>) -> Result<T, Nex
     value.map_err(wire_err)
 }
 
-fn parse_optional<T>(raw: &Option<String>) -> Result<Option<T>, NexusApiError>
+fn parse_optional<T>(raw: Option<&str>) -> Result<Option<T>, NexusApiError>
 where
     T: std::str::FromStr,
     T::Err: std::fmt::Display,
 {
-    raw.as_deref().map(str::parse).transpose().map_err(wire_err)
+    raw.map(str::parse).transpose().map_err(wire_err)
 }
 
 fn character_from_record(record: &CharacterRecord) -> Result<Character, NexusApiError> {
@@ -103,14 +103,16 @@ fn character_from_record(record: &CharacterRecord) -> Result<Character, NexusApi
             .display_name(record.display_name.as_str())
             .status(record.status.as_str())
             .persona(persona)
-            .image_uri(parse_optional(&record.image_uri)?)
+            .image_uri(parse_optional(record.image_uri.as_deref())?)
             .created_at(parse_rfc3339(&record.created_at)?)
             .updated_at(parse_rfc3339(&record.updated_at)?)
             .try_into(),
     )
 }
 
-fn binding_from_record(record: &ActorWorldBindingRecord) -> Result<ActorWorldBinding, NexusApiError> {
+fn binding_from_record(
+    record: &ActorWorldBindingRecord,
+) -> Result<ActorWorldBinding, NexusApiError> {
     finish_builder(
         ActorWorldBinding::builder()
             .schema_version(1u64)
@@ -118,14 +120,18 @@ fn binding_from_record(record: &ActorWorldBindingRecord) -> Result<ActorWorldBin
             .character_id(record.character_id.as_str())
             .world_id(record.world_id.as_str())
             .status(record.status.as_str())
-            .world_sheet_entry_id(parse_optional(&record.world_sheet_entry_id)?)
+            .world_sheet_entry_id(parse_optional(record.world_sheet_entry_id.as_deref())?)
             .created_at(parse_rfc3339(&record.created_at)?)
             .updated_at(parse_rfc3339(&record.updated_at)?)
             .try_into(),
     )
 }
 
-fn pagination_info(limit: u32, has_more: bool, next_cursor: Option<String>) -> Result<NexusPaginationInfo, NexusApiError> {
+fn pagination_info(
+    limit: u32,
+    has_more: bool,
+    next_cursor: Option<String>,
+) -> Result<NexusPaginationInfo, NexusApiError> {
     finish_builder(
         NexusPaginationInfo::builder()
             .limit(i64::from(limit))
@@ -240,7 +246,9 @@ pub async fn get_character(
         .ok_or_else(|| NexusApiError::NotFound(format!("character {character_id}")))?;
     Ok(Json(finish_builder(
         CharacterDetail::builder()
-            .character(map_wire::<DetailCharacterWire>(character_from_record(&row)?)?)
+            .character(map_wire::<DetailCharacterWire>(character_from_record(
+                &row,
+            )?)?)
             .try_into(),
     )?))
 }
@@ -267,7 +275,9 @@ pub async fn add_binding(
         StatusCode::CREATED,
         Json(finish_builder(
             AddCharacterBindingResponse::builder()
-                .binding(map_wire::<AddedBindingWire>(binding_from_record(&binding)?)?)
+                .binding(map_wire::<AddedBindingWire>(binding_from_record(
+                    &binding,
+                )?)?)
                 .try_into(),
         )?),
     ))

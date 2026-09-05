@@ -17,7 +17,7 @@ pub const NAME_A_SHARE: &str = "AShare";
 pub const NAME_B_SHARE: &str = "BShare";
 pub const NAME_A_W1_LOCAL: &str = "AW1Local";
 
-/// Seeded graph ids and KnowledgeEntry identities.
+/// Seeded graph ids and `KnowledgeEntry` identities.
 #[derive(Debug, Clone)]
 pub struct RnAct4Graph {
     pub creator_id: String,
@@ -71,7 +71,8 @@ async fn cli_ok(d: &LiveDaemon, args: &[&str]) -> Output {
 
 async fn cli_json(d: &LiveDaemon, args: &[&str]) -> Value {
     let out = cli_ok(d, args).await;
-    serde_json::from_str(&stdout(&out)).unwrap_or_else(|_| panic!("cli json {args:?}: {}", stdout(&out)))
+    serde_json::from_str(&stdout(&out))
+        .unwrap_or_else(|_| panic!("cli json {args:?}: {}", stdout(&out)))
 }
 
 fn entry_id(value: &Value) -> String {
@@ -95,13 +96,7 @@ pub async fn activate_creator(d: &LiveDaemon) -> String {
 
     cli_ok(
         d,
-        &[
-            "system",
-            "config",
-            "set",
-            "active_creator_id",
-            &creator_id,
-        ],
+        &["system", "config", "set", "active_creator_id", &creator_id],
     )
     .await;
 
@@ -109,6 +104,7 @@ pub async fn activate_creator(d: &LiveDaemon) -> String {
 }
 
 /// Build the full RN-ACT-4 graph through public HTTP routes and CLI verbs.
+#[allow(clippy::too_many_lines, clippy::similar_names)] // single full-graph fixture (A/B roles)
 pub async fn seed(d: &LiveDaemon) -> RnAct4Graph {
     let creator_id = activate_creator(d).await;
 

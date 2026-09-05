@@ -69,7 +69,10 @@ fn character_owner_emits_character_id_never_world_id() {
     let rec = record_for(&KnowledgeOwnerRef::character("chr_abc"), "Shared lore");
     let spoke = knowledge_record_to_spoke(&rec);
     let ns = nexus_ns(&spoke);
-    assert_eq!(ns.get("character_id").and_then(|v| v.as_str()), Some("chr_abc"));
+    assert_eq!(
+        ns.get("character_id").and_then(|v| v.as_str()),
+        Some("chr_abc")
+    );
     assert!(
         !ns.contains_key("world_id"),
         "character-owned entry must not carry world_id: {ns:?}"
@@ -85,7 +88,10 @@ fn character_owner_emits_character_id_never_world_id() {
 /// `world_id`.
 #[test]
 fn binding_owner_emits_binding_id_never_world_id() {
-    let rec = record_for(&KnowledgeOwnerRef::actor_world_binding("awb_abc"), "Private note");
+    let rec = record_for(
+        &KnowledgeOwnerRef::actor_world_binding("awb_abc"),
+        "Private note",
+    );
     let spoke = knowledge_record_to_spoke(&rec);
     let ns = nexus_ns(&spoke);
     assert_eq!(
@@ -99,7 +105,10 @@ fn binding_owner_emits_binding_id_never_world_id() {
     assert!(!ns.contains_key("character_id"));
 
     let back = spoke_to_knowledge_record(spoke).unwrap();
-    assert_eq!(back.owner, KnowledgeOwnerRef::actor_world_binding("awb_abc"));
+    assert_eq!(
+        back.owner,
+        KnowledgeOwnerRef::actor_world_binding("awb_abc")
+    );
 }
 
 /// Fail closed: a spoke entry with NO canonical owner key must not gain a
@@ -126,7 +135,10 @@ fn creator_only_round_trips_as_nexus_metadata() {
     rec.creator_only = true;
     let spoke = knowledge_record_to_spoke(&rec);
     let ns = nexus_ns(&spoke);
-    assert_eq!(ns.get("creator_only").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        ns.get("creator_only").and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
 
     let back = spoke_to_knowledge_record(spoke).unwrap();
     assert!(back.creator_only);
@@ -136,7 +148,7 @@ fn creator_only_round_trips_as_nexus_metadata() {
 /// Build a spoke entry whose `extensions.nexus` JSON is exactly the supplied
 /// map (bypassing the typed setters) — used to synthesize malformed wire
 /// payloads the typed setter would never emit.
-fn spoke_with_nexus(json_map: serde_json::Value) -> spoke_schemas::KnowledgeEntry {
+fn spoke_with_nexus(json_map: &serde_json::Value) -> spoke_schemas::KnowledgeEntry {
     let rec = record_for(&KnowledgeOwnerRef::world("wld_x"), "Wire");
     let mut spoke = knowledge_record_to_spoke(&rec);
     let key = KnowledgeEntryExtensionsKey::try_from("nexus").unwrap();
@@ -165,10 +177,13 @@ fn ambiguous_owner_keys_reject_both_pairs_and_triple() {
             "actor_world_binding_id": "awb_1"
         }),
     ] {
-        let spoke = spoke_with_nexus(ns);
+        let spoke = spoke_with_nexus(&ns);
         let err = spoke_to_knowledge_record(spoke).unwrap_err();
         assert!(
-            matches!(err, nexus_knowledge::world_kb::errors::KbError::InvalidOwnerMetadata(_)),
+            matches!(
+                err,
+                nexus_knowledge::world_kb::errors::KbError::InvalidOwnerMetadata(_)
+            ),
             "ambiguous owner metadata must reject, got {err:?}"
         );
     }
@@ -184,10 +199,13 @@ fn wrong_typed_or_null_owner_key_rejects() {
         serde_json::json!({"character_id": ["not", "a", "string"]}),
         serde_json::json!({"actor_world_binding_id": {"id": "nested"}}),
     ] {
-        let spoke = spoke_with_nexus(ns);
+        let spoke = spoke_with_nexus(&ns);
         let err = spoke_to_knowledge_record(spoke).unwrap_err();
         assert!(
-            matches!(err, nexus_knowledge::world_kb::errors::KbError::InvalidOwnerMetadata(_)),
+            matches!(
+                err,
+                nexus_knowledge::world_kb::errors::KbError::InvalidOwnerMetadata(_)
+            ),
             "malformed owner key must reject, got {err:?}"
         );
     }
@@ -222,12 +240,12 @@ fn creator_only_on_non_world_owner_rejects() {
 fn schema_version_overflow_rejects_not_normalizes() {
     let rec = record_for(&KnowledgeOwnerRef::world("wld_x"), "Overflow");
     let mut spoke = knowledge_record_to_spoke(&rec);
-    spoke.schema_version = std::num::NonZero::new((u32::MAX as u64) + 1).expect("non-zero");
+    spoke.schema_version = std::num::NonZero::new(u64::from(u32::MAX) + 1).expect("non-zero");
     let err = spoke_to_knowledge_record(spoke).unwrap_err();
     assert!(
         matches!(
             &err,
-            nexus_knowledge::world_kb::errors::KbError::UnsupportedSchemaVersion(n) if *n == (u32::MAX as u64) + 1
+            nexus_knowledge::world_kb::errors::KbError::UnsupportedSchemaVersion(n) if *n == u64::from(u32::MAX) + 1
         ),
         "schema_version overflow must reject, got {err:?}"
     );

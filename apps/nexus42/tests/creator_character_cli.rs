@@ -163,8 +163,9 @@ async fn create_bind_remove_journey_human_and_json() {
     );
 }
 
-
 #[tokio::test]
+#[allow(clippy::too_many_lines, clippy::similar_names)] // e2e pagination proof (A/B pages)
+
 async fn binding_list_human_and_json_paginate() {
     let d = LiveDaemon::start().await;
     activate_owner(&d).await;
@@ -224,7 +225,10 @@ async fn binding_list_human_and_json_paginate() {
     let page: Value = serde_json::from_str(&stdout(&json_page)).unwrap();
     assert_eq!(page["items"].as_array().unwrap().len(), 1);
     assert_eq!(page["pagination"]["has_more"], true);
-    let cursor = page["pagination"]["next_cursor"].as_str().unwrap().to_string();
+    let cursor = page["pagination"]["next_cursor"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let json_page2 = d
         .cli(&[
@@ -241,10 +245,17 @@ async fn binding_list_human_and_json_paginate() {
             "--json",
         ])
         .await;
-    assert!(json_page2.status.success(), "json page2: {}", stderr(&json_page2));
+    assert!(
+        json_page2.status.success(),
+        "json page2: {}",
+        stderr(&json_page2)
+    );
     let page2: Value = serde_json::from_str(&stdout(&json_page2)).unwrap();
     assert_eq!(page2["items"].as_array().unwrap().len(), 1);
-    assert_ne!(page["items"][0]["binding_id"], page2["items"][0]["binding_id"]);
+    assert_ne!(
+        page["items"][0]["binding_id"],
+        page2["items"][0]["binding_id"]
+    );
 
     let human = d
         .cli(&[
@@ -312,7 +323,10 @@ async fn knowledge_add_list_view_json_round_trip() {
         .await;
     assert!(created.status.success(), "create: {}", stderr(&created));
     let body: Value = serde_json::from_str(&stdout(&created)).unwrap();
-    let chr = body["character"]["character_id"].as_str().unwrap().to_string();
+    let chr = body["character"]["character_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let bind = body["binding"]["binding_id"].as_str().unwrap().to_string();
 
     let added = d

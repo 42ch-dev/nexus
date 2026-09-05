@@ -104,7 +104,7 @@ impl ActorSessionRegistry {
     /// Returns a policy-mapped API error when the path is relative, traverses,
     /// or cannot be resolved.
     pub fn canonicalize_cwd(cwd: &Path) -> Result<PathBuf, NexusApiError> {
-        nexus_agent_host::config::validate_workspace_path(cwd).map_err(map_policy)
+        nexus_agent_host::config::validate_workspace_path(cwd).map_err(|e| map_policy(&e))
     }
 
     /// Build the exact tuple key from an admitted Actor context.
@@ -186,15 +186,10 @@ impl ActorSessionRegistry {
         let mut first_err = None;
         for id in ids {
             if let Err(err) = host.shutdown_session(id).await {
-                if first_err.is_none() {
-                    first_err = Some(map_host(err));
-                }
+                let _ = first_err.get_or_insert_with(|| map_host(&err));
             }
         }
-        match first_err {
-            Some(err) => Err(err),
-            None => Ok(()),
-        }
+        first_err.map_or_else(|| Ok(()), Err)
     }
 
     /// Drop the process-lifetime maps (daemon shutdown).
@@ -305,34 +300,37 @@ impl ActorSessionRegistry {
             .map(|row| row.key.clone());
         if let Some(key) = key {
             let lock = self.lock_for_key(&key);
-            let _guard = lock.lock().await;
+            let guard = lock.lock().await;
             let still_indexed = self
                 .maps()
                 .by_session
                 .get(&session_id)
                 .is_some_and(|row| row.key == key);
             if let Err(err) = host.shutdown_session(session_id.clone()).await {
-                drop(_guard);
+                drop(guard);
                 self.reclaim(&key, &lock);
-                return Err(map_host(err));
+                return Err(map_host(&err));
             }
             if still_indexed {
                 let mut maps = self.maps();
                 Self::evict_locked(&mut maps, &key, &session_id);
             }
-            drop(_guard);
+            drop(guard);
             self.reclaim(&key, &lock);
             Ok(())
         } else {
-            host.shutdown_session(session_id).await.map_err(map_host)
+            host.shutdown_session(session_id)
+                .await
+                .map_err(|e| map_host(&e))
         }
     }
 
-    /// Reuse a Ready exact match, reject Busy, or mint a replacement after stale eviction.
+    /// Reuse a `Ready` exact match, reject `Busy`, or mint a replacement after stale eviction.
     ///
     /// # Errors
     ///
-    /// `actor_session_busy` when the HostFacade session is Busy; host list/create errors otherwise.
+    /// `actor_session_busy` when the `HostFacade` session is `Busy`; host list/create errors otherwise.
+    #[allow(clippy::too_many_lines)] // single reconcile loop with early-return branches
     pub async fn resolve_or_create<F, Fut>(
         &self,
         key: ActorSessionKey,
@@ -349,12 +347,12 @@ impl ActorSessionRegistry {
             Self::reject_if_closed(&maps)?;
         }
         let lock = self.lock_for_key(&key);
-        let _guard = lock.lock().await;
+        let guard = lock.lock().await;
         {
             let maps = self.maps();
             if let Err(err) = Self::reject_if_closed(&maps) {
                 drop(maps);
-                drop(_guard);
+                drop(guard);
                 self.reclaim(&key, &lock);
                 return Err(err);
             }
@@ -368,28 +366,28 @@ impl ActorSessionRegistry {
             let listed = match host.list_sessions().await {
                 Ok(listed) => listed,
                 Err(err) => {
-                    drop(_guard);
+                    drop(guard);
                     self.reclaim(&key, &lock);
-                    return Err(map_host(err));
+                    return Err(map_host(&err));
                 }
             };
             {
                 let maps = self.maps();
                 if let Err(err) = Self::reject_if_closed(&maps) {
                     drop(maps);
-                    drop(_guard);
+                    drop(guard);
                     self.reclaim(&key, &lock);
                     return Err(err);
                 }
             }
             match listed.into_iter().find(|session| session.id == existing) {
                 Some(session) if matches!(session.state, SessionState::Ready) => {
-                    drop(_guard);
+                    drop(guard);
                     self.reclaim(&key, &lock);
                     return Ok(session);
                 }
                 Some(session) if session.state.is_busy() => {
-                    drop(_guard);
+                    drop(guard);
                     self.reclaim(&key, &lock);
                     return Err(NexusApiError::ConflictCoded {
                         code: "actor_session_busy".into(),
@@ -398,9 +396,9 @@ impl ActorSessionRegistry {
                 }
                 Some(session) => {
                     if let Err(err) = host.shutdown_session(session.id.clone()).await {
-                        drop(_guard);
+                        drop(guard);
                         self.reclaim(&key, &lock);
-                        return Err(map_host(err));
+                        return Err(map_host(&err));
                     }
                     let mut maps = self.maps();
                     Self::evict_locked(&mut maps, &key, &session.id);
@@ -415,7 +413,7 @@ impl ActorSessionRegistry {
         let session = match create().await {
             Ok(session) => session,
             Err(err) => {
-                drop(_guard);
+                drop(guard);
                 self.reclaim(&key, &lock);
                 return Err(err);
             }
@@ -438,14 +436,14 @@ impl ActorSessionRegistry {
         };
         if !inserted {
             let cleanup = Self::teardown_minted_host(host, session.id.clone()).await;
-            drop(_guard);
+            drop(guard);
             self.reclaim(&key, &lock);
             return match cleanup {
                 Ok(()) => Err(shutting_down()),
                 Err(err) => Err(err),
             };
         }
-        drop(_guard);
+        drop(guard);
         self.reclaim(&key, &lock);
         Ok(session)
     }
@@ -462,7 +460,7 @@ impl ActorSessionRegistry {
                 Err(err) => last = Some(err),
             }
         }
-        Err(map_host(last.expect("minted host cleanup attempted")))
+        Err(map_host(&last.expect("minted host cleanup attempted")))
     }
 }
 
@@ -558,14 +556,14 @@ pub fn echo_actor_pair(
     Ok((Some(actor_ref), Some(viewpoint)))
 }
 
-fn map_policy(err: nexus_agent_host::HostError) -> NexusApiError {
+fn map_policy(err: &nexus_agent_host::HostError) -> NexusApiError {
     NexusApiError::Forbidden {
         resource: "agent_host".into(),
         reason: err.to_string(),
     }
 }
 
-fn map_host(err: nexus_agent_host::HostError) -> NexusApiError {
+fn map_host(err: &nexus_agent_host::HostError) -> NexusApiError {
     match err.category() {
         "provider_unavailable" => NexusApiError::NotFound(err.to_string()),
         "capability_unsupported" => NexusApiError::InvalidInput {
@@ -606,7 +604,11 @@ mod tests {
         }
     }
 
-    fn sample_ctx(actor: AdmittedActor, world: &str, binding: Option<&str>) -> AdmittedActorContext {
+    fn sample_ctx(
+        actor: AdmittedActor,
+        world: &str,
+        binding: Option<&str>,
+    ) -> AdmittedActorContext {
         AdmittedActorContext {
             actor,
             world_id: world.to_string(),
@@ -731,7 +733,9 @@ mod tests {
                 tokio::time::sleep(delay).await;
             }
             if self.fail_create.swap(false, Ordering::SeqCst) {
-                return Err(nexus_agent_host::HostError::internal("injected create failure"));
+                return Err(nexus_agent_host::HostError::internal(
+                    "injected create failure",
+                ));
             }
             self.creates.fetch_add(1, Ordering::SeqCst);
             let session = HostSession {
@@ -804,7 +808,9 @@ mod tests {
                 tokio::time::sleep(delay).await;
             }
             if self.fail_list.swap(false, Ordering::SeqCst) {
-                return Err(nexus_agent_host::HostError::internal("injected list failure"));
+                return Err(nexus_agent_host::HostError::internal(
+                    "injected list failure",
+                ));
             }
             Ok(self
                 .sessions
@@ -819,10 +825,7 @@ mod tests {
             Ok(ProviderCatalog::new())
         }
 
-        fn subscribe_events(
-            &self,
-            _session_id: HostSessionId,
-        ) -> broadcast::Receiver<HostEvent> {
+        fn subscribe_events(&self, _session_id: HostSessionId) -> broadcast::Receiver<HostEvent> {
             self.events.subscribe()
         }
     }
@@ -943,7 +946,10 @@ mod tests {
                 let host_ref: &dyn HostFacade = host_a.as_ref();
                 reg_a
                     .resolve_or_create(key_a, ctx_a, host_ref, || async {
-                        host_ref.create_session(host_req()).await.map_err(map_host)
+                        host_ref
+                            .create_session(host_req())
+                            .await
+                            .map_err(|e| map_host(&e))
                     })
                     .await
             },
@@ -951,7 +957,10 @@ mod tests {
                 let host_ref: &dyn HostFacade = host_b.as_ref();
                 reg_b
                     .resolve_or_create(key_b, ctx_b, host_ref, || async {
-                        host_ref.create_session(host_req()).await.map_err(map_host)
+                        host_ref
+                            .create_session(host_req())
+                            .await
+                            .map_err(|e| map_host(&e))
                     })
                     .await
             }
@@ -973,11 +982,16 @@ mod tests {
         let key = key_with(&ctx, "prov", cwd.path(), None, None);
         let created = registry
             .resolve_or_create(key.clone(), ctx.clone(), host.as_ref(), || async {
-                host.create_session(host_req()).await.map_err(map_host)
+                host.create_session(host_req())
+                    .await
+                    .map_err(|e| map_host(&e))
             })
             .await
             .expect("create");
-        host.set_state(created.id.clone(), SessionState::Busy(HostOperationId::new()));
+        host.set_state(
+            created.id.clone(),
+            SessionState::Busy(HostOperationId::new()),
+        );
 
         let err = registry
             .resolve_or_create(key, ctx, host.as_ref(), || async {
@@ -999,7 +1013,9 @@ mod tests {
         let key = key_with(&ctx, "prov", cwd.path(), None, None);
         let first = registry
             .resolve_or_create(key.clone(), ctx.clone(), host.as_ref(), || async {
-                host.create_session(host_req()).await.map_err(map_host)
+                host.create_session(host_req())
+                    .await
+                    .map_err(|e| map_host(&e))
             })
             .await
             .expect("first");
@@ -1007,24 +1023,35 @@ mod tests {
         host.set_state(first.id.clone(), SessionState::Stopped);
         let replaced = registry
             .resolve_or_create(key.clone(), ctx.clone(), host.as_ref(), || async {
-                host.create_session(host_req()).await.map_err(map_host)
+                host.create_session(host_req())
+                    .await
+                    .map_err(|e| map_host(&e))
             })
             .await
             .expect("replace terminal");
         assert_ne!(replaced.id, first.id);
         assert!(registry.context_for(&first.id).is_none());
 
-        host.shutdown_session(replaced.id.clone()).await.expect("drop host row");
+        host.shutdown_session(replaced.id.clone())
+            .await
+            .expect("drop host row");
         let after_missing = registry
             .resolve_or_create(key, ctx, host.as_ref(), || async {
-                host.create_session(host_req()).await.map_err(map_host)
+                host.create_session(host_req())
+                    .await
+                    .map_err(|e| map_host(&e))
             })
             .await
             .expect("replace missing");
         assert_ne!(after_missing.id, replaced.id);
         assert_eq!(host.creates.load(Ordering::SeqCst), 3);
         assert!(registry.is_actor_session(&first.id));
-        assert!(host.sessions.lock().expect("sessions").get(&first.id).is_none());
+        assert!(host
+            .sessions
+            .lock()
+            .expect("sessions")
+            .get(&first.id)
+            .is_none());
     }
 
     #[tokio::test]
@@ -1036,7 +1063,9 @@ mod tests {
         let key = key_with(&ctx, "prov", cwd.path(), None, None);
         let session = registry
             .resolve_or_create(key, ctx, host.as_ref(), || async {
-                host.create_session(host_req()).await.map_err(map_host)
+                host.create_session(host_req())
+                    .await
+                    .map_err(|e| map_host(&e))
             })
             .await
             .expect("create");
@@ -1054,7 +1083,9 @@ mod tests {
                 key_with(&base_character_ctx(), "prov", cwd.path(), None, None),
                 base_character_ctx(),
                 host.as_ref(),
-                || async { panic!("must not mint after close"); },
+                || async {
+                    panic!("must not mint after close");
+                },
             )
             .await
             .expect_err("closed");
@@ -1070,7 +1101,9 @@ mod tests {
         let key = key_with(&ctx, "prov", cwd.path(), None, None);
         let session = registry
             .resolve_or_create(key, ctx, host.as_ref(), || async {
-                host.create_session(host_req()).await.map_err(map_host)
+                host.create_session(host_req())
+                    .await
+                    .map_err(|e| map_host(&e))
             })
             .await
             .expect("create");
@@ -1088,7 +1121,9 @@ mod tests {
         let key = key_with(&ctx, "prov", cwd.path(), None, None);
         let _ = registry
             .resolve_or_create(key, ctx, host.as_ref(), || async {
-                host.create_session(host_req()).await.map_err(map_host)
+                host.create_session(host_req())
+                    .await
+                    .map_err(|e| map_host(&e))
             })
             .await
             .expect("second");
@@ -1104,7 +1139,9 @@ mod tests {
     ) -> HostSession {
         registry
             .resolve_or_create(key, ctx, host.as_ref(), || async {
-                host.create_session(host_req()).await.map_err(map_host)
+                host.create_session(host_req())
+                    .await
+                    .map_err(|e| map_host(&e))
             })
             .await
             .expect("mint")
@@ -1177,7 +1214,10 @@ mod tests {
         let create = tokio::spawn(async move {
             reg_a
                 .resolve_or_create(key, ctx, host_a.as_ref(), || async {
-                    host_a.create_session(host_req()).await.map_err(map_host)
+                    host_a
+                        .create_session(host_req())
+                        .await
+                        .map_err(|e| map_host(&e))
                 })
                 .await
         });
@@ -1242,7 +1282,9 @@ mod tests {
         let key = key_with(&ctx, "prov", cwd.path(), None, None);
         let err = registry
             .resolve_or_create(key.clone(), ctx.clone(), host.as_ref(), || async {
-                host.create_session(host_req()).await.map_err(map_host)
+                host.create_session(host_req())
+                    .await
+                    .map_err(|e| map_host(&e))
             })
             .await
             .expect_err("create fail");
@@ -1266,14 +1308,13 @@ mod tests {
         let ctx = base_character_ctx();
         let key = key_with(&ctx, "prov", cwd.path(), None, None);
         let first = mint(&registry, &host, key.clone(), ctx.clone()).await;
-        host.sessions
-            .lock()
-            .expect("sessions")
-            .remove(&first.id);
+        host.sessions.lock().expect("sessions").remove(&first.id);
         host.fail_next_create();
         let err = registry
             .resolve_or_create(key.clone(), ctx.clone(), host.as_ref(), || async {
-                host.create_session(host_req()).await.map_err(map_host)
+                host.create_session(host_req())
+                    .await
+                    .map_err(|e| map_host(&e))
             })
             .await
             .expect_err("replacement create fail");
@@ -1299,7 +1340,10 @@ mod tests {
         let reg = registry.clone();
         let create = tokio::spawn(async move {
             reg.resolve_or_create(key, ctx, host_a.as_ref(), || async {
-                host_a.create_session(host_req()).await.map_err(map_host)
+                host_a
+                    .create_session(host_req())
+                    .await
+                    .map_err(|e| map_host(&e))
             })
             .await
         });
@@ -1325,7 +1369,10 @@ mod tests {
         let reg = registry.clone();
         let create = tokio::spawn(async move {
             reg.resolve_or_create(key, ctx, host_a.as_ref(), || async {
-                host_a.create_session(host_req()).await.map_err(map_host)
+                host_a
+                    .create_session(host_req())
+                    .await
+                    .map_err(|e| map_host(&e))
             })
             .await
         });
@@ -1442,9 +1489,8 @@ mod tests {
         let reg = registry.clone();
         let host_a = host.clone();
         let sid = first.id.clone();
-        let shutdown = tokio::spawn(async move {
-            reg.shutdown_session(sid, host_a.as_ref()).await
-        });
+        let shutdown =
+            tokio::spawn(async move { reg.shutdown_session(sid, host_a.as_ref()).await });
         tokio::time::sleep(Duration::from_millis(10)).await;
         registry.close();
         let err = shutdown.await.expect("join").expect_err("shutdown error");

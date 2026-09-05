@@ -273,7 +273,10 @@ async fn cross_chapter_existing_kb_match_refreshes_body() {
         .iter()
         .filter(|kb| kb.canonical_name == "Aelin")
         .count();
-    assert_eq!(aelin_kb, 1, "exactly one confirmed KnowledgeEntryRecord for Aelin");
+    assert_eq!(
+        aelin_kb, 1,
+        "exactly one confirmed KnowledgeEntryRecord for Aelin"
+    );
 }
 
 // ── Reconciliation: stale candidate removed when name vanishes from all ────

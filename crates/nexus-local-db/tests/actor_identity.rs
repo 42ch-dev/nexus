@@ -1,4 +1,4 @@
-//! P0 Task 2 — Character / ActorWorldBinding store transaction proofs.
+//! P0 Task 2 — Character / `ActorWorldBinding` store transaction proofs.
 
 #![allow(clippy::unwrap_used)]
 
@@ -323,9 +323,10 @@ async fn non_last_remove_deletes_only_that_row() {
     .await
     .unwrap();
 
-    let remaining = list_bindings_for_character(&pool, OWNER, &created.character.character_id, 100, 0)
-        .await
-        .unwrap();
+    let remaining =
+        list_bindings_for_character(&pool, OWNER, &created.character.character_id, 100, 0)
+            .await
+            .unwrap();
     assert_eq!(remaining.len(), 1);
     assert_eq!(remaining[0].binding_id, created.binding.binding_id);
     assert_eq!(remaining[0].world_id, WORLD_A);
@@ -378,11 +379,10 @@ async fn concurrent_last_binding_removes_leave_one_active() {
         "exactly one concurrent remove must succeed, got {r1:?} / {r2:?}"
     );
     assert!(r1.is_err() || r2.is_err());
-    let err = if r1.is_err() {
-        r1.unwrap_err()
-    } else {
-        r2.unwrap_err()
-    };
+    let err = r1
+        .err()
+        .or_else(|| r2.err())
+        .expect("exactly one concurrent remove must fail");
     assert!(matches!(
         err,
         LocalDbError::ActorContractConflict {
@@ -405,7 +405,9 @@ fn mint_character_id_matches_db_shape() {
     let id = mint_character_id();
     assert_eq!(id.len(), 36);
     assert!(id.starts_with("chr_"));
-    assert!(id[4..].chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+    assert!(id[4..]
+        .chars()
+        .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
 }
 
 #[tokio::test]
@@ -417,7 +419,10 @@ async fn null_primary_keys_are_rejected() {
         .execute(&pool)
         .await
         .unwrap_err();
-    assert!(chr_err.to_string().contains("NOT NULL") || chr_err.to_string().to_lowercase().contains("constraint"));
+    assert!(
+        chr_err.to_string().contains("NOT NULL")
+            || chr_err.to_string().to_lowercase().contains("constraint")
+    );
 
     let created = create_character_with_initial_binding(
         &pool,
@@ -438,7 +443,10 @@ async fn null_primary_keys_are_rejected() {
         .execute(&pool)
         .await
         .unwrap_err();
-    assert!(bind_err.to_string().contains("NOT NULL") || bind_err.to_string().to_lowercase().contains("constraint"));
+    assert!(
+        bind_err.to_string().contains("NOT NULL")
+            || bind_err.to_string().to_lowercase().contains("constraint")
+    );
 }
 
 #[tokio::test]
@@ -557,4 +565,3 @@ async fn actor_conflict_display_is_human_readable() {
     assert_ne!(msg, "last_active_actor_world_binding");
     assert!(msg.contains("last active"));
 }
-

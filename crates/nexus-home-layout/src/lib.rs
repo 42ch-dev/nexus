@@ -563,7 +563,10 @@ pub fn is_valid_character_id(s: &str) -> bool {
     let Some(hex) = s.strip_prefix("chr_") else {
         return false;
     };
-    hex.len() == 32 && hex.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+    hex.len() == 32
+        && hex
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 
 /// `$HOME/.nexus42/rules/writing-craft.md` — user override for Layer 1 rules.
@@ -1368,11 +1371,21 @@ mod tests {
     fn character_paths_stay_inside_character_root_for_normal_ids() {
         let home = PathBuf::from("/h");
         let root = character_root(&home, "ctr_owner", "chr_aabbccddee00112233445566778899ff");
-        let soul = character_soul_md_path(&home, "ctr_owner", "chr_aabbccddee00112233445566778899ff");
-        let mem =
-            character_long_term_memory_dir(&home, "ctr_owner", "chr_aabbccddee00112233445566778899ff");
-        assert!(soul.starts_with(&root), "SOUL path must stay under the Character root");
-        assert!(mem.starts_with(&root), "memory dir must stay under the Character root");
+        let soul =
+            character_soul_md_path(&home, "ctr_owner", "chr_aabbccddee00112233445566778899ff");
+        let mem = character_long_term_memory_dir(
+            &home,
+            "ctr_owner",
+            "chr_aabbccddee00112233445566778899ff",
+        );
+        assert!(
+            soul.starts_with(&root),
+            "SOUL path must stay under the Character root"
+        );
+        assert!(
+            mem.starts_with(&root),
+            "memory dir must stay under the Character root"
+        );
         // Character files live under the OWNER's creator tree, never at the
         // creator root itself or in a sibling creator's tree.
         let owner_root = PathBuf::from("/h/.nexus42/creators/ctr_owner");
@@ -1443,20 +1456,35 @@ mod tests {
     fn is_valid_character_id_matches_minted_format() {
         // Minted by `nexus_local_db::character::mint_character_id` as
         // `chr_` + 32 lowercase hex.
-        assert!(is_valid_character_id("chr_0123456789abcdef0123456789abcdef"));
-        assert!(is_valid_character_id("chr_aabbccddee00112233445566778899ff"));
-        assert!(!is_valid_character_id("ctr_0123456789abcdef0123456789abcdef"));
+        assert!(is_valid_character_id(
+            "chr_0123456789abcdef0123456789abcdef"
+        ));
+        assert!(is_valid_character_id(
+            "chr_aabbccddee00112233445566778899ff"
+        ));
+        assert!(!is_valid_character_id(
+            "ctr_0123456789abcdef0123456789abcdef"
+        ));
         assert!(!is_valid_character_id("chr_"));
         assert!(!is_valid_character_id("chr_0123456789abcdef")); // too short
-        assert!(!is_valid_character_id("chr_0123456789abcdef0123456789abcdef00")); // too long
-        assert!(!is_valid_character_id("chr_0123456789ABCDEF0123456789ABCDEF")); // uppercase
-        assert!(!is_valid_character_id("chr_0123456789abcdef0123456789abcdeg")); // non-hex
+        assert!(!is_valid_character_id(
+            "chr_0123456789abcdef0123456789abcdef00"
+        )); // too long
+        assert!(!is_valid_character_id(
+            "chr_0123456789ABCDEF0123456789ABCDEF"
+        )); // uppercase
+        assert!(!is_valid_character_id(
+            "chr_0123456789abcdef0123456789abcdeg"
+        )); // non-hex
         assert!(!is_valid_character_id("chr_../escape"));
         assert!(!is_valid_character_id("chr_a/b"));
         assert!(!is_valid_character_id("chr_a\\b"));
-        assert!(!is_valid_character_id("chr_\u{0}null456789abcdef0123456789ab"));
+        assert!(!is_valid_character_id(
+            "chr_\u{0}null456789abcdef0123456789ab"
+        ));
         assert!(!is_valid_character_id(""));
-        assert!(!is_valid_character_id("chr_0123456789abcdef0123456789abcdeff"));
+        assert!(!is_valid_character_id(
+            "chr_0123456789abcdef0123456789abcdeff"
+        ));
     }
 }
-

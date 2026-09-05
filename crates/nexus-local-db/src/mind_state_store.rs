@@ -73,7 +73,7 @@ pub struct MindStateRow {
 /// Returns [`LocalDbError::Sqlx`] on database failure — including a
 /// duplicate `mind_state_id` primary key and an unknown
 /// `holder_entry_id` foreign key.
-/// Pinned pre-v1.184 P4 MindState wire envelope (field names + shapes).
+/// Pinned pre-v1.184 P4 `MindState` wire envelope (field names + shapes).
 pub const LEGACY_MIND_STATE_WIRE_FIXTURE: &str = r#"{
         "schema_version": 1,
         "mind_state_id": "ms_001",
@@ -93,6 +93,10 @@ pub const LEGACY_MIND_STATE_WIRE_FIXTURE: &str = r#"{
     }"#;
 
 /// Insert a `MindState` row inside a caller-owned transaction (v1.184 P4).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` on database failure.
 #[allow(clippy::too_many_arguments)]
 pub async fn insert_mind_state_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
@@ -134,6 +138,11 @@ pub async fn insert_mind_state_in_tx(
     Ok(())
 }
 
+/// Insert a `MindState` row from raw column values.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` on database failure.
 #[allow(clippy::too_many_arguments)] // raw column values — the full row shape
 pub async fn insert_mind_state(
     pool: &SqlitePool,

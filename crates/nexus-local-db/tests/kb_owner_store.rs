@@ -102,7 +102,14 @@ async fn seed_binding(pool: &SqlitePool, binding_id: &str, character_id: &str, w
 async fn raw_owner_row(
     pool: &SqlitePool,
     key_block_id: &str,
-) -> (String, Option<String>, Option<String>, Option<String>, i64, Option<String>) {
+) -> (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    i64,
+    Option<String>,
+) {
     sqlx::query_as(
         "SELECT owner_kind, world_id, character_id, actor_world_binding_id, creator_only, \
          extensions_nexus_json FROM kb_key_blocks WHERE key_block_id = ?",
@@ -113,7 +120,7 @@ async fn raw_owner_row(
     .unwrap()
 }
 
-fn record_with_body(owner: KnowledgeOwnerRef, name: &str) -> KnowledgeEntryRecord {
+fn record_with_body(owner: &KnowledgeOwnerRef, name: &str) -> KnowledgeEntryRecord {
     let mut rec = match &owner {
         KnowledgeOwnerRef::World(id) => KnowledgeEntryRecord::new(id, BlockType::Character, name),
         KnowledgeOwnerRef::Character(id) => {
@@ -139,7 +146,7 @@ async fn world_owner_round_trip_preserves_legacy_behavior() {
     seed_world(&pool, WORLD_A).await;
     let store = SqliteKbStore::new(pool.clone());
 
-    let rec = record_with_body(KnowledgeOwnerRef::world(WORLD_A), "Aria");
+    let rec = record_with_body(&KnowledgeOwnerRef::world(WORLD_A), "Aria");
     let entry_id = rec.entry_id.clone();
     let res = store.insert_knowledge_entry(rec).await.unwrap();
     assert_eq!(res.owner, KnowledgeOwnerRef::world(WORLD_A));
@@ -161,7 +168,7 @@ async fn world_owner_round_trip_preserves_legacy_behavior() {
     assert_eq!(queried.total_count, 1);
 
     // World-scoped active uniqueness still rejects a same-name duplicate.
-    let dup = record_with_body(KnowledgeOwnerRef::world(WORLD_A), "Aria");
+    let dup = record_with_body(&KnowledgeOwnerRef::world(WORLD_A), "Aria");
     let err = store.insert_knowledge_entry(dup).await.unwrap_err();
     assert_eq!(
         err,
@@ -193,7 +200,7 @@ async fn character_owner_round_trip_without_world_fabrication() {
     seed_character(&pool, CHARACTER).await;
     let store = SqliteKbStore::new(pool.clone());
 
-    let rec = record_with_body(KnowledgeOwnerRef::character(CHARACTER), "Shared lore");
+    let rec = record_with_body(&KnowledgeOwnerRef::character(CHARACTER), "Shared lore");
     let entry_id = rec.entry_id.clone();
     let res = store.insert_knowledge_entry(rec).await.unwrap();
     assert_eq!(res.owner, KnowledgeOwnerRef::character(CHARACTER));
@@ -205,7 +212,14 @@ async fn character_owner_round_trip_without_world_fabrication() {
 
     // Invisible to legacy world-scoped reads.
     assert!(store.list_by_world(WORLD_A).await.unwrap().is_empty());
-    assert_eq!(store.query(&KbQuery::new(WORLD_A)).await.unwrap().total_count, 0);
+    assert_eq!(
+        store
+            .query(&KbQuery::new(WORLD_A))
+            .await
+            .unwrap()
+            .total_count,
+        0
+    );
 
     // Owner-scoped listing finds it.
     let owned = store
@@ -239,7 +253,10 @@ async fn binding_owner_round_trip_without_world_fabrication() {
     seed_binding(&pool, BINDING, CHARACTER, WORLD_A).await;
     let store = SqliteKbStore::new(pool.clone());
 
-    let rec = record_with_body(KnowledgeOwnerRef::actor_world_binding(BINDING), "Private note");
+    let rec = record_with_body(
+        &KnowledgeOwnerRef::actor_world_binding(BINDING),
+        "Private note",
+    );
     let entry_id = rec.entry_id.clone();
     store.insert_knowledge_entry(rec).await.unwrap();
 
@@ -277,7 +294,7 @@ async fn creator_only_is_world_owned_only() {
     seed_character(&pool, CHARACTER).await;
     let store = SqliteKbStore::new(pool.clone());
 
-    let mut rec = record_with_body(KnowledgeOwnerRef::world(WORLD_A), "Creator lore");
+    let mut rec = record_with_body(&KnowledgeOwnerRef::world(WORLD_A), "Creator lore");
     rec.creator_only = true;
     let entry_id = rec.entry_id.clone();
     store.insert_knowledge_entry(rec).await.unwrap();
@@ -291,7 +308,7 @@ async fn creator_only_is_world_owned_only() {
     assert_eq!(store.list_by_world(WORLD_A).await.unwrap().len(), 1);
 
     // Character-owned creator_only violates the CHECK.
-    let mut bad = record_with_body(KnowledgeOwnerRef::character(CHARACTER), "Bad");
+    let mut bad = record_with_body(&KnowledgeOwnerRef::character(CHARACTER), "Bad");
     bad.creator_only = true;
     assert!(store.insert_knowledge_entry(bad).await.is_err());
 }
@@ -306,7 +323,7 @@ async fn owner_and_creator_only_are_immutable_through_update() {
     seed_character(&pool, CHARACTER).await;
     let store = SqliteKbStore::new(pool.clone());
 
-    let rec = record_with_body(KnowledgeOwnerRef::world(WORLD_A), "Aria");
+    let rec = record_with_body(&KnowledgeOwnerRef::world(WORLD_A), "Aria");
     let entry_id = rec.entry_id.clone();
     store.insert_knowledge_entry(rec).await.unwrap();
 
@@ -363,7 +380,7 @@ async fn unknown_nexus_extension_keys_round_trip_all_owners() {
         KnowledgeOwnerRef::character(CHARACTER),
         KnowledgeOwnerRef::actor_world_binding(BINDING),
     ] {
-        let mut rec = record_with_body(owner.clone(), &format!("extras {}", owner.kind()));
+        let mut rec = record_with_body(&owner, &format!("extras {}", owner.kind()));
         rec.extensions_nexus_extras = Some(serde_json::json!({"custom_flag": "keep-me"}));
         let entry_id = rec.entry_id.clone();
         store.insert_knowledge_entry(rec).await.unwrap();
@@ -398,7 +415,7 @@ async fn owner_scoped_active_uniqueness_via_store() {
 
     store
         .insert_knowledge_entry(record_with_body(
-            KnowledgeOwnerRef::world(WORLD_A),
+            &KnowledgeOwnerRef::world(WORLD_A),
             "Shared name",
         ))
         .await
@@ -406,7 +423,7 @@ async fn owner_scoped_active_uniqueness_via_store() {
     // Cross-owner same-name is accepted.
     store
         .insert_knowledge_entry(record_with_body(
-            KnowledgeOwnerRef::character(CHARACTER),
+            &KnowledgeOwnerRef::character(CHARACTER),
             "Shared name",
         ))
         .await
@@ -414,7 +431,7 @@ async fn owner_scoped_active_uniqueness_via_store() {
     // Same-owner duplicate is rejected with the owner on the error.
     let err = store
         .insert_knowledge_entry(record_with_body(
-            KnowledgeOwnerRef::character(CHARACTER),
+            &KnowledgeOwnerRef::character(CHARACTER),
             "Shared name",
         ))
         .await
@@ -444,7 +461,7 @@ async fn insert_rejects_creator_only_on_non_world_owner() {
         KnowledgeOwnerRef::character(CHARACTER),
         KnowledgeOwnerRef::actor_world_binding(BINDING),
     ] {
-        let mut rec = record_with_body(owner.clone(), "Flagged");
+        let mut rec = record_with_body(&owner, "Flagged");
         rec.creator_only = true;
         let err = store.insert_knowledge_entry(rec).await.unwrap_err();
         assert!(
@@ -461,15 +478,12 @@ async fn insert_accepts_creator_only_on_world_owner() {
     seed_world(&pool, WORLD_A).await;
     let store = SqliteKbStore::new(pool);
 
-    let mut rec = record_with_body(KnowledgeOwnerRef::world(WORLD_A), "Flagged");
+    let mut rec = record_with_body(&KnowledgeOwnerRef::world(WORLD_A), "Flagged");
     rec.creator_only = true;
     let result = store.insert_knowledge_entry(rec).await.unwrap();
     assert_eq!(result.owner, KnowledgeOwnerRef::world(WORLD_A));
 
     // The typed creator_only column round-trips to true.
-    let got = store
-        .get_knowledge_entry(&result.entry_id)
-        .await
-        .unwrap();
+    let got = store.get_knowledge_entry(&result.entry_id).await.unwrap();
     assert!(got.creator_only);
 }

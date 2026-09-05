@@ -37,6 +37,11 @@ pub fn exists(home: &Path, bearer: MemoryBearerRef<'_>) -> bool {
 }
 
 /// Read and parse SOUL.md for a bearer.
+///
+/// # Errors
+///
+/// Returns [`MemoryError::SoulNotFound`] when the file is absent and
+/// [`MemoryError::Io`]/[`MemoryError::Yaml`] on read or parse failure.
 pub fn load(home: &Path, bearer: MemoryBearerRef<'_>) -> Result<SoulDocument, MemoryError> {
     bearer.validate()?;
     let path = soul_path(home, bearer);
@@ -238,7 +243,11 @@ mod tests {
     #[test]
     fn save_rejects_path_traversal() {
         let home = fake_home();
-        let result = save(&home, MemoryBearerRef::Creator("../../../tmp/evil"), &SoulDocument::for_creator("ctr_legit"));
+        let result = save(
+            &home,
+            MemoryBearerRef::Creator("../../../tmp/evil"),
+            &SoulDocument::for_creator("ctr_legit"),
+        );
         assert!(result.is_err());
         assert!(result
             .unwrap_err()

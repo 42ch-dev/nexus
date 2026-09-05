@@ -241,18 +241,14 @@ pub fn parse_stored_created_at(raw: &str) -> Result<chrono::DateTime<chrono::Utc
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(raw) {
         return Ok(dt.with_timezone(&chrono::Utc));
     }
-    let naive = chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S").or_else(|_| {
-        chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S%.f")
-    });
-    match naive {
-        Ok(ndt) => Ok(ndt.and_utc()),
-        Err(_) => Err(format!(
-            "created_at is not RFC3339 or SQLite datetime: {raw}"
-        )),
-    }
+    let naive = chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S")
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S%.f"));
+    naive
+        .map(|ndt| ndt.and_utc())
+        .map_err(|_| format!("created_at is not RFC3339 or SQLite datetime: {raw}"))
 }
 
-/// Millisecond unix timestamp for Actor KnowledgeView / SQL keyset order.
+/// Millisecond unix timestamp for Actor `KnowledgeView` / SQL keyset order.
 ///
 /// Matches SQLite `strftime('%s') * 1000 + substr(strftime('%f'), 4)` so SQL
 /// predicates and the Rust merge compare the same total-order key. Sub-ms
@@ -276,16 +272,16 @@ impl KnowledgeEntryRecord {
     /// Precondition: caller must have `WorldMembership` with `can_sync_kb=true`.
     #[must_use]
     pub fn new(world_id: &str, block_type: BlockType, canonical_name: &str) -> Self {
-        Self::with_owner(KnowledgeOwnerRef::world(world_id), block_type, canonical_name)
+        Self::with_owner(
+            KnowledgeOwnerRef::world(world_id),
+            block_type,
+            canonical_name,
+        )
     }
 
     /// Create a new provisional Character-owned `KnowledgeEntryRecord`.
     #[must_use]
-    pub fn for_character(
-        character_id: &str,
-        block_type: BlockType,
-        canonical_name: &str,
-    ) -> Self {
+    pub fn for_character(character_id: &str, block_type: BlockType, canonical_name: &str) -> Self {
         Self::with_owner(
             KnowledgeOwnerRef::character(character_id),
             block_type,
@@ -295,11 +291,7 @@ impl KnowledgeEntryRecord {
 
     /// Create a new provisional binding-owned `KnowledgeEntryRecord`.
     #[must_use]
-    pub fn for_binding(
-        binding_id: &str,
-        block_type: BlockType,
-        canonical_name: &str,
-    ) -> Self {
+    pub fn for_binding(binding_id: &str, block_type: BlockType, canonical_name: &str) -> Self {
         Self::with_owner(
             KnowledgeOwnerRef::actor_world_binding(binding_id),
             block_type,
@@ -447,7 +439,9 @@ impl KnowledgeEntryRecord {
 }
 
 /// Validate the owner/flag invariant shared by every write boundary
-/// (v1.184 P1 fix): `creator_only` may be `true` only for a
+/// (v1.184 P1 fix).
+///
+/// `creator_only` may be `true` only for a
 /// [`KnowledgeOwnerRef::World`] owner. Used by both `KbStore`
 /// implementations (in-memory + `SQLite`) and the spoke conversion seam so
 /// the invariant holds identically across domain, memory, `SQLite`, and
@@ -633,7 +627,7 @@ fn validate_closed_belief_labels(row: &BeliefPropositionRaw) -> Result<(), KbErr
     Ok(())
 }
 
-/// Validate one Character ToM belief row for the v1.184 P4 record API.
+/// Validate one Character `ToM` belief row for the v1.184 P4 record API.
 pub fn validate_character_tom_belief_row(
     row: &BeliefPropositionRaw,
     viewer_character_id: &str,
@@ -718,7 +712,6 @@ pub const LEGACY_MENTAL_BELIEF_MODULES_FIXTURE: &str = r#"{
                 }
             ]
         }"#;
-
 
 #[cfg(test)]
 mod tests {

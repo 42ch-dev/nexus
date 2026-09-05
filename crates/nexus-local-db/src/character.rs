@@ -291,7 +291,7 @@ pub async fn list_characters(
 ///
 /// # Errors
 ///
-/// Returns `LocalDbError` if validation, ownership, WorldSheet, uniqueness, or SQL fails.
+/// Returns `LocalDbError` if validation, ownership, `WorldSheet`, uniqueness, or SQL fails.
 /// Any failure rolls back both inserts.
 pub async fn create_character_with_initial_binding(
     pool: &SqlitePool,
@@ -367,12 +367,13 @@ async fn create_in_tx(
     )
     .await?;
 
-    let character = load_character(tx, character_id)
-        .await?
-        .ok_or_else(|| LocalDbError::ActorNotFound {
-            resource: "character",
-            id: character_id.to_string(),
-        })?;
+    let character =
+        load_character(tx, character_id)
+            .await?
+            .ok_or_else(|| LocalDbError::ActorNotFound {
+                resource: "character",
+                id: character_id.to_string(),
+            })?;
     Ok(CreateCharacterResult { character, binding })
 }
 

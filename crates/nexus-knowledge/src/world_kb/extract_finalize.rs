@@ -57,7 +57,8 @@ pub async fn finalize_extract<S: KbStore + Sync>(
         .map_err(|e| KbStoreError::ValidationLegacy(e.to_string()))?;
 
     // Step 3: Build KnowledgeEntryRecord.
-    let mut kb = KnowledgeEntryRecord::new(&input.world_id, input.block_type, &input.canonical_name);
+    let mut kb =
+        KnowledgeEntryRecord::new(&input.world_id, input.block_type, &input.canonical_name);
     kb.body = Some(input.body);
     kb.source_anchor = Some(input.source_anchor);
 

@@ -167,7 +167,8 @@ mod tests {
         let home = tmp.path();
 
         // Create SOUL first so preview can load it
-        nexus_creator_memory::soul_io::create(home, MemoryBearerRef::Creator("ctr_captest")).unwrap();
+        nexus_creator_memory::soul_io::create(home, MemoryBearerRef::Creator("ctr_captest"))
+            .unwrap();
 
         let cap = SoulExperienceAggregate;
         let result = cap
@@ -188,13 +189,19 @@ mod tests {
         let home = tmp.path();
 
         // Create SOUL
-        nexus_creator_memory::soul_io::create(home, MemoryBearerRef::Creator("ctr_captest2")).unwrap();
+        nexus_creator_memory::soul_io::create(home, MemoryBearerRef::Creator("ctr_captest2"))
+            .unwrap();
 
         // Create an experience-kind memory
         let mut mem = nexus_creator_memory::LongTermMemory::new("story_summary");
         mem.set_body("An epic tale of courage and determination.");
-        nexus_creator_memory::memory_io::save_memory(home, MemoryBearerRef::Creator("ctr_captest2"), "epic-tale", &mem)
-            .unwrap();
+        nexus_creator_memory::memory_io::save_memory(
+            home,
+            MemoryBearerRef::Creator("ctr_captest2"),
+            "epic-tale",
+            &mem,
+        )
+        .unwrap();
 
         let cap = SoulExperienceAggregate;
         let result = cap

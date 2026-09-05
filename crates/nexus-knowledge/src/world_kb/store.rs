@@ -99,10 +99,16 @@ pub trait KbStore {
     ) -> Result<KbInsertResult, KbStoreError>;
 
     /// Get a `KnowledgeEntryRecord` by its ID.
-    async fn get_knowledge_entry(&self, entry_id: &str) -> Result<KnowledgeEntryRecord, KbStoreError>;
+    async fn get_knowledge_entry(
+        &self,
+        entry_id: &str,
+    ) -> Result<KnowledgeEntryRecord, KbStoreError>;
 
     /// List all active `KnowledgeEntryRecord`s in a world.
-    async fn list_by_world(&self, world_id: &str) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError>;
+    async fn list_by_world(
+        &self,
+        world_id: &str,
+    ) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError>;
 
     /// Query `KnowledgeEntryRecord`s with filters.
     async fn query(&self, query: &KbQuery) -> Result<KbQueryResult, KbStoreError>;
@@ -202,7 +208,8 @@ impl InMemoryKbStore {
     /// Acquire a read lock on the blocks map.
     fn read_blocks(
         &self,
-    ) -> Result<std::sync::RwLockReadGuard<'_, HashMap<String, KnowledgeEntryRecord>>, KbStoreError> {
+    ) -> Result<std::sync::RwLockReadGuard<'_, HashMap<String, KnowledgeEntryRecord>>, KbStoreError>
+    {
         self.blocks
             .read()
             .map_err(|e| KbStoreError::Storage(e.to_string()))
@@ -211,7 +218,8 @@ impl InMemoryKbStore {
     /// Acquire a write lock on the blocks map.
     fn write_blocks(
         &self,
-    ) -> Result<std::sync::RwLockWriteGuard<'_, HashMap<String, KnowledgeEntryRecord>>, KbStoreError> {
+    ) -> Result<std::sync::RwLockWriteGuard<'_, HashMap<String, KnowledgeEntryRecord>>, KbStoreError>
+    {
         self.blocks
             .write()
             .map_err(|e| KbStoreError::Storage(e.to_string()))
@@ -271,13 +279,7 @@ impl KbStore for InMemoryKbStore {
             // — concurrent-uniqueness race: InMemoryKbStore check+insert is not
             // atomic under concurrent access; acceptable for single-user daemon.
             let mut blocks = self.write_blocks()?;
-            Self::check_uniqueness(
-                &blocks,
-                &kb.owner,
-                &kb.canonical_name,
-                kb.block_type,
-                None,
-            )?;
+            Self::check_uniqueness(&blocks, &kb.owner, &kb.canonical_name, kb.block_type, None)?;
             blocks.insert(entry_id.clone(), kb);
         }
 
@@ -288,7 +290,10 @@ impl KbStore for InMemoryKbStore {
         })
     }
 
-    async fn get_knowledge_entry(&self, entry_id: &str) -> Result<KnowledgeEntryRecord, KbStoreError> {
+    async fn get_knowledge_entry(
+        &self,
+        entry_id: &str,
+    ) -> Result<KnowledgeEntryRecord, KbStoreError> {
         let blocks = self.read_blocks()?;
         blocks
             .get(entry_id)
@@ -296,7 +301,10 @@ impl KbStore for InMemoryKbStore {
             .ok_or_else(|| KbStoreError::NotFound(entry_id.to_string()))
     }
 
-    async fn list_by_world(&self, world_id: &str) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
+    async fn list_by_world(
+        &self,
+        world_id: &str,
+    ) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
         // v1.184 P1: `list_by_world` remains a World-scoped read — only
         // World-owned active records match (Character/binding rows carry a
         // `None` world_id and are excluded).
@@ -1218,8 +1226,7 @@ mod tests {
     #[tokio::test]
     async fn insert_rejects_creator_only_on_binding_owner() {
         let store = InMemoryKbStore::new();
-        let mut kb =
-            KnowledgeEntryRecord::for_binding("awb_1", BlockType::Character, "Flagged");
+        let mut kb = KnowledgeEntryRecord::for_binding("awb_1", BlockType::Character, "Flagged");
         kb.creator_only = true;
         let err = store.insert_knowledge_entry(kb).await.unwrap_err();
         assert!(

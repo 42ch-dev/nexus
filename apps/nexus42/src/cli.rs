@@ -99,6 +99,7 @@ impl Cli {
 }
 
 #[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)] // clap derive requires non-boxed subcommands for flatten
 pub enum Commands {
     /// Manage Creator entities (register, pair, credentials, workspace, soul, memory, kb)
     Creator {

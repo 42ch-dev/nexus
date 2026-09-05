@@ -34,7 +34,7 @@ use std::num::NonZeroU64;
 use nexus_contracts::{BlockType, KeyBlockStatus};
 use nexus_knowledge::world_kb::errors::KbError;
 use nexus_knowledge::world_kb::knowledge_entry::{
-    ConflictCheckResult, MembershipPermissionCheck, KnowledgeEntryBody, KnowledgeEntryRecord,
+    ConflictCheckResult, KnowledgeEntryBody, KnowledgeEntryRecord, MembershipPermissionCheck,
 };
 use nexus_knowledge::world_kb::source_anchor::SourceAnchor;
 use serde_json::{Map, Value};
@@ -170,6 +170,11 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
 /// present on the spoke type — the seam fails closed instead of fabricating
 /// a World owner (v1.184 P1; the pre-cutover reverse defaulted `world_id` to
 /// an empty string).
+///
+/// # Errors
+///
+/// Returns [`KbError::MissingOwner`] when no canonical owner key is present
+/// on the spoke type.
 pub fn spoke_to_knowledge_record(
     entry: SpokeKnowledgeEntry,
 ) -> Result<KnowledgeEntryRecord, KbError> {
@@ -576,7 +581,10 @@ impl KnowledgeEntryRecordSpokeExt for KnowledgeEntryRecord {
 /// result back wholesale — only the status field, to keep the nexus
 /// timestamp/revision convention authoritative). `updated_at` follows the
 /// nexus timestamp convention.
-fn apply_spoke_status_transition(entry: &mut KnowledgeEntryRecord, to: &str) -> Result<(), KbError> {
+fn apply_spoke_status_transition(
+    entry: &mut KnowledgeEntryRecord,
+    to: &str,
+) -> Result<(), KbError> {
     let spoke = knowledge_record_to_spoke(entry);
     let result = map_spoke_reject(transition_status(&spoke, to))?;
     entry.status = result.status;
@@ -838,8 +846,11 @@ mod tests {
             tags: Some(vec!["gear".to_string()]),
             ..Default::default()
         };
-        let mut spoke =
-            knowledge_record_to_spoke(&KnowledgeEntryRecord::new("wld_test", BlockType::Item, "Backpack"));
+        let mut spoke = knowledge_record_to_spoke(&KnowledgeEntryRecord::new(
+            "wld_test",
+            BlockType::Item,
+            "Backpack",
+        ));
         // Simulate the persist-path carrier stash (build_spoke_upsert_request).
         let body_value = serde_json::to_value(&full_body).unwrap_or_default();
         set_nexus_body(&mut spoke, Some(&body_value));

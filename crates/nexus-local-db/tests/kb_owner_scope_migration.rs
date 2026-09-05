@@ -7,7 +7,7 @@
 //!   survives the rebuild;
 //! - exactly-one-owner and World-only `creator_only` CHECK constraints;
 //! - owner FK actions (CASCADE world, RESTRICT character/binding, SET NULL
-//!   WorldSheet link);
+//!   `WorldSheet` link);
 //! - owner-scoped active uniqueness partial unique indexes;
 //! - legacy World `KbStore` behavior on an upgraded database.
 
@@ -26,7 +26,7 @@ use std::borrow::Cow;
 /// `20260905000002` keeps sqlx's numeric ordering after every shipped
 /// migration (the July/August rebuilds use 14-digit versions, e.g.
 /// `20260815000001`; a 12-digit `202609050002` would sort *before* them).
-const OWNER_MIGRATION_VERSION: i64 = 20260905000002;
+const OWNER_MIGRATION_VERSION: i64 = 20_260_905_000_002;
 
 const CREATOR: &str = "ctr_cccccccccccccccccccccccccccccccc";
 const WORLD_A: &str = "wld_ownerA";
@@ -233,6 +233,7 @@ async fn seed_legacy_kb(
 }
 
 /// Insert a post-migration row with explicit owner columns.
+#[allow(clippy::too_many_arguments)] // raw column values — the full row shape
 async fn insert_owned_kb(
     pool: &SqlitePool,
     key_block_id: &str,
@@ -274,8 +275,7 @@ async fn dump(pool: &SqlitePool, sql: &str) -> Vec<String> {
 }
 
 /// Canonical dump of the 16 legacy `kb_key_blocks` columns.
-const LEGACY_ROW_DUMP_SQL: &str =
-    "SELECT json_array(\
+const LEGACY_ROW_DUMP_SQL: &str = "SELECT json_array(\
        key_block_id, world_id, block_type, canonical_name, status, revision, \
        body_json, source_anchor_json, created_from_command_id, created_at, \
        updated_at, source_work_id, source_chapter, source_provenance_kind, \
@@ -286,22 +286,19 @@ const ANCHOR_DUMP_SQL: &str =
     "SELECT json_array(key_block_id, anchor_ordinal, source_anchor_json, created_at) \
      FROM kb_source_anchors ORDER BY key_block_id, anchor_ordinal";
 
-const RELATIONSHIP_DUMP_SQL: &str =
-    "SELECT json_array(\
+const RELATIONSHIP_DUMP_SQL: &str = "SELECT json_array(\
        relationship_id, world_id, source_entity_id, target_entity_id, relation_type, \
        custom_label, symmetric, confidence, source_anchor_ids, metadata, created_at, \
        updated_at, revision, needs_review, source, extensions_nexus_json) \
      FROM kb_relationships ORDER BY relationship_id";
 
-const MIND_STATE_DUMP_SQL: &str =
-    "SELECT json_array(\
+const MIND_STATE_DUMP_SQL: &str = "SELECT json_array(\
        mind_state_id, schema_version, holder_entry_id, canonical_name, occurred_at, \
        sort_key, snapshot_json, deltas_json, source_anchor_json, created_at, \
        updated_at, extensions_json) \
      FROM mind_states ORDER BY mind_state_id";
 
-const BINDING_DUMP_SQL: &str =
-    "SELECT json_array(\
+const BINDING_DUMP_SQL: &str = "SELECT json_array(\
        binding_id, character_id, world_id, status, world_sheet_entry_id, created_at, \
        updated_at) \
      FROM actor_world_bindings ORDER BY binding_id";
@@ -345,7 +342,10 @@ async fn kb_schema_objects(pool: &SqlitePool) -> Vec<(String, String, String)> {
 }
 
 async fn count_where(pool: &SqlitePool, sql: &str) -> i64 {
-    sqlx::query_scalar::<_, i64>(sql).fetch_one(pool).await.unwrap()
+    sqlx::query_scalar::<_, i64>(sql)
+        .fetch_one(pool)
+        .await
+        .unwrap()
 }
 
 fn expect_check_violation(result: Result<(), sqlx::Error>, case: &str) {
@@ -375,6 +375,7 @@ fn expect_unique_violation(result: Result<(), sqlx::Error>, case: &str) {
 // ── Fixture upgrade fidelity ────────────────────────────────────────────
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)] // single end-to-end byte-fidelity proof
 async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
     let (pool, _dir) = fresh_pool().await;
     run_migrator(&pool, pre_upgrade_migrator()).await;
@@ -532,7 +533,11 @@ async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
     }
 
     // Inbound children.
-    for (kb, ordinal) in [("kb_full_0001", 0), ("kb_full_0001", 1), ("kb_casc_0001", 0)] {
+    for (kb, ordinal) in [
+        ("kb_full_0001", 0),
+        ("kb_full_0001", 1),
+        ("kb_casc_0001", 0),
+    ] {
         sqlx::query(
             "INSERT INTO kb_source_anchors \
              (key_block_id, anchor_ordinal, source_anchor_json, created_at) \
@@ -567,7 +572,10 @@ async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
         .await
         .unwrap();
     }
-    for (ms_id, holder) in [("ms_holder_a", "kb_mindholder"), ("ms_cascade", "kb_casc_0002")] {
+    for (ms_id, holder) in [
+        ("ms_holder_a", "kb_mindholder"),
+        ("ms_cascade", "kb_casc_0002"),
+    ] {
         sqlx::query(
             "INSERT INTO mind_states \
              (mind_state_id, schema_version, holder_entry_id, canonical_name, occurred_at, \
@@ -624,16 +632,25 @@ async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
     .await;
     assert_eq!(owner_dump.len(), pre_rows.len());
     for row in &owner_dump {
-        assert_eq!(row, "[\"world\",null,null,0]", "legacy rows become World-owned");
+        assert_eq!(
+            row, "[\"world\",null,null,0]",
+            "legacy rows become World-owned"
+        );
     }
 
     // ── Schema objects restored ─────────────────────────────────────────
     let post_indexes = index_names(&pool).await;
     for name in PRE_EXISTING_INDEXES {
-        assert!(post_indexes.contains(&name.to_string()), "missing index {name}");
+        assert!(
+            post_indexes.contains(&name.to_string()),
+            "missing index {name}"
+        );
     }
     for name in OWNER_INDEXES {
-        assert!(post_indexes.contains(&name.to_string()), "missing index {name}");
+        assert!(
+            post_indexes.contains(&name.to_string()),
+            "missing index {name}"
+        );
     }
     // All three active-uniqueness indexes keep the status predicate.
     let partial_count = count_where(
@@ -643,7 +660,10 @@ async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
          AND sql LIKE '%status NOT IN%'",
     )
     .await;
-    assert_eq!(partial_count, 3, "three owner-scoped partial unique indexes");
+    assert_eq!(
+        partial_count, 3,
+        "three owner-scoped partial unique indexes"
+    );
 
     let ddl = table_sql(&pool).await;
     for fragment in [
@@ -664,7 +684,11 @@ async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
         .fetch_all(&pool)
         .await
         .unwrap();
-    assert!(violations.is_empty(), "foreign_key_check returned {} violation(s)", violations.len());
+    assert!(
+        violations.is_empty(),
+        "foreign_key_check returned {} violation(s)",
+        violations.len()
+    );
 
     // ── Legacy World store behavior on the upgraded database ────────────
     let store = SqliteKbStore::new(pool.clone());
@@ -675,13 +699,12 @@ async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
     assert_eq!(fetched.world_id(), Some(WORLD_A));
     assert_eq!(fetched.canonical_name, "Post Upgrade Hero");
     // New store inserts land as World-owned rows.
-    let new_owner: (String, i64) = sqlx::query_as(
-        "SELECT owner_kind, creator_only FROM kb_key_blocks WHERE key_block_id = ?",
-    )
-    .bind(&kb.entry_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let new_owner: (String, i64) =
+        sqlx::query_as("SELECT owner_kind, creator_only FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(&kb.entry_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(new_owner, ("world".to_string(), 0));
     // World listing still sees the world rows (9 active in world A + new one).
     let listed = store.list_by_world(WORLD_A).await.unwrap();
@@ -691,7 +714,11 @@ async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
     );
     // Legacy duplicate mapping intact (2067 → KbStoreError::Duplicate).
     let dup = store
-        .insert_knowledge_entry(KnowledgeEntryRecord::new(WORLD_A, BlockType::Character, "Post Upgrade Hero"))
+        .insert_knowledge_entry(KnowledgeEntryRecord::new(
+            WORLD_A,
+            BlockType::Character,
+            "Post Upgrade Hero",
+        ))
         .await
         .unwrap_err();
     assert!(
@@ -712,7 +739,10 @@ async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(sheet_link, None, "ON DELETE SET NULL must fire post-rebuild");
+    assert_eq!(
+        sheet_link, None,
+        "ON DELETE SET NULL must fire post-rebuild"
+    );
 
     // CASCADE: deleting the cascade world removes its KEs and their children.
     sqlx::query("DELETE FROM narrative_worlds WHERE world_id = ?")
@@ -721,22 +751,38 @@ async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
         .await
         .unwrap();
     assert_eq!(
-        count_where(&pool, "SELECT COUNT(*) FROM kb_key_blocks WHERE world_id = 'wld_ownerC'").await,
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM kb_key_blocks WHERE world_id = 'wld_ownerC'"
+        )
+        .await,
         0,
         "world delete must cascade to kb_key_blocks"
     );
     assert_eq!(
-        count_where(&pool, "SELECT COUNT(*) FROM kb_source_anchors WHERE key_block_id = 'kb_casc_0001'").await,
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM kb_source_anchors WHERE key_block_id = 'kb_casc_0001'"
+        )
+        .await,
         0,
         "cascade must reach kb_source_anchors"
     );
     assert_eq!(
-        count_where(&pool, "SELECT COUNT(*) FROM mind_states WHERE holder_entry_id = 'kb_casc_0002'").await,
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM mind_states WHERE holder_entry_id = 'kb_casc_0002'"
+        )
+        .await,
         0,
         "cascade must reach mind_states"
     );
     assert_eq!(
-        count_where(&pool, "SELECT COUNT(*) FROM kb_relationships WHERE world_id = 'wld_ownerC'").await,
+        count_where(
+            &pool,
+            "SELECT COUNT(*) FROM kb_relationships WHERE world_id = 'wld_ownerC'"
+        )
+        .await,
         0,
         "cascade must reach kb_relationships"
     );
@@ -757,7 +803,10 @@ async fn upgrade_preserves_exact_sqlite_master_definitions() {
     // ── Pin the pre-upgrade inventory: exactly the table plus the six known
     //    legacy indexes, and no table-attached triggers. ──────────────────
     let pre_objects = kb_schema_objects(&pool).await;
-    let pre_tables = pre_objects.iter().filter(|(ty, _, _)| ty == "table").count();
+    let pre_tables = pre_objects
+        .iter()
+        .filter(|(ty, _, _)| ty == "table")
+        .count();
     assert_eq!(pre_tables, 1, "exactly one kb_key_blocks table row");
     let pre_index_names: Vec<&str> = pre_objects
         .iter()
@@ -766,7 +815,10 @@ async fn upgrade_preserves_exact_sqlite_master_definitions() {
         .collect();
     let mut expected_indexes = PRE_EXISTING_INDEXES.to_vec();
     expected_indexes.sort_unstable();
-    assert_eq!(pre_index_names, expected_indexes, "pre-upgrade index inventory");
+    assert_eq!(
+        pre_index_names, expected_indexes,
+        "pre-upgrade index inventory"
+    );
     assert!(
         !pre_objects.iter().any(|(ty, _, _)| ty == "trigger"),
         "no table-attached triggers are part of the supported inventory"
@@ -806,55 +858,184 @@ async fn exactly_one_owner_check_rejects_invalid_combinations() {
     seed_binding(&pool, BINDING, CHARACTER, WORLD_A, None).await;
 
     // Valid baselines: exactly one owner column per kind.
-    insert_owned_kb(&pool, "kb_ok_world", "world", Some(WORLD_A), None, None, 0, "Ok World", "confirmed")
-        .await
-        .unwrap();
-    insert_owned_kb(&pool, "kb_ok_char", "character", None, Some(CHARACTER), None, 0, "Ok Char", "confirmed")
-        .await
-        .unwrap();
-    insert_owned_kb(&pool, "kb_ok_bind", "actor_world_binding", None, None, Some(BINDING), 0, "Ok Bind", "confirmed")
-        .await
-        .unwrap();
+    insert_owned_kb(
+        &pool,
+        "kb_ok_world",
+        "world",
+        Some(WORLD_A),
+        None,
+        None,
+        0,
+        "Ok World",
+        "confirmed",
+    )
+    .await
+    .unwrap();
+    insert_owned_kb(
+        &pool,
+        "kb_ok_char",
+        "character",
+        None,
+        Some(CHARACTER),
+        None,
+        0,
+        "Ok Char",
+        "confirmed",
+    )
+    .await
+    .unwrap();
+    insert_owned_kb(
+        &pool,
+        "kb_ok_bind",
+        "actor_world_binding",
+        None,
+        None,
+        Some(BINDING),
+        0,
+        "Ok Bind",
+        "confirmed",
+    )
+    .await
+    .unwrap();
 
     // World owner without world_id.
     expect_check_violation(
-        insert_owned_kb(&pool, "kb_bad_01", "world", None, None, None, 0, "Bad 01", "confirmed").await,
+        insert_owned_kb(
+            &pool,
+            "kb_bad_01",
+            "world",
+            None,
+            None,
+            None,
+            0,
+            "Bad 01",
+            "confirmed",
+        )
+        .await,
         "world owner without world_id",
     );
     // World owner with a second owner column set.
     expect_check_violation(
-        insert_owned_kb(&pool, "kb_bad_02", "world", Some(WORLD_A), Some(CHARACTER), None, 0, "Bad 02", "confirmed").await,
+        insert_owned_kb(
+            &pool,
+            "kb_bad_02",
+            "world",
+            Some(WORLD_A),
+            Some(CHARACTER),
+            None,
+            0,
+            "Bad 02",
+            "confirmed",
+        )
+        .await,
         "world owner with character_id",
     );
     expect_check_violation(
-        insert_owned_kb(&pool, "kb_bad_03", "world", Some(WORLD_A), None, Some(BINDING), 0, "Bad 03", "confirmed").await,
+        insert_owned_kb(
+            &pool,
+            "kb_bad_03",
+            "world",
+            Some(WORLD_A),
+            None,
+            Some(BINDING),
+            0,
+            "Bad 03",
+            "confirmed",
+        )
+        .await,
         "world owner with binding id",
     );
     // Character owner with world_id or without character_id.
     expect_check_violation(
-        insert_owned_kb(&pool, "kb_bad_04", "character", Some(WORLD_A), Some(CHARACTER), None, 0, "Bad 04", "confirmed").await,
+        insert_owned_kb(
+            &pool,
+            "kb_bad_04",
+            "character",
+            Some(WORLD_A),
+            Some(CHARACTER),
+            None,
+            0,
+            "Bad 04",
+            "confirmed",
+        )
+        .await,
         "character owner with world_id",
     );
     expect_check_violation(
-        insert_owned_kb(&pool, "kb_bad_05", "character", None, None, None, 0, "Bad 05", "confirmed").await,
+        insert_owned_kb(
+            &pool,
+            "kb_bad_05",
+            "character",
+            None,
+            None,
+            None,
+            0,
+            "Bad 05",
+            "confirmed",
+        )
+        .await,
         "character owner without character_id",
     );
     expect_check_violation(
-        insert_owned_kb(&pool, "kb_bad_06", "character", None, Some(CHARACTER), Some(BINDING), 0, "Bad 06", "confirmed").await,
+        insert_owned_kb(
+            &pool,
+            "kb_bad_06",
+            "character",
+            None,
+            Some(CHARACTER),
+            Some(BINDING),
+            0,
+            "Bad 06",
+            "confirmed",
+        )
+        .await,
         "character owner with binding id",
     );
     // Binding owner without binding id / with world_id.
     expect_check_violation(
-        insert_owned_kb(&pool, "kb_bad_07", "actor_world_binding", None, None, None, 0, "Bad 07", "confirmed").await,
+        insert_owned_kb(
+            &pool,
+            "kb_bad_07",
+            "actor_world_binding",
+            None,
+            None,
+            None,
+            0,
+            "Bad 07",
+            "confirmed",
+        )
+        .await,
         "binding owner without binding id",
     );
     expect_check_violation(
-        insert_owned_kb(&pool, "kb_bad_08", "actor_world_binding", Some(WORLD_A), None, Some(BINDING), 0, "Bad 08", "confirmed").await,
+        insert_owned_kb(
+            &pool,
+            "kb_bad_08",
+            "actor_world_binding",
+            Some(WORLD_A),
+            None,
+            Some(BINDING),
+            0,
+            "Bad 08",
+            "confirmed",
+        )
+        .await,
         "binding owner with world_id",
     );
     // Unknown owner kind.
     expect_check_violation(
-        insert_owned_kb(&pool, "kb_bad_09", "creator", None, None, None, 0, "Bad 09", "confirmed").await,
+        insert_owned_kb(
+            &pool,
+            "kb_bad_09",
+            "creator",
+            None,
+            None,
+            None,
+            0,
+            "Bad 09",
+            "confirmed",
+        )
+        .await,
         "unknown owner_kind",
     );
 }
@@ -868,21 +1049,64 @@ async fn creator_only_is_world_owned_only() {
     seed_binding(&pool, BINDING, CHARACTER, WORLD_A, None).await;
 
     // World-owned creator-only lore is allowed.
-    insert_owned_kb(&pool, "kb_co_world", "world", Some(WORLD_A), None, None, 1, "Creator Lore", "confirmed")
-        .await
-        .unwrap();
+    insert_owned_kb(
+        &pool,
+        "kb_co_world",
+        "world",
+        Some(WORLD_A),
+        None,
+        None,
+        1,
+        "Creator Lore",
+        "confirmed",
+    )
+    .await
+    .unwrap();
     // Character/binding owners can never be creator-only.
     expect_check_violation(
-        insert_owned_kb(&pool, "kb_co_char", "character", None, Some(CHARACTER), None, 1, "CO Char", "confirmed").await,
+        insert_owned_kb(
+            &pool,
+            "kb_co_char",
+            "character",
+            None,
+            Some(CHARACTER),
+            None,
+            1,
+            "CO Char",
+            "confirmed",
+        )
+        .await,
         "creator_only on character owner",
     );
     expect_check_violation(
-        insert_owned_kb(&pool, "kb_co_bind", "actor_world_binding", None, None, Some(BINDING), 1, "CO Bind", "confirmed").await,
+        insert_owned_kb(
+            &pool,
+            "kb_co_bind",
+            "actor_world_binding",
+            None,
+            None,
+            Some(BINDING),
+            1,
+            "CO Bind",
+            "confirmed",
+        )
+        .await,
         "creator_only on binding owner",
     );
     // creator_only is a boolean domain.
     expect_check_violation(
-        insert_owned_kb(&pool, "kb_co_two", "world", Some(WORLD_A), None, None, 2, "CO Two", "confirmed").await,
+        insert_owned_kb(
+            &pool,
+            "kb_co_two",
+            "world",
+            Some(WORLD_A),
+            None,
+            None,
+            2,
+            "CO Two",
+            "confirmed",
+        )
+        .await,
         "creator_only outside {0,1}",
     );
 }
@@ -930,9 +1154,19 @@ async fn owner_foreign_keys_enforced_with_actions() {
     );
 
     // RESTRICT: a Character with owned KE cannot be deleted.
-    insert_owned_kb(&pool, "kb_own_char", "character", None, Some(CHARACTER), None, 0, "Owned Char", "confirmed")
-        .await
-        .unwrap();
+    insert_owned_kb(
+        &pool,
+        "kb_own_char",
+        "character",
+        None,
+        Some(CHARACTER),
+        None,
+        0,
+        "Owned Char",
+        "confirmed",
+    )
+    .await
+    .unwrap();
     let delete_character = sqlx::query("DELETE FROM characters WHERE character_id = ?")
         .bind(CHARACTER)
         .execute(&pool)
@@ -941,9 +1175,19 @@ async fn owner_foreign_keys_enforced_with_actions() {
     expect_fk_violation(delete_character, "delete character owning KE (RESTRICT)");
 
     // RESTRICT: a binding with owned KE cannot be deleted.
-    insert_owned_kb(&pool, "kb_own_bind", "actor_world_binding", None, None, Some(BINDING), 0, "Owned Bind", "confirmed")
-        .await
-        .unwrap();
+    insert_owned_kb(
+        &pool,
+        "kb_own_bind",
+        "actor_world_binding",
+        None,
+        None,
+        Some(BINDING),
+        0,
+        "Owned Bind",
+        "confirmed",
+    )
+    .await
+    .unwrap();
     let delete_binding = sqlx::query("DELETE FROM actor_world_bindings WHERE binding_id = ?")
         .bind(BINDING)
         .execute(&pool)
@@ -964,40 +1208,133 @@ async fn owner_scoped_active_uniqueness_enforced() {
     seed_binding(&pool, BINDING, CHARACTER, WORLD_A, None).await;
 
     // Character scope: same (character, type, name) active pair rejects.
-    insert_owned_kb(&pool, "kb_u_char_a", "character", None, Some(CHARACTER), None, 0, "Shared Name", "confirmed")
-        .await
-        .unwrap();
+    insert_owned_kb(
+        &pool,
+        "kb_u_char_a",
+        "character",
+        None,
+        Some(CHARACTER),
+        None,
+        0,
+        "Shared Name",
+        "confirmed",
+    )
+    .await
+    .unwrap();
     expect_unique_violation(
-        insert_owned_kb(&pool, "kb_u_char_b", "character", None, Some(CHARACTER), None, 0, "Shared Name", "confirmed").await,
+        insert_owned_kb(
+            &pool,
+            "kb_u_char_b",
+            "character",
+            None,
+            Some(CHARACTER),
+            None,
+            0,
+            "Shared Name",
+            "confirmed",
+        )
+        .await,
         "duplicate active character-owned name",
     );
     // Same name under a different Character is a different scope.
-    insert_owned_kb(&pool, "kb_u_char_c", "character", None, Some(CHARACTER_B), None, 0, "Shared Name", "confirmed")
-        .await
-        .unwrap();
+    insert_owned_kb(
+        &pool,
+        "kb_u_char_c",
+        "character",
+        None,
+        Some(CHARACTER_B),
+        None,
+        0,
+        "Shared Name",
+        "confirmed",
+    )
+    .await
+    .unwrap();
     // Same name in World and binding scopes does not collide across scopes.
-    insert_owned_kb(&pool, "kb_u_world", "world", Some(WORLD_A), None, None, 0, "Shared Name", "confirmed")
-        .await
-        .unwrap();
-    insert_owned_kb(&pool, "kb_u_bind", "actor_world_binding", None, None, Some(BINDING), 0, "Shared Name", "confirmed")
-        .await
-        .unwrap();
+    insert_owned_kb(
+        &pool,
+        "kb_u_world",
+        "world",
+        Some(WORLD_A),
+        None,
+        None,
+        0,
+        "Shared Name",
+        "confirmed",
+    )
+    .await
+    .unwrap();
+    insert_owned_kb(
+        &pool,
+        "kb_u_bind",
+        "actor_world_binding",
+        None,
+        None,
+        Some(BINDING),
+        0,
+        "Shared Name",
+        "confirmed",
+    )
+    .await
+    .unwrap();
     expect_unique_violation(
-        insert_owned_kb(&pool, "kb_u_bind2", "actor_world_binding", None, None, Some(BINDING), 0, "Shared Name", "confirmed").await,
+        insert_owned_kb(
+            &pool,
+            "kb_u_bind2",
+            "actor_world_binding",
+            None,
+            None,
+            Some(BINDING),
+            0,
+            "Shared Name",
+            "confirmed",
+        )
+        .await,
         "duplicate active binding-owned name",
     );
     expect_unique_violation(
-        insert_owned_kb(&pool, "kb_u_world2", "world", Some(WORLD_A), None, None, 0, "Shared Name", "confirmed").await,
+        insert_owned_kb(
+            &pool,
+            "kb_u_world2",
+            "world",
+            Some(WORLD_A),
+            None,
+            None,
+            0,
+            "Shared Name",
+            "confirmed",
+        )
+        .await,
         "duplicate active world-owned name (legacy invariant)",
     );
     // Terminal statuses drop out of the partial predicate: a deleted row no
     // longer blocks a replacement in the same owner scope.
-    insert_owned_kb(&pool, "kb_u_term", "character", None, Some(CHARACTER), None, 0, "Terminal Name", "deleted")
-        .await
-        .unwrap();
-    insert_owned_kb(&pool, "kb_u_term2", "character", None, Some(CHARACTER), None, 0, "Terminal Name", "confirmed")
-        .await
-        .unwrap();
+    insert_owned_kb(
+        &pool,
+        "kb_u_term",
+        "character",
+        None,
+        Some(CHARACTER),
+        None,
+        0,
+        "Terminal Name",
+        "deleted",
+    )
+    .await
+    .unwrap();
+    insert_owned_kb(
+        &pool,
+        "kb_u_term2",
+        "character",
+        None,
+        Some(CHARACTER),
+        None,
+        0,
+        "Terminal Name",
+        "confirmed",
+    )
+    .await
+    .unwrap();
 }
 
 // ── Legacy insert shapes ────────────────────────────────────────────────

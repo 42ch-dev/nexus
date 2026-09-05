@@ -186,6 +186,7 @@ fn derive_world_slug(title: &str) -> String {
     }
 }
 
+#[allow(clippy::too_many_lines)] // route handler
 pub async fn delete_world(
     State(state): State<WorkspaceState>,
     Path(world_id): Path<String>,
@@ -230,12 +231,13 @@ pub async fn delete_world(
     // cohesive in one handler rather than scattering fragments across
     // .sqlx/ entries. On any early `return Err(...)` below the `tx` is
     // dropped, which sqlx turns into an automatic ROLLBACK.
-    let mut tx = nexus_local_db::begin_immediate(pool)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: format!("delete_world: begin tx failed: {e}"),
-        })?;
+    let mut tx =
+        nexus_local_db::begin_immediate(pool)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: format!("delete_world: begin tx failed: {e}"),
+            })?;
 
     let binding_count = nexus_local_db::count_bindings_for_world_tx(&mut tx, &world_id)
         .await
@@ -307,8 +309,6 @@ pub async fn delete_world(
             });
         }
     };
-
-
 
     if deleted == 0 {
         // Concurrent delete raced; treat as 404 — row is gone. The tx rolls

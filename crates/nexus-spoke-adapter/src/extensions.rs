@@ -182,6 +182,11 @@ pub fn get_provenance(entry: &KnowledgeEntry) -> (Option<&str>, Option<i64>, Opt
 /// - [`KbError::MissingOwner`] when no typed owner key is present.
 /// - [`KbError::InvalidOwnerMetadata`] when more than one typed owner key is
 ///   present, or an owner key is present but not a string (including `null`).
+///
+/// # Panics
+///
+/// Never in practice: the single `.expect` is guarded by the
+/// `claims.len() == 1` match arm.
 pub fn get_owner(entry: &KnowledgeEntry) -> Result<KnowledgeOwnerRef, KbError> {
     let ns = nexus_namespace(entry).ok_or(KbError::MissingOwner)?;
     // Collect the present, string-typed owner claims as `(key, value)`,
@@ -207,9 +212,7 @@ pub fn get_owner(entry: &KnowledgeEntry) -> Result<KnowledgeOwnerRef, KbError> {
     match claims.len() {
         0 => Err(KbError::MissingOwner),
         1 => {
-            let (key, id) = claims
-                .pop()
-                .expect("len == 1 as matched above");
+            let (key, id) = claims.pop().expect("len == 1 as matched above");
             Ok(match key {
                 "world_id" => KnowledgeOwnerRef::world(id),
                 "character_id" => KnowledgeOwnerRef::character(id),

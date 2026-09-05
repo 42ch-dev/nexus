@@ -32,7 +32,7 @@
 //! [`spoke_to_knowledge_record`]: crate::conversion::spoke_to_knowledge_record
 //! [`knowledge_record_to_spoke`]: crate::conversion::knowledge_record_to_spoke
 use super::NexusAdapter;
-use crate::conversion::{spoke_to_knowledge_record, knowledge_record_to_spoke};
+use crate::conversion::{knowledge_record_to_spoke, spoke_to_knowledge_record};
 use crate::extensions::set_nexus_body;
 use crate::{KnowledgeEntry, Scope, ScopeExtensionsKey};
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
@@ -233,8 +233,7 @@ impl KbStore for SpokeBackedKbStore {
             .items
             .into_iter()
             .map(|spoke| {
-                spoke_to_knowledge_record(spoke)
-                    .map_err(|e| KbStoreError::Storage(e.to_string()))
+                spoke_to_knowledge_record(spoke).map_err(|e| KbStoreError::Storage(e.to_string()))
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(KbQueryResult {
@@ -251,7 +250,10 @@ impl KbStore for SpokeBackedKbStore {
         Err(read_only_error("insert_knowledge_entry"))
     }
 
-    async fn get_knowledge_entry(&self, entry_id: &str) -> Result<KnowledgeEntryRecord, KbStoreError> {
+    async fn get_knowledge_entry(
+        &self,
+        entry_id: &str,
+    ) -> Result<KnowledgeEntryRecord, KbStoreError> {
         // Delegate to SqliteKbStore (MCA does not call this; the daemon CRUD
         // path uses SqliteKbStore directly — unchanged).
         SqliteKbStore::new(self.pool.clone())
@@ -259,7 +261,10 @@ impl KbStore for SpokeBackedKbStore {
             .await
     }
 
-    async fn list_by_world(&self, world_id: &str) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
+    async fn list_by_world(
+        &self,
+        world_id: &str,
+    ) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
         SqliteKbStore::new(self.pool.clone())
             .list_by_world(world_id)
             .await
@@ -447,7 +452,9 @@ mod tests {
         (pool, dir)
     }
 
-    async fn seed_world_with_entries(pool: &sqlx::SqlitePool) -> (String, Vec<KnowledgeEntryRecord>) {
+    async fn seed_world_with_entries(
+        pool: &sqlx::SqlitePool,
+    ) -> (String, Vec<KnowledgeEntryRecord>) {
         // SAFETY: test-only static INSERTs with bind params.
         sqlx::query(
             "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
@@ -605,7 +612,8 @@ mod tests {
         // Seed beyond the 500-row window.
         let sqlite = SqliteKbStore::new(pool.clone());
         for i in 0..(nexus_local_db::kb_store::LIST_BY_WORLD_LIMIT + 50) {
-            let mut entry = KnowledgeEntryRecord::new("wld_big", BlockType::Item, &format!("Row_{i:04}"));
+            let mut entry =
+                KnowledgeEntryRecord::new("wld_big", BlockType::Item, &format!("Row_{i:04}"));
             entry.entry_id = format!("kb_big_{i:04}");
             sqlite.insert_knowledge_entry(entry).await.unwrap();
         }

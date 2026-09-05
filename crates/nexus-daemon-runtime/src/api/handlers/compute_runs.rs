@@ -1011,11 +1011,9 @@ async fn create_key_blocks_in_tx(
                     message: format!("decode new_key_block: {e}"),
                 }
             })?;
-        let kb = spoke_to_knowledge_record(spoke).map_err(|e| {
-            NexusApiError::Internal {
-                code: "DESERIALIZATION_ERROR".to_string(),
-                message: format!("decode new_key_block owner: {e}"),
-            }
+        let kb = spoke_to_knowledge_record(spoke).map_err(|e| NexusApiError::Internal {
+            code: "DESERIALIZATION_ERROR".to_string(),
+            message: format!("decode new_key_block owner: {e}"),
         })?;
 
         // v1.184 P1: World-scoped insert lane — reject any non-World owner.
@@ -1024,7 +1022,8 @@ async fn create_key_blocks_in_tx(
                 code: "invalid_input".to_string(),
                 message: format!(
                     "new_key_block '{}' targets world '{}', not admitted world '{world_id}'",
-                    kb.entry_id, kb.world_id().unwrap_or_default()
+                    kb.entry_id,
+                    kb.world_id().unwrap_or_default()
                 ),
             });
         }
@@ -1056,7 +1055,7 @@ async fn create_key_blocks_in_tx(
         )
         .bind(&kb.entry_id)
         .bind(world_id)
-        .bind(&block_type_str)
+        .bind(block_type_str)
         .bind(&kb.canonical_name)
         .bind(&kb.status)
         .bind(&body_json)
@@ -1171,10 +1170,9 @@ mod tests {
         .expect("minimal spoke KnowledgeEntry wire fixture");
 
         let mut tx = pool.begin().await.unwrap();
-        let created =
-            create_key_blocks_in_tx(&mut tx, "wld_accept", std::slice::from_ref(&block))
-                .await
-                .expect("world-matching block must insert");
+        let created = create_key_blocks_in_tx(&mut tx, "wld_accept", std::slice::from_ref(&block))
+            .await
+            .expect("world-matching block must insert");
         assert_eq!(created, 1);
         tx.commit().await.unwrap();
 

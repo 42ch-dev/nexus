@@ -1829,7 +1829,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn assemble_moment_world_kb_identical_across_kb_stores() {
         use nexus_contracts::BlockType;
-        use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
+        use nexus_knowledge::world_kb::knowledge_entry::{
+            KnowledgeEntryBody, KnowledgeEntryRecord,
+        };
         use nexus_knowledge::world_kb::KbStore;
         use nexus_moment_context_assembly::MomentContext;
 

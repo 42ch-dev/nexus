@@ -156,10 +156,9 @@ impl SoulNarrativeSynthesizer for AcpSoulNarrativeSynthesizer {
         // wrong worker). The Character identity is preserved as trusted
         // context.
         let identity = bearer.identity();
-        let (subject, character_id) = match identity.character_id {
-            Some(chr) => ("character", Some(chr)),
-            None => ("creator", None),
-        };
+        let (subject, character_id) = identity
+            .character_id
+            .map_or(("creator", None), |chr| ("character", Some(chr)));
         let cap =
             self.registry
                 .get("acp.prompt")
@@ -185,15 +184,10 @@ impl SoulNarrativeSynthesizer for AcpSoulNarrativeSynthesizer {
             payload["_character_id"] = json!(chr);
         }
 
-        let result = cap
-            .run(payload)
-            .await
-            .map_err(|e| match e {
-                CapabilityError::WorkerUnavailable => MemoryError::WorkerUnavailable,
-                other => {
-                    MemoryError::ValidationError(format!("narrative synthesis failed: {other}"))
-                }
-            })?;
+        let result = cap.run(payload).await.map_err(|e| match e {
+            CapabilityError::WorkerUnavailable => MemoryError::WorkerUnavailable,
+            other => MemoryError::ValidationError(format!("narrative synthesis failed: {other}")),
+        })?;
 
         let full_text = result
             .get("full_text")
@@ -261,9 +255,7 @@ mod tests {
         assert!(creator.contains(
             "You are a reflective creative-writing mentor synthesizing a Creator-SOUL narrative.\n\n"
         ));
-        assert!(creator.contains(
-            "The creator has accumulated the following creative fragments. "
-        ));
+        assert!(creator.contains("The creator has accumulated the following creative fragments. "));
         assert!(creator.contains(
             "Synthesize a coherent, reflective narrative of their creative identity — \
              who they are becoming as a writer. The narrative must:\n"
@@ -285,9 +277,9 @@ mod tests {
         assert!(character.contains(
             "You are a reflective creative-writing mentor synthesizing a Character-SOUL narrative.\n\n"
         ));
-        assert!(character.contains(
-            "The character has accumulated the following creative fragments. "
-        ));
+        assert!(
+            character.contains("The character has accumulated the following creative fragments. ")
+        );
         assert!(character.contains(
             "Synthesize a coherent, reflective narrative of their creative identity — \
              who they are becoming as a character. The narrative must:\n"
@@ -321,7 +313,10 @@ mod tests {
             character_id: chr,
         };
         let ident = bearer.identity();
-        assert_eq!(ident.creator_id, owner, "ACP worker routed by owner Creator");
+        assert_eq!(
+            ident.creator_id, owner,
+            "ACP worker routed by owner Creator"
+        );
         assert_eq!(ident.character_id, Some(chr));
 
         // Creator arm routes by itself and has no Character identity.
@@ -339,7 +334,10 @@ mod session_id_tests {
     #[test]
     fn session_id_is_namespaced_by_bearer_and_binding() {
         // Creator arm keeps the legacy global key.
-        assert_eq!(AcpSoulNarrativeSynthesizer::session_id(None, None), "soul_narrative_reflect");
+        assert_eq!(
+            AcpSoulNarrativeSynthesizer::session_id(None, None),
+            "soul_narrative_reflect"
+        );
         assert_eq!(
             AcpSoulNarrativeSynthesizer::session_id(None, Some("binding")),
             "soul_narrative_reflect",

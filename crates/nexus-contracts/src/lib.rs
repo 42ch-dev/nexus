@@ -59,8 +59,8 @@ pub use generated::domain::world_membership::WorldMembershipRole as MembershipRo
 pub use common_types::{
     ActorWorldBindingId, BlockType, BundleId, CharacterId, CommandId, CreatorId, DeliveryState,
     DeltaSequence, KeyBlockId, KeyBlockStatus, ManuscriptId, ManuscriptPhase, ReferenceSourceType,
-    ScanStatus, SchemaVersion, SourceSummaryRef, StoryManifestId, TimelineEventId, Timestamp, UserId,
-    WorkspaceId, WorldId,
+    ScanStatus, SchemaVersion, SourceSummaryRef, StoryManifestId, TimelineEventId, Timestamp,
+    UserId, WorkspaceId, WorldId,
 };
 
 // Sync / bundle / publish enums: typify mangles these per-schema, so alias the

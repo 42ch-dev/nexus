@@ -1,12 +1,10 @@
-//! Character ToM HTTP handlers (v1.184 P4 Task 2).
+//! Character `ToM` HTTP handlers (v1.184 P4 Task 2).
 
 #![allow(clippy::missing_errors_doc)]
 
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::world_kb_guards::require_creator;
-use crate::character_tom::{
-    record_input_from_request, CharacterTomListQuery, CharacterTomService,
-};
+use crate::character_tom::{record_input_from_request, CharacterTomListQuery, CharacterTomService};
 use crate::workspace::WorkspaceState;
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
@@ -50,7 +48,9 @@ fn parse_rfc3339(raw: &str) -> Result<DateTime<Utc>, NexusApiError> {
     parse_stored_created_at(raw).map_err(wire_err)
 }
 
-fn item_from_row(row: &crate::character_tom::CharacterTomBeliefRow) -> Result<serde_json::Value, NexusApiError> {
+fn item_from_row(
+    row: &crate::character_tom::CharacterTomBeliefRow,
+) -> Result<serde_json::Value, NexusApiError> {
     let mut value = serde_json::json!({
         "carrier_entry_id": row.carrier_entry_id,
         "row_ordinal": i64::from(row.row_ordinal),
@@ -70,7 +70,9 @@ fn item_from_row(row: &crate::character_tom::CharacterTomBeliefRow) -> Result<se
     Ok(value)
 }
 
-fn list_pagination(page: &crate::character_tom::CharacterTomPage) -> Result<ListedPagination, NexusApiError> {
+fn list_pagination(
+    page: &crate::character_tom::CharacterTomPage,
+) -> Result<ListedPagination, NexusApiError> {
     finish_builder(
         ListedPagination::builder()
             .limit(i64::from(page.limit))
@@ -88,15 +90,15 @@ pub async fn record_tom(
 ) -> Result<Json<RecordCharacterTomResponse>, NexusApiError> {
     let req: RecordCharacterTomRequest = parse_canonical_json(&body)?;
     let owner = require_creator(&state)?;
-    let expected_revision = i64::try_from(req.expected_revision).map_err(|_| NexusApiError::BadRequest {
-        code: "invalid_input".into(),
-        message: "expected_revision is out of range".into(),
-    })?;
+    let expected_revision =
+        i64::try_from(req.expected_revision).map_err(|_| NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: "expected_revision is out of range".into(),
+        })?;
     let input = record_input_from_request(&req, expected_revision)?;
     let service = CharacterTomService::new(state.pool_or_uninit()?.clone());
-    let (carrier_entry_id, revision, mind_state_id) = service
-        .record(&owner, &character_id, input)
-        .await?;
+    let (carrier_entry_id, revision, mind_state_id) =
+        service.record(&owner, &character_id, input).await?;
     Ok(Json(finish_builder(
         RecordCharacterTomResponse::builder()
             .carrier_entry_id(carrier_entry_id)

@@ -23,6 +23,7 @@ pub struct QualitySignal {
 /// This is a pure function with no I/O or external dependencies.
 /// Tokens are lowercased for deduplication but alpha ratio is computed
 /// against the original text.
+#[allow(clippy::cast_precision_loss)] // heuristic f32 score: f32 rounding is intended
 pub fn quality_signal(input: &str) -> QualitySignal {
     let tokens: Vec<&str> = input.split_whitespace().collect();
     let total = tokens.len();

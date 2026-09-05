@@ -1,11 +1,13 @@
-//! Reusable fail-closed Actor KnowledgeView service (v1.184 P1 Task 3).
+//! Reusable fail-closed Actor `KnowledgeView` service (v1.184 P1 Task 3).
 //!
 //! HTTP, CLI, and later P2/P4 callers compose through this type. Callers never
 //! re-union owner sets themselves. Invalid ownership or any failed component
 //! query returns an error and no partial page.
 
 use crate::api::errors::NexusApiError;
-use nexus_knowledge::world_kb::knowledge_entry::{stored_created_at_order_millis, KnowledgeEntryRecord, KnowledgeOwnerRef};
+use nexus_knowledge::world_kb::knowledge_entry::{
+    stored_created_at_order_millis, KnowledgeEntryRecord, KnowledgeOwnerRef,
+};
 use nexus_knowledge::world_kb::store::KbStoreError;
 use nexus_local_db::kb_store::SqliteKbStore;
 use sqlx::SqlitePool;
@@ -40,7 +42,7 @@ pub enum AdmittedActor {
     Character { character_id: String },
 }
 
-/// One reusable KnowledgeView composer.
+/// One reusable `KnowledgeView` composer.
 pub struct ActorKnowledgeViewService {
     store: SqliteKbStore,
     pool: SqlitePool,
@@ -64,12 +66,12 @@ impl ActorKnowledgeViewService {
     pub fn resolve_limit(raw: Option<i64>) -> Result<u32, NexusApiError> {
         match raw {
             None => Ok(DEFAULT_LIMIT),
-            Some(n) if n > 0 && n <= i64::from(MAX_LIMIT) => u32::try_from(n).map_err(|_| {
-                NexusApiError::BadRequest {
+            Some(n) if n > 0 && n <= i64::from(MAX_LIMIT) => {
+                u32::try_from(n).map_err(|_| NexusApiError::BadRequest {
                     code: "invalid_input".into(),
                     message: "limit is out of range".into(),
-                }
-            }),
+                })
+            }
             Some(_) => Err(NexusApiError::BadRequest {
                 code: "invalid_input".into(),
                 message: format!("limit must be between 1 and {MAX_LIMIT}"),
@@ -82,7 +84,9 @@ impl ActorKnowledgeViewService {
     /// # Errors
     ///
     /// Returns `invalid_input` when the token is present but not a `k2:` pair.
-    pub fn decode_cursor(cursor: &Option<String>) -> Result<Option<(String, String)>, NexusApiError> {
+    pub fn decode_cursor(
+        cursor: &Option<String>,
+    ) -> Result<Option<(String, String)>, NexusApiError> {
         match cursor {
             None => Ok(None),
             Some(raw) => {
@@ -121,7 +125,8 @@ impl ActorKnowledgeViewService {
         }
         keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
         if let Some((created_at, entry_id)) = cursor {
-            let cursor_ms = stored_created_at_order_millis(&created_at).map_err(|_| invalid_cursor())?;
+            let cursor_ms =
+                stored_created_at_order_millis(&created_at).map_err(|_| invalid_cursor())?;
             keyed.retain(|(ms, id, _)| (*ms, id.as_str()) > (cursor_ms, entry_id.as_str()));
         }
         let limit_us = usize::try_from(limit).unwrap_or(usize::MAX);
@@ -129,7 +134,9 @@ impl ActorKnowledgeViewService {
         keyed.truncate(limit_us);
         let items: Vec<KnowledgeEntryRecord> = keyed.into_iter().map(|(_, _, row)| row).collect();
         let next_cursor = if has_more {
-            items.last().map(|row| Self::encode_cursor(&row.created_at, &row.entry_id))
+            items
+                .last()
+                .map(|row| Self::encode_cursor(&row.created_at, &row.entry_id))
         } else {
             None
         };
@@ -161,7 +168,12 @@ impl ActorKnowledgeViewService {
                 self.require_owned_world(caller_creator_id, &query.world_id)
                     .await?;
                 let parts = self
-                    .creator_union(caller_creator_id, &query.world_id, cursor.as_ref(), query.limit)
+                    .creator_union(
+                        caller_creator_id,
+                        &query.world_id,
+                        cursor.as_ref(),
+                        query.limit,
+                    )
                     .await?;
                 Self::paginate(parts, None, query.limit)
             }
@@ -320,7 +332,7 @@ impl ActorKnowledgeViewService {
                 exclude_creator_only,
             )
             .await
-            .map_err(component_err)
+            .map_err(|e| component_err(&e))
     }
 
     /// Owned **and active** World admission (PR #240 finding 1): public
@@ -344,12 +356,12 @@ impl ActorKnowledgeViewService {
             Some(stored) if stored.owner_creator_id == creator_id && stored.status == "active" => {
                 Ok(())
             }
-            Some(stored) if stored.owner_creator_id == creator_id => Err(
-                NexusApiError::ConflictCoded {
+            Some(stored) if stored.owner_creator_id == creator_id => {
+                Err(NexusApiError::ConflictCoded {
                     code: "world_inactive".into(),
                     message: format!("world {world_id} is {}", stored.status),
-                },
-            ),
+                })
+            }
             _ => Err(not_found("world", world_id)),
         }
     }
@@ -418,7 +430,7 @@ fn not_found(resource: &str, id: &str) -> NexusApiError {
     NexusApiError::NotFound(format!("{resource} {id}"))
 }
 
-fn component_err(err: KbStoreError) -> NexusApiError {
+fn component_err(err: &KbStoreError) -> NexusApiError {
     NexusApiError::Internal {
         code: "ACTOR_KNOWLEDGE_VIEW_COMPONENT_FAILED".into(),
         message: err.to_string(),
@@ -502,8 +514,7 @@ mod tests {
             "k2:ts\u{1f}id\u{1f}unexpected",
             "k2:ts\u{1f}id\u{1f}",
         ] {
-            let err = ActorKnowledgeViewService::decode_cursor(&Some(bad.into()))
-                .expect_err(bad);
+            let err = ActorKnowledgeViewService::decode_cursor(&Some(bad.into())).expect_err(bad);
             match err {
                 NexusApiError::BadRequest { code, .. } => assert_eq!(code, "invalid_input"),
                 other => panic!("unexpected {other:?}"),
@@ -564,7 +575,11 @@ mod tests {
         ];
         let page1 = ActorKnowledgeViewService::paginate(rows.clone(), None, 1).expect("p1");
         assert_eq!(
-            page1.items.iter().map(|r| r.entry_id.as_str()).collect::<Vec<_>>(),
+            page1
+                .items
+                .iter()
+                .map(|r| r.entry_id.as_str())
+                .collect::<Vec<_>>(),
             vec!["kb_a"]
         );
         assert!(page1.has_more);
@@ -573,7 +588,11 @@ mod tests {
             .expect("cursor");
         let page2 = ActorKnowledgeViewService::paginate(rows, Some(cursor), 1).expect("p2");
         assert_eq!(
-            page2.items.iter().map(|r| r.entry_id.as_str()).collect::<Vec<_>>(),
+            page2
+                .items
+                .iter()
+                .map(|r| r.entry_id.as_str())
+                .collect::<Vec<_>>(),
             vec!["kb_m"]
         );
         assert!(!page2.has_more);

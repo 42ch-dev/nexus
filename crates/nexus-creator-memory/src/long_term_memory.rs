@@ -23,7 +23,7 @@ pub const MEMORY_FILE_VERSION: u32 = 1;
 /// - `memory_kind`: matches `MemoryKind` enum values from `memory_item.rs`
 /// - `updated_at`: ISO-8601 timestamp
 /// - `source_session_ids`: optional list of ACP session IDs that produced this memory
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LongTermMemoryFrontmatter {
     pub nexus_memory_version: u32,
     pub memory_id: String,
@@ -77,6 +77,11 @@ impl LongTermMemory {
     /// - `memory_kind` is a valid `MemoryKind` enum value
     /// - `updated_at` is non-empty
     /// - Slug (derived from `source_path`) is path-safe, if `source_path` is set
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::ValidationError`] when any required invariant
+    /// is violated.
     pub fn validate(&self) -> Result<(), MemoryError> {
         if self.frontmatter.nexus_memory_version != MEMORY_FILE_VERSION {
             return Err(MemoryError::ValidationError(format!(
@@ -114,8 +119,7 @@ impl LongTermMemory {
                 if let Some(slug) = stem.to_str() {
                     if !slug_is_safe(slug) {
                         return Err(MemoryError::ValidationError(format!(
-                            "slug derived from source_path is not path-safe: '{}'",
-                            slug
+                            "slug derived from source_path is not path-safe: '{slug}'"
                         )));
                     }
                 }
@@ -152,6 +156,11 @@ impl LongTermMemory {
     /// ---
     /// Body content here.
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::ValidationError`] when the frontmatter
+    /// serialization fails.
     pub fn render(&self) -> Result<String, MemoryError> {
         let yaml = serde_yaml::to_string(&self.frontmatter).map_err(|e| {
             MemoryError::ValidationError(format!("failed to serialize memory frontmatter: {e}"))
@@ -217,7 +226,7 @@ pub fn slug_is_safe(slug: &str) -> bool {
     !slug.contains("..")
         && !slug.contains('/')
         && !slug.contains('\\')
-        && !slug.chars().any(|c| c.is_control())
+        && !slug.chars().any(char::is_control)
 }
 
 /// Extract YAML frontmatter and body from markdown content.
@@ -231,18 +240,19 @@ fn extract_frontmatter_and_body(content: &str) -> Result<(String, String), Strin
     }
     // Find closing ---
     let after_open = &trimmed[3..];
-    if let Some(end_offset) = after_open.find("\n---") {
-        let fm_str = after_open[..end_offset].trim().to_string();
-        let body_start = 3 + end_offset + 4; // skip "---\n---"
-        let body = if body_start < trimmed.len() {
-            trimmed[body_start..].trim_start().to_string()
-        } else {
-            String::new()
-        };
-        Ok((fm_str, body))
-    } else {
-        Err("missing closing frontmatter delimiter '---'".to_string())
-    }
+    after_open.find("\n---").map_or_else(
+        || Err("missing closing frontmatter delimiter '---'".to_string()),
+        |end_offset| {
+            let fm_str = after_open[..end_offset].trim().to_string();
+            let body_start = 3 + end_offset + 4; // skip "---\n---"
+            let body = if body_start < trimmed.len() {
+                trimmed[body_start..].trim_start().to_string()
+            } else {
+                String::new()
+            };
+            Ok((fm_str, body))
+        },
+    )
 }
 
 #[cfg(test)]

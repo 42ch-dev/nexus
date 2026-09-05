@@ -319,7 +319,10 @@ pub fn validate_body(
 }
 
 /// Validate novel-profile `body` semantics (V1.40 P1).
-fn validate_novel_body(block_type: BlockType, body: Option<&KnowledgeEntryBody>) -> Result<(), KbError> {
+fn validate_novel_body(
+    block_type: BlockType,
+    body: Option<&KnowledgeEntryBody>,
+) -> Result<(), KbError> {
     let b = body.ok_or_else(|| {
         KbError::Validation(ValidationError {
             kind: ValidationKind::MissingBody,
@@ -472,7 +475,10 @@ fn validate_game_bible_body(
 /// Requires `script_category` in `body.attributes` and validates it
 /// against the three valid values. Rejects `novel_category` and
 /// `game_bible_category` if present.
-fn validate_script_body(block_type: BlockType, body: Option<&KnowledgeEntryBody>) -> Result<(), KbError> {
+fn validate_script_body(
+    block_type: BlockType,
+    body: Option<&KnowledgeEntryBody>,
+) -> Result<(), KbError> {
     let b = body.ok_or_else(|| {
         KbError::Validation(ValidationError {
             kind: ValidationKind::MissingBody,

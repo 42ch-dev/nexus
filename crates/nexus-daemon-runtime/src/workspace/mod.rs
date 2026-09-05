@@ -866,10 +866,9 @@ impl WorkspaceState {
         self.shutdown_notify.notify_waiters();
     }
 
-
     /// Process-lifetime Actor session registry.
     #[must_use]
-    pub fn actor_sessions(&self) -> &ActorSessionRegistry {
+    pub const fn actor_sessions(&self) -> &ActorSessionRegistry {
         &self.actor_sessions
     }
     /// Workspace session manager (DF-31 skeleton).

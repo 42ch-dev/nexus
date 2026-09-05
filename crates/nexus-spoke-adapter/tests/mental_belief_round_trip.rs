@@ -16,9 +16,9 @@
 
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::{
-    BeliefPropositionRaw, MentalFieldsRaw, KnowledgeEntryRecord,
+    BeliefPropositionRaw, KnowledgeEntryRecord, MentalFieldsRaw,
 };
-use nexus_spoke_adapter::conversion::{spoke_to_knowledge_record, knowledge_record_to_spoke};
+use nexus_spoke_adapter::conversion::{knowledge_record_to_spoke, spoke_to_knowledge_record};
 use serde_json::{json, Value};
 
 /// Character entry carrying the handbook worked-example false-belief

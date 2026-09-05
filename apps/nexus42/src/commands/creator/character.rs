@@ -1,4 +1,4 @@
-//! `creator character` — thin DaemonClient surface for Character identity and bindings.
+//! `creator character` — thin `DaemonClient` surface for Character identity and bindings.
 
 use crate::api::DaemonClient;
 use crate::commands::creator::work_utils::query_path;
@@ -8,21 +8,13 @@ use clap::Subcommand;
 use nexus_contracts::daemon_api::actor_knowledge::{
     add_knowledge_entry_request::AddKnowledgeEntryRequest,
     add_knowledge_entry_response::AddKnowledgeEntryResponse,
-    list_character_knowledge_response::ListCharacterKnowledgeResponse,
-    view_request::ViewRequest,
+    list_character_knowledge_response::ListCharacterKnowledgeResponse, view_request::ViewRequest,
     view_response::ViewResponse,
 };
 use nexus_contracts::daemon_api::agent_host::{
-    create_session_request::CreateSessionRequest, execute_operation_request::ExecuteOperationRequest,
-    operation_response::OperationResponse, session_response::SessionResponse,
-};
-use nexus_contracts::daemon_api::characters::{
-    add_character_binding_request::AddCharacterBindingRequest,
-    add_character_binding_response::AddCharacterBindingResponse,
-    character_detail::CharacterDetail, create_character_request::CreateCharacterRequest,
-    create_character_response::CreateCharacterResponse,
-    list_character_bindings_response::ListCharacterBindingsResponse,
-    list_characters_response::ListCharactersResponse,
+    create_session_request::CreateSessionRequest,
+    execute_operation_request::ExecuteOperationRequest, operation_response::OperationResponse,
+    session_response::SessionResponse,
 };
 use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_request::CaptureCharacterPendingReviewRequest;
 use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_response::CaptureCharacterPendingReviewResponse;
@@ -40,6 +32,14 @@ use nexus_contracts::daemon_api::characters::tom::list_character_tom_response::L
 use nexus_contracts::daemon_api::characters::tom::list_character_tom_response::NexusCharacterTomBeliefItem;
 use nexus_contracts::daemon_api::characters::tom::record_character_tom_request::RecordCharacterTomRequest;
 use nexus_contracts::daemon_api::characters::tom::record_character_tom_response::RecordCharacterTomResponse;
+use nexus_contracts::daemon_api::characters::{
+    add_character_binding_request::AddCharacterBindingRequest,
+    add_character_binding_response::AddCharacterBindingResponse, character_detail::CharacterDetail,
+    create_character_request::CreateCharacterRequest,
+    create_character_response::CreateCharacterResponse,
+    list_character_bindings_response::ListCharacterBindingsResponse,
+    list_characters_response::ListCharactersResponse,
+};
 
 /// `creator character` subcommands.
 #[derive(Debug, Subcommand)]
@@ -58,10 +58,10 @@ pub enum CharacterCommand {
         /// Optional persona JSON object
         #[arg(long)]
         persona: Option<String>,
-        /// Optional WorldSheet KnowledgeEntry id
+        /// Optional `WorldSheet` `KnowledgeEntry` id
         #[arg(long)]
         world_sheet_entry_id: Option<String>,
-        /// Emit the generated CreateCharacterResponse DTO
+        /// Emit the generated `CreateCharacterResponse` DTO
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -85,7 +85,7 @@ pub enum CharacterCommand {
         #[command(subcommand)]
         command: BindingCommand,
     },
-    /// Character KnowledgeEntry add/list/view
+    /// Character `KnowledgeEntry` add/list/view
     Knowledge {
         #[command(subcommand)]
         command: KnowledgeCommand,
@@ -100,7 +100,7 @@ pub enum CharacterCommand {
         #[command(subcommand)]
         command: CharacterSoulCommand,
     },
-    /// Character ToM L1/L2 record and show (v1.184 P4)
+    /// Character `ToM` L1/L2 record and show (v1.184 P4)
     Tom {
         #[command(subcommand)]
         command: CharacterTomCommand,
@@ -113,7 +113,7 @@ pub enum CharacterCommand {
         world_id: String,
         #[arg(long)]
         binding_id: String,
-        /// User prompt submitted as one HostOperation::Prompt
+        /// User prompt submitted as one `HostOperation::Prompt`
         #[arg(long)]
         prompt: String,
         /// Provider id (deterministic mock in tests)
@@ -173,7 +173,7 @@ pub enum BindingCommand {
 /// `creator character knowledge` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum KnowledgeCommand {
-    /// Add a KnowledgeEntry under a stored owner
+    /// Add a `KnowledgeEntry` under a stored owner
     Add {
         /// Owner kind: world | character | binding
         #[arg(long)]
@@ -193,7 +193,7 @@ pub enum KnowledgeCommand {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// List Character-owned KnowledgeEntry rows (no World union)
+    /// List Character-owned `KnowledgeEntry` rows (no World union)
     List {
         #[arg(long)]
         character_id: String,
@@ -204,9 +204,9 @@ pub enum KnowledgeCommand {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// Compose KnowledgeView for a Creator or Character actor_ref
+    /// Compose `KnowledgeView` for a Creator or Character `actor_ref`
     View {
-        /// actor_kind: creator | character
+        /// `actor_kind`: creator | character
         #[arg(long)]
         actor: String,
         #[arg(long)]
@@ -317,6 +317,7 @@ pub enum CharacterMemoryCommand {
 
 /// `creator character tom` subcommands (v1.184 P4).
 #[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)] // clap derive requires non-boxed subcommands
 pub enum CharacterTomCommand {
     /// Record one L1 or L2 belief on an authorized carrier
     Record {
@@ -357,7 +358,7 @@ pub enum CharacterTomCommand {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// List bounded ToM rows (L1 before L2 in keyset order)
+    /// List bounded `ToM` rows (L1 before L2 in keyset order)
     Show {
         #[arg(long)]
         character_id: String,
@@ -396,6 +397,7 @@ pub enum CharacterSoulCommand {
 /// # Errors
 ///
 /// Returns daemon/network errors from [`DaemonClient`].
+#[allow(clippy::too_many_lines)] // single CLI command dispatcher
 pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
     let client = DaemonClient::from_config(config);
     match cmd {
@@ -423,10 +425,7 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
             cursor,
             json,
         } => list(&client, limit, cursor, json).await,
-        CharacterCommand::Show {
-            character_id,
-            json,
-        } => show(&client, &character_id, json).await,
+        CharacterCommand::Show { character_id, json } => show(&client, &character_id, json).await,
         CharacterCommand::Binding { command } => match command {
             BindingCommand::Add {
                 character_id,
@@ -512,8 +511,15 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                 json,
             } => {
                 memory_capture(
-                    &client, &character_id, &pending_id, &session_id, binding_id, task_kind,
-                    digest, created_at, json,
+                    &client,
+                    &character_id,
+                    &pending_id,
+                    &session_id,
+                    binding_id,
+                    task_kind,
+                    digest,
+                    created_at,
+                    json,
                 )
                 .await
             }
@@ -523,16 +529,12 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                 limit,
                 cursor,
                 json,
-            } => {
-                memory_pending_list(&client, &character_id, binding_id, limit, cursor, json).await
-            }
+            } => memory_pending_list(&client, &character_id, binding_id, limit, cursor, json).await,
             CharacterMemoryCommand::PendingCount {
                 character_id,
                 binding_id,
                 json,
-            } => {
-                memory_pending_count(&client, &character_id, binding_id, json).await
-            }
+            } => memory_pending_count(&client, &character_id, binding_id, json).await,
             CharacterMemoryCommand::PendingDismiss {
                 character_id,
                 pending_id,
@@ -556,8 +558,14 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                 expected_revision,
                 json,
             } => {
-                memory_promote(&client, &character_id, &fragment_id, expected_revision, json)
-                    .await
+                memory_promote(
+                    &client,
+                    &character_id,
+                    &fragment_id,
+                    expected_revision,
+                    json,
+                )
+                .await
             }
         },
         CharacterCommand::Soul { command } => match command {
@@ -619,16 +627,18 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                 limit,
                 cursor,
                 json,
-            } => tom_show(
-                &client,
-                &character_id,
-                &world_id,
-                &binding_id,
-                limit,
-                cursor,
-                json,
-            )
-            .await,
+            } => {
+                tom_show(
+                    &client,
+                    &character_id,
+                    &world_id,
+                    &binding_id,
+                    limit,
+                    cursor,
+                    json,
+                )
+                .await
+            }
         },
         CharacterCommand::Run {
             character_id,
@@ -699,10 +709,10 @@ async fn create(
         println!("{}", serde_json::to_string_pretty(&resp)?);
     } else {
         println!("Character created:");
-        println!("  character_id: {}", &*resp.character.character_id);
-        println!("  display_name:  {}", &*resp.character.display_name);
-        println!("  binding_id:    {}", &*resp.binding.binding_id);
-        println!("  world_id:       {}", &*resp.binding.world_id);
+        println!("  character_id: {}", *resp.character.character_id);
+        println!("  display_name:  {}", *resp.character.display_name);
+        println!("  binding_id:    {}", *resp.binding.binding_id);
+        println!("  world_id:       {}", *resp.binding.world_id);
     }
     Ok(())
 }
@@ -731,7 +741,7 @@ async fn list(
         for item in &resp.items {
             println!(
                 "{}  {}  {}",
-                &*item.character_id, &*item.display_name, item.status
+                *item.character_id, *item.display_name, item.status
             );
         }
         if resp.pagination.has_more {
@@ -751,10 +761,10 @@ async fn show(client: &DaemonClient, character_id: &str, json: bool) -> Result<(
         println!("{}", serde_json::to_string_pretty(&resp)?);
     } else {
         let c = &resp.character;
-        println!("character_id: {}", &*c.character_id);
-        println!("display_name: {}", &*c.display_name);
+        println!("character_id: {}", *c.character_id);
+        println!("display_name: {}", *c.display_name);
         println!("status:       {}", c.status);
-        println!("owner:        {}", &*c.owner_creator_id);
+        println!("owner:        {}", *c.owner_creator_id);
     }
     Ok(())
 }
@@ -781,8 +791,8 @@ async fn add_binding(
         println!("{}", serde_json::to_string_pretty(&resp)?);
     } else {
         println!("Binding added:");
-        println!("  binding_id: {}", &*resp.binding.binding_id);
-        println!("  world_id:    {}", &*resp.binding.world_id);
+        println!("  binding_id: {}", *resp.binding.binding_id);
+        println!("  world_id:    {}", *resp.binding.world_id);
     }
     Ok(())
 }
@@ -813,7 +823,7 @@ async fn list_bindings(
         println!("No bindings.");
     } else {
         for item in &resp.items {
-            println!("{}  {}  {}", &*item.binding_id, &*item.world_id, item.status);
+            println!("{}  {}  {}", *item.binding_id, *item.world_id, item.status);
         }
         if resp.pagination.has_more {
             if let Some(next) = &resp.pagination.next_cursor {
@@ -854,6 +864,7 @@ fn owner_kind_wire(owner: &str) -> Result<&'static str> {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // CLI arg mapping
 async fn add_knowledge(
     client: &DaemonClient,
     owner: &str,
@@ -888,7 +899,7 @@ async fn add_knowledge(
         println!("{}", serde_json::to_string_pretty(&resp)?);
     } else {
         println!("KnowledgeEntry added:");
-        println!("  entry_id: {}", &*resp.item.entry_id);
+        println!("  entry_id: {}", *resp.item.entry_id);
         println!("  owner:    {}", serde_json::to_string(&resp.item.owner)?);
     }
     Ok(())
@@ -922,8 +933,8 @@ async fn list_knowledge(
         for item in &resp.items {
             println!(
                 "{}  {}  {}",
-                &*item.entry_id,
-                &*item.canonical_name,
+                *item.entry_id,
+                *item.canonical_name,
                 serde_json::to_string(&item.owner)?
             );
         }
@@ -936,6 +947,7 @@ async fn list_knowledge(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)] // CLI arg mapping
 async fn view_knowledge(
     client: &DaemonClient,
     actor: &str,
@@ -980,9 +992,7 @@ async fn view_knowledge(
         body["cursor"] = serde_json::Value::String(c);
     }
     let req: ViewRequest = serde_json::from_value(body)?;
-    let resp: ViewResponse = client
-        .post("/v1/daemon/actor-knowledge/view", &req)
-        .await?;
+    let resp: ViewResponse = client.post("/v1/daemon/actor-knowledge/view", &req).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&resp)?);
     } else if resp.items.is_empty() {
@@ -991,8 +1001,8 @@ async fn view_knowledge(
         for item in &resp.items {
             println!(
                 "{}  {}  {}  creator_only={}",
-                &*item.entry_id,
-                &*item.canonical_name,
+                *item.entry_id,
+                *item.canonical_name,
                 serde_json::to_string(&item.owner)?,
                 item.creator_only
             );
@@ -1006,6 +1016,7 @@ async fn view_knowledge(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)] // CLI arg mapping
 async fn run_character(
     client: &DaemonClient,
     character_id: String,
@@ -1047,9 +1058,7 @@ async fn run_character(
         body["viewpoint"]["event_id"] = serde_json::Value::String(event_id);
     }
     let req: CreateSessionRequest = serde_json::from_value(body)?;
-    let session: SessionResponse = client
-        .post("/v1/daemon/agent-host/sessions", &req)
-        .await?;
+    let session: SessionResponse = client.post("/v1/daemon/agent-host/sessions", &req).await?;
 
     let mut events = client
         .stream_get(&format!(
@@ -1108,7 +1117,11 @@ fn character_memory_base(character_id: &str) -> String {
     format!("/v1/daemon/characters/{character_id}/memory")
 }
 
-fn binding_pairs(binding_id: Option<&str>, limit: Option<i64>, cursor: Option<&str>) -> Vec<(String, String)> {
+fn binding_pairs(
+    binding_id: Option<&str>,
+    limit: Option<i64>,
+    cursor: Option<&str>,
+) -> Vec<(String, String)> {
     let mut pairs = Vec::new();
     if let Some(b) = binding_id {
         pairs.push(("binding_id".to_string(), b.to_string()));
@@ -1122,6 +1135,7 @@ fn binding_pairs(binding_id: Option<&str>, limit: Option<i64>, cursor: Option<&s
     pairs
 }
 
+#[allow(clippy::too_many_arguments)] // CLI arg mapping
 async fn memory_capture(
     client: &DaemonClient,
     character_id: &str,
@@ -1149,7 +1163,10 @@ async fn memory_capture(
     }
     let req: CaptureCharacterPendingReviewRequest = serde_json::from_value(body)?;
     let resp: CaptureCharacterPendingReviewResponse = client
-        .post(&format!("{}/pending-review", character_memory_base(character_id)), &req)
+        .post(
+            &format!("{}/pending-review", character_memory_base(character_id)),
+            &req,
+        )
         .await?;
     print_character_capture(&resp, json);
     Ok(())
@@ -1160,7 +1177,7 @@ fn print_character_capture(resp: &CaptureCharacterPendingReviewResponse, json: b
         println!("{}", serde_json::to_string_pretty(resp).unwrap_or_default());
     } else {
         println!("Captured pending review:");
-        println!("  pending_id: {}", &*resp.pending_id);
+        println!("  pending_id: {}", *resp.pending_id);
     }
 }
 
@@ -1173,7 +1190,13 @@ async fn memory_pending_list(
     json: bool,
 ) -> Result<()> {
     let pairs = binding_pairs(binding_id.as_deref(), limit, cursor.as_deref());
-    let path = query_path(&format!("{}/pending-review", character_memory_base(character_id)), &pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect::<Vec<_>>());
+    let path = query_path(
+        &format!("{}/pending-review", character_memory_base(character_id)),
+        &pairs
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect::<Vec<_>>(),
+    );
     let resp: ListCharacterPendingReviewsResponse = client.get(&path).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&resp)?);
@@ -1182,9 +1205,9 @@ async fn memory_pending_list(
     } else {
         for r in &resp.items {
             if let Some(b) = r.binding_id.as_deref() {
-                println!("{}  {}  binding={}", &*r.pending_id, &*r.task_kind, b);
+                println!("{}  {}  binding={}", *r.pending_id, *r.task_kind, b);
             } else {
-                println!("{}  {}  shared", &*r.pending_id, &*r.task_kind);
+                println!("{}  {}  shared", *r.pending_id, *r.task_kind);
             }
         }
         if resp.pagination.has_more {
@@ -1202,7 +1225,10 @@ async fn memory_pending_count(
     binding_id: Option<String>,
     json: bool,
 ) -> Result<()> {
-    let mut path = format!("{}/pending-review/count", character_memory_base(character_id));
+    let mut path = format!(
+        "{}/pending-review/count",
+        character_memory_base(character_id)
+    );
     if let Some(b) = binding_id {
         path = format!("{path}?binding_id={b}");
     }
@@ -1261,7 +1287,10 @@ async fn memory_review(
         }
         let req: ReviewCharacterMemoryRequest = serde_json::from_value(body)?;
         let resp: ReviewCharacterMemoryResponse = client
-            .post(&format!("{}/review", character_memory_base(character_id)), &req)
+            .post(
+                &format!("{}/review", character_memory_base(character_id)),
+                &req,
+            )
             .await?;
         promoted += resp.promoted;
         fragmented += resp.fragmented;
@@ -1298,7 +1327,9 @@ async fn memory_review(
     } else if processed == 0 && !has_more {
         println!("No pending memories to review.");
     } else {
-        println!("Review completed: promoted={promoted}, fragmented={fragmented}, dropped={dropped}");
+        println!(
+            "Review completed: promoted={promoted}, fragmented={fragmented}, dropped={dropped}"
+        );
         if stopped_zero_progress {
             println!(
                 "Note: a review call made zero progress but the daemon still reported \
@@ -1324,7 +1355,13 @@ async fn memory_fragments(
     json: bool,
 ) -> Result<()> {
     let pairs = binding_pairs(binding_id.as_deref(), limit, cursor.as_deref());
-    let path = query_path(&format!("{}/fragments", character_memory_base(character_id)), &pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect::<Vec<_>>());
+    let path = query_path(
+        &format!("{}/fragments", character_memory_base(character_id)),
+        &pairs
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect::<Vec<_>>(),
+    );
     let resp: ListCharacterMemoryFragmentsResponse = client.get(&path).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&resp)?);
@@ -1332,8 +1369,11 @@ async fn memory_fragments(
         println!("No memory fragments found.");
     } else {
         for f in &resp.fragments {
-            let scope = f.binding_id.as_deref().map(|s| s.as_str()).unwrap_or("shared");
-            println!("{}  {}  {}", &*f.fragment_id, scope, &*f.summary);
+            let scope = f
+                .binding_id
+                .as_deref()
+                .map_or("shared", std::string::String::as_str);
+            println!("{}  {}  {}", *f.fragment_id, scope, &*f.summary);
         }
         if resp.pagination.has_more {
             if let Some(next) = &resp.pagination.next_cursor {
@@ -1366,7 +1406,10 @@ async fn memory_promote(
     if json {
         println!("{}", serde_json::to_string_pretty(&resp)?);
     } else {
-        println!("Promoted fragment {} to shared (revision {}).", &*resp.fragment.fragment_id, resp.fragment.revision);
+        println!(
+            "Promoted fragment {} to shared (revision {}).",
+            *resp.fragment.fragment_id, resp.fragment.revision
+        );
     }
     Ok(())
 }
@@ -1392,8 +1435,8 @@ async fn soul_reflect(
     if json {
         println!("{}", serde_json::to_string_pretty(&resp)?);
     } else {
-        println!("character_id: {}", &*resp.character_id);
-        println!("state:        {}", &resp.state.to_string());
+        println!("character_id: {}", *resp.character_id);
+        println!("state:        {}", resp.state);
         if let Some(n) = resp.narrative.as_deref() {
             println!("narrative:");
             println!("{n}");
@@ -1401,7 +1444,6 @@ async fn soul_reflect(
     }
     Ok(())
 }
-
 
 // ─── Character ToM helpers (v1.184 P4) ─────────────────────────────────────
 
@@ -1415,6 +1457,7 @@ fn merge_tom_json_field(body: &mut serde_json::Value, key: &str, value: Option<S
     }
 }
 
+#[allow(clippy::too_many_arguments)] // CLI arg mapping
 async fn tom_record(
     client: &DaemonClient,
     character_id: &str,
@@ -1455,9 +1498,8 @@ async fn tom_record(
     merge_tom_json_field(&mut body, "sort_key", sort_key);
     merge_tom_json_field(&mut body, "event_id", event_id);
     let req: RecordCharacterTomRequest = serde_json::from_value(body)?;
-    let resp: RecordCharacterTomResponse = client
-        .post(&character_tom_base(character_id), &req)
-        .await?;
+    let resp: RecordCharacterTomResponse =
+        client.post(&character_tom_base(character_id), &req).await?;
     print_tom_record(&resp, json);
     Ok(())
 }
@@ -1546,15 +1588,10 @@ fn format_tom_item_human(row: &NexusCharacterTomBeliefItem) -> String {
     let truth = row
         .truth
         .as_ref()
-        .map(|t| t.to_string())
-        .unwrap_or_else(|| "Unknown".to_string());
+        .map_or_else(|| "Unknown".to_string(), std::string::ToString::to_string);
     format!(
         "- [{}] holder={} truth={} {} (carrier={})",
-        row.order,
-        holder,
-        truth,
-        proposition,
-        &*row.carrier_entry_id
+        row.order, holder, truth, proposition, &*row.carrier_entry_id
     )
 }
 

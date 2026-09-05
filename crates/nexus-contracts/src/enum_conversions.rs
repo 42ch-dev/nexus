@@ -13,12 +13,11 @@
 
 use crate::common_types::{
     AccountStatus, AgentProfileStatus, BindingStatus, BlockType, CommandOrigin, CommandStatus,
-    CommandType, CreatorStatus, DeliveryState,
-    DeltaOperation, DeltaType, ForkBranchStatus, KeyBlockStatus, ManifestType, ManuscriptStorage,
-    MembershipRole, MembershipStatus, MemoryKind, MemoryStatus, PairingSource, PairingStatus,
-    ProfileKind, PublishStoryOutcome, ReferenceSourceType, RegistrationSource, ScanStatus,
-    SelectionMode, StoryManifestStatus, SubscriptionTier, TimelineEventStatus, TimelineEventType,
-    VerificationStatus, WorldStatus,
+    CommandType, CreatorStatus, DeliveryState, DeltaOperation, DeltaType, ForkBranchStatus,
+    KeyBlockStatus, ManifestType, ManuscriptStorage, MembershipRole, MembershipStatus, MemoryKind,
+    MemoryStatus, PairingSource, PairingStatus, ProfileKind, PublishStoryOutcome,
+    ReferenceSourceType, RegistrationSource, ScanStatus, SelectionMode, StoryManifestStatus,
+    SubscriptionTier, TimelineEventStatus, TimelineEventType, VerificationStatus, WorldStatus,
 };
 use crate::generated::daemon_api::canvas::world_kb::world_kb_relationship_kind::WorldKbRelationshipKind;
 use crate::generated::daemon_api::works::chapters::chapter_status::ChapterStatus;

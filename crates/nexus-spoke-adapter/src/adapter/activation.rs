@@ -1975,7 +1975,7 @@ mod tests {
 
     #[test]
     fn test_modules_activation_survives_spoke_roundtrip() {
-        use crate::conversion::{spoke_to_knowledge_record, knowledge_record_to_spoke};
+        use crate::conversion::{knowledge_record_to_spoke, spoke_to_knowledge_record};
 
         let mut entry = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero");
         entry.entry_id = "kb_rt1".to_string();

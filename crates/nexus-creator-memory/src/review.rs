@@ -164,6 +164,11 @@ pub struct PendingReviewInput {
 /// }
 /// ```
 pub fn classify_pending_review(record: &PendingReviewInput) -> ReviewDecision {
+    // Threshold constants
+    const DROP_THRESHOLD: usize = 50; // Very short = no meaningful content
+    const HIGH_SIGNAL_MIN_LENGTH: usize = 80; // High-signal creative content can promote shorter
+    const DEFAULT_PROMOTE_THRESHOLD: usize = 200; // Unknown tasks promote at this length
+
     let digest_len = record.raw_digest.len();
     let task_kind: TaskKind = {
         let parsed: TaskKind = record.task_kind.parse().unwrap_or(TaskKind::Unknown);
@@ -177,11 +182,6 @@ pub fn classify_pending_review(record: &PendingReviewInput) -> ReviewDecision {
         }
         parsed
     };
-
-    // Threshold constants
-    const DROP_THRESHOLD: usize = 50; // Very short = no meaningful content
-    const HIGH_SIGNAL_MIN_LENGTH: usize = 80; // High-signal creative content can promote shorter
-    const DEFAULT_PROMOTE_THRESHOLD: usize = 200; // Unknown tasks promote at this length
 
     // Rule 1: Creative tasks use quality signal for promotion decisions
     if matches!(
@@ -244,10 +244,7 @@ pub fn classify_pending_review(record: &PendingReviewInput) -> ReviewDecision {
     ReviewDecision {
         pending_id: record.pending_id.clone(),
         action: ReviewAction::PromoteToLongTerm,
-        reason: format!(
-            "Substantial digest ({} chars) — long-term value",
-            digest_len
-        ),
+        reason: format!("Substantial digest ({digest_len} chars) — long-term value"),
     }
 }
 
@@ -480,7 +477,7 @@ fn extract_keywords(text: &str) -> Vec<String> {
                 )
         })
         .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .collect();
 
     // Filter stop words and dedupe using HashSet for O(1) lookups (R13).
@@ -639,12 +636,19 @@ pub fn check_session_already_promoted(
 /// // let bearer = MemoryBearerRef::Creator("ctr_test");
 /// // let memory = promote_to_long_term(&home, bearer, &input, &summarizer).await.unwrap();
 /// ```
+///
+/// # Errors
+///
+/// Returns [`MemoryError::AlreadyPromoted`] when the session already has a
+/// long-term memory file, and [`MemoryError`] on summarizer/validation/I/O
+/// failure.
 pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
     home: &Path,
     bearer: MemoryBearerRef<'_>,
     record: &PendingReviewInput,
     summarizer: &S,
 ) -> Result<LongTermMemory, MemoryError> {
+    const MAX_DIGEST_BYTES: usize = 256 * 1024;
     // 1. Check idempotency
     if check_session_already_promoted(home, bearer, &record.session_id)? {
         return Err(MemoryError::AlreadyPromoted {
@@ -655,7 +659,6 @@ pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
     // R-V133P4-06: Size guard — cap raw_digest before summarization to prevent
     // unbounded LTM file growth. 256 KiB is generous for a session digest.
     // R-V141HYG-01: Use floor_char_boundary to avoid panicking on multi-byte content.
-    const MAX_DIGEST_BYTES: usize = 256 * 1024;
     let raw_digest = if record.raw_digest.len() > MAX_DIGEST_BYTES {
         tracing::warn!(
             session_id = %record.session_id,
@@ -719,9 +722,8 @@ pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
 /// long-term memory frontmatter based on the session's task type.
 fn task_kind_to_memory_kind(task_kind: &str) -> &'static str {
     match task_kind.to_lowercase().as_str() {
-        "brainstorm" => "story_summary",
+        "brainstorm" | "chapter" => "story_summary",
         "outline" => "plot_outline",
-        "chapter" => "story_summary",
         "research" => "research_material",
         _ => "custom",
     }
@@ -934,7 +936,8 @@ mod tests {
         let home = std::path::PathBuf::from("/tmp/test_promotion_empty");
         let _ = std::fs::remove_dir_all(&home);
 
-        let result = check_session_already_promoted(&home, MemoryBearerRef::Creator("ctr_test"), "sess_123");
+        let result =
+            check_session_already_promoted(&home, MemoryBearerRef::Creator("ctr_test"), "sess_123");
         assert!(result.is_ok());
         assert!(!result.unwrap());
 
@@ -967,9 +970,14 @@ mod tests {
         let input = sample_input("brainstorm", "Session digest for testing promotion.");
         let summarizer = MockSummarizer;
 
-        let memory = promote_to_long_term(&home, MemoryBearerRef::Creator("ctr_test"), &input, &summarizer)
-            .await
-            .unwrap();
+        let memory = promote_to_long_term(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            &input,
+            &summarizer,
+        )
+        .await
+        .unwrap();
 
         // Check memory properties
         assert!(memory.frontmatter.memory_id.starts_with("mem_"));
@@ -1010,12 +1018,23 @@ mod tests {
         let summarizer = MockSummarizer;
 
         // First promotion succeeds
-        let _ = promote_to_long_term(&home, MemoryBearerRef::Creator("ctr_test"), &input, &summarizer)
-            .await
-            .unwrap();
+        let _ = promote_to_long_term(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            &input,
+            &summarizer,
+        )
+        .await
+        .unwrap();
 
         // Second promotion with same session_id fails
-        let result = promote_to_long_term(&home, MemoryBearerRef::Creator("ctr_test"), &input, &summarizer).await;
+        let result = promote_to_long_term(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            &input,
+            &summarizer,
+        )
+        .await;
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.to_string().contains("already promoted"));
@@ -1050,7 +1069,13 @@ mod tests {
         let input = sample_input("brainstorm", "Session to promote.");
         let summarizer = FailingSummarizer;
 
-        let result = promote_to_long_term(&home, MemoryBearerRef::Creator("ctr_test"), &input, &summarizer).await;
+        let result = promote_to_long_term(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            &input,
+            &summarizer,
+        )
+        .await;
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -1159,7 +1184,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// R-V133P4-06: Size guard truncates oversized raw_digest before summarization.
+    /// R-V133P4-06: Size guard truncates oversized `raw_digest` before summarization.
     #[tokio::test]
     async fn promote_truncates_oversized_raw_digest() {
         let home = PathBuf::from("/tmp/test_promotion_size_guard");
@@ -1198,8 +1223,8 @@ mod tests {
             &input,
             &Passthrough,
         )
-            .await
-            .expect("promotion should succeed");
+        .await
+        .expect("promotion should succeed");
         // The body should be truncated to 256 KiB, not the full 300 KiB input
         assert!(
             memory.body.len() <= 256 * 1024,

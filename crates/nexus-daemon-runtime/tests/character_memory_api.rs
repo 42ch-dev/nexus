@@ -22,7 +22,6 @@ fn j(resp: &axum_test::TestResponse) -> Value {
     resp.json()
 }
 
-
 const OWNER: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const OTHER: &str = "ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const WORLD_A: &str = "wld_worldA";
@@ -100,7 +99,10 @@ async fn create_character(server: &TestServer, name: &str, world_id: &str) -> (S
     assert_eq!(resp.status_code(), 201, "create {name}: {}", resp.text());
     let body: Value = resp.json();
     (
-        body["character"]["character_id"].as_str().unwrap().to_string(),
+        body["character"]["character_id"]
+            .as_str()
+            .unwrap()
+            .to_string(),
         body["binding"]["binding_id"].as_str().unwrap().to_string(),
     )
 }
@@ -278,7 +280,10 @@ async fn capture_list_count_delete_lifecycle_and_scope_isolation() {
     // Deleting a missing row is a stable 404.
     let resp = ctx
         .server
-        .delete(&format!("{}/pending-review/pend_missing", memory_base(&chr)))
+        .delete(&format!(
+            "{}/pending-review/pend_missing",
+            memory_base(&chr)
+        ))
         .await;
     assert_eq!(resp.status_code(), 404);
 }
@@ -317,7 +322,10 @@ async fn pagination_is_bounded_and_deterministic() {
         .collect();
     assert_eq!(ids1, vec!["pend_page_4", "pend_page_3"]);
     assert_eq!(page1["pagination"]["has_more"], true);
-    let cursor = page1["pagination"]["next_cursor"].as_str().unwrap().to_string();
+    let cursor = page1["pagination"]["next_cursor"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // Page 2 via cursor.
     let resp = ctx
@@ -364,7 +372,11 @@ async fn pagination_is_bounded_and_deterministic() {
         .get(&format!("{}/pending-review?limit=0", memory_base(&chr)))
         .await;
     if resp.status_code() != 422 {
-        panic!("limit=0 expected 422 got {} body: {}", resp.status_code(), resp.text());
+        panic!(
+            "limit=0 expected 422 got {} body: {}",
+            resp.status_code(),
+            resp.text()
+        );
     }
 }
 
@@ -375,8 +387,16 @@ async fn review_drains_queue_into_character_storage_only() {
     let ctx = ctx().await;
     let (chr, _bind1) = create_character(&ctx.server, "Ava", WORLD_A).await;
 
-    capture(&ctx.server, &chr, "pend_promote", None, None, PROMOTE_DIGEST, "2026-01-01T00:00:01Z")
-        .await;
+    capture(
+        &ctx.server,
+        &chr,
+        "pend_promote",
+        None,
+        None,
+        PROMOTE_DIGEST,
+        "2026-01-01T00:00:01Z",
+    )
+    .await;
     capture(
         &ctx.server,
         &chr,
@@ -454,7 +474,8 @@ async fn review_drains_queue_into_character_storage_only() {
             .join(OWNER)
             .join("memory")
             .exists()
-            && !ctx.nexus_home
+            && !ctx
+                .nexus_home
                 .join(".nexus42")
                 .join("creators")
                 .join(OWNER)
@@ -469,8 +490,16 @@ async fn review_scoped_to_binding_processes_only_that_scope() {
     let ctx = ctx().await;
     let (chr, bind1) = create_character(&ctx.server, "Ava", WORLD_A).await;
 
-    capture(&ctx.server, &chr, "pend_shared", None, Some("research"), FRAGMENT_DIGEST, "2026-01-01T00:00:01Z")
-        .await;
+    capture(
+        &ctx.server,
+        &chr,
+        "pend_shared",
+        None,
+        Some("research"),
+        FRAGMENT_DIGEST,
+        "2026-01-01T00:00:01Z",
+    )
+    .await;
     capture(
         &ctx.server,
         &chr,
@@ -497,12 +526,21 @@ async fn review_scoped_to_binding_processes_only_that_scope() {
     // The fragment carries the binding-local provenance.
     let resp = ctx
         .server
-        .get(&format!("{}/fragments?binding_id={bind1}", memory_base(&chr)))
+        .get(&format!(
+            "{}/fragments?binding_id={bind1}",
+            memory_base(&chr)
+        ))
         .await;
-    let fragments = resp.json::<Value>()["fragments"].as_array().unwrap().clone();
+    let fragments = resp.json::<Value>()["fragments"]
+        .as_array()
+        .unwrap()
+        .clone();
     assert_eq!(fragments.len(), 1);
     assert_eq!(fragments[0]["binding_id"], bind1);
-    let resp = ctx.server.get(&format!("{}/fragments", memory_base(&chr))).await;
+    let resp = ctx
+        .server
+        .get(&format!("{}/fragments", memory_base(&chr)))
+        .await;
     assert_eq!(j(&resp)["fragments"].as_array().unwrap().len(), 0);
 }
 
@@ -532,9 +570,15 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
 
     let resp = ctx
         .server
-        .get(&format!("{}/fragments?binding_id={bind1}", memory_base(&chr)))
+        .get(&format!(
+            "{}/fragments?binding_id={bind1}",
+            memory_base(&chr)
+        ))
         .await;
-    let fragments = resp.json::<Value>()["fragments"].as_array().unwrap().clone();
+    let fragments = resp.json::<Value>()["fragments"]
+        .as_array()
+        .unwrap()
+        .clone();
     assert_eq!(fragments.len(), 1);
     let fragment_id = fragments[0]["fragment_id"].as_str().unwrap().to_string();
     assert_eq!(fragments[0]["revision"], 0);
@@ -548,12 +592,19 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
         .json(&json!({ "expected_revision": 7 }))
         .await;
     if resp.status_code() != 409 {
-        panic!("stale expected 409 got {}: {}", resp.status_code(), resp.text());
+        panic!(
+            "stale expected 409 got {}: {}",
+            resp.status_code(),
+            resp.text()
+        );
     }
     assert_eq!(j(&resp)["error"]["code"], "version_mismatch");
     let resp = ctx
         .server
-        .get(&format!("{}/fragments?binding_id={bind1}", memory_base(&chr)))
+        .get(&format!(
+            "{}/fragments?binding_id={bind1}",
+            memory_base(&chr)
+        ))
         .await;
     let after = j(&resp)["fragments"].as_array().unwrap().clone();
     assert_eq!(after.len(), 1, "stale promotion must not mutate");
@@ -575,11 +626,17 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
     );
 
     // The fragment now lives in the shared scope only.
-    let resp = ctx.server.get(&format!("{}/fragments", memory_base(&chr))).await;
+    let resp = ctx
+        .server
+        .get(&format!("{}/fragments", memory_base(&chr)))
+        .await;
     assert_eq!(j(&resp)["fragments"].as_array().unwrap().len(), 1);
     let resp = ctx
         .server
-        .get(&format!("{}/fragments?binding_id={bind1}", memory_base(&chr)))
+        .get(&format!(
+            "{}/fragments?binding_id={bind1}",
+            memory_base(&chr)
+        ))
         .await;
     assert_eq!(j(&resp)["fragments"].as_array().unwrap().len(), 0);
 
@@ -590,7 +647,10 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
         .json(&json!({ "expected_revision": 1 }))
         .await;
     assert_eq!(resp.status_code(), 409, "re-promote body: {}", resp.text());
-    assert_eq!(j(&resp)["error"]["code"], "character_fragment_already_shared");
+    assert_eq!(
+        j(&resp)["error"]["code"],
+        "character_fragment_already_shared"
+    );
 }
 
 // ─── SOUL narrative reflect ───────────────────────────────────────────────
@@ -658,11 +718,10 @@ async fn reflect_reports_insufficient_ungenerated_current_and_stale() {
 
     // Simulate a completed synthesis by caching a narrative at the current
     // stats fingerprint → current, not stale.
-    let (stats, _cached) = nexus_local_db::character_soul_narrative_fragment_stats(
-        &ctx.pool, OWNER, &chr, None,
-    )
-    .await
-    .unwrap();
+    let (stats, _cached) =
+        nexus_local_db::character_soul_narrative_fragment_stats(&ctx.pool, OWNER, &chr, None)
+            .await
+            .unwrap();
     nexus_local_db::upsert_character_soul_narrative(
         &ctx.pool,
         OWNER,
@@ -698,7 +757,15 @@ async fn reflect_reports_insufficient_ungenerated_current_and_stale() {
     );
 
     // A new fragment diverges the stats → stale.
-    seed_fragment(&ctx.pool, &chr, None, "frag_new", "kw_new", "2026-01-03T00:00:00Z").await;
+    seed_fragment(
+        &ctx.pool,
+        &chr,
+        None,
+        "frag_new",
+        "kw_new",
+        "2026-01-03T00:00:00Z",
+    )
+    .await;
     let resp = ctx
         .server
         .post(&reflect_path)
@@ -847,7 +914,6 @@ async fn foreign_missing_inactive_character_and_binding_fail_before_side_effects
     assert_eq!(count_pending(&ctx.server, &chr_b, Some(&bind_b)).await, 0);
 }
 
-
 #[tokio::test]
 async fn capture_is_idempotent_for_duplicate_pending_and_session() {
     let ctx = ctx().await;
@@ -879,8 +945,17 @@ async fn capture_is_idempotent_for_duplicate_pending_and_session() {
         "2026-01-01T00:00:01Z",
     )
     .await;
-    assert_eq!(resp.status_code(), 200, "duplicate pending_id: {}", resp.text());
-    assert_eq!(count_pending(&ctx.server, &chr, None).await, 1, "no extra row");
+    assert_eq!(
+        resp.status_code(),
+        200,
+        "duplicate pending_id: {}",
+        resp.text()
+    );
+    assert_eq!(
+        count_pending(&ctx.server, &chr, None).await,
+        1,
+        "no extra row"
+    );
 
     // Re-capturing the same (character_id, session_id) is also idempotent even
     // with a different pending id — the unique (character_id, session_id) index
@@ -896,8 +971,17 @@ async fn capture_is_idempotent_for_duplicate_pending_and_session() {
             "created_at": "2026-01-01T00:00:02Z",
         }))
         .await;
-    assert_eq!(resp.status_code(), 200, "duplicate session: {}", resp.text());
-    assert_eq!(count_pending(&ctx.server, &chr, None).await, 1, "session-scoped idempotency");
+    assert_eq!(
+        resp.status_code(),
+        200,
+        "duplicate session: {}",
+        resp.text()
+    );
+    assert_eq!(
+        count_pending(&ctx.server, &chr, None).await,
+        1,
+        "session-scoped idempotency"
+    );
 
     // A genuinely new pending id + session still lands a second row.
     let resp = capture(
@@ -913,7 +997,6 @@ async fn capture_is_idempotent_for_duplicate_pending_and_session() {
     assert_eq!(resp.status_code(), 200);
     assert_eq!(count_pending(&ctx.server, &chr, None).await, 2);
 }
-
 
 #[tokio::test]
 async fn review_is_bounded_at_batch_limit_with_correct_has_more() {
@@ -944,7 +1027,10 @@ async fn review_is_bounded_at_batch_limit_with_correct_has_more() {
     assert_eq!(resp.status_code(), 200, "review: {}", resp.text());
     let body = resp.json::<Value>();
     let processed = body["processed"].as_i64().unwrap();
-    assert_eq!(processed, 50, "one call must process at most the batch bound");
+    assert_eq!(
+        processed, 50,
+        "one call must process at most the batch bound"
+    );
     assert_eq!(body["has_more"], true, "remaining rows must be signalled");
 
     // Drain the remainder; the queue empties and has_more goes false.
@@ -962,7 +1048,11 @@ async fn review_is_bounded_at_batch_limit_with_correct_has_more() {
             break;
         }
     }
-    assert_eq!(count_pending(&ctx.server, &chr, None).await, 0, "queue fully drained");
+    assert_eq!(
+        count_pending(&ctx.server, &chr, None).await,
+        0,
+        "queue fully drained"
+    );
     // Exactly 53 rows were inspected across calls (50 + 3).
     let total: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM character_memory_fragments")
         .fetch_one(&ctx.pool)

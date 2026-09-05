@@ -55,7 +55,7 @@ use crate::state_delta;
 use async_trait::async_trait;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_narrative::NarrativeGateway;
-use nexus_spoke_adapter::conversion::{spoke_to_knowledge_record, knowledge_record_to_spoke};
+use nexus_spoke_adapter::conversion::{knowledge_record_to_spoke, spoke_to_knowledge_record};
 use nexus_wasm_host::{ComputeInput, ModuleCache, WasmEngine};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -409,7 +409,9 @@ async fn create_new_key_blocks(
             return Err(CapabilityError::InputInvalid(format!(
                 "new_key_block '{}' targets world '{}' but admitted world is '{}'; \
                  cross-world block injection rejected",
-                kb.entry_id, kb.world_id().unwrap_or_default(), world_id
+                kb.entry_id,
+                kb.world_id().unwrap_or_default(),
+                world_id
             )));
         }
         kb_store

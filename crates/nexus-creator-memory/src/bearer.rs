@@ -48,7 +48,7 @@ pub enum MemoryBearerRef<'a> {
 impl MemoryBearerRef<'_> {
     /// The bearer's primary id (`ctr_…` for Creator, `chr_…` for Character).
     #[must_use]
-    pub fn id(&self) -> &str {
+    pub const fn id(&self) -> &str {
         match *self {
             Self::Creator(creator_id) => creator_id,
             Self::Character { character_id, .. } => character_id,
@@ -85,7 +85,9 @@ impl MemoryBearerRef<'_> {
 
     /// Resolve the SOUL.md path for this bearer via the home layout.
     ///
-    /// # Panics (defense-in-depth)
+    /// # Panics
+    ///
+    /// Defense-in-depth:
     ///
     /// The layout helpers panic on path-traversal id components. Callers
     /// should run [`Self::validate`] first (all `soul_io`/`memory_io`
@@ -93,9 +95,7 @@ impl MemoryBearerRef<'_> {
     #[must_use]
     pub fn soul_path(&self, home: &Path) -> PathBuf {
         match *self {
-            Self::Creator(creator_id) => {
-                nexus_home_layout::creator_soul_md_path(home, creator_id)
-            }
+            Self::Creator(creator_id) => nexus_home_layout::creator_soul_md_path(home, creator_id),
             Self::Character {
                 owner_creator_id,
                 character_id,
@@ -112,10 +112,7 @@ impl MemoryBearerRef<'_> {
     ///
     /// Returns [`MemoryError::InvalidIdFormat`] when either id component is
     /// malformed or path-unsafe.
-    pub fn validated_long_term_memory_dir(
-        &self,
-        home: &Path,
-    ) -> Result<PathBuf, MemoryError> {
+    pub fn validated_long_term_memory_dir(&self, home: &Path) -> Result<PathBuf, MemoryError> {
         self.validate()?;
         Ok(self.long_term_memory_dir(home))
     }
@@ -125,7 +122,9 @@ impl MemoryBearerRef<'_> {
     /// The Creator arm is byte-identical to the legacy
     /// `memory_io::memory_dir` construction.
     ///
-    /// # Panics (defense-in-depth)
+    /// # Panics
+    ///
+    /// Defense-in-depth:
     ///
     /// Both id components are path-safety-asserted at the builder boundary —
     /// the Creator id is run through the home-layout validator (rejecting
@@ -157,7 +156,9 @@ impl MemoryBearerRef<'_> {
 
     /// Resolve the full path for a long-term memory file (`<slug>.md`).
     ///
-    /// # Panics (defense-in-depth)
+    /// # Panics
+    ///
+    /// Defense-in-depth:
     ///
     /// The slug is validated with [`crate::long_term_memory::slug_is_safe`] at
     /// the builder boundary (rejecting `..`, `/`, `\`, empty, and control
@@ -179,7 +180,7 @@ impl MemoryBearerRef<'_> {
     /// Creator, never by its `chr_…` storage id). `character_id` is `Some`
     /// only for a Character bearer and preserves the storage/bearer identity.
     #[must_use]
-    pub fn identity(&self) -> BearerIdentity<'_> {
+    pub const fn identity(&self) -> BearerIdentity<'_> {
         match *self {
             Self::Creator(creator_id) => BearerIdentity {
                 creator_id,

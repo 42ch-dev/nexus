@@ -63,12 +63,14 @@ fn character_rejects_bounds_and_extra_properties() {
 
 #[test]
 fn create_request_rejects_ownership_leak() {
-    assert!(serde_json::from_value::<CreateCharacterRequest>(serde_json::json!({
-        "display_name":"Ada",
-        "world_id": format!("wld_{HEX32}"),
-        "owner_creator_id": ctr()
-    }))
-    .is_err());
+    assert!(
+        serde_json::from_value::<CreateCharacterRequest>(serde_json::json!({
+            "display_name":"Ada",
+            "world_id": format!("wld_{HEX32}"),
+            "owner_creator_id": ctr()
+        }))
+        .is_err()
+    );
     serde_json::from_value::<CreateCharacterRequest>(serde_json::json!({
         "display_name":"Ada",
         "world_id": format!("wld_{HEX32}")
@@ -89,7 +91,6 @@ fn binding_rejects_unknown_status() {
     });
     assert!(serde_json::from_value::<ActorWorldBinding>(valid).is_err());
 }
-
 
 #[test]
 fn root_status_populates_generated_records() {
@@ -198,30 +199,44 @@ fn character_response_dtos_enforce_display_name_trim_and_unicode() {
         .expect("detail accepts 120 CJK scalars");
 
     let leading = character_record(" Ada");
-    assert!(serde_json::from_value::<CharacterDetail>(serde_json::json!({ "character": leading.clone() })).is_err());
-    assert!(serde_json::from_value::<CreateCharacterResponse>(serde_json::json!({
-        "character": leading.clone(),
-        "binding": binding_record()
-    }))
+    assert!(serde_json::from_value::<CharacterDetail>(
+        serde_json::json!({ "character": leading.clone() })
+    )
     .is_err());
-    assert!(serde_json::from_value::<ListCharactersResponse>(serde_json::json!({
-        "items": [leading],
-        "pagination": { "limit": 20, "has_more": false }
-    }))
-    .is_err());
+    assert!(
+        serde_json::from_value::<CreateCharacterResponse>(serde_json::json!({
+            "character": leading.clone(),
+            "binding": binding_record()
+        }))
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<ListCharactersResponse>(serde_json::json!({
+            "items": [leading],
+            "pagination": { "limit": 20, "has_more": false }
+        }))
+        .is_err()
+    );
 
     let trailing = character_record("Ada ");
-    assert!(serde_json::from_value::<CharacterDetail>(serde_json::json!({ "character": trailing.clone() })).is_err());
-    assert!(serde_json::from_value::<CreateCharacterResponse>(serde_json::json!({
-        "character": trailing.clone(),
-        "binding": binding_record()
-    }))
+    assert!(serde_json::from_value::<CharacterDetail>(
+        serde_json::json!({ "character": trailing.clone() })
+    )
     .is_err());
-    assert!(serde_json::from_value::<ListCharactersResponse>(serde_json::json!({
-        "items": [trailing],
-        "pagination": { "limit": 20, "has_more": false }
-    }))
-    .is_err());
+    assert!(
+        serde_json::from_value::<CreateCharacterResponse>(serde_json::json!({
+            "character": trailing.clone(),
+            "binding": binding_record()
+        }))
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<ListCharactersResponse>(serde_json::json!({
+            "items": [trailing],
+            "pagination": { "limit": 20, "has_more": false }
+        }))
+        .is_err()
+    );
 }
 
 #[test]

@@ -17,12 +17,12 @@
 use crate::api::errors::NexusApiError;
 use crate::character_tom::{CharacterTomListQuery, CharacterTomService};
 use nexus_creator_memory::bearer::MemoryBearerRef;
-use nexus_moment_context_assembly::CharacterMindInput;
 use nexus_creator_memory::errors::MemoryError;
 use nexus_creator_memory::review::{
     PendingReviewInput, ReviewAction, ReviewDecision, SessionDigestSummarizer,
 };
 use nexus_creator_memory::soul_narrative::SoulNarrativeSynthesizer;
+use nexus_moment_context_assembly::CharacterMindInput;
 use sqlx::SqlitePool;
 use std::path::Path;
 
@@ -40,7 +40,7 @@ use std::path::Path;
 /// `scope_id` is the Creator arm's world id or the Character arm's binding
 /// id; `None` = whole Creator / shared Character.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct BearerPipelineCtx<'a> {
+pub struct BearerPipelineCtx<'a> {
     bearer: MemoryBearerRef<'a>,
     scope_id: Option<&'a str>,
 }
@@ -48,7 +48,7 @@ pub(crate) struct BearerPipelineCtx<'a> {
 impl<'a> BearerPipelineCtx<'a> {
     /// Build a Creator-arm context (trusted operator; handler already
     /// authorized the active Creator from config).
-    pub(crate) const fn creator(creator_id: &'a str, scope_id: Option<&'a str>) -> Self {
+    pub const fn creator(creator_id: &'a str, scope_id: Option<&'a str>) -> Self {
         Self {
             bearer: MemoryBearerRef::Creator(creator_id),
             scope_id,
@@ -67,7 +67,7 @@ impl<'a> BearerPipelineCtx<'a> {
     /// Consumed by the Task 3 generated Character handlers and the dual-bearer
     /// semantic suite; the public Creator handlers use the Creator arm.
     #[allow(dead_code)]
-    pub(crate) async fn character(
+    pub async fn character(
         pool: &SqlitePool,
         owner_creator_id: &'a str,
         character_id: &'a str,
@@ -118,10 +118,10 @@ fn map_local_db_error(e: nexus_local_db::LocalDbError) -> NexusApiError {
 // ── Review pipeline ────────────────────────────────────────────────────────
 
 /// Maximum pending rows inspected per review call (V1.80 REL-01).
-pub(crate) const REVIEW_BATCH_LIMIT: i64 = 50;
+pub const REVIEW_BATCH_LIMIT: i64 = 50;
 
 /// Outcome of a bounded review batch (V1.80 REL-01; moved from `memory.rs`).
-pub(crate) struct ReviewBatchOutcome {
+pub struct ReviewBatchOutcome {
     pub promoted: i64,
     pub fragmented: i64,
     pub dropped: i64,
@@ -133,7 +133,7 @@ pub(crate) struct ReviewBatchOutcome {
 }
 
 impl ReviewBatchOutcome {
-    pub(crate) const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             promoted: 0,
             fragmented: 0,
@@ -161,7 +161,7 @@ struct RowActionCounts {
 /// storage. The deadline semantics (stop on expiry, partial progress,
 /// `any_row_remained_pending`) are identical to the pre-refactor Creator
 /// logic.
-pub(crate) async fn process_bearer_review_batch(
+pub async fn process_bearer_review_batch(
     inputs: &[PendingReviewInput],
     nexus_home: &Path,
     ctx: &BearerPipelineCtx<'_>,
@@ -234,8 +234,8 @@ async fn process_single_review_row(
             // Character-shared after the explicit revision-checked fragment
             // promotion. Shared Character scope and the whole Creator arm are
             // unchanged.
-            let binding_local = matches!(ctx.bearer, MemoryBearerRef::Character { .. })
-                && input.scope_id.is_some();
+            let binding_local =
+                matches!(ctx.bearer, MemoryBearerRef::Character { .. }) && input.scope_id.is_some();
             if binding_local {
                 let fragment = nexus_creator_memory::review::create_fragment_from_review(input);
                 match insert_fragment_and_delete_pending(
@@ -290,18 +290,16 @@ async fn process_single_review_row(
                 }
             }
         }
-        ReviewAction::Drop => {
-            match delete_pending_row(pool, ctx, &input.pending_id).await {
-                Ok(()) => counts.dropped = 1,
-                Err(e) => {
-                    tracing::warn!(
-                        pending_id = %input.pending_id,
-                        error = %e,
-                        "Failed to drop pending review; row stays pending"
-                    );
-                }
+        ReviewAction::Drop => match delete_pending_row(pool, ctx, &input.pending_id).await {
+            Ok(()) => counts.dropped = 1,
+            Err(e) => {
+                tracing::warn!(
+                    pending_id = %input.pending_id,
+                    error = %e,
+                    "Failed to drop pending review; row stays pending"
+                );
             }
-        }
+        },
         // MergeIntoExisting and TriggerSoulExperienceOnly are later features.
         _ => {
             tracing::debug!(
@@ -380,9 +378,7 @@ async fn claim_pending_and_promote(
                 .await
                 .map_err(map_local_db_error)?
         }
-        MemoryBearerRef::Character {
-            character_id, ..
-        } => {
+        MemoryBearerRef::Character { character_id, .. } => {
             nexus_local_db::delete_character_pending_review_in_tx(
                 &mut tx,
                 character_id,
@@ -516,11 +512,11 @@ async fn insert_fragment_and_delete_pending(
 }
 
 /// Maximum allowed digest size in bytes (256 KiB). R-V133P4-06.
-pub(crate) const MAX_DIGEST_BYTES: usize = 256 * 1024;
+pub const MAX_DIGEST_BYTES: usize = 256 * 1024;
 
 /// Passthrough summarizer that returns the raw digest with a provenance
 /// header (V1.33 R-V133P4-03/06 behavior preserved for the Creator arm).
-pub(crate) struct PassthroughSummarizer {
+pub struct PassthroughSummarizer {
     /// Header key (`creator_id` or `character_id`) for the bearer.
     id_key: &'static str,
     /// Header value.
@@ -532,7 +528,7 @@ pub(crate) struct PassthroughSummarizer {
 }
 
 impl PassthroughSummarizer {
-    pub(crate) fn new(bearer: MemoryBearerRef<'_>) -> Self {
+    pub fn new(bearer: MemoryBearerRef<'_>) -> Self {
         match bearer {
             MemoryBearerRef::Creator(id) => Self {
                 id_key: "creator_id",
@@ -586,11 +582,11 @@ impl SessionDigestSummarizer for PassthroughSummarizer {
 // ── SOUL narrative reflect pipeline ───────────────────────────────────────
 
 /// Maximum Unicode scalar chars persisted for a synthesized narrative.
-pub(crate) const SOUL_NARRATIVE_MAX_CHARS: usize = 16 * 1024;
+pub const SOUL_NARRATIVE_MAX_CHARS: usize = 16 * 1024;
 
 /// Insufficient-data gate thresholds (V1.81 G1).
-pub(crate) const MIN_SOUL_NARRATIVE_FRAGMENTS: i64 = 10;
-pub(crate) const MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS: i64 = 20;
+pub const MIN_SOUL_NARRATIVE_FRAGMENTS: i64 = 10;
+pub const MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS: i64 = 20;
 
 /// Forward-looking tokens checked by the narrative quality suffix heuristic.
 const FORWARD_LOOKING_TOKENS: &[&str] = &[
@@ -609,7 +605,7 @@ const FORWARD_LOOKING_BIGRAMS: &[(&str, &str)] = &[
 /// Internal reflect state (mapped to the wire `SoulNarrativeRequest` state in
 /// the handler).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ReflectState {
+pub enum ReflectState {
     InsufficientData,
     Ungenerated,
     Current,
@@ -618,7 +614,7 @@ pub(crate) enum ReflectState {
 
 /// Outcome of a bearer-parameterized reflect run (pre-wire mapping).
 #[derive(Debug, Clone)]
-pub(crate) struct ReflectOutcome {
+pub struct ReflectOutcome {
     pub state: ReflectState,
     pub narrative: Option<String>,
     pub generated_at: Option<String>,
@@ -645,7 +641,7 @@ struct FragmentSignal {
 /// 4. read/poll path (force=false) returns current/stale/ungenerated without
 ///    calling the synthesizer;
 /// 5. force=true synthesizes (on-demand only), validates/caps, persists.
-pub(crate) async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer + ?Sized>(
+pub async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer + ?Sized>(
     pool: &SqlitePool,
     ctx: &BearerPipelineCtx<'_>,
     force: bool,
@@ -655,8 +651,7 @@ pub(crate) async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer + ?Sized>(
     let (fragment_stats, cached) = bearer_fragment_stats(pool, ctx).await?;
 
     // 2. insufficient-data gate (before any ACP call).
-    let min_distinct =
-        usize::try_from(MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS).unwrap_or(usize::MAX);
+    let min_distinct = usize::try_from(MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS).unwrap_or(usize::MAX);
     let insufficient = fragment_stats.fragment_count < MIN_SOUL_NARRATIVE_FRAGMENTS
         || fragment_stats.distinct_keyword_count < min_distinct;
 
@@ -733,9 +728,7 @@ pub(crate) async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer + ?Sized>(
     })
 }
 
-fn outcome_ungenerated(
-    stats: &nexus_local_db::SoulNarrativeFragmentStats,
-) -> ReflectOutcome {
+fn outcome_ungenerated(stats: &nexus_local_db::SoulNarrativeFragmentStats) -> ReflectOutcome {
     ReflectOutcome {
         state: ReflectState::Ungenerated,
         narrative: None,
@@ -757,7 +750,9 @@ fn outcome_stale(
         narrative: c.narrative.clone(),
         generated_at: c.generated_at.clone(),
         stale: true,
-        fragment_count_at_generation: Some(u64::try_from(c.fragment_count_at_generation).unwrap_or(0)),
+        fragment_count_at_generation: Some(
+            u64::try_from(c.fragment_count_at_generation).unwrap_or(0),
+        ),
         max_fragment_created_at_at_generation: c.max_fragment_created_at_at_generation.clone(),
         current_fragment_count: u64::try_from(stats.fragment_count).unwrap_or(0),
         current_distinct_keyword_count: u64::try_from(stats.distinct_keyword_count).unwrap_or(0),
@@ -773,7 +768,9 @@ fn outcome_current(
         narrative: c.narrative.clone(),
         generated_at: c.generated_at.clone(),
         stale: false,
-        fragment_count_at_generation: Some(u64::try_from(c.fragment_count_at_generation).unwrap_or(0)),
+        fragment_count_at_generation: Some(
+            u64::try_from(c.fragment_count_at_generation).unwrap_or(0),
+        ),
         max_fragment_created_at_at_generation: c.max_fragment_created_at_at_generation.clone(),
         current_fragment_count: u64::try_from(stats.fragment_count).unwrap_or(0),
         current_distinct_keyword_count: u64::try_from(stats.distinct_keyword_count).unwrap_or(0),
@@ -793,28 +790,24 @@ async fn bearer_fragment_stats(
 > {
     match ctx.bearer {
         MemoryBearerRef::Creator(creator_id) => {
-            let (stats, cached) = nexus_local_db::soul_narrative_fragment_stats(
-                pool,
-                creator_id,
-                ctx.scope_id,
-            )
-            .await
-            .map_err(map_local_db_error)?;
+            let (stats, cached) =
+                nexus_local_db::soul_narrative_fragment_stats(pool, creator_id, ctx.scope_id)
+                    .await
+                    .map_err(map_local_db_error)?;
             Ok((stats, cached))
         }
         MemoryBearerRef::Character {
             owner_creator_id,
             character_id,
         } => {
-            let (stats, cached) =
-                nexus_local_db::character_soul_narrative_fragment_stats(
-                    pool,
-                    owner_creator_id,
-                    character_id,
-                    ctx.scope_id,
-                )
-                .await
-                .map_err(map_local_db_error)?;
+            let (stats, cached) = nexus_local_db::character_soul_narrative_fragment_stats(
+                pool,
+                owner_creator_id,
+                character_id,
+                ctx.scope_id,
+            )
+            .await
+            .map_err(map_local_db_error)?;
             // Same record shape — the creator cache uses `SoulNarrativeRecord`.
             let cached = cached.map(|c| nexus_local_db::SoulNarrativeRecord {
                 creator_id: character_id.to_string(),
@@ -965,7 +958,7 @@ const MIND_PROJECTION_LTM_LIMIT: usize = 20;
 ///
 /// Returns an `Internal`/`DATABASE_ERROR`/validation `NexusApiError` on any
 /// projection read failure other than a recognised absent-data condition.
-pub(crate) async fn load_character_mind_projection(
+pub async fn load_character_mind_projection(
     pool: &SqlitePool,
     nexus_home: &Path,
     owner_creator_id: &str,
@@ -1022,10 +1015,12 @@ pub(crate) async fn load_character_mind_projection(
     // Promoted long-term memory files (authoritative pipeline sink): the
     // capture→review→promote journey must be visible to `character run`.
     let mut ltm_lines: Vec<String> = Vec::new();
-    let ltm_slugs = nexus_creator_memory::memory_io::list_memories(nexus_home, bearer)
-        .map_err(|e| NexusApiError::Internal {
-            code: "CHARACTER_MEMORY_LIST_ERROR".into(),
-            message: e.to_string(),
+    let ltm_slugs =
+        nexus_creator_memory::memory_io::list_memories(nexus_home, bearer).map_err(|e| {
+            NexusApiError::Internal {
+                code: "CHARACTER_MEMORY_LIST_ERROR".into(),
+                message: e.to_string(),
+            }
         })?;
     for slug in ltm_slugs.into_iter().take(MIND_PROJECTION_LTM_LIMIT) {
         let content = nexus_creator_memory::memory_io::load_memory(nexus_home, bearer, &slug)
@@ -1034,12 +1029,10 @@ pub(crate) async fn load_character_mind_projection(
                 message: e.to_string(),
             })?;
         // Render the frontmatter-body text as a deterministic memory line.
-        let body = content
-            .render()
-            .map_err(|e| NexusApiError::Internal {
-                code: "CHARACTER_MEMORY_RENDER_ERROR".into(),
-                message: e.to_string(),
-            })?;
+        let body = content.render().map_err(|e| NexusApiError::Internal {
+            code: "CHARACTER_MEMORY_RENDER_ERROR".into(),
+            message: e.to_string(),
+        })?;
         ltm_lines.push(format!("- {body}"));
     }
 
@@ -1071,12 +1064,12 @@ pub(crate) async fn load_character_mind_projection(
     Ok(CharacterMindInput::new(soul, all_lines))
 }
 
-/// Per-order MCA ToM fetch bound: L1 and L2 are fetched independently at the
+/// Per-order MCA `ToM` fetch bound: L1 and L2 are fetched independently at the
 /// `CharacterMindInput` slot cap so neither order can starve the other
 /// (QC fix round 1, F-003).
 const MIND_PROJECTION_TOM_ORDER_LIMIT: u32 = 20;
 
-/// One deterministic human line for a projected ToM belief row (v1.184 P4).
+/// One deterministic human line for a projected `ToM` belief row (v1.184 P4).
 fn format_tom_belief_line(row: &crate::character_tom::CharacterTomBeliefRow) -> String {
     let holder = row.belief.holder.as_deref().unwrap_or("?");
     let proposition = row.belief.proposition.as_deref().unwrap_or("");
@@ -1085,8 +1078,8 @@ fn format_tom_belief_line(row: &crate::character_tom::CharacterTomBeliefRow) -> 
     format!("- [{order}] holder={holder} truth={truth} {proposition}")
 }
 
-/// Load bounded SOUL/Memory plus L1-then-L2 ToM for an admitted Character run.
-pub(crate) async fn load_character_mind_projection_with_tom(
+/// Load bounded SOUL/Memory plus L1-then-L2 `ToM` for an admitted Character run.
+pub async fn load_character_mind_projection_with_tom(
     pool: &SqlitePool,
     nexus_home: &Path,
     owner_creator_id: &str,
@@ -1170,7 +1163,9 @@ fn build_soul_narrative_synthesis_input(
 }
 
 /// Build up to 8 temporal buckets from fragments ordered by `created_at` DESC.
-fn build_temporal_buckets(signals: &[FragmentSignal]) -> Vec<nexus_creator_memory::soul_narrative::TemporalBucket> {
+fn build_temporal_buckets(
+    signals: &[FragmentSignal],
+) -> Vec<nexus_creator_memory::soul_narrative::TemporalBucket> {
     use nexus_creator_memory::soul_narrative::TemporalBucket;
 
     if signals.is_empty() {
@@ -1225,7 +1220,7 @@ fn build_temporal_buckets(signals: &[FragmentSignal]) -> Vec<nexus_creator_memor
 
 /// Truncate `summary` to at most `max_chars` Unicode scalar characters,
 /// appending `…` when truncating (UTF-8 safe; avoids mid-char byte panic).
-pub(crate) fn truncate_summary(summary: &str, max_chars: usize) -> String {
+pub fn truncate_summary(summary: &str, max_chars: usize) -> String {
     if summary.chars().count() <= max_chars {
         summary.to_string()
     } else {
@@ -1298,11 +1293,9 @@ fn map_soul_narrative_memory_error(err: MemoryError) -> NexusApiError {
         MemoryError::WorkerUnavailable => NexusApiError::ServiceUnavailable {
             message: "ACP worker unavailable for narrative synthesis".into(),
         },
-        MemoryError::CapabilityMissing { capability } => {
-            NexusApiError::ServiceUnavailable {
-                message: format!("{capability} capability not available in registry"),
-            }
-        }
+        MemoryError::CapabilityMissing { capability } => NexusApiError::ServiceUnavailable {
+            message: format!("{capability} capability not available in registry"),
+        },
         MemoryError::MalformedOutput { reason }
         | MemoryError::QualityThresholdMissed { reason } => NexusApiError::BadRequest {
             code: "narrative_generation_failed".into(),
@@ -1376,7 +1369,10 @@ mod tests {
             .unwrap();
         assert!(result.contains("# character_id: chr_0123456789abcdef0123456789abcdef"));
         assert!(result.contains("# binding_id: bnd_x"), "got: {result}");
-        assert!(result.contains("# creator_id:") == false, "no creator_id key");
+        assert!(
+            result.contains("# creator_id:") == false,
+            "no creator_id key"
+        );
     }
 
     #[tokio::test]

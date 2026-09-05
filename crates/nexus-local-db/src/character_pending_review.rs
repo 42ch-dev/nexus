@@ -36,7 +36,7 @@ pub struct CharacterPendingReviewRecord {
     pub created_at: String,
 }
 
-fn record_from_row(
+const fn record_from_row(
     pending_id: String,
     session_id: String,
     character_id: String,
@@ -55,7 +55,6 @@ fn record_from_row(
         created_at,
     }
 }
-
 
 /// Create a Character pending review record (idempotent on retry).
 ///

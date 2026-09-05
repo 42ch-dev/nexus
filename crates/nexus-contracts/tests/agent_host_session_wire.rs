@@ -1,19 +1,18 @@
 //! v1.184 P2 Task 1 — generated agent-host session pair rules.
 
+use nexus_contracts::generated::daemon_api::agent_host::create_session_request as create_mod;
+use nexus_contracts::generated::daemon_api::agent_host::session_list_response as list_mod;
+use nexus_contracts::generated::daemon_api::agent_host::session_response as single_mod;
 use nexus_contracts::generated::daemon_api::agent_host::{
     CreateSessionRequest, ExecuteOperationRequest, SessionListResponse, SessionResponse,
     SessionViewpoint,
 };
-use nexus_contracts::generated::daemon_api::agent_host::create_session_request as create_mod;
-use nexus_contracts::generated::daemon_api::agent_host::session_list_response as list_mod;
-use nexus_contracts::generated::daemon_api::agent_host::session_response as single_mod;
 
 #[test]
 fn legacy_create_session_json_roundtrip_omits_actor_fields() {
-    let req: CreateSessionRequest = serde_json::from_str(
-        r#"{"provider_id":"claude-native","cwd":"/tmp"}"#,
-    )
-    .expect("legacy request");
+    let req: CreateSessionRequest =
+        serde_json::from_str(r#"{"provider_id":"claude-native","cwd":"/tmp"}"#)
+            .expect("legacy request");
     assert!(req.actor_ref.is_none());
     assert!(req.viewpoint.is_none());
     assert_eq!(req.provider_id, "claude-native");
@@ -110,7 +109,8 @@ fn pin_nested_viewpoint<T>(include_optionals: bool, expected: &str)
 where
     T: serde::de::DeserializeOwned + serde::Serialize,
 {
-    let viewpoint: T = serde_json::from_value(viewpoint_payload(include_optionals)).expect("viewpoint");
+    let viewpoint: T =
+        serde_json::from_value(viewpoint_payload(include_optionals)).expect("viewpoint");
     assert_eq!(serde_json::to_string(&viewpoint).unwrap(), expected);
 }
 

@@ -26,7 +26,7 @@ fn tmp(tag: &str) -> PathBuf {
     ))
 }
 
-fn creator() -> MemoryBearerRef<'static> {
+const fn creator() -> MemoryBearerRef<'static> {
     MemoryBearerRef::Creator(GOLDEN_HOME_ID)
 }
 
@@ -158,7 +158,10 @@ async fn creator_promote_output_shape_is_stable() {
     assert_eq!(id_suffix.len(), 32, "memory_id keeps 32-hex shape");
     assert!(id_suffix.chars().all(|c| c.is_ascii_hexdigit()));
     let ts = &memory.frontmatter.updated_at;
-    assert!(ts.len() >= 20 && ts.contains('T'), "RFC3339 timestamp: {ts}");
+    assert!(
+        ts.len() >= 20 && ts.contains('T'),
+        "RFC3339 timestamp: {ts}"
+    );
 
     // Slug derivation is pinned: `mem_<id>` → `memory-<id>`.
     let expected_slug = memory.frontmatter.memory_id.replace("mem_", "memory-");

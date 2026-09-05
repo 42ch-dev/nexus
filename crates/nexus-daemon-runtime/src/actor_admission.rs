@@ -1,7 +1,7 @@
 //! Stored-data Actor admission for agent-host session and prompt paths (v1.184 P2 Task 1).
 //!
 //! Callers never treat request-body ownership claims as trusted context.
-//! Any deny returns before MCA, HostFacade session work, registry insertion,
+//! Any deny returns before MCA, `HostFacade` session work, registry insertion,
 //! or provider calls.
 
 use crate::actor_knowledge_view::{
@@ -28,7 +28,7 @@ pub struct ActorViewpoint {
     pub event_id: Option<String>,
 }
 
-/// Admitted Actor + viewpoint plus the P1 bounded KnowledgeView.
+/// Admitted Actor + viewpoint plus the P1 bounded `KnowledgeView`.
 #[derive(Debug, Clone)]
 pub struct AdmittedActorContext {
     pub actor: AdmittedActor,
@@ -531,9 +531,7 @@ mod tests {
         .await;
         assert_deny(
             &svc,
-            AdmittedActor::Character {
-                character_id,
-            },
+            AdmittedActor::Character { character_id },
             ActorViewpoint {
                 world_id: "wld_foreign".into(),
                 binding_id: Some(binding_id),

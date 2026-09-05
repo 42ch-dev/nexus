@@ -1546,7 +1546,12 @@ fn make_dummy_string(prop_def: &Value) -> Value {
     if let Some(pattern) = prop_def.get("pattern").and_then(|p| p.as_str()) {
         let inner = pattern.trim_start_matches('^').trim_end_matches('$');
         if !inner.is_empty()
-            && !inner.chars().any(|c| matches!(c, '[' | '\\' | '.' | '{' | '*' | '+' | '?' | '(' | ')' | '|'))
+            && !inner.chars().any(|c| {
+                matches!(
+                    c,
+                    '[' | '\\' | '.' | '{' | '*' | '+' | '?' | '(' | ')' | '|'
+                )
+            })
         {
             return Value::String(inner.to_string());
         }
@@ -2148,8 +2153,14 @@ fn actor_ref_one_of_arms_roundtrip_and_reject() {
     });
     let creator_v: ActorRef = serde_json::from_value(creator.clone()).expect("creator arm");
     let character_v: ActorRef = serde_json::from_value(character.clone()).expect("character arm");
-    assert_eq!(serde_json::to_value(&creator_v).unwrap()["actor_kind"], "creator");
-    assert_eq!(serde_json::to_value(&character_v).unwrap()["actor_kind"], "character");
+    assert_eq!(
+        serde_json::to_value(&creator_v).unwrap()["actor_kind"],
+        "creator"
+    );
+    assert_eq!(
+        serde_json::to_value(&character_v).unwrap()["actor_kind"],
+        "character"
+    );
     assert!(serde_json::from_value::<ActorRef>(serde_json::json!({
         "actor_kind": "npc",
         "creator_id": "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

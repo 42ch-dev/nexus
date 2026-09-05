@@ -79,7 +79,8 @@ async fn seed_neutral_stores(kb: &InMemoryKbStore, knowledge: &InMemoryKnowledge
     use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 
     // Entry with NO modules map at all.
-    let mut kb_plain = KnowledgeEntryRecord::new("wld_golden_neutral", BlockType::Character, "Hero");
+    let mut kb_plain =
+        KnowledgeEntryRecord::new("wld_golden_neutral", BlockType::Character, "Hero");
     kb_plain.entry_id = "kb_neutral_001".to_string();
     kb_plain.created_at = "2026-01-01T00:00:02Z".to_string();
     kb.insert_knowledge_entry(kb_plain)

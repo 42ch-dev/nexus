@@ -229,7 +229,8 @@ impl ComputeInputBuilder {
             if ref_entry.world_id() != Some(self.world_id.as_str()) {
                 return Err(ComputeBuildError::ReferencedEntryNotInWorld(format!(
                     "referenced entry {ref_id} belongs to world {}, not {}",
-                    ref_entry.world_id().unwrap_or_default(), self.world_id
+                    ref_entry.world_id().unwrap_or_default(),
+                    self.world_id
                 )));
             }
 

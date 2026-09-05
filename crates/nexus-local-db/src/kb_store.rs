@@ -108,7 +108,10 @@ fn build_extensions_nexus(
     nexus.remove("character_id");
     nexus.remove("actor_world_binding_id");
     if let Some(world_id) = owner.world_id() {
-        nexus.insert("world_id".into(), serde_json::Value::String(world_id.to_owned()));
+        nexus.insert(
+            "world_id".into(),
+            serde_json::Value::String(world_id.to_owned()),
+        );
     } else if let Some(character_id) = owner.character_id() {
         nexus.insert(
             "character_id".into(),
@@ -531,7 +534,7 @@ impl SqliteKbStore {
         let world_id_opt = owner.world_id();
         let character_id = owner.character_id();
         let actor_world_binding_id = owner.actor_world_binding_id();
-        let creator_only_i64 = if kb.creator_only { 1 } else { 0 };
+        let creator_only_i64 = i64::from(kb.creator_only);
         let cname = kb.canonical_name.clone();
         let btype = kb.block_type;
         sqlx::query(
@@ -644,12 +647,14 @@ impl KeyBlockRow {
                     self.key_block_id
                 ))
             })?),
-            "character" => KnowledgeOwnerRef::character(self.character_id.clone().ok_or_else(|| {
-                KbStoreError::Storage(format!(
-                    "malformed owner row {}: owner_kind='character' with NULL character_id",
-                    self.key_block_id
-                ))
-            })?),
+            "character" => {
+                KnowledgeOwnerRef::character(self.character_id.clone().ok_or_else(|| {
+                    KbStoreError::Storage(format!(
+                        "malformed owner row {}: owner_kind='character' with NULL character_id",
+                        self.key_block_id
+                    ))
+                })?)
+            }
             "actor_world_binding" => KnowledgeOwnerRef::actor_world_binding(
                 self.actor_world_binding_id.clone().ok_or_else(|| {
                     KbStoreError::Storage(format!(
@@ -727,9 +732,9 @@ impl KeyBlockRow {
             "character" => {
                 KnowledgeOwnerRef::character(self.character_id.clone().unwrap_or_default())
             }
-            "actor_world_binding" => {
-                KnowledgeOwnerRef::actor_world_binding(self.actor_world_binding_id.clone().unwrap_or_default())
-            }
+            "actor_world_binding" => KnowledgeOwnerRef::actor_world_binding(
+                self.actor_world_binding_id.clone().unwrap_or_default(),
+            ),
             other => {
                 // Fail toward a World owner of an empty id is never correct;
                 // but the extras merge only needs the namespace keys — a
@@ -856,7 +861,10 @@ impl KbStore for SqliteKbStore {
         Ok(result)
     }
 
-    async fn get_knowledge_entry(&self, key_block_id: &str) -> Result<KnowledgeEntryRecord, KbStoreError> {
+    async fn get_knowledge_entry(
+        &self,
+        key_block_id: &str,
+    ) -> Result<KnowledgeEntryRecord, KbStoreError> {
         // SAFETY: runtime query because new provenance columns are unknown
         // to sqlx offline mode until migration 202606190003 is applied.
         let row = sqlx::query_as::<_, KeyBlockRow>(
@@ -879,7 +887,10 @@ impl KbStore for SqliteKbStore {
         row.to_record()
     }
 
-    async fn list_by_world(&self, world_id: &str) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
+    async fn list_by_world(
+        &self,
+        world_id: &str,
+    ) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
         // SAFETY: LIMIT is a compile-time constant; dynamic SQL needed because
         // sqlx::query_as! does not support LIMIT as bind param in SQLite offline mode.
         let rows = sqlx::query_as::<_, KeyBlockRow>(&format!(
@@ -991,7 +1002,8 @@ impl KbStore for SqliteKbStore {
         let total_count = filtered.len();
         let offset = query.offset.unwrap_or(0);
         let limit = query.limit.unwrap_or(usize::MAX);
-        let items: Vec<KnowledgeEntryRecord> = filtered.into_iter().skip(offset).take(limit).collect();
+        let items: Vec<KnowledgeEntryRecord> =
+            filtered.into_iter().skip(offset).take(limit).collect();
         let fetched = items.len();
         let has_more = offset + fetched < total_count;
 
@@ -1340,7 +1352,7 @@ impl SqliteKbStore {
         rows.iter().map(KeyBlockRow::to_record).collect()
     }
 
-    /// Complete owner listing for Actor KnowledgeView (v1.184 P1 T3 fix1).
+    /// Complete owner listing for Actor `KnowledgeView` (v1.184 P1 T3 fix1).
     ///
     /// Unlike [`Self::list_by_owner`], this path has no silent 500-row cap.
     /// Rows are ordered by `(created_at, key_block_id)` so keyset pagination
@@ -1392,7 +1404,7 @@ impl SqliteKbStore {
         rows.iter().map(KeyBlockRow::to_record).collect()
     }
 
-    /// SQL-side owner keyset for Actor KnowledgeView (v1.184 P1 QC W2).
+    /// SQL-side owner keyset for Actor `KnowledgeView` (v1.184 P1 QC W2).
     ///
     /// Each component is bounded to `limit` rows (`limit` is already `page
     /// size + 1` at the call site). Chronological order uses millisecond unix
@@ -1465,10 +1477,7 @@ impl SqliteKbStore {
                 .bind(created_at)
                 .bind(entry_id);
         }
-        let rows = query
-            .fetch_all(&*self.pool)
-            .await
-            .map_err(|e| db_err(&e))?;
+        let rows = query.fetch_all(&*self.pool).await.map_err(|e| db_err(&e))?;
         rows.iter().map(KeyBlockRow::to_record).collect()
     }
 }
@@ -1586,12 +1595,10 @@ pub async fn cas_update_key_block_fields(
     // row can never be rewritten through a World-scoped CAS lane). NULL
     // revision is treated as 0.
     let current: Option<(Option<i64>, Option<String>)> =
-        sqlx::query_as(
-            "SELECT revision, world_id FROM kb_key_blocks WHERE key_block_id = ?",
-        )
-        .bind(key_block_id)
-        .fetch_optional(&mut **tx)
-        .await?;
+        sqlx::query_as("SELECT revision, world_id FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(key_block_id)
+            .fetch_optional(&mut **tx)
+            .await?;
     if let Some((_, stored_world)) = current.as_ref() {
         if stored_world.as_deref() != Some(world_id) {
             // The caller's revision was valid; the WORLD moved (a cross-
@@ -1614,10 +1621,10 @@ pub async fn cas_update_key_block_fields(
     })
 }
 
-/// Character ToM carrier CAS: replaces `modules_json` and bumps `revision`.
+/// Character `ToM` carrier CAS: replaces `modules_json` and bumps `revision`.
 ///
-/// Used by the v1.184 P4 Character ToM seam for Character- or binding-owned
-/// carrier KnowledgeEntries that cannot use the World-scoped
+/// Used by the v1.184 P4 Character `ToM` seam for Character- or binding-owned
+/// carrier `KnowledgeEntries` that cannot use the World-scoped
 /// [`cas_update_key_block_fields`] predicate.
 ///
 /// Beyond OCC revision, the predicate revalidates inside the write
@@ -1665,10 +1672,12 @@ pub async fn cas_update_key_block_modules_in_tx(
         return Ok(u64::try_from(new_revision).unwrap_or(0));
     }
 
-    let current: Option<Option<i64>> =
-        sqlx::query_scalar!("SELECT revision FROM kb_key_blocks WHERE key_block_id = ?", key_block_id)
-            .fetch_optional(&mut **tx)
-            .await?;
+    let current: Option<Option<i64>> = sqlx::query_scalar!(
+        "SELECT revision FROM kb_key_blocks WHERE key_block_id = ?",
+        key_block_id
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
     // NULL revision normalizes to 0, matching the COALESCE(revision, 0)
     // predicate and the established cas_update_key_block_fields reporting;
     // `None` means the row itself is absent.
@@ -1680,7 +1689,6 @@ pub async fn cas_update_key_block_modules_in_tx(
         actual,
     })
 }
-
 
 /// Persist the non-CAS fields of a `kb_key_blocks` row inside a caller-owned
 /// transaction.
@@ -2206,8 +2214,11 @@ mod tests {
         assert_eq!(complete.len(), n);
         let ids: Vec<&str> = complete.iter().map(|r| r.entry_id.as_str()).collect();
         let mut sorted = ids.clone();
-        sorted.sort();
-        assert_eq!(ids, sorted, "equal timestamps must tie-break on key_block_id");
+        sorted.sort_unstable();
+        assert_eq!(
+            ids, sorted,
+            "equal timestamps must tie-break on key_block_id"
+        );
     }
 
     #[tokio::test]
@@ -2217,8 +2228,14 @@ mod tests {
         let store = SqliteKbStore::new(pool.clone());
         let rows = [
             ("kb_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1", "2026-01-01 00:00:02"),
-            ("kb_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb1", "2026-01-01T00:00:00Z"),
-            ("kb_ccccccccccccccccccccccccccccccc1", "2026-01-01T00:00:01Z"),
+            (
+                "kb_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb1",
+                "2026-01-01T00:00:00Z",
+            ),
+            (
+                "kb_ccccccccccccccccccccccccccccccc1",
+                "2026-01-01T00:00:01Z",
+            ),
         ];
         for (id, ts) in rows {
             let mut kb = KnowledgeEntryRecord::new("wld_1", BlockType::Item, id);
@@ -2250,20 +2267,22 @@ mod tests {
             .unwrap();
         assert_eq!(first.len(), 3, "SQL LIMIT must bound the component");
         assert_eq!(
-            first.iter().map(|r| r.entry_id.as_str()).collect::<Vec<_>>(),
+            first
+                .iter()
+                .map(|r| r.entry_id.as_str())
+                .collect::<Vec<_>>(),
             vec![
                 "kb_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb1",
                 "kb_ccccccccccccccccccccccccccccccc1",
                 "kb_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
             ]
         );
-        let stored_space: String = sqlx::query_scalar(
-            "SELECT created_at FROM kb_key_blocks WHERE key_block_id = ?",
-        )
-        .bind("kb_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let stored_space: String =
+            sqlx::query_scalar("SELECT created_at FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind("kb_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(stored_space, "2026-01-01 00:00:02");
 
         let after = (first[1].created_at.clone(), first[1].entry_id.clone());
@@ -2302,7 +2321,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            first.iter().map(|r| r.entry_id.as_str()).collect::<Vec<_>>(),
+            first
+                .iter()
+                .map(|r| r.entry_id.as_str())
+                .collect::<Vec<_>>(),
             vec!["kb_a"]
         );
         let after = (first[0].created_at.clone(), first[0].entry_id.clone());
@@ -2404,15 +2426,27 @@ mod tests {
 
         let store = SqliteKbStore::new(pool);
         store
-            .insert_knowledge_entry(KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero"))
+            .insert_knowledge_entry(KnowledgeEntryRecord::new(
+                "wld_1",
+                BlockType::Character,
+                "Hero",
+            ))
             .await
             .unwrap();
         store
-            .insert_knowledge_entry(KnowledgeEntryRecord::new("wld_1", BlockType::Scene, "Forest"))
+            .insert_knowledge_entry(KnowledgeEntryRecord::new(
+                "wld_1",
+                BlockType::Scene,
+                "Forest",
+            ))
             .await
             .unwrap();
         store
-            .insert_knowledge_entry(KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Villain"))
+            .insert_knowledge_entry(KnowledgeEntryRecord::new(
+                "wld_1",
+                BlockType::Character,
+                "Villain",
+            ))
             .await
             .unwrap();
 
@@ -2441,7 +2475,11 @@ mod tests {
 
         let store = SqliteKbStore::new(pool);
         store
-            .insert_knowledge_entry(KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Hero"))
+            .insert_knowledge_entry(KnowledgeEntryRecord::new(
+                "wld_1",
+                BlockType::Character,
+                "Hero",
+            ))
             .await
             .unwrap();
 
@@ -3023,7 +3061,9 @@ mod tests {
 
     async fn seed_character_key_block(pool: &SqlitePool, canonical_name: &str) -> String {
         // ToM-scoped CAS requires an admitted Character/binding owner.
-        crate::ensure_creator_row(pool, "ctr_cas", "Cas").await.unwrap();
+        crate::ensure_creator_row(pool, "ctr_cas", "Cas")
+            .await
+            .unwrap();
         sqlx::query(
             "INSERT OR IGNORE INTO characters \
              (character_id, owner_creator_id, display_name, status, image_uri, persona_json, \
@@ -3035,7 +3075,11 @@ mod tests {
         .await
         .unwrap();
         let store = SqliteKbStore::new(pool.clone());
-        let kb = KnowledgeEntryRecord::for_character("chr_cccccccccccccccccccccccccccccccc", BlockType::Character, canonical_name);
+        let kb = KnowledgeEntryRecord::for_character(
+            "chr_cccccccccccccccccccccccccccccccc",
+            BlockType::Character,
+            canonical_name,
+        );
         let id = kb.entry_id.clone();
         let mut tx = pool.begin().await.unwrap();
         store.insert_key_block_in_tx(&mut tx, kb).await.unwrap();
@@ -3074,7 +3118,9 @@ mod tests {
         .expect_err("stale expected revision must miss the CAS");
         let _ = tx.rollback().await;
         match err {
-            LocalDbError::VersionMismatch { actual, expected, .. } => {
+            LocalDbError::VersionMismatch {
+                actual, expected, ..
+            } => {
                 assert_eq!(expected, 5);
                 assert_eq!(actual, Some(0), "NULL revision normalizes to actual 0");
             }

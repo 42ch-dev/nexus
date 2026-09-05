@@ -19,7 +19,9 @@ use nexus_creator_memory::review::PendingReviewInput;
 use nexus_creator_memory::soul_narrative::{
     SoulNarrativeDraft, SoulNarrativeSynthesisInput, SoulNarrativeSynthesizer,
 };
-use nexus_local_db::{create_character_with_initial_binding, ensure_creator_row, CreateCharacterParams};
+use nexus_local_db::{
+    create_character_with_initial_binding, ensure_creator_row, CreateCharacterParams,
+};
 use std::path::PathBuf;
 
 const OWNER_A: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -114,7 +116,11 @@ fn pch(id: &str, sess: &str, digest: &str, kind: &str, chr: &str) -> PendingRevi
 }
 
 async fn count(pool: &sqlx::SqlitePool, sql: &str, bind: &str) -> i64 {
-    let row: (i64,) = sqlx::query_as(sql).bind(bind).fetch_one(pool).await.unwrap();
+    let row: (i64,) = sqlx::query_as(sql)
+        .bind(bind)
+        .fetch_one(pool)
+        .await
+        .unwrap();
     row.0
 }
 
@@ -213,19 +219,34 @@ async fn review_both_arms_share_classification_and_isolate_storage() {
     assert_eq!(char_out.fragmented, 1);
     assert_eq!(char_out.dropped, 1);
 
-    assert_eq!(count_all(&pool, "SELECT COUNT(*) FROM memory_pending_review").await, 0);
     assert_eq!(
-        count_all(&pool, "SELECT COUNT(*) FROM character_memory_pending_review").await,
+        count_all(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
         0
     );
     assert_eq!(
-        count(&pool, "SELECT COUNT(*) FROM memory_fragments WHERE creator_id = ?", OWNER_A)
-            .await,
+        count_all(
+            &pool,
+            "SELECT COUNT(*) FROM character_memory_pending_review"
+        )
+        .await,
+        0
+    );
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT COUNT(*) FROM memory_fragments WHERE creator_id = ?",
+            OWNER_A
+        )
+        .await,
         1
     );
     assert_eq!(
-        count(&pool, "SELECT COUNT(*) FROM character_memory_fragments WHERE character_id = ?", &chr)
-            .await,
+        count(
+            &pool,
+            "SELECT COUNT(*) FROM character_memory_fragments WHERE character_id = ?",
+            &chr
+        )
+        .await,
         1
     );
     assert_eq!(
@@ -244,8 +265,16 @@ async fn review_both_arms_share_classification_and_isolate_storage() {
     }
     .long_term_memory_dir(&home);
     assert_ne!(cdir, hdir);
-    assert_eq!(std::fs::read_dir(&cdir).unwrap().count(), 1, "creator memory dir");
-    assert_eq!(std::fs::read_dir(&hdir).unwrap().count(), 1, "character memory dir");
+    assert_eq!(
+        std::fs::read_dir(&cdir).unwrap().count(),
+        1,
+        "creator memory dir"
+    );
+    assert_eq!(
+        std::fs::read_dir(&hdir).unwrap().count(),
+        1,
+        "character memory dir"
+    );
 
     drop(s.tmp);
 }
@@ -346,11 +375,17 @@ async fn reflect_both_arms_report_insufficient_data_and_ungenerated() {
     let no_synth: Option<&NoSynth> = None;
 
     assert_eq!(
-        reflect_bearer_soul(&pool, &c_ctx, false, no_synth).await.unwrap().state,
+        reflect_bearer_soul(&pool, &c_ctx, false, no_synth)
+            .await
+            .unwrap()
+            .state,
         ReflectState::InsufficientData
     );
     assert_eq!(
-        reflect_bearer_soul(&pool, &h_ctx, false, no_synth).await.unwrap().state,
+        reflect_bearer_soul(&pool, &h_ctx, false, no_synth)
+            .await
+            .unwrap()
+            .state,
         ReflectState::InsufficientData
     );
 
@@ -388,10 +423,14 @@ async fn reflect_both_arms_report_insufficient_data_and_ungenerated() {
         .unwrap();
     }
 
-    let o = reflect_bearer_soul(&pool, &c_ctx, false, no_synth).await.unwrap();
+    let o = reflect_bearer_soul(&pool, &c_ctx, false, no_synth)
+        .await
+        .unwrap();
     assert_eq!(o.state, ReflectState::Ungenerated);
     assert_eq!(o.current_fragment_count, 25);
-    let o = reflect_bearer_soul(&pool, &h_ctx, false, no_synth).await.unwrap();
+    let o = reflect_bearer_soul(&pool, &h_ctx, false, no_synth)
+        .await
+        .unwrap();
     assert_eq!(o.state, ReflectState::Ungenerated);
     assert_eq!(o.current_fragment_count, 25);
 
@@ -409,22 +448,24 @@ async fn reflect_both_arms_report_insufficient_data_and_ungenerated() {
                 .map(|(k, _)| k.clone())
                 .unwrap_or_default();
             Ok(SoulNarrativeDraft {
-                narrative: format!(
-                    "A reflective narrative about {kw} and magic, looking ahead."
-                ),
+                narrative: format!("A reflective narrative about {kw} and magic, looking ahead."),
             })
         }
     }
     let mock = Mock;
 
-    let o = reflect_bearer_soul(&pool, &c_ctx, true, Some(&mock)).await.unwrap();
+    let o = reflect_bearer_soul(&pool, &c_ctx, true, Some(&mock))
+        .await
+        .unwrap();
     assert_eq!(o.state, ReflectState::Current);
     assert_eq!(
         count_all(&pool, "SELECT COUNT(*) FROM memory_soul_narratives").await,
         1
     );
 
-    let o = reflect_bearer_soul(&pool, &h_ctx, true, Some(&mock)).await.unwrap();
+    let o = reflect_bearer_soul(&pool, &h_ctx, true, Some(&mock))
+        .await
+        .unwrap();
     assert_eq!(o.state, ReflectState::Current);
     assert_eq!(
         count_all(&pool, "SELECT COUNT(*) FROM character_soul_narratives").await,
@@ -499,10 +540,22 @@ async fn character_provenance_rejects_inactive_character_before_side_effects() {
 
     // No DB rows for the archived Character in any Character memory table.
     let schema_checks = [
-        ("SELECT COUNT(*) FROM character_memory_pending_review WHERE character_id = ?", "pending"),
-        ("SELECT COUNT(*) FROM character_memory_fragments WHERE character_id = ?", "fragments"),
-        ("SELECT COUNT(*) FROM character_soul_narratives WHERE character_id = ?", "narratives"),
-        ("SELECT COUNT(*) FROM character_soul_meta WHERE character_id = ?", "soul_meta"),
+        (
+            "SELECT COUNT(*) FROM character_memory_pending_review WHERE character_id = ?",
+            "pending",
+        ),
+        (
+            "SELECT COUNT(*) FROM character_memory_fragments WHERE character_id = ?",
+            "fragments",
+        ),
+        (
+            "SELECT COUNT(*) FROM character_soul_narratives WHERE character_id = ?",
+            "narratives",
+        ),
+        (
+            "SELECT COUNT(*) FROM character_soul_meta WHERE character_id = ?",
+            "soul_meta",
+        ),
     ];
     for (sql, label) in schema_checks {
         let n = count(&s.pool, sql, &charted).await;
@@ -519,23 +572,21 @@ async fn character_mind_projection_is_bounded_scoped_and_honest_empty() {
 
     let s = setup().await;
     // The character was created with one initial binding to WORLD_A.
-    let binding_a1 = nexus_local_db::list_bindings_for_character(
-        &s.pool,
-        OWNER_A,
-        &s.chr_a,
-        10,
-        0,
-    )
-    .await
-    .unwrap()
-    .into_iter()
-    .next()
-    .unwrap()
-    .binding_id;
+    let binding_a1 = nexus_local_db::list_bindings_for_character(&s.pool, OWNER_A, &s.chr_a, 10, 0)
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap()
+        .binding_id;
 
     // Honest empty: no SOUL.md and no fragments → both slots empty.
     let mind = load_character_mind_projection(
-        &s.pool, &s.nexus_home, OWNER_A, &s.chr_a, Some(&binding_a1),
+        &s.pool,
+        &s.nexus_home,
+        OWNER_A,
+        &s.chr_a,
+        Some(&binding_a1),
     )
     .await
     .expect("honest-empty projection ok");
@@ -572,7 +623,11 @@ async fn character_mind_projection_is_bounded_scoped_and_honest_empty() {
 
     // Projection for that binding: shared + binding-local, newest first.
     let mind = load_character_mind_projection(
-        &s.pool, &s.nexus_home, OWNER_A, &s.chr_a, Some(&binding_a1),
+        &s.pool,
+        &s.nexus_home,
+        OWNER_A,
+        &s.chr_a,
+        Some(&binding_a1),
     )
     .await
     .expect("projection ok");
@@ -585,18 +640,20 @@ async fn character_mind_projection_is_bounded_scoped_and_honest_empty() {
     assert!(mind.memory[1].contains("SHAREDPROJ"));
 
     // The shared scope (no binding) sees only the shared fragment.
-    let mind = load_character_mind_projection(
-        &s.pool, &s.nexus_home, OWNER_A, &s.chr_a, None,
-    )
-    .await
-    .expect("projection ok");
+    let mind = load_character_mind_projection(&s.pool, &s.nexus_home, OWNER_A, &s.chr_a, None)
+        .await
+        .expect("projection ok");
     assert_eq!(mind.memory.len(), 1);
     assert!(mind.memory[0].contains("SHAREDPROJ"));
 
     // A foreign OWNER_B scope never observes Character A data — it fails
     // closed (repo owner gate) rather than projecting an empty Character mind.
     let foreign = load_character_mind_projection(
-        &s.pool, &s.nexus_home, OWNER_B, &s.chr_a, Some(&binding_a1),
+        &s.pool,
+        &s.nexus_home,
+        OWNER_B,
+        &s.chr_a,
+        Some(&binding_a1),
     )
     .await;
     assert!(
@@ -613,7 +670,11 @@ async fn character_mind_projection_is_bounded_scoped_and_honest_empty() {
     let doc = soul_io::load(&s.nexus_home, bearer).unwrap();
     soul_io::save(&s.nexus_home, bearer, &doc).unwrap();
     let mind = load_character_mind_projection(
-        &s.pool, &s.nexus_home, OWNER_A, &s.chr_a, Some(&binding_a1),
+        &s.pool,
+        &s.nexus_home,
+        OWNER_A,
+        &s.chr_a,
+        Some(&binding_a1),
     )
     .await
     .expect("projection ok");
@@ -624,7 +685,9 @@ async fn character_mind_projection_is_bounded_scoped_and_honest_empty() {
 
 #[tokio::test]
 async fn promoted_character_long_term_memory_is_projected_into_run() {
-    use crate::api::handlers::memory_pipeline::{load_character_mind_projection, process_bearer_review_batch};
+    use crate::api::handlers::memory_pipeline::{
+        load_character_mind_projection, process_bearer_review_batch,
+    };
 
     let s = setup().await;
     let ctx = ctxh(&s.pool, &s.chr_a).await;
@@ -688,19 +751,13 @@ async fn inaccessible_ltm_directory_fails_projection_closed() {
     use crate::api::handlers::memory_pipeline::load_character_mind_projection;
 
     let s = setup().await;
-    let binding_a1 = nexus_local_db::list_bindings_for_character(
-        &s.pool,
-        OWNER_A,
-        &s.chr_a,
-        10,
-        0,
-    )
-    .await
-    .unwrap()
-    .into_iter()
-    .next()
-    .unwrap()
-    .binding_id;
+    let binding_a1 = nexus_local_db::list_bindings_for_character(&s.pool, OWNER_A, &s.chr_a, 10, 0)
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap()
+        .binding_id;
 
     // Replace the Character long-term-memory directory with a regular file so
     // `read_dir` fails with a non-NotFound error (metadata/read failure).
@@ -740,19 +797,13 @@ async fn inaccessible_ltm_directory_fails_projection_closed() {
 async fn binding_local_promote_stays_binding_local_no_global_ltm() {
     use crate::api::handlers::memory_pipeline::load_character_mind_projection;
     let s = setup().await;
-    let binding_a1 = nexus_local_db::list_bindings_for_character(
-        &s.pool,
-        OWNER_A,
-        &s.chr_a,
-        10,
-        0,
-    )
-    .await
-    .unwrap()
-    .into_iter()
-    .next()
-    .unwrap()
-    .binding_id;
+    let binding_a1 = nexus_local_db::list_bindings_for_character(&s.pool, OWNER_A, &s.chr_a, 10, 0)
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap()
+        .binding_id;
     let ctx = ctxh(&s.pool, &s.chr_a).await;
     let marker = "BINDING_LOCAL_PROMOTE_MARKER";
 
@@ -795,8 +846,14 @@ async fn binding_local_promote_stays_binding_local_no_global_ltm() {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     let outcome =
         process_bearer_review_batch(&[input], &s.nexus_home, &ctx, &s.pool, deadline).await;
-    assert_eq!(outcome.promoted, 0, "binding-local Promote must not write global LTM");
-    assert_eq!(outcome.fragmented, 1, "must land as a binding-local fragment");
+    assert_eq!(
+        outcome.promoted, 0,
+        "binding-local Promote must not write global LTM"
+    );
+    assert_eq!(
+        outcome.fragmented, 1,
+        "must land as a binding-local fragment"
+    );
 
     // No global Character LTM file was written (no cross-binding leak).
     let ltm_slugs = nexus_creator_memory::memory_io::list_memories(
@@ -824,14 +881,22 @@ async fn binding_local_promote_stays_binding_local_no_global_ltm() {
     .await
     .unwrap();
     assert_eq!(frags.len(), 1);
-    assert_eq!(frags[0].actor_world_binding_id.as_deref(), Some(binding_a1.as_str()));
+    assert_eq!(
+        frags[0].actor_world_binding_id.as_deref(),
+        Some(binding_a1.as_str())
+    );
 
     // run projection for that binding shows the marker; the shared projection
     // must NOT see it (no implicit promotion / cross-binding leak).
-    let mind_binding =
-        load_character_mind_projection(&s.pool, &s.nexus_home, OWNER_A, &s.chr_a, Some(&binding_a1))
-            .await
-            .expect("binding projection ok");
+    let mind_binding = load_character_mind_projection(
+        &s.pool,
+        &s.nexus_home,
+        OWNER_A,
+        &s.chr_a,
+        Some(&binding_a1),
+    )
+    .await
+    .expect("binding projection ok");
     assert!(
         mind_binding.memory.iter().any(|l| l.contains(marker)),
         "binding-local fragment must appear in that binding's run: {:?}",
@@ -853,23 +918,17 @@ async fn binding_local_promote_stays_binding_local_no_global_ltm() {
 #[tokio::test]
 async fn admitted_binding_fragments_retain_capacity_when_ltm_is_full() {
     use crate::api::handlers::memory_pipeline::load_character_mind_projection;
-    use nexus_creator_memory::memory_io::{self, save_memory};
     use nexus_creator_memory::long_term_memory::LongTermMemory;
+    use nexus_creator_memory::memory_io::{self, save_memory};
 
     let s = setup().await;
-    let binding_a1 = nexus_local_db::list_bindings_for_character(
-        &s.pool,
-        OWNER_A,
-        &s.chr_a,
-        10,
-        0,
-    )
-    .await
-    .unwrap()
-    .into_iter()
-    .next()
-    .unwrap()
-    .binding_id;
+    let binding_a1 = nexus_local_db::list_bindings_for_character(&s.pool, OWNER_A, &s.chr_a, 10, 0)
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap()
+        .binding_id;
     let bearer = MemoryBearerRef::Character {
         owner_creator_id: OWNER_A,
         character_id: &s.chr_a,
@@ -882,12 +941,18 @@ async fn admitted_binding_fragments_retain_capacity_when_ltm_is_full() {
         save_memory(&s.nexus_home, bearer, &format!("ltm_{i:02}"), &mem).unwrap();
     }
     assert!(
-        memory_io::list_memories(&s.nexus_home, bearer).unwrap().len() >= 20,
+        memory_io::list_memories(&s.nexus_home, bearer)
+            .unwrap()
+            .len()
+            >= 20,
         "precondition: LTM is full"
     );
 
     // Two binding-local fragments for the selected World life.
-    for (fid, marker) in [("frag_cap_1", "CAPRESERVED1"), ("frag_cap_2", "CAPRESERVED2")] {
+    for (fid, marker) in [
+        ("frag_cap_1", "CAPRESERVED1"),
+        ("frag_cap_2", "CAPRESERVED2"),
+    ] {
         nexus_local_db::create_character_fragment(
             &s.pool,
             OWNER_A,
@@ -928,7 +993,6 @@ async fn admitted_binding_fragments_retain_capacity_when_ltm_is_full() {
 
     drop(s.tmp);
 }
-
 
 #[tokio::test]
 async fn tom_projection_fills_both_slots_when_l1_exceeds_single_page() {
@@ -1046,7 +1110,10 @@ async fn review_failed_queue_advance_rolls_back_fragment_and_reports_no_success(
     // tables at the database level.
     for (table, trigger) in [
         ("memory_pending_review", "fail_pending_delete_creator"),
-        ("character_memory_pending_review", "fail_pending_delete_character"),
+        (
+            "character_memory_pending_review",
+            "fail_pending_delete_character",
+        ),
     ] {
         sqlx::query(&format!(
             "CREATE TRIGGER {trigger} BEFORE DELETE ON {table} \
@@ -1101,13 +1168,20 @@ async fn review_failed_queue_advance_rolls_back_fragment_and_reports_no_success(
         1
     );
     assert_eq!(
-        count_all(&s.pool, "SELECT COUNT(*) FROM character_memory_pending_review").await,
+        count_all(
+            &s.pool,
+            "SELECT COUNT(*) FROM character_memory_pending_review"
+        )
+        .await,
         1
     );
 
     // Drop the triggers and re-run: the same rows now process cleanly
     // (queue advanced exactly once, no duplicate fragments).
-    for trigger in ["fail_pending_delete_creator", "fail_pending_delete_character"] {
+    for trigger in [
+        "fail_pending_delete_creator",
+        "fail_pending_delete_character",
+    ] {
         sqlx::query(&format!("DROP TRIGGER {trigger}"))
             .execute(&s.pool)
             .await
@@ -1195,7 +1269,10 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
     // ── Mode A: forced claim (DELETE) failure — no file write at all ─────
     for (table, trigger) in [
         ("memory_pending_review", "fail_promote_delete_creator"),
-        ("character_memory_pending_review", "fail_promote_delete_character"),
+        (
+            "character_memory_pending_review",
+            "fail_promote_delete_character",
+        ),
     ] {
         sqlx::query(&format!(
             "CREATE TRIGGER {trigger} BEFORE DELETE ON {table} \
@@ -1221,7 +1298,13 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
         "claim-first: no LTM file is written when the queue claim fails"
     );
     let char_out = process_bearer_review_batch(
-        &[pch("ch_p", "sess_ch_p", PROMOTE_DIGEST, "brainstorm", &s.chr_a)],
+        &[pch(
+            "ch_p",
+            "sess_ch_p",
+            PROMOTE_DIGEST,
+            "brainstorm",
+            &s.chr_a,
+        )],
         &s.nexus_home,
         &ctxh(&s.pool, &s.chr_a).await,
         &s.pool,
@@ -1237,10 +1320,17 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
         1
     );
     assert_eq!(
-        count_all(&s.pool, "SELECT COUNT(*) FROM character_memory_pending_review").await,
+        count_all(
+            &s.pool,
+            "SELECT COUNT(*) FROM character_memory_pending_review"
+        )
+        .await,
         1
     );
-    for trigger in ["fail_promote_delete_creator", "fail_promote_delete_character"] {
+    for trigger in [
+        "fail_promote_delete_creator",
+        "fail_promote_delete_character",
+    ] {
         sqlx::query(&format!("DROP TRIGGER {trigger}"))
             .execute(&s.pool)
             .await
@@ -1264,7 +1354,13 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
         0
     );
     let char_retry = process_bearer_review_batch(
-        &[pch("ch_p", "sess_ch_p", PROMOTE_DIGEST, "brainstorm", &s.chr_a)],
+        &[pch(
+            "ch_p",
+            "sess_ch_p",
+            PROMOTE_DIGEST,
+            "brainstorm",
+            &s.chr_a,
+        )],
         &s.nexus_home,
         &ctxh(&s.pool, &s.chr_a).await,
         &s.pool,
@@ -1274,7 +1370,11 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
     assert_eq!(char_retry.promoted, 1);
     assert_eq!(count_md(&character_ltm), 1);
     assert_eq!(
-        count_all(&s.pool, "SELECT COUNT(*) FROM character_memory_pending_review").await,
+        count_all(
+            &s.pool,
+            "SELECT COUNT(*) FROM character_memory_pending_review"
+        )
+        .await,
         0
     );
 
@@ -1307,15 +1407,12 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
     .expect("simulated crashed attempt writes the file");
     assert_eq!(count_md(&creator_ltm), 2);
 
-    let resume = process_bearer_review_batch(
-        &[input2],
-        &s.nexus_home,
-        &ctxc(),
-        &s.pool,
-        horizon,
-    )
-    .await;
-    assert_eq!(resume.promoted, 1, "AlreadyPromoted resume advances the queue");
+    let resume =
+        process_bearer_review_batch(&[input2], &s.nexus_home, &ctxc(), &s.pool, horizon).await;
+    assert_eq!(
+        resume.promoted, 1,
+        "AlreadyPromoted resume advances the queue"
+    );
     assert!(!resume.any_row_remained_pending);
     assert_eq!(
         count_md(&creator_ltm),
@@ -1344,7 +1441,13 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
     )
     .await
     .unwrap();
-    let char_input2 = pch("ch_p2", "sess_ch_p2", PROMOTE_DIGEST, "brainstorm", &s.chr_a);
+    let char_input2 = pch(
+        "ch_p2",
+        "sess_ch_p2",
+        PROMOTE_DIGEST,
+        "brainstorm",
+        &s.chr_a,
+    );
     let char_bearer = MemoryBearerRef::Character {
         owner_creator_id: OWNER_A,
         character_id: &s.chr_a,
@@ -1367,7 +1470,10 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
         horizon,
     )
     .await;
-    assert_eq!(char_resume.promoted, 1, "Character AlreadyPromoted resume advances the queue");
+    assert_eq!(
+        char_resume.promoted, 1,
+        "Character AlreadyPromoted resume advances the queue"
+    );
     assert!(!char_resume.any_row_remained_pending);
     assert_eq!(
         count_md(&character_ltm),
@@ -1375,7 +1481,11 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
         "Character resume must not write a duplicate LTM file"
     );
     assert_eq!(
-        count_all(&s.pool, "SELECT COUNT(*) FROM character_memory_pending_review").await,
+        count_all(
+            &s.pool,
+            "SELECT COUNT(*) FROM character_memory_pending_review"
+        )
+        .await,
         0
     );
 
@@ -1408,7 +1518,13 @@ async fn review_stale_promote_writes_no_file_and_reports_no_success() {
     );
 
     let char_out = process_bearer_review_batch(
-        &[pch("ghost_ch_p", "s_gp", PROMOTE_DIGEST, "brainstorm", &s.chr_a)],
+        &[pch(
+            "ghost_ch_p",
+            "s_gp",
+            PROMOTE_DIGEST,
+            "brainstorm",
+            &s.chr_a,
+        )],
         &s.nexus_home,
         &ctxh(&s.pool, &s.chr_a).await,
         &s.pool,
@@ -1448,7 +1564,10 @@ async fn review_stale_zero_delete_rolls_back_fragment_insert() {
         horizon,
     )
     .await;
-    assert_eq!(creator_out.fragmented, 0, "zero-row delete must not report success");
+    assert_eq!(
+        creator_out.fragmented, 0,
+        "zero-row delete must not report success"
+    );
     assert!(creator_out.any_row_remained_pending);
     assert_eq!(
         count_all(&s.pool, "SELECT COUNT(*) FROM memory_fragments").await,
@@ -1457,7 +1576,13 @@ async fn review_stale_zero_delete_rolls_back_fragment_insert() {
     );
 
     let char_out = process_bearer_review_batch(
-        &[pch("ghost_ch", "s_g", FRAGMENT_DIGEST, "research", &s.chr_a)],
+        &[pch(
+            "ghost_ch",
+            "s_g",
+            FRAGMENT_DIGEST,
+            "research",
+            &s.chr_a,
+        )],
         &s.nexus_home,
         &ctxh(&s.pool, &s.chr_a).await,
         &s.pool,
@@ -1546,7 +1671,10 @@ async fn review_promote_filesystem_failure_rolls_back_claim_and_recovers() {
         horizon,
     )
     .await;
-    assert_eq!(creator_out.promoted, 0, "filesystem failure reports no success");
+    assert_eq!(
+        creator_out.promoted, 0,
+        "filesystem failure reports no success"
+    );
     assert!(creator_out.any_row_remained_pending);
     assert_eq!(
         count_all(&s.pool, "SELECT COUNT(*) FROM memory_pending_review").await,
@@ -1555,7 +1683,13 @@ async fn review_promote_filesystem_failure_rolls_back_claim_and_recovers() {
     );
 
     let char_out = process_bearer_review_batch(
-        &[pch("ch_fs", "sess_ch_fs", PROMOTE_DIGEST, "brainstorm", &s.chr_a)],
+        &[pch(
+            "ch_fs",
+            "sess_ch_fs",
+            PROMOTE_DIGEST,
+            "brainstorm",
+            &s.chr_a,
+        )],
         &s.nexus_home,
         &ctxh(&s.pool, &s.chr_a).await,
         &s.pool,
@@ -1565,7 +1699,11 @@ async fn review_promote_filesystem_failure_rolls_back_claim_and_recovers() {
     assert_eq!(char_out.promoted, 0);
     assert!(char_out.any_row_remained_pending);
     assert_eq!(
-        count_all(&s.pool, "SELECT COUNT(*) FROM character_memory_pending_review").await,
+        count_all(
+            &s.pool,
+            "SELECT COUNT(*) FROM character_memory_pending_review"
+        )
+        .await,
         1
     );
 
@@ -1590,7 +1728,13 @@ async fn review_promote_filesystem_failure_rolls_back_claim_and_recovers() {
     );
 
     let char_retry = process_bearer_review_batch(
-        &[pch("ch_fs", "sess_ch_fs", PROMOTE_DIGEST, "brainstorm", &s.chr_a)],
+        &[pch(
+            "ch_fs",
+            "sess_ch_fs",
+            PROMOTE_DIGEST,
+            "brainstorm",
+            &s.chr_a,
+        )],
         &s.nexus_home,
         &ctxh(&s.pool, &s.chr_a).await,
         &s.pool,
@@ -1600,7 +1744,11 @@ async fn review_promote_filesystem_failure_rolls_back_claim_and_recovers() {
     assert_eq!(char_retry.promoted, 1);
     assert_eq!(count_md(&character_ltm), 1);
     assert_eq!(
-        count_all(&s.pool, "SELECT COUNT(*) FROM character_memory_pending_review").await,
+        count_all(
+            &s.pool,
+            "SELECT COUNT(*) FROM character_memory_pending_review"
+        )
+        .await,
         0
     );
 

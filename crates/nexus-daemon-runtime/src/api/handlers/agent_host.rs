@@ -16,12 +16,21 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 
+use crate::actor_admission::{
+    ActorAdmissionService, ActorPairMode, ActorViewpoint, AdmittedActorContext,
+};
+use crate::actor_knowledge_view::AdmittedActor;
+use crate::api::handlers::world_kb_guards::require_creator;
+use crate::workspace::actor_sessions::{echo_actor_pair, ActorSessionRegistry};
 use axum::extract::{Path, Query, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::Json;
 use futures_util::StreamExt;
-use crate::actor_admission::{ActorAdmissionService, ActorPairMode, ActorViewpoint, AdmittedActorContext};
-use crate::actor_knowledge_view::AdmittedActor;
+use nexus_contracts::generated::daemon_api::agent_host::{
+    AgentHostListSessionsQuery, AgentScanEntry, CancelOperationResponse, CreateSessionRequest,
+    ExecuteOperationRequest, OperationResponse, ScanRequest, ScanResponse, SessionListResponse,
+    SessionResponse, ShutdownSessionResponse,
+};
 use nexus_local_db::narrative_gateway::SqliteNarrativeGateway;
 use nexus_local_db::SqliteKnowledgeStore;
 use nexus_moment_context_assembly::{
@@ -29,13 +38,6 @@ use nexus_moment_context_assembly::{
     DEFAULT_WORLD_CONTEXT_TOKEN_BUDGET,
 };
 use nexus_spoke_adapter::SpokeBackedKbStore;
-use crate::api::handlers::world_kb_guards::require_creator;
-use crate::workspace::actor_sessions::{echo_actor_pair, ActorSessionRegistry};
-use nexus_contracts::generated::daemon_api::agent_host::{
-    AgentHostListSessionsQuery, AgentScanEntry, CancelOperationResponse, CreateSessionRequest,
-    ExecuteOperationRequest, OperationResponse, ScanRequest, ScanResponse, SessionListResponse,
-    SessionResponse, ShutdownSessionResponse,
-};
 use serde::Serialize;
 use tokio_stream::Stream;
 use uuid::Uuid;
@@ -186,7 +188,8 @@ pub async fn create_session(
     State(state): State<WorkspaceState>,
     Json(req): Json<CreateSessionRequest>,
 ) -> Result<Json<SessionResponse>, NexusApiError> {
-    let pair = ActorAdmissionService::classify_pair(req.actor_ref.is_some(), req.viewpoint.is_some())?;
+    let pair =
+        ActorAdmissionService::classify_pair(req.actor_ref.is_some(), req.viewpoint.is_some())?;
     if pair == ActorPairMode::Actor {
         let creator_id = require_creator(&state)?;
         let admission = ActorAdmissionService::new(state.pool_or_uninit()?.clone());
@@ -294,7 +297,7 @@ fn host_create_request(
     }
 }
 
-fn session_wire(
+const fn session_wire(
     session_id: String,
     provider_id: String,
     state: String,
@@ -331,11 +334,11 @@ fn overlay_actor_pair(
         >,
     ),
     NexusApiError,
-> {
-    match state.actor_sessions().context_for(session_id) {
-        Some(ctx) => echo_actor_pair(&ctx),
-        None => Ok((None, None)),
-    }
+>{
+    state
+        .actor_sessions()
+        .context_for(session_id)
+        .map_or_else(|| Ok((None, None)), |ctx| echo_actor_pair(&ctx))
 }
 
 /// GET /v1/daemon/agent-host/sessions
@@ -348,10 +351,7 @@ pub async fn list_sessions(
     let host = get_host(&state)?;
     let sessions = host.list_sessions().await.map_err(|e| map_host_error(&e))?;
 
-    let limit = params
-        .limit
-        .unwrap_or(50)
-        .clamp(1, 250);
+    let limit = params.limit.unwrap_or(50).clamp(1, 250);
     let limit_us = usize::try_from(limit).unwrap_or(250);
 
     // Cursor-based pagination: cursor is a session ID (UUID string).
@@ -506,22 +506,23 @@ async fn assemble_admitted_prompt(
             // v1.184 P3: project only the admitted Character's SOUL/Memory
             // (shared scope + the selected binding scope) into the reserved
             // mind slots. Honest-empty when optional data is absent.
-            let binding_id = ctx
-                .binding_id
-                .as_deref()
-                .ok_or_else(|| NexusApiError::InvalidInput {
-                    field: "binding_id".into(),
-                    reason: "Character host launch requires an active binding".into(),
-                })?;
-            let mind = crate::api::handlers::memory_pipeline::load_character_mind_projection_with_tom(
-                &pool,
-                state.nexus_home(),
-                &creator_id,
-                character_id,
-                &ctx.world_id,
-                binding_id,
-            )
-            .await?;
+            let binding_id =
+                ctx.binding_id
+                    .as_deref()
+                    .ok_or_else(|| NexusApiError::InvalidInput {
+                        field: "binding_id".into(),
+                        reason: "Character host launch requires an active binding".into(),
+                    })?;
+            let mind =
+                crate::api::handlers::memory_pipeline::load_character_mind_projection_with_tom(
+                    &pool,
+                    state.nexus_home(),
+                    &creator_id,
+                    character_id,
+                    &ctx.world_id,
+                    binding_id,
+                )
+                .await?;
             MomentActorContext::character_with_mind(view, mind)
         }
         AdmittedActor::Creator { .. } => MomentActorContext::creator_with_view(view),
@@ -1795,13 +1796,21 @@ mod tests {
             "actor_ref": {"actor_kind":"creator","creator_id":"ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         }))
         .expect("partial actor_ref still parses");
-        assert!(ActorAdmissionService::classify_pair(only_actor.actor_ref.is_some(), only_actor.viewpoint.is_some()).is_err());
+        assert!(ActorAdmissionService::classify_pair(
+            only_actor.actor_ref.is_some(),
+            only_actor.viewpoint.is_some()
+        )
+        .is_err());
         let only_view: CreateSessionRequest = serde_json::from_value(serde_json::json!({
             "provider_id": "claude-native",
             "viewpoint": {"world_id":"wld_worldA"}
         }))
         .expect("partial viewpoint still parses");
-        assert!(ActorAdmissionService::classify_pair(only_view.actor_ref.is_some(), only_view.viewpoint.is_some()).is_err());
+        assert!(ActorAdmissionService::classify_pair(
+            only_view.actor_ref.is_some(),
+            only_view.viewpoint.is_some()
+        )
+        .is_err());
     }
 
     struct CountingHost {
@@ -1834,8 +1843,7 @@ mod tests {
             op: nexus_agent_host::capability::model::HostOperation,
         ) -> nexus_agent_host::HostResult<nexus_agent_host::capability::model::HostEventStream>
         {
-            self.execs
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.execs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             self.inner.exec(session_id, op).await
         }
 
@@ -1846,7 +1854,9 @@ mod tests {
             self.inner.cancel(op_id).await
         }
 
-        async fn health(&self) -> nexus_agent_host::HostResult<nexus_agent_host::capability::model::HostHealth> {
+        async fn health(
+            &self,
+        ) -> nexus_agent_host::HostResult<nexus_agent_host::capability::model::HostHealth> {
             self.inner.health().await
         }
 
@@ -1861,23 +1871,32 @@ mod tests {
             self.inner.shutdown_session(session_id).await
         }
 
-        async fn list_sessions(&self) -> nexus_agent_host::HostResult<Vec<nexus_agent_host::HostSession>> {
+        async fn list_sessions(
+            &self,
+        ) -> nexus_agent_host::HostResult<Vec<nexus_agent_host::HostSession>> {
             self.inner.list_sessions().await
         }
 
-        async fn provider_catalog(&self) -> nexus_agent_host::HostResult<nexus_agent_host::ProviderCatalog> {
+        async fn provider_catalog(
+            &self,
+        ) -> nexus_agent_host::HostResult<nexus_agent_host::ProviderCatalog> {
             self.inner.provider_catalog().await
         }
 
         fn subscribe_events(
             &self,
             session_id: nexus_agent_host::HostSessionId,
-        ) -> tokio::sync::broadcast::Receiver<nexus_agent_host::capability::model::HostEvent> {
+        ) -> tokio::sync::broadcast::Receiver<nexus_agent_host::capability::model::HostEvent>
+        {
             self.inner.subscribe_events(session_id)
         }
     }
 
-    async fn state_with_counting_host() -> (crate::test_utils::TestTempRoot, WorkspaceState, Arc<CountingHost>) {
+    async fn state_with_counting_host() -> (
+        crate::test_utils::TestTempRoot,
+        WorkspaceState,
+        Arc<CountingHost>,
+    ) {
         let (tmp, nexus_home, db_path) = create_test_workspace().await;
         std::fs::write(
             nexus_home.join("config.toml"),
@@ -1907,7 +1926,11 @@ mod tests {
         let result = create_session(State(state), Json(req)).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().error_code(), "invalid_input");
-        assert_eq!(host.create_sessions.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(
+            host.create_sessions
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
         assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
@@ -1929,10 +1952,13 @@ mod tests {
         let result = create_session(State(state), Json(req)).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().error_code(), "not_found");
-        assert_eq!(host.create_sessions.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(
+            host.create_sessions
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
         assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
-
 
     async fn seed_owned_character(state: &WorkspaceState) -> (String, String) {
         let pool = state.pool().unwrap();
@@ -1964,7 +1990,11 @@ mod tests {
         (created.character.character_id, created.binding.binding_id)
     }
 
-    fn character_session_req(character_id: &str, world_id: &str, binding_id: &str) -> CreateSessionRequest {
+    fn character_session_req(
+        character_id: &str,
+        world_id: &str,
+        binding_id: &str,
+    ) -> CreateSessionRequest {
         serde_json::from_value(serde_json::json!({
             "provider_id": "nonexistent",
             "actor_ref": {"actor_kind":"character","character_id": character_id},
@@ -1991,13 +2021,19 @@ mod tests {
         assert_eq!(err.error_code(), "not_found");
         assert_eq!(err.status_code(), axum::http::StatusCode::NOT_FOUND);
 
-        sqlx::query("UPDATE narrative_worlds SET status = 'archived' WHERE world_id = 'wld_worldA'")
-            .execute(pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "UPDATE narrative_worlds SET status = 'archived' WHERE world_id = 'wld_worldA'",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
         let err = create_session(
             State(state.clone()),
-            Json(character_session_req(&character_id, "wld_worldA", &binding_id)),
+            Json(character_session_req(
+                &character_id,
+                "wld_worldA",
+                &binding_id,
+            )),
         )
         .await
         .unwrap_err();
@@ -2015,7 +2051,11 @@ mod tests {
             .unwrap();
         let err = create_session(
             State(state.clone()),
-            Json(character_session_req(&character_id, "wld_worldA", &binding_id)),
+            Json(character_session_req(
+                &character_id,
+                "wld_worldA",
+                &binding_id,
+            )),
         )
         .await
         .unwrap_err();
@@ -2034,7 +2074,11 @@ mod tests {
             .unwrap();
         let err = create_session(
             State(state.clone()),
-            Json(character_session_req(&character_id, "wld_worldA", &binding_id)),
+            Json(character_session_req(
+                &character_id,
+                "wld_worldA",
+                &binding_id,
+            )),
         )
         .await
         .unwrap_err();
@@ -2057,12 +2101,21 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.error_code(), "not_found");
 
-        assert_eq!(host.create_sessions.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(
+            host.create_sessions
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
         assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
     struct PromptHost {
-        sessions: std::sync::Mutex<std::collections::HashMap<nexus_agent_host::HostSessionId, nexus_agent_host::HostSession>>,
+        sessions: std::sync::Mutex<
+            std::collections::HashMap<
+                nexus_agent_host::HostSessionId,
+                nexus_agent_host::HostSession,
+            >,
+        >,
         ops: std::sync::Mutex<Vec<nexus_agent_host::capability::model::HostOperation>>,
         execs: std::sync::atomic::AtomicU64,
         events: tokio::sync::broadcast::Sender<nexus_agent_host::capability::model::HostEvent>,
@@ -2081,14 +2134,15 @@ mod tests {
 
         fn last_prompt_text(&self) -> String {
             match self.ops.lock().expect("ops").last() {
-                Some(nexus_agent_host::capability::model::HostOperation::Prompt { content, .. }) => {
-                    match content.as_slice() {
-                        [nexus_agent_host::capability::model::HostContentBlock::Text { text }] => {
-                            text.clone()
-                        }
-                        _ => panic!("expected one text block"),
+                Some(nexus_agent_host::capability::model::HostOperation::Prompt {
+                    content,
+                    ..
+                }) => match content.as_slice() {
+                    [nexus_agent_host::capability::model::HostContentBlock::Text { text }] => {
+                        text.clone()
                     }
-                }
+                    _ => panic!("expected one text block"),
+                },
                 other => panic!("expected prompt, got {other:?}"),
             }
         }
@@ -2113,7 +2167,8 @@ mod tests {
                 state: nexus_agent_host::SessionState::Ready,
                 created_at: chrono::Utc::now(),
                 active_op_id: None,
-                negotiated_capabilities: nexus_agent_host::capability::model::CapabilityDescriptor::native_cli_limited(),
+                negotiated_capabilities:
+                    nexus_agent_host::capability::model::CapabilityDescriptor::native_cli_limited(),
             };
             self.sessions
                 .lock()
@@ -2140,7 +2195,9 @@ mod tests {
             Ok(())
         }
 
-        async fn health(&self) -> nexus_agent_host::HostResult<nexus_agent_host::capability::model::HostHealth> {
+        async fn health(
+            &self,
+        ) -> nexus_agent_host::HostResult<nexus_agent_host::capability::model::HostHealth> {
             Ok(nexus_agent_host::capability::model::HostHealth {
                 running: true,
                 active_sessions: self.sessions.lock().expect("sessions").len(),
@@ -2164,23 +2221,38 @@ mod tests {
             Ok(())
         }
 
-        async fn list_sessions(&self) -> nexus_agent_host::HostResult<Vec<nexus_agent_host::HostSession>> {
-            Ok(self.sessions.lock().expect("sessions").values().cloned().collect())
+        async fn list_sessions(
+            &self,
+        ) -> nexus_agent_host::HostResult<Vec<nexus_agent_host::HostSession>> {
+            Ok(self
+                .sessions
+                .lock()
+                .expect("sessions")
+                .values()
+                .cloned()
+                .collect())
         }
 
-        async fn provider_catalog(&self) -> nexus_agent_host::HostResult<nexus_agent_host::ProviderCatalog> {
+        async fn provider_catalog(
+            &self,
+        ) -> nexus_agent_host::HostResult<nexus_agent_host::ProviderCatalog> {
             Ok(nexus_agent_host::ProviderCatalog::new())
         }
 
         fn subscribe_events(
             &self,
             _session_id: nexus_agent_host::HostSessionId,
-        ) -> tokio::sync::broadcast::Receiver<nexus_agent_host::capability::model::HostEvent> {
+        ) -> tokio::sync::broadcast::Receiver<nexus_agent_host::capability::model::HostEvent>
+        {
             self.events.subscribe()
         }
     }
 
-    async fn state_with_prompt_host() -> (crate::test_utils::TestTempRoot, WorkspaceState, Arc<PromptHost>) {
+    async fn state_with_prompt_host() -> (
+        crate::test_utils::TestTempRoot,
+        WorkspaceState,
+        Arc<PromptHost>,
+    ) {
         let (tmp, nexus_home, db_path) = create_test_workspace().await;
         std::fs::write(
             nexus_home.join("config.toml"),
@@ -2196,8 +2268,8 @@ mod tests {
 
     #[test]
     fn legacy_prompt_json_bytes_are_kind_and_content_only() {
-        let req: ExecuteOperationRequest = serde_json::from_str(r#"{"kind":"prompt","content":"hello"}"#)
-            .expect("legacy prompt");
+        let req: ExecuteOperationRequest =
+            serde_json::from_str(r#"{"kind":"prompt","content":"hello"}"#).expect("legacy prompt");
         let json = serde_json::to_string(&req).expect("json");
         assert_eq!(json, r#"{"kind":"prompt","content":"hello"}"#);
     }
@@ -2207,11 +2279,13 @@ mod tests {
         let (_tmp, state, host) = state_with_prompt_host().await;
         let created = create_session(
             State(state.clone()),
-            Json(serde_json::from_value(serde_json::json!({
-                "provider_id": "prov",
-                "cwd": "/tmp"
-            }))
-            .unwrap()),
+            Json(
+                serde_json::from_value(serde_json::json!({
+                    "provider_id": "prov",
+                    "cwd": "/tmp"
+                }))
+                .unwrap(),
+            ),
         )
         .await
         .expect("legacy create");
@@ -2236,13 +2310,15 @@ mod tests {
         let (character_id, binding_id) = seed_owned_character(&state).await;
         let created = create_session(
             State(state.clone()),
-            Json(serde_json::from_value(serde_json::json!({
-                "provider_id": "prov",
-                "cwd": "/tmp",
-                "actor_ref": {"actor_kind":"character","character_id": character_id},
-                "viewpoint": {"world_id":"wld_worldA","binding_id": binding_id}
-            }))
-            .unwrap()),
+            Json(
+                serde_json::from_value(serde_json::json!({
+                    "provider_id": "prov",
+                    "cwd": "/tmp",
+                    "actor_ref": {"actor_kind":"character","character_id": character_id},
+                    "viewpoint": {"world_id":"wld_worldA","binding_id": binding_id}
+                }))
+                .unwrap(),
+            ),
         )
         .await
         .expect("create actor session");
@@ -2278,13 +2354,15 @@ mod tests {
         let (character_id, binding_id) = seed_owned_character(&state).await;
         let created = create_session(
             State(state.clone()),
-            Json(serde_json::from_value(serde_json::json!({
-                "provider_id": "prov",
-                "cwd": "/tmp",
-                "actor_ref": {"actor_kind":"character","character_id": character_id},
-                "viewpoint": {"world_id":"wld_worldA","binding_id": binding_id}
-            }))
-            .unwrap()),
+            Json(
+                serde_json::from_value(serde_json::json!({
+                    "provider_id": "prov",
+                    "cwd": "/tmp",
+                    "actor_ref": {"actor_kind":"character","character_id": character_id},
+                    "viewpoint": {"world_id":"wld_worldA","binding_id": binding_id}
+                }))
+                .unwrap(),
+            ),
         )
         .await
         .expect("create");
@@ -2306,20 +2384,21 @@ mod tests {
         assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
-
     #[tokio::test]
     async fn shutdown_rejects_actor_prompt_before_host_exec() {
         let (_tmp, state, host) = state_with_prompt_host().await;
         let (character_id, binding_id) = seed_owned_character(&state).await;
         let created = create_session(
             State(state.clone()),
-            Json(serde_json::from_value(serde_json::json!({
-                "provider_id": "prov",
-                "cwd": "/tmp",
-                "actor_ref": {"actor_kind":"character","character_id": character_id},
-                "viewpoint": {"world_id":"wld_worldA","binding_id": binding_id}
-            }))
-            .unwrap()),
+            Json(
+                serde_json::from_value(serde_json::json!({
+                    "provider_id": "prov",
+                    "cwd": "/tmp",
+                    "actor_ref": {"actor_kind":"character","character_id": character_id},
+                    "viewpoint": {"world_id":"wld_worldA","binding_id": binding_id}
+                }))
+                .unwrap(),
+            ),
         )
         .await
         .expect("create");
@@ -2343,13 +2422,15 @@ mod tests {
         let (character_id, binding_id) = seed_owned_character(&state).await;
         let created = create_session(
             State(state.clone()),
-            Json(serde_json::from_value(serde_json::json!({
-                "provider_id": "prov",
-                "cwd": "/tmp",
-                "actor_ref": {"actor_kind":"character","character_id": character_id},
-                "viewpoint": {"world_id":"wld_worldA","binding_id": binding_id}
-            }))
-            .unwrap()),
+            Json(
+                serde_json::from_value(serde_json::json!({
+                    "provider_id": "prov",
+                    "cwd": "/tmp",
+                    "actor_ref": {"actor_kind":"character","character_id": character_id},
+                    "viewpoint": {"world_id":"wld_worldA","binding_id": binding_id}
+                }))
+                .unwrap(),
+            ),
         )
         .await
         .expect("create");

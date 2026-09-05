@@ -267,7 +267,12 @@ async fn creator_only_hidden_from_character_visible_to_creator() {
             "binding_id": binding
         }))
         .await;
-    assert_eq!(character_page.status_code(), 200, "{}", character_page.text());
+    assert_eq!(
+        character_page.status_code(),
+        200,
+        "{}",
+        character_page.text()
+    );
     let character_body: Value = character_page.json();
     let character_names = names(&character_body);
     assert!(character_names.contains(&"PublicWorld".into()));
@@ -414,8 +419,14 @@ async fn view_orders_and_paginates_with_opaque_k2_cursor() {
 async fn non_last_binding_with_owned_knowledge_is_stable_409() {
     let ctx = ctx().await;
     let created = create_character(&ctx.server, "Ava", WORLD_A).await;
-    let chr = created["character"]["character_id"].as_str().unwrap().to_string();
-    let bind_a = created["binding"]["binding_id"].as_str().unwrap().to_string();
+    let chr = created["character"]["character_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let bind_a = created["binding"]["binding_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let second = ctx
         .server
@@ -439,13 +450,12 @@ async fn non_last_binding_with_owned_knowledge_is_stable_409() {
 
     let before = count_bindings(&ctx.pool, &chr).await;
     assert_eq!(before, 2);
-    let ke_before: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM kb_key_blocks WHERE actor_world_binding_id = ?",
-    )
-    .bind(&bind_a)
-    .fetch_one(&ctx.pool)
-    .await
-    .unwrap();
+    let ke_before: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE actor_world_binding_id = ?")
+            .bind(&bind_a)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
     assert_eq!(ke_before, 1);
 
     let remove = ctx
@@ -456,13 +466,12 @@ async fn non_last_binding_with_owned_knowledge_is_stable_409() {
     let body: Value = remove.json();
     assert_eq!(body["error"]["code"], "binding_has_owned_knowledge");
     assert_eq!(count_bindings(&ctx.pool, &chr).await, before);
-    let ke_after: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM kb_key_blocks WHERE actor_world_binding_id = ?",
-    )
-    .bind(&bind_a)
-    .fetch_one(&ctx.pool)
-    .await
-    .unwrap();
+    let ke_after: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE actor_world_binding_id = ?")
+            .bind(&bind_a)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
     assert_eq!(ke_after, ke_before);
 }
 
@@ -547,7 +556,10 @@ async fn character_view_and_binding_add_require_owned_target_world() {
     .unwrap();
 
     let created = create_character(&ctx.server, "Ava", WORLD_A).await;
-    let chr = created["character"]["character_id"].as_str().unwrap().to_string();
+    let chr = created["character"]["character_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let foreign_binding = "awb_cccccccccccccccccccccccccccccccc";
     sqlx::query(
         "INSERT INTO actor_world_bindings \
@@ -587,17 +599,21 @@ async fn character_view_and_binding_add_require_owned_target_world() {
         }))
         .await;
     assert_eq!(add.status_code(), 404, "{}", add.text());
-    let ke: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM kb_key_blocks WHERE actor_world_binding_id = ?",
-    )
-    .bind(foreign_binding)
-    .fetch_one(&ctx.pool)
-    .await
-    .unwrap();
+    let ke: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE actor_world_binding_id = ?")
+            .bind(foreign_binding)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
     assert_eq!(ke, 0);
 }
 
-async fn insert_legacy_default_world_row(pool: &sqlx::SqlitePool, world_id: &str, entry_id: &str, name: &str) {
+async fn insert_legacy_default_world_row(
+    pool: &sqlx::SqlitePool,
+    world_id: &str,
+    entry_id: &str,
+    name: &str,
+) {
     sqlx::query(
         "INSERT INTO kb_key_blocks \
          (key_block_id, owner_kind, world_id, block_type, canonical_name, status) \
@@ -646,13 +662,12 @@ async fn view_projects_legacy_sqlite_datetime_without_rewriting_bytes() {
         "LegacyDefault",
     )
     .await;
-    let stored: String = sqlx::query_scalar(
-        "SELECT created_at FROM kb_key_blocks WHERE key_block_id = ?",
-    )
-    .bind("kb_legacydefault000000000000000001")
-    .fetch_one(&ctx.pool)
-    .await
-    .unwrap();
+    let stored: String =
+        sqlx::query_scalar("SELECT created_at FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind("kb_legacydefault000000000000000001")
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
     assert!(
         stored.contains(' ') && !stored.contains('T'),
         "legacy bytes must stay SQLite datetime: {stored}"
@@ -679,13 +694,12 @@ async fn view_projects_legacy_sqlite_datetime_without_rewriting_bytes() {
         wire.contains('T'),
         "wire created_at must be canonical RFC3339: {wire}"
     );
-    let stored_after: String = sqlx::query_scalar(
-        "SELECT created_at FROM kb_key_blocks WHERE key_block_id = ?",
-    )
-    .bind("kb_legacydefault000000000000000001")
-    .fetch_one(&ctx.pool)
-    .await
-    .unwrap();
+    let stored_after: String =
+        sqlx::query_scalar("SELECT created_at FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind("kb_legacydefault000000000000000001")
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
     assert_eq!(stored_after, stored);
 }
 
