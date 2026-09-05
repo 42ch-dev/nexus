@@ -43,19 +43,30 @@ pub fn memory_path(home: &Path, bearer: MemoryBearerRef<'_>, slug: &str) -> Path
 /// List all memory slugs (filenames without `.md` extension) in the
 /// memory directory for a bearer.
 ///
-/// Returns an empty list if the directory doesn't exist or contains
-/// no `.md` files.
+/// Returns an empty list only when the directory is genuinely absent
+/// (`ErrorKind::NotFound`) or contains no `.md` files. A permission, I/O, or
+/// malformed-path failure is propagated as a [`MemoryError`], so callers
+/// (e.g. the Character mind projection) can distinguish honest-empty absence
+/// from an inability to read the directory and fail closed before host launch.
 pub fn list_memories(
     home: &Path,
     bearer: MemoryBearerRef<'_>,
 ) -> Result<Vec<String>, MemoryError> {
     bearer.validate()?;
     let dir = memory_dir(home, bearer);
-    if !dir.exists() {
-        return Ok(Vec::new());
-    }
-    let entries = std::fs::read_dir(&dir)
-        .map_err(|e| MemoryError::ValidationError(format!("cannot read memory directory: {e}")))?;
+    // Attempt the read directly rather than gating on `Path::exists()`, which
+    // returns false both for a missing path and for an unreadable path. A
+    // missing directory is the only honest-empty case; metadata/permission
+    // errors must surface to the caller.
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => {
+            return Err(MemoryError::ValidationError(format!(
+                "cannot read memory directory: {e}"
+            )));
+        }
+    };
     let mut slugs = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|e| {
@@ -289,6 +300,38 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("not found"), "err: {err}");
+    }
+
+    #[test]
+    fn list_memories_missing_dir_is_honest_empty() {
+        let home = fake_home();
+        cleanup(&home);
+        // Never create the memory directory: genuine absence is honest-empty.
+        let slugs = list_memories(&home, MemoryBearerRef::Creator("ctr_test")).unwrap();
+        assert!(slugs.is_empty());
+        cleanup(&home);
+    }
+
+    #[test]
+    fn list_memories_propagates_non_notfound_read_error() {
+        let home = fake_home();
+        cleanup(&home);
+        // Place a regular file where the memory directory should be so
+        // read_dir fails with NotADirectory (not NotFound) — a metadata/read
+        // failure must propagate rather than be treated as absence.
+        let dir = memory_dir(&home, MemoryBearerRef::Creator("ctr_test"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::remove_dir(&dir).unwrap();
+        std::fs::write(&dir, "not a directory").unwrap();
+
+        let result = list_memories(&home, MemoryBearerRef::Creator("ctr_test"));
+        assert!(
+            result.is_err(),
+            "a non-directory/path metadata failure must propagate"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("cannot read memory directory"), "err: {err}");
+        cleanup(&home);
     }
 
     #[test]

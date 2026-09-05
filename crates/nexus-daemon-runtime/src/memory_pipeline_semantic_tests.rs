@@ -624,3 +624,56 @@ async fn promoted_character_long_term_memory_is_projected_into_run() {
 
     drop(s.tmp);
 }
+
+#[tokio::test]
+async fn inaccessible_ltm_directory_fails_projection_closed() {
+    use crate::api::handlers::memory_pipeline::load_character_mind_projection;
+
+    let s = setup().await;
+    let binding_a1 = nexus_local_db::list_bindings_for_character(
+        &s.pool,
+        OWNER_A,
+        &s.chr_a,
+        10,
+        0,
+    )
+    .await
+    .unwrap()
+    .into_iter()
+    .next()
+    .unwrap()
+    .binding_id;
+
+    // Replace the Character long-term-memory directory with a regular file so
+    // `read_dir` fails with a non-NotFound error (metadata/read failure).
+    let ltm_dir = MemoryBearerRef::Character {
+        owner_creator_id: OWNER_A,
+        character_id: &s.chr_a,
+    }
+    .long_term_memory_dir(&s.nexus_home);
+    std::fs::create_dir_all(&ltm_dir).unwrap();
+    std::fs::remove_dir(&ltm_dir).unwrap();
+    std::fs::write(&ltm_dir, "not a directory").unwrap();
+
+    // The projection must fail closed (Err) rather than producing an empty
+    // CharacterMindInput that would let the host operation launch.
+    let result = load_character_mind_projection(
+        &s.pool,
+        &s.nexus_home,
+        OWNER_A,
+        &s.chr_a,
+        Some(&binding_a1),
+    )
+    .await;
+    assert!(
+        result.is_err(),
+        "inaccessible LTM directory must fail the projection closed"
+    );
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("CHARACTER_MEMORY_LIST_ERROR") || msg.contains("cannot read memory directory"),
+        "unexpected error: {msg}"
+    );
+
+    drop(s.tmp);
+}
