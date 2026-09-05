@@ -59,6 +59,7 @@ pub mod host_tool_handlers;
 pub mod inspector;
 pub mod kb;
 pub mod memory;
+pub(crate) mod memory_pipeline;
 pub mod monitoring;
 pub mod narrative;
 pub mod orchestration;

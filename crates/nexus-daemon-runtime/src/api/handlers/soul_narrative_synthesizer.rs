@@ -11,6 +11,7 @@
 use nexus_creator_memory::soul_narrative::{
     SoulNarrativeDraft, SoulNarrativeSynthesisInput, SoulNarrativeSynthesizer,
 };
+use nexus_creator_memory::MemoryBearerRef;
 use nexus_creator_memory::MemoryError;
 use nexus_orchestration::capability::{CapabilityError, CapabilityRegistry};
 use serde_json::json;
@@ -114,9 +115,10 @@ impl AcpSoulNarrativeSynthesizer {
 impl SoulNarrativeSynthesizer for AcpSoulNarrativeSynthesizer {
     async fn synthesize(
         &self,
-        creator_id: &str,
+        bearer: MemoryBearerRef<'_>,
         input: SoulNarrativeSynthesisInput,
     ) -> Result<SoulNarrativeDraft, MemoryError> {
+        let creator_id = bearer.id();
         let cap =
             self.registry
                 .get("acp.prompt")

@@ -448,14 +448,16 @@ async fn build_stage0_from_local(
 
     let home = crate::config::user_home_dir()?;
 
+    let bearer = nexus_creator_memory::MemoryBearerRef::Creator(creator_id);
+
     // 1. Load SOUL.md
-    let soul = nexus_creator_memory::soul_io::load(&home, creator_id)?;
+    let soul = nexus_creator_memory::soul_io::load(&home, bearer)?;
 
     // 2. List long-term memories (skip personality_core — already in SOUL personality)
-    let slugs = nexus_creator_memory::memory_io::list_memories(&home, creator_id)?;
+    let slugs = nexus_creator_memory::memory_io::list_memories(&home, bearer)?;
     let mut long_term_memories = Vec::new();
     for slug in &slugs {
-        if let Ok(mem) = nexus_creator_memory::memory_io::load_memory(&home, creator_id, slug) {
+        if let Ok(mem) = nexus_creator_memory::memory_io::load_memory(&home, bearer, slug) {
             if mem.frontmatter.memory_kind == "personality_core" {
                 continue;
             }

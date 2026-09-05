@@ -1,68 +1,56 @@
 //! Long-term memory file I/O operations.
 //!
 //! Handles reading, writing, listing, and deleting long-term memory
-//! Markdown files on disk. Follows the same patterns as `soul_io.rs`.
+//! Markdown files on disk. Path resolution dispatches through the closed
+//! [`MemoryBearerRef`] (v1.184 P3).
 //!
 //! Memory files live at:
-//! `~/.nexus42/creators/<creator_id>/memory/long-term/<slug>.md`
+//! `~/.nexus42/creators/<creator_id>/memory/long-term/<slug>.md` (Creator)
+//! or
+//! `~/.nexus42/creators/<owner_creator_id>/characters/<character_id>/memory/long-term/<slug>.md`
+//! (Character).
 //!
-//! All public functions that accept a `creator_id` validate it at the top
-//! to prevent path-traversal attacks.
+//! All public functions validate the bearer at the top to prevent
+//! path-traversal attacks.
 
+use crate::bearer::MemoryBearerRef;
 use crate::errors::MemoryError;
 use crate::long_term_memory::LongTermMemory;
-use nexus_creator::is_valid_creator_id;
 use std::path::{Path, PathBuf};
 
-/// Memory directory relative to the creator's home layout.
-const MEMORY_SUBDIR: &str = "memory/long-term";
-
-/// Validate that `creator_id` is safe to use in filesystem paths.
-///
-/// Rejects IDs containing path separators, `..` components, backslashes,
-/// or control characters, and requires the standard `ctr_` prefix.
-fn validate_creator_id(creator_id: &str) -> Result<(), MemoryError> {
-    if is_valid_creator_id(creator_id) {
-        Ok(())
-    } else {
-        Err(MemoryError::InvalidIdFormat(format!(
-            "creator_id '{creator_id}' is not a valid CreatorId (must match ^ctr_[a-zA-Z0-9]+$ and contain no path separators or control characters)"
-        )))
-    }
-}
 #[must_use]
-/// Resolve the memory directory path for a creator.
+/// Resolve the memory directory path for a bearer.
 ///
-/// Returns: `<home>/.nexus42/creators/<creator_id>/memory/long-term/`
-pub fn memory_dir(home: &Path, creator_id: &str) -> PathBuf {
-    nexus_home_layout::nexus_root_from_home(home)
-        .join("creators")
-        .join(creator_id)
-        .join(MEMORY_SUBDIR)
+/// Returns `<home>/.nexus42/creators/<creator_id>/memory/long-term/` for the
+/// Creator arm, or the Character arm's `…/characters/<character_id>/memory/long-term/`.
+pub fn memory_dir(home: &Path, bearer: MemoryBearerRef<'_>) -> PathBuf {
+    bearer.long_term_memory_dir(home)
 }
 
 /// Resolve the full path for a memory file.
 ///
-/// Returns: `<home>/.nexus42/creators/<creator_id>/memory/long-term/<slug>.md`
+/// Returns `<memory_dir>/<slug>.md`.
 ///
 /// # Panics (defense-in-depth)
 ///
-/// Does not validate `creator_id` or `slug` on its own — callers should
-/// validate before calling. If called with malicious input, the path
-/// may resolve outside the expected directory.
+/// Does not validate the bearer or `slug` on its own — callers should
+/// validate before calling (`slug_is_safe` / `bearer.validate()`).
 #[must_use]
-pub fn memory_path(home: &Path, creator_id: &str, slug: &str) -> PathBuf {
-    memory_dir(home, creator_id).join(format!("{slug}.md"))
+pub fn memory_path(home: &Path, bearer: MemoryBearerRef<'_>, slug: &str) -> PathBuf {
+    bearer.long_term_memory_path(home, slug)
 }
 
 /// List all memory slugs (filenames without `.md` extension) in the
-/// memory directory for a creator.
+/// memory directory for a bearer.
 ///
 /// Returns an empty list if the directory doesn't exist or contains
 /// no `.md` files.
-pub fn list_memories(home: &Path, creator_id: &str) -> Result<Vec<String>, MemoryError> {
-    validate_creator_id(creator_id)?;
-    let dir = memory_dir(home, creator_id);
+pub fn list_memories(
+    home: &Path,
+    bearer: MemoryBearerRef<'_>,
+) -> Result<Vec<String>, MemoryError> {
+    bearer.validate()?;
+    let dir = memory_dir(home, bearer);
     if !dir.exists() {
         return Ok(Vec::new());
     }
@@ -98,17 +86,17 @@ pub fn list_memories(home: &Path, creator_id: &str) -> Result<Vec<String>, Memor
 /// and a `LongTermMemory` with the `source_path` set is returned.
 pub fn load_memory(
     home: &Path,
-    creator_id: &str,
+    bearer: MemoryBearerRef<'_>,
     slug: &str,
 ) -> Result<LongTermMemory, MemoryError> {
-    validate_creator_id(creator_id)?;
+    bearer.validate()?;
     if !slug_is_safe(slug) {
         return Err(MemoryError::ValidationError(format!(
             "slug '{}' is not path-safe (rejected: contains '..', '/', '\\', or control characters)",
             slug
         )));
     }
-    let path = memory_path(home, creator_id, slug);
+    let path = memory_path(home, bearer, slug);
     if !path.exists() {
         return Err(MemoryError::ValidationError(format!(
             "memory file not found: {}",
@@ -135,20 +123,20 @@ pub fn load_memory(
 /// on crash or disk-full (R-V133P4-05).
 pub fn save_memory(
     home: &Path,
-    creator_id: &str,
+    bearer: MemoryBearerRef<'_>,
     slug: &str,
     memory: &LongTermMemory,
 ) -> Result<(), MemoryError> {
-    validate_creator_id(creator_id)?;
+    bearer.validate()?;
     if !slug_is_safe(slug) {
         return Err(MemoryError::ValidationError(format!(
             "slug '{}' is not path-safe (rejected: contains '..', '/', '\\', or control characters)",
             slug
         )));
     }
-    ensure_memory_dir(home, creator_id)?;
+    ensure_memory_dir(home, bearer)?;
     let content = memory.render()?;
-    let path = memory_path(home, creator_id, slug);
+    let path = memory_path(home, bearer, slug);
 
     // R-V133P4-05: Atomic write — write to temp file, then rename.
     // POSIX rename is atomic within a filesystem, preventing partial writes.
@@ -166,15 +154,15 @@ pub fn save_memory(
 /// # Errors
 /// Returns `Err(MemoryError::...)` if validation fails.
 /// Delete a long-term memory file.
-pub fn delete_memory(home: &Path, creator_id: &str, slug: &str) -> Result<(), MemoryError> {
-    validate_creator_id(creator_id)?;
+pub fn delete_memory(home: &Path, bearer: MemoryBearerRef<'_>, slug: &str) -> Result<(), MemoryError> {
+    bearer.validate()?;
     if !slug_is_safe(slug) {
         return Err(MemoryError::ValidationError(format!(
             "slug '{}' is not path-safe (rejected: contains '..', '/', '\\', or control characters)",
             slug
         )));
     }
-    let path = memory_path(home, creator_id, slug);
+    let path = memory_path(home, bearer, slug);
     if !path.exists() {
         return Err(MemoryError::ValidationError(format!(
             "memory file not found: {}",
@@ -199,13 +187,13 @@ pub fn slug_is_safe(slug: &str) -> bool {
 ///
 /// # Errors
 /// Returns `Err(MemoryError::...)` if validation fails.
-/// Ensure the memory directory exists for a creator.
+/// Ensure the memory directory exists for a bearer.
 ///
-/// Creates `<home>/.nexus42/creators/<creator_id>/memory/long-term/`
-/// and all parent directories if they don't exist.
-pub fn ensure_memory_dir(home: &Path, creator_id: &str) -> Result<(), MemoryError> {
-    validate_creator_id(creator_id)?;
-    let dir = memory_dir(home, creator_id);
+/// Creates the bearer's `memory/long-term/` directory (and all parents) if
+/// it doesn't exist.
+pub fn ensure_memory_dir(home: &Path, bearer: MemoryBearerRef<'_>) -> Result<(), MemoryError> {
+    bearer.validate()?;
+    let dir = memory_dir(home, bearer);
     std::fs::create_dir_all(&dir).map_err(|e| {
         MemoryError::ValidationError(format!("cannot create memory directory: {e}"))
     })?;
@@ -237,8 +225,8 @@ mod tests {
         mem.set_body("Chapter 1 analysis: the protagonist discovers the truth.");
         mem.add_source_session("sess_001");
 
-        save_memory(&home, "ctr_test", "chapter1-analysis", &mem).unwrap();
-        let loaded = load_memory(&home, "ctr_test", "chapter1-analysis").unwrap();
+        save_memory(&home, MemoryBearerRef::Creator("ctr_test"), "chapter1-analysis", &mem).unwrap();
+        let loaded = load_memory(&home, MemoryBearerRef::Creator("ctr_test"), "chapter1-analysis").unwrap();
 
         assert_eq!(loaded.frontmatter.memory_id, mem.frontmatter.memory_id);
         assert_eq!(loaded.frontmatter.memory_kind, "story_summary");
@@ -252,7 +240,7 @@ mod tests {
     fn list_memories_empty() {
         let home = fake_home();
         cleanup(&home);
-        let slugs = list_memories(&home, "ctr_test").unwrap();
+        let slugs = list_memories(&home, MemoryBearerRef::Creator("ctr_test")).unwrap();
         assert!(slugs.is_empty());
         cleanup(&home);
     }
@@ -264,10 +252,10 @@ mod tests {
         let mem1 = LongTermMemory::new("story_summary");
         let mem2 = LongTermMemory::new("character_note");
 
-        save_memory(&home, "ctr_test", "alpha-memory", &mem1).unwrap();
-        save_memory(&home, "ctr_test", "beta-memory", &mem2).unwrap();
+        save_memory(&home, MemoryBearerRef::Creator("ctr_test"), "alpha-memory", &mem1).unwrap();
+        save_memory(&home, MemoryBearerRef::Creator("ctr_test"), "beta-memory", &mem2).unwrap();
 
-        let slugs = list_memories(&home, "ctr_test").unwrap();
+        let slugs = list_memories(&home, MemoryBearerRef::Creator("ctr_test")).unwrap();
         assert_eq!(slugs, vec!["alpha-memory", "beta-memory"]);
         cleanup(&home);
     }
@@ -277,18 +265,18 @@ mod tests {
         let home = fake_home();
         cleanup(&home);
         let mem = LongTermMemory::new("story_summary");
-        save_memory(&home, "ctr_test", "to-delete", &mem).unwrap();
+        save_memory(&home, MemoryBearerRef::Creator("ctr_test"), "to-delete", &mem).unwrap();
 
-        assert!(load_memory(&home, "ctr_test", "to-delete").is_ok());
-        delete_memory(&home, "ctr_test", "to-delete").unwrap();
-        assert!(load_memory(&home, "ctr_test", "to-delete").is_err());
+        assert!(load_memory(&home, MemoryBearerRef::Creator("ctr_test"), "to-delete").is_ok());
+        delete_memory(&home, MemoryBearerRef::Creator("ctr_test"), "to-delete").unwrap();
+        assert!(load_memory(&home, MemoryBearerRef::Creator("ctr_test"), "to-delete").is_err());
         cleanup(&home);
     }
 
     #[test]
     fn load_not_found() {
         let home = fake_home();
-        let result = load_memory(&home, "ctr_test", "nonexistent");
+        let result = load_memory(&home, MemoryBearerRef::Creator("ctr_test"), "nonexistent");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("not found"), "err: {err}");
@@ -297,7 +285,7 @@ mod tests {
     #[test]
     fn delete_not_found() {
         let home = fake_home();
-        let result = delete_memory(&home, "ctr_test", "nonexistent");
+        let result = delete_memory(&home, MemoryBearerRef::Creator("ctr_test"), "nonexistent");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("not found"), "err: {err}");
@@ -307,8 +295,8 @@ mod tests {
     fn ensure_memory_dir_creates_dirs() {
         let home = fake_home();
         cleanup(&home);
-        ensure_memory_dir(&home, "ctr_mkdir").unwrap();
-        let dir = memory_dir(&home, "ctr_mkdir");
+        ensure_memory_dir(&home, MemoryBearerRef::Creator("ctr_mkdir")).unwrap();
+        let dir = memory_dir(&home, MemoryBearerRef::Creator("ctr_mkdir"));
         assert!(dir.exists());
         cleanup(&home);
     }
@@ -317,7 +305,7 @@ mod tests {
     fn memory_dir_layout() {
         let home = PathBuf::from("/h");
         assert_eq!(
-            memory_dir(&home, "ctr_test"),
+            memory_dir(&home, MemoryBearerRef::Creator("ctr_test")),
             PathBuf::from("/h/.nexus42/creators/ctr_test/memory/long-term")
         );
     }
@@ -326,7 +314,7 @@ mod tests {
     fn memory_path_layout() {
         let home = PathBuf::from("/h");
         assert_eq!(
-            memory_path(&home, "ctr_test", "my-slug"),
+            memory_path(&home, MemoryBearerRef::Creator("ctr_test"), "my-slug"),
             PathBuf::from("/h/.nexus42/creators/ctr_test/memory/long-term/my-slug.md")
         );
     }
@@ -336,7 +324,7 @@ mod tests {
     #[test]
     fn load_rejects_path_traversal_creator_id() {
         let home = fake_home();
-        let result = load_memory(&home, "../../etc/passwd", "safe-slug");
+        let result = load_memory(&home, MemoryBearerRef::Creator("../../etc/passwd"), "safe-slug");
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -348,7 +336,7 @@ mod tests {
     fn save_rejects_path_traversal_creator_id() {
         let home = fake_home();
         let mem = LongTermMemory::new("story_summary");
-        let result = save_memory(&home, "../../etc", "slug", &mem);
+        let result = save_memory(&home, MemoryBearerRef::Creator("../../etc"), "slug", &mem);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -359,7 +347,7 @@ mod tests {
     #[test]
     fn delete_rejects_path_traversal_creator_id() {
         let home = fake_home();
-        let result = delete_memory(&home, "ctr_../evil", "slug");
+        let result = delete_memory(&home, MemoryBearerRef::Creator("ctr_../evil"), "slug");
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -370,7 +358,7 @@ mod tests {
     #[test]
     fn list_rejects_path_traversal_creator_id() {
         let home = fake_home();
-        let result = list_memories(&home, "../../etc");
+        let result = list_memories(&home, MemoryBearerRef::Creator("../../etc"));
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -381,7 +369,7 @@ mod tests {
     #[test]
     fn load_rejects_unsafe_slug() {
         let home = fake_home();
-        let result = load_memory(&home, "ctr_test", "../etc/passwd");
+        let result = load_memory(&home, MemoryBearerRef::Creator("ctr_test"), "../etc/passwd");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not path-safe"));
     }
@@ -390,7 +378,7 @@ mod tests {
     fn save_rejects_unsafe_slug() {
         let home = fake_home();
         let mem = LongTermMemory::new("story_summary");
-        let result = save_memory(&home, "ctr_test", "../evil", &mem);
+        let result = save_memory(&home, MemoryBearerRef::Creator("ctr_test"), "../evil", &mem);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not path-safe"));
     }
@@ -398,7 +386,7 @@ mod tests {
     #[test]
     fn delete_rejects_unsafe_slug() {
         let home = fake_home();
-        let result = delete_memory(&home, "ctr_test", "..\\escape");
+        let result = delete_memory(&home, MemoryBearerRef::Creator("ctr_test"), "..\\escape");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not path-safe"));
     }
@@ -406,7 +394,7 @@ mod tests {
     #[test]
     fn ensure_dir_rejects_path_traversal_creator_id() {
         let home = fake_home();
-        let result = ensure_memory_dir(&home, "ctr_../escape");
+        let result = ensure_memory_dir(&home, MemoryBearerRef::Creator("ctr_../escape"));
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -420,14 +408,14 @@ mod tests {
         cleanup(&home);
         let mut mem = LongTermMemory::new("story_summary");
         mem.set_body("Original content");
-        save_memory(&home, "ctr_test", "update-test", &mem).unwrap();
+        save_memory(&home, MemoryBearerRef::Creator("ctr_test"), "update-test", &mem).unwrap();
 
         // Load, modify, save
-        let mut loaded = load_memory(&home, "ctr_test", "update-test").unwrap();
+        let mut loaded = load_memory(&home, MemoryBearerRef::Creator("ctr_test"), "update-test").unwrap();
         loaded.set_body("Updated content");
-        save_memory(&home, "ctr_test", "update-test", &loaded).unwrap();
+        save_memory(&home, MemoryBearerRef::Creator("ctr_test"), "update-test", &loaded).unwrap();
 
-        let reloaded = load_memory(&home, "ctr_test", "update-test").unwrap();
+        let reloaded = load_memory(&home, MemoryBearerRef::Creator("ctr_test"), "update-test").unwrap();
         assert!(reloaded.body.contains("Updated content"));
         cleanup(&home);
     }
@@ -438,8 +426,8 @@ mod tests {
         cleanup(&home);
         // Don't call ensure_memory_dir explicitly; save should handle it
         let mem = LongTermMemory::new("custom");
-        assert!(save_memory(&home, "ctr_new", "auto-dir", &mem).is_ok());
-        assert!(memory_path(&home, "ctr_new", "auto-dir").exists());
+        assert!(save_memory(&home, MemoryBearerRef::Creator("ctr_new"), "auto-dir", &mem).is_ok());
+        assert!(memory_path(&home, MemoryBearerRef::Creator("ctr_new"), "auto-dir").exists());
         cleanup(&home);
     }
 }

@@ -1,60 +1,48 @@
 //! SOUL.md file I/O operations.
 //!
 //! Handles reading, writing, and creating SOUL.md files on disk.
-//! Uses `nexus_home_layout` for path resolution.
+//! Path resolution dispatches through the closed [`MemoryBearerRef`]
+//! (v1.184 P3): the Creator arm reproduces the legacy layout and bytes;
+//! the Character arm uses the `nexus-home-layout` Character paths.
 //!
-//! All public functions that accept a `creator_id` validate it at the top
-//! to prevent path-traversal attacks (malicious IDs like `../../etc/`).
+//! All public functions validate the bearer at the top to prevent
+//! path-traversal attacks (malicious ids like `../../etc/`).
 
+use crate::bearer::MemoryBearerRef;
 use crate::errors::MemoryError;
 use crate::soul::SoulDocument;
-use nexus_creator::is_valid_creator_id;
 use std::path::{Path, PathBuf};
-
-/// Validate that `creator_id` is safe to use in filesystem paths.
-///
-/// Rejects IDs containing path separators, `..` components, backslashes,
-/// or control characters, and requires the standard `ctr_` prefix.
-fn validate_creator_id(creator_id: &str) -> Result<(), MemoryError> {
-    if is_valid_creator_id(creator_id) {
-        Ok(())
-    } else {
-        Err(MemoryError::InvalidIdFormat(format!(
-            "creator_id '{creator_id}' is not a valid CreatorId (must match ^ctr_[a-zA-Z0-9]+$ and contain no path separators or control characters)"
-        )))
-    }
-}
 #[must_use]
-/// Resolve the SOUL.md path for a creator using the home layout.
+/// Resolve the SOUL.md path for a bearer using the home layout.
 ///
 /// # Panics (defense-in-depth)
 ///
-/// This function does **not** validate `creator_id` on its own — callers
-/// that reach this through the public API should already have passed
-/// `validate_creator_id()`. If you call this directly with untrusted input,
-/// run `validate_creator_id()` first.
-pub fn soul_path(home: &Path, creator_id: &str) -> PathBuf {
-    nexus_home_layout::creator_soul_md_path(home, creator_id)
+/// This function does **not** validate the bearer on its own — callers that
+/// reach this through the public API should already have passed
+/// `bearer.validate()`. If you call this directly with untrusted input, run
+/// `bearer.validate()` first.
+pub fn soul_path(home: &Path, bearer: MemoryBearerRef<'_>) -> PathBuf {
+    bearer.soul_path(home)
 }
 
-/// Check if a SOUL.md exists for the given creator.
+/// Check if a SOUL.md exists for the given bearer.
 #[must_use]
-pub fn exists(home: &Path, creator_id: &str) -> bool {
-    // Existence check: silently return false for invalid IDs rather than
+pub fn exists(home: &Path, bearer: MemoryBearerRef<'_>) -> bool {
+    // Existence check: silently return false for invalid ids rather than
     // erroring, matching common "check then maybe create" patterns.
-    if !is_valid_creator_id(creator_id) {
+    if bearer.validate().is_err() {
         return false;
     }
-    soul_path(home, creator_id).exists()
+    soul_path(home, bearer).exists()
 }
 
-/// Read and parse SOUL.md for a creator.
-pub fn load(home: &Path, creator_id: &str) -> Result<SoulDocument, MemoryError> {
-    validate_creator_id(creator_id)?;
-    let path = soul_path(home, creator_id);
+/// Read and parse SOUL.md for a bearer.
+pub fn load(home: &Path, bearer: MemoryBearerRef<'_>) -> Result<SoulDocument, MemoryError> {
+    bearer.validate()?;
+    let path = soul_path(home, bearer);
     if !path.exists() {
         return Err(MemoryError::SoulNotFound {
-            creator_id: creator_id.to_string(),
+            creator_id: bearer.id().to_string(),
             path: path.display().to_string(),
         });
     }
@@ -68,10 +56,10 @@ pub fn load(home: &Path, creator_id: &str) -> Result<SoulDocument, MemoryError> 
 ///
 /// # Errors
 /// Returns `Err(MemoryError::...)` if validation fails.
-/// Create a new SOUL.md for a creator. Fails if it already exists.
-pub fn create(home: &Path, creator_id: &str) -> Result<SoulDocument, MemoryError> {
-    validate_creator_id(creator_id)?;
-    let path = soul_path(home, creator_id);
+/// Create a new SOUL.md for a bearer. Fails if it already exists.
+pub fn create(home: &Path, bearer: MemoryBearerRef<'_>) -> Result<SoulDocument, MemoryError> {
+    bearer.validate()?;
+    let path = soul_path(home, bearer);
     if path.exists() {
         return Err(MemoryError::ValidationError(format!(
             "SOUL.md already exists at {}",
@@ -82,11 +70,11 @@ pub fn create(home: &Path, creator_id: &str) -> Result<SoulDocument, MemoryError
         std::fs::create_dir_all(parent)
             .map_err(|e| MemoryError::ValidationError(format!("cannot create creator dir: {e}")))?;
     }
-    let doc = SoulDocument::for_creator(creator_id);
+    let doc = SoulDocument::for_creator(bearer.id());
     let content = doc.render();
     std::fs::write(&path, &content)
         .map_err(|e| MemoryError::ValidationError(format!("cannot write SOUL.md: {e}")))?;
-    let mut loaded_doc = load(home, creator_id)?;
+    let mut loaded_doc = load(home, bearer)?;
     loaded_doc.source_path = Some(path);
     Ok(loaded_doc)
 }
@@ -94,12 +82,16 @@ pub fn create(home: &Path, creator_id: &str) -> Result<SoulDocument, MemoryError
 /// # Errors
 /// Returns `Err(MemoryError::...)` if validation fails.
 /// Save an existing SOUL.md (overwrites). Must already exist.
-pub fn save(home: &Path, creator_id: &str, doc: &SoulDocument) -> Result<(), MemoryError> {
-    validate_creator_id(creator_id)?;
-    let path = soul_path(home, creator_id);
+pub fn save(
+    home: &Path,
+    bearer: MemoryBearerRef<'_>,
+    doc: &SoulDocument,
+) -> Result<(), MemoryError> {
+    bearer.validate()?;
+    let path = soul_path(home, bearer);
     if !path.exists() {
         return Err(MemoryError::SoulNotFound {
-            creator_id: creator_id.to_string(),
+            creator_id: bearer.id().to_string(),
             path: path.display().to_string(),
         });
     }
@@ -112,9 +104,9 @@ pub fn save(home: &Path, creator_id: &str, doc: &SoulDocument) -> Result<(), Mem
 /// # Errors
 /// Returns `Err(MemoryError::...)` if validation fails.
 /// Validate an existing SOUL.md (check sections and return parsed doc).
-pub fn validate(home: &Path, creator_id: &str) -> Result<SoulDocument, MemoryError> {
-    validate_creator_id(creator_id)?;
-    let doc = load(home, creator_id)?;
+pub fn validate(home: &Path, bearer: MemoryBearerRef<'_>) -> Result<SoulDocument, MemoryError> {
+    bearer.validate()?;
+    let doc = load(home, bearer)?;
     doc.validate()?;
     Ok(doc)
 }
@@ -124,13 +116,13 @@ pub fn validate(home: &Path, creator_id: &str) -> Result<SoulDocument, MemoryErr
 ///
 /// # Errors
 /// Returns `Err(MemoryError::...)` if validation fails.
-/// Delete SOUL.md for a creator.
-pub fn delete(home: &Path, creator_id: &str) -> Result<(), MemoryError> {
-    validate_creator_id(creator_id)?;
-    let path = soul_path(home, creator_id);
+/// Delete SOUL.md for a bearer.
+pub fn delete(home: &Path, bearer: MemoryBearerRef<'_>) -> Result<(), MemoryError> {
+    bearer.validate()?;
+    let path = soul_path(home, bearer);
     if !path.exists() {
         return Err(MemoryError::SoulNotFound {
-            creator_id: creator_id.to_string(),
+            creator_id: bearer.id().to_string(),
             path: path.display().to_string(),
         });
     }
@@ -161,12 +153,12 @@ mod tests {
     fn create_load_roundtrip() {
         let home = fake_home();
         cleanup(&home);
-        let doc = create(&home, "ctr_test").unwrap();
+        let doc = create(&home, MemoryBearerRef::Creator("ctr_test")).unwrap();
         assert!(doc.personality.is_some());
         assert!(doc.experience.is_some());
-        assert!(exists(&home, "ctr_test"));
+        assert!(exists(&home, MemoryBearerRef::Creator("ctr_test")));
 
-        let loaded = load(&home, "ctr_test").unwrap();
+        let loaded = load(&home, MemoryBearerRef::Creator("ctr_test")).unwrap();
         assert_eq!(
             loaded.frontmatter.creator_id.as_deref().unwrap(),
             "ctr_test"
@@ -177,7 +169,7 @@ mod tests {
     #[test]
     fn load_not_found() {
         let home = fake_home();
-        let result = load(&home, "ctr_nonexistent");
+        let result = load(&home, MemoryBearerRef::Creator("ctr_nonexistent"));
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("not found"), "err: {err}");
@@ -188,8 +180,8 @@ mod tests {
     fn create_already_exists() {
         let home = fake_home();
         cleanup(&home);
-        create(&home, "ctr_dup").unwrap();
-        let result = create(&home, "ctr_dup");
+        create(&home, MemoryBearerRef::Creator("ctr_dup")).unwrap();
+        let result = create(&home, MemoryBearerRef::Creator("ctr_dup"));
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("already exists"), "err: {err}");
@@ -200,11 +192,11 @@ mod tests {
     fn save_update_and_reload() {
         let home = fake_home();
         cleanup(&home);
-        create(&home, "ctr_save").unwrap();
-        let mut doc = load(&home, "ctr_save").unwrap();
+        create(&home, MemoryBearerRef::Creator("ctr_save")).unwrap();
+        let mut doc = load(&home, MemoryBearerRef::Creator("ctr_save")).unwrap();
         doc.set_personality("Updated personality.".to_string());
-        save(&home, "ctr_save", &doc).unwrap();
-        let reloaded = load(&home, "ctr_save").unwrap();
+        save(&home, MemoryBearerRef::Creator("ctr_save"), &doc).unwrap();
+        let reloaded = load(&home, MemoryBearerRef::Creator("ctr_save")).unwrap();
         assert_eq!(
             reloaded.personality.as_deref().unwrap().trim(),
             "Updated personality."
@@ -216,8 +208,8 @@ mod tests {
     fn validate_ok() {
         let home = fake_home();
         cleanup(&home);
-        create(&home, "ctr_val").unwrap();
-        assert!(validate(&home, "ctr_val").is_ok());
+        create(&home, MemoryBearerRef::Creator("ctr_val")).unwrap();
+        assert!(validate(&home, MemoryBearerRef::Creator("ctr_val")).is_ok());
         cleanup(&home);
     }
 
@@ -226,7 +218,7 @@ mod tests {
     #[test]
     fn load_rejects_path_traversal() {
         let home = fake_home();
-        let result = load(&home, "../../etc/passwd");
+        let result = load(&home, MemoryBearerRef::Creator("../../etc/passwd"));
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("invalid ID format"), "err: {err}");
@@ -236,7 +228,7 @@ mod tests {
     fn create_rejects_path_traversal() {
         let home = fake_home();
         cleanup(&home);
-        let result = create(&home, "../../etc/passwd");
+        let result = create(&home, MemoryBearerRef::Creator("../../etc/passwd"));
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("invalid ID format"), "err: {err}");
@@ -246,11 +238,7 @@ mod tests {
     #[test]
     fn save_rejects_path_traversal() {
         let home = fake_home();
-        let result = save(
-            &home,
-            "../../../tmp/evil",
-            &SoulDocument::for_creator("ctr_legit"),
-        );
+        let result = save(&home, MemoryBearerRef::Creator("../../../tmp/evil"), &SoulDocument::for_creator("ctr_legit"));
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -261,7 +249,7 @@ mod tests {
     #[test]
     fn validate_rejects_path_traversal() {
         let home = fake_home();
-        let result = validate(&home, "ctr_.._escape");
+        let result = validate(&home, MemoryBearerRef::Creator("ctr_.._escape"));
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -272,7 +260,7 @@ mod tests {
     #[test]
     fn delete_rejects_path_traversal() {
         let home = fake_home();
-        let result = delete(&home, "ctr_../evil");
+        let result = delete(&home, MemoryBearerRef::Creator("ctr_../evil"));
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -283,7 +271,7 @@ mod tests {
     #[test]
     fn exists_returns_false_for_invalid_id() {
         let home = fake_home();
-        assert!(!exists(&home, "../../etc"));
-        assert!(!exists(&home, "ctr_../escape"));
+        assert!(!exists(&home, MemoryBearerRef::Creator("../../etc")));
+        assert!(!exists(&home, MemoryBearerRef::Creator("ctr_../escape")));
     }
 }

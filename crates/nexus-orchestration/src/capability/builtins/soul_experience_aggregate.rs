@@ -11,6 +11,7 @@
 
 use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
+use nexus_creator_memory::MemoryBearerRef;
 use serde_json::{json, Value};
 
 /// The `soul.experience.aggregate` capability.
@@ -90,7 +91,9 @@ impl Capability for SoulExperienceAggregate {
         // side-effect-free. The preset orchestrator or CLI is responsible for
         // writing the result to SOUL.md.
         let result = nexus_creator_memory::experience_aggregation::aggregate_experience_preview(
-            home, creator_id, None, // Deterministic path only — no LLM synthesizer
+            home,
+            MemoryBearerRef::Creator(creator_id),
+            None, // Deterministic path only — no LLM synthesizer
         )
         .await
         .map_err(|e| CapabilityError::Internal(format!("experience aggregation failed: {e}")))?;
