@@ -73,13 +73,29 @@ pub fn list_memories(
             MemoryError::ValidationError(format!("cannot read directory entry: {e}"))
         })?;
         let path = entry.path();
-        if path.is_file() {
-            if let Some(ext) = path.extension() {
-                if ext == "md" {
-                    if let Some(stem) = path.file_stem() {
-                        if let Some(name) = stem.to_str() {
-                            slugs.push(name.to_string());
-                        }
+        // Resolve the entry type with a result-bearing metadata operation that
+        // follows symlinks (matching the previous `Path::is_file()` semantics).
+        // A per-entry permission/I/O/metadata failure is propagated rather than
+        // silently dropping the file; an entry that vanished between `read_dir`
+        // and this stat is treated as ordinary absence (skipped), and a
+        // non-file entry (directory, FIFO, socket) remains excluded.
+        let metadata = match std::fs::metadata(&path) {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                return Err(MemoryError::ValidationError(format!(
+                    "cannot stat memory entry: {e}"
+                )));
+            }
+        };
+        if !metadata.is_file() {
+            continue;
+        }
+        if let Some(ext) = path.extension() {
+            if ext == "md" {
+                if let Some(stem) = path.file_stem() {
+                    if let Some(name) = stem.to_str() {
+                        slugs.push(name.to_string());
                     }
                 }
             }
@@ -331,6 +347,53 @@ mod tests {
         );
         let err = result.unwrap_err().to_string();
         assert!(err.contains("cannot read memory directory"), "err: {err}");
+        cleanup(&home);
+    }
+
+    #[test]
+    fn list_memories_excludes_non_file_entries() {
+        let home = fake_home();
+        cleanup(&home);
+        let mut mem = LongTermMemory::new("story_summary");
+        mem.set_body("Body.");
+        save_memory(&home, MemoryBearerRef::Creator("ctr_test"), "keep-me", &mem).unwrap();
+
+        // A directory named like a memory file and a non-md regular file must
+        // both be excluded; only the regular `.md` file is collected.
+        let dir = memory_dir(&home, MemoryBearerRef::Creator("ctr_test"));
+        std::fs::create_dir_all(dir.join("subdir.md")).unwrap();
+        std::fs::write(dir.join("note.txt"), "not a memory").unwrap();
+
+        let slugs = list_memories(&home, MemoryBearerRef::Creator("ctr_test")).unwrap();
+        assert_eq!(slugs, vec!["keep-me"]);
+        cleanup(&home);
+    }
+
+    #[test]
+    fn list_memories_propagates_per_entry_metadata_error() {
+        let home = fake_home();
+        cleanup(&home);
+        let dir = memory_dir(&home, MemoryBearerRef::Creator("ctr_test"));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // A self-loop symlink makes the following `fs::metadata` fail with a
+        // non-NotFound error (filesystem loop), which must propagate rather
+        // than silently drop the entry.
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("loop_self", dir.join("loop_self")).unwrap();
+
+        #[cfg(unix)]
+        {
+            let result = list_memories(&home, MemoryBearerRef::Creator("ctr_test"));
+            assert!(
+                result.is_err(),
+                "a per-entry metadata failure must propagate"
+            );
+            let err = result.unwrap_err().to_string();
+            assert!(err.contains("cannot stat memory entry"), "err: {err}");
+        }
+        #[cfg(not(unix))]
+        cleanup(&home);
         cleanup(&home);
     }
 
