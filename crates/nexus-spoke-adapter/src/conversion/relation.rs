@@ -2,7 +2,7 @@
 //!
 //! This is the **sole reverse-mapping seam** between the nexus-local-db
 //! `KbRelationshipRow` storage type and the spoke standard `Relation` wire
-//! type (analogous to [`super::world_kb_to_spoke`] for `WorldKbEntry`). The
+//! type (analogous to [`super::knowledge_record_to_spoke`] for `KnowledgeEntryRecord`). The
 //! production [`RelationPort`](crate::RelationPort) impl in
 //! `adapter/relation_port.rs` uses this same function for get / create-return
 //! / update-return, and V1.146 P3 T2's CLI pack exporter uses it to convert
@@ -16,7 +16,7 @@
 //!
 //! The nexus-local columns (`world_id`, `symmetric`, `confidence`,
 //! `source_anchor_ids`, `needs_review`, `source`) ride under the `nexus`
-//! namespace on the spoke type, consistent with the `WorldKbEntry` seam.
+//! namespace on the spoke type, consistent with the `KnowledgeEntryRecord` seam.
 //!
 //! V1.146 P5 T2: the `extensions_nexus_json` column preserves unknown
 //! `extensions.nexus` keys across the `SQLite` round-trip. On read, the JSON

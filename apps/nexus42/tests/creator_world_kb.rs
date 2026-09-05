@@ -166,7 +166,7 @@ async fn adopt_auto_promote() {
         .await
         .unwrap();
 
-    // One high-confidence candidate becomes a confirmed WorldKbEntry.
+    // One high-confidence candidate becomes a confirmed KnowledgeEntryRecord.
     let kb_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE world_id = ?")
         .bind(WORLD)
         .fetch_one(&pool)

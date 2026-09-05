@@ -11,6 +11,7 @@
 )]
 
 pub mod api;
+pub mod actor_knowledge_view;
 pub mod auth;
 pub mod auto_chronology;
 pub mod boot;

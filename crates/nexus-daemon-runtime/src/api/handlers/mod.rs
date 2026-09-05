@@ -43,6 +43,7 @@ pub(crate) fn raw_user_home(
 }
 
 pub mod acp;
+pub mod actor_knowledge;
 pub mod agent_host;
 pub mod chapters;
 pub mod characters;

@@ -292,3 +292,83 @@ async fn binding_list_human_and_json_paginate() {
         human2_out.lines().next().unwrap_or("")
     );
 }
+
+#[tokio::test]
+async fn knowledge_add_list_view_json_round_trip() {
+    let d = LiveDaemon::start().await;
+    activate_owner(&d).await;
+
+    let created = d
+        .cli(&[
+            "creator",
+            "character",
+            "create",
+            "--display-name",
+            "Ava",
+            "--world-id",
+            WORLD_A,
+            "--json",
+        ])
+        .await;
+    assert!(created.status.success(), "create: {}", stderr(&created));
+    let body: Value = serde_json::from_str(&stdout(&created)).unwrap();
+    let chr = body["character"]["character_id"].as_str().unwrap().to_string();
+    let bind = body["binding"]["binding_id"].as_str().unwrap().to_string();
+
+    let added = d
+        .cli(&[
+            "creator",
+            "character",
+            "knowledge",
+            "add",
+            "--owner",
+            "character",
+            "--character-id",
+            &chr,
+            "--block-type",
+            "item",
+            "--canonical-name",
+            "CharNote",
+            "--json",
+        ])
+        .await;
+    assert!(added.status.success(), "add: {}", stderr(&added));
+    let added_body: Value = serde_json::from_str(&stdout(&added)).unwrap();
+    assert_eq!(added_body["item"]["canonical_name"], "CharNote");
+
+    let listed = d
+        .cli(&[
+            "creator",
+            "character",
+            "knowledge",
+            "list",
+            "--character-id",
+            &chr,
+            "--json",
+        ])
+        .await;
+    assert!(listed.status.success(), "list: {}", stderr(&listed));
+    let list_body: Value = serde_json::from_str(&stdout(&listed)).unwrap();
+    assert_eq!(list_body["items"].as_array().unwrap().len(), 1);
+
+    let viewed = d
+        .cli(&[
+            "creator",
+            "character",
+            "knowledge",
+            "view",
+            "--actor",
+            "character",
+            "--character-id",
+            &chr,
+            "--world-id",
+            WORLD_A,
+            "--binding-id",
+            &bind,
+            "--json",
+        ])
+        .await;
+    assert!(viewed.status.success(), "view: {}", stderr(&viewed));
+    let view_body: Value = serde_json::from_str(&stdout(&viewed)).unwrap();
+    assert_eq!(view_body["items"][0]["canonical_name"], "CharNote");
+}

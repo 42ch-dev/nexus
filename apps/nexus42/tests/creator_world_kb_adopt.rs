@@ -78,7 +78,7 @@ async fn seed_llm_pending() -> (sqlx::SqlitePool, tempfile::TempDir, String) {
 
 /// `kb_adopt` accepts a candidate carrying LLM metadata (non-character
 /// `block_type` + confidence + `source_quote`), promotes it to a `confirmed`
-/// `WorldKbEntry`, and leaves the LLM columns intact on the promotion row.
+/// `KnowledgeEntryRecord`, and leaves the LLM columns intact on the promotion row.
 #[tokio::test]
 async fn adopt_succeeds_on_llm_extracted_candidate() {
     let (pool, _dir, job_id) = seed_llm_pending().await;
@@ -98,13 +98,13 @@ async fn adopt_succeeds_on_llm_extracted_candidate() {
         Some("...the eastern gate groaned open...")
     );
 
-    // A confirmed WorldKbEntry exists with the LLM-judged block_type.
+    // A confirmed KnowledgeEntryRecord exists with the LLM-judged block_type.
     let store = SqliteKbStore::new(pool.clone());
     let blocks = store.list_by_world(WORLD).await.unwrap();
     let adopted = blocks
         .iter()
         .find(|b| b.canonical_name == "Azure Gate")
-        .unwrap_or_else(|| panic!("no WorldKbEntry for Azure Gate: {blocks:?}"));
+        .unwrap_or_else(|| panic!("no KnowledgeEntryRecord for Azure Gate: {blocks:?}"));
     assert_eq!(adopted.status, "confirmed");
     assert_eq!(
         adopted.block_type,

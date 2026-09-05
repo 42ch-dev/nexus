@@ -326,6 +326,18 @@ async fn remove_binding_tx(
         });
     }
 
+    let owned: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM kb_key_blocks WHERE owner_kind = 'actor_world_binding' AND actor_world_binding_id = ?",
+    )
+    .bind(binding_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    if owned > 0 {
+        return Err(LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::BindingHasOwnedKnowledge,
+        });
+    }
+
     let deleted = sqlx::query!(
         r#"DELETE FROM actor_world_bindings WHERE binding_id = ? AND character_id = ? AND status = 'active'"#,
         binding_id,

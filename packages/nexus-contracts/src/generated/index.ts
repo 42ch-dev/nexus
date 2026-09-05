@@ -5,6 +5,7 @@
  */
 
 export * from './common';
+export * from './daemon-api/actor-knowledge';
 export * from './daemon-api/agent-host';
 export * from './daemon-api/canvas/outline';
 export * from './daemon-api/canvas/strategy';
@@ -37,6 +38,13 @@ export * from './platform/sync';
 // Schema version constants
 export const SCHEMA_VERSIONS: Record<string, number> = {
   VersionRef: 1,
+  AddKnowledgeEntryRequest: 1,
+  AddKnowledgeEntryResponse: 1,
+  KnowledgeViewItem: 1,
+  ListCharacterKnowledgeQuery: 1,
+  ListCharacterKnowledgeResponse: 1,
+  ViewRequest: 1,
+  ViewResponse: 1,
   AgentScanEntry: 1,
   ScanRequest: 1,
   ScanResponse: 1,
@@ -233,6 +241,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   Character: 1,
   Creator: 1,
   ForkBranch: 1,
+  KnowledgeOwnerRef: 1,
   Memory: 1,
   Pairing: 1,
   StoryManifest: 1,

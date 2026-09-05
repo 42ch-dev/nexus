@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT block_type, body_json, world_id FROM kb_key_blocks WHERE key_block_id = ?",
+  "query": "SELECT block_type, body_json, world_id AS \"world_id!\" FROM kb_key_blocks WHERE key_block_id = ?",
   "describe": {
     "columns": [
       {
@@ -14,7 +14,7 @@
         "type_info": "Text"
       },
       {
-        "name": "world_id",
+        "name": "world_id!",
         "ordinal": 2,
         "type_info": "Text"
       }
@@ -28,5 +28,5 @@
       false
     ]
   },
-  "hash": "f659c495e0461d11cfa4e8e11e8c94649daf8ca2da99ccc65c9e3b0d6a7e95e4"
+  "hash": "c188565af5cffd416ab555508268bb8732454f20c143641574a1c67cff9ebddf"
 }

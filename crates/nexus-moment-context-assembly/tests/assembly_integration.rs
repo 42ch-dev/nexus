@@ -87,7 +87,7 @@ fn seed_event(
 /// Seed a KB key block.
 async fn seed_kb_block(stores: &FixtureStores, world_id: &str, block_type: BlockType, name: &str) {
     let kb =
-        nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(world_id, block_type, name);
+        nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(world_id, block_type, name);
     stores
         .kb
         .insert_knowledge_entry(kb)

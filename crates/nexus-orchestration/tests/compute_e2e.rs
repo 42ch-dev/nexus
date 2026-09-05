@@ -22,7 +22,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use nexus_contracts::BlockType;
-use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef};
 use nexus_knowledge::world_kb::{KbQuery, KbStore};
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::{narrative_write, open_pool, run_migrations};
@@ -72,7 +72,7 @@ async fn seed_world(pool: &sqlx::SqlitePool, owner: &str, world_id: &str) {
         .unwrap();
 }
 
-/// Seed a computable character `WorldKbEntry` with the given combat attributes.
+/// Seed a computable character `KnowledgeEntryRecord` with the given combat attributes.
 async fn seed_character(
     pool: &sqlx::SqlitePool,
     world_id: &str,
@@ -81,12 +81,12 @@ async fn seed_character(
     base_def: i64,
     current_hp: i64,
     max_hp: i64,
-) -> WorldKbEntry {
-    let kb = WorldKbEntry {
-        world_id: world_id.to_string(),
+) -> KnowledgeEntryRecord {
+    let kb = KnowledgeEntryRecord {
+        owner: KnowledgeOwnerRef::world(world_id),
         block_type: BlockType::Character,
         canonical_name: name.to_string(),
-        body: Some(WorldKbBody {
+        body: Some(KnowledgeEntryBody {
             summary: Some(format!("{name} combatant")),
             attributes: Some(json!({
                 "max_hp": max_hp,
@@ -103,7 +103,7 @@ async fn seed_character(
             })),
             ..Default::default()
         }),
-        ..WorldKbEntry::new(world_id, BlockType::Character, name)
+        ..KnowledgeEntryRecord::new(world_id, BlockType::Character, name)
     };
     let kb_store = SqliteKbStore::new(pool.clone());
     kb_store.insert_knowledge_entry(kb.clone()).await.unwrap();

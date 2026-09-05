@@ -29,7 +29,7 @@ use crate::slots::{self, SlotMapEntry};
 use crate::stage0::{Stage0Assembly, STAGE0_PERSONALITY_END, STAGE0_PERSONALITY_START};
 use crate::world_context::WorldKbQueryBuilder;
 use nexus_contracts::BlockType;
-use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
+use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_knowledge::KnowledgeStore;
 use nexus_narrative::NarrativeGateway;
@@ -852,7 +852,7 @@ async fn apply_directive<D: DirectiveStore>(
 /// map reflects what actually rendered, not what activation matched — plus
 /// the DF-79 hygiene trace (per-entry applied/skipped/notes).
 fn render_gated_slots(
-    entries: Vec<WorldKbEntry>,
+    entries: Vec<KnowledgeEntryRecord>,
     stage: Option<GenerationStage>,
 ) -> (
     Option<String>,
@@ -899,7 +899,7 @@ async fn fetch_world_kb_entries<K: KbStore>(
     kb_store: &K,
     world_id: &str,
     request: &MomentRequest,
-) -> Result<Vec<WorldKbEntry>, nexus_knowledge::world_kb::KbStoreError> {
+) -> Result<Vec<KnowledgeEntryRecord>, nexus_knowledge::world_kb::KbStoreError> {
     let builder = WorldKbQueryBuilder::new(world_id);
     let mut query = builder.query_all();
     if let Some(limit) = request.kb_limit {
@@ -1124,7 +1124,7 @@ mod tests {
         stores.narrative.insert_event(event);
 
         // Set up KB
-        let kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+        let kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
             "Hero",
@@ -1334,7 +1334,7 @@ mod tests {
     async fn directive_injects_into_reserved_slot_with_lifecycle() {
         let stores = TestStores::new();
         seed_world_and_timeline(&stores).await;
-        let kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+        let kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
             "Hero",
@@ -1394,7 +1394,7 @@ mod tests {
     async fn directive_depth_positions_section_within_region() {
         let stores = TestStores::new();
         seed_world_and_timeline(&stores).await;
-        let kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+        let kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
             "Hero",
@@ -1563,12 +1563,12 @@ mod tests {
         let stores = TestStores::new();
 
         // Seed two KB blocks
-        let kb1 = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+        let kb1 = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
             "Hero",
         );
-        let kb2 = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+        let kb2 = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
             "wld_1",
             nexus_contracts::BlockType::Scene,
             "Castle",
@@ -1606,12 +1606,12 @@ mod tests {
     async fn kb_query_respects_text_search() {
         let stores = TestStores::new();
 
-        let kb1 = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+        let kb1 = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
             "Hero",
         );
-        let kb2 = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+        let kb2 = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
             "wld_1",
             nexus_contracts::BlockType::Scene,
             "Castle",
@@ -1651,7 +1651,7 @@ mod tests {
         stores.narrative.insert_world(world);
 
         // Set up KB
-        let kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+        let kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
             "Hero with a long description",
@@ -1839,15 +1839,15 @@ mod tests {
 
     // ── V1.146 P4 T2: activation flag tests ────────────────────────
 
-    /// Helper: create a `WorldKbEntry` with optional `modules.activation` JSON.
+    /// Helper: create a `KnowledgeEntryRecord` with optional `modules.activation` JSON.
     fn kb_entry_with_modules(
         world_id: &str,
         block_type: nexus_contracts::BlockType,
         name: &str,
         entry_id: &str,
         modules: Option<serde_json::Value>,
-    ) -> WorldKbEntry {
-        let mut entry = WorldKbEntry::new(world_id, block_type, name);
+    ) -> KnowledgeEntryRecord {
+        let mut entry = KnowledgeEntryRecord::new(world_id, block_type, name);
         entry.entry_id = entry_id.to_string();
         entry.modules = modules;
         entry
@@ -2059,9 +2059,9 @@ mod tests {
         // The transform applies to the emitted `body.summary` text; the
         // stored World-KB body stays byte-identical (read-path invariant).
         let stores = TestStores::new();
-        let mut kb = WorldKbEntry::new("wld_1", nexus_contracts::BlockType::Character, "Hero");
+        let mut kb = KnowledgeEntryRecord::new("wld_1", nexus_contracts::BlockType::Character, "Hero");
         kb.entry_id = "kb_hygiene".to_string();
-        kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::WorldKbBody {
+        kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
             summary: Some("The hero fights the dragon".to_string()),
             attributes: Some(serde_json::json!({
                 "hygiene": [{ "pattern": "dragon", "replacement": "wyrm" }]
@@ -2114,9 +2114,9 @@ mod tests {
         // block (byte-identical to the no-hygiene path).
         let stores = TestStores::new();
         for (id, name) in [("kb_a", "Hero"), ("kb_b", "Castle")] {
-            let mut kb = WorldKbEntry::new("wld_1", nexus_contracts::BlockType::Character, name);
+            let mut kb = KnowledgeEntryRecord::new("wld_1", nexus_contracts::BlockType::Character, name);
             kb.entry_id = id.to_string();
-            kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::WorldKbBody {
+            kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
                 summary: Some(format!("{name} summary")),
                 ..Default::default()
             });
@@ -2138,13 +2138,13 @@ mod tests {
     #[tokio::test]
     async fn hygiene_carrier_survives_edit_patch_round_trip() {
         // Simulates `creator world kb edit --body`: JSON round-trip through
-        // `WorldKbBody` + `update_knowledge_entry` (the kb_edit code path).
+        // `KnowledgeEntryBody` + `update_knowledge_entry` (the kb_edit code path).
         // The `attributes.hygiene` carrier must survive the store round-trip
         // and drive the emission transform.
         let stores = TestStores::new();
-        let mut kb = WorldKbEntry::new("wld_1", nexus_contracts::BlockType::Character, "Hero");
+        let mut kb = KnowledgeEntryRecord::new("wld_1", nexus_contracts::BlockType::Character, "Hero");
         kb.entry_id = "kb_hygiene".to_string();
-        kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::WorldKbBody {
+        kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
             summary: Some("The hero fights the dragon".to_string()),
             ..Default::default()
         });
@@ -2153,7 +2153,7 @@ mod tests {
         stores.kb.insert_knowledge_entry(kb).await.unwrap();
 
         // Author patches the body with a hygiene carrier (kb_edit flow).
-        let patched: nexus_knowledge::world_kb::knowledge_entry::WorldKbBody =
+        let patched: nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody =
             serde_json::from_str(
                 r#"{"summary":"The hero fights the dragon","attributes":{"hygiene":[{"pattern":"dragon","replacement":"wyrm"}]}}"#,
             )

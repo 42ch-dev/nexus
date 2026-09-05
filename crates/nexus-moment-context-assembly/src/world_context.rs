@@ -14,7 +14,7 @@
 //!
 //! Legacy V1.39 worldless Works (`world_id == None`) receive no block.
 
-// Spec terminology (canonical_name, novel_category, WorldKbEntry, etc.) triggers doc_markdown.
+// Spec terminology (canonical_name, novel_category, KnowledgeEntryRecord, etc.) triggers doc_markdown.
 #![allow(clippy::doc_markdown)]
 
 use nexus_contracts::BlockType;
@@ -191,12 +191,12 @@ impl<'a> WorldKbQueryBuilder<'a> {
     }
 }
 
-/// Extract `novel_category` from a WorldKbEntry's body attributes.
+/// Extract `novel_category` from a KnowledgeEntryRecord's body attributes.
 ///
 /// Returns `None` if the body or attributes are missing, or if `novel_category`
 /// is not a string.
 fn extract_novel_category(
-    kb: &nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry,
+    kb: &nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord,
 ) -> Option<String> {
     kb.body
         .as_ref()
@@ -206,8 +206,8 @@ fn extract_novel_category(
         .map(std::string::ToString::to_string)
 }
 
-/// Convert a WorldKbEntry to a WorldContextItem.
-fn kb_to_item(kb: nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry) -> WorldContextItem {
+/// Convert a KnowledgeEntryRecord to a WorldContextItem.
+fn kb_to_item(kb: nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord) -> WorldContextItem {
     let descriptor = kb
         .body
         .as_ref()
@@ -444,19 +444,19 @@ fn apply_token_budget(block: &mut WorldContextBlock, max_chars: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_knowledge::world_kb::knowledge_entry::WorldKbBody;
+    use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody;
 
-    /// Helper: create a novel-profile WorldKbEntry.
+    /// Helper: create a novel-profile KnowledgeEntryRecord.
     fn make_novel_block(
         world_id: &str,
         block_type: BlockType,
         name: &str,
         novel_category: &str,
-    ) -> nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry {
-        let mut kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+    ) -> nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord {
+        let mut kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
             world_id, block_type, name,
         );
-        kb.set_body(WorldKbBody {
+        kb.set_body(KnowledgeEntryBody {
             summary: Some(format!("{novel_category}: {name} summary")),
             attributes: Some(serde_json::json!({
                 "novel_category": novel_category,
@@ -752,12 +752,12 @@ mod tests {
 
         // Create many characters with long summaries
         for i in 0..20 {
-            let mut kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+            let mut kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
                 "wld_1",
                 BlockType::Character,
                 &format!("char_{i:02}"),
             );
-            kb.set_body(WorldKbBody {
+            kb.set_body(KnowledgeEntryBody {
                 summary: Some(format!(
                     "Character {i} with a very long descriptor that takes up space"
                 )),

@@ -1,6 +1,6 @@
 //! `SourceAnchor` value object — domain logic wrapper around contract `SourceAnchor`.
 //!
-//! `SourceAnchor` is NOT an aggregate; it's a value object embedded in `WorldKbEntry`, Delta, etc.
+//! `SourceAnchor` is NOT an aggregate; it's a value object embedded in `KnowledgeEntryRecord`, Delta, etc.
 //! See data-model-v1.md §6.1.
 
 use crate::world_kb::errors::KbError;

@@ -5,7 +5,7 @@
 
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::extract_finalize::{finalize_extract, ExtractFinalizeInput};
-use nexus_knowledge::world_kb::knowledge_entry::WorldKbBody;
+use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeOwnerRef};
 use nexus_knowledge::world_kb::source_anchor::SourceAnchor;
 use nexus_knowledge::world_kb::store::InMemoryKbStore;
 use nexus_knowledge::world_kb::validation::ValidationMode;
@@ -66,7 +66,7 @@ async fn test_persist_extract_chapter_block_e2e() {
 
     // Step 3: Simulate the extract finalize step (what kb.extract_work does).
     let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
-    let body = WorldKbBody {
+    let body = KnowledgeEntryBody {
         summary: Some("Lin Xia is a brave warrior from the Neon City".to_string()),
         attributes: Some(serde_json::json!({
             "novel_category": "character",
@@ -89,7 +89,7 @@ async fn test_persist_extract_chapter_block_e2e() {
 
     let result = finalize_extract(&store, input).await.unwrap();
     assert!(result.entry_id.starts_with("kb_"));
-    assert_eq!(result.world_id, world_id);
+    assert_eq!(result.owner, KnowledgeOwnerRef::world(world_id));
 
     // Step 4: Verify the KB block is queryable via the store.
     let blocks = store.list_by_world(world_id).await.unwrap();
@@ -110,7 +110,7 @@ async fn test_worldless_work_skips_world_promotion() {
     // in Generic mode; a dedicated test for truly empty/absent world_id is deferred.
 
     let store = InMemoryKbStore::new();
-    let body = WorldKbBody {
+    let body = KnowledgeEntryBody {
         summary: Some("A generic knowledge item".to_string()),
         attributes: None,
         tags: None,
@@ -185,7 +185,7 @@ async fn test_extract_idempotent_job() {
 #[tokio::test]
 async fn test_extract_novel_requires_novel_category() {
     let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
-    let body = WorldKbBody {
+    let body = KnowledgeEntryBody {
         summary: Some("Test".to_string()),
         attributes: Some(serde_json::json!({})), // missing novel_category
         tags: None,

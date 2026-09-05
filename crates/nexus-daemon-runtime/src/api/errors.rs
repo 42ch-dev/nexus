@@ -705,6 +705,7 @@ mod tests {
             ActorContractConflict::DuplicateActiveBinding,
             ActorContractConflict::InvalidWorldSheet,
             ActorContractConflict::WorldHasActorBindings,
+            ActorContractConflict::BindingHasOwnedKnowledge,
         ];
         for code in cases {
             let err = NexusApiError::from(nexus_local_db::LocalDbError::ActorContractConflict {
