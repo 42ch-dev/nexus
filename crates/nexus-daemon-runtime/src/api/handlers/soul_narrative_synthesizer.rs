@@ -31,24 +31,30 @@ impl AcpSoulNarrativeSynthesizer {
 
     /// Build the synthesis prompt from the capped input signal.
     ///
+    /// `subject` is `"creator"` or `"character"`; for a Character bearer the
+    /// prompt reflects that Character's own identity (never the owner
+    /// Creator's), while the worker is still routed by the owner Creator's id.
+    ///
     /// The prompt instructs the LLM to produce a reflective narrative with:
     /// 1. **Specificity** — references at least two distinct theme keywords.
     /// 2. **Temporality** — references at least one shift or development over time.
     /// 3. **Actionable tone** — ends with a forward-looking reflection or question.
-    fn build_prompt(input: &SoulNarrativeSynthesisInput) -> String {
+    fn build_prompt(input: &SoulNarrativeSynthesisInput, subject: &str) -> String {
         use std::fmt::Write;
 
         let mut prompt = String::new();
 
         // Header
-        prompt.push_str(
-            "You are a reflective creative-writing mentor synthesizing a Creator-SOUL narrative.\n\n",
-        );
-        prompt.push_str("The creator has accumulated the following creative fragments. ");
-        prompt.push_str(
+        prompt.push_str(&format!(
+            "You are a reflective creative-writing mentor synthesizing a {subject}-SOUL narrative.\n\n"
+        ));
+        prompt.push_str(&format!(
+            "The {subject} has accumulated the following creative fragments. "
+        ));
+        prompt.push_str(&format!(
             "Synthesize a coherent, reflective narrative of their creative identity — \
-             who they are becoming as a writer. The narrative must:\n",
-        );
+             who they are becoming as a {subject}. The narrative must:\n",
+        ));
         prompt.push_str("1. Reference at least two distinct theme keywords from their work.\n");
         prompt.push_str("2. Reference at least one shift or development over time.\n");
         prompt.push_str("3. End with a forward-looking reflection or question.\n\n");
@@ -118,7 +124,16 @@ impl SoulNarrativeSynthesizer for AcpSoulNarrativeSynthesizer {
         bearer: MemoryBearerRef<'_>,
         input: SoulNarrativeSynthesisInput,
     ) -> Result<SoulNarrativeDraft, MemoryError> {
-        let creator_id = bearer.id();
+        // Worker routing identity: the owner Creator whose ACP worker is
+        // registered. For a Character bearer this is `owner_creator_id`, NOT
+        // the `chr_…` storage id (which would resolve to no worker or the
+        // wrong worker). The Character identity is preserved as trusted
+        // context.
+        let identity = bearer.identity();
+        let (subject, character_id) = match identity.character_id {
+            Some(chr) => ("character", Some(chr)),
+            None => ("creator", None),
+        };
         let cap =
             self.registry
                 .get("acp.prompt")
@@ -126,15 +141,20 @@ impl SoulNarrativeSynthesizer for AcpSoulNarrativeSynthesizer {
                     capability: "acp.prompt".to_string(),
                 })?;
 
-        let prompt = Self::build_prompt(&input);
+        let prompt = Self::build_prompt(&input, subject);
+
+        let mut payload = json!({
+            "prompt": prompt,
+            "tool_policy": "deny_all",
+            "_creator_id": identity.creator_id,
+            "_session_id": "soul_narrative_reflect"
+        });
+        if let Some(chr) = character_id {
+            payload["_character_id"] = json!(chr);
+        }
 
         let result = cap
-            .run(json!({
-                "prompt": prompt,
-                "tool_policy": "deny_all",
-                "_creator_id": creator_id,
-                "_session_id": "soul_narrative_reflect"
-            }))
+            .run(payload)
             .await
             .map_err(|e| match e {
                 CapabilityError::WorkerUnavailable => MemoryError::WorkerUnavailable,
@@ -186,7 +206,7 @@ mod tests {
 
     #[test]
     fn build_prompt_includes_all_sections() {
-        let prompt = AcpSoulNarrativeSynthesizer::build_prompt(&sample_input());
+        let prompt = AcpSoulNarrativeSynthesizer::build_prompt(&sample_input(), "creator");
         assert!(prompt.contains("Total fragments: 15"));
         assert!(prompt.contains("Distinct keywords: 25"));
         assert!(prompt.contains("historical fiction (12)"));
@@ -198,5 +218,40 @@ mod tests {
         assert!(prompt.contains("theme keywords"));
         assert!(prompt.contains("shift or development"));
         assert!(prompt.contains("forward-looking"));
+    }
+
+    #[test]
+    fn build_prompt_is_subject_aware() {
+        let creator = AcpSoulNarrativeSynthesizer::build_prompt(&sample_input(), "creator");
+        assert!(creator.contains("Creator-SOUL narrative"));
+        assert!(creator.contains("who they are becoming as a creator"));
+
+        let character = AcpSoulNarrativeSynthesizer::build_prompt(&sample_input(), "character");
+        assert!(character.contains("character-SOUL narrative"));
+        assert!(character.contains("who they are becoming as a character"));
+        // A character prompt must never ask about "this creator is becoming".
+        assert!(!character.contains("who they are becoming as a writer"));
+    }
+
+    /// A Character bearer's synthesis is routed by its owner Creator id
+    /// (worker lookup) while the Character storage identity is preserved and
+    /// never substituted into the worker routing slot.
+    #[test]
+    fn character_synthesis_identity_routes_by_owner_not_character() {
+        let owner = "ctr_0123456789abcdef0123456789abcdef";
+        let chr = "chr_0123456789abcdef0123456789abcdef";
+        let bearer = MemoryBearerRef::Character {
+            owner_creator_id: owner,
+            character_id: chr,
+        };
+        let ident = bearer.identity();
+        assert_eq!(ident.creator_id, owner, "ACP worker routed by owner Creator");
+        assert_eq!(ident.character_id, Some(chr));
+
+        // Creator arm routes by itself and has no Character identity.
+        let bearer = MemoryBearerRef::Creator(owner);
+        let ident = bearer.identity();
+        assert_eq!(ident.creator_id, owner);
+        assert_eq!(ident.character_id, None);
     }
 }

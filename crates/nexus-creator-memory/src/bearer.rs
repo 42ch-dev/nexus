@@ -110,14 +110,23 @@ impl MemoryBearerRef<'_> {
     ///
     /// # Panics (defense-in-depth)
     ///
-    /// Same contract as [`Self::soul_path`].
+    /// Both id components are path-safety-asserted at the builder boundary —
+    /// the Creator id is run through the home-layout validator (rejecting
+    /// `/`, `\`, `..`, control chars) and the Character id through the
+    /// Character home-layout helper — so a direct caller cannot obtain a path
+    /// outside the intended bearer root.
     #[must_use]
     pub fn long_term_memory_dir(&self, home: &Path) -> PathBuf {
         match *self {
-            Self::Creator(creator_id) => nexus_home_layout::nexus_root_from_home(home)
-                .join("creators")
-                .join(creator_id)
-                .join(MEMORY_SUBDIR),
+            Self::Creator(creator_id) => {
+                if let Err(msg) = nexus_home_layout::validate_creator_id_safe(creator_id) {
+                    panic!("{msg}");
+                }
+                nexus_home_layout::nexus_root_from_home(home)
+                    .join("creators")
+                    .join(creator_id)
+                    .join(MEMORY_SUBDIR)
+            }
             Self::Character {
                 owner_creator_id,
                 character_id,
@@ -133,12 +142,51 @@ impl MemoryBearerRef<'_> {
     ///
     /// # Panics (defense-in-depth)
     ///
-    /// Same contract as [`Self::soul_path`]; slug safety is enforced by
-    /// `memory_io` (`slug_is_safe`) before any I/O.
+    /// The slug is validated with [`crate::long_term_memory::slug_is_safe`] at
+    /// the builder boundary (rejecting `..`, `/`, `\`, empty, and control
+    /// chars) so a direct caller cannot construct a traversal-form slug path.
     #[must_use]
     pub fn long_term_memory_path(&self, home: &Path, slug: &str) -> PathBuf {
+        assert!(
+            crate::long_term_memory::slug_is_safe(slug),
+            "slug '{slug}' is not path-safe (rejected: contains '..', '/', '\\', control characters, or is empty)"
+        );
         self.long_term_memory_dir(home).join(format!("{slug}.md"))
     }
+
+    /// Resolve the ACP worker identity for this bearer.
+    ///
+    /// The `creator_id` is the Creator that owns a registered worker (== the
+    /// bearer id for the Creator arm; the Character's `owner_creator_id` for
+    /// the Character arm, so a Character reflection is routed by its owner
+    /// Creator, never by its `chr_…` storage id). `character_id` is `Some`
+    /// only for a Character bearer and preserves the storage/bearer identity.
+    #[must_use]
+    pub fn identity(&self) -> BearerIdentity<'_> {
+        match *self {
+            Self::Creator(creator_id) => BearerIdentity {
+                creator_id,
+                character_id: None,
+            },
+            Self::Character {
+                owner_creator_id,
+                character_id,
+            } => BearerIdentity {
+                creator_id: owner_creator_id,
+                character_id: Some(character_id),
+            },
+        }
+    }
+}
+
+/// The ACP worker identity of a bearer: the owner Creator that routes to the
+/// worker registry plus the optional Character being reflected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BearerIdentity<'a> {
+    /// Owner Creator id used for ACP worker routing (`registry.get`).
+    pub creator_id: &'a str,
+    /// Character id when the bearer is a Character; `None` for the Creator arm.
+    pub character_id: Option<&'a str>,
 }
 
 /// Validate that a Creator id is safe to use in filesystem paths.
@@ -154,5 +202,89 @@ fn validate_creator_id(creator_id: &str) -> Result<(), MemoryError> {
         Err(MemoryError::InvalidIdFormat(format!(
             "creator_id '{creator_id}' is not a valid CreatorId (must match ^ctr_[a-zA-Z0-9]+$ and contain no path separators or control characters)"
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn creator_path_builder_rejects_traversal_id() {
+        let home = PathBuf::from("/h");
+        for bad in ["../ctr_x", "ctr_a/b", "ctr_a\\b", "ctr_\u{7}bell"] {
+            let r = std::panic::catch_unwind(|| {
+                MemoryBearerRef::Creator(bad).long_term_memory_dir(&home);
+            });
+            assert!(r.is_err(), "creator id {bad:?} must be rejected");
+        }
+    }
+
+    #[test]
+    fn character_path_builder_rejects_traversal_ids() {
+        let home = PathBuf::from("/h");
+        let owner = "ctr_ownerx";
+        for bad_chr in ["chr_../escape", "chr_a/b", "chr_a\\b", ""] {
+            let r = std::panic::catch_unwind(|| {
+                MemoryBearerRef::Character {
+                    owner_creator_id: owner,
+                    character_id: bad_chr,
+                }
+                .long_term_memory_dir(&home);
+            });
+            assert!(r.is_err(), "character id {bad_chr:?} must be rejected");
+        }
+        for bad_owner in ["../ctr_x", "ctr_a/b", "ctr_.."] {
+            let r = std::panic::catch_unwind(|| {
+                MemoryBearerRef::Character {
+                    owner_creator_id: bad_owner,
+                    character_id: "chr_0123456789abcdef0123456789abcdef",
+                }
+                .long_term_memory_dir(&home);
+            });
+            assert!(r.is_err(), "owner id {bad_owner:?} must be rejected");
+        }
+    }
+
+    #[test]
+    fn memory_path_builder_rejects_unsafe_slug() {
+        let home = PathBuf::from("/h");
+        let bearer = MemoryBearerRef::Creator("ctr_x");
+        for bad in ["../etc", "a/b", "a\\b", "..", "", "with\u{0}null"] {
+            let r = std::panic::catch_unwind(|| {
+                bearer.long_term_memory_path(&home, bad);
+            });
+            assert!(r.is_err(), "slug {bad:?} must be rejected");
+        }
+    }
+
+    #[test]
+    fn memory_path_builder_keeps_safe_slugs() {
+        let home = PathBuf::from("/h");
+        let bearer = MemoryBearerRef::Creator("ctr_x");
+        assert_eq!(
+            bearer.long_term_memory_path(&home, "some-slug"),
+            PathBuf::from("/h/.nexus42/creators/ctr_x/memory/long-term/some-slug.md")
+        );
+    }
+
+    #[test]
+    fn identity_routes_creator_by_self_and_character_by_owner() {
+        let cb = MemoryBearerRef::Creator("ctr_ownerx");
+        let ident = cb.identity();
+        assert_eq!(ident.creator_id, "ctr_ownerx");
+        assert_eq!(ident.character_id, None);
+
+        let hb = MemoryBearerRef::Character {
+            owner_creator_id: "ctr_ownerx",
+            character_id: "chr_0123456789abcdef0123456789abcdef",
+        };
+        let ident = hb.identity();
+        assert_eq!(ident.creator_id, "ctr_ownerx", "routed by owner Creator");
+        assert_eq!(
+            ident.character_id,
+            Some("chr_0123456789abcdef0123456789abcdef"),
+            "storage identity preserved"
+        );
     }
 }

@@ -628,7 +628,8 @@ pub fn check_session_already_promoted(
 /// // let home = PathBuf::from("/tmp/test_home");
 /// // let input = PendingReviewInput { ... };
 /// // let summarizer = MockSummarizer;
-/// // let memory = promote_to_long_term(&home, "ctr_test", &input, &summarizer).await.unwrap();
+/// // let bearer = MemoryBearerRef::Creator("ctr_test");
+/// // let memory = promote_to_long_term(&home, bearer, &input, &summarizer).await.unwrap();
 /// ```
 pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
     home: &Path,

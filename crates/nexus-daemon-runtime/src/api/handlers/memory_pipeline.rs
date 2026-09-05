@@ -26,16 +26,26 @@ use std::path::Path;
 
 /// A bearer plus its scope provenance for one pipeline run.
 ///
+/// This is an **authorization capability**, not a passive data bag: the
+/// fields are private and the only ways to build one are [`Self::creator`]
+/// (the trusted operator's own Creator arm, already authorized by the handler
+/// auth gate) and [`Self::character`] (which verifies format, ownership, and
+/// the ACTIVE lifecycle before the context is returned). Because the fields
+/// are private, a caller cannot fabricate a Character context without passing
+/// the async authorization check, so every Character pipeline entrypoint is
+/// sealed behind owner/active-character validation.
+///
 /// `scope_id` is the Creator arm's world id or the Character arm's binding
 /// id; `None` = whole Creator / shared Character.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct BearerPipelineCtx<'a> {
-    pub bearer: MemoryBearerRef<'a>,
-    pub scope_id: Option<&'a str>,
+    bearer: MemoryBearerRef<'a>,
+    scope_id: Option<&'a str>,
 }
 
 impl<'a> BearerPipelineCtx<'a> {
-    /// Build a Creator-arm context.
+    /// Build a Creator-arm context (trusted operator; handler already
+    /// authorized the active Creator from config).
     pub(crate) const fn creator(creator_id: &'a str, scope_id: Option<&'a str>) -> Self {
         Self {
             bearer: MemoryBearerRef::Creator(creator_id),
@@ -43,14 +53,17 @@ impl<'a> BearerPipelineCtx<'a> {
         }
     }
 
-    /// Build a Character-arm context, validating format and actor ownership
-    /// **before** any DB read, file write, or synthesis. Rejects foreign or
-    /// non-existent Characters (fail-closed; never falls back to the
-    /// Creator's data).
+    /// Build a Character-arm context, validating format, ownership, and the
+    /// active lifecycle **before** any DB read, file write, or synthesis.
     ///
-    /// Consumed by the Task 3 generated Character handlers and the in-crate
-    /// dual-bearer semantic suite; the public Creator handlers use the
-    /// Creator arm and never construct a Character context directly.
+    /// Rejects foreign, non-existent, and inactive/archived Characters
+    /// (fail-closed; never falls back to the Creator's data). Because the
+    /// context fields are private, this is the only way to obtain a
+    /// Character context inside the crate, so mutating entrypoints cannot be
+    /// invoked without a validated, authorized context.
+    ///
+    /// Consumed by the Task 3 generated Character handlers and the dual-bearer
+    /// semantic suite; the public Creator handlers use the Creator arm.
     #[allow(dead_code)]
     pub(crate) async fn character(
         pool: &SqlitePool,
@@ -69,13 +82,20 @@ impl<'a> BearerPipelineCtx<'a> {
         let owned = nexus_local_db::get_character(pool, owner_creator_id, character_id)
             .await
             .map_err(map_local_db_error)?;
-        if owned.is_none() {
-            return Err(NexusApiError::Forbidden {
+        match owned {
+            None => Err(NexusApiError::Forbidden {
                 resource: "character_memory".into(),
                 reason: format!("character '{character_id}' is not owned by creator '{owner_creator_id}'"),
-            });
+            }),
+            Some(c) if c.status != "active" => Err(NexusApiError::Forbidden {
+                resource: "character_memory".into(),
+                reason: format!(
+                    "character '{character_id}' is not active (status '{}'); only active Characters may enter the memory pipeline",
+                    c.status
+                ),
+            }),
+            Some(_) => Ok(Self { bearer, scope_id }),
         }
-        Ok(Self { bearer, scope_id })
     }
 }
 
@@ -947,7 +967,6 @@ mod tests {
     use super::*;
     use nexus_creator_memory::bearer::MemoryBearerRef;
     use nexus_creator_memory::errors::MemoryError;
-    use nexus_creator_memory::soul_narrative::SoulNarrativeSynthesizer as _;
 
     #[tokio::test]
     async fn passthrough_summarizer_includes_untrusted_header() {
@@ -1125,426 +1144,5 @@ mod tests {
         let truncated = truncate_summary(&long, SOUL_NARRATIVE_MAX_CHARS);
         assert_eq!(truncated.chars().count(), SOUL_NARRATIVE_MAX_CHARS);
         assert!(truncated.ends_with('…'));
-    }
-}
-
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod semantic_tests {
-    use super::*;
-    use nexus_creator_memory::bearer::MemoryBearerRef;
-    use nexus_creator_memory::long_term_memory::LongTermMemory;
-    use nexus_creator_memory::review::PendingReviewInput;
-    use nexus_creator_memory::soul_narrative::{
-        SoulNarrativeDraft, SoulNarrativeSynthesisInput, SoulNarrativeSynthesizer,
-    };
-    use nexus_local_db::{
-        create_character_with_initial_binding, ensure_creator_row, CreateCharacterParams,
-    };
-    use std::path::PathBuf;
-
-    const OWNER_A: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    const OWNER_B: &str = "ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-    const WORLD_A: &str = "wld_worldA";
-
-    const PROMOTE_DIGEST: &str =
-        "The chapter pivots from betrayal to alliance, with causal consequences for three factions.";
-    const FRAGMENT_DIGEST: &str =
-        "Research summary long enough to classify as a fragment rather than being dropped for shortness.";
-    const DROP_DIGEST: &str = "Too short.";
-
-    struct Sync {
-        tmp: crate::test_utils::TestTempRoot,
-        nexus_home: PathBuf,
-        pool: sqlx::SqlitePool,
-        chr_a: String,
-    }
-
-    async fn setup() -> Sync {
-        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
-        let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
-        ensure_creator_row(&pool, OWNER_A, "Owner A").await.unwrap();
-        ensure_creator_row(&pool, OWNER_B, "Owner B").await.unwrap();
-        sqlx::query(
-            "INSERT INTO narrative_worlds \
-             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
-              time_policy, metadata_json, created_at) \
-             VALUES (?, 'ws', ?, ?, ?, 'active', 'private', 'manual', '{}', datetime('now'))",
-        )
-        .bind(WORLD_A)
-        .bind(OWNER_A)
-        .bind(WORLD_A)
-        .bind(WORLD_A)
-        .execute(&pool)
-        .await
-        .unwrap();
-        let created = create_character_with_initial_binding(
-            &pool,
-            CreateCharacterParams {
-                owner_creator_id: OWNER_A,
-                display_name: "Ava",
-                image_uri: None,
-                persona_json: "{}",
-                world_id: WORLD_A,
-                world_sheet_entry_id: None,
-            },
-        )
-        .await
-        .unwrap();
-        Sync {
-            tmp,
-            nexus_home,
-            pool,
-            chr_a: created.character.character_id.clone(),
-        }
-    }
-
-    fn ctxc() -> BearerPipelineCtx<'static> {
-        BearerPipelineCtx {
-            bearer: MemoryBearerRef::Creator(OWNER_A),
-            scope_id: None,
-        }
-    }
-
-    fn ctxh(chr: &str) -> BearerPipelineCtx<'_> {
-        BearerPipelineCtx {
-            bearer: MemoryBearerRef::Character {
-                owner_creator_id: OWNER_A,
-                character_id: chr,
-            },
-            scope_id: None,
-        }
-    }
-
-    fn pcr(id: &str, sess: &str, digest: &str, kind: &str) -> PendingReviewInput {
-        PendingReviewInput {
-            pending_id: id.to_string(),
-            session_id: sess.to_string(),
-            bearer_id: OWNER_A.to_string(),
-            scope_id: None,
-            task_kind: kind.to_string(),
-            raw_digest: digest.to_string(),
-            created_at: "2026-01-01T00:00:01Z".to_string(),
-        }
-    }
-
-    fn pch(id: &str, sess: &str, digest: &str, kind: &str, chr: &str) -> PendingReviewInput {
-        PendingReviewInput {
-            pending_id: id.to_string(),
-            session_id: sess.to_string(),
-            bearer_id: chr.to_string(),
-            scope_id: None,
-            task_kind: kind.to_string(),
-            raw_digest: digest.to_string(),
-            created_at: "2026-01-01T00:00:01Z".to_string(),
-        }
-    }
-
-    async fn count(pool: &sqlx::SqlitePool, sql: &str, bind: &str) -> i64 {
-        let row: (i64,) = sqlx::query_as(sql)
-            .bind(bind)
-            .fetch_one(pool)
-            .await
-            .unwrap();
-        row.0
-    }
-
-    async fn count_all(pool: &sqlx::SqlitePool, sql: &str) -> i64 {
-        let row: (i64,) = sqlx::query_as(sql).fetch_one(pool).await.unwrap();
-        row.0
-    }
-
-    struct NoSynth;
-    impl SoulNarrativeSynthesizer for NoSynth {
-        async fn synthesize(
-            &self,
-            _: MemoryBearerRef<'_>,
-            _: SoulNarrativeSynthesisInput,
-        ) -> Result<SoulNarrativeDraft, MemoryError> {
-            Err(MemoryError::WorkerUnavailable)
-        }
-    }
-
-    #[tokio::test]
-    async fn review_both_arms_share_classification_and_isolate_storage() {
-        let s = setup().await;
-        let home = s.nexus_home.clone();
-        let pool = s.pool.clone();
-        let chr = s.chr_a.clone();
-
-        let horizon = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
-        let creator_out = process_bearer_review_batch(
-            &[pcr("c_p", "s_p", PROMOTE_DIGEST, "brainstorm"),
-              pcr("c_f", "s_f", FRAGMENT_DIGEST, "research"),
-              pcr("c_d", "s_d", DROP_DIGEST, "unknown")],
-            &home,
-            &ctxc(),
-            &pool,
-            horizon,
-        )
-        .await;
-        assert_eq!(creator_out.promoted, 1);
-        assert_eq!(creator_out.fragmented, 1);
-        assert_eq!(creator_out.dropped, 1);
-
-        let char_out = process_bearer_review_batch(
-            &[pch("c_p", "s_p", PROMOTE_DIGEST, "brainstorm", &chr),
-              pch("c_f", "s_f", FRAGMENT_DIGEST, "research", &chr),
-              pch("c_d", "s_d", DROP_DIGEST, "unknown", &chr)],
-            &home,
-            &ctxh(&chr),
-            &pool,
-            horizon,
-        )
-        .await;
-        assert_eq!(char_out.promoted, 1);
-        assert_eq!(char_out.fragmented, 1);
-        assert_eq!(char_out.dropped, 1);
-
-        // Both pending queues drained.
-        assert_eq!(count_all(&pool, "SELECT COUNT(*) FROM memory_pending_review").await, 0);
-        assert_eq!(
-            count_all(&pool, "SELECT COUNT(*) FROM character_memory_pending_review").await,
-            0
-        );
-        // Fragments landed in bearer-specific tables only.
-        assert_eq!(
-            count(&pool, "SELECT COUNT(*) FROM memory_fragments WHERE creator_id = ?", OWNER_A).await,
-            1
-        );
-        assert_eq!(
-            count(&pool, "SELECT COUNT(*) FROM character_memory_fragments WHERE character_id = ?", &chr).await,
-            1
-        );
-        assert_eq!(
-            count_all(&pool, "SELECT COUNT(*) FROM memory_fragments WHERE creator_id = 'ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'").await,
-            0
-        );
-
-        // File isolation: Creator and Character memory dirs contain exactly
-        // their own promoted files and are distinct roots.
-        let cdir = MemoryBearerRef::Creator(OWNER_A).long_term_memory_dir(&home);
-        let hdir = MemoryBearerRef::Character {
-            owner_creator_id: OWNER_A,
-            character_id: &chr,
-        }
-        .long_term_memory_dir(&home);
-        assert_ne!(cdir, hdir);
-        assert_eq!(std::fs::read_dir(&cdir).unwrap().count(), 1, "creator memory dir");
-        assert_eq!(std::fs::read_dir(&hdir).unwrap().count(), 1, "character memory dir");
-
-        drop(s.tmp);
-    }
-
-    #[tokio::test]
-    async fn promotion_is_idempotent_for_both_arms() {
-        let s = setup().await;
-        let home = s.nexus_home.clone();
-        let chr = s.chr_a.clone();
-
-        use nexus_creator_memory::review::SessionDigestSummarizer;
-        struct Fix;
-        impl SessionDigestSummarizer for Fix {
-            async fn summarize(
-                &self,
-                _: &str,
-                _: &str,
-                _: &str,
-                _: Option<&str>,
-            ) -> Result<String, MemoryError> {
-                Ok("fixed body.".to_string())
-            }
-        }
-        let fix = Fix;
-
-        let ci = pcr("p1", "sess_x", PROMOTE_DIGEST, "brainstorm");
-        let hi = pch("p2", "sess_x", PROMOTE_DIGEST, "brainstorm", &chr);
-        let cb = MemoryBearerRef::Creator(OWNER_A);
-        let hb = MemoryBearerRef::Character {
-            owner_creator_id: OWNER_A,
-            character_id: &chr,
-        };
-
-        nexus_creator_memory::review::promote_to_long_term(&home, cb, &ci, &fix)
-            .await
-            .unwrap();
-        let dup = nexus_creator_memory::review::promote_to_long_term(&home, cb, &ci, &fix).await;
-        assert!(dup.is_err());
-        assert!(dup.unwrap_err().to_string().contains("already promoted"));
-
-        nexus_creator_memory::review::promote_to_long_term(&home, hb, &hi, &fix)
-            .await
-            .unwrap();
-        let dup = nexus_creator_memory::review::promote_to_long_term(&home, hb, &hi, &fix).await;
-        assert!(dup.is_err());
-        assert!(dup.unwrap_err().to_string().contains("already promoted"));
-
-        drop(s.tmp);
-    }
-
-    #[tokio::test]
-    async fn aggregation_updates_soul_in_the_right_root() {
-        let s = setup().await;
-        let home = s.nexus_home.clone();
-        let chr = s.chr_a.clone();
-
-        let cb = MemoryBearerRef::Creator(OWNER_A);
-        let hb = MemoryBearerRef::Character {
-            owner_creator_id: OWNER_A,
-            character_id: &chr,
-        };
-        nexus_creator_memory::soul_io::create(&home, cb).unwrap();
-        let mut cmem = LongTermMemory::new("story_summary");
-        cmem.set_body("A grand adventure story.");
-        nexus_creator_memory::memory_io::save_memory(&home, cb, "adventure", &cmem).unwrap();
-
-        nexus_creator_memory::soul_io::create(&home, hb).unwrap();
-        let mut chmem = LongTermMemory::new("story_summary");
-        chmem.set_body("A grand adventure story.");
-        nexus_creator_memory::memory_io::save_memory(&home, hb, "adventure", &chmem).unwrap();
-
-        let cres = nexus_creator_memory::experience_aggregation::aggregate_experience(
-            &home, cb, None,
-        )
-        .await
-        .unwrap();
-        let hres = nexus_creator_memory::experience_aggregation::aggregate_experience(
-            &home, hb, None,
-        )
-        .await
-        .unwrap();
-        assert_eq!(cres.experience_markdown, hres.experience_markdown);
-        assert_eq!(cres.memories_processed, 1);
-        assert_eq!(hres.memories_processed, 1);
-
-        let c_soul = std::fs::read_to_string(cb.soul_path(&home)).unwrap();
-        let h_soul = std::fs::read_to_string(hb.soul_path(&home)).unwrap();
-        assert!(c_soul.contains("### Story Summary"));
-        assert!(h_soul.contains("### Story Summary"));
-
-        drop(s.tmp);
-    }
-
-    #[tokio::test]
-    async fn reflect_both_arms_report_insufficient_data_and_ungenerated() {
-        let s = setup().await;
-        let pool = s.pool.clone();
-        let chr = s.chr_a.clone();
-        let home = s.nexus_home.clone();
-
-        let c_ctx = ctxc();
-        let h_ctx = ctxh(&chr);
-        let no_synth: Option<&NoSynth> = None;
-
-        assert_eq!(
-            reflect_bearer_soul(&pool, &c_ctx, false, no_synth).await.unwrap().state,
-            ReflectState::InsufficientData
-        );
-        assert_eq!(
-            reflect_bearer_soul(&pool, &h_ctx, false, no_synth).await.unwrap().state,
-            ReflectState::InsufficientData
-        );
-
-        for i in 0..25 {
-            let kw = format!("uniq_{i}");
-            let now = chrono::Utc::now().to_rfc3339();
-            sqlx::query(
-                "INSERT INTO memory_fragments \
-                 (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id) \
-                 VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)",
-            )
-            .bind(format!("cf_{i:04}"))
-            .bind(format!("scf_{i:04}"))
-            .bind(OWNER_A)
-            .bind(format!(r#"["{kw}"]"#))
-            .bind(format!("summary {i}"))
-            .bind(&now)
-            .execute(&pool)
-            .await
-            .unwrap();
-
-            sqlx::query(
-                "INSERT INTO character_memory_fragments \
-                 (fragment_id, session_id, character_id, actor_world_binding_id, keywords, summary, created_at, ttl, revision) \
-                 VALUES (?, ?, ?, NULL, ?, ?, ?, NULL, 0)",
-            )
-            .bind(format!("chf_{i:04}"))
-            .bind(format!("schf_{i:04}"))
-            .bind(&chr)
-            .bind(format!(r#"["{kw}"]"#))
-            .bind(format!("summary {i}"))
-            .bind(&now)
-            .execute(&pool)
-            .await
-            .unwrap();
-        }
-
-        let o = reflect_bearer_soul(&pool, &c_ctx, false, no_synth).await.unwrap();
-        assert_eq!(o.state, ReflectState::Ungenerated);
-        assert_eq!(o.current_fragment_count, 25);
-        let o = reflect_bearer_soul(&pool, &h_ctx, false, no_synth).await.unwrap();
-        assert_eq!(o.state, ReflectState::Ungenerated);
-        assert_eq!(o.current_fragment_count, 25);
-
-        struct Mock;
-        impl SoulNarrativeSynthesizer for Mock {
-            async fn synthesize(
-                &self,
-                _: MemoryBearerRef<'_>,
-                input: SoulNarrativeSynthesisInput,
-            ) -> Result<SoulNarrativeDraft, MemoryError> {
-                let kw = input
-                    .top_keywords
-                    .first()
-                    .map(|(k, _)| k.clone())
-                    .unwrap_or_default();
-                Ok(SoulNarrativeDraft {
-                    narrative: format!("A reflective narrative about {kw} and magic, looking ahead."),
-                })
-            }
-        }
-        let mock = Mock;
-
-        let o = reflect_bearer_soul(&pool, &c_ctx, true, Some(&mock)).await.unwrap();
-        assert_eq!(o.state, ReflectState::Current);
-        assert_eq!(count_all(&pool, "SELECT COUNT(*) FROM memory_soul_narratives").await, 1);
-
-        let o = reflect_bearer_soul(&pool, &h_ctx, true, Some(&mock)).await.unwrap();
-        assert_eq!(o.state, ReflectState::Current);
-        assert_eq!(
-            count_all(&pool, "SELECT COUNT(*) FROM character_soul_narratives").await,
-            1
-        );
-
-        // The character's synthesized narrative landed only in the character
-        // cache table (Creator cache unchanged).
-        assert_eq!(count_all(&pool, "SELECT COUNT(*) FROM memory_soul_narratives").await, 1);
-
-        // Created SOUL/context files only for the creator (reflect does not
-        // write files), but home dir exists; no cross writes.
-        let _ = home;
-        drop(s.tmp);
-    }
-
-    #[tokio::test]
-    async fn character_provenance_rejects_foreign_owner_before_side_effects() {
-        let s = setup().await;
-        let charted = s.chr_a.clone();
-
-        let res = BearerPipelineCtx::character(&s.pool, OWNER_B, &charted, None).await;
-        assert!(res.is_err());
-        assert!(matches!(res, Err(NexusApiError::Forbidden { .. })));
-
-        let res = BearerPipelineCtx::character(
-            &s.pool,
-            OWNER_A,
-            "chr_ffffffffffffffffffffffffffffffff",
-            None,
-        )
-        .await;
-        assert!(res.is_err());
-
-        drop(s.tmp);
     }
 }

@@ -42,7 +42,7 @@ pub mod soul;
 pub mod soul_io;
 pub mod soul_narrative;
 
-pub use bearer::MemoryBearerRef;
+pub use bearer::{BearerIdentity, MemoryBearerRef};
 pub use errors::MemoryError;
 pub use long_term_memory::LongTermMemory;
 pub use review::{check_session_already_promoted, promote_to_long_term, SessionDigestSummarizer};
