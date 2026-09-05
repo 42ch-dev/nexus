@@ -573,3 +573,117 @@ async fn extreme_expected_revision_rejects_without_panic_or_mutation() {
     assert_eq!(mind_state_count(&ctx.pool).await, 0);
     assert_eq!(carrier_revision(&ctx.pool, &carrier).await, 0);
 }
+
+// ── Fix round 2: invalid JSON / bounded derivative history / DB-side bounds ──
+
+async fn set_carrier_modules_text(pool: &sqlx::SqlitePool, carrier_id: &str, raw: &str) {
+    sqlx::query("UPDATE kb_key_blocks SET modules_json = ? WHERE key_block_id = ?")
+        .bind(raw)
+        .bind(carrier_id)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+async fn insert_derivative_mind_state(
+    pool: &sqlx::SqlitePool,
+    mind_state_id: &str,
+    carrier_id: &str,
+    occurred_at: &str,
+    created_at: &str,
+) {
+    sqlx::query(
+        "INSERT INTO mind_states \
+         (mind_state_id, schema_version, holder_entry_id, canonical_name, occurred_at, \
+          sort_key, snapshot_json, deltas_json, source_anchor_json, created_at, updated_at, \
+          extensions_json) \
+         VALUES (?, 1, ?, 'derivative', ?, '0001', '{}', '[]', NULL, ?, ?, '{\"nexus\":{}}')",
+    )
+    .bind(mind_state_id)
+    .bind(carrier_id)
+    .bind(occurred_at)
+    .bind(created_at)
+    .bind(created_at)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn invalid_json_modules_fails_closed_and_never_overwritten() {
+    let ctx = ctx().await;
+    let a = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr_a = a["character"]["character_id"].as_str().unwrap().to_string();
+    let bind_a = a["binding"]["binding_id"].as_str().unwrap().to_string();
+    let carrier = seed_carrier(&ctx.pool, &chr_a).await;
+    set_carrier_modules_text(&ctx.pool, &carrier, "{\"belief\": [").await; // invalid JSON text
+
+    let resp = record(&ctx.server, &chr_a, l1_body(WORLD_A, &bind_a, &carrier, &chr_a, 0)).await;
+    assert_eq!(resp.status_code(), 409, "invalid json record: {}", resp.text());
+    assert_eq!(
+        resp.json::<Value>()["error"]["code"], "carrier_modules_invalid_json",
+        "must be distinguishable from shape-malformed / absent"
+    );
+    // Bytes are preserved: never coerced to absent or overwritten.
+    assert_eq!(carrier_modules_json(&ctx.pool, &carrier).await, "{\"belief\": [");
+    assert_eq!(mind_state_count(&ctx.pool).await, 0);
+    assert_eq!(carrier_revision(&ctx.pool, &carrier).await, 0);
+
+    let path = format!("/v1/daemon/characters/{chr_a}/tom?world_id={WORLD_A}&binding_id={bind_a}");
+    let resp = ctx.server.get(&path).await;
+    assert_eq!(resp.status_code(), 409, "invalid json list: {}", resp.text());
+    assert_eq!(
+        resp.json::<Value>()["error"]["code"], "carrier_modules_invalid_json",
+        "list must also fail closed on invalid persisted JSON"
+    );
+}
+
+#[tokio::test]
+async fn derivative_history_uses_one_grouped_row_per_carrier() {
+    let ctx = ctx().await;
+    let a = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr_a = a["character"]["character_id"].as_str().unwrap().to_string();
+    let bind_a = a["binding"]["binding_id"].as_str().unwrap().to_string();
+    let carrier = seed_carrier(&ctx.pool, &chr_a).await;
+
+    let resp = record(&ctx.server, &chr_a, l1_body(WORLD_A, &bind_a, &carrier, &chr_a, 0)).await;
+    assert_eq!(resp.status_code(), 200, "{}", resp.text());
+
+    // Add out-of-band derivatives with far-future created_at (the anti-join
+    // orders by created_at / mind_state_id) plus a run of older history; only
+    // the single latest row's occurred_at must surface — never a concatenated
+    // or unbounded list.
+    insert_derivative_mind_state(&ctx.pool, "ms_bg_old", &carrier, "2099-01-01T00:00:00Z", "2099-01-01T00:00:00Z").await;
+    insert_derivative_mind_state(&ctx.pool, "ms_bg_old2", &carrier, "2099-01-02T00:00:00Z", "2099-01-02T00:00:00Z").await;
+    insert_derivative_mind_state(&ctx.pool, "ms_bg_latest", &carrier, "2099-01-03T00:00:00Z", "2099-01-03T00:00:00Z").await;
+
+    let page = list_tom(&ctx.server, &chr_a, WORLD_A, &bind_a).await;
+    let items = page["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["carrier_recorded_at"], "2099-01-03T00:00:00Z");
+}
+
+#[tokio::test]
+async fn oversize_belief_array_rejects_via_db_probe_without_panic() {
+    // The DB-side probe rejects at 201 rows before any record materialization;
+    // a valid but huge corpus still yields a deterministic 409 (no panic).
+    let ctx = ctx().await;
+    let a = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr_a = a["character"]["character_id"].as_str().unwrap().to_string();
+    let bind_a = a["binding"]["binding_id"].as_str().unwrap().to_string();
+    let rows: Vec<Value> = (0..=200)
+        .map(|i| json!({"holder": chr_a, "proposition": format!("p{i}"), "order": 1}))
+        .collect();
+    let carrier = seed_carrier_with_modules(&ctx.pool, &chr_a, "Huge", json!({"belief": rows})).await;
+    let path = format!("/v1/daemon/characters/{chr_a}/tom?world_id={WORLD_A}&binding_id={bind_a}");
+    let resp = ctx.server.get(&path).await;
+    assert_eq!(resp.status_code(), 409, "oversize list: {}", resp.text());
+    assert_eq!(
+        resp.json::<Value>()["error"]["code"], "view_incomplete",
+        "must be a bounded-work rejection, not a read of all rows"
+    );
+    // Record on the same oversize carrier rejects before appending a 201st row.
+    let resp = record(&ctx.server, &chr_a, l1_body(WORLD_A, &bind_a, &carrier, &chr_a, 0)).await;
+    assert_eq!(resp.status_code(), 409, "oversize record: {}", resp.text());
+    assert_eq!(mind_state_count(&ctx.pool).await, 0);
+}
