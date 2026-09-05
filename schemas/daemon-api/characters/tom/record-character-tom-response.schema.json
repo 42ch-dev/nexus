@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/characters/tom/record-character-tom-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus RecordCharacterTomResponse",
+  "description": "Response for POST /v1/daemon/characters/{character_id}/tom. Returned only after the carrier CAS and the derivative MindState insert committed atomically; any failure rolls back both writes.",
+  "type": "object",
+  "required": ["carrier_entry_id", "revision", "mind_state_id"],
+  "additionalProperties": false,
+  "properties": {
+    "carrier_entry_id": {
+      "type": "string",
+      "description": "Carrier KnowledgeEntry id that was CAS-patched."
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "New carrier revision after the CAS bump (expected_revision + 1)."
+    },
+    "mind_state_id": {
+      "type": "string",
+      "description": "Derivative MindState row id; its holder_entry_id equals carrier_entry_id."
+    }
+  }
+}

@@ -3,6 +3,7 @@
 
 pub mod memory;
 pub mod soul;
+pub mod tom;
 pub mod add_character_binding_request;
 pub mod add_character_binding_response;
 pub mod character_detail;
@@ -15,6 +16,7 @@ pub mod list_characters_response;
 
 pub use memory::*;
 pub use soul::*;
+pub use tom::*;
 pub use add_character_binding_request::*;
 pub use add_character_binding_response::*;
 pub use character_detail::*;
