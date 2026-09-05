@@ -496,6 +496,9 @@ async fn character_run_isolation_and_legacy_outside_lookup() {
 
 const TOM_L1_MARKER: &str = "TOMRUNL1MARKER dock safety";
 const TOM_L2_MARKER: &str = "TOMRUNL2MARKER models Ben";
+const TOM_SOUL_MARKER: &str = "TOMSOULMARKER keeps a ledger of every debt owed to the river";
+const TOM_MEM_MARKER: &str = "TOMMEMMARKER the harbor accord holds because Ava keeps it";
+const TOM_W1_BINDING_MARKER: &str = "TOMW1BINDMARKER only W1 binding carrier belief";
 
 async fn seed_tom_carrier_run(d: &LiveDaemon, character_id: &str) -> String {
     use nexus_contracts::BlockType;
@@ -511,46 +514,333 @@ async fn seed_tom_carrier_run(d: &LiveDaemon, character_id: &str) -> String {
     id
 }
 
+async fn seed_binding_tom_carrier(d: &LiveDaemon, binding_id: &str) -> String {
+    use nexus_contracts::BlockType;
+    use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
+    use nexus_knowledge::world_kb::store::KbStore;
+    use nexus_local_db::kb_store::SqliteKbStore;
+    use serde_json::json;
+    let store = SqliteKbStore::new(d.pool.clone());
+    let mut kb = KnowledgeEntryRecord::for_binding(binding_id, BlockType::Character, "TomBindingCarrier");
+    kb.modules = Some(json!({ "belief": [] }));
+    let id = kb.entry_id.clone();
+    store.insert_knowledge_entry(kb).await.unwrap();
+    id
+}
+
+fn fragment_digest(marker: &str) -> String {
+    format!("{marker} — researched background detail for texture and continuity.")
+}
+
+async fn cli_ok(d: &LiveDaemon, args: &[&str]) -> Output {
+    let out = d.cli(args).await;
+    assert!(out.status.success(), "cli {args:?}: {}", stderr(&out));
+    out
+}
+
+/// RN-ACT-4 + P3 memory + P4 ToM full-mind dogfood (v1.184 P4 Task 3).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn character_run_includes_tom_l1_l2_after_cli_record() {
+async fn character_tom_full_mind_p0_p4_dogfood() {
     let host = MockHost::new();
     let d = LiveDaemon::start_with_agent_host(host.clone()).await;
     let g = seed(&d).await;
-    let carrier = seed_tom_carrier_run(&d, &g.character_a).await;
-    let before = host.execs.load(Ordering::SeqCst);
+    let chr = g.character_a.as_str();
+    let carrier = seed_tom_carrier_run(&d, chr).await;
+    let before_execs = host.execs.load(Ordering::SeqCst);
+
+    let soul_dir = d
+        .home
+        .path()
+        .join(".nexus42")
+        .join(".nexus42")
+        .join("creators")
+        .join(&g.creator_id)
+        .join("characters")
+        .join(chr);
+    std::fs::create_dir_all(&soul_dir).unwrap();
+    std::fs::write(
+        soul_dir.join("SOUL.md"),
+        format!("# Ava\n\n{TOM_SOUL_MARKER}\n"),
+    )
+    .unwrap();
+    cli_ok(
+        &d,
+        &[
+            "creator",
+            "character",
+            "memory",
+            "capture",
+            "--character-id",
+            chr,
+            "--pending-id",
+            "pend_tom_dog",
+            "--session-id",
+            "sess_tom_dog",
+            "--task-kind",
+            "research",
+            "--digest",
+            &fragment_digest(TOM_MEM_MARKER),
+        ],
+    )
+    .await;
+    cli_ok(
+        &d,
+        &["creator", "character", "memory", "review", "--character-id", chr],
+    )
+    .await;
 
     for (holder, order, rev, prop) in [
-        (&g.character_a, "1", "0", TOM_L1_MARKER),
+        (chr, "1", "0", TOM_L1_MARKER),
         (&g.character_b, "2", "1", TOM_L2_MARKER),
     ] {
-        let out = d.cli(&[
-            "creator", "character", "tom", "record",
-            "--character-id", &g.character_a,
-            "--world-id", &g.world_w1,
-            "--binding-id", &g.bind_a_w1,
-            "--carrier-entry-id", &carrier,
-            "--expected-revision", rev,
-            "--holder", holder,
-            "--proposition", prop,
-            "--order", order,
-            "--truth", "True",
-            "--access", "Private",
-            "--representation", "Explicit",
-            "--content-type", "Location",
-            "--source", "Perception",
-            "--context", "Neutral",
-        ]).await;
-        assert!(out.status.success(), "record: {}", stderr(&out));
+        cli_ok(
+            &d,
+            &[
+                "creator",
+                "character",
+                "tom",
+                "record",
+                "--character-id",
+                chr,
+                "--world-id",
+                &g.world_w1,
+                "--binding-id",
+                &g.bind_a_w1,
+                "--carrier-entry-id",
+                &carrier,
+                "--expected-revision",
+                rev,
+                "--holder",
+                holder,
+                "--proposition",
+                prop,
+                "--order",
+                order,
+                "--truth",
+                "True",
+                "--access",
+                "Private",
+                "--representation",
+                "Explicit",
+                "--content-type",
+                "Location",
+                "--source",
+                "Perception",
+                "--context",
+                "Neutral",
+            ],
+        )
+        .await;
     }
-    assert_eq!(host.execs.load(Ordering::SeqCst), before);
+    assert_eq!(
+        host.execs.load(Ordering::SeqCst),
+        before_execs,
+        "tom record must not call host"
+    );
 
-    let out = d.cli(&run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &[])).await;
-    assert!(out.status.success(), "run: {}", stderr(&out));
-    assert_eq!(host.execs.load(Ordering::SeqCst), before + 1);
-    let prompt = host.last_prompt();
-    assert!(prompt.contains(TOM_L1_MARKER), "{prompt}");
-    assert!(prompt.contains(TOM_L2_MARKER), "{prompt}");
-    assert!(prompt.contains("## Character ToM — L1"));
-    assert!(prompt.contains("## Character ToM — L2"));
+    let show_human = cli_ok(
+        &d,
+        &[
+            "creator",
+            "character",
+            "tom",
+            "show",
+            "--character-id",
+            chr,
+            "--world-id",
+            &g.world_w1,
+            "--binding-id",
+            &g.bind_a_w1,
+        ],
+    )
+    .await;
+    let show_text = stdout(&show_human);
+    assert!(show_text.contains(TOM_L1_MARKER));
+    assert!(show_text.contains(TOM_L2_MARKER));
+    let show_json = json_out(
+        &cli_ok(
+            &d,
+            &[
+                "creator",
+                "character",
+                "tom",
+                "show",
+                "--character-id",
+                chr,
+                "--world-id",
+                &g.world_w1,
+                "--binding-id",
+                &g.bind_a_w1,
+                "--json",
+            ],
+        )
+        .await,
+    );
+    let orders: Vec<i64> = show_json["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["order"].as_i64().unwrap())
+        .collect();
+    assert_eq!(orders, vec![1, 2]);
+
+    // Binding-owned carrier: visible in W1 binding scope only (not W2).
+    let bind_carrier = seed_binding_tom_carrier(&d, &g.bind_a_w1).await;
+    cli_ok(
+        &d,
+        &[
+            "creator",
+            "character",
+            "tom",
+            "record",
+            "--character-id",
+            chr,
+            "--world-id",
+            &g.world_w1,
+            "--binding-id",
+            &g.bind_a_w1,
+            "--carrier-entry-id",
+            &bind_carrier,
+            "--expected-revision",
+            "0",
+            "--holder",
+            chr,
+            "--proposition",
+            TOM_W1_BINDING_MARKER,
+            "--order",
+            "1",
+            "--truth",
+            "True",
+            "--access",
+            "Private",
+            "--representation",
+            "Explicit",
+            "--content-type",
+            "Location",
+            "--source",
+            "Perception",
+            "--context",
+            "Neutral",
+        ],
+    )
+    .await;
+
+    let w1_show = stdout(
+        &cli_ok(
+            &d,
+            &[
+                "creator",
+                "character",
+                "tom",
+                "show",
+                "--character-id",
+                chr,
+                "--world-id",
+                &g.world_w1,
+                "--binding-id",
+                &g.bind_a_w1,
+            ],
+        )
+        .await,
+    );
+    assert!(w1_show.contains(TOM_W1_BINDING_MARKER));
+
+    let w2_show = stdout(
+        &cli_ok(
+            &d,
+            &[
+                "creator",
+                "character",
+                "tom",
+                "show",
+                "--character-id",
+                chr,
+                "--world-id",
+                &g.world_w2,
+                "--binding-id",
+                &g.bind_a_w2,
+            ],
+        )
+        .await,
+    );
+    assert!(
+        !w2_show.contains(TOM_W1_BINDING_MARKER),
+        "binding-local ToM must not leak into W2: {w2_show}"
+    );
+    // Character-owned L1/L2 remain visible in W2 (same viewer carriers).
+    assert!(w2_show.contains(TOM_L1_MARKER) && w2_show.contains(TOM_L2_MARKER));
+
+    let b_show = stdout(
+        &cli_ok(
+            &d,
+            &[
+                "creator",
+                "character",
+                "tom",
+                "show",
+                "--character-id",
+                &g.character_b,
+                "--world-id",
+                &g.world_w1,
+                "--binding-id",
+                &g.bind_b_w1,
+            ],
+        )
+        .await,
+    );
+    assert!(
+        !b_show.contains(TOM_L1_MARKER) && !b_show.contains(TOM_L2_MARKER),
+        "B must not see A's carrier beliefs: {b_show}"
+    );
+    assert_eq!(
+        host.execs.load(Ordering::SeqCst),
+        before_execs,
+        "tom show must not call host"
+    );
+
+    let cwd = d.home.path().join("tom-dog-cwd");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let cwd = cwd.to_string_lossy().into_owned();
+    let a_run = json_out(
+        &cli_ok(
+            &d,
+            &run_args(chr, &g.world_w1, &g.bind_a_w1, &["--cwd", &cwd]),
+        )
+        .await,
+    );
+    let a_id = a_run["session"]["session_id"].as_str().unwrap();
+    assert_eq!(host.execs.load(Ordering::SeqCst), before_execs + 1, "one host prompt for A");
+    let a_prompt = host.last_prompt();
+    assert!(a_prompt.contains(TOM_SOUL_MARKER), "SOUL: {a_prompt}");
+    assert!(a_prompt.contains(TOM_MEM_MARKER), "memory: {a_prompt}");
+    assert!(a_prompt.contains(TOM_L1_MARKER), "L1: {a_prompt}");
+    assert!(a_prompt.contains(TOM_L2_MARKER), "L2: {a_prompt}");
+    assert!(a_prompt.contains(TOM_W1_BINDING_MARKER), "binding tom: {a_prompt}");
+    assert!(a_prompt.contains("## Character ToM — L1"));
+    assert!(a_prompt.contains("## Character ToM — L2"));
+    assert!(a_prompt.contains(NAME_W1_PUBLIC));
+    assert!(a_prompt.contains(NAME_A_SHARE));
+    assert!(!a_prompt.contains(NAME_W1_SECRET));
+    assert!(!a_prompt.contains(NAME_B_SHARE));
+    assert!(!a_prompt.contains("## Personality"));
+
+    let b_run = json_out(
+        &cli_ok(
+            &d,
+            &run_args(
+                &g.character_b,
+                &g.world_w1,
+                &g.bind_b_w1,
+                &["--cwd", &cwd],
+            ),
+        )
+        .await,
+    );
+    let b_id = b_run["session"]["session_id"].as_str().unwrap();
+    assert_ne!(a_id, b_id, "Character session isolation");
+    assert_eq!(host.execs.load(Ordering::SeqCst), before_execs + 2);
+    let b_prompt = host.last_prompt();
+    assert!(!b_prompt.contains(TOM_L1_MARKER), "B prompt must not include A ToM");
 }
+
 
