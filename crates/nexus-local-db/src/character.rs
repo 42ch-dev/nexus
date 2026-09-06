@@ -175,27 +175,7 @@ pub(crate) fn validate_persona_json(raw: &str) -> Result<String, LocalDbError> {
     Ok(serialized)
 }
 
-pub(crate) async fn require_owned_world(
-    tx: &mut Transaction<'_, Sqlite>,
-    owner_creator_id: &str,
-    world_id: &str,
-) -> Result<(), LocalDbError> {
-    let owner = sqlx::query_scalar!(
-        r#"SELECT owner_creator_id as "owner_creator_id!" FROM narrative_worlds WHERE world_id = ?"#,
-        world_id
-    )
-    .fetch_optional(&mut **tx)
-    .await?;
-    match owner {
-        Some(stored) if stored == owner_creator_id => Ok(()),
-        Some(_) | None => Err(LocalDbError::ActorNotFound {
-            resource: "world",
-            id: world_id.to_string(),
-        }),
-    }
-}
-
-/// Pool variant of [`require_owned_world`] for retained-data read paths.
+/// Owned World validation for retained-data read paths.
 ///
 /// The World must exist and be owned by `owner_creator_id`; no status
 /// requirement applies (retained reads tolerate an archived World).
