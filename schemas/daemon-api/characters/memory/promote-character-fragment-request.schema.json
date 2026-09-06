@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/characters/memory/promote-character-fragment-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus PromoteCharacterFragmentRequest",
+  "description": "Request body for POST /v1/daemon/characters/{character_id}/memory/fragments/{fragment_id}:promote. Explicit, revision-checked promotion of one binding-local fragment to shared Character memory. The fragment id is preserved, `binding_id` provenance is cleared atomically, and only the affected narrative cache scopes are invalidated. Stale revisions fail with a stable 409 version_mismatch; already-shared fragments fail 409 character_fragment_already_shared. No implicit promotion exists.",
+  "type": "object",
+  "required": ["expected_revision"],
+  "additionalProperties": false,
+  "properties": {
+    "expected_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "The fragment revision the caller observed; promotion applies only when it still matches."
+    }
+  }
+}

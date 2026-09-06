@@ -167,7 +167,7 @@ pub enum AnnotationCommand {
 /// Returns `CliError` on invalid input (chapter < 1, scroll out of range,
 /// invalid color, empty selected text) or any daemon API / network failure.
 pub async fn run(cmd: ReadingCommand, config: &CliConfig) -> Result<()> {
-    let client = DaemonClient::from_config(config);
+    let client = DaemonClient::from_config(config)?;
     match cmd {
         ReadingCommand::Progress { command } => run_progress(&client, command).await,
         ReadingCommand::Annotation { command } => run_annotation(&client, command).await,

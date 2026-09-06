@@ -10,7 +10,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use nexus_contracts::BlockType;
-use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+use nexus_knowledge::world_kb::knowledge_entry::{
+    KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef,
+};
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::{open_pool, run_migrations};
@@ -69,15 +71,15 @@ async fn seed_world_with_head(pool: &sqlx::SqlitePool, world_id: &str, head_even
     .unwrap();
 }
 
-/// Seed a computable `WorldKbEntry` with the given `block_type` and attributes.
+/// Seed a computable `KnowledgeEntryRecord` with the given `block_type` and attributes.
 async fn seed_kb_entry(
     pool: &sqlx::SqlitePool,
     world_id: &str,
     block_type: BlockType,
     name: &str,
     computable: bool,
-) -> WorldKbEntry {
-    let mut body = WorldKbBody {
+) -> KnowledgeEntryRecord {
+    let mut body = KnowledgeEntryBody {
         summary: Some(format!("{name} entry")),
         computable: Some(computable),
         ..Default::default()
@@ -85,12 +87,12 @@ async fn seed_kb_entry(
     if computable {
         body.state = Some(json!({"hp": 100, "atk": 10}));
     }
-    let kb = WorldKbEntry {
-        world_id: world_id.to_string(),
+    let kb = KnowledgeEntryRecord {
+        owner: KnowledgeOwnerRef::world(world_id),
         block_type,
         canonical_name: name.to_string(),
         body: Some(body),
-        ..WorldKbEntry::new(world_id, block_type, name)
+        ..KnowledgeEntryRecord::new(world_id, block_type, name)
     };
     let kb_store = SqliteKbStore::new(pool.clone());
     kb_store.insert_knowledge_entry(kb.clone()).await.unwrap();

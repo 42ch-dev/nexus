@@ -1,7 +1,7 @@
 //! World KB key-block author surface — `creator world kb list/show/edit/delete`.
 //!
 //! V1.50 T-B P0. This is the canonical author CLI for inspecting and editing
-//! World-scoped `WorldKbEntry` rows (per entity-scope-model.md §5.5), distinct from
+//! World-scoped `KnowledgeEntryRecord` rows (per entity-scope-model.md §5.5), distinct from
 //! the legacy ingest path `creator kb --scope world`.
 //!
 //! V1.50 T-B P1 adds the review-time promotion surface:
@@ -11,7 +11,7 @@
 //!
 //! # Author identity
 //!
-//! `WorldKbEntry`s are World-scoped (entity-scope-model §1.2/§5.1). The only
+//! `KnowledgeEntryRecord`s are World-scoped (entity-scope-model §1.2/§5.1). The only
 //! ownership field available on a World KB row is `narrative_worlds.owner_creator_id`
 //! (there is no direct `works.creator_id` linkage on `kb_key_blocks`). Therefore
 //! `edit`/`delete` gate on the **world owner** matching the active creator;
@@ -31,7 +31,7 @@ pub mod pack;
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
-use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
 use nexus_knowledge::world_kb::store::KbStoreError;
 use nexus_knowledge::world_kb::validation::ValidationMode;
 use nexus_knowledge::world_kb::KbStore;
@@ -57,22 +57,22 @@ pub enum WorldKbCommand {
         json: bool,
     },
 
-    /// Show full body + provenance + status for a single `WorldKbEntry`
+    /// Show full body + provenance + status for a single `KnowledgeEntryRecord`
     Show {
         /// World reference — the world ID (e.g. `wld_abc123`)
         world_ref: String,
-        /// `WorldKbEntry` ID (e.g. `kb_...`)
+        /// `KnowledgeEntryRecord` ID (e.g. `kb_...`)
         block_id: String,
         /// Emit machine-readable JSON
         #[arg(long)]
         json: bool,
     },
 
-    /// Edit a `WorldKbEntry` body in place (re-runs `ValidationMode::Novel`)
+    /// Edit a `KnowledgeEntryRecord` body in place (re-runs `ValidationMode::Novel`)
     Edit {
         /// World reference — the world ID (e.g. `wld_abc123`)
         world_ref: String,
-        /// `WorldKbEntry` ID (e.g. `kb_...`)
+        /// `KnowledgeEntryRecord` ID (e.g. `kb_...`)
         block_id: String,
         /// New body as JSON (`{"summary":...,"attributes":...,"tags":...}`).
         /// `attributes.hygiene` (DF-79) is an optional array of
@@ -88,11 +88,11 @@ pub enum WorldKbCommand {
         json: bool,
     },
 
-    /// Delete a `WorldKbEntry` (soft-delete; prompts unless `--yes`)
+    /// Delete a `KnowledgeEntryRecord` (soft-delete; prompts unless `--yes`)
     Delete {
         /// World reference — the world ID (e.g. `wld_abc123`)
         world_ref: String,
-        /// `WorldKbEntry` ID (e.g. `kb_...`)
+        /// `KnowledgeEntryRecord` ID (e.g. `kb_...`)
         block_id: String,
         /// Skip the interactive confirmation prompt
         #[arg(long, short = 'y')]
@@ -117,7 +117,7 @@ pub enum WorldKbCommand {
         missing_only: bool,
     },
 
-    /// Confirm a review-time KB candidate → promote to a `confirmed` `WorldKbEntry`
+    /// Confirm a review-time KB candidate → promote to a `confirmed` `KnowledgeEntryRecord`
     ///
     /// Without `--auto`, requires an `extract_job_id`. With `--auto --world-ref`,
     /// promotes all high-confidence pending candidates in that world.
@@ -338,7 +338,7 @@ pub async fn kb_show(pool: &SqlitePool, world_id: &str, block_id: &str, json: bo
     }
 
     println!("Key Block: {}", block.entry_id);
-    println!("  World:      {}", block.world_id);
+    println!("  World:      {}", block.world_id().unwrap_or_default());
     println!("  Name:       {}", block.canonical_name);
     println!("  Type:       {:?}", block.block_type);
     println!("  Status:     {}", block.status);
@@ -394,10 +394,10 @@ pub async fn kb_edit(
     require_world_or_work_owner(pool, world_id, creator_id, block.source_work_id.as_deref())
         .await?;
 
-    let new_body: WorldKbBody = serde_json::from_str(body_str).map_err(|e| {
+    let new_body: KnowledgeEntryBody = serde_json::from_str(body_str).map_err(|e| {
         CliError::Other(format!(
             "Invalid --body JSON: {e}. \
-             Expected a WorldKbBody object: {{\"summary\":..., \"attributes\":..., \"tags\":...}}"
+             Expected a KnowledgeEntryBody object: {{\"summary\":..., \"attributes\":..., \"tags\":...}}"
         ))
     })?;
 
@@ -414,7 +414,7 @@ pub async fn kb_edit(
         println!("{}", serde_json::to_string_pretty(&value)?);
     } else {
         println!("✓ Key block updated: {}", block.entry_id);
-        println!("  World:  {}", block.world_id);
+        println!("  World:  {}", block.world_id().unwrap_or_default());
         println!("  Name:   {}", block.canonical_name);
         println!("  Status: {}", block.status);
     }
@@ -727,19 +727,19 @@ struct MissingKbEntry {
     candidate: MissingKbLogCandidate,
 }
 
-/// `creator world kb adopt` — confirm a candidate into a `confirmed` `WorldKbEntry`.
+/// `creator world kb adopt` — confirm a candidate into a `confirmed` `KnowledgeEntryRecord`.
 ///
 /// Steps (entity-scope-model.md §5.5.3 promotion gate):
 /// 1. Load the promotion row; require it is in `pending` state.
 /// 2. Author identity gate: the active creator must own the candidate's world.
-/// 3. Parse `proposed_payload` into a `WorldKbBody`; parse `block_type_guess`
+/// 3. Parse `proposed_payload` into a `KnowledgeEntryBody`; parse `block_type_guess`
 ///    into a wire `BlockType`.
-/// 4. Build a `WorldKbEntry` with `status="confirmed"`.
+/// 4. Build a `KnowledgeEntryRecord` with `status="confirmed"`.
 /// 5. **Atomic promotion (R-V150KBED-03)**: wrap `insert_knowledge_entry` +
 ///    `mark_confirmed` in a single `SQLite` transaction. If the validation,
 ///    insert, or promotion flip fails (or the flip returns `Ok(false)` because
 ///    a concurrent writer raced us), the transaction rolls back and **no orphan
-///    `WorldKbEntry` is persisted**. The candidate row is left in its pre-adopt
+///    `KnowledgeEntryRecord` is persisted**. The candidate row is left in its pre-adopt
 ///    state.
 /// 6. Validation uses `SqliteKbStore::with_validation_mode(Novel)` so V1.40 P1
 ///    validation re-runs (entity-scope-model §5.5.5).
@@ -815,7 +815,7 @@ pub async fn kb_adopt(
     let _file_lock = ();
 
     // Parse proposed body.
-    let body: WorldKbBody =
+    let body: KnowledgeEntryBody =
         serde_json::from_str(candidate.proposed_payload.as_deref().unwrap_or("{}"))
             .map_err(|e| CliError::Other(format!("Invalid proposed_payload JSON: {e}")))?;
 
@@ -832,13 +832,13 @@ pub async fn kb_adopt(
     // Novel-mode store so insert re-runs V1.40 P1 validation (§5.1.1).
     let store = SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
 
-    let mut kb = WorldKbEntry::new(world_id, block_type, &canonical_name);
+    let mut kb = KnowledgeEntryRecord::new(world_id, block_type, &canonical_name);
     kb.body = Some(body);
-    // §5.5.1: adopt transitions to `confirmed` (terminal WorldKbEntry status).
+    // §5.5.1: adopt transitions to `confirmed` (terminal KnowledgeEntryRecord status).
     kb.status = "confirmed".to_string();
     kb.created_at = chrono::Utc::now().to_rfc3339();
 
-    // V1.52 T-A P2: Work→WorldKbEntry provenance linkage (entity-scope-model.md §5.5.7).
+    // V1.52 T-A P2: Work→KnowledgeEntryRecord provenance linkage (entity-scope-model.md §5.5.7).
     // Populate source_work_id and source_chapter from the extract job context.
     // provenance_kind is inferred: LLM extraction → review_time_extract,
     // heuristic/no LLM → manual.
@@ -854,10 +854,10 @@ pub async fn kb_adopt(
         Some("manual".to_string())
     };
 
-    // R-V150KBED-03: atomic promotion. The WorldKbEntry insert and the promotion
+    // R-V150KBED-03: atomic promotion. The KnowledgeEntryRecord insert and the promotion
     // row flip share a single transaction; any failure (validation, insert,
     // flip error, or `Ok(false)` race) rolls the whole thing back so no orphan
-    // WorldKbEntry is persisted.
+    // KnowledgeEntryRecord is persisted.
     let mut tx = pool
         .begin()
         .await
@@ -890,7 +890,7 @@ pub async fn kb_adopt(
 
     if !flipped {
         // Race: the row was confirmed/rejected between `load_pending_candidate`
-        // and this flip. Explicit rollback so the orphan WorldKbEntry insert is
+        // and this flip. Explicit rollback so the orphan KnowledgeEntryRecord insert is
         // undone before we surface the error. Best-effort: a rollback failure
         // is logged but the row was never committed so no orphan persists.
         if let Err(e) = tx.rollback().await {
@@ -921,7 +921,7 @@ pub async fn kb_adopt(
             serde_json::to_string_pretty(&serde_json::json!({
                 "extract_job_id": extract_job_id,
                 "key_block_id": insert_result.entry_id,
-                "world_id": insert_result.world_id,
+                "world_id": insert_result.owner.world_id(),
                 "status": "confirmed",
                 "llm_confidence": confidence,
                 "llm_source_quote": source_quote,
@@ -930,7 +930,10 @@ pub async fn kb_adopt(
     } else {
         println!("✓ KB candidate adopted: {extract_job_id}");
         println!("  Key block:   {}", insert_result.entry_id);
-        println!("  World:       {}", insert_result.world_id);
+        println!(
+            "  World:       {}",
+            insert_result.owner.world_id().unwrap_or_default()
+        );
         println!("  Status:      confirmed");
         // Confidence is shown as 2-decimal or '-' for heuristic rows; source
         // quote is truncated for terminal width (full text in --json).
@@ -966,7 +969,7 @@ pub async fn kb_adopt(
 /// - adopt-time `ValidationMode::Novel` passes (`validation_clean`)
 /// - no duplicate `canonical_name` in the world
 ///
-/// Each promoted candidate is inserted as a confirmed `WorldKbEntry` in a dedicated
+/// Each promoted candidate is inserted as a confirmed `KnowledgeEntryRecord` in a dedicated
 /// transaction, the promotion row is flipped with `auto_promoted_*` audit
 /// columns, and an audit log is written under
 /// `Works/<work_ref>/Logs/kb/auto-promoted/`. Candidates that do not qualify
@@ -977,7 +980,7 @@ pub async fn kb_adopt(
 /// This function iterates all pending `kb_extract_jobs` rows for a World with
 /// no upper bound on N. Each promoted candidate incurs:
 ///
-/// - A dedicated DB transaction (INSERT `WorldKbEntry` + CAS flip promotion row)
+/// - A dedicated DB transaction (INSERT `KnowledgeEntryRecord` + CAS flip promotion row)
 /// - A best-effort audit log write under `Works/<work_ref>/Logs/kb/auto-promoted/`
 /// - Full `ValidationMode::Novel` re-validation
 ///
@@ -1078,19 +1081,19 @@ pub async fn kb_adopt_auto(
             continue;
         }
 
-        // ── Build WorldKbEntry ─────────────────────────────────────────────────
-        let body: WorldKbBody =
+        // ── Build KnowledgeEntryRecord ─────────────────────────────────────────────────
+        let body: KnowledgeEntryBody =
             serde_json::from_str(candidate.proposed_payload.as_deref().unwrap_or("{}"))
                 .map_err(|e| CliError::Other(format!("Invalid proposed_payload JSON: {e}")))?;
         let block_type_str = candidate.block_type_guess.as_deref().unwrap_or("character");
         let block_type = parse_block_type_cli(block_type_str)?;
 
-        let mut kb = WorldKbEntry::new(world_id, block_type, canonical_name);
+        let mut kb = KnowledgeEntryRecord::new(world_id, block_type, canonical_name);
         kb.body = Some(body);
         kb.status = "confirmed".to_string();
         kb.created_at = chrono::Utc::now().to_rfc3339();
 
-        // V1.52 T-A P2: Work→WorldKbEntry provenance linkage.
+        // V1.52 T-A P2: Work→KnowledgeEntryRecord provenance linkage.
         // Auto-adopt sets author_explicit provenance; source from extract job.
         kb.source_work_id = candidate.work_id.clone();
         kb.source_chapter = candidate.source_chapter_id;
@@ -1116,7 +1119,7 @@ pub async fn kb_adopt_auto(
                 tx.rollback().await.ok();
                 skipped.push(SkippedRecord {
                     extract_job_id: candidate.job_id.clone(),
-                    reason: format!("WorldKbEntry validation/insert failed: {e}"),
+                    reason: format!("KnowledgeEntryRecord validation/insert failed: {e}"),
                 });
                 continue;
             }
@@ -1382,19 +1385,23 @@ pub async fn kb_reject(
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
-/// Verify the referenced `WorldKbEntry` actually belongs to the requested world.
-fn require_block_in_world(block: &WorldKbEntry, world_id: &str, block_id: &str) -> Result<()> {
-    if block.world_id != world_id {
+/// Verify the referenced `KnowledgeEntryRecord` actually belongs to the requested world.
+fn require_block_in_world(
+    block: &KnowledgeEntryRecord,
+    world_id: &str,
+    block_id: &str,
+) -> Result<()> {
+    if block.world_id() != Some(world_id) {
         return Err(CliError::Other(format!(
             "Key block '{block_id}' does not belong to world '{world_id}' \
              (it belongs to '{}').",
-            block.world_id
+            block.world_id().unwrap_or_default()
         )));
     }
     Ok(())
 }
 
-/// Author identity gate with Work→WorldKbEntry provenance support (§5.5.7).
+/// Author identity gate with Work→KnowledgeEntryRecord provenance support (§5.5.7).
 ///
 /// When `source_work_id` is set (R-V150KBED-02 resolution), the authorisation
 /// gate accepts EITHER the World owner OR the source Work's creator — a KB row
@@ -1437,7 +1444,7 @@ async fn require_world_or_work_owner(
 /// Author identity gate. Reads `narrative_worlds.owner_creator_id` and requires
 /// it to match `creator_id`. Returns `403 WORLD_KB_FORBIDDEN` on mismatch.
 ///
-/// Per entity-scope-model §1.2/§5.1, `WorldKbEntry`s are World-scoped and the
+/// Per entity-scope-model §1.2/§5.1, `KnowledgeEntryRecord`s are World-scoped and the
 /// canonical ownership is the world's `owner_creator_id` (there is no direct
 /// `works.creator_id` linkage on `kb_key_blocks`).
 async fn require_world_owner(pool: &SqlitePool, world_id: &str, creator_id: &str) -> Result<()> {
@@ -1498,7 +1505,7 @@ fn map_kb_store_error(verb: &str, block_id: &str, world_id: &str, e: KbStoreErro
 }
 
 /// Build the JSON summary object for `--json` list output.
-fn block_summary_json(block: &WorldKbEntry) -> serde_json::Value {
+fn block_summary_json(block: &KnowledgeEntryRecord) -> serde_json::Value {
     serde_json::json!({
         "key_block_id": block.entry_id,
         "canonical_name": block.canonical_name,

@@ -13,6 +13,7 @@
 //! - **Maintenance**: `demo-seed`, `logout`
 
 pub mod bootstrap;
+pub mod character;
 pub mod inspector;
 pub mod kb;
 pub mod knowledge;
@@ -238,7 +239,7 @@ async fn init_workspace(
     let display_name = name.unwrap_or_else(|| workspace_slug.clone());
 
     // Try daemon API first (T25: CLI → daemon migration)
-    let client = crate::api::DaemonClient::from_config(&CliConfig::load()?);
+    let client = crate::api::DaemonClient::from_config(&CliConfig::load()?)?;
     if client.health_check().await? {
         let req = crate::api::models::CreateWorkspaceRequest {
             creator_id: creator_id.clone(),
@@ -596,6 +597,11 @@ pub enum CreatorCommand {
         #[command(subcommand)]
         command: world::WorldCommand,
     },
+    /// Character identity and World bindings (daemon-only)
+    Character {
+        #[command(subcommand)]
+        command: character::CharacterCommand,
+    },
 
     /// Reading-depth data CRUD (V1.175 P1, group 3) — progress + annotations.
     ///
@@ -767,6 +773,7 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::Reference { command } => reference::run(command, config).await,
         CreatorCommand::Kb { command } => kb::run(command, config).await,
         CreatorCommand::World { command } => world::run(command, config).await,
+        CreatorCommand::Character { command } => character::run(command, config).await,
         CreatorCommand::Reading { command } => reading::run(command, config).await,
         CreatorCommand::Inspector { command } => inspector::run(command, config).await,
         CreatorCommand::Knowledge { command } => knowledge::run(command, config).await,
@@ -863,17 +870,19 @@ async fn run_demo_seed(config: &CliConfig, force: bool) -> Result<()> {
     println!("✓ Demo event: {}", event.event_id);
 
     // 3. Create demo KB block
-    let mut kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+    let mut kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
         &world.world_id,
         nexus_contracts::BlockType::Character,
         "Hero",
     );
-    kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::WorldKbBody {
-        summary: Some("The protagonist of the demo world.".to_string()),
-        attributes: None,
-        tags: Some(vec!["protagonist".to_string(), "demo".to_string()]),
-        ..Default::default()
-    });
+    kb.body = Some(
+        nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
+            summary: Some("The protagonist of the demo world.".to_string()),
+            attributes: None,
+            tags: Some(vec!["protagonist".to_string(), "demo".to_string()]),
+            ..Default::default()
+        },
+    );
     let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
     let kb_result = kb_store
         .insert_knowledge_entry(kb)
@@ -928,7 +937,7 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
         CreatorWorkspaceCommand::List => {
             let home = user_home()?;
             // Try daemon API first (T26: migration)
-            let client = crate::api::DaemonClient::from_config(config);
+            let client = crate::api::DaemonClient::from_config(config)?;
             if client.health_check().await? {
                 match client.list_workspaces(Some(creator_id)).await {
                     Ok(resp) => {
@@ -985,7 +994,7 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
             validate_workspace_slug(&workspace_slug)?;
 
             // Try daemon API first (T26: migration)
-            let client = crate::api::DaemonClient::from_config(config);
+            let client = crate::api::DaemonClient::from_config(config)?;
             if client.health_check().await? {
                 let req = crate::api::models::CreateWorkspaceRequest {
                     creator_id: creator_id.to_string(),
@@ -1054,7 +1063,7 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
             validate_workspace_slug(&workspace_slug)?;
 
             // Try daemon API first (T26: migration)
-            let client = crate::api::DaemonClient::from_config(config);
+            let client = crate::api::DaemonClient::from_config(config)?;
             if client.health_check().await? {
                 let req = crate::api::models::SetActiveWorkspaceRequest {
                     creator_id: Some(creator_id.to_string()),
@@ -1413,7 +1422,7 @@ async fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Resul
 
     // Try daemon API for enriched info when checking active creator
     if config.active_creator_id.as_deref() == Some(id.as_str()) {
-        let client = crate::api::DaemonClient::from_config(config);
+        let client = crate::api::DaemonClient::from_config(config)?;
         if client.health_check().await? {
             match client.get_active_creator().await {
                 Ok(daemon_resp) => {
@@ -1495,7 +1504,7 @@ async fn use_creator(_config: &CliConfig, creator_ref: &str) -> Result<()> {
 
     // Try daemon API first
     let daemon_config = CliConfig::load()?;
-    let client = crate::api::DaemonClient::from_config(&daemon_config);
+    let client = crate::api::DaemonClient::from_config(&daemon_config)?;
     if client.health_check().await? {
         let req = crate::api::models::SetActiveCreatorRequest {
             creator_id: resolved_id.clone(),
@@ -1795,7 +1804,7 @@ async fn logout_creator(config: &CliConfig) -> Result<()> {
     let creator_id = creator_id.expect("checked above");
 
     // Try daemon API first (T33: migration)
-    let client = crate::api::DaemonClient::from_config(config);
+    let client = crate::api::DaemonClient::from_config(config)?;
     if client.health_check().await? {
         if let Err(e) = client.logout_creator(creator_id).await {
             eprintln!("nexus42: daemon logout failed, continuing with local cleanup: {e}");

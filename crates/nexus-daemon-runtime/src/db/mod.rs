@@ -86,6 +86,6 @@ mod restart_tests {
             "exactly one key block should survive restart"
         );
         assert_eq!(blocks[0].canonical_name, "Hero");
-        assert_eq!(blocks[0].world_id, "wld_restart");
+        assert_eq!(blocks[0].world_id(), Some("wld_restart"));
     }
 }

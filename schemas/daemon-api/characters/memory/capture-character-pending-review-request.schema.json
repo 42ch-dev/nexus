@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/characters/memory/capture-character-pending-review-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CaptureCharacterPendingReviewRequest",
+  "description": "Request body for POST /v1/daemon/characters/{character_id}/memory/pending-review. Captures one session-end digest into the Character review queue. `binding_id` marks binding-local provenance and must be an active binding of the path Character in an owned active World; omitted means shared Character scope. The owner Creator is always resolved from the active-Creator config — request bodies never carry `owner_creator_id`.",
+  "type": "object",
+  "required": ["pending_id", "session_id", "raw_digest"],
+  "additionalProperties": false,
+  "properties": {
+    "pending_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "session_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "binding_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/ActorWorldBindingId"
+    },
+    "task_kind": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "Classification hint (brainstorm, outline, chapter, research); defaults to `unknown`."
+    },
+    "raw_digest": { "type": "string", "minLength": 1, "maxLength": 65536 },
+    "created_at": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
+      "description": "Client-supplied capture timestamp; defaults to server time."
+    }
+  }
+}

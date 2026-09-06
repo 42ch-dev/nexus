@@ -62,7 +62,7 @@
 use std::collections::BTreeMap;
 
 use crate::generation::GenerationStage;
-use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
+use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 
 /// Section heading for the `world.before` slot (Q1 provisional lock —
 /// `guides/mca-section-audit.md`; product meaning locked in spec §2).
@@ -92,20 +92,20 @@ const HINT_OUTLET: &str = "outlet";
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SlotRouting {
     /// `world.before` — entries with `position_hint:"before_defs"`.
-    pub before: Vec<WorldKbEntry>,
+    pub before: Vec<KnowledgeEntryRecord>,
     /// Default fallback — no hint, `position_hint:"depth"`, unknown hint, or
     /// an `outlet` hint without a paired name. Renders as the V1.149 flat
     /// entry block (no sub-heading) — the neutral-only byte-equivalence
     /// anchor.
-    pub fallback: Vec<WorldKbEntry>,
+    pub fallback: Vec<KnowledgeEntryRecord>,
     /// `world.after` — entries with `position_hint:"after_defs"`.
-    pub after: Vec<WorldKbEntry>,
+    pub after: Vec<KnowledgeEntryRecord>,
     /// `kb.outlet.<name>` — open outlets keyed by the outlet string.
     /// Rendered sorted by `<name>` (`BTreeMap` iteration order is the sort).
-    pub outlets: BTreeMap<String, Vec<WorldKbEntry>>,
+    pub outlets: BTreeMap<String, Vec<KnowledgeEntryRecord>>,
     /// `style.post_history` — the one reserved well-known outlet (tail of the
     /// lore block, after all open outlets).
-    pub post_history: Vec<WorldKbEntry>,
+    pub post_history: Vec<KnowledgeEntryRecord>,
 }
 
 /// One accepted entry's slot assignment.
@@ -186,7 +186,7 @@ impl SlotRouting {
 /// reads `modules.activation.position_hint` / `outlet` and shapes assembly
 /// output.
 #[must_use]
-pub fn route_slots(matched: Vec<WorldKbEntry>) -> SlotRouting {
+pub fn route_slots(matched: Vec<KnowledgeEntryRecord>) -> SlotRouting {
     let mut routing = SlotRouting::default();
     for entry in matched {
         let (position_hint, outlet) = placement_of(&entry);
@@ -255,9 +255,9 @@ pub fn route_slots(matched: Vec<WorldKbEntry>) -> SlotRouting {
 /// assembly output.
 #[must_use]
 pub fn apply_stage_gate(
-    matched: Vec<WorldKbEntry>,
+    matched: Vec<KnowledgeEntryRecord>,
     stage: Option<GenerationStage>,
-) -> Vec<WorldKbEntry> {
+) -> Vec<KnowledgeEntryRecord> {
     match stage.unwrap_or(GenerationStage::Unspecified) {
         // (a) tested gate — `system_maintenance`: no lore slots at all
         // (spec §4 row; `_system.*` isolation invariant).
@@ -288,7 +288,7 @@ pub fn apply_stage_gate(
 /// `"style.post_history "` (trailing whitespace) is treated as the same
 /// reserved outlet — it must not open a near-duplicate `kb.outlet.*` slot or
 /// bypass the generation-stage gate (R-001).
-fn routes_to_style_post_history(entry: &WorldKbEntry) -> bool {
+fn routes_to_style_post_history(entry: &KnowledgeEntryRecord) -> bool {
     matches!(
         placement_of(entry),
         (Some(hint), Some(outlet)) if hint == HINT_OUTLET && outlet.trim() == WELL_KNOWN_STYLE_OUTLET
@@ -361,7 +361,7 @@ pub fn render_slots(routing: &SlotRouting) -> Option<String> {
 /// Reading the two strings is not matching logic — the activation engine
 /// already decided what fires. `None`/malformed values fall back to
 /// "no hint".
-fn placement_of(entry: &WorldKbEntry) -> (Option<String>, Option<String>) {
+fn placement_of(entry: &KnowledgeEntryRecord) -> (Option<String>, Option<String>) {
     let Some(modules) = entry.modules.as_ref() else {
         return (None, None);
     };
@@ -385,7 +385,7 @@ fn placement_of(entry: &WorldKbEntry) -> (Option<String>, Option<String>) {
 /// byte-identical to V1.149 (AC-I1b); the activation off-switch in
 /// `assemble_moment` also renders through it so flag-off output stays the
 /// V1.149 flat block (no slot sub-headings).
-pub(crate) fn format_entries(entries: &[WorldKbEntry]) -> String {
+pub(crate) fn format_entries(entries: &[KnowledgeEntryRecord]) -> String {
     entries
         .iter()
         .map(|kb| {
@@ -408,10 +408,10 @@ mod tests {
     use super::*;
     use nexus_contracts::BlockType;
 
-    /// Helper: build a `WorldKbEntry` with a `modules.activation` JSON payload
+    /// Helper: build a `KnowledgeEntryRecord` with a `modules.activation` JSON payload
     /// (or `None` for a fully neutral entry).
-    fn entry(name: &str, id: &str, activation: Option<serde_json::Value>) -> WorldKbEntry {
-        let mut entry = WorldKbEntry::new("wld_1", BlockType::Character, name);
+    fn entry(name: &str, id: &str, activation: Option<serde_json::Value>) -> KnowledgeEntryRecord {
+        let mut entry = KnowledgeEntryRecord::new("wld_1", BlockType::Character, name);
         entry.entry_id = id.to_string();
         entry.modules = activation.map(|a| serde_json::json!({ "activation": a }));
         entry
@@ -425,7 +425,7 @@ mod tests {
         serde_json::json!({ "position_hint": "outlet", "outlet": outlet })
     }
 
-    fn names(entries: &[WorldKbEntry]) -> Vec<&str> {
+    fn names(entries: &[KnowledgeEntryRecord]) -> Vec<&str> {
         entries.iter().map(|e| e.canonical_name.as_str()).collect()
     }
 
@@ -774,7 +774,7 @@ mod tests {
     /// A mixed matched list covering every routing shape: `before_defs`,
     /// `after_defs`, the reserved style outlet, two open outlets, and a
     /// no-hint neutral entry.
-    fn mixed_matched_list() -> Vec<WorldKbEntry> {
+    fn mixed_matched_list() -> Vec<KnowledgeEntryRecord> {
         vec![
             entry("Rules", "kb_bf", Some(with_hint("before_defs"))),
             entry("Hero", "kb_fb", None),
@@ -840,7 +840,7 @@ mod tests {
         );
         assert_eq!(
             gated,
-            Vec::<WorldKbEntry>::new(),
+            Vec::<KnowledgeEntryRecord>::new(),
             "trailing-space style variant must be gated off for persist"
         );
     }
@@ -854,7 +854,7 @@ mod tests {
                 mixed_matched_list(),
                 Some(GenerationStage::SystemMaintenance)
             ),
-            Vec::<WorldKbEntry>::new(),
+            Vec::<KnowledgeEntryRecord>::new(),
             "system_maintenance must produce no lore entries"
         );
     }

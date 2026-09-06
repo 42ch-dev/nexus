@@ -5,6 +5,7 @@
 //! lives here (no daemon dependency); the real `AcpSoulNarrativeSynthesizer`
 //! adapter lives in `nexus-daemon-runtime`.
 
+use crate::bearer::MemoryBearerRef;
 use crate::errors::MemoryError;
 
 /// Capped input signal for the LLM synthesis prompt.
@@ -54,7 +55,15 @@ pub struct SoulNarrativeDraft {
 /// Tests use a mock synthesizer to avoid real ACP/LLM calls.
 #[allow(async_fn_in_trait)]
 pub trait SoulNarrativeSynthesizer: Send + Sync {
-    /// Synthesize a Creator-SOUL narrative from the capped input signal.
+    /// Synthesize a Creator/Character-SOUL narrative from the capped input
+    /// signal.
+    ///
+    /// `session_scope` is the bearer-local provenance (`Some(binding)` for a
+    /// binding-local Character reflection, otherwise `None`). It lets a
+    /// worker-session-aware implementation namespace its ACP conversation so a
+    /// Character/binding reflection never resumes another bearer's history.
+    /// Implementations that ignore it must treat absence as the caller's
+    /// explicit intent.
     ///
     /// # Errors
     ///
@@ -62,7 +71,8 @@ pub trait SoulNarrativeSynthesizer: Send + Sync {
     /// malformed LLM output).
     async fn synthesize(
         &self,
-        creator_id: &str,
+        bearer: MemoryBearerRef<'_>,
         input: SoulNarrativeSynthesisInput,
+        session_scope: Option<&str>,
     ) -> Result<SoulNarrativeDraft, MemoryError>;
 }

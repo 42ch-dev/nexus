@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/characters/list-characters-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListCharactersResponse",
+  "description": "Response for GET /v1/daemon/characters. Cursor pagination; items are Character records scoped to the active Creator.",
+  "type": "object",
+  "required": [
+    "items",
+    "pagination"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "https://nexus42.invalid/schemas/domain/character.schema.json"
+      }
+    },
+    "pagination": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/kb/pagination-info.schema.json"
+    }
+  }
+}

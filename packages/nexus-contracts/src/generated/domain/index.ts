@@ -4,8 +4,12 @@
  * Generator: json-schema-to-typescript (tooling/codegen/src/ts-gen.ts)
  */
 
+export type { ActorRef } from './actor-ref';
+export type { ActorWorldBinding } from './actor-world-binding';
+export type { Character } from './character';
 export type { Creator } from './creator';
 export type { ForkBranch } from './fork-branch';
+export type { KnowledgeOwnerRef } from './knowledge-owner-ref';
 export type { Memory } from './memory';
 export type { Pairing } from './pairing';
 export type { StoryManifest } from './story-manifest';

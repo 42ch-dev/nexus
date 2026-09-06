@@ -5,10 +5,15 @@
  */
 
 export * from './common';
+export * from './daemon-api/actor-knowledge';
 export * from './daemon-api/agent-host';
 export * from './daemon-api/canvas/outline';
 export * from './daemon-api/canvas/strategy';
 export * from './daemon-api/canvas/world-kb';
+export * from './daemon-api/characters';
+export * from './daemon-api/characters/memory';
+export * from './daemon-api/characters/soul';
+export * from './daemon-api/characters/tom';
 export * from './daemon-api/check';
 export * from './daemon-api/common';
 export * from './daemon-api/compute';
@@ -36,9 +41,25 @@ export * from './platform/sync';
 // Schema version constants
 export const SCHEMA_VERSIONS: Record<string, number> = {
   VersionRef: 1,
+  AddKnowledgeEntryRequest: 1,
+  AddKnowledgeEntryResponse: 1,
+  KnowledgeViewItem: 1,
+  ListCharacterKnowledgeQuery: 1,
+  ListCharacterKnowledgeResponse: 1,
+  ViewRequest: 1,
+  ViewResponse: 1,
+  AgentHostListSessionsQuery: 1,
   AgentScanEntry: 1,
+  CancelOperationResponse: 1,
+  CreateSessionRequest: 1,
+  ExecuteOperationRequest: 1,
+  OperationResponse: 1,
   ScanRequest: 1,
   ScanResponse: 1,
+  SessionListResponse: 1,
+  SessionResponse: 1,
+  SessionViewpoint: 1,
+  ShutdownSessionResponse: 1,
   OutlineConflictError: 1,
   OutlinePatchChapterRequest: 1,
   OutlinePatchChapterSet: 1,
@@ -71,6 +92,37 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   WorldKbRelationshipProjection: 1,
   WorldKbSourceAnchorProjection: 1,
   WorldKbValidationError: 1,
+  AddCharacterBindingRequest: 1,
+  AddCharacterBindingResponse: 1,
+  CharacterDetail: 1,
+  CreateCharacterRequest: 1,
+  CreateCharacterResponse: 1,
+  ListCharacterBindingsQuery: 1,
+  ListCharacterBindingsResponse: 1,
+  ListCharactersQuery: 1,
+  ListCharactersResponse: 1,
+  CaptureCharacterPendingReviewRequest: 1,
+  CaptureCharacterPendingReviewResponse: 1,
+  CharacterMemoryFragmentInfo: 1,
+  CharacterPendingReviewInfo: 1,
+  CountCharacterPendingReviewsQuery: 1,
+  CountCharacterPendingReviewsResponse: 1,
+  DeleteCharacterPendingReviewResponse: 1,
+  ListCharacterMemoryFragmentsQuery: 1,
+  ListCharacterMemoryFragmentsResponse: 1,
+  ListCharacterPendingReviewsQuery: 1,
+  ListCharacterPendingReviewsResponse: 1,
+  PromoteCharacterFragmentRequest: 1,
+  PromoteCharacterFragmentResponse: 1,
+  ReviewCharacterMemoryRequest: 1,
+  ReviewCharacterMemoryResponse: 1,
+  CharacterSoulNarrativeRequest: 1,
+  CharacterSoulNarrativeResponse: 1,
+  ListCharacterTomQuery: 1,
+  ListCharacterTomResponse: 1,
+  RecordCharacterTomRequest: 1,
+  RecordCharacterTomResponse: 1,
+  TomBeliefItem: 1,
   CheckRequest: 1,
   CheckResponse: 1,
   ErrorResponse: 1,
@@ -218,8 +270,12 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   WorldRuleResponse: 1,
   WorldRuleUpdateRequest: 1,
   WorldRulesListResponse: 1,
+  ActorRef: 1,
+  ActorWorldBinding: 1,
+  Character: 1,
   Creator: 1,
   ForkBranch: 1,
+  KnowledgeOwnerRef: 1,
   Memory: 1,
   Pairing: 1,
   StoryManifest: 1,

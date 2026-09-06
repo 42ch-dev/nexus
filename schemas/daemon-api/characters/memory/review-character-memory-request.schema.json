@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/characters/memory/review-character-memory-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ReviewCharacterMemoryRequest",
+  "description": "Request body for POST /v1/daemon/characters/{character_id}/memory/review. Drains one bounded batch (<= 50 rows) of the Character pending-review queue through the shared deterministic review pipeline. `binding_id` restricts the batch to one active binding-local scope; omitted drains the shared Character scope.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "binding_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/ActorWorldBindingId"
+    }
+  }
+}

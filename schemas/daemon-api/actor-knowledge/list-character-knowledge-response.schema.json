@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/actor-knowledge/list-character-knowledge-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListCharacterKnowledgeResponse",
+  "description": "Response for GET /v1/daemon/characters/:character_id/knowledge.",
+  "type": "object",
+  "required": ["items", "pagination"],
+  "additionalProperties": false,
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "https://nexus42.invalid/schemas/daemon-api/actor-knowledge/knowledge-view-item.schema.json"
+      }
+    },
+    "pagination": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/kb/pagination-info.schema.json"
+    }
+  }
+}

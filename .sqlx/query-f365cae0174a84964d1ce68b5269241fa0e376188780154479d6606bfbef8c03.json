@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT binding_id as \"binding_id!\",\n                  character_id as \"character_id!\",\n                  world_id as \"world_id!\",\n                  status as \"status!\",\n                  world_sheet_entry_id,\n                  created_at as \"created_at!\",\n                  updated_at as \"updated_at!\"\n           FROM actor_world_bindings WHERE binding_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "binding_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "character_id!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "world_id!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "status!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "world_sheet_entry_id",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at!",
+        "ordinal": 6,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "f365cae0174a84964d1ce68b5269241fa0e376188780154479d6606bfbef8c03"
+}

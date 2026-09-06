@@ -8,7 +8,7 @@
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::validation::CANONICAL_NAME_MAX_LEN;
 use nexus_knowledge::world_kb::KbStore;
-use nexus_knowledge::world_kb::WorldKbEntry;
+use nexus_knowledge::world_kb::KnowledgeEntryRecord;
 use nexus_local_db::kb_relationships::{generate_relationship_id, get_relationship};
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_spoke_adapter::pack::ParsedPack;
@@ -166,7 +166,7 @@ pub async fn import_pack(
 
         // ── Entry ID collision (global PK, world-scoped semantics) ─────
         if let Ok(existing_by_id) = store.get_knowledge_entry(&entry.entry_id).await {
-            if existing_by_id.world_id == world_id {
+            if existing_by_id.world_id() == Some(world_id) {
                 // Same-world re-import: when entry_id and canonical_name both
                 // match, this is the same entry — honor conflict policy.
                 // If canonical_name or block_type differs, honor conflict policy on
@@ -329,7 +329,7 @@ pub async fn import_pack(
                 ImportOutcome::Skipped,
                 Some(format!(
                     "entry_id owned by world {} (no target-world name match)",
-                    existing_by_id.world_id
+                    existing_by_id.world_id().unwrap_or_default()
                 )),
             );
             summary.entries.skipped += 1;
@@ -814,7 +814,7 @@ async fn import_overwritten_entry(
     pool: &SqlitePool,
     world_id: &str,
     entry: &mut KnowledgeEntry,
-    existing: &WorldKbEntry,
+    existing: &KnowledgeEntryRecord,
     pack_entry_id: &str,
     summary: &mut ImportSummary,
     target_entry_ids: &mut HashSet<String>,

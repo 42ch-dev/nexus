@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/characters/memory/review-character-memory-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ReviewCharacterMemoryResponse",
+  "description": "Response body for POST /v1/daemon/characters/{character_id}/memory/review. Mirrors the Creator review drain contract: counts per classifier action plus the has_more/processed drain signals.",
+  "type": "object",
+  "required": ["promoted", "fragmented", "dropped"],
+  "additionalProperties": false,
+  "properties": {
+    "promoted": { "type": "integer" },
+    "fragmented": { "type": "integer" },
+    "dropped": { "type": "integer" },
+    "has_more": {
+      "type": "boolean",
+      "description": "When true the pending queue was not fully drained by this call; the client should re-issue POST review to drain the remainder."
+    },
+    "processed": {
+      "type": "integer",
+      "description": "Number of pending rows inspected during this call."
+    }
+  }
+}

@@ -581,7 +581,7 @@ mod tests {
         // exercised by the real `get_info` path.
         let handler = McpBridgeHandler {
             backend: DaemonClientBackend {
-                client: DaemonClient::new("http://127.0.0.1:1"),
+                client: DaemonClient::new("http://127.0.0.1:1").expect("valid loopback URL"),
             },
             policy: VisibilityPolicy::absent(),
         };

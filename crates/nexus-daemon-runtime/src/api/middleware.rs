@@ -204,9 +204,11 @@ fn generate_request_id() -> String {
         .unwrap_or_default()
         .as_millis();
 
-    // Mix counter + timestamp for uniqueness (truncate to u64 is fine for ID purposes)
-    #[allow(clippy::cast_possible_truncation)]
-    let mixed = count.wrapping_add(millis as u64);
+    // Checked conversion: epoch millis are well below u64::MAX for every
+    // realistic clock; saturate rather than wrap if a pathological clock
+    // value is ever observed.
+    let millis_u64 = u64::try_from(millis).unwrap_or(u64::MAX);
+    let mixed = count.wrapping_add(millis_u64);
     // `{:013}` would space-pad Strings (the `0` fill flag is numeric-only),
     // leaking trailing spaces into the wire request_id — emit the bare
     // base62 value instead (doc format `req_<base62>`; u64 max is 11 digits).

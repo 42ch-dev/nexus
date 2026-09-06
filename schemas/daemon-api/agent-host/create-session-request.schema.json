@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/agent-host/create-session-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus AgentHostCreateSessionRequest",
+  "description": "Request body for POST /v1/daemon/agent-host/sessions. Legacy fields are unchanged. actor_ref and viewpoint are a pair: both absent is legacy, both present is Actor mode; supplying only one is rejected in the daemon.",
+  "type": "object",
+  "required": ["provider_id"],
+  "additionalProperties": false,
+  "properties": {
+    "provider_id": {
+      "type": "string",
+      "description": "Provider identifier selected for the managed session."
+    },
+    "cwd": {
+      "type": "string",
+      "description": "Working directory for the session. Omitted or null uses the daemon default."
+    },
+    "model": { "type": "string" },
+    "mode": { "type": "string" },
+    "actor_ref": {
+      "$ref": "https://nexus42.invalid/schemas/domain/actor-ref.schema.json"
+    },
+    "viewpoint": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/agent-host/session-viewpoint.schema.json"
+    }
+  }
+}

@@ -200,7 +200,7 @@ struct ScheduleCli {
 /// - Invalid schedule parameters
 /// - CLI configuration cannot be loaded/saved
 pub async fn run(cmd: ScheduleCommand, config: &CliConfig) -> Result<()> {
-    let client = crate::api::DaemonClient::from_config(config);
+    let client = crate::api::DaemonClient::from_config(config)?;
 
     match cmd {
         ScheduleCommand::Add {

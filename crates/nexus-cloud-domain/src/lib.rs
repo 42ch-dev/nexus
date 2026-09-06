@@ -4,10 +4,6 @@
 //! All **types** come from `nexus-contracts` (contracts-first).
 //! No HTTP — cloud-sync owns transport.
 
-#![allow(clippy::missing_errors_doc)]
-#![allow(clippy::must_use_candidate)]
-#![allow(clippy::uninlined_format_args)]
-
 pub mod errors;
 pub mod pairing;
 pub mod user;

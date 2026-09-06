@@ -4,9 +4,9 @@
 //!
 //! # Wire conversion reuse (HARD, spec §7.1)
 //!
-//! The adapter REUSES the sole conversion seam (`world_kb_to_spoke` /
-//! `spoke_to_world_kb` in `crate::conversion`, since V1.145 P1a)
-//! between SQLite-backed [`WorldKbEntry`] rows and spoke [`KnowledgeEntry`]
+//! The adapter REUSES the sole conversion seam (`knowledge_record_to_spoke` /
+//! `spoke_to_knowledge_record` in `crate::conversion`, since V1.145 P1a)
+//! between SQLite-backed [`KnowledgeEntryRecord`] rows and spoke [`KnowledgeEntry`]
 //! wire types. No second conversion path is added here.
 //!
 //! # CAS contract (spec §7.4)
@@ -25,12 +25,12 @@
 //! | Row moved to another world (world-aware CAS miss, V1.154 P2 R3) | world-conflict marker (`InternalError` carrier; wire `world_conflict` per spec §3.2) |
 
 use super::NexusAdapter;
-use crate::conversion::{spoke_to_world_kb, world_kb_to_spoke};
+use crate::conversion::{knowledge_record_to_spoke, spoke_to_knowledge_record};
 use crate::extensions::build_extensions_nexus;
 use crate::{KnowledgeEntry, KnowledgeEntryPort, SpokeReject, SpokeRejectCode, SpokeResult};
 use async_trait::async_trait;
 use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
-use nexus_knowledge::world_kb::WorldKbEntry;
+use nexus_knowledge::world_kb::KnowledgeEntryRecord;
 use nexus_local_db::kb_store::{
     cas_update_key_block_fields, update_key_block_auxiliary_fields_in_tx, SqliteKbStore,
 };
@@ -172,13 +172,13 @@ impl KnowledgeEntryPort for NexusAdapter<'_> {
         let pool = self.pool.clone();
         let entry_id = entry_id.to_string();
         let store = SqliteKbStore::new(pool);
-        let world_entry: WorldKbEntry = match store.get_knowledge_entry(&entry_id).await {
+        let world_entry: KnowledgeEntryRecord = match store.get_knowledge_entry(&entry_id).await {
             Ok(row) => row,
             Err(e) => return Self::map_get_err(e, &entry_id),
         };
         // Reuse the sole conversion seam (spec §7.1) — now free functions
         // in nexus-spoke-adapter (V1.145 P1a dep-graph reversal).
-        SpokeResult::Ok(world_kb_to_spoke(&world_entry))
+        SpokeResult::Ok(knowledge_record_to_spoke(&world_entry))
     }
 
     async fn put_knowledge_entry(
@@ -197,6 +197,7 @@ impl KnowledgeEntryPort for NexusAdapter<'_> {
 /// Create path: `expected_base_revision = None`. Reject if the row already
 /// exists; otherwise insert via [`SqliteKbStore::insert_key_block_in_tx`]
 /// and return the entry with its initial post-create revision (`Some(1)`).
+#[allow(clippy::too_many_lines)] // single validated create transaction
 async fn put_create(
     adapter: &NexusAdapter<'_>,
     pool: &sqlx::SqlitePool,
@@ -230,15 +231,25 @@ async fn put_create(
     // nexus-spoke-adapter (V1.145 P1a). Set the initial post-create revision
     // to 1 (matches the V1.73 NULL-normalization rule: the first successful
     // write sets revision = 1).
-    let mut world_entry: WorldKbEntry = spoke_to_world_kb(entry.clone());
+    let mut world_entry: KnowledgeEntryRecord = match spoke_to_knowledge_record(entry.clone()) {
+        Ok(v) => v,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InvalidInput,
+                format!("create entry lacks canonical owner metadata: {e}"),
+                json!({ "entry_id": entry_id }),
+            );
+        }
+    };
     world_entry.revision = Some(1);
 
     // V1.145 P0 T2: build `extensions.nexus` JSON at the adapter boundary so
     // the storage layer stays spoke-unaware. Mirrors the UPDATE CAS path in
     // `run_cas_update_in_tx` (spec §7.4); the JSON is passed opaquely to
-    // `insert_key_block_with_extensions_in_tx`.
+    // `insert_key_block_with_extensions_in_tx`. v1.184 P1: owner-aware.
     let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
-        &world_entry.world_id,
+        &world_entry.owner,
+        world_entry.creator_only,
         world_entry.created_from_command_id.as_deref(),
         world_entry.source_work_id.as_deref(),
         world_entry.source_chapter,
@@ -289,7 +300,7 @@ async fn put_create(
             SpokeResult::Ok(result)
         }
         Err(KbStoreError::Duplicate {
-            world_id,
+            owner,
             name,
             block_type,
         }) => reject(
@@ -297,10 +308,23 @@ async fn put_create(
             format!("Entry already exists: {entry_id}"),
             json!({
                 "entry_id": entry_id,
-                "world_id": world_id,
+                "owner": owner,
                 "canonical_name": name,
                 "block_type": format!("{block_type:?}"),
             }),
+        ),
+        // v1.184 P1 fix: caller-input failures (canonical-name/body
+        // validation, the World-only creator_only invariant, and the
+        // immutable-owner guard) are InvalidInput, never InternalError — the
+        // latter is reserved for genuine storage failures.
+        Err(
+            e @ (KbStoreError::Validation(_)
+            | KbStoreError::ValidationLegacy(_)
+            | KbStoreError::ImmutableOwner(_)),
+        ) => reject(
+            SpokeRejectCode::InvalidInput,
+            format!("invalid entry on create: {e}"),
+            json!({ "entry_id": entry_id }),
         ),
         Err(e) => reject(
             SpokeRejectCode::InternalError,
@@ -334,7 +358,16 @@ async fn put_update_bound(
     expected: u64,
 ) -> SpokeResult<KnowledgeEntry> {
     let entry_id = entry.entry_id.clone();
-    let world_entry: WorldKbEntry = spoke_to_world_kb(entry.clone());
+    let world_entry: KnowledgeEntryRecord = match spoke_to_knowledge_record(entry.clone()) {
+        Ok(v) => v,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InvalidInput,
+                format!("knowledge entry lacks canonical owner metadata: {e}"),
+                json!({ "entry_id": entry_id }),
+            );
+        }
+    };
     let mut tx = adapter
         .take_bound_tx()
         .expect("bound adapter must have tx in cell");
@@ -357,7 +390,16 @@ async fn put_update_unbound(
     expected: u64,
 ) -> SpokeResult<KnowledgeEntry> {
     let entry_id = entry.entry_id.clone();
-    let world_entry: WorldKbEntry = spoke_to_world_kb(entry.clone());
+    let world_entry: KnowledgeEntryRecord = match spoke_to_knowledge_record(entry.clone()) {
+        Ok(v) => v,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InvalidInput,
+                format!("knowledge entry lacks canonical owner metadata: {e}"),
+                json!({ "entry_id": entry_id }),
+            );
+        }
+    };
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
@@ -415,7 +457,16 @@ pub(crate) async fn commit_compute_settlement(
 
         for (entry, expected) in entry_updates {
             let entry_id = entry.entry_id.clone();
-            let world_entry: WorldKbEntry = spoke_to_world_kb(entry);
+            let world_entry: KnowledgeEntryRecord = match spoke_to_knowledge_record(entry) {
+                Ok(v) => v,
+                Err(e) => {
+                    return reject(
+                        SpokeRejectCode::InvalidInput,
+                        format!("knowledge entry lacks canonical owner metadata: {e}"),
+                        json!({ "entry_id": entry_id }),
+                    );
+                }
+            };
             match run_cas_update_in_tx(&mut tx, &entry_id, &world_entry, expected).await {
                 SpokeResult::Ok(_) => {}
                 SpokeResult::Reject(r) => {
@@ -458,7 +509,7 @@ pub(crate) async fn commit_compute_settlement(
 async fn run_cas_update_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     entry_id: &str,
-    world_entry: &WorldKbEntry,
+    world_entry: &KnowledgeEntryRecord,
     expected: u64,
 ) -> SpokeResult<u64> {
     let body_json = world_entry
@@ -473,7 +524,8 @@ async fn run_cas_update_in_tx(
         .as_ref()
         .map(|a| serde_json::to_string(a).unwrap_or_default());
     let extensions_nexus_json = serde_json::to_string(&build_extensions_nexus(
-        &world_entry.world_id,
+        &world_entry.owner,
+        world_entry.creator_only,
         world_entry.created_from_command_id.as_deref(),
         world_entry.source_work_id.as_deref(),
         world_entry.source_chapter,
@@ -487,6 +539,65 @@ async fn run_cas_update_in_tx(
         .as_ref()
         .map(|m| serde_json::to_string(m).unwrap_or_default());
 
+    // v1.184 P1 fix: `creator_only` is immutable on update. The stored typed
+    // value is read back inside the tx and compared to the candidate *before*
+    // the CAS writes, but ONLY when the stored row is in the same world as
+    // the candidate — a candidate that flips the flag is rejected InvalidInput
+    // with no write (otherwise the extension JSON would briefly disagree with
+    // the authoritative typed column and the mismatch would be masked).
+    //
+    // Owner immutability needs no separate check: the World-owned CAS lane
+    // already binds the candidate's `world_id` in its predicate, so a row
+    // moved to another world between verification and CAS misses the predicate
+    // and classifies as a world-conflict (InternalError carrier) — exactly the
+    // spec §3.2 behavior. We must NOT intercept that here as an immutable-
+    // owner error, or we would mask the world-conflict.
+    let stored_creator_only = match sqlx::query_as::<_, (Option<String>, i64)>(
+        "SELECT world_id, creator_only FROM kb_key_blocks WHERE key_block_id = ?",
+    )
+    .bind(entry_id)
+    .fetch_optional(&mut **tx)
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            return reject(
+                SpokeRejectCode::InternalError,
+                format!("storage error reading stored creator_only for update: {e}"),
+                json!({ "entry_id": entry_id }),
+            );
+        }
+    };
+    if let Some((stored_world, stored_creator_only)) = stored_creator_only {
+        // Only a same-world creator_only flip is an immutable-owner violation.
+        // A different stored world (or non-World row) falls through to the CAS,
+        // which classifies world-conflict / not-found exactly as before.
+        if stored_world.as_deref() == world_entry.world_id()
+            && (stored_creator_only != 0) != world_entry.creator_only
+        {
+            return reject(
+                SpokeRejectCode::InvalidInput,
+                "knowledge entry creator_only is immutable (stored flag differs from candidate)",
+                json!({ "entry_id": entry_id }),
+            );
+        }
+    }
+    // A missing row falls through to the CAS, which classifies NotFound /
+    // CAS-miss exactly as before.
+
+    // v1.184 P1: the CAS update lane is World-owned only — a non-World
+    // candidate cannot be patched through the world-scoped CAS (fails closed
+    // rather than passing an empty world id into a same-world predicate).
+    let Some(world_id) = world_entry.world_id() else {
+        return reject(
+            SpokeRejectCode::InvalidInput,
+            format!(
+                "knowledge entry update requires a World-owned record (got {})",
+                world_entry.owner.kind()
+            ),
+            json!({ "entry_id": entry_id }),
+        );
+    };
     let new_rev = match cas_update_key_block_fields(
         tx,
         entry_id,
@@ -500,7 +611,7 @@ async fn run_cas_update_in_tx(
         // cross-process writer moved the row to another world between the
         // gate check and this CAS, the predicate misses and the storage
         // layer classifies it as WorldConflict.
-        &world_entry.world_id,
+        world_id,
     )
     .await
     {
@@ -577,7 +688,7 @@ mod tests {
     use super::*;
     use crate::KnowledgeEntryPort;
     use nexus_contracts::BlockType;
-    use nexus_knowledge::world_kb::{WorldKbBody, WorldKbEntry};
+    use nexus_knowledge::world_kb::{KnowledgeEntryBody, KnowledgeEntryRecord};
     use nexus_local_db::{open_pool, run_migrations};
 
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
@@ -610,18 +721,18 @@ mod tests {
     /// Build a spoke `KnowledgeEntry` fixture with a populated `extensions.nexus`
     /// (so it round-trips into the `kb_key_blocks` row that requires `world_id`).
     fn spoke_entry(entry_id: &str, canonical_name: &str, revision: Option<u64>) -> KnowledgeEntry {
-        // Round-trip through the sole conversion seam: build a WorldKbEntry
+        // Round-trip through the sole conversion seam: build a KnowledgeEntryRecord
         // (which carries world_id natively), convert forward to spoke — this
         // guarantees the fixture satisfies the storage shape requirements
         // (world_id present under extensions.nexus; canonical_name format-valid).
-        let mut world = WorldKbEntry::new("wld_1", BlockType::Character, canonical_name);
+        let mut world = KnowledgeEntryRecord::new("wld_1", BlockType::Character, canonical_name);
         world.entry_id = entry_id.to_string();
         world.revision = revision;
-        world.body = Some(WorldKbBody {
+        world.body = Some(KnowledgeEntryBody {
             summary: Some(format!("{canonical_name} summary")),
             ..Default::default()
         });
-        world_kb_to_spoke(&world)
+        knowledge_record_to_spoke(&world)
     }
 
     /// Test helper: unwrap a `SpokeResult::Ok` or panic with the reject payload.
@@ -997,6 +1108,168 @@ mod tests {
     // cover STORED_REVISION_STALE and REVISION_CONFLICT — they pass
     // unchanged (confirmed by the red-green run). No additional OCC test
     // needed beyond the existing coverage.
+
+    /// Read the stored typed `owner_kind`/`creator_only` columns plus the
+    /// persisted `extensions_nexus_json` for an entry — used to assert an
+    /// immutable-owner/creator_only rejection leaves storage unchanged.
+    async fn stored_typed_owner_and_extensions(
+        pool: &sqlx::SqlitePool,
+        entry_id: &str,
+    ) -> (String, bool, serde_json::Value) {
+        let row: (String, i64, String) = sqlx::query_as(
+            "SELECT owner_kind, creator_only, extensions_nexus_json \
+             FROM kb_key_blocks WHERE key_block_id = ?",
+        )
+        .bind(entry_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let json_val: serde_json::Value = serde_json::from_str(&row.2).unwrap_or_default();
+        (row.0, row.1 != 0, json_val)
+    }
+
+    /// Build a World-owned spoke entry with `creator_only` set (v1.184 P1 fix
+    /// regression: a candidate that flips `creator_only` on update must be
+    /// rejected `InvalidInput` with no write).
+    fn spoke_entry_creator_only(
+        entry_id: &str,
+        canonical_name: &str,
+        creator_only: bool,
+    ) -> KnowledgeEntry {
+        let mut world = KnowledgeEntryRecord::new("wld_1", BlockType::Character, canonical_name);
+        world.entry_id = entry_id.to_string();
+        world.creator_only = creator_only;
+        world.body = Some(KnowledgeEntryBody {
+            summary: Some(format!("{canonical_name} summary")),
+            ..Default::default()
+        });
+        knowledge_record_to_spoke(&world)
+    }
+
+    /// v1.184 P1 fix: the production spoke update path must reject a
+    /// `creator_only` flip (immutable) as `InvalidInput`, leaving the typed
+    /// column and the extensions JSON unchanged.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_update_rejects_creator_only_flip_unchanged_data() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let adapter = NexusAdapter::new(pool.clone());
+        let entry = spoke_entry_creator_only("kb_flag", "Flagged", false);
+        let created = unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
+        assert_eq!(created.revision, Some(1));
+
+        // Attempt to flip creator_only true → reject InvalidInput.
+        let flip = spoke_entry_creator_only("kb_flag", "Flagged", true);
+        match adapter.put_knowledge_entry(flip, Some(1)).await {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InvalidInput,
+                    "creator_only flip must map to InvalidInput, got {r:?}"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InvalidInput reject"),
+        }
+
+        // Storage unchanged: typed creator_only still false; the extensions
+        // JSON namespace must not carry a creator_only key.
+        let (kind, stored_flag, ext_json) =
+            stored_typed_owner_and_extensions(&pool, "kb_flag").await;
+        assert_eq!(kind, "world");
+        assert!(
+            !stored_flag,
+            "typed creator_only must remain false after rejected flip"
+        );
+        let nexus_obj = ext_json.get("nexus").and_then(serde_json::Value::as_object);
+        assert!(
+            nexus_obj.is_none_or(|m| !m.contains_key("creator_only")),
+            "no creator_only key may leak into the persisted extensions JSON after rejected flip: {ext_json:?}"
+        );
+    }
+
+    /// v1.184 P1 fix: an ambiguous owner payload reaching the spoke write
+    /// boundary maps to `InvalidInput` (never `InternalError`) on create.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_create_ambiguous_owner_maps_to_invalid_input() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let adapter = NexusAdapter::new(pool);
+        let mut entry = spoke_entry("kb_ambig", "Ambig", None);
+        // Inject two typed owner keys — the conversion seam must fail closed.
+        let key = spoke_schemas::knowledge_entry::KnowledgeEntryExtensionsKey::try_from("nexus")
+            .expect("nexus key is a valid extension key");
+        if let Some(ns) = entry.extensions.get_mut(&key) {
+            ns.insert(
+                "character_id".to_string(),
+                serde_json::Value::String("chr_1".into()),
+            );
+        }
+
+        match adapter.put_knowledge_entry(entry, None).await {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InvalidInput,
+                    "ambiguous owner must map to InvalidInput, got {r:?}"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InvalidInput reject"),
+        }
+    }
+
+    /// v1.184 P1 fix: a non-World owner carrying `creator_only` reaches the
+    /// create boundary → `InvalidInput` (not `InternalError`).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_create_creator_only_on_character_maps_to_invalid_input() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let adapter = NexusAdapter::new(pool);
+        let mut rec =
+            KnowledgeEntryRecord::for_character("chr_1", BlockType::Character, "CharFlag");
+        rec.creator_only = true;
+        rec.body = Some(KnowledgeEntryBody {
+            summary: Some("char flag".to_string()),
+            ..Default::default()
+        });
+        let entry = knowledge_record_to_spoke(&rec);
+
+        match adapter.put_knowledge_entry(entry, None).await {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InvalidInput,
+                    "creator_only on a Character-owned entry must map to InvalidInput, got {r:?}"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InvalidInput reject"),
+        }
+    }
+
+    /// v1.184 P1 fix: an unknown `entry_type` on the create boundary maps to
+    /// `InvalidInput` (never silently normalized).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn put_create_unknown_entry_type_maps_to_invalid_input() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let adapter = NexusAdapter::new(pool);
+        let mut entry = spoke_entry("kb_unktype", "UnknownType", None);
+        entry.entry_type = "not_a_real_block_type".to_string();
+
+        match adapter.put_knowledge_entry(entry, None).await {
+            SpokeResult::Reject(r) => {
+                assert_eq!(
+                    r.code,
+                    SpokeRejectCode::InvalidInput,
+                    "unknown entry_type must map to InvalidInput, got {r:?}"
+                );
+            }
+            SpokeResult::Ok(_) => panic!("expected InvalidInput reject"),
+        }
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn put_create_bound_tx_not_visible_until_outer_commit() {

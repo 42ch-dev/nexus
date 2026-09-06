@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/characters/create-character-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CreateCharacterResponse",
+  "description": "Response body for POST /v1/daemon/characters (201 Created): the Character plus its initial active binding.",
+  "type": "object",
+  "required": [
+    "character",
+    "binding"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "character": {
+      "$ref": "https://nexus42.invalid/schemas/domain/character.schema.json"
+    },
+    "binding": {
+      "$ref": "https://nexus42.invalid/schemas/domain/actor-world-binding.schema.json"
+    }
+  }
+}

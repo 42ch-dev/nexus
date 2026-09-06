@@ -68,7 +68,7 @@ pub enum InspectorCommand {
 /// `CliError` for daemon / network failures (403 foreign world, 400
 /// work→world binding mismatch, …).
 pub async fn run(cmd: InspectorCommand, config: &CliConfig) -> Result<()> {
-    let client = DaemonClient::from_config(config);
+    let client = DaemonClient::from_config(config)?;
     match cmd {
         InspectorCommand::Moment {
             world_id,

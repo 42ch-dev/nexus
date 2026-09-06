@@ -6,7 +6,7 @@
 use thiserror::Error;
 
 /// Domain error type covering all aggregate validation and state transition errors.
-#[derive(Debug, Error, PartialEq)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum DomainError {
     // ── Permission errors ────────────────────────────────────────────
     /// Initiator lacks required permission for the operation.
@@ -203,8 +203,8 @@ mod tests {
         };
         let msg = err.to_string();
         assert!(msg.contains("revision mismatch"), "msg: {msg}");
-        assert!(msg.contains("5"), "msg: {msg}");
-        assert!(msg.contains("3"), "msg: {msg}");
+        assert!(msg.contains('5'), "msg: {msg}");
+        assert!(msg.contains('3'), "msg: {msg}");
     }
 
     #[test]
@@ -270,7 +270,7 @@ mod tests {
         let err = DomainError::ProvisionalRecordsExist { count: 7 };
         let msg = err.to_string();
         assert!(msg.contains("provisional records exist"), "msg: {msg}");
-        assert!(msg.contains("7"), "msg: {msg}");
+        assert!(msg.contains('7'), "msg: {msg}");
     }
 
     #[test]

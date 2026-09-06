@@ -27,9 +27,9 @@ use crate::directive::{
 use crate::generation::GenerationStage;
 use crate::slots::{self, SlotMapEntry};
 use crate::stage0::{Stage0Assembly, STAGE0_PERSONALITY_END, STAGE0_PERSONALITY_START};
-use crate::world_context::WorldKbQueryBuilder;
+use crate::world_context::{CharacterViewInput, WorldKbQueryBuilder};
 use nexus_contracts::BlockType;
-use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
+use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_knowledge::KnowledgeStore;
 use nexus_narrative::NarrativeGateway;
@@ -54,6 +54,178 @@ const USER_KNOWLEDGE_HEADING: &str = "## User Knowledge";
 /// `## World Knowledge Base`. P0 reserves the position but never renders it
 /// (no directive active); P1 fills the slot.
 const MOMENT_DIRECTIVE_HEADING: &str = "## Moment Directive";
+
+/// P2 Character mind headings (empty rows; P3/P4 fill the same slots).
+const CHARACTER_SOUL_HEADING: &str = "## Character SOUL";
+const CHARACTER_MEMORY_HEADING: &str = "## Character Memory";
+const CHARACTER_TOM_L1_HEADING: &str = "## Character ToM — L1";
+const CHARACTER_TOM_L2_HEADING: &str = "## Character ToM — L2";
+
+/// P3/P4 Character SOUL/Memory/ToM projection into the four fixed mind slots.
+///
+/// Immutable once built: [`Self::new`] applies fixed deterministic bounds
+/// (UTF-8-safe truncation + entry cap) so the projected slots are stable and
+/// bounded when rendered. `None`/empty keep the P2 empty-heading bytes
+/// identical (missing optional memory/ToM is an honest empty section).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CharacterMindInput {
+    /// SOUL.md text for the executing Character, bounded and truncated.
+    pub soul: Option<String>,
+    /// Memory lines for the admitted scope, bounded and caller-ordered.
+    pub memory: Vec<String>,
+    /// L1 self-belief lines for the executing Character, bounded and in the
+    /// Task 2 service's deterministic keyset order (v1.184 P4).
+    pub tom_l1: Vec<String>,
+    /// L2 lines: the executing Character's recorded model of other
+    /// Characters, bounded and in the same keyset order (v1.184 P4).
+    pub tom_l2: Vec<String>,
+}
+
+/// Max Unicode scalar chars for the projected SOUL slot (4 KiB).
+pub const CHARACTER_MIND_MAX_SOUL_CHARS: usize = 4096;
+/// Max memory lines projected into the `## Character Memory` slot.
+pub const CHARACTER_MIND_MAX_MEMORY_ENTRIES: usize = 20;
+/// Max Unicode scalar chars per projected memory line.
+pub const CHARACTER_MIND_MAX_ENTRY_CHARS: usize = 280;
+/// Max L1/L2 `ToM` lines projected into each `## Character ToM` slot.
+pub const CHARACTER_MIND_MAX_TOM_ENTRIES: usize = 20;
+/// Max Unicode scalar chars per projected `ToM` line.
+pub const CHARACTER_MIND_MAX_TOM_CHARS: usize = 280;
+
+impl CharacterMindInput {
+    /// Build a bounded, deterministic mind input.
+    #[must_use]
+    pub fn new(soul: Option<String>, memory: Vec<String>) -> Self {
+        let soul = soul.map(|s| truncate_chars(&s, CHARACTER_MIND_MAX_SOUL_CHARS));
+        let memory: Vec<String> = memory
+            .into_iter()
+            .take(CHARACTER_MIND_MAX_MEMORY_ENTRIES)
+            .map(|line| truncate_chars(&line, CHARACTER_MIND_MAX_ENTRY_CHARS))
+            .collect();
+        Self {
+            soul,
+            memory,
+            tom_l1: Vec::new(),
+            tom_l2: Vec::new(),
+        }
+    }
+
+    /// Attach bounded, deterministic L1/L2 `ToM` lines (v1.184 P4).
+    ///
+    /// L1 is projected before L2 by construction: the caller passes the
+    /// already keyset-ordered `(order, carrier_entry_id, row_ordinal)` split;
+    /// this builder only caps and truncates. Empty vecs keep the P2/P3
+    /// empty-heading bytes identical (honest empty sections).
+    #[must_use]
+    pub fn with_tom(mut self, tom_l1: Vec<String>, tom_l2: Vec<String>) -> Self {
+        self.tom_l1 = tom_l1
+            .into_iter()
+            .take(CHARACTER_MIND_MAX_TOM_ENTRIES)
+            .map(|line| truncate_chars(&line, CHARACTER_MIND_MAX_TOM_CHARS))
+            .collect();
+        self.tom_l2 = tom_l2
+            .into_iter()
+            .take(CHARACTER_MIND_MAX_TOM_ENTRIES)
+            .map(|line| truncate_chars(&line, CHARACTER_MIND_MAX_TOM_CHARS))
+            .collect();
+        self
+    }
+
+    /// Whether neither slot carries content (used by tests to assert the
+    /// legacy/honest-empty path).
+    #[cfg(test)]
+    fn is_empty(&self) -> bool {
+        self.soul.as_deref().is_none_or(str::is_empty)
+            && self.memory.is_empty()
+            && self.tom_l1.is_empty()
+            && self.tom_l2.is_empty()
+    }
+}
+
+/// Truncate `text` to at most `max_chars` Unicode scalar chars.
+///
+/// Counts scalar characters (never bytes) and, when truncating, reserves one
+/// scalar for the `…` marker so the total is exactly `max_chars` — the bound
+/// is a character cap, not a byte cap, and is UTF-8 safe (never splits a
+/// multi-byte code point).
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let keep = max_chars.saturating_sub(1);
+    let mut s: String = text.chars().take(keep).collect();
+    s.push('…');
+    s
+}
+
+/// Actor discriminant for internal MCA context. Authorization is caller-owned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MomentActorKind {
+    /// Explicit Creator actor (no Character mind headings).
+    Creator,
+    /// Character actor: bounded view + four fixed empty mind headings.
+    Character,
+}
+
+/// Internal Actor context carried into [`assemble_moment`].
+///
+/// MCA does not authorize; the daemon admission service must populate this.
+#[derive(Debug, Clone)]
+pub struct MomentActorContext {
+    /// Admitted actor kind.
+    pub kind: MomentActorKind,
+    /// Character view rows. Required for [`MomentActorKind::Character`]; ignored otherwise.
+    pub character_view: Option<CharacterViewInput>,
+    /// P3 SOUL/Memory projection for [`MomentActorKind::Character`]. `None`
+    /// means no projection (the P2 empty-heading bytes). Ignored for Creator.
+    pub character_mind: Option<CharacterMindInput>,
+}
+
+impl MomentActorContext {
+    /// Character actor with a bounded admitted view (may be empty rows).
+    #[must_use]
+    pub fn character(view: CharacterViewInput) -> Self {
+        Self::character_with_mind(view, CharacterMindInput::default())
+    }
+
+    /// Character actor with a bounded admitted SOUL/Memory projection.
+    #[must_use]
+    pub const fn character_with_mind(view: CharacterViewInput, mind: CharacterMindInput) -> Self {
+        Self {
+            kind: MomentActorKind::Character,
+            character_view: Some(view),
+            character_mind: Some(mind),
+        }
+    }
+
+    /// Creator actor without an admitted view (non-Actor/legacy World query).
+    #[must_use]
+    pub const fn creator() -> Self {
+        Self {
+            kind: MomentActorKind::Creator,
+            character_view: None,
+            character_mind: None,
+        }
+    }
+
+    /// Creator actor consuming the admitted P1 omniscient union.
+    #[must_use]
+    pub const fn creator_with_view(view: CharacterViewInput) -> Self {
+        Self {
+            kind: MomentActorKind::Creator,
+            character_view: Some(view),
+            character_mind: None,
+        }
+    }
+
+    const fn is_character(&self) -> bool {
+        matches!(self.kind, MomentActorKind::Character)
+    }
+
+    const fn uses_admitted_view(&self) -> bool {
+        self.character_view.is_some() || self.is_character()
+    }
+}
 
 /// Parameters for a single moment context assembly request.
 ///
@@ -129,6 +301,8 @@ pub struct MomentRequest {
     /// the preset runner / schedule path threads the executing stage when it
     /// drives assembly (see `guides/generation-trigger-wiring.md`).
     pub generation_stage: Option<GenerationStage>,
+    /// Optional admitted Actor context (v1.184 P2). `None` is exact legacy.
+    pub actor: Option<MomentActorContext>,
 }
 
 impl MomentRequest {
@@ -152,6 +326,7 @@ impl MomentRequest {
             hop_edges: None,
             hop_max_tokens: None,
             generation_stage: None,
+            actor: None,
         }
     }
 
@@ -266,6 +441,13 @@ impl MomentRequest {
         self.generation_stage = Some(stage);
         self
     }
+
+    /// Attach admitted Actor context (Character or Creator).
+    #[must_use]
+    pub fn with_actor(mut self, actor: MomentActorContext) -> Self {
+        self.actor = Some(actor);
+        self
+    }
 }
 
 /// Assembled context from all domain sources for a single moment.
@@ -322,6 +504,11 @@ pub struct MomentContext {
     /// ran (no World-KB, activation off, or all entries gated off).
     /// Additive — never part of `to_full_context()` (AC-I6).
     pub hygiene_trace: Option<Vec<crate::hygiene::HygieneTraceEntry>>,
+    /// P3 SOUL/Memory projection into the four fixed Character mind headings.
+    /// `Some(mind)` emits the headings (SOUL/Memory bodies when present; the
+    /// two `ToM` headings always empty); `None` is legacy — empty sections stay
+    /// omitted.
+    pub character_mind: Option<CharacterMindInput>,
 }
 
 impl MomentContext {
@@ -356,8 +543,12 @@ impl MomentContext {
         let directive = section(self.moment_directive.as_ref(), MOMENT_DIRECTIVE_HEADING);
         let world_kb = section(self.world_kb.as_ref(), WORLD_KB_HEADING);
         let user_knowledge = section(self.user_knowledge.as_ref(), USER_KNOWLEDGE_HEADING);
+        let character_mind = self
+            .character_mind
+            .as_ref()
+            .map(render_character_mind_headings);
 
-        let mut parts: Vec<Option<String>> = vec![stage0];
+        let mut parts: Vec<Option<String>> = vec![stage0, character_mind];
         match self.moment_directive_depth {
             DirectiveDepth::Head => {
                 parts.push(directive);
@@ -619,8 +810,15 @@ where
         request.stage0.assemble()
     };
 
-    // 2. Narrative context (if world_id provided)
-    let (world_state, timeline) = if let Some(ref world_id) = request.world_id {
+    // 2. Narrative context (if world_id provided). Character Actor mode never
+    // loads unrestricted World State / Timeline.
+    let skip_unrestricted_narrative = request
+        .actor
+        .as_ref()
+        .is_some_and(MomentActorContext::is_character);
+    let (world_state, timeline) = if skip_unrestricted_narrative {
+        (None, None)
+    } else if let Some(ref world_id) = request.world_id {
         match fetch_narrative_context(narrative, world_id, request.branch_id.as_deref()).await {
             Ok((ws, tl)) => (ws, tl),
             Err(_) => (None, None),
@@ -742,8 +940,15 @@ where
         None
     };
 
-    // 4. User knowledge (if user_id provided)
-    let user_knowledge = if let Some(ref user_id) = request.user_id {
+    // 4. User knowledge (if user_id provided). Character mode omits Creator
+    //    user-knowledge fallback entirely.
+    let user_knowledge = if request
+        .actor
+        .as_ref()
+        .is_some_and(MomentActorContext::is_character)
+    {
+        None
+    } else if let Some(ref user_id) = request.user_id {
         match fetch_user_knowledge(knowledge, user_id, request.knowledge_limit).await {
             Ok(Some(uk_text)) => Some(uk_text),
             _ => None,
@@ -790,6 +995,10 @@ where
         activation_budget,
         moment_directive_meta: directive.as_ref().map(MomentDirectiveStatus::from),
         hygiene_trace,
+        character_mind: request.actor.as_ref().and_then(|a| {
+            a.is_character()
+                .then(|| a.character_mind.clone().unwrap_or_default())
+        }),
     };
 
     // 6. Cross-domain truncation if max_tokens set (the directive section is
@@ -852,7 +1061,7 @@ async fn apply_directive<D: DirectiveStore>(
 /// map reflects what actually rendered, not what activation matched — plus
 /// the DF-79 hygiene trace (per-entry applied/skipped/notes).
 fn render_gated_slots(
-    entries: Vec<WorldKbEntry>,
+    entries: Vec<KnowledgeEntryRecord>,
     stage: Option<GenerationStage>,
 ) -> (
     Option<String>,
@@ -867,6 +1076,38 @@ fn render_gated_slots(
     let routing = slots::route_slots(hygiened);
     let map = routing.to_slot_map();
     (slots::render_slots(&routing), map, trace)
+}
+
+fn render_character_mind_headings(mind: &CharacterMindInput) -> String {
+    let soul = mind
+        .soul
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|s| format!("{s}\n"))
+        .unwrap_or_default();
+    let memory = if mind.memory.is_empty() {
+        String::new()
+    } else {
+        let lines = mind.memory.join("\n");
+        format!("{lines}\n")
+    };
+    // ToM bodies (v1.184 P4): absent rows keep the exact P2/P3 empty-heading
+    // bytes (`heading\n\n` straight into the next heading).
+    let tom_l1 = if mind.tom_l1.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", mind.tom_l1.join("\n"))
+    };
+    // L2 section keeps the legacy trailing bytes exactly: empty renders
+    // `heading\n`; filled renders `heading\n\n<lines>\n` (memory pattern).
+    let tom_l2_section = if mind.tom_l2.is_empty() {
+        format!("{CHARACTER_TOM_L2_HEADING}\n")
+    } else {
+        format!("{CHARACTER_TOM_L2_HEADING}\n\n{}\n", mind.tom_l2.join("\n"))
+    };
+    format!(
+        "{CHARACTER_SOUL_HEADING}\n\n{soul}{CHARACTER_MEMORY_HEADING}\n\n{memory}{CHARACTER_TOM_L1_HEADING}\n\n{tom_l1}{tom_l2_section}"
+    )
 }
 
 /// Fetch narrative context (world state + timeline) from the gateway.
@@ -899,7 +1140,18 @@ async fn fetch_world_kb_entries<K: KbStore>(
     kb_store: &K,
     world_id: &str,
     request: &MomentRequest,
-) -> Result<Vec<WorldKbEntry>, nexus_knowledge::world_kb::KbStoreError> {
+) -> Result<Vec<KnowledgeEntryRecord>, nexus_knowledge::world_kb::KbStoreError> {
+    if request
+        .actor
+        .as_ref()
+        .is_some_and(MomentActorContext::uses_admitted_view)
+    {
+        let view = request
+            .actor
+            .as_ref()
+            .and_then(|actor| actor.character_view.as_ref());
+        return Ok(WorldKbQueryBuilder::character_view_or_unrestricted(view).unwrap_or_default());
+    }
     let builder = WorldKbQueryBuilder::new(world_id);
     let mut query = builder.query_all();
     if let Some(limit) = request.kb_limit {
@@ -1124,7 +1376,7 @@ mod tests {
         stores.narrative.insert_event(event);
 
         // Set up KB
-        let kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+        let kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
             "Hero",
@@ -1174,6 +1426,138 @@ mod tests {
         assert!(!full.contains(TIMELINE_HEADING));
         assert!(!full.contains(WORLD_KB_HEADING));
         assert!(!full.contains(USER_KNOWLEDGE_HEADING));
+        assert!(!full.contains(CHARACTER_SOUL_HEADING));
+        assert!(!full.contains(CHARACTER_MEMORY_HEADING));
+        assert!(!full.contains(CHARACTER_TOM_L1_HEADING));
+        assert!(!full.contains(CHARACTER_TOM_L2_HEADING));
+    }
+
+    #[tokio::test]
+    async fn character_mode_renders_empty_mind_headings_without_world_fallback() {
+        let stores = TestStores::new();
+        let world = nexus_narrative::world::World::new(
+            "wld_1",
+            "ctr_test",
+            "SecretNarrativeWorld",
+            "secret-world",
+            nexus_contracts::Visibility::Private,
+            nexus_contracts::TimePolicy::Manual,
+        );
+        stores.narrative.insert_world(world);
+        let mut event = nexus_narrative::timeline_event::TimelineEvent::new(
+            "wld_1",
+            "fbk_root",
+            nexus_narrative::timeline_event::TimelineEventType::StoryAdvance,
+            1,
+        );
+        event.title = Some("SecretTimelineBeat".to_string());
+        stores.narrative.insert_event(event);
+        let secret = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
+            "wld_1",
+            nexus_contracts::BlockType::Character,
+            "SecretWorldRow",
+        );
+        stores.kb.insert_knowledge_entry(secret).await.unwrap();
+        let allowed = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
+            "wld_1",
+            nexus_contracts::BlockType::Character,
+            "AdmittedAda",
+        );
+        let request = MomentRequest::new(Stage0Assembly {
+            user_prompt: "Act.".to_string(),
+            personality: "Creator SOUL must not leak.".to_string(),
+            ..Stage0Assembly::default()
+        })
+        .with_world("wld_1")
+        .with_user("user_1")
+        .with_actor(MomentActorContext::character(
+            CharacterViewInput::from_entries(vec![allowed]),
+        ));
+
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let full = ctx.to_full_context();
+        assert!(full.contains(CHARACTER_SOUL_HEADING));
+        assert!(full.contains(CHARACTER_MEMORY_HEADING));
+        assert!(full.contains(CHARACTER_TOM_L1_HEADING));
+        assert!(full.contains(CHARACTER_TOM_L2_HEADING));
+        assert!(full.contains("AdmittedAda"));
+        assert!(!full.contains("SecretWorldRow"));
+        assert!(!full.contains("SecretNarrativeWorld"));
+        assert!(!full.contains("SecretTimelineBeat"));
+        assert!(ctx.user_knowledge.is_none());
+        assert!(!full.contains(WORLD_STATE_HEADING));
+        assert!(!full.contains(TIMELINE_HEADING));
+        let soul = full.find(CHARACTER_SOUL_HEADING).unwrap();
+        let mem = full.find(CHARACTER_MEMORY_HEADING).unwrap();
+        let l1 = full.find(CHARACTER_TOM_L1_HEADING).unwrap();
+        let l2 = full.find(CHARACTER_TOM_L2_HEADING).unwrap();
+        assert!(soul < mem && mem < l1 && l1 < l2);
+    }
+
+    #[tokio::test]
+    async fn creator_actor_mode_renders_admitted_union_not_unrestricted_kb() {
+        let stores = TestStores::new();
+        let secret = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
+            "wld_1",
+            nexus_contracts::BlockType::Item,
+            "SecretWorldRow",
+        );
+        stores.kb.insert_knowledge_entry(secret).await.unwrap();
+        let admitted = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
+            "wld_1",
+            nexus_contracts::BlockType::Item,
+            "AdmittedUnionRow",
+        );
+        let request = MomentRequest::new(minimal_stage0())
+            .with_world("wld_1")
+            .with_actor(MomentActorContext::creator_with_view(
+                CharacterViewInput::from_entries(vec![admitted]),
+            ));
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let full = ctx.to_full_context();
+        assert!(full.contains("AdmittedUnionRow"));
+        assert!(!full.contains("SecretWorldRow"));
+        assert!(!full.contains(CHARACTER_SOUL_HEADING));
+    }
+
+    #[tokio::test]
+    async fn actor_token_budget_truncates_oversized_admitted_content() {
+        let stores = TestStores::new();
+        let mut huge = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
+            "wld_1",
+            nexus_contracts::BlockType::Item,
+            "HugeAdmitted",
+        );
+        huge.body = Some(
+            nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
+                summary: Some("X".repeat(8000)),
+                ..Default::default()
+            },
+        );
+        let request = MomentRequest::new(minimal_stage0())
+            .with_world("wld_1")
+            .with_max_tokens(20)
+            .with_actor(MomentActorContext::character(
+                CharacterViewInput::from_entries(vec![huge]),
+            ));
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let full = ctx.to_full_context();
+        assert!(full.chars().count() < 8000);
+        assert!(full.contains(CHARACTER_SOUL_HEADING));
+    }
+
+    #[test]
+    fn stage0_legacy_empty_section_omission_unchanged() {
+        let output = Stage0Assembly {
+            personality: String::new(),
+            experience: String::new(),
+            user_prompt: "Task.".to_string(),
+            ..Stage0Assembly::default()
+        }
+        .assemble();
+        assert!(!output.contains("## Personality"));
+        assert!(!output.contains(CHARACTER_SOUL_HEADING));
+        assert!(output.contains("Task."));
     }
 
     // ── V1.150 P0: reserved Moment Directive slot (spec §2 / Q1) ──────
@@ -1334,7 +1718,7 @@ mod tests {
     async fn directive_injects_into_reserved_slot_with_lifecycle() {
         let stores = TestStores::new();
         seed_world_and_timeline(&stores).await;
-        let kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+        let kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
             "Hero",
@@ -1394,7 +1778,7 @@ mod tests {
     async fn directive_depth_positions_section_within_region() {
         let stores = TestStores::new();
         seed_world_and_timeline(&stores).await;
-        let kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+        let kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
             "Hero",
@@ -1563,12 +1947,12 @@ mod tests {
         let stores = TestStores::new();
 
         // Seed two KB blocks
-        let kb1 = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+        let kb1 = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
             "Hero",
         );
-        let kb2 = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+        let kb2 = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
             "wld_1",
             nexus_contracts::BlockType::Scene,
             "Castle",
@@ -1606,12 +1990,12 @@ mod tests {
     async fn kb_query_respects_text_search() {
         let stores = TestStores::new();
 
-        let kb1 = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+        let kb1 = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
             "Hero",
         );
-        let kb2 = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+        let kb2 = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
             "wld_1",
             nexus_contracts::BlockType::Scene,
             "Castle",
@@ -1651,7 +2035,7 @@ mod tests {
         stores.narrative.insert_world(world);
 
         // Set up KB
-        let kb = nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry::new(
+        let kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
             "wld_1",
             nexus_contracts::BlockType::Character,
             "Hero with a long description",
@@ -1731,6 +2115,7 @@ mod tests {
             activation_budget: None,
             moment_directive_meta: None,
             hygiene_trace: None,
+            character_mind: None,
         };
 
         let (personality, rest) = ctx.split_stage0_personality();
@@ -1774,6 +2159,7 @@ mod tests {
             activation_budget: None,
             moment_directive_meta: None,
             hygiene_trace: None,
+            character_mind: None,
         };
 
         // apply_cross_domain_truncation uses split_stage0_personality internally
@@ -1839,15 +2225,15 @@ mod tests {
 
     // ── V1.146 P4 T2: activation flag tests ────────────────────────
 
-    /// Helper: create a `WorldKbEntry` with optional `modules.activation` JSON.
+    /// Helper: create a `KnowledgeEntryRecord` with optional `modules.activation` JSON.
     fn kb_entry_with_modules(
         world_id: &str,
         block_type: nexus_contracts::BlockType,
         name: &str,
         entry_id: &str,
         modules: Option<serde_json::Value>,
-    ) -> WorldKbEntry {
-        let mut entry = WorldKbEntry::new(world_id, block_type, name);
+    ) -> KnowledgeEntryRecord {
+        let mut entry = KnowledgeEntryRecord::new(world_id, block_type, name);
         entry.entry_id = entry_id.to_string();
         entry.modules = modules;
         entry
@@ -2059,15 +2445,18 @@ mod tests {
         // The transform applies to the emitted `body.summary` text; the
         // stored World-KB body stays byte-identical (read-path invariant).
         let stores = TestStores::new();
-        let mut kb = WorldKbEntry::new("wld_1", nexus_contracts::BlockType::Character, "Hero");
+        let mut kb =
+            KnowledgeEntryRecord::new("wld_1", nexus_contracts::BlockType::Character, "Hero");
         kb.entry_id = "kb_hygiene".to_string();
-        kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::WorldKbBody {
-            summary: Some("The hero fights the dragon".to_string()),
-            attributes: Some(serde_json::json!({
-                "hygiene": [{ "pattern": "dragon", "replacement": "wyrm" }]
-            })),
-            ..Default::default()
-        });
+        kb.body = Some(
+            nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
+                summary: Some("The hero fights the dragon".to_string()),
+                attributes: Some(serde_json::json!({
+                    "hygiene": [{ "pattern": "dragon", "replacement": "wyrm" }]
+                })),
+                ..Default::default()
+            },
+        );
         kb.modules =
             Some(serde_json::json!({"activation": {"keys": ["hero"], "logic": "and_any"}}));
         stores.kb.insert_knowledge_entry(kb).await.unwrap();
@@ -2114,12 +2503,15 @@ mod tests {
         // block (byte-identical to the no-hygiene path).
         let stores = TestStores::new();
         for (id, name) in [("kb_a", "Hero"), ("kb_b", "Castle")] {
-            let mut kb = WorldKbEntry::new("wld_1", nexus_contracts::BlockType::Character, name);
+            let mut kb =
+                KnowledgeEntryRecord::new("wld_1", nexus_contracts::BlockType::Character, name);
             kb.entry_id = id.to_string();
-            kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::WorldKbBody {
-                summary: Some(format!("{name} summary")),
-                ..Default::default()
-            });
+            kb.body = Some(
+                nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
+                    summary: Some(format!("{name} summary")),
+                    ..Default::default()
+                },
+            );
             stores.kb.insert_knowledge_entry(kb).await.unwrap();
         }
 
@@ -2138,22 +2530,25 @@ mod tests {
     #[tokio::test]
     async fn hygiene_carrier_survives_edit_patch_round_trip() {
         // Simulates `creator world kb edit --body`: JSON round-trip through
-        // `WorldKbBody` + `update_knowledge_entry` (the kb_edit code path).
+        // `KnowledgeEntryBody` + `update_knowledge_entry` (the kb_edit code path).
         // The `attributes.hygiene` carrier must survive the store round-trip
         // and drive the emission transform.
         let stores = TestStores::new();
-        let mut kb = WorldKbEntry::new("wld_1", nexus_contracts::BlockType::Character, "Hero");
+        let mut kb =
+            KnowledgeEntryRecord::new("wld_1", nexus_contracts::BlockType::Character, "Hero");
         kb.entry_id = "kb_hygiene".to_string();
-        kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::WorldKbBody {
-            summary: Some("The hero fights the dragon".to_string()),
-            ..Default::default()
-        });
+        kb.body = Some(
+            nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
+                summary: Some("The hero fights the dragon".to_string()),
+                ..Default::default()
+            },
+        );
         kb.modules =
             Some(serde_json::json!({"activation": {"keys": ["hero"], "logic": "and_any"}}));
         stores.kb.insert_knowledge_entry(kb).await.unwrap();
 
         // Author patches the body with a hygiene carrier (kb_edit flow).
-        let patched: nexus_knowledge::world_kb::knowledge_entry::WorldKbBody =
+        let patched: nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody =
             serde_json::from_str(
                 r#"{"summary":"The hero fights the dragon","attributes":{"hygiene":[{"pattern":"dragon","replacement":"wyrm"}]}}"#,
             )
@@ -2634,5 +3029,152 @@ mod tests {
             .iter()
             .any(|t| t.entry_id == "kb_guild" && !t.accepted));
         assert!(!trace.iter().any(|t| t.entry_id == "kb_guild" && t.accepted));
+    }
+
+    // ── P3: Character SOUL/Memory slot projection ─────────────────────────
+
+    #[test]
+    fn mind_input_applies_fixed_bounds_deterministically() {
+        let long_soul = "x".repeat(CHARACTER_MIND_MAX_SOUL_CHARS + 500);
+        let wide_soul = "é".repeat(CHARACTER_MIND_MAX_SOUL_CHARS + 3);
+        let astral_soul = "🜂".repeat(CHARACTER_MIND_MAX_SOUL_CHARS + 3);
+        let entries: Vec<String> = (0..(CHARACTER_MIND_MAX_MEMORY_ENTRIES + 7))
+            .map(|i| {
+                format!(
+                    "entry {i} {}",
+                    "y".repeat(CHARACTER_MIND_MAX_ENTRY_CHARS + 100)
+                )
+            })
+            .collect();
+
+        let mind = CharacterMindInput::new(Some(long_soul), entries);
+        assert_eq!(
+            mind.soul.as_ref().unwrap().chars().count(),
+            CHARACTER_MIND_MAX_SOUL_CHARS,
+            "truncation keeps the scalar bound (ellipsis reserved inside the cap)"
+        );
+        assert!(mind.soul.as_ref().unwrap().ends_with('…'));
+        assert_eq!(
+            mind.memory.len(),
+            CHARACTER_MIND_MAX_MEMORY_ENTRIES,
+            "entry cap applies"
+        );
+        let last = mind.memory.last().unwrap();
+        assert_eq!(
+            last.chars().count(),
+            CHARACTER_MIND_MAX_ENTRY_CHARS,
+            "each memory line is capped at the scalar bound"
+        );
+        assert!(last.ends_with('…'));
+
+        // Multi-byte safe: truncating é-heavy text hits the same scalar cap
+        // (two-byte chars) and never splits a code point.
+        let mind = CharacterMindInput::new(Some(wide_soul), vec![]);
+        let wide = mind.soul.as_ref().unwrap();
+        assert_eq!(wide.chars().count(), CHARACTER_MIND_MAX_SOUL_CHARS);
+        assert!(wide.ends_with('…'));
+        assert!(wide.is_char_boundary(wide.len()));
+
+        // Four-byte (astral) chars hit the same scalar cap and stay valid UTF-8.
+        let mind = CharacterMindInput::new(Some(astral_soul), vec![]);
+        let astral = mind.soul.as_ref().unwrap();
+        assert_eq!(astral.chars().count(), CHARACTER_MIND_MAX_SOUL_CHARS);
+        assert!(astral.ends_with('…'));
+        assert!(astral.is_char_boundary(astral.len()));
+
+        // Empty / None keeps is_empty true (legacy empty headings).
+        let empty = CharacterMindInput::default();
+        assert!(empty.is_empty());
+        let filled = CharacterMindInput::new(Some("soul".to_string()), vec!["m1".to_string()]);
+        assert!(!filled.is_empty());
+    }
+
+    #[test]
+    fn render_mind_slots_bounded_and_ordered_with_empty_tom() {
+        let mind = CharacterMindInput::new(
+            Some("# Ava\nSOUL body".to_string()),
+            vec!["- m1".to_string(), "- m2".to_string()],
+        );
+        let rendered = render_character_mind_headings(&mind);
+        assert!(rendered.starts_with("## Character SOUL\n\n"));
+        assert!(rendered.contains("# Ava\nSOUL body\n"));
+        assert!(rendered.contains("## Character Memory\n\n- m1\n- m2\n"));
+        assert!(rendered.contains("## Character ToM — L1\n\n## Character ToM — L2\n"));
+        // SOUL before Memory before ToM; no ToM content.
+        let soul_pos = rendered.find("## Character SOUL").unwrap();
+        let mem_pos = rendered.find("## Character Memory").unwrap();
+        let tom1 = rendered.find("## Character ToM — L1").unwrap();
+        assert!(soul_pos < mem_pos && mem_pos < tom1);
+        assert!(!rendered.contains("ToM — L1\n\nsome L1"));
+        assert!(!rendered.contains("ToM — L2\n\nsome L2"));
+    }
+
+    #[test]
+    fn render_mind_slots_fills_tom_l1_before_l2() {
+        let mind = CharacterMindInput::new(None, vec![])
+            .with_tom(vec!["- L1 line".to_string()], vec!["- L2 line".to_string()]);
+        let rendered = render_character_mind_headings(&mind);
+        assert!(rendered.contains(
+            "## Character ToM — L1
+
+- L1 line
+"
+        ));
+        assert!(rendered.contains(
+            "## Character ToM — L2
+
+- L2 line
+"
+        ));
+        let l1 = rendered.find("## Character ToM — L1").unwrap();
+        let l2 = rendered.find("## Character ToM — L2").unwrap();
+        assert!(l1 < l2);
+    }
+
+    #[tokio::test]
+    async fn character_mind_slots_fill_only_when_projected() {
+        let stores = TestStores::new();
+        let allowed = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
+            "wld_1",
+            nexus_contracts::BlockType::Character,
+            "AdmittedAda",
+        );
+        // Empty mind: legacy P2 empty headings, no SOUL/Memory bodies.
+        let request = MomentRequest::new(Stage0Assembly {
+            user_prompt: "Act.".to_string(),
+            personality: "Creator SOUL must not leak.".to_string(),
+            ..Stage0Assembly::default()
+        })
+        .with_world("wld_1")
+        .with_actor(MomentActorContext::character(
+            CharacterViewInput::from_entries(vec![allowed.clone()]),
+        ));
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let empty_full = ctx.to_full_context();
+        assert!(empty_full.contains("## Character SOUL\n\n## Character Memory\n\n"));
+
+        // Projected mind: SOUL + Memory bodies present; ToM stays empty.
+        let projected = CharacterMindInput::new(
+            Some("# Ava\nSOUL".to_string()),
+            vec![
+                "- SHAREDMEMORYMARKER".to_string(),
+                "- LOCALMEMORYMARKER".to_string(),
+            ],
+        );
+        let request = MomentRequest::new(Stage0Assembly {
+            user_prompt: "Act.".to_string(),
+            personality: "Creator SOUL must not leak.".to_string(),
+            ..Stage0Assembly::default()
+        })
+        .with_world("wld_1")
+        .with_actor(MomentActorContext::character_with_mind(
+            CharacterViewInput::from_entries(vec![allowed]),
+            projected,
+        ));
+        let ctx = assemble_moment(&request, &stores.narrative, &stores.kb, &stores.knowledge).await;
+        let full = ctx.to_full_context();
+        assert!(full.contains("# Ava\nSOUL\n"));
+        assert!(full.contains("- SHAREDMEMORYMARKER\n- LOCALMEMORYMARKER\n"));
+        assert!(full.contains("## Character ToM — L1\n\n## Character ToM — L2\n"));
     }
 }

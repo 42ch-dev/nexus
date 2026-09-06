@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/characters/list-characters-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListCharactersQuery",
+  "description": "Query parameters for GET /v1/daemon/characters.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "limit": {
+      "type": "integer"
+    },
+    "cursor": {
+      "type": "string"
+    }
+  }
+}

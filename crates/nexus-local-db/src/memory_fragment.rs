@@ -56,6 +56,36 @@ pub async fn create_fragment(
     Ok(())
 }
 
+/// Insert a memory fragment inside a caller-owned transaction.
+///
+/// PR #240 finding 2: the review pipeline commits the fragment insert and
+/// the pending-row deletion in one transaction so a failed queue advance
+/// cannot leave a duplicated fragment.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn create_fragment_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    fragment: &MemoryFragmentRecord,
+) -> Result<(), LocalDbError> {
+    sqlx::query!(
+        "INSERT INTO memory_fragments (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        fragment.fragment_id,
+        fragment.session_id,
+        fragment.creator_id,
+        fragment.keywords,
+        fragment.summary,
+        fragment.created_at,
+        fragment.ttl,
+        fragment.world_id
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 /// List all fragments for a creator.
 ///
 /// Returns records ordered by `created_at` descending (most recent first).

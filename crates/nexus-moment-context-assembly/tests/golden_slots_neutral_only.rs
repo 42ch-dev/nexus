@@ -90,9 +90,9 @@ fn build_neutral_fixture() -> (
 /// without sorting, so multi-entry fixtures would make the byte-exact golden
 /// order nondeterministic (same convention as the V1.149 goldens).
 async fn seed_neutral_stores(kb: &InMemoryKbStore, knowledge: &InMemoryKnowledgeStore) {
-    use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
+    use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 
-    let mut kb_plain = WorldKbEntry::new("wld_golden_slots", BlockType::Character, "Hero");
+    let mut kb_plain = KnowledgeEntryRecord::new("wld_golden_slots", BlockType::Character, "Hero");
     kb_plain.entry_id = "kb_slots_neutral_001".to_string();
     kb_plain.created_at = "2026-01-01T00:00:02Z".to_string();
     kb.insert_knowledge_entry(kb_plain)

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM character_memory_fragments WHERE fragment_id = ? AND character_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "096e3c6da34a7320597cb664b5bbd63335f36af2703f6fa7238b6cdd66ac9e8f"
+}

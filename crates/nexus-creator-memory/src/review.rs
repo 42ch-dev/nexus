@@ -14,6 +14,7 @@ use std::future::Future;
 use std::path::Path;
 use std::str::FromStr;
 
+use crate::bearer::MemoryBearerRef;
 use crate::errors::MemoryError;
 use crate::long_term_memory::LongTermMemory;
 use crate::review_quality::is_high_signal;
@@ -116,8 +117,11 @@ impl TaskKind {
 pub struct PendingReviewInput {
     pub pending_id: String,
     pub session_id: String,
-    pub creator_id: String,
-    pub world_id: Option<String>,
+    /// Bearer primary id (`ctr_…` Creator or `chr_…` Character).
+    pub bearer_id: String,
+    /// Bearer scope provenance: the Creator arm's world id, or the Character
+    /// arm's binding id. `None` = no scope (whole Creator / shared Character).
+    pub scope_id: Option<String>,
     pub task_kind: String,
     pub raw_digest: String,
     pub created_at: String,
@@ -146,8 +150,8 @@ pub struct PendingReviewInput {
 /// let input = PendingReviewInput {
 ///     pending_id: "pending_001".to_string(),
 ///     session_id: "sess_001".to_string(),
-///     creator_id: "ctr_test".to_string(),
-///     world_id: None,
+///     bearer_id: "ctr_test".to_string(),
+///     scope_id: None,
 ///     task_kind: "brainstorm".to_string(),
 ///     raw_digest: "Discussed three key themes for the novel: narrative structure, character arcs, and emotional resonance. Explored how these interweave to create compelling storytelling.".to_string(),
 ///     created_at: "2026-04-14T10:00:00Z".to_string(),
@@ -160,6 +164,11 @@ pub struct PendingReviewInput {
 /// }
 /// ```
 pub fn classify_pending_review(record: &PendingReviewInput) -> ReviewDecision {
+    // Threshold constants
+    const DROP_THRESHOLD: usize = 50; // Very short = no meaningful content
+    const HIGH_SIGNAL_MIN_LENGTH: usize = 80; // High-signal creative content can promote shorter
+    const DEFAULT_PROMOTE_THRESHOLD: usize = 200; // Unknown tasks promote at this length
+
     let digest_len = record.raw_digest.len();
     let task_kind: TaskKind = {
         let parsed: TaskKind = record.task_kind.parse().unwrap_or(TaskKind::Unknown);
@@ -173,11 +182,6 @@ pub fn classify_pending_review(record: &PendingReviewInput) -> ReviewDecision {
         }
         parsed
     };
-
-    // Threshold constants
-    const DROP_THRESHOLD: usize = 50; // Very short = no meaningful content
-    const HIGH_SIGNAL_MIN_LENGTH: usize = 80; // High-signal creative content can promote shorter
-    const DEFAULT_PROMOTE_THRESHOLD: usize = 200; // Unknown tasks promote at this length
 
     // Rule 1: Creative tasks use quality signal for promotion decisions
     if matches!(
@@ -240,10 +244,7 @@ pub fn classify_pending_review(record: &PendingReviewInput) -> ReviewDecision {
     ReviewDecision {
         pending_id: record.pending_id.clone(),
         action: ReviewAction::PromoteToLongTerm,
-        reason: format!(
-            "Substantial digest ({} chars) — long-term value",
-            digest_len
-        ),
+        reason: format!("Substantial digest ({digest_len} chars) — long-term value"),
     }
 }
 
@@ -254,8 +255,8 @@ pub struct MemoryFragment {
     pub fragment_id: String,
     /// Session ID that generated this fragment.
     pub session_id: String,
-    /// Creator ID for ownership.
-    pub creator_id: String,
+    /// Bearer ID for ownership (`ctr_…` Creator or `chr_…` Character).
+    pub bearer_id: String,
     /// Keywords extracted from digest.
     pub keywords: Vec<String>,
     /// Short summary.
@@ -284,8 +285,8 @@ pub struct MemoryFragment {
 /// let input = PendingReviewInput {
 ///     pending_id: "pending_001".to_string(),
 ///     session_id: "sess_001".to_string(),
-///     creator_id: "ctr_test".to_string(),
-///     world_id: None,
+///     bearer_id: "ctr_test".to_string(),
+///     scope_id: None,
 ///     task_kind: "research".to_string(),
 ///     raw_digest: "Explored three key concepts: narrative structure, character development, and pacing.".to_string(),
 ///     created_at: "2026-04-14T10:00:00Z".to_string(),
@@ -302,9 +303,17 @@ pub fn create_fragment_from_review(record: &PendingReviewInput) -> MemoryFragmen
     // Extract keywords from raw_digest
     let keywords = extract_keywords(&record.raw_digest);
 
-    // Generate summary (truncate to 200 chars max)
+    // Generate summary (truncate to 200 bytes max, UTF-8 safe). The raw digest
+    // may contain multibyte code points (CJK, emoji); slicing at a fixed byte
+    // offset can land mid-codepoint and panic. Walk back to the nearest char
+    // boundary (same discipline as `promote_to_long_term`'s MAX_DIGEST_BYTES
+    // cap, R-V141HYG-01).
     let summary = if record.raw_digest.len() > 200 {
-        format!("{}...", &record.raw_digest[..197])
+        let mut end = 197;
+        while !record.raw_digest.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &record.raw_digest[..end])
     } else {
         record.raw_digest.clone()
     };
@@ -326,7 +335,7 @@ pub fn create_fragment_from_review(record: &PendingReviewInput) -> MemoryFragmen
     MemoryFragment {
         fragment_id,
         session_id: record.session_id.clone(),
-        creator_id: record.creator_id.clone(),
+        bearer_id: record.bearer_id.clone(),
         keywords,
         summary,
         created_at: record.created_at.clone(),
@@ -468,7 +477,7 @@ fn extract_keywords(text: &str) -> Vec<String> {
                 )
         })
         .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .collect();
 
     // Filter stop words and dedupe using HashSet for O(1) lookups (R13).
@@ -524,7 +533,7 @@ pub trait SessionDigestSummarizer: Send + Sync {
         session_id: &str,
         task_kind: &str,
         raw_digest: &str,
-        world_id: Option<&str>,
+        scope_id: Option<&str>,
     ) -> impl Future<Output = Result<String, MemoryError>> + Send;
 }
 
@@ -548,24 +557,26 @@ pub trait SessionDigestSummarizer: Send + Sync {
 /// ```rust
 /// use std::path::PathBuf;
 /// use nexus_creator_memory::review::check_session_already_promoted;
+/// use nexus_creator_memory::MemoryBearerRef;
 ///
 /// let home = PathBuf::from("/tmp/test_home");
-/// let already = check_session_already_promoted(&home, "ctr_test", "sess_123").unwrap();
+/// let bearer = MemoryBearerRef::Creator("ctr_test");
+/// let already = check_session_already_promoted(&home, bearer, "sess_123").unwrap();
 /// if already {
 ///     println!("Session already promoted — skipping");
 /// }
 /// ```
 pub fn check_session_already_promoted(
     home: &Path,
-    creator_id: &str,
+    bearer: MemoryBearerRef<'_>,
     session_id: &str,
 ) -> Result<bool, MemoryError> {
-    // List all long-term memories for this creator
-    let slugs = crate::memory_io::list_memories(home, creator_id)?;
+    // List all long-term memories for this bearer
+    let slugs = crate::memory_io::list_memories(home, bearer)?;
 
     // Check each memory's source_session_ids
     for slug in slugs {
-        if let Ok(memory) = crate::memory_io::load_memory(home, creator_id, &slug) {
+        if let Ok(memory) = crate::memory_io::load_memory(home, bearer, &slug) {
             if memory
                 .frontmatter
                 .source_session_ids
@@ -622,26 +633,32 @@ pub fn check_session_already_promoted(
 /// // let home = PathBuf::from("/tmp/test_home");
 /// // let input = PendingReviewInput { ... };
 /// // let summarizer = MockSummarizer;
-/// // let memory = promote_to_long_term(&home, "ctr_test", &input, &summarizer).await.unwrap();
+/// // let bearer = MemoryBearerRef::Creator("ctr_test");
+/// // let memory = promote_to_long_term(&home, bearer, &input, &summarizer).await.unwrap();
 /// ```
+///
+/// # Errors
+///
+/// Returns [`MemoryError::AlreadyPromoted`] when the session already has a
+/// long-term memory file, and [`MemoryError`] on summarizer/validation/I/O
+/// failure.
 pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
     home: &Path,
-    creator_id: &str,
+    bearer: MemoryBearerRef<'_>,
     record: &PendingReviewInput,
     summarizer: &S,
 ) -> Result<LongTermMemory, MemoryError> {
+    const MAX_DIGEST_BYTES: usize = 256 * 1024;
     // 1. Check idempotency
-    if check_session_already_promoted(home, creator_id, &record.session_id)? {
-        return Err(MemoryError::ValidationError(format!(
-            "Session '{}' already promoted to long-term memory",
-            record.session_id
-        )));
+    if check_session_already_promoted(home, bearer, &record.session_id)? {
+        return Err(MemoryError::AlreadyPromoted {
+            session_id: record.session_id.clone(),
+        });
     }
 
     // R-V133P4-06: Size guard — cap raw_digest before summarization to prevent
     // unbounded LTM file growth. 256 KiB is generous for a session digest.
     // R-V141HYG-01: Use floor_char_boundary to avoid panicking on multi-byte content.
-    const MAX_DIGEST_BYTES: usize = 256 * 1024;
     let raw_digest = if record.raw_digest.len() > MAX_DIGEST_BYTES {
         tracing::warn!(
             session_id = %record.session_id,
@@ -666,7 +683,7 @@ pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
             &record.session_id,
             &record.task_kind,
             raw_digest,
-            record.world_id.as_deref(),
+            record.scope_id.as_deref(),
         )
         .await?;
 
@@ -687,7 +704,7 @@ pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
     let slug = memory.frontmatter.memory_id.replace("mem_", "memory-");
 
     // 7. Save via memory_io
-    crate::memory_io::save_memory(home, creator_id, &slug, &memory)?;
+    crate::memory_io::save_memory(home, bearer, &slug, &memory)?;
 
     tracing::info!(
         memory_id = %memory.frontmatter.memory_id,
@@ -705,9 +722,8 @@ pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
 /// long-term memory frontmatter based on the session's task type.
 fn task_kind_to_memory_kind(task_kind: &str) -> &'static str {
     match task_kind.to_lowercase().as_str() {
-        "brainstorm" => "story_summary",
+        "brainstorm" | "chapter" => "story_summary",
         "outline" => "plot_outline",
-        "chapter" => "story_summary",
         "research" => "research_material",
         _ => "custom",
     }
@@ -722,8 +738,8 @@ mod tests {
         PendingReviewInput {
             pending_id: "pending_test".to_string(),
             session_id: "sess_test".to_string(),
-            creator_id: "ctr_test".to_string(),
-            world_id: None,
+            bearer_id: "ctr_test".to_string(),
+            scope_id: None,
             task_kind: task_kind.to_string(),
             raw_digest: raw_digest.to_string(),
             created_at: "2026-04-14T10:00:00Z".to_string(),
@@ -920,7 +936,8 @@ mod tests {
         let home = std::path::PathBuf::from("/tmp/test_promotion_empty");
         let _ = std::fs::remove_dir_all(&home);
 
-        let result = check_session_already_promoted(&home, "ctr_test", "sess_123");
+        let result =
+            check_session_already_promoted(&home, MemoryBearerRef::Creator("ctr_test"), "sess_123");
         assert!(result.is_ok());
         assert!(!result.unwrap());
 
@@ -953,9 +970,14 @@ mod tests {
         let input = sample_input("brainstorm", "Session digest for testing promotion.");
         let summarizer = MockSummarizer;
 
-        let memory = promote_to_long_term(&home, "ctr_test", &input, &summarizer)
-            .await
-            .unwrap();
+        let memory = promote_to_long_term(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            &input,
+            &summarizer,
+        )
+        .await
+        .unwrap();
 
         // Check memory properties
         assert!(memory.frontmatter.memory_id.starts_with("mem_"));
@@ -996,12 +1018,23 @@ mod tests {
         let summarizer = MockSummarizer;
 
         // First promotion succeeds
-        let _ = promote_to_long_term(&home, "ctr_test", &input, &summarizer)
-            .await
-            .unwrap();
+        let _ = promote_to_long_term(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            &input,
+            &summarizer,
+        )
+        .await
+        .unwrap();
 
         // Second promotion with same session_id fails
-        let result = promote_to_long_term(&home, "ctr_test", &input, &summarizer).await;
+        let result = promote_to_long_term(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            &input,
+            &summarizer,
+        )
+        .await;
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.to_string().contains("already promoted"));
@@ -1036,7 +1069,13 @@ mod tests {
         let input = sample_input("brainstorm", "Session to promote.");
         let summarizer = FailingSummarizer;
 
-        let result = promote_to_long_term(&home, "ctr_test", &input, &summarizer).await;
+        let result = promote_to_long_term(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            &input,
+            &summarizer,
+        )
+        .await;
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -1053,8 +1092,8 @@ mod tests {
         let input = PendingReviewInput {
             pending_id: "p1".into(),
             session_id: "s1".into(),
-            creator_id: "ctr_test".into(),
-            world_id: None,
+            bearer_id: "ctr_test".into(),
+            scope_id: None,
             task_kind: "brainstorm".into(),
             raw_digest: "aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa ".repeat(40),
             created_at: "2026-04-15T00:00:00Z".into(),
@@ -1068,8 +1107,8 @@ mod tests {
         let input = PendingReviewInput {
             pending_id: "p2".into(),
             session_id: "s2".into(),
-            creator_id: "ctr_test".into(),
-            world_id: None,
+            bearer_id: "ctr_test".into(),
+            scope_id: None,
             task_kind: "brainstorm".into(),
             raw_digest: "The chapter pivots from betrayal to alliance, with causal consequences for three factions."
                 .into(),
@@ -1082,9 +1121,6 @@ mod tests {
     /// R-V141HYG-01: UTF-8-safe truncation — boundary must not land mid-character.
     #[tokio::test]
     async fn promote_truncates_oversized_raw_digest_at_utf8_boundary() {
-        let home = PathBuf::from("/tmp/test_promotion_utf8_boundary");
-        let _ = std::fs::remove_dir_all(&home);
-
         struct Passthrough;
         #[allow(async_fn_in_trait, clippy::unused_async_trait_impl)]
         impl SessionDigestSummarizer for Passthrough {
@@ -1098,6 +1134,9 @@ mod tests {
                 Ok(raw_digest.to_string())
             }
         }
+
+        let home = PathBuf::from("/tmp/test_promotion_utf8_boundary");
+        let _ = std::fs::remove_dir_all(&home);
 
         // Each CJK char is 3 bytes in UTF-8. Fill to just over 256 KiB so that the
         // byte boundary at MAX_DIGEST_BYTES lands mid-character.
@@ -1115,17 +1154,22 @@ mod tests {
         let input = PendingReviewInput {
             pending_id: "p_utf8".into(),
             session_id: "s_utf8".into(),
-            creator_id: "ctr_test".into(),
-            world_id: None,
+            bearer_id: "ctr_test".into(),
+            scope_id: None,
             task_kind: "brainstorm".into(),
             raw_digest: big_digest,
             created_at: "2026-04-15T00:00:00Z".into(),
         };
 
         // Must not panic — the old code did &string[..256*1024] which panics here.
-        let memory = promote_to_long_term(&home, "ctr_test", &input, &Passthrough)
-            .await
-            .expect("promotion should succeed with UTF-8-safe truncation");
+        let memory = promote_to_long_term(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            &input,
+            &Passthrough,
+        )
+        .await
+        .expect("promotion should succeed with UTF-8-safe truncation");
 
         // The body must be valid UTF-8 and <= MAX_DIGEST_BYTES
         assert!(
@@ -1140,12 +1184,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// R-V133P4-06: Size guard truncates oversized raw_digest before summarization.
+    /// R-V133P4-06: Size guard truncates oversized `raw_digest` before summarization.
     #[tokio::test]
     async fn promote_truncates_oversized_raw_digest() {
-        let home = PathBuf::from("/tmp/test_promotion_size_guard");
-        let _ = std::fs::remove_dir_all(&home);
-
         struct Passthrough;
         #[allow(async_fn_in_trait, clippy::unused_async_trait_impl)]
         impl SessionDigestSummarizer for Passthrough {
@@ -1161,21 +1202,29 @@ mod tests {
             }
         }
 
+        let home = PathBuf::from("/tmp/test_promotion_size_guard");
+        let _ = std::fs::remove_dir_all(&home);
+
         // Create a digest larger than 256 KiB
         let big_digest = "x".repeat(300 * 1024);
         let input = PendingReviewInput {
             pending_id: "p_trunc".into(),
             session_id: "s_trunc".into(),
-            creator_id: "ctr_test".into(),
-            world_id: None,
+            bearer_id: "ctr_test".into(),
+            scope_id: None,
             task_kind: "brainstorm".into(),
             raw_digest: big_digest,
             created_at: "2026-04-15T00:00:00Z".into(),
         };
 
-        let memory = promote_to_long_term(&home, "ctr_test", &input, &Passthrough)
-            .await
-            .expect("promotion should succeed");
+        let memory = promote_to_long_term(
+            &home,
+            MemoryBearerRef::Creator("ctr_test"),
+            &input,
+            &Passthrough,
+        )
+        .await
+        .expect("promotion should succeed");
         // The body should be truncated to 256 KiB, not the full 300 KiB input
         assert!(
             memory.body.len() <= 256 * 1024,
@@ -1184,5 +1233,58 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&home);
+    }
+}
+
+#[cfg(test)]
+mod utf8_fragment_tests {
+    use super::create_fragment_from_review;
+
+    fn pending(digest: &str) -> crate::review::PendingReviewInput {
+        crate::review::PendingReviewInput {
+            pending_id: "pending_utf8".to_string(),
+            session_id: "sess_utf8".to_string(),
+            bearer_id: "chr_test".to_string(),
+            scope_id: None,
+            task_kind: "research".to_string(),
+            raw_digest: digest.to_string(),
+            created_at: "2026-04-14T10:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn fragment_summary_is_utf8_safe_for_cjk_and_emoji() {
+        // A multibyte digest over 200 bytes where byte offset 197 lands
+        // mid-codepoint; the old `&text[..197]` would panic.
+        let cjk = "字".repeat(200); // 3-byte chars -> byte 197 is mid-codepoint
+        let frag = create_fragment_from_review(&pending(&cjk));
+        assert!(
+            frag.summary.ends_with("..."),
+            "truncated summary appends ellipsis"
+        );
+        assert!(
+            frag.summary.is_char_boundary(frag.summary.len()),
+            "summary must be valid UTF-8"
+        );
+
+        // Emoji (4-byte) digest.
+        let emoji = "🫠".repeat(200); // 4-byte astral chars
+        let frag = create_fragment_from_review(&pending(&emoji));
+        assert!(frag.summary.ends_with("..."));
+        assert!(frag.summary.is_char_boundary(frag.summary.len()));
+
+        // A short multibyte digest under 200 bytes is not truncated.
+        let short = "猫".repeat(50); // 150 bytes
+        let frag = create_fragment_from_review(&pending(&short));
+        assert!(!frag.summary.ends_with("..."));
+        assert_eq!(frag.summary, short);
+    }
+
+    #[test]
+    fn fragment_summary_truncation_never_splits_ascii() {
+        let ascii = "a".repeat(300);
+        let frag = create_fragment_from_review(&pending(&ascii));
+        assert!(frag.summary.ends_with("..."));
+        assert_eq!(frag.summary.len(), 200, "197 content + 3 ellipsis");
     }
 }

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM character_soul_narratives\n             WHERE character_id = ? AND (actor_world_binding_id IS NULL OR actor_world_binding_id = ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "83cedf88876aa1405b82833cdb41893e7e1c0f137074a6881d4d408b7c384f09"
+}

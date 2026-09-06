@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/actor-knowledge/add-knowledge-entry-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus AddActorKnowledgeEntryResponse",
+  "description": "Response for POST /v1/daemon/actor-knowledge/entries (201 Created).",
+  "type": "object",
+  "required": ["item"],
+  "additionalProperties": false,
+  "properties": {
+    "item": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/actor-knowledge/knowledge-view-item.schema.json"
+    }
+  }
+}

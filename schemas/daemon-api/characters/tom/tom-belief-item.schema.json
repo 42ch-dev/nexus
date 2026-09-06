@@ -1,0 +1,84 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/characters/tom/tom-belief-item.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CharacterTomBeliefItem",
+  "description": "One Character ToM belief row read from an authorized carrier's authoritative modules.belief array. Keyset order is (order, carrier_entry_id, row_ordinal): L1 (order 1) sorts before L2 (order 2). row_ordinal is the physical zero-based array index; malformed legacy elements are skipped without renumbering.",
+  "type": "object",
+  "required": ["carrier_entry_id", "row_ordinal", "holder", "order"],
+  "additionalProperties": false,
+  "properties": {
+    "carrier_entry_id": {
+      "type": "string",
+      "description": "Carrier KnowledgeEntry id holding this row."
+    },
+    "row_ordinal": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Physical zero-based position of the row inside the carrier's modules.belief array."
+    },
+    "holder": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CharacterId",
+      "description": "Epistemic subject (chr_*). L1 rows name the viewer; L2 rows name another Character."
+    },
+    "proposition": {
+      "type": "string",
+      "description": "Minimal content being represented."
+    },
+    "order": {
+      "type": "integer",
+      "description": "Belief depth: 1 = L1, 2 = L2."
+    },
+    "truth": {
+      "type": "string",
+      "enum": ["True", "False", "Unknown"],
+      "description": "Truth Status (handbook closed label)."
+    },
+    "access": {
+      "type": "string",
+      "enum": ["Private", "Shared", "Public"],
+      "description": "Knowledge Access (handbook closed label)."
+    },
+    "representation": {
+      "type": "string",
+      "enum": ["Explicit", "Implicit"],
+      "description": "Representation (handbook closed label)."
+    },
+    "content_type": {
+      "type": "string",
+      "enum": [
+        "Location",
+        "Contents/Physical State",
+        "Identity/Relation",
+        "Epistemic",
+        "Desire/Intention",
+        "Emotion",
+        "Trait/Value",
+        "Action/Event"
+      ],
+      "description": "Content Type (handbook closed label; slash-containing labels are literal)."
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "Narration",
+        "Perception",
+        "Memory",
+        "Testimony",
+        "Inference",
+        "Imagination",
+        "Unknown"
+      ],
+      "description": "Mental Source (handbook closed label)."
+    },
+    "context": {
+      "type": "string",
+      "enum": ["Deceptive", "Temporal", "Counterfactual", "Neutral"],
+      "description": "Context (handbook closed label)."
+    },
+    "carrier_recorded_at": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
+      "description": "Latest derivative MindState timestamp recorded against this carrier, when any. MindState is never treated as a second authority."
+    }
+  }
+}

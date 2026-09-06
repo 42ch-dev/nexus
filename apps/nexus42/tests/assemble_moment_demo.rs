@@ -71,8 +71,8 @@ fn seed_demo_stores(
 /// Helper: seed KB block (async, call before assembly).
 async fn seed_kb(kb: &InMemoryKbStore, world_id: &str) {
     use nexus_contracts::BlockType;
-    use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
-    let block = WorldKbEntry::new(world_id, BlockType::Character, "Demo Hero");
+    use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
+    let block = KnowledgeEntryRecord::new(world_id, BlockType::Character, "Demo Hero");
     kb.insert_knowledge_entry(block).await.unwrap();
 }
 

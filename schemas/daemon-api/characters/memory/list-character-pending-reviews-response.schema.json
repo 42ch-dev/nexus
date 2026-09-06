@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/characters/memory/list-character-pending-reviews-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListCharacterPendingReviewsResponse",
+  "description": "Response for GET /v1/daemon/characters/{character_id}/memory/pending-review (cursor pagination). Items are ordered created_at DESC, pending_id DESC (deterministic).",
+  "type": "object",
+  "required": ["items", "pagination"],
+  "additionalProperties": false,
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "https://nexus42.invalid/schemas/daemon-api/characters/memory/character-pending-review-info.schema.json"
+      }
+    },
+    "pagination": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/kb/pagination-info.schema.json"
+    }
+  }
+}

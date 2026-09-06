@@ -833,6 +833,65 @@ async fn add_cross_world_entity_rejects_422() {
     assert_eq!(err.error_code(), "world_kb_validation_failed");
 }
 
+// v1.184 P1 T2: relationship endpoints must be World-owned in the same
+// world — a Character-owned KE (owner_kind='character', NULL world_id) is
+// not a valid endpoint even though it exists.
+#[tokio::test]
+async fn add_character_owned_entity_rejects_422() {
+    let (_tmp, state) = fresh_state().await;
+    seed_key_block(
+        state.pool().unwrap(),
+        "kb_a",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+    )
+    .await;
+    // Character-owned KE: no world_id, owner_kind='character'.
+    sqlx::query(
+        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+         VALUES ('ctr_rel_char', 'Rel Char Owner', 'active', datetime('now'), '{}')",
+    )
+    .execute(state.pool().unwrap())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO characters \
+         (character_id, owner_creator_id, display_name, status, image_uri, persona_json, \
+          created_at, updated_at) \
+         VALUES ('chr_aaaaaaaabbbbbbbbccccccccdddddddd', 'ctr_rel_char', 'Rel Char', 'active', NULL, '{}', \
+          datetime('now'), datetime('now'))",
+    )
+    .execute(state.pool().unwrap())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO kb_key_blocks \
+         (key_block_id, owner_kind, character_id, block_type, canonical_name, status, revision, \
+          body_json, created_at, updated_at) \
+         VALUES ('kb_char', 'character', 'chr_aaaaaaaabbbbbbbbccccccccdddddddd', 'character', 'Shared lore', 'confirmed', 0, \
+          '{}', datetime('now'), datetime('now'))",
+    )
+    .execute(state.pool().unwrap())
+    .await
+    .unwrap();
+
+    let req = add_request("kb_a", "kb_char", WorldKbRelationshipKind::AlliedWith);
+    let err = patch_relationship(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect_err("character-owned endpoint must 422");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "world_kb_validation_failed");
+}
+
 async fn seed_other_world(pool: &sqlx::SqlitePool, world_id: &str) {
     let row = sqlx::query!(
         "SELECT owner_creator_id, workspace_id FROM narrative_worlds WHERE world_id = ?",

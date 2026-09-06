@@ -2,7 +2,7 @@
 //!
 //! This crate owns the narrative graph aggregates: World, `TimelineEvent`,
 //! `ForkBranch`, `StoryManifest`, `ManuscriptState`, `WorldMembership`, and
-//! cross-aggregate consistency rules. Uses `nexus-kb` for `WorldKbEntry` types.
+//! cross-aggregate consistency rules. Uses `nexus-kb` for `KnowledgeEntryRecord` types.
 //!
 //! # Read Model API (V1.23)
 //!

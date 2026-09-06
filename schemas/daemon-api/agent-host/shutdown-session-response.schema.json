@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/agent-host/shutdown-session-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus AgentHostShutdownSessionResponse",
+  "description": "Response for DELETE /v1/daemon/agent-host/sessions/{session_id}.",
+  "type": "object",
+  "required": ["session_id", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "session_id": { "type": "string" },
+    "status": { "type": "string" }
+  }
+}

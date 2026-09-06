@@ -318,7 +318,7 @@ fn cmd_install(
 /// a `user` capability MUST show it, builtins show `builtin` (no silent
 /// omission, AR-40).
 async fn cmd_list(config: &CliConfig, output_format: &str) -> Result<()> {
-    let client = DaemonClient::from_config(config);
+    let client = DaemonClient::from_config(config)?;
     let resp: crate::api::models::CapabilityListResponse = client
         .get("/v1/daemon/orchestration/capabilities")
         .await
@@ -1268,7 +1268,7 @@ mod tests {
         };
         // Render the text path via the parsed model (pure row rendering is
         // covered by the shape assertions below).
-        let client = DaemonClient::from_config(&config);
+        let client = DaemonClient::from_config(&config).expect("valid mock configuration");
         let resp: crate::api::models::CapabilityListResponse = client
             .get("/v1/daemon/orchestration/capabilities")
             .await

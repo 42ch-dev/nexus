@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/characters/memory/character-memory-fragment-info.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CharacterMemoryFragmentInfo",
+  "description": "One Character memory fragment. `binding_id` is the binding-local provenance; absent means shared Character scope. `revision` backs optimistic-concurrency promotion (local to shared).",
+  "type": "object",
+  "required": [
+    "fragment_id",
+    "session_id",
+    "character_id",
+    "summary",
+    "keywords",
+    "created_at",
+    "revision"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "fragment_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "session_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "character_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CharacterId"
+    },
+    "binding_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/ActorWorldBindingId",
+      "description": "Binding-local provenance; omitted for shared Character scope."
+    },
+    "summary": { "type": "string" },
+    "keywords": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "created_at": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
+    },
+    "ttl": {
+      "type": "string",
+      "description": "Optional TTL hint (e.g. `30d`)."
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "OCC revision; required as `expected_revision` for promotion."
+    }
+  }
+}

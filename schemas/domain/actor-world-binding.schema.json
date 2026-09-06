@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/domain/actor-world-binding.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ActorWorldBinding",
+  "description": "Character to World association. Distinct from WorldMembership (Creator to World). v1 APIs create active rows only.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "binding_id",
+    "character_id",
+    "world_id",
+    "status",
+    "created_at",
+    "updated_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "binding_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/ActorWorldBindingId"
+    },
+    "character_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CharacterId"
+    },
+    "world_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId"
+    },
+    "status": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/ActorWorldBindingStatus"
+    },
+    "world_sheet_entry_id": {
+      "type": "string",
+      "maxLength": 128,
+      "description": "Optional WorldSheet KnowledgeEntry id (block_type=character lore). Absent when unbound. At most 128 bytes."
+    },
+    "created_at": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
+    },
+    "updated_at": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
+    }
+  }
+}

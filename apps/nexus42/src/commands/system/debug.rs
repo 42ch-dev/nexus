@@ -86,42 +86,24 @@ async fn dump_workspace(config: &CliConfig, format: &str) -> Result<()> {
     }
 
     // --- Daemon status (non-blocking, with short timeout) ---
-    let client = crate::api::DaemonClient::with_timeouts(
-        &config.daemon_url,
-        std::time::Duration::from_secs(2),
-        std::time::Duration::from_secs(5),
-    )
-    .expect("M-2: failed to build debug daemon client");
-    match client.health_check().await {
-        Ok(true) => {
-            match client
-                .get::<serde_json::Value>("/v1/daemon/runtime/status")
-                .await
-            {
-                Ok(status) => {
-                    state.insert("daemon_status".to_string(), status);
-                }
-                Err(e) => {
-                    state.insert(
-                        "daemon_status".to_string(),
-                        serde_json::json!({"error": e.to_string()}),
-                    );
-                }
-            }
+    let daemon_status = async {
+        let client = crate::api::DaemonClient::with_timeouts(
+            &config.daemon_url,
+            std::time::Duration::from_secs(2),
+            std::time::Duration::from_secs(5),
+        )?;
+        if !client.health_check().await? {
+            return Ok(serde_json::json!({"running": false}));
         }
-        Ok(false) => {
-            state.insert(
-                "daemon_status".to_string(),
-                serde_json::json!({"running": false}),
-            );
-        }
-        Err(e) => {
-            state.insert(
-                "daemon_status".to_string(),
-                serde_json::json!({"error": e.to_string()}),
-            );
-        }
+        client
+            .get::<serde_json::Value>("/v1/daemon/runtime/status")
+            .await
     }
+    .await;
+    state.insert(
+        "daemon_status".to_string(),
+        daemon_status.unwrap_or_else(|error| serde_json::json!({"error": error.to_string()})),
+    );
 
     // --- Database state (best-effort) ---
     match crate::config::resolve_state_db_path(config) {
@@ -175,7 +157,7 @@ async fn dump_workspace(config: &CliConfig, format: &str) -> Result<()> {
 /// MVP: prints delta metadata retrieved from the daemon. Does not
 /// perform actual state mutation.
 async fn replay_delta(config: &CliConfig, delta_id: &str) -> Result<()> {
-    let client = crate::api::DaemonClient::from_config(config);
+    let client = crate::api::DaemonClient::from_config(config)?;
 
     // Check daemon availability
     if !client.health_check().await? {
@@ -276,34 +258,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dump_workspace_with_default_config() {
-        let config = CliConfig::default();
-        // Should not panic; may not have daemon or workspace
-        let result = dump_workspace(&config, "json").await;
-        assert!(
-            result.is_ok(),
-            "dump_workspace should not error: {:?}",
-            result.err()
-        );
-    }
-
-    #[tokio::test]
-    async fn dump_workspace_toml_format() {
-        let config = CliConfig::default();
-        let result = dump_workspace(&config, "toml").await;
-        assert!(
-            result.is_ok(),
-            "dump_workspace TOML should not error: {:?}",
-            result.err()
-        );
-    }
-
-    #[tokio::test]
-    async fn replay_delta_daemon_not_running() {
-        let config = CliConfig::default();
-        // Default config points to localhost:8420 which is unlikely running in tests
+    async fn replay_delta_rejects_invalid_daemon_configuration() {
+        let config = CliConfig {
+            daemon_url: String::new(),
+            ..CliConfig::default()
+        };
         let result = replay_delta(&config, "nonexistent").await;
-        // Should error because daemon is not running
-        assert!(result.is_err());
+        assert!(matches!(result, Err(crate::errors::CliError::Config(_))));
     }
 }

@@ -43,8 +43,12 @@ pub(crate) fn raw_user_home(
 }
 
 pub mod acp;
+pub mod actor_knowledge;
 pub mod agent_host;
 pub mod chapters;
+pub mod character_memory;
+pub mod character_tom;
+pub mod characters;
 pub mod check;
 pub mod compute_modules;
 pub mod compute_runs;
@@ -57,6 +61,7 @@ pub mod host_tool_handlers;
 pub mod inspector;
 pub mod kb;
 pub mod memory;
+pub(crate) mod memory_pipeline;
 pub mod monitoring;
 pub mod narrative;
 pub mod orchestration;

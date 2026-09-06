@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO actor_world_bindings\n           (binding_id, character_id, world_id, status, world_sheet_entry_id, created_at, updated_at)\n           VALUES (?, ?, ?, 'active', ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "7948695b5f05df6b4696f68d670938cff5f004088efb29ad81ba171d9a7047fb"
+}

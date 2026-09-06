@@ -83,7 +83,7 @@ pub struct TimelineEvent {
     /// metadata carrier (V1.164 P1). Preserved verbatim across the `SQLite`
     /// read-modify-write cycle and the spoke conversion seam. `None` when no
     /// modules data is present (unrecorded per spoke handbook — distinct from
-    /// explicit empty). Matches the `WorldKbEntry.modules` precedent.
+    /// explicit empty). Matches the `KnowledgeEntryRecord.modules` precedent.
     ///
     /// Malformed shapes (non-object map values, regex-invalid keys) are
     /// REJECTED at the spoke seam (panic) — writers must pre-validate; P2
@@ -207,7 +207,7 @@ impl TimelineEvent {
         }
     }
 
-    /// Add affected `WorldKbEntry` reference.
+    /// Add affected `KnowledgeEntryRecord` reference.
     pub fn add_affected_kb(&mut self, kb_id: &str) {
         let kbs = self.affected_key_block_ids.get_or_insert_with(Vec::new);
         if !kbs.contains(&kb_id.to_string()) {
@@ -499,7 +499,7 @@ impl From<SpokeTimelineEvent> for TimelineEvent {
     fn from(s: SpokeTimelineEvent) -> Self {
         // Extract borrowed extensions.nexus data into owned values FIRST, so
         // subsequent field moves out of `s` are not blocked by outstanding
-        // borrows (same ordering convention as WorldKbEntry↔KnowledgeEntry).
+        // borrows (same ordering convention as KnowledgeEntryRecord↔KnowledgeEntry).
         let (
             world_id,
             branch_id,
@@ -778,7 +778,7 @@ mod tests {
     // ── V1.143 P0 T1: spoke seam round-trip ─────────────────────────────
     //
     // Proves the conversion seam (`TimelineEvent ↔ spoke TimelineEvent`)
-    // round-trips ALL 13 nexus fields. Mirrors the `WorldKbEntry ↔ spoke
+    // round-trips ALL 13 nexus fields. Mirrors the `KnowledgeEntryRecord ↔ spoke
     // KnowledgeEntry` round-trip suite in nexus-knowledge.
 
     #[test]

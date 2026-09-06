@@ -23,6 +23,7 @@ pub struct QualitySignal {
 /// This is a pure function with no I/O or external dependencies.
 /// Tokens are lowercased for deduplication but alpha ratio is computed
 /// against the original text.
+#[allow(clippy::cast_precision_loss)] // heuristic f32 score: f32 rounding is intended
 pub fn quality_signal(input: &str) -> QualitySignal {
     let tokens: Vec<&str> = input.split_whitespace().collect();
     let total = tokens.len();
@@ -86,9 +87,9 @@ mod tests {
     #[test]
     fn empty_string_yields_zero_signals() {
         let q = quality_signal("");
-        assert_eq!(q.unique_ratio, 0.0);
-        assert_eq!(q.alpha_ratio, 0.0);
-        assert_eq!(q.repeated_token_ratio, 0.0);
+        assert!((q.unique_ratio - 0.0).abs() < f32::EPSILON);
+        assert!((q.alpha_ratio - 0.0).abs() < f32::EPSILON);
+        assert!((q.repeated_token_ratio - 0.0).abs() < f32::EPSILON);
         assert!(!is_high_signal(""));
     }
 
@@ -149,8 +150,8 @@ mod tests {
         // repeated_token_ratio 1.0 > 0.45 → fails
         assert!(!is_high_signal("hello"));
         let q = quality_signal("hello");
-        assert_eq!(q.unique_ratio, 1.0);
-        assert_eq!(q.repeated_token_ratio, 1.0);
+        assert!((q.unique_ratio - 1.0).abs() < f32::EPSILON);
+        assert!((q.repeated_token_ratio - 1.0).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -208,9 +209,9 @@ mod tests {
     #[test]
     fn whitespace_only_is_zero_signals() {
         let q = quality_signal("   \t\n  ");
-        assert_eq!(q.unique_ratio, 0.0);
-        assert_eq!(q.alpha_ratio, 0.0);
-        assert_eq!(q.repeated_token_ratio, 0.0);
+        assert!((q.unique_ratio - 0.0).abs() < f32::EPSILON);
+        assert!((q.alpha_ratio - 0.0).abs() < f32::EPSILON);
+        assert!((q.repeated_token_ratio - 0.0).abs() < f32::EPSILON);
         assert!(!is_high_signal("   \t\n  "));
     }
 }

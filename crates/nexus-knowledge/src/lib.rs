@@ -4,9 +4,9 @@
 //! merger of the former `nexus-kb` into `nexus-knowledge`):
 //!
 //! - **World KB** (`world_kb` module): the former `nexus-kb`'s domain —
-//!   narrative KB entries (`WorldKbEntry` + `SourceAnchor`, `KbStore`) tied to
+//!   narrative KB entries (`KnowledgeEntryRecord` + `SourceAnchor`, `KbStore`) tied to
 //!   a World entity. Relocated here from the deleted `nexus-kb` crate.
-//!   `WorldKbEntry` converts to/from the spoke standard `KnowledgeEntry` at the
+//!   `KnowledgeEntryRecord` converts to/from the spoke standard `KnowledgeEntry` at the
 //!   wire boundary (V1.139 P1 T2); User-scoped entries are a separate domain
 //!   (`UserKnowledgeEntry` in the `knowledge` module).
 //!

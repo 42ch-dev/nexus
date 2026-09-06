@@ -86,7 +86,7 @@ pub enum WorldCommand {
     /// World KB key-block author surface (list/show/edit/delete).
     ///
     /// Per entity-scope-model §5.5, `creator world kb` is the canonical author
-    /// CLI for inspecting and editing World-scoped `WorldKbEntry` rows. This is a
+    /// CLI for inspecting and editing World-scoped `KnowledgeEntryRecord` rows. This is a
     /// separate surface from `creator kb --scope world` (the legacy ingest path).
     Kb {
         #[command(subcommand)]
@@ -451,7 +451,7 @@ async fn run_show(config: &CliConfig, world_id: &str) -> Result<()> {
 /// Returns `CliError` for daemon / network failures (404 `not_found` for an
 /// unknown world, 403 foreign world).
 async fn world_findings_list(world_id: &str, json: bool, config: &CliConfig) -> Result<()> {
-    let client = crate::api::DaemonClient::from_config(config);
+    let client = crate::api::DaemonClient::from_config(config)?;
     let path = format!("/v1/daemon/worlds/{world_id}/findings");
     let resp: nexus_contracts::daemon_api::worlds::WorldFindingsListResponse =
         client.get(&path).await?;

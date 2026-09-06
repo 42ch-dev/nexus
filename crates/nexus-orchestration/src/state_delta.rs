@@ -2,7 +2,7 @@
 //! (`narrative.compute`) and the direct Control Room lane (V1.147 P0).
 //!
 //! Implements incremental `add`/`sub`/`set` on nested state paths
-//! (dot-notation, e.g. `character.current_hp`) within a `WorldKbEntry`'s
+//! (dot-notation, e.g. `character.current_hp`) within a `KnowledgeEntryRecord`'s
 //! `body.state.<block_type_key>.<rest>`.
 //!
 //! # TX-aware variant
@@ -17,7 +17,7 @@
 
 use crate::capability::CapabilityError;
 use nexus_contracts::generated::daemon_api::compute::compute_output::ComputeOutputStateDeltaItem as ComputeOutputStateDelta;
-use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
 use nexus_knowledge::world_kb::KbStore;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
@@ -39,7 +39,7 @@ pub const fn state_delta_op_wire(
 }
 
 /// Apply a list of `ComputeOutputStateDelta` entries to the world's
-/// `WorldKbEntry` bodies (pool-backed).  Used by `narrative.compute`.
+/// `KnowledgeEntryRecord` bodies (pool-backed).  Used by `narrative.compute`.
 ///
 /// Returns the number of state deltas successfully applied.
 ///
@@ -171,7 +171,7 @@ pub async fn apply_state_delta_in_tx(
                 ))
             })?;
 
-        let mut body: WorldKbBody = body_json_str
+        let mut body: KnowledgeEntryBody = body_json_str
             .as_deref()
             .map(|s| serde_json::from_str(s).unwrap_or_default())
             .unwrap_or_default();
@@ -227,10 +227,10 @@ pub async fn apply_state_delta_in_tx(
     Ok(applied)
 }
 
-/// Apply a single delta to an in-memory `WorldKbEntry`.
+/// Apply a single delta to an in-memory `KnowledgeEntryRecord`.
 /// Used by the pool-backed variant (which already has the full entry loaded).
 fn apply_single_delta(
-    kb: &mut WorldKbEntry,
+    kb: &mut KnowledgeEntryRecord,
     delta: &ComputeOutputStateDelta,
 ) -> Result<(), CapabilityError> {
     let op_wire = state_delta_op_wire(delta.op);
@@ -290,7 +290,7 @@ pub fn apply_json_delta(
 
     let inner = state_obj.get_mut(state_key).ok_or_else(|| {
         CapabilityError::InputInvalid(format!(
-            "state key '{state_key}' not found in target WorldKbEntry state"
+            "state key '{state_key}' not found in target KnowledgeEntryRecord state"
         ))
     })?;
 

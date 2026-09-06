@@ -382,10 +382,14 @@ impl Outbox {
         let next_retry_at = match retry_after {
             RetryAfterPolicy::AtTime(t) => Some(t.to_rfc3339()),
             RetryAfterPolicy::AfterSeconds(secs) => {
-                // SAFETY: secs is a u64 seconds delay from the platform; i64::MAX ~= 292 years,
-                // so any realistic delay in seconds will fit without wrapping.
-                #[allow(clippy::cast_possible_wrap)]
-                let target = now + chrono::Duration::seconds(*secs as i64);
+                // Checked conversion: an impossibly large external delay must
+                // fail closed rather than wrap negative on the i64 timeline.
+                let secs_i64 = i64::try_from(*secs).map_err(|_| {
+                    SyncError::InvalidInput(format!(
+                        "retry_after AfterSeconds({secs}) exceeds the i64 timeline"
+                    ))
+                })?;
+                let target = now + chrono::Duration::seconds(secs_i64);
                 Some(target.to_rfc3339())
             }
             RetryAfterPolicy::None => None,
@@ -453,10 +457,13 @@ impl Outbox {
         .fetch_one(&mut *tx)
         .await?;
 
-        // SAFETY: retry_count is i64 from SQLite, u64 for storage; i64::MAX > u64::MAX so
-        // any stored retry_count will fit in u64 without sign loss.
-        #[allow(clippy::cast_sign_loss)]
-        let retry_count = retry_count_row as u64;
+        // Checked conversion: a corrupted negative retry_count must fail
+        // closed (never become a huge u64).
+        let retry_count = u64::try_from(retry_count_row).map_err(|_| {
+            SyncError::InvalidInput(format!(
+                "outbox retry_count is negative for {outbox_entry_id}: {retry_count_row}"
+            ))
+        })?;
 
         if retry_count >= MAX_RETRIES {
             // Permanently mark as failed without retry
@@ -482,10 +489,15 @@ impl Outbox {
         // Calculate exponential backoff
         let delay_secs =
             BASE_RETRY_DELAY_SECS.saturating_mul(2u64.saturating_pow(retry_count.min(30) as u32));
-        // SAFETY: delay_secs is calculated from BASE_RETRY_DELAY_SECS and retry_count, both u64.
-        // i64::MAX ~= 292 years in seconds, so any realistic delay fits in i64 without wrapping.
-        #[allow(clippy::cast_possible_wrap)]
-        let next_retry = chrono::Utc::now() + chrono::Duration::seconds(delay_secs as i64);
+        // Checked conversion: `delay_secs` is bounded by the `min(30)` exponent
+        // cap, but a corrupted/externally-injected value must fail closed
+        // rather than wrap negative.
+        let delay_secs_i64 = i64::try_from(delay_secs).map_err(|_| {
+            SyncError::InvalidInput(format!(
+                "outbox backoff delay exceeds the i64 timeline: {delay_secs}"
+            ))
+        })?;
+        let next_retry = chrono::Utc::now() + chrono::Duration::seconds(delay_secs_i64);
         let now = chrono::Utc::now();
 
         let next_retry_str = next_retry.to_rfc3339();
@@ -556,10 +568,12 @@ impl Outbox {
                 bundle_id: row.bundle_id,
                 idempotency_key: row.idempotency_key,
                 delivery_state,
-                // SAFETY: retry_count is i64 from SQLite, stored as u64; the value is non-negative
-                // and fits in u64 on all supported targets.
-                #[allow(clippy::cast_sign_loss)]
-                retry_count: Some(row.retry_count as u64),
+                retry_count: Some(u64::try_from(row.retry_count).map_err(|_| {
+                    SyncError::InvalidInput(format!(
+                        "outbox retry_count is negative: {}",
+                        row.retry_count
+                    ))
+                })?),
                 last_error: row.last_error,
                 next_retry_at: row.next_retry_at,
                 created_at: row.created_at,
@@ -603,10 +617,12 @@ impl Outbox {
             bundle_id: row.bundle_id,
             idempotency_key: row.idempotency_key,
             delivery_state,
-            // SAFETY: retry_count is i64 from SQLite, stored as u64; the value is non-negative
-            // and fits in u64 on all supported targets.
-            #[allow(clippy::cast_sign_loss)]
-            retry_count: Some(row.retry_count as u64),
+            retry_count: Some(u64::try_from(row.retry_count).map_err(|_| {
+                SyncError::InvalidInput(format!(
+                    "outbox retry_count is negative: {}",
+                    row.retry_count
+                ))
+            })?),
             last_error: row.last_error,
             next_retry_at: row.next_retry_at,
             created_at: row.created_at,
@@ -625,9 +641,6 @@ impl Outbox {
             .execute(self.pool.inner())
             .await?;
 
-        // SAFETY: rows_affected() returns i64; on realistic targets usize >= u32, so
-        // the truncation to usize is safe (a u32 row count fits in usize).
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let count = usize::try_from(result.rows_affected()).unwrap_or(usize::MAX);
         tracing::info!(count = count, "Purged acked outbox entries");
         Ok(count)
@@ -645,9 +658,6 @@ impl Outbox {
         .fetch_one(self.pool.inner())
         .await?;
 
-        // SAFETY: count is a non-negative row count from SQLite; usize::try_from preserves the value
-        // on all targets where usize >= u32 (all 32-bit and 64-bit targets we support).
-        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
         let count = usize::try_from(count).unwrap_or_default();
         Ok(count)
     }
@@ -841,6 +851,24 @@ mod tests {
         let entry = outbox.get(&entry_id).await.expect("get");
         assert_eq!(entry.delivery_state, DeliveryState::Conflicted);
         assert_eq!(entry.last_error, Some("version mismatch".to_string()));
+    }
+
+    #[tokio::test]
+    async fn outbox_huge_after_seconds_is_rejected_before_wrap() {
+        let outbox = Outbox::new_in_memory().await.expect("create outbox");
+        let cmd = make_test_command();
+        let entry_id = outbox.append(&cmd).await.expect("append");
+        // A delay beyond the i64 seconds timeline must fail closed, not wrap
+        // negative on the chrono timeline.
+        let err = outbox
+            .mark_conflicted_with_retry(
+                &entry_id,
+                "huge delay",
+                &RetryAfterPolicy::AfterSeconds(u64::MAX),
+            )
+            .await
+            .expect_err("oversized AfterSeconds must be rejected");
+        assert!(matches!(err, SyncError::InvalidInput(_)), "got {err:?}");
     }
 
     #[tokio::test]

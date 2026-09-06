@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO characters\n           (character_id, owner_creator_id, display_name, status, image_uri, persona_json, created_at, updated_at)\n           VALUES (?, ?, ?, 'active', ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "0b44d93fe8bc7c497dcd81933ed5b34348f972b9a431d3b5788bf1ded19b816c"
+}

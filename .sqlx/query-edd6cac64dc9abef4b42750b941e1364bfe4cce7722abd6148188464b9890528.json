@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM actor_world_bindings WHERE binding_id = ? AND character_id = ? AND status = 'active'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "edd6cac64dc9abef4b42750b941e1364bfe4cce7722abd6148188464b9890528"
+}

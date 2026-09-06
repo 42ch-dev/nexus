@@ -81,6 +81,11 @@ impl User {
     }
 
     /// Suspend an active account.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CloudDomainError::InvalidState`] when the account is
+    /// already deleted.
     pub fn suspend(&mut self) -> Result<(), CloudDomainError> {
         if self.account_status == AccountStatus::Deleted.as_str() {
             return Err(CloudDomainError::InvalidState {

@@ -16,7 +16,8 @@
 // V1.164: 16 → 17 — narrative_timeline_events.modules_json column (migration 20260814000001_add_timeline_event_modules_json.sql).
 // V1.164: 17 → 18 — mind_states table (migration 20260814000002_create_mind_states.sql).
 // V1.165: 18 → 19 — world_findings table (DR-68 / AR-1; migration 20260815000001_create_world_findings.sql).
-pub const DB_SCHEMA_VERSION: u32 = 19;
+// V1.184: 19 → 20 — characters + actor_world_bindings (P0 actor contract).
+pub const DB_SCHEMA_VERSION: u32 = 20;
 
 /// Contract schema version from generated wire types
 ///

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT binding_id AS \"binding_id!\" FROM actor_world_bindings\n                   WHERE character_id = ? AND world_id = ? AND status = 'active' LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "binding_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "cef4ee18eea8671999f84810a060f0a368e9e0904a950a006776e028eda651cf"
+}

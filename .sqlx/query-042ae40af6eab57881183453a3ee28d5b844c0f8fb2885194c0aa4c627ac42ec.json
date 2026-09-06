@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT (SELECT COUNT(*) FROM character_memory_pending_review WHERE actor_world_binding_id = ?) +\n                  (SELECT COUNT(*) FROM character_memory_fragments WHERE actor_world_binding_id = ?) +\n                  (SELECT COUNT(*) FROM character_soul_narratives WHERE actor_world_binding_id = ?)\n                  as \"count!: i64\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "count!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "042ae40af6eab57881183453a3ee28d5b844c0f8fb2885194c0aa4c627ac42ec"
+}

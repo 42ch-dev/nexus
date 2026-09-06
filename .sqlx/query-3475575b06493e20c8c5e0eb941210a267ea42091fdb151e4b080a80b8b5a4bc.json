@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT owner_creator_id as \"owner_creator_id!\" FROM characters WHERE character_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "owner_creator_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3475575b06493e20c8c5e0eb941210a267ea42091fdb151e4b080a80b8b5a4bc"
+}

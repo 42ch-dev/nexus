@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/agent-host/session-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus AgentHostSessionResponse",
+  "description": "Agent-host session summary. Optional actor_ref and viewpoint are omitted for legacy sessions.",
+  "type": "object",
+  "required": ["session_id", "provider_id", "state"],
+  "additionalProperties": false,
+  "properties": {
+    "session_id": { "type": "string" },
+    "provider_id": { "type": "string" },
+    "state": { "type": "string" },
+    "active_op_id": { "type": "string" },
+    "model": { "type": "string" },
+    "actor_ref": {
+      "$ref": "https://nexus42.invalid/schemas/domain/actor-ref.schema.json"
+    },
+    "viewpoint": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/agent-host/session-viewpoint.schema.json"
+    }
+  }
+}

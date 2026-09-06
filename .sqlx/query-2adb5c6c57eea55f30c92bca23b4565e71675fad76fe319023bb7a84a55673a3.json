@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT character_id AS \"character_id!\", world_id AS \"world_id!\",\n                      status AS \"status!\"\n               FROM actor_world_bindings WHERE binding_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "character_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "world_id!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "status!",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2adb5c6c57eea55f30c92bca23b4565e71675fad76fe319023bb7a84a55673a3"
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/agent-host/agent-host-list-sessions-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus AgentHostListSessionsQuery",
+  "description": "Query parameters for GET /v1/daemon/agent-host/sessions.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "limit": { "type": "integer" },
+    "cursor": { "type": "string" }
+  }
+}

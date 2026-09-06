@@ -1161,7 +1161,7 @@ async fn verify_stored_worlds(
 ///
 ///    **Dead-code note (entry-body tier):** the pin is defense for the
 ///    entry-body resolution tier, which is currently DEAD CODE — the
-///    conversion seam (`world_kb_to_spoke` / `spoke_to_world_kb`) preserves
+///    conversion seam (`knowledge_record_to_spoke` / `spoke_to_knowledge_record`) preserves
 ///    `body.computable` only as a bool marker (`{"_computable": true}` ⇄
 ///    `Some(true)`), so `entry.body.computable.module_id` can never carry a
 ///    value today. If body.computable maps ever survive the seam, the

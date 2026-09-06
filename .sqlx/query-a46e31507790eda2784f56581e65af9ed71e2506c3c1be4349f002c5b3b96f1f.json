@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT key_block_id AS \"key_block_id!\", revision, status AS \"status!\",\n                          character_id, actor_world_binding_id\n                   FROM kb_key_blocks\n                   WHERE actor_world_binding_id = ?\n                     AND status NOT IN ('deleted', 'merged', 'deprecated')\n                     AND (\n                       modules_json IS NULL\n                       OR (\n                         json_valid(modules_json)\n                         AND (\n                           json_type(modules_json, '$.belief') IS NULL\n                           OR json_type(modules_json, '$.belief') = 'array'\n                         )\n                         AND COALESCE(json_array_length(modules_json, '$.belief'), 0) <= ?\n                       )\n                     )\n                   ORDER BY created_at ASC, key_block_id ASC\n                   LIMIT 201",
+  "describe": {
+    "columns": [
+      {
+        "name": "key_block_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "revision",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "status!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "character_id",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "actor_world_binding_id",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "a46e31507790eda2784f56581e65af9ed71e2506c3c1be4349f002c5b3b96f1f"
+}

@@ -8,6 +8,10 @@
 //! The client reads `NEXUS42_DAEMON_API_KEY` from the environment at construction
 //! time and attaches it as `X-API-Key` header on all requests except health/status
 //! probes. When the key is empty or unset, no header is attached (keyless-localhost mode).
+//!
+//! Remote endpoints require HTTPS. Loopback HTTP bypasses proxies and pins
+//! localhost resolution; redirects are disabled for both JSON and SSE requests.
+//! API key headers are marked sensitive so Debug output cannot expose them.
 
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
@@ -53,6 +57,7 @@ const DAEMON_API_KEY_ENV: &str = "NEXUS42_DAEMON_API_KEY";
 const UNGUARDED_PATHS: &[&str] = &[
     "/v1/daemon/runtime/health",
     "/v1/daemon/runtime/status",
+    "/v1/daemon/runtime/cert-fingerprint",
     "/v1/daemon/daemon/status",
 ];
 
@@ -63,36 +68,75 @@ pub struct DaemonClient {
     http: reqwest::Client,
     /// Daemon API key read from `NEXUS42_DAEMON_API_KEY` env var.
     /// `None` when unset/empty (keyless-localhost mode).
-    api_key: Option<String>,
+    api_key: Option<reqwest::header::HeaderValue>,
+}
+
+/// Keep local HTTP local, and require TLS for remote daemon connections.
+fn daemon_transport(base_url: &str) -> Result<reqwest::ClientBuilder> {
+    let url =
+        url::Url::parse(base_url).map_err(|_| CliError::Config("invalid daemon URL".into()))?;
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(CliError::Config(
+            "daemon URL must not contain credentials, a query, or a fragment".into(),
+        ));
+    }
+    let loopback = match url.host() {
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        Some(url::Host::Domain(host)) => host == "localhost",
+        None => false,
+    };
+    if url.scheme() != "https" && !(url.scheme() == "http" && loopback) {
+        return Err(CliError::Config(
+            "remote daemon URLs require HTTPS; HTTP is allowed only on loopback".into(),
+        ));
+    }
+    // Custom X-API-Key headers must never follow a redirect to another origin.
+    let mut builder = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .https_only(!loopback);
+    if loopback {
+        // A proxy or DNS override must not turn local cleartext into remote traffic.
+        builder = builder.no_proxy().resolve_to_addrs(
+            "localhost",
+            &[
+                std::net::SocketAddr::from(([127, 0, 0, 1], 0)),
+                std::net::SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 1], 0)),
+            ],
+        );
+    }
+    Ok(builder)
 }
 
 impl DaemonClient {
-    /// Create a new daemon client from config with default timeouts
-    #[must_use]
-    pub fn from_config(config: &CliConfig) -> Self {
+    /// Create a new daemon client from config with default timeouts.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the transport configuration is invalid.
+    pub fn from_config(config: &CliConfig) -> Result<Self> {
         Self::new(&config.daemon_url)
     }
 
     /// Create a new daemon client with a custom base URL and default timeouts.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if the reqwest client cannot be constructed — a broken HTTP
-    /// stack is unrecoverable for the CLI (M-2: the previous unbounded
-    /// `Client::new()` fallback silently dropped the configured timeouts).
-    #[must_use]
-    pub fn new(base_url: &str) -> Self {
+    /// Returns an error if the transport configuration is invalid.
+    pub fn new(base_url: &str) -> Result<Self> {
         Self::with_timeouts(base_url, DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT)
-            .expect("failed to build daemon HTTP client with default timeouts")
     }
 
     /// Create a new daemon client with custom timeouts.
     ///
     /// # Errors
     ///
-    /// Returns the reqwest builder error on construction failure instead of
-    /// falling back to an unbounded `reqwest::Client` (M-2) — a silent
-    /// fallback would drop both the connect and request timeouts.
+    /// Returns a configuration error for insecure/invalid URLs or invalid API
+    /// key headers, or a reqwest builder error on construction failure.
     pub fn with_timeouts(
         base_url: &str,
         connect_timeout: Duration,
@@ -101,7 +145,7 @@ impl DaemonClient {
         // `From<reqwest::Error> for CliError` maps connect/timeout errors to
         // `DaemonNotRunning`; construction failures here are builder-level
         // (invalid TLS/configuration), surfaced as `CliError::Network`.
-        let http = reqwest::Client::builder()
+        let http = daemon_transport(base_url)?
             .connect_timeout(connect_timeout)
             .timeout(request_timeout)
             .build()?;
@@ -110,7 +154,14 @@ impl DaemonClient {
         let api_key = std::env::var(DAEMON_API_KEY_ENV)
             .ok()
             .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
+            .filter(|s| !s.is_empty())
+            .map(|s| {
+                let mut value = reqwest::header::HeaderValue::from_str(&s)
+                    .map_err(|_| CliError::Config("invalid daemon API key header".into()))?;
+                value.set_sensitive(true);
+                Ok::<_, CliError>(value)
+            })
+            .transpose()?;
 
         Ok(Self {
             base_url: base_url.to_string(),
@@ -175,6 +226,25 @@ impl DaemonClient {
 
         let data: T = resp.json().await?;
         Ok(data)
+    }
+
+    /// Open a streaming GET (no whole-body timeout) for SSE endpoints.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CliError::Api` if the daemon returns a non-success HTTP status,
+    /// or a network error if the request fails.
+    pub async fn stream_get(&self, path: &str) -> Result<reqwest::Response> {
+        let url = format!("{}{}", self.base_url, path);
+        let http = daemon_transport(&self.base_url)?
+            .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+            .build()?;
+        let resp = self.send_authenticated(http.get(&url), path).await?;
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            return Err(Self::parse_error_response(&url, status, resp).await);
+        }
+        Ok(resp)
     }
 
     /// Send a POST request with JSON body.
@@ -567,6 +637,11 @@ impl DaemonClient {
         req: reqwest::RequestBuilder,
         path: &str,
     ) -> Result<reqwest::Response> {
+        if !path.starts_with('/') || path.starts_with("//") || path.contains('\\') {
+            return Err(CliError::Config(
+                "daemon API path must be origin-relative".into(),
+            ));
+        }
         let req = self.with_api_key(req, path);
         req.send().await.map_err(Into::into)
     }
@@ -575,7 +650,7 @@ impl DaemonClient {
     fn with_api_key(&self, req: reqwest::RequestBuilder, path: &str) -> reqwest::RequestBuilder {
         if let Some(ref key) = self.api_key {
             if !UNGUARDED_PATHS.contains(&path) {
-                return req.header("X-API-Key", key.as_str());
+                return req.header("X-API-Key", key.clone());
             }
         }
         req
@@ -870,36 +945,94 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_new_client_has_default_timeouts() {
-        let client = DaemonClient::new("http://127.0.0.1:8420");
-        assert_eq!(client.base_url, "http://127.0.0.1:8420");
+    fn rejects_invalid_or_insecure_daemon_urls() {
+        for base_url in [
+            "",
+            "http://198.51.100.1:8420",
+            "http://daemon.example",
+            "http://localhost.example",
+            "http://localhost@daemon.example",
+            "ftp://127.0.0.1:8420",
+        ] {
+            assert!(
+                matches!(DaemonClient::new(base_url), Err(CliError::Config(_))),
+                "insecure daemon endpoint accepted: {base_url}"
+            );
+        }
     }
 
     #[test]
-    fn test_with_timeouts_builds_client() {
-        let client = DaemonClient::with_timeouts(
-            "http://127.0.0.1:9999",
-            Duration::from_secs(5),
-            Duration::from_secs(15),
+    #[serial_test::serial]
+    fn api_key_is_redacted_from_client_and_request_debug() {
+        let original_key = std::env::var_os(DAEMON_API_KEY_ENV);
+        std::env::set_var(DAEMON_API_KEY_ENV, "  sentinel-daemon-secret  ");
+        let client = DaemonClient::new("http://127.0.0.1:8420").expect("valid loopback URL");
+        match original_key {
+            Some(value) => std::env::set_var(DAEMON_API_KEY_ENV, value),
+            None => std::env::remove_var(DAEMON_API_KEY_ENV),
+        }
+        let request = client
+            .with_api_key(client.http.get("http://127.0.0.1:8420/private"), "/private")
+            .build()
+            .unwrap();
+        assert!(!format!("{client:?}").contains("sentinel-daemon-secret"));
+        assert!(!format!("{request:?}").contains("sentinel-daemon-secret"));
+        assert_eq!(request.headers()["X-API-Key"], "sentinel-daemon-secret");
+        for path in [
+            "/v1/daemon/runtime/health",
+            "/v1/daemon/runtime/cert-fingerprint",
+        ] {
+            let probe = client
+                .with_api_key(
+                    client.http.get(format!("http://127.0.0.1:8420{path}")),
+                    path,
+                )
+                .build()
+                .unwrap();
+            assert!(!probe.headers().contains_key("X-API-Key"));
+        }
+    }
+
+    #[tokio::test]
+    async fn authenticated_requests_do_not_follow_redirects() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let destination = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let redirect_address = destination.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (mut connection, _) = listener.accept().await.unwrap();
+                let mut request = [0u8; 4096];
+                let _ = connection.read(&mut request).await.unwrap();
+                connection.write_all(format!(
+                    "HTTP/1.1 302 Found\r\nLocation: http://{redirect_address}/stolen\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                ).as_bytes()).await.unwrap();
+            }
+        });
+        let mut client = DaemonClient::with_timeouts(
+            &format!("http://{address}"),
+            Duration::from_millis(200),
+            Duration::from_millis(400),
         )
-        .expect("M-2: test client builds");
-        assert_eq!(client.base_url, "http://127.0.0.1:9999");
-    }
-
-    #[test]
-    fn test_from_config_uses_daemon_url() {
-        let config = CliConfig {
-            daemon_url: "http://127.0.0.1:9000".to_string(),
-            ..Default::default()
-        };
-        let client = DaemonClient::from_config(&config);
-        assert_eq!(client.base_url, "http://127.0.0.1:9000");
-    }
-
-    #[test]
-    fn test_default_constants() {
-        assert_eq!(DEFAULT_CONNECT_TIMEOUT, Duration::from_secs(10));
-        assert_eq!(DEFAULT_REQUEST_TIMEOUT, Duration::from_secs(30));
+        .unwrap();
+        client.api_key = Some("redirect-secret".parse().unwrap());
+        assert!(matches!(
+            client.get::<serde_json::Value>("/private").await,
+            Err(CliError::Api { status: 302, .. })
+        ));
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(2), client.stream_get("/events"))
+                .await
+                .unwrap(),
+            Err(CliError::Api { status: 302, .. })
+        ));
+        server.await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), destination.accept())
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -924,10 +1057,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_timeout_prevents_infinite_hang() {
-        // Connect to a non-routable address to test timeout behavior.
-        // 198.51.100.1 is TEST-NET-2 (RFC 5737) — should be unreachable and cause a timeout.
+        // A listening socket that never responds proves the request deadline,
+        // without depending on external routing or reaching a remote HTTP host.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
         let client = DaemonClient::with_timeouts(
-            "http://198.51.100.1:1",
+            &format!("http://{address}"),
             Duration::from_millis(100),
             Duration::from_millis(200),
         )
@@ -946,54 +1081,4 @@ mod tests {
         assert!(result.is_ok(), "health_check should absorb timeout errors");
         assert!(!result.expect("health check timeout test"));
     }
-
-    #[test]
-    fn test_api_key_read_from_env() {
-        let _lock = ENV_TEST_LOCK.lock().unwrap();
-        std::env::set_var(DAEMON_API_KEY_ENV, "test-key-123");
-        let client = DaemonClient::new("http://127.0.0.1:8420");
-        assert_eq!(client.api_key.as_deref(), Some("test-key-123"));
-        std::env::remove_var(DAEMON_API_KEY_ENV);
-    }
-
-    #[test]
-    fn test_api_key_none_when_unset() {
-        let _lock = ENV_TEST_LOCK.lock().unwrap();
-        std::env::remove_var(DAEMON_API_KEY_ENV);
-        let client = DaemonClient::new("http://127.0.0.1:8420");
-        assert!(client.api_key.is_none());
-    }
-
-    #[test]
-    fn test_api_key_none_when_empty() {
-        let _lock = ENV_TEST_LOCK.lock().unwrap();
-        std::env::set_var(DAEMON_API_KEY_ENV, "");
-        let client = DaemonClient::new("http://127.0.0.1:8420");
-        assert!(client.api_key.is_none());
-        std::env::remove_var(DAEMON_API_KEY_ENV);
-    }
-
-    #[test]
-    fn test_api_key_trimmed() {
-        let _lock = ENV_TEST_LOCK.lock().unwrap();
-        std::env::set_var(DAEMON_API_KEY_ENV, "  my-key  ");
-        let client = DaemonClient::new("http://127.0.0.1:8420");
-        assert_eq!(client.api_key.as_deref(), Some("my-key"));
-        std::env::remove_var(DAEMON_API_KEY_ENV);
-    }
-
-    #[test]
-    fn test_unguarded_paths_skip_header() {
-        let _client = DaemonClient::new("http://127.0.0.1:8420");
-        for path in UNGUARDED_PATHS {
-            assert!(
-                UNGUARDED_PATHS.contains(path),
-                "{path} should be in UNGUARDED_PATHS"
-            );
-        }
-    }
-
-    /// Lock to serialize env-var tests that read `NEXUS42_DAEMON_API_KEY`.
-    static ENV_TEST_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
-        std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
 }

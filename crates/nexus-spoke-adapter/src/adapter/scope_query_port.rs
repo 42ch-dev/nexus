@@ -10,7 +10,7 @@
 //! listings reject when the cap is exceeded so orchestrators never receive a
 //! silently incomplete scope.
 //!
-//! Rows are projected through the V1.139 `WorldKbEntry → SpokeKnowledgeEntry`
+//! Rows are projected through the V1.139 `KnowledgeEntryRecord → SpokeKnowledgeEntry`
 //! conversion seam (spec §7.1). The world id is taken from `scope.scope_id`.
 //!
 //! # Timeline events (production — V1.145 P3)
@@ -33,7 +33,7 @@
 //! timeline events are append-ordered and bounded per branch.
 
 use super::NexusAdapter;
-use crate::conversion::world_kb_to_spoke;
+use crate::conversion::knowledge_record_to_spoke;
 use crate::extensions::has_nexus_body;
 use crate::{
     KnowledgeEntry, Scope, ScopeExtensionsKey, ScopeQueryPort, SpokeReject, SpokeRejectCode,
@@ -91,16 +91,16 @@ impl ScopeQueryPort for NexusAdapter<'_> {
             .entries
             .iter()
             // Reuse the V1.139 conversion seam — sole boundary between
-            // WorldKbEntry rows and the spoke wire type (spec §7.1); free
+            // KnowledgeEntryRecord rows and the spoke wire type (spec §7.1); free
             // function in nexus-spoke-adapter since V1.145 P1a.
-            .map(world_kb_to_spoke)
+            .map(knowledge_record_to_spoke)
             .collect();
 
         // Carrier-boundary guard (QC2-W003): the reserved `_nexus_body`
         // carrier is MCA-read-path + persist-path only. This orchestrator
         // read path hands spoke entries straight back to the orchestrator,
         // so a leaked carrier would persist into the `extensions` DB
-        // column. `world_kb_to_spoke` never sets it, but this debug-only
+        // column. `knowledge_record_to_spoke` never sets it, but this debug-only
         // assertion catches a future caller that accidentally stashes one.
         debug_assert!(
             !wire.iter().any(has_nexus_body),
@@ -205,7 +205,7 @@ mod tests {
     use crate::ScopeQueryPort;
     use nexus_contracts::BlockType;
     use nexus_knowledge::world_kb::store::KbStore;
-    use nexus_knowledge::world_kb::{WorldKbBody, WorldKbEntry};
+    use nexus_knowledge::world_kb::{KnowledgeEntryBody, KnowledgeEntryRecord};
     use nexus_local_db::kb_store::LIST_BY_WORLD_LIMIT;
     use nexus_local_db::narrative_gateway::seed;
     use nexus_local_db::{open_pool, run_migrations};
@@ -219,7 +219,9 @@ mod tests {
         (pool, dir)
     }
 
-    async fn seed_world_with_entries(pool: &sqlx::SqlitePool) -> (String, Vec<WorldKbEntry>) {
+    async fn seed_world_with_entries(
+        pool: &sqlx::SqlitePool,
+    ) -> (String, Vec<KnowledgeEntryRecord>) {
         // SAFETY: test-only static INSERTs with bind params.
         sqlx::query(
             "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
@@ -247,10 +249,10 @@ mod tests {
         .into_iter()
         .enumerate()
         {
-            let mut entry = WorldKbEntry::new("wld_scope", block_type, name);
+            let mut entry = KnowledgeEntryRecord::new("wld_scope", block_type, name);
             // Distinct entry ids so the `entry_ids` filter test has signal.
             entry.entry_id = format!("kb_scope_{idx}");
-            entry.body = Some(WorldKbBody {
+            entry.body = Some(KnowledgeEntryBody {
                 summary: Some(format!("{name} summary")),
                 ..Default::default()
             });
@@ -359,7 +361,7 @@ mod tests {
         let store = SqliteKbStore::new(pool.clone());
         for i in 0..LIST_BY_WORLD_LIMIT {
             let mut filler =
-                WorldKbEntry::new(&world_id, BlockType::Item, &format!("Filler_{i:03}"));
+                KnowledgeEntryRecord::new(&world_id, BlockType::Item, &format!("Filler_{i:03}"));
             filler.entry_id = format!("kb_fill_{i:03}");
             store.insert_knowledge_entry(filler).await.unwrap();
         }
@@ -402,7 +404,8 @@ mod tests {
 
         let store = SqliteKbStore::new(pool.clone());
         for i in 0..=LIST_BY_WORLD_LIMIT {
-            let mut entry = WorldKbEntry::new("wld_big", BlockType::Item, &format!("Row_{i:03}"));
+            let mut entry =
+                KnowledgeEntryRecord::new("wld_big", BlockType::Item, &format!("Row_{i:03}"));
             entry.entry_id = format!("kb_big_{i:03}");
             store.insert_knowledge_entry(entry).await.unwrap();
         }

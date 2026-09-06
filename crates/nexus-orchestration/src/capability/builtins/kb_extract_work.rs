@@ -1,13 +1,13 @@
-//! `kb.extract_work` capability — extract a `WorldKbEntry` from a work-scope KB entry.
+//! `kb.extract_work` capability — extract a `KnowledgeEntryRecord` from a work-scope KB entry.
 //!
 //! Full e2e pipeline (R16):
 //! 1. When `job_id` present: load job row; reject wrong status.
 //! 2. When `job_id` omitted: call `claim_job` for `creator_id`.
 //! 3. Mark running → load work content → build extraction prompt → parse
-//!    LLM response → mark done → insert `WorldKbEntry` via `SqliteKbStore`.
+//!    LLM response → mark done → insert `KnowledgeEntryRecord` via `SqliteKbStore`.
 //!
 //! The capability is stateful: it holds an `Option<SqlitePool>` for job
-//! lifecycle management and `WorldKbEntry` insertion. Without a pool it returns
+//! lifecycle management and `KnowledgeEntryRecord` insertion. Without a pool it returns
 //! `WorkerUnavailable`.
 //!
 //! Design: plan `2026-05-26-v1.30-kb-extract-lifecycle-hardening.md` §K4.
@@ -51,7 +51,7 @@ fn deserialize_body<'de, D: serde::Deserializer<'de>>(de: D) -> Result<String, D
 
 /// The `kb.extract_work` capability.
 ///
-/// Holds an optional `SqlitePool` for job lifecycle management and `WorldKbEntry`
+/// Holds an optional `SqlitePool` for job lifecycle management and `KnowledgeEntryRecord`
 /// insertion. When `pool` is `None`, returns `WorkerUnavailable`.
 ///
 /// Input schema:
@@ -68,7 +68,7 @@ fn deserialize_body<'de, D: serde::Deserializer<'de>>(de: D) -> Result<String, D
 ///
 /// Output schema depends on the phase:
 /// - **Prompt phase** (no `llm_response`): returns extraction prompt + job data
-/// - **Finalize phase** (with `llm_response`): returns `WorldKbEntry` insert result
+/// - **Finalize phase** (with `llm_response`): returns `KnowledgeEntryRecord` insert result
 pub struct KbExtractWork {
     pool: Option<Arc<sqlx::SqlitePool>>,
 }
@@ -164,7 +164,7 @@ impl Capability for KbExtractWork {
             "properties": {
                 "job_id": { "type": "string", "description": "Existing extract job ID" },
                 "work_entry_id": { "type": "string", "description": "Work-scope KB entry ID to extract" },
-                "world_id": { "type": "string", "description": "Target world ID for the resulting WorldKbEntry" },
+                "world_id": { "type": "string", "description": "Target world ID for the resulting KnowledgeEntryRecord" },
                 "work_id": { "type": "string", "description": "Source work ID (parent of the chapter)" },
                 "work_content": { "type": "string", "description": "Pre-loaded work content" },
                 "creator_id": { "type": "string", "description": "Creator ID" },
@@ -308,7 +308,7 @@ impl Capability for KbExtractWork {
             }));
         };
 
-        // ── Phase 4: Parse LLM response → WorldKbEntry insert ───────────
+        // ── Phase 4: Parse LLM response → KnowledgeEntryRecord insert ───────────
         let extract = match parse_extraction_response(response_text) {
             Ok(resp) => resp,
             Err(e) => {
@@ -348,11 +348,11 @@ impl Capability for KbExtractWork {
         };
 
         // Build body from LLM response.
-        let body: nexus_knowledge::world_kb::knowledge_entry::WorldKbBody =
+        let body: nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody =
             if let Ok(parsed) = serde_json::from_str(&extract.body) {
                 parsed
             } else {
-                nexus_knowledge::world_kb::knowledge_entry::WorldKbBody {
+                nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
                     summary: Some(extract.body.clone()),
                     attributes: None,
                     tags: None,
@@ -382,10 +382,10 @@ impl Capability for KbExtractWork {
             validation_mode,
         };
 
-        // ── Phase 4b: Insert WorldKbEntry BEFORE marking job done ──────────
+        // ── Phase 4b: Insert KnowledgeEntryRecord BEFORE marking job done ──────────
         // Insert first; only mark done on success. On insert failure,
         // mark the job as failed so the preset state machine can surface
-        // or retry. This prevents "done job with no WorldKbEntry" data loss.
+        // or retry. This prevents "done job with no KnowledgeEntryRecord" data loss.
         let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.as_ref().clone());
         let insert_result =
             match nexus_knowledge::world_kb::finalize_extract(&store, finalize_input).await {
@@ -395,16 +395,16 @@ impl Capability for KbExtractWork {
                     let _ = nexus_local_db::mark_extract_job_failed(
                         pool,
                         &job_id,
-                        &format!("WorldKbEntry insert failed: {e}"),
+                        &format!("KnowledgeEntryRecord insert failed: {e}"),
                     )
                     .await;
                     return Err(CapabilityError::Internal(format!(
-                        "WorldKbEntry insert failed: {e}"
+                        "KnowledgeEntryRecord insert failed: {e}"
                     )));
                 }
             };
 
-        // Mark done only after the WorldKbEntry was successfully inserted.
+        // Mark done only after the KnowledgeEntryRecord was successfully inserted.
         nexus_local_db::mark_extract_job_done(pool, &job_id)
             .await
             .map_err(|e| CapabilityError::Internal(format!("Failed to mark job done: {e}")))?;
@@ -413,7 +413,7 @@ impl Capability for KbExtractWork {
             "job_id": job_id,
             "status": "done",
             "key_block_id": insert_result.entry_id,
-            "world_id": insert_result.world_id,
+            "owner": insert_result.owner,
             "block_type": extract.block_type,
             "canonical_name": extract.canonical_name,
             "created_at": insert_result.created_at

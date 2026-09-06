@@ -448,14 +448,16 @@ async fn build_stage0_from_local(
 
     let home = crate::config::user_home_dir()?;
 
+    let bearer = nexus_creator_memory::MemoryBearerRef::Creator(creator_id);
+
     // 1. Load SOUL.md
-    let soul = nexus_creator_memory::soul_io::load(&home, creator_id)?;
+    let soul = nexus_creator_memory::soul_io::load(&home, bearer)?;
 
     // 2. List long-term memories (skip personality_core — already in SOUL personality)
-    let slugs = nexus_creator_memory::memory_io::list_memories(&home, creator_id)?;
+    let slugs = nexus_creator_memory::memory_io::list_memories(&home, bearer)?;
     let mut long_term_memories = Vec::new();
     for slug in &slugs {
-        if let Ok(mem) = nexus_creator_memory::memory_io::load_memory(&home, creator_id, slug) {
+        if let Ok(mem) = nexus_creator_memory::memory_io::load_memory(&home, bearer, slug) {
             if mem.frontmatter.memory_kind == "personality_core" {
                 continue;
             }
@@ -656,8 +658,8 @@ pub async fn run_assemble_moment(
     let narrative = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
     // V1.145 P2 — the MCA WorldKB read now crosses the spoke-adapter boundary:
     // `SpokeBackedKbStore` routes `query` through `NexusAdapter`'s
-    // scoped read (storage → spoke `KnowledgeEntry` → `WorldKbEntry` via the
-    // `spoke_to_world_kb` conversion seam), matching `SqliteKbStore::query`
+    // scoped read (storage → spoke `KnowledgeEntry` → `KnowledgeEntryRecord` via the
+    // `spoke_to_knowledge_record` conversion seam), matching `SqliteKbStore::query`
     // behavior exactly (silent 500-row window; no reject-on-overflow).
     let kb = nexus_spoke_adapter::SpokeBackedKbStore::new(pool.clone());
     // V1.149 P1: preload the world's confirmed relation edges for relation-hop
@@ -1827,7 +1829,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn assemble_moment_world_kb_identical_across_kb_stores() {
         use nexus_contracts::BlockType;
-        use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+        use nexus_knowledge::world_kb::knowledge_entry::{
+            KnowledgeEntryBody, KnowledgeEntryRecord,
+        };
         use nexus_knowledge::world_kb::KbStore;
         use nexus_moment_context_assembly::MomentContext;
 
@@ -1861,9 +1865,9 @@ mod tests {
         .into_iter()
         .enumerate()
         {
-            let mut entry = WorldKbEntry::new("wld_t4", bt, name);
+            let mut entry = KnowledgeEntryRecord::new("wld_t4", bt, name);
             entry.entry_id = format!("kb_t4_{idx}");
-            entry.body = Some(WorldKbBody {
+            entry.body = Some(KnowledgeEntryBody {
                 summary: Some(format!("{name} summary")),
                 // An integer attribute that the spoke typed body alone would
                 // round-trip as a float — the lossless carrier must recover it.

@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/characters/character-detail.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CharacterDetail",
+  "description": "Response for GET /v1/daemon/characters/:character_id.",
+  "type": "object",
+  "required": [
+    "character"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "character": {
+      "$ref": "https://nexus42.invalid/schemas/domain/character.schema.json"
+    }
+  }
+}

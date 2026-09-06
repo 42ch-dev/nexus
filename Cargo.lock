@@ -4080,6 +4080,7 @@ dependencies = [
  "hex",
  "libp2p",
  "nexus-acp-host",
+ "nexus-agent-host",
  "nexus-cloud-sync",
  "nexus-contracts",
  "nexus-creator",

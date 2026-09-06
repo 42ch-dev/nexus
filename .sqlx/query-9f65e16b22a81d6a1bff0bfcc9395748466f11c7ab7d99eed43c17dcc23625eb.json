@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT EXISTS(\n            SELECT 1 FROM kb_key_blocks\n            WHERE key_block_id = ?\n              AND world_id = ?\n              AND block_type = 'character'\n              AND status != 'deleted'\n         ) as \"ok!: i64\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "ok!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9f65e16b22a81d6a1bff0bfcc9395748466f11c7ab7d99eed43c17dcc23625eb"
+}

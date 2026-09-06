@@ -1,4 +1,4 @@
-//! Extract finalize helpers — validate + upsert `WorldKbEntry` + `SourceAnchor`.
+//! Extract finalize helpers — validate + upsert `KnowledgeEntryRecord` + `SourceAnchor`.
 //!
 //! V1.40 P3 (T3): shared domain logic for `kb.extract_work` capability.
 //! Validates P1 rules (`canonical_name`, body with `novel_category`), then
@@ -6,7 +6,7 @@
 //!
 //! The caller is responsible for job lifecycle (mark running/done/failed).
 
-use crate::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+use crate::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
 use crate::world_kb::query::KbInsertResult;
 use crate::world_kb::source_anchor::SourceAnchor;
 use crate::world_kb::store::KbStore;
@@ -24,19 +24,19 @@ pub struct ExtractFinalizeInput {
     /// Canonical name from LLM extraction.
     pub canonical_name: String,
     /// Body content from LLM extraction.
-    pub body: WorldKbBody,
+    pub body: KnowledgeEntryBody,
     /// Source anchor for the chapter artifact.
     pub source_anchor: SourceAnchor,
     /// Validation mode: `Novel` for V1.40 novel works, `Generic` otherwise.
     pub validation_mode: ValidationMode,
 }
 
-/// Validate extraction input and insert a `WorldKbEntry` via the provided store.
+/// Validate extraction input and insert a `KnowledgeEntryRecord` via the provided store.
 ///
 /// Steps:
 /// 1. Validate `canonical_name` format (P1 grammar rules).
 /// 2. Validate `body` per `ValidationMode` (Novel: requires `novel_category`).
-/// 3. Construct `WorldKbEntry` with provisional status.
+/// 3. Construct `KnowledgeEntryRecord` with provisional status.
 /// 4. Insert via `KbStore::insert_knowledge_entry`.
 ///
 /// # Errors
@@ -56,8 +56,9 @@ pub async fn finalize_extract<S: KbStore + Sync>(
     validate_body(input.block_type, Some(&input.body), input.validation_mode)
         .map_err(|e| KbStoreError::ValidationLegacy(e.to_string()))?;
 
-    // Step 3: Build WorldKbEntry.
-    let mut kb = WorldKbEntry::new(&input.world_id, input.block_type, &input.canonical_name);
+    // Step 3: Build KnowledgeEntryRecord.
+    let mut kb =
+        KnowledgeEntryRecord::new(&input.world_id, input.block_type, &input.canonical_name);
     kb.body = Some(input.body);
     kb.source_anchor = Some(input.source_anchor);
 
@@ -68,10 +69,11 @@ pub async fn finalize_extract<S: KbStore + Sync>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world_kb::knowledge_entry::KnowledgeOwnerRef;
     use crate::world_kb::store::InMemoryKbStore;
 
-    fn novel_body() -> WorldKbBody {
-        WorldKbBody {
+    fn novel_body() -> KnowledgeEntryBody {
+        KnowledgeEntryBody {
             summary: Some("A brave warrior".to_string()),
             attributes: Some(serde_json::json!({
                 "novel_category": "character",
@@ -103,7 +105,7 @@ mod tests {
 
         let result = finalize_extract(&store, input).await.unwrap();
         assert!(result.entry_id.starts_with("kb_"));
-        assert_eq!(result.world_id, "wld_1");
+        assert_eq!(result.owner, KnowledgeOwnerRef::world("wld_1"));
     }
 
     #[tokio::test]
@@ -128,7 +130,7 @@ mod tests {
     #[tokio::test]
     async fn test_finalize_extract_rejects_missing_novel_category() {
         let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
-        let body = WorldKbBody {
+        let body = KnowledgeEntryBody {
             summary: Some("test".to_string()),
             attributes: Some(serde_json::json!({})),
             tags: None,
@@ -153,7 +155,7 @@ mod tests {
     #[tokio::test]
     async fn test_finalize_extract_generic_mode_no_novel_category_required() {
         let store = InMemoryKbStore::new();
-        let body = WorldKbBody {
+        let body = KnowledgeEntryBody {
             summary: Some("generic entity".to_string()),
             attributes: None,
             tags: None,

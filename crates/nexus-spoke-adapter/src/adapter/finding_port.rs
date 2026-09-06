@@ -255,11 +255,15 @@ async fn insert_world_finding_tx(
     let text_position_json =
         serde_json::to_string(&f.text_position).unwrap_or_else(|_| "{}".to_string());
     let extensions_json = serde_json::to_string(&f.extensions).unwrap_or_else(|_| "{}".to_string());
-    // `schema_version` is a small non-zero schema version (the wire fixture
-    // uses 1); u64 → i64 can only wrap at values above `i64::MAX`, which no
-    // schema version reaches — mirrors the `mind_state.rs` cast discipline.
-    #[allow(clippy::cast_possible_wrap)]
-    let schema_version = f.schema_version.get() as i64;
+    // Checked conversion: a schema version beyond the i64 domain is rejected
+    // (fail-closed) rather than wrapping — no realistic schema version reaches
+    // this, but a corrupted/hostile wire payload must not silently wrap.
+    let schema_version = i64::try_from(f.schema_version.get()).map_err(|_| {
+        LocalDbError::ValidationError(format!(
+            "world finding schema_version {} exceeds the i64 domain",
+            f.schema_version.get()
+        ))
+    })?;
     insert_world_finding_in_tx(
         tx,
         &f.finding_id,

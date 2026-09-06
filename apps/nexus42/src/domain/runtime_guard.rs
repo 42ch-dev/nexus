@@ -52,6 +52,11 @@ pub fn classify_operation(operation: &str) -> OperationCategory {
 /// # Arguments
 /// * `mode` - Current runtime mode
 /// * `operation` - Human-readable operation name (used in error message)
+///
+/// # Errors
+///
+/// Returns `Err(DomainError::PlatformOperationProhibited)` if the mode is
+/// `local_only`.
 pub fn require_platform(mode: &DomainRuntimeMode, operation: &str) -> Result<(), DomainError> {
     if mode.is_local_only() {
         return Err(DomainError::PlatformOperationProhibited {
@@ -64,15 +69,11 @@ pub fn require_platform(mode: &DomainRuntimeMode, operation: &str) -> Result<(),
 ///
 /// # Errors
 /// Returns `Err(DomainError::...)` if validation fails.
-///
-/// # Errors
-/// Returns `Err(DomainError::...)` if validation fails.
 /// Check that the current mode allows an operation by its category.
 pub fn check_operation(mode: &DomainRuntimeMode, operation: &str) -> Result<(), DomainError> {
     match classify_operation(operation) {
-        OperationCategory::LocalOnly => Ok(()),
+        OperationCategory::LocalOnly | OperationCategory::LocalWithPlatformEnhancement => Ok(()),
         OperationCategory::PlatformRequired => require_platform(mode, operation),
-        OperationCategory::LocalWithPlatformEnhancement => Ok(()),
     }
 }
 

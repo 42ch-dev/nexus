@@ -700,8 +700,11 @@ impl WorkerManager {
                     #[cfg(unix)]
                     {
                         // 1. Send SIGTERM first.
-                        #[allow(clippy::cast_possible_wrap)]
-                        let nix_pid = Pid::from_raw(pid as i32);
+                        let Ok(pid_i32) = i32::try_from(pid) else {
+                            warn!(pid, "invalid PID beyond i32; skipping worker terminate");
+                            return;
+                        };
+                        let nix_pid = Pid::from_raw(pid_i32);
                         if let Err(e) = kill(nix_pid, Signal::SIGTERM) {
                             warn!(pid, error = %e, "failed to send SIGTERM to worker");
                             // If SIGTERM fails, fall back to SIGKILL immediately.

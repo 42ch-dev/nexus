@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT character_id as \"character_id!\", file_path as \"file_path!\",\n                  schema_version as \"schema_version!\", personality_hash, experience_hash,\n                  created_at as \"created_at!\", updated_at as \"updated_at!\"\n           FROM character_soul_meta WHERE character_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "character_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "file_path!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "schema_version!",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "personality_hash",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "experience_hash",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at!",
+        "ordinal": 6,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "0c19138e9bb9cdd2807820d975f658dba606a1bfaafba34f967b7e4fb137116b"
+}

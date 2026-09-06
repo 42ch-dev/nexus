@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM character_soul_meta WHERE character_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "d44e621e11b9c7f5803ab0843a00c98d8106342e47788d8a5ce0f23a7b0c85c1"
+}

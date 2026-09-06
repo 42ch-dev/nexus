@@ -105,7 +105,7 @@ async fn seed_world(pool: &sqlx::SqlitePool, world_id: &str) {
     .unwrap();
 }
 
-/// Seed a computable character `WorldKbEntry` with deterministic entry id and
+/// Seed a computable character `KnowledgeEntryRecord` with deterministic entry id and
 /// the V1.61 KB body shape (`attributes` flat object + `state.character.*`).
 async fn seed_character(
     pool: &sqlx::SqlitePool,
@@ -137,16 +137,18 @@ async fn seed_character_in_world(
     max_hp: i64,
 ) {
     use nexus_contracts::BlockType;
-    use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+    use nexus_knowledge::world_kb::knowledge_entry::{
+        KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef,
+    };
     use nexus_knowledge::world_kb::KbStore;
     use nexus_local_db::kb_store::SqliteKbStore;
 
-    let kb = WorldKbEntry {
+    let kb = KnowledgeEntryRecord {
         entry_id: entry_id.to_string(),
-        world_id: world_id.to_string(),
+        owner: KnowledgeOwnerRef::world(world_id),
         block_type: BlockType::Character,
         canonical_name: name.to_string(),
-        body: Some(WorldKbBody {
+        body: Some(KnowledgeEntryBody {
             summary: Some(format!("{name} combatant")),
             attributes: Some(json!({
                 "max_hp": max_hp,
@@ -163,7 +165,7 @@ async fn seed_character_in_world(
             })),
             ..Default::default()
         }),
-        ..WorldKbEntry::new(world_id, BlockType::Character, name)
+        ..KnowledgeEntryRecord::new(world_id, BlockType::Character, name)
     };
     SqliteKbStore::new(pool.clone())
         .insert_knowledge_entry(kb)
@@ -1281,16 +1283,18 @@ async fn run_with_other_world_branch_returns_422() {
 /// state is the honest manifest violation.
 async fn seed_broken_character(pool: &sqlx::SqlitePool, entry_id: &str) {
     use nexus_contracts::BlockType;
-    use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+    use nexus_knowledge::world_kb::knowledge_entry::{
+        KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef,
+    };
     use nexus_knowledge::world_kb::KbStore;
     use nexus_local_db::kb_store::SqliteKbStore;
 
-    let kb = WorldKbEntry {
+    let kb = KnowledgeEntryRecord {
         entry_id: entry_id.to_string(),
-        world_id: WORLD.to_string(),
+        owner: KnowledgeOwnerRef::world(WORLD),
         block_type: BlockType::Character,
         canonical_name: format!("Broken {entry_id}"),
-        body: Some(WorldKbBody {
+        body: Some(KnowledgeEntryBody {
             summary: Some("Broken combatant".to_string()),
             attributes: Some(json!({
                 "max_hp": 100,
@@ -1307,7 +1311,7 @@ async fn seed_broken_character(pool: &sqlx::SqlitePool, entry_id: &str) {
             })),
             ..Default::default()
         }),
-        ..WorldKbEntry::new(WORLD, BlockType::Character, "Broken")
+        ..KnowledgeEntryRecord::new(WORLD, BlockType::Character, "Broken")
     };
     SqliteKbStore::new(pool.clone())
         .insert_knowledge_entry(kb)

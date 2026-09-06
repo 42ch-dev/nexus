@@ -35,7 +35,7 @@ use nexus_daemon_runtime::pack_import::{import_pack, ConflictPolicy, ImportOutco
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_relationships::list_relationships_for_world;
 use nexus_local_db::kb_store::SqliteKbStore;
-use nexus_spoke_adapter::conversion::{kb_relationship_row_to_spoke, world_kb_to_spoke};
+use nexus_spoke_adapter::conversion::{kb_relationship_row_to_spoke, knowledge_record_to_spoke};
 use nexus_spoke_adapter::pack::st_lorebook::{
     parse_st_lorebook, ConversionDiagnostic, DiagnosticSeverity, StLorebookError,
 };
@@ -209,7 +209,7 @@ async fn export(args: ExportArgs, config: &CliConfig, pool: &SqlitePool) -> Resu
 
     // ── Convert entries to spoke KnowledgeEntry ───────────────────────
     let spoke_entries: Vec<nexus_spoke_adapter::KnowledgeEntry> =
-        entries.iter().map(world_kb_to_spoke).collect();
+        entries.iter().map(knowledge_record_to_spoke).collect();
 
     // ── Anchors ───────────────────────────────────────────────────────
     // nexus has no persisted SourceAnchor store; accept the flag but emit
@@ -490,7 +490,7 @@ mod tests {
     use super::*;
     use nexus_contracts::BlockType;
     use nexus_daemon_runtime::pack_import::IMPORT_PROVENANCE;
-    use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+    use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
     // parse_pack is re-exported at module level from the parent `pack` module;
     // the explicit import below is a reminder of the path but resolves to the
     // same item.
@@ -543,8 +543,8 @@ mod tests {
 
         let mut entry_ids = Vec::new();
         for (i, name) in ["Alice", "Bob", "Carol"].iter().enumerate() {
-            let mut kb = WorldKbEntry::new(WORLD, BlockType::Character, name);
-            kb.body = Some(WorldKbBody {
+            let mut kb = KnowledgeEntryRecord::new(WORLD, BlockType::Character, name);
+            kb.body = Some(KnowledgeEntryBody {
                 summary: Some(format!("{name} summary")),
                 ..Default::default()
             });
@@ -924,8 +924,8 @@ mod tests {
         // under the original entry_id).
         let (pool2, _dir2) = empty_world_pool().await;
         let store = SqliteKbStore::new(pool2.clone());
-        let mut carol_clone = WorldKbEntry::new(WORLD, BlockType::Character, "Carol");
-        carol_clone.body = Some(WorldKbBody {
+        let mut carol_clone = KnowledgeEntryRecord::new(WORLD, BlockType::Character, "Carol");
+        carol_clone.body = Some(KnowledgeEntryBody {
             summary: Some("Cloned Carol".to_string()),
             ..Default::default()
         });
@@ -1023,8 +1023,8 @@ mod tests {
 
         let (pool2, _dir2) = empty_world_pool().await;
         let store = SqliteKbStore::new(pool2.clone());
-        let mut carol_clone = WorldKbEntry::new(WORLD, BlockType::Character, "Carol");
-        carol_clone.body = Some(WorldKbBody {
+        let mut carol_clone = KnowledgeEntryRecord::new(WORLD, BlockType::Character, "Carol");
+        carol_clone.body = Some(KnowledgeEntryBody {
             summary: Some("Pre-existing Carol".to_string()),
             ..Default::default()
         });
@@ -1077,9 +1077,9 @@ mod tests {
         // Pre-create Carol with a distinct body and non-default status.
         let (pool2, _dir2) = empty_world_pool().await;
         let store = SqliteKbStore::new(pool2.clone());
-        let mut carol_clone = WorldKbEntry::new(WORLD, BlockType::Character, "Carol");
+        let mut carol_clone = KnowledgeEntryRecord::new(WORLD, BlockType::Character, "Carol");
         carol_clone.status = "confirmed".to_string();
-        carol_clone.body = Some(WorldKbBody {
+        carol_clone.body = Some(KnowledgeEntryBody {
             summary: Some("Pre-existing Carol body".to_string()),
             ..Default::default()
         });
@@ -1135,7 +1135,7 @@ mod tests {
             .get_knowledge_entry(carol_id)
             .await
             .expect("Carol must exist");
-        carol.body = Some(WorldKbBody {
+        carol.body = Some(KnowledgeEntryBody {
             summary: Some("Stale Carol body".to_string()),
             ..Default::default()
         });
@@ -1277,8 +1277,8 @@ mod tests {
         let store = SqliteKbStore::new(pool.clone());
         let mut b_ids = Vec::new();
         for name in ["Alice", "Bob", "Carol"] {
-            let mut kb = WorldKbEntry::new(WORLD_B, BlockType::Character, name);
-            kb.body = Some(WorldKbBody {
+            let mut kb = KnowledgeEntryRecord::new(WORLD_B, BlockType::Character, name);
+            kb.body = Some(KnowledgeEntryBody {
                 summary: Some(format!("{name} in B")),
                 ..Default::default()
             });
@@ -1485,8 +1485,8 @@ mod tests {
         let store_a = SqliteKbStore::new(pool_a.clone());
         let mut entry_ids = Vec::new();
         for (name, key) in [("Alice", "alice"), ("Bob", "bob"), ("Carol", "carol")] {
-            let mut kb = WorldKbEntry::new(WORLD_A, BlockType::Character, name);
-            kb.body = Some(WorldKbBody {
+            let mut kb = KnowledgeEntryRecord::new(WORLD_A, BlockType::Character, name);
+            kb.body = Some(KnowledgeEntryBody {
                 summary: Some(format!("{name} summary")),
                 ..Default::default()
             });
@@ -1751,8 +1751,8 @@ mod tests {
         let store = SqliteKbStore::new(pool.clone());
         let mut entry_ids = Vec::new();
         for name in ["Alice", "Bob", "Carol"] {
-            let mut kb = WorldKbEntry::new(WORLD, BlockType::Character, name);
-            kb.body = Some(WorldKbBody {
+            let mut kb = KnowledgeEntryRecord::new(WORLD, BlockType::Character, name);
+            kb.body = Some(KnowledgeEntryBody {
                 summary: Some(format!("{name} summary")),
                 ..Default::default()
             });
@@ -1785,8 +1785,8 @@ mod tests {
         // ── Target world: pre-create Carol with a different id ─────────
         let (pool2, _dir2) = empty_world_pool().await;
         let store2 = SqliteKbStore::new(pool2.clone());
-        let mut carol_clone = WorldKbEntry::new(WORLD, BlockType::Character, "Carol");
-        carol_clone.body = Some(WorldKbBody {
+        let mut carol_clone = KnowledgeEntryRecord::new(WORLD, BlockType::Character, "Carol");
+        carol_clone.body = Some(KnowledgeEntryBody {
             summary: Some("Pre-existing Carol".to_string()),
             ..Default::default()
         });
@@ -1923,8 +1923,8 @@ mod tests {
         let store_a = SqliteKbStore::new(pool_a.clone());
 
         // Entry "Dragon" — activation key ["dragon"], logic "and_any".
-        let mut dragon = WorldKbEntry::new(WORLD_A, BlockType::Character, "Dragon");
-        dragon.body = Some(WorldKbBody {
+        let mut dragon = KnowledgeEntryRecord::new(WORLD_A, BlockType::Character, "Dragon");
+        dragon.body = Some(KnowledgeEntryBody {
             summary: Some("A fearsome fire-breathing dragon".to_string()),
             ..Default::default()
         });
@@ -1936,8 +1936,8 @@ mod tests {
         // Entry "Ghost" — activation key ["haunt"], must NOT match
         // a stage0 that only mentions "dragon". Summary deliberately
         // avoids the substring "haunt" so the entry does not self-match.
-        let mut ghost = WorldKbEntry::new(WORLD_A, BlockType::Character, "Ghost");
-        ghost.body = Some(WorldKbBody {
+        let mut ghost = KnowledgeEntryRecord::new(WORLD_A, BlockType::Character, "Ghost");
+        ghost.body = Some(KnowledgeEntryBody {
             summary: Some("A spooky translucent apparition".to_string()),
             ..Default::default()
         });
@@ -2185,7 +2185,11 @@ mod tests {
         let (pool2, _dir2) = empty_world_pool().await;
         let store = SqliteKbStore::new(pool2.clone());
         store
-            .insert_knowledge_entry(WorldKbEntry::new(WORLD, BlockType::Character, "Carol"))
+            .insert_knowledge_entry(KnowledgeEntryRecord::new(
+                WORLD,
+                BlockType::Character,
+                "Carol",
+            ))
             .await
             .unwrap();
         let pre = count_entries(&pool2, WORLD).await;
@@ -2218,7 +2222,11 @@ mod tests {
         let (pool2, _dir2) = empty_world_pool().await;
         let store = SqliteKbStore::new(pool2.clone());
         store
-            .insert_knowledge_entry(WorldKbEntry::new(WORLD, BlockType::Character, "Carol"))
+            .insert_knowledge_entry(KnowledgeEntryRecord::new(
+                WORLD,
+                BlockType::Character,
+                "Carol",
+            ))
             .await
             .unwrap();
         let pre = count_entries(&pool2, WORLD).await;
@@ -2250,7 +2258,11 @@ mod tests {
         let (pool, _dir) = empty_world_pool().await;
         let store = SqliteKbStore::new(pool.clone());
         store
-            .insert_knowledge_entry(WorldKbEntry::new(WORLD, BlockType::Character, &long_name))
+            .insert_knowledge_entry(KnowledgeEntryRecord::new(
+                WORLD,
+                BlockType::Character,
+                &long_name,
+            ))
             .await
             .unwrap();
         let pack_json = json!({
@@ -2297,7 +2309,11 @@ mod tests {
         let mut target_ids = Vec::new();
         for name in ["Alice", "Bob", "Carol"] {
             let res = store
-                .insert_knowledge_entry(WorldKbEntry::new(WORLD, BlockType::Character, name))
+                .insert_knowledge_entry(KnowledgeEntryRecord::new(
+                    WORLD,
+                    BlockType::Character,
+                    name,
+                ))
                 .await
                 .unwrap();
             target_ids.push(res.entry_id);
@@ -2347,14 +2363,18 @@ mod tests {
         )
         .await;
         let store_a = SqliteKbStore::new(pool_a.clone());
-        let mut dragon = WorldKbEntry::new(WORLD_A, BlockType::Character, "Dragon");
+        let mut dragon = KnowledgeEntryRecord::new(WORLD_A, BlockType::Character, "Dragon");
         dragon.modules = Some(json!({"activation": {"key": ["dragon"], "logic": "and_any"}}));
         store_a.insert_knowledge_entry(dragon).await.unwrap();
         let (pack_path, _pack_dir) = export_to_file_custom_world(&pool_a, WORLD_A).await;
         let (pool_rename, _dir_r) = empty_world_pool().await;
         let store_r = SqliteKbStore::new(pool_rename.clone());
         store_r
-            .insert_knowledge_entry(WorldKbEntry::new(WORLD, BlockType::Character, "Dragon"))
+            .insert_knowledge_entry(KnowledgeEntryRecord::new(
+                WORLD,
+                BlockType::Character,
+                "Dragon",
+            ))
             .await
             .unwrap();
         let parsed = parse_pack(
@@ -2386,7 +2406,7 @@ mod tests {
         let _ = activation::apply_activation(&[renamed], "a dragon appears", &[]);
         let (pool_over, _dir_o) = empty_world_pool().await;
         let store_o = SqliteKbStore::new(pool_over.clone());
-        let mut pre2 = WorldKbEntry::new(WORLD, BlockType::Character, "Dragon");
+        let mut pre2 = KnowledgeEntryRecord::new(WORLD, BlockType::Character, "Dragon");
         pre2.modules = Some(json!({"activation": {"key": ["stale"], "logic": "and_any"}}));
         store_o.insert_knowledge_entry(pre2).await.unwrap();
         let parsed2 = parse_pack(
@@ -2628,8 +2648,8 @@ mod tests {
     async fn import_from_st_conflict_rename_passthrough() {
         let (pool, _dir) = empty_world_pool().await;
         let store = SqliteKbStore::new(pool.clone());
-        let mut existing = WorldKbEntry::new(WORLD, BlockType::InfoPoint, "Dragon lore");
-        existing.body = Some(WorldKbBody {
+        let mut existing = KnowledgeEntryRecord::new(WORLD, BlockType::InfoPoint, "Dragon lore");
+        existing.body = Some(KnowledgeEntryBody {
             summary: Some("Pre-existing dragon lore.".to_string()),
             ..Default::default()
         });

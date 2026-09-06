@@ -15,7 +15,7 @@ use crate::api::errors::NexusApiError;
 
 /// Cursor token prefix. Bumping the version lets a future encoding coexist
 /// with tokens minted by older daemons (old clients that send a stale cursor
-/// get a `400` and simply re-request from page 1).
+/// get a `422` `invalid_input` and simply re-request from page 1).
 const CURSOR_PREFIX: &str = "v1:";
 
 /// Encode a row offset into an opaque cursor token.
@@ -27,7 +27,7 @@ pub fn encode_offset_cursor(offset: u32) -> String {
 /// Decode an opaque cursor token into the underlying row offset.
 ///
 /// Returns `Ok(0)` when `cursor` is `None` (first page). Returns
-/// `NexusApiError::BadRequest { code: "invalid_input" }` (HTTP 400) when the
+/// `NexusApiError::BadRequest { code: "invalid_input" }` (HTTP 422) when the
 /// token is malformed — callers surface this as the canonical
 /// `<resource>_cursor_invalid` / `invalid_input` error per convention §3.2.
 ///

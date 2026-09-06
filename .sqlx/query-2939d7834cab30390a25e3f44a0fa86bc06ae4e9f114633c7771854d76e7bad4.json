@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) FROM kb_key_blocks\n                   WHERE key_block_id = ?\n                     AND modules_json IS NOT NULL AND NOT json_valid(modules_json)",
+  "describe": {
+    "columns": [
+      {
+        "name": "COUNT(*)",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2939d7834cab30390a25e3f44a0fa86bc06ae4e9f114633c7771854d76e7bad4"
+}

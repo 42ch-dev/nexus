@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/actor-knowledge/add-knowledge-entry-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus AddActorKnowledgeEntryRequest",
+  "description": "Request body for POST /v1/daemon/actor-knowledge/entries. Stored-owner admission only; clients never send owner_creator_id.",
+  "type": "object",
+  "required": ["owner_kind", "block_type", "canonical_name"],
+  "additionalProperties": false,
+  "properties": {
+    "owner_kind": {
+      "type": "string",
+      "enum": ["world", "character", "actor_world_binding"]
+    },
+    "world_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId"
+    },
+    "character_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CharacterId"
+    },
+    "binding_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/ActorWorldBindingId"
+    },
+    "creator_only": {
+      "type": "boolean",
+      "description": "World-owned only. Rejected for Character and binding owners."
+    },
+    "block_type": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/BlockType"
+    },
+    "canonical_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    }
+  }
+}

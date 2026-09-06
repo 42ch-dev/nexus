@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/characters/memory/character-pending-review-info.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CharacterPendingReviewInfo",
+  "description": "One Character pending-review queue row. `binding_id` is the binding-local provenance (one World life); absent means shared Character scope. Rows are only ever read or written under the owning active Character; the server resolves the owner from stored state.",
+  "type": "object",
+  "required": [
+    "pending_id",
+    "session_id",
+    "character_id",
+    "task_kind",
+    "raw_digest",
+    "created_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "pending_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "session_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "character_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CharacterId"
+    },
+    "binding_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/ActorWorldBindingId",
+      "description": "Binding-local provenance; omitted for shared Character scope."
+    },
+    "task_kind": { "type": "string", "maxLength": 64 },
+    "raw_digest": { "type": "string", "minLength": 1, "maxLength": 65536 },
+    "created_at": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
+    }
+  }
+}

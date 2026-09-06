@@ -200,9 +200,9 @@ pub fn build_story_bundle(
         return None;
     }
 
-    // u32 is sufficient: a story with >4 billion chapters is not a real scenario.
-    #[allow(clippy::cast_possible_truncation)]
-    let chapter_count = chapters.len() as u32;
+    // Checked conversion: a chapter count beyond u32 yields no bundle
+    // (fail-closed on a corrupt/injected chapter list) rather than truncating.
+    let chapter_count = u32::try_from(chapters.len()).ok()?;
 
     Some(StoryBundle {
         world_id: world_id.to_string(),

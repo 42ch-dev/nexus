@@ -26,6 +26,20 @@ export type WorldId = string;
  */
 export type CreatorId = string;
 /**
+ * Character ID (lowercase prefix chr_ and exactly 32 hex characters)
+ *
+ * This interface was referenced by `CommonTypes`'s JSON-Schema
+ * via the `definition` "CharacterId".
+ */
+export type CharacterId = string;
+/**
+ * ActorWorldBinding ID (lowercase prefix awb_ and exactly 32 hex characters)
+ *
+ * This interface was referenced by `CommonTypes`'s JSON-Schema
+ * via the `definition` "ActorWorldBindingId".
+ */
+export type ActorWorldBindingId = string;
+/**
  * User ID (prefix: 'usr_')
  *
  * This interface was referenced by `CommonTypes`'s JSON-Schema
@@ -363,6 +377,20 @@ export type DeliveryState = "staged" | "ready" | "sent" | "acked" | "conflicted"
  * via the `definition` "BindingStatus".
  */
 export type BindingStatus = "active" | "unlinked" | "stale";
+/**
+ * Character bearer status. v1.184 product surfaces never archive a Character.
+ *
+ * This interface was referenced by `CommonTypes`'s JSON-Schema
+ * via the `definition` "CharacterStatus".
+ */
+export type CharacterStatus = "active" | "archived";
+/**
+ * ActorWorldBinding status. v1.184 APIs create active rows only; inactive is reserved storage vocabulary.
+ *
+ * This interface was referenced by `CommonTypes`'s JSON-Schema
+ * via the `definition` "ActorWorldBindingStatus".
+ */
+export type ActorWorldBindingStatus = "active" | "inactive";
 /**
  * Agent profile kind (data-model-v1.md §5.15)
  *

@@ -45,7 +45,7 @@ pub async fn run(args: HostCallArgs, config: &CliConfig) -> Result<()> {
     let params: serde_json::Value = serde_json::from_str(&args.args)
         .map_err(|e| CliError::Other(format!("--args must be valid JSON: {e}")))?;
 
-    let client = DaemonClient::from_config(config);
+    let client = DaemonClient::from_config(config)?;
     let request_body = build_tool_request(&args.tool_id, &params);
 
     let response: serde_json::Value = client

@@ -69,8 +69,8 @@ fn build_deterministic_fixture() -> (
 /// Seed KB entry and user knowledge into the in-memory stores (async).
 async fn seed_stores(kb: &InMemoryKbStore, knowledge: &InMemoryKnowledgeStore) {
     // KB entry with activation module (tests that flag OFF still includes it)
-    use nexus_knowledge::world_kb::knowledge_entry::WorldKbEntry;
-    let mut kb_entry = WorldKbEntry::new("wld_golden", BlockType::Character, "Hero");
+    use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
+    let mut kb_entry = KnowledgeEntryRecord::new("wld_golden", BlockType::Character, "Hero");
     kb_entry.entry_id = "kb_golden_001".to_string();
     kb_entry.created_at = "2026-01-01T00:00:02Z".to_string();
     kb_entry.modules = Some(serde_json::json!({

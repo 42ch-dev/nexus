@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT m.holder_entry_id AS \"carrier_entry_id!\", m.occurred_at\n               FROM mind_states m\n               WHERE m.holder_entry_id IN (SELECT value FROM json_each(?))\n                 AND NOT EXISTS (\n                   SELECT 1 FROM mind_states m2\n                   WHERE m2.holder_entry_id = m.holder_entry_id\n                     AND (m2.created_at > m.created_at\n                          OR (m2.created_at = m.created_at\n                              AND m2.mind_state_id > m.mind_state_id))\n                 )",
+  "describe": {
+    "columns": [
+      {
+        "name": "carrier_entry_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "occurred_at",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "092e8f4058a9b477209428dcee2795d27f8c22e84666c825d5ef959f1dfd8074"
+}

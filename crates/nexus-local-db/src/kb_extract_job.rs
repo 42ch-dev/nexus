@@ -1,7 +1,7 @@
 //! KB Extract job queue — SQLite-backed persistence.
 //!
 //! Each job represents a request to extract a work-scope KB entry into a
-//! world-scoped `WorldKbEntry` via the `kb.extract_work` capability.
+//! world-scoped `KnowledgeEntryRecord` via the `kb.extract_work` capability.
 //!
 //! Lifecycle: `queued` → `running` → `done` | `failed`.
 //! SSOT in `nexus-local-db`; no second in-memory queue.
@@ -21,7 +21,7 @@ pub struct KbExtractJob {
     pub workspace_id: String,
     /// Work-scope KB entry ID to extract from (V1.29 legacy; still used for idempotency).
     pub work_entry_id: String,
-    /// Target world ID for the resulting `WorldKbEntry`.
+    /// Target world ID for the resulting `KnowledgeEntryRecord`.
     pub world_id: String,
     /// Job status: `queued`, `running`, `done`, `failed`.
     pub status: String,
@@ -570,7 +570,7 @@ pub async fn list_for_chapter(
 ///
 /// Behavior:
 /// - Existing **confirmed** row → [`UpsertOutcome::Unchanged`] (terminal per
-///   §5.5.2; rescan never mutates a promoted `WorldKbEntry`'s origin candidate).
+///   §5.5.2; rescan never mutates a promoted `KnowledgeEntryRecord`'s origin candidate).
 /// - Existing **pending** row with identical payload + chapter → `Unchanged`.
 /// - Existing **pending** row with a changed payload/chapter → UPDATE +
 ///   [`UpsertOutcome::Updated`].
@@ -723,7 +723,7 @@ pub struct KbExtractPromotion {
     pub work_id: Option<String>,
     /// Promotion state: `pending`, `confirmed`, `rejected` (§5.5.1).
     pub promotion_status: String,
-    /// Proposed `WorldKbEntry` body as JSON.
+    /// Proposed `KnowledgeEntryRecord` body as JSON.
     pub proposed_payload: Option<String>,
     /// Source chapter number (NULL for work-level candidates).
     pub source_chapter_id: Option<i64>,
@@ -1023,10 +1023,10 @@ pub async fn mark_confirmed(pool: &SqlitePool, job_id: &str) -> Result<bool, sql
 /// Transaction-aware variant of [`mark_confirmed`] (R-V150KBED-03).
 ///
 /// Same conditional `UPDATE` but issued against a caller-managed transaction
-/// so the `creator world kb adopt` path can wrap the `WorldKbEntry` insert + this
+/// so the `creator world kb adopt` path can wrap the `KnowledgeEntryRecord` insert + this
 /// flip atomically. A return of `Ok(false)` (race: row was already confirmed/
 /// rejected) MUST be paired with `tx.rollback()` by the caller so no orphan
-/// `WorldKbEntry` is persisted.
+/// `KnowledgeEntryRecord` is persisted.
 ///
 /// **Keep in sync with [`mark_confirmed`]**: the UPDATE statement and the
 /// `Ok(false)` semantics must stay identical.

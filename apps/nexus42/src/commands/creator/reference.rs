@@ -315,7 +315,7 @@ async fn run_refresh(config: &CliConfig, reference_ref: &str, dry_run: bool) -> 
     }
 
     // Connect to the daemon.
-    let client = DaemonClient::from_config(config);
+    let client = DaemonClient::from_config(config)?;
     if !client.health_check().await? {
         return Err(CliError::daemon_not_reachable_with_remediation());
     }

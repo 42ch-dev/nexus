@@ -181,7 +181,7 @@ impl TransitionKindArg {
 /// 422 `strategy_validation_failed`, 400 `bad_request` for other 400s —
 /// all named, non-zero exit).
 pub async fn run(cmd: PatchCommand, config: &CliConfig) -> Result<()> {
-    let client = DaemonClient::from_config(config);
+    let client = DaemonClient::from_config(config)?;
     match cmd {
         PatchCommand::State {
             strategy_id,

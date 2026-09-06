@@ -1,0 +1,111 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/characters/tom/record-character-tom-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus RecordCharacterTomRequest",
+  "description": "Request body for POST /v1/daemon/characters/{character_id}/tom. Closed DTO: the server admits viewer, carrier owner, selected binding, and L2 subject from stored rows before any mutation; payload claims never establish scope. holder is the epistemic subject (modules.belief[*].holder), never the MindState carrier FK. Paper aliases (actor, knowledge_access, mental_source) are not fields.",
+  "type": "object",
+  "required": [
+    "world_id",
+    "binding_id",
+    "carrier_entry_id",
+    "expected_revision",
+    "holder",
+    "proposition",
+    "order"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "world_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId",
+      "description": "Selected owned active World. The viewer's binding and any L2 subject binding must be active in this World."
+    },
+    "binding_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/ActorWorldBindingId",
+      "description": "The viewer Character's selected active binding in world_id."
+    },
+    "carrier_entry_id": {
+      "type": "string",
+      "description": "Carrier KnowledgeEntry id. Must be non-deleted and canonically owned by the viewer Character or by the selected binding."
+    },
+    "expected_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "OCC precondition: the carrier revision observed on read (NULL normalizes to 0)."
+    },
+    "holder": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CharacterId",
+      "description": "Epistemic subject. L1 (order 1): must equal the viewer Character id. L2 (order 2): a different Character with its own active binding to world_id."
+    },
+    "proposition": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Minimal content being represented."
+    },
+    "order": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2,
+      "description": "Recursive belief depth on the Character API: 1 = L1 self-belief, 2 = L2 model of another Character. 0 and >2 reject."
+    },
+    "truth": {
+      "type": "string",
+      "enum": ["True", "False", "Unknown"],
+      "description": "Truth Status (handbook closed labels)."
+    },
+    "access": {
+      "type": "string",
+      "enum": ["Private", "Shared", "Public"],
+      "description": "Knowledge Access (handbook closed labels). Exact field name is access, not knowledge_access."
+    },
+    "representation": {
+      "type": "string",
+      "enum": ["Explicit", "Implicit"],
+      "description": "Representation (handbook closed labels)."
+    },
+    "content_type": {
+      "type": "string",
+      "enum": [
+        "Location",
+        "Contents/Physical State",
+        "Identity/Relation",
+        "Epistemic",
+        "Desire/Intention",
+        "Emotion",
+        "Trait/Value",
+        "Action/Event"
+      ],
+      "description": "Content Type (handbook closed labels; slash-containing labels are literal)."
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "Narration",
+        "Perception",
+        "Memory",
+        "Testimony",
+        "Inference",
+        "Imagination",
+        "Unknown"
+      ],
+      "description": "Mental Source (handbook closed labels). Exact field name is source, not mental_source."
+    },
+    "context": {
+      "type": "string",
+      "enum": ["Deceptive", "Temporal", "Counterfactual", "Neutral"],
+      "description": "Context (handbook closed labels)."
+    },
+    "occurred_at": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
+      "description": "Optional when-axis: occurrence time copied onto the derivative MindState row."
+    },
+    "sort_key": {
+      "type": "string",
+      "description": "Optional when-axis: caller ordering key copied onto the derivative MindState row."
+    },
+    "event_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/TimelineEventId",
+      "description": "Optional when-axis: grounding TimelineEvent id recorded as the derivative MindState source_anchor. Never an inference trigger."
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE character_soul_narratives\n             SET distinct_keyword_count_cache = ?, stats_fingerprint = ?\n             WHERE character_id = ? AND actor_world_binding_id IS ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "f6592c714f67a740f20cfd3d75f000ab3d14cb3e0e182c67ae70fecdf7d6daf8"
+}

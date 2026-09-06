@@ -1,7 +1,7 @@
 //! Canvas World KB Daemon API handlers (V1.73 P0 Track A).
 //!
 //! Four World KB routes under `/v1/daemon/worlds/{world_id}/kb/*`, exposing
-//! the World-scoped `WorldKbEntry` graph + promotion state machine
+//! the World-scoped `KnowledgeEntryRecord` graph + promotion state machine
 //! (entity-scope-model §5.5) to the canvas. Writes use per-row OCC on
 //! `kb_key_blocks.revision` (entity edits) and `kb_extract_jobs.version`
 //! (promotion), per the architect Phase 2b lock — no new migration.
@@ -43,7 +43,7 @@ use nexus_contracts::{
     WorldKbPatchRelationshipResponse, WorldKbPromoteCandidateRequest,
     WorldKbPromoteCandidateResponse, WorldKbRelationshipProjection, WorldKbSourceAnchorProjection,
 };
-use nexus_knowledge::world_kb::knowledge_entry::{WorldKbBody, WorldKbEntry};
+use nexus_knowledge::world_kb::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryRecord};
 use nexus_knowledge::world_kb::validation::{
     validate_body, validate_canonical_name, ValidationMode,
 };
@@ -71,7 +71,7 @@ use nexus_spoke_adapter::NexusAdapter;
 // on Surface A (spoke `RelationPort` has no delete).
 // These spoke types are re-exported through `nexus_spoke_adapter` (the
 // single boundary that crosses into spoke standard objects; spec §7).
-use nexus_spoke_adapter::conversion::{spoke_to_world_kb, world_kb_to_spoke};
+use nexus_spoke_adapter::conversion::{knowledge_record_to_spoke, spoke_to_knowledge_record};
 use nexus_spoke_adapter::extensions::set_nexus_body;
 use nexus_spoke_adapter::{
     is_world_conflict_reject, orchestrate_promote, orchestrate_relate, orchestrate_upsert,
@@ -169,8 +169,8 @@ async fn reread_promotion_version(
         .map_or(0, |j| u64::try_from(j.version).unwrap_or(0)))
 }
 
-/// Build the wire projection of a `WorldKbEntry`.
-fn project_entity(kb: &WorldKbEntry) -> WorldKbEntityProjection {
+/// Build the wire projection of a `KnowledgeEntryRecord`.
+fn project_entity(kb: &KnowledgeEntryRecord) -> WorldKbEntityProjection {
     let body_value = kb
         .body
         .as_ref()
@@ -188,7 +188,7 @@ fn project_entity(kb: &WorldKbEntry) -> WorldKbEntityProjection {
     let source_anchor_count = u64::from(kb.source_work_id.is_some());
     WorldKbEntityProjection {
         key_block_id: kb.entry_id.clone(),
-        world_id: kb.world_id.clone(),
+        world_id: kb.world_id().map(str::to_string).unwrap_or_default(),
         block_type: wire_cast(kb.block_type),
         canonical_name: wire_cast(kb.canonical_name.clone()),
         status: kb.status.clone(),
@@ -197,7 +197,7 @@ fn project_entity(kb: &WorldKbEntry) -> WorldKbEntityProjection {
             .and_then(|v| v.as_object().cloned())
             .unwrap_or_default(),
         // V1.164 P3 T1 (AR-2): carry the functional-dialect modules verbatim
-        // from `kb_key_blocks.modules_json` (`WorldKbEntry.modules`). None →
+        // from `kb_key_blocks.modules_json` (`KnowledgeEntryRecord.modules`). None →
         // empty map → omitted from the wire (schema: "Absent when no modules
         // data is present"), matching the `body` projection pattern.
         modules: kb
@@ -341,7 +341,7 @@ pub async fn patch_entity(
             });
         }
     };
-    if kb.world_id != world_id {
+    if kb.world_id() != Some(world_id.as_str()) {
         return Err(NexusApiError::NotFound(format!(
             "entity {} in world {world_id}",
             req.entity_id
@@ -383,7 +383,7 @@ pub async fn patch_entity(
         });
     }
 
-    // Compute new field values + validate. Only the typed `WorldKbBody` is
+    // Compute new field values + validate. Only the typed `KnowledgeEntryBody` is
     // needed: V1.143 routes the write through `orchestrate_upsert`, and the
     // production adapter serializes the spoke `KnowledgeEntry` body itself.
     let new_name = req.patch.title.as_ref().map(|t| t.to_string());
@@ -531,7 +531,7 @@ async fn patch_entity_create(
     // Fresh entity: client-minted `entity_id`, PATH `world_id`, default
     // new-entity status (provisional), create revision 0 (the orchestrator's
     // `validate_create_path` accepts None/0; `put_create` sets it to 1).
-    let mut fresh = WorldKbEntry::new(world_id, block_type, title.as_str());
+    let mut fresh = KnowledgeEntryRecord::new(world_id, block_type, title.as_str());
     fresh.entry_id = req.entity_id.clone();
     fresh.revision = Some(0);
 
@@ -600,10 +600,10 @@ fn patch_is_empty(patch: &NexusWorldKbEntityPatch) -> bool {
 /// Extracted from [`patch_entity`] to keep the handler under the
 /// `too_many_lines` budget (same convention as `merge_candidate_summary`).
 fn build_post_patch(
-    kb: &WorldKbEntry,
+    kb: &KnowledgeEntryRecord,
     patch: &NexusWorldKbEntityPatch,
-    body_for_validation: Option<&WorldKbBody>,
-) -> WorldKbEntry {
+    body_for_validation: Option<&KnowledgeEntryBody>,
+) -> KnowledgeEntryRecord {
     let mut post_patch = kb.clone();
     if let Some(ref name) = patch.title {
         post_patch.canonical_name = name.to_string();
@@ -626,7 +626,7 @@ fn build_post_patch(
 /// Extracted from [`patch_entity`] / [`patch_entity_create`] to keep both
 /// handlers under the `too_many_lines` budget.
 fn apply_patch_modules(
-    post_patch: &mut WorldKbEntry,
+    post_patch: &mut KnowledgeEntryRecord,
     base: Option<&serde_json::Value>,
     patch: &NexusWorldKbEntityPatch,
 ) {
@@ -646,7 +646,7 @@ fn apply_patch_modules(
 /// newtype (`^[a-z][a-z0-9_-]*$`) and `NexusWorldKbEntityPatchModulesValue`
 /// is an untagged `{object, array}` enum — so non-matching keys / scalar
 /// values reject as 400 before this runs (axum `Json` extractor). This is
-/// what makes PD-12 fidelity true: the `world_kb_to_spoke` conversion seam
+/// what makes PD-12 fidelity true: the `knowledge_record_to_spoke` conversion seam
 /// silently drops non-conforming entries
 /// (`conversion/knowledge_entry.rs:366-374`), so the wire boundary is the
 /// rejection point (AR-4 lock 4).
@@ -657,7 +657,7 @@ fn merge_modules(
     if provided.is_empty() {
         return base.cloned();
     }
-    // `WorldKbEntry.modules` is documented as a JSON object; a non-object
+    // `KnowledgeEntryRecord.modules` is documented as a JSON object; a non-object
     // base (should not occur) is treated as empty and replaced by the
     // provided keys.
     let mut map = base
@@ -678,17 +678,17 @@ fn merge_modules(
     Some(serde_json::Value::Object(map))
 }
 
-/// Resolve the new `WorldKbBody` for validation from the patch + the current
+/// Resolve the new `KnowledgeEntryBody` for validation from the patch + the current
 /// entity body. `aliases` are merged into `body.attributes.aliases`.
 ///
 /// V1.143: the DB-format `body_json` string is no longer returned — the write
 /// now routes through `orchestrate_upsert`, and the production adapter
 /// serializes the spoke `KnowledgeEntry` body itself. Only the typed
-/// `WorldKbBody` is needed (validation + building the post-patch entity).
+/// `KnowledgeEntryBody` is needed (validation + building the post-patch entity).
 fn compute_body(
-    kb: &WorldKbEntry,
+    kb: &KnowledgeEntryRecord,
     patch: &NexusWorldKbEntityPatch,
-) -> Result<Option<WorldKbBody>, NexusApiError> {
+) -> Result<Option<KnowledgeEntryBody>, NexusApiError> {
     if patch.body.is_empty() && patch.aliases.is_empty() {
         return Ok(None);
     }
@@ -719,10 +719,10 @@ fn compute_body(
                 .collect(),
         );
     }
-    let body: WorldKbBody =
+    let body: KnowledgeEntryBody =
         serde_json::from_value(value).map_err(|e| NexusApiError::InvalidInput {
             field: "body".to_string(),
-            reason: format!("body is not a valid WorldKbBody: {e}"),
+            reason: format!("body is not a valid KnowledgeEntryBody: {e}"),
         })?;
     Ok(Some(body))
 }
@@ -798,7 +798,7 @@ pub async fn promote_candidate(
 
 /// Resolved adopt inputs (parsed payload + optional patch refinements).
 struct AdoptPlan {
-    body: WorldKbBody,
+    body: KnowledgeEntryBody,
     block_type: nexus_contracts::BlockType,
     canonical_name: String,
 }
@@ -809,12 +809,12 @@ fn build_adopt_plan(
     candidate: &KbExtractPromotion,
     req: &WorldKbPromoteCandidateRequest,
 ) -> Result<AdoptPlan, NexusApiError> {
-    let mut body: WorldKbBody = serde_json::from_str(
+    let mut body: KnowledgeEntryBody = serde_json::from_str(
         candidate.proposed_payload.as_deref().unwrap_or("{}"),
     )
     .map_err(|e| NexusApiError::Internal {
         code: "KB_PAYLOAD_INVALID".to_string(),
-        message: format!("proposed_payload is not a valid WorldKbBody: {e}"),
+        message: format!("proposed_payload is not a valid KnowledgeEntryBody: {e}"),
     })?;
     let block_type = req.patch.as_ref().and_then(|p| p.block_type).map_or_else(
         || parse_block_type(candidate.block_type_guess.as_deref().unwrap_or("character")),
@@ -851,7 +851,7 @@ fn build_adopt_plan(
                 serde_json::from_value(serde_json::Value::Object(p.body.clone())).map_err(|e| {
                     NexusApiError::InvalidInput {
                         field: "patch.body".to_string(),
-                        reason: format!("not a valid WorldKbBody: {e}"),
+                        reason: format!("not a valid KnowledgeEntryBody: {e}"),
                     }
                 })?;
         }
@@ -867,7 +867,7 @@ fn build_adopt_plan(
 }
 
 /// Set `body.attributes.aliases` in place.
-fn merge_aliases_into_body(body: &mut WorldKbBody, aliases: &[String]) {
+fn merge_aliases_into_body(body: &mut KnowledgeEntryBody, aliases: &[String]) {
     let mut value = serde_json::to_value(&*body).unwrap_or_default();
     if let Some(obj) = value.as_object_mut() {
         let attrs = obj
@@ -880,7 +880,7 @@ fn merge_aliases_into_body(body: &mut WorldKbBody, aliases: &[String]) {
                 .collect(),
         );
     }
-    if let Ok(merged) = serde_json::from_value::<WorldKbBody>(value) {
+    if let Ok(merged) = serde_json::from_value::<KnowledgeEntryBody>(value) {
         *body = merged;
     }
 }
@@ -915,7 +915,7 @@ async fn promote_adopt(
 
     // Build the candidate with `status = "provisional"` — the orchestrator
     // flips it to "confirmed" via `apply_promote_acceptance`.
-    let mut kb = WorldKbEntry::new(world_id, block_type, &canonical_name);
+    let mut kb = KnowledgeEntryRecord::new(world_id, block_type, &canonical_name);
     kb.body = Some(body);
     kb.status = "provisional".to_string();
     kb.created_at = chrono::Utc::now().to_rfc3339();
@@ -1017,7 +1017,7 @@ async fn build_promote_adopt_response(
 
 async fn build_promote_adopt_response_from_kb(
     pool: &sqlx::SqlitePool,
-    updated_kb: &WorldKbEntry,
+    updated_kb: &KnowledgeEntryRecord,
     candidate: &KbExtractPromotion,
     job_id: &str,
 ) -> Result<Json<WorldKbPromoteCandidateResponse>, NexusApiError> {
@@ -1184,10 +1184,10 @@ fn promote_adopt_commit_ambiguity_error(
     }
 }
 
-/// Build a spoke [`PromoteRequest`] from a nexus [`WorldKbEntry`] candidate.
+/// Build a spoke [`PromoteRequest`] from a nexus [`KnowledgeEntryRecord`] candidate.
 ///
 /// The candidate is converted to the spoke [`SpokeKnowledgeEntry`] boundary
-/// type via the sole `world_kb_to_spoke` conversion seam (spec §7.1), then
+/// type via the sole `knowledge_record_to_spoke` conversion seam (spec §7.1), then
 /// round-tripped through JSON to fit the `PromoteRequest.candidate` wire
 /// shape. The spoke codegen emits a distinct struct per wire shape even
 /// when the schema is shared; the orchestrator's internal
@@ -1199,11 +1199,11 @@ fn promote_adopt_commit_ambiguity_error(
 /// Panics if the round-trip fails — the candidate has already been through
 /// nexus validation (`validate_canonical_name`, `validate_body`), so a
 /// serialization/deserialization failure here indicates a wire-shape drift
-/// between `WorldKbEntry` and spoke `KnowledgeEntry`, not a runtime input
+/// between `KnowledgeEntryRecord` and spoke `KnowledgeEntry`, not a runtime input
 /// error. That class of failure should surface as a panic at the seam,
 /// not a misleading 422 to the caller.
-fn build_spoke_promote_request(candidate: &WorldKbEntry) -> PromoteRequest {
-    let spoke_entry: SpokeKnowledgeEntry = world_kb_to_spoke(candidate);
+fn build_spoke_promote_request(candidate: &KnowledgeEntryRecord) -> PromoteRequest {
+    let spoke_entry: SpokeKnowledgeEntry = knowledge_record_to_spoke(candidate);
     let wire = serde_json::to_value(&spoke_entry).unwrap_or_else(|_| serde_json::json!({}));
     serde_json::from_value(serde_json::json!({ "candidate": wire }))
         .expect("KnowledgeEntry-derived candidate fits PromoteRequest.candidate shape")
@@ -1218,10 +1218,10 @@ fn build_spoke_promote_request(candidate: &WorldKbEntry) -> PromoteRequest {
 // would obscure, not simplify (per the brief's "don't over-abstract" guidance).
 
 /// Build a spoke [`UpsertRequest`] carrying a single post-patch
-/// [`WorldKbEntry`] candidate.
+/// [`KnowledgeEntryRecord`] candidate.
 ///
 /// Mirrors [`build_spoke_promote_request`]: the entry is converted to the
-/// spoke [`SpokeKnowledgeEntry`] boundary type via the sole `world_kb_to_spoke`
+/// spoke [`SpokeKnowledgeEntry`] boundary type via the sole `knowledge_record_to_spoke`
 /// conversion seam (spec §7.1), then round-tripped through JSON to fit the
 /// `UpsertRequest.knowledge_entries` wire shape (the spoke codegen emits a
 /// distinct struct per wire shape even when the schema is shared).
@@ -1229,8 +1229,8 @@ fn build_spoke_promote_request(candidate: &WorldKbEntry) -> PromoteRequest {
 /// `expected_base_revision` is NOT a field on [`UpsertRequest`]: the
 /// orchestrator derives it from its own `get_knowledge_entry` + the candidate's
 /// `revision` (which the caller sets to the current stored revision).
-fn build_spoke_upsert_request(entry: &WorldKbEntry) -> UpsertRequest {
-    let mut spoke_entry: SpokeKnowledgeEntry = world_kb_to_spoke(entry);
+fn build_spoke_upsert_request(entry: &KnowledgeEntryRecord) -> UpsertRequest {
+    let mut spoke_entry: SpokeKnowledgeEntry = knowledge_record_to_spoke(entry);
     // Stash the full nexus body losslessly across the spoke boundary. Spoke's
     // typed BodyAttributeValue only models string/number/bool; null/array/
     // object attribute values have no spoke slot and would be silently dropped
@@ -1251,7 +1251,7 @@ fn build_spoke_upsert_request(entry: &WorldKbEntry) -> UpsertRequest {
 }
 
 /// Map `orchestrate_upsert`'s [`SpokeResult<UpsertResponse>`] to the persisted
-/// [`WorldKbEntry`] on success, or to a [`NexusApiError`] on reject.
+/// [`KnowledgeEntryRecord`] on success, or to a [`NexusApiError`] on reject.
 ///
 /// `patch_entity` upserts exactly one entry; the orchestrator returns the
 /// persisted entries in request order, so the first (and only) element is the
@@ -1271,7 +1271,7 @@ async fn map_upsert_response(
     result: SpokeResult<UpsertResponse>,
     pool: &sqlx::SqlitePool,
     entity_id: &str,
-) -> Result<WorldKbEntry, NexusApiError> {
+) -> Result<KnowledgeEntryRecord, NexusApiError> {
     match result {
         SpokeResult::Ok(UpsertResponse::Variant0 { knowledge_entries, .. }) => {
             // Single-entry upsert; take the first persisted entry.
@@ -1285,7 +1285,7 @@ async fn map_upsert_response(
             })?;
             // The codegen emits a DISTINCT `KnowledgeEntry` struct per wire
             // shape. Round-trip through JSON into the canonical data type that
-            // the `spoke_to_world_kb` conversion seam consumes
+            // the `spoke_to_knowledge_record` conversion seam consumes
             // (mirrors `map_promote_response`).
             let wire = serde_json::to_value(&persisted_wire).map_err(|e| NexusApiError::Internal {
                 code: "SPOKE_RESPONSE_DECODE".to_string(),
@@ -1301,7 +1301,12 @@ async fn map_upsert_response(
                     ),
                 }
             })?;
-            Ok(spoke_to_world_kb(spoke_entry))
+            Ok(spoke_to_knowledge_record(spoke_entry).map_err(|e| NexusApiError::Internal {
+                code: "SPOKE_RESPONSE_DECODE".to_string(),
+                message: format!(
+                    "orchestrate_upsert response had no resolvable KnowledgeOwnerRef: {e}"
+                ),
+            })?)
         }
         // Variant1 is the wire error-envelope case. The orchestrator always
         // surfaces errors via `SpokeResult::Reject` (not Variant1), so this arm
@@ -1463,7 +1468,7 @@ async fn map_promote_response(
     result: SpokeResult<PromoteResponse>,
     pool: &sqlx::SqlitePool,
     job_id: &str,
-    candidate_lookup: &WorldKbEntry,
+    candidate_lookup: &KnowledgeEntryRecord,
 ) -> Result<PromoteAdoptOrchestrateOutcome, NexusApiError> {
     match result {
         SpokeResult::Ok(PromoteResponse::Variant0 { knowledge_entry, .. }) => {
@@ -1515,7 +1520,7 @@ async fn map_promote_reject(
     reject: SpokeReject,
     pool: &sqlx::SqlitePool,
     job_id: &str,
-    candidate_lookup: &WorldKbEntry,
+    candidate_lookup: &KnowledgeEntryRecord,
 ) -> Result<PromoteAdoptOrchestrateOutcome, NexusApiError> {
     if reject.code == SpokeRejectCode::KnowledgeEntryAlreadyExists
         || reject.code == SpokeRejectCode::DuplicateActiveKnowledgeEntry
@@ -1534,7 +1539,7 @@ async fn map_promote_reject(
                 // entry (authoritative via the unique key) and return it.
                 if let Some(existing) = find_active_entry_for(
                     pool,
-                    &candidate_lookup.world_id,
+                    candidate_lookup.world_id().unwrap_or_default(),
                     &candidate_lookup.canonical_name,
                     candidate_lookup.block_type,
                 )
@@ -1547,7 +1552,7 @@ async fn map_promote_reject(
                             "promote_adopt retry-safe: returning existing confirmed entry from prior partial attempt"
                         );
                         return Ok(PromoteAdoptOrchestrateOutcome::RecoveredConfirmed(
-                            world_kb_to_spoke(&existing),
+                            knowledge_record_to_spoke(&existing),
                         ));
                     }
                     tracing::warn!(
@@ -1565,7 +1570,7 @@ async fn map_promote_reject(
             } else if job.promotion_status == "pending" {
                 return Err(NexusApiError::world_kb_validation_failed(
                     &[
-                        "an active WorldKbEntry with the same name/type already exists in this \
+                        "an active KnowledgeEntryRecord with the same name/type already exists in this \
                          world while the promotion job is still pending (wait for the in-flight \
                          adopt to finish, refresh the candidates list, or use merge)"
                             .to_string(),
@@ -1576,7 +1581,7 @@ async fn map_promote_reject(
         }
         return Err(NexusApiError::world_kb_validation_failed(
             &[
-                "an active WorldKbEntry with the same name/type already exists in this world \
+                "an active KnowledgeEntryRecord with the same name/type already exists in this world \
                  (refresh the candidates list and retry)"
                     .to_string(),
             ],
@@ -1586,7 +1591,7 @@ async fn map_promote_reject(
     Err(spoke_reject_to_api_error(reject, pool, job_id).await)
 }
 
-/// Look up the active [`WorldKbEntry`] matching the same unique key as the
+/// Look up the active [`KnowledgeEntryRecord`] matching the same unique key as the
 /// candidate. Used by the retry-safe branch of [`map_promote_response`] to
 /// recover the existing confirmed entry on retry.
 async fn find_active_entry_for(
@@ -1594,7 +1599,7 @@ async fn find_active_entry_for(
     world_id: &str,
     canonical_name: &str,
     block_type: nexus_contracts::BlockType,
-) -> Result<Option<WorldKbEntry>, NexusApiError> {
+) -> Result<Option<KnowledgeEntryRecord>, NexusApiError> {
     let store = kb_store::SqliteKbStore::new(pool.clone());
     store
         .get_active_by_unique_key(world_id, canonical_name, block_type)
@@ -1715,7 +1720,7 @@ async fn promote_reject(
 
 /// Merge: fold the candidate summary into an existing confirmed target, then
 /// dismiss the candidate. `merge_target_id` must reference a confirmed/manual
-/// `WorldKbEntry` in the same world.
+/// `KnowledgeEntryRecord` in the same world.
 ///
 /// Surface A retention — compound multi-table TX (CAS-update target `kb_key_blocks` body +
 /// CAS-reject candidate `kb_extract_jobs` in one `SQLite` transaction). spoke orchestrators map one
@@ -1747,7 +1752,7 @@ async fn promote_merge(
                 code: "DATABASE_ERROR".to_string(),
                 message: e.to_string(),
             })?;
-    if target.world_id != world_id {
+    if target.world_id() != Some(world_id) {
         return Err(NexusApiError::NotFound(format!(
             "merge target {target_id} in world {world_id}"
         )));
@@ -1839,11 +1844,14 @@ async fn promote_merge(
 /// the target has no summary. Returns the serialized body JSON string.
 /// Extracted from [`promote_merge`] to keep that handler under the
 /// `too_many_lines` budget.
-fn merge_candidate_summary(target_body: &WorldKbBody, candidate: &KbExtractPromotion) -> String {
+fn merge_candidate_summary(
+    target_body: &KnowledgeEntryBody,
+    candidate: &KbExtractPromotion,
+) -> String {
     let candidate_summary = candidate
         .proposed_payload
         .as_deref()
-        .and_then(|p| serde_json::from_str::<WorldKbBody>(p).ok())
+        .and_then(|p| serde_json::from_str::<KnowledgeEntryBody>(p).ok())
         .and_then(|b| b.summary);
     let mut merged = target_body.clone();
     if let Some(cs) = candidate_summary {
@@ -1883,7 +1891,7 @@ pub async fn get_graph(
         })?;
 
     // simplify: V1.73 derives source-anchor provenance edges from the
-    // WorldKbEntry's own source_work_id/source_provenance_kind rather than a
+    // KnowledgeEntryRecord's own source_work_id/source_provenance_kind rather than a
     // separate kb_source_anchors join. One edge per entity with provenance.
     let mut entities = Vec::with_capacity(blocks.len().min(GRAPH_ENTITY_CAP));
     let mut source_anchors = Vec::new();
@@ -1938,7 +1946,7 @@ pub async fn get_graph(
 }
 
 /// `GET /v1/daemon/worlds/{world_id}/kb/key-blocks/{key_block_id}/state` —
-/// computable `WorldKbEntry` state read.
+/// computable `KnowledgeEntryRecord` state read.
 ///
 /// V1.114 P2: dedicated read surface for `body.state` of computable `KnowledgeEntry` rows.
 /// Returns `state` when `body.computable` is true; `state: null` and
@@ -1965,9 +1973,9 @@ pub async fn get_key_block_state(
             },
         })?;
 
-    // Scope check: the WorldKbEntry must live in the path world. Treat a row
+    // Scope check: the KnowledgeEntryRecord must live in the path world. Treat a row
     // belonging to a different world as 404 (same as patch_entity).
-    if kb.world_id != world_id {
+    if kb.world_id() != Some(world_id.as_str()) {
         return Err(NexusApiError::NotFound(format!(
             "key block {key_block_id} in world {world_id}"
         )));
@@ -2191,7 +2199,7 @@ pub async fn get_candidates(
 /// Build a spoke [`SpokeRelation`] from the nexus patch-relationship input.
 ///
 /// This is the sole nexus→spoke conversion seam for relations (there is no
-/// `WorldKbEntry ↔ KnowledgeEntry`-style two-way pair — spoke's `Relation`
+/// `KnowledgeEntryRecord ↔ KnowledgeEntry`-style two-way pair — spoke's `Relation`
 /// maps directly onto the nexus row at this boundary, per the P1
 /// `RelationPort` `row_to_relation` reverse seam).
 ///
@@ -2793,10 +2801,14 @@ async fn require_entities_in_world(
     source_id: &str,
     target_id: &str,
 ) -> Result<(), NexusApiError> {
-    // SAFETY: compile-time checked query against kb_key_blocks.
+    // SAFETY: runtime query with static column names and bind params. v1.184
+    // P1: relationship endpoints must be World-owned (owner_kind='world') AND
+    // live in the same stored world — a Character/binding-owned row (NULL
+    // world_id) is treated as missing here and rejected, fail-closed. The
+    // ownership check reads the typed owner columns, never payload claims.
     let rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT key_block_id, status FROM kb_key_blocks \
-         WHERE world_id = ? AND key_block_id IN (?, ?)",
+         WHERE owner_kind = 'world' AND world_id = ? AND key_block_id IN (?, ?)",
     )
     .bind(world_id)
     .bind(source_id)
@@ -2846,7 +2858,7 @@ struct AnchorValidationRow {
     source_work_id: Option<String>,
 }
 
-/// Verify every source-anchor projection id references a `WorldKbEntry` in the world
+/// Verify every source-anchor projection id references a `KnowledgeEntryRecord` in the world
 /// that actually has provenance (`source_work_id IS NOT NULL`). Anchor ids use
 /// the V1.73 graph projection format `sa_<key_block_id>`.
 async fn require_valid_source_anchors(

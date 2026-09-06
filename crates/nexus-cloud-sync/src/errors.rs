@@ -36,6 +36,12 @@ pub enum SyncError {
     #[error("outbox max retries exceeded: {id} (retried {retries} times)")]
     OutboxMaxRetriesExceeded { id: String, retries: u64 },
 
+    // ── Input errors ───────────────────────────────────────────────
+    /// Caller-supplied input is invalid or an external value exceeds the
+    /// representable domain; fail-closed boundary rejection.
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
+
     // ── Bundle builder errors ──────────────────────────────────────
     /// Bundle validation failed.
     #[error("bundle validation failed: {0}")]
@@ -146,6 +152,7 @@ impl SyncError {
             Self::OutboxMaxRetriesExceeded { .. } => "OUTBOX_MAX_RETRIES_EXCEEDED",
 
             // Bundle errors
+            Self::InvalidInput(_) => "INVALID_INPUT",
             Self::BundleValidation(_) => "BUNDLE_VALIDATION_ERROR",
             Self::BundleMissingField { .. } => "BUNDLE_MISSING_FIELD",
             Self::BundleSequenceNotMonotonic { .. } => "BUNDLE_SEQUENCE_NOT_MONOTONIC",

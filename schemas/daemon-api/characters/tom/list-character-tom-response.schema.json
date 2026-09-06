@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "schema_version": 1,
+  "$id": "https://nexus42.invalid/schemas/daemon-api/characters/tom/list-character-tom-response.schema.json",
+  "title": "Nexus ListCharacterTomResponse",
+  "description": "Response for GET /v1/daemon/characters/{character_id}/tom. Bounded deterministic keyset page ordered (order, carrier_entry_id, row_ordinal); all-or-error, never a partial page.",
+  "type": "object",
+  "required": ["items", "pagination"],
+  "additionalProperties": false,
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "https://nexus42.invalid/schemas/daemon-api/characters/tom/tom-belief-item.schema.json"
+      }
+    },
+    "pagination": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/kb/pagination-info.schema.json"
+    }
+  }
+}

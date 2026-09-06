@@ -994,13 +994,13 @@ fn map_delta_error(e: nexus_orchestration::capability::CapabilityError) -> Nexus
     }
 }
 
-/// Create new `WorldKbEntry` records inside a TX.
+/// Create new `KnowledgeEntryRecord` records inside a TX.
 async fn create_key_blocks_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     world_id: &str,
     blocks: &[serde_json::Map<String, Value>],
 ) -> Result<usize, NexusApiError> {
-    use nexus_spoke_adapter::conversion::spoke_to_world_kb;
+    use nexus_spoke_adapter::conversion::spoke_to_knowledge_record;
 
     let mut created = 0usize;
     for kb_map in blocks {
@@ -1011,14 +1011,19 @@ async fn create_key_blocks_in_tx(
                     message: format!("decode new_key_block: {e}"),
                 }
             })?;
-        let kb = spoke_to_world_kb(spoke);
+        let kb = spoke_to_knowledge_record(spoke).map_err(|e| NexusApiError::Internal {
+            code: "DESERIALIZATION_ERROR".to_string(),
+            message: format!("decode new_key_block owner: {e}"),
+        })?;
 
-        if kb.world_id != world_id {
+        // v1.184 P1: World-scoped insert lane — reject any non-World owner.
+        if kb.world_id() != Some(world_id) {
             return Err(NexusApiError::BadRequest {
                 code: "invalid_input".to_string(),
                 message: format!(
                     "new_key_block '{}' targets world '{}', not admitted world '{world_id}'",
-                    kb.entry_id, kb.world_id
+                    kb.entry_id,
+                    kb.world_id().unwrap_or_default()
                 ),
             });
         }
@@ -1037,21 +1042,26 @@ async fn create_key_blocks_in_tx(
 
         // Compile-time checked query (F-004 fix — the Accept TX is the
         // highest-risk write path, so its SQL must be offline-validated).
-        sqlx::query!(
+        // v1.184 P1: owner columns are new (unknown to sqlx offline mode), so
+        // the insert runs as a runtime query with bind params. The lane is
+        // World-owned only (world_id param), so owner_kind='world' and the
+        // non-World owner columns are NULL.
+        sqlx::query(
             "INSERT INTO kb_key_blocks \
-             (key_block_id, world_id, block_type, canonical_name, status, \
+             (key_block_id, owner_kind, world_id, character_id, \
+              actor_world_binding_id, creator_only, block_type, canonical_name, status, \
               body_json, source_anchor_json, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            kb.entry_id,
-            kb.world_id,
-            block_type_str,
-            kb.canonical_name,
-            kb.status,
-            body_json,
-            source_anchor_json,
-            now,
-            now,
+             VALUES (?, 'world', ?, NULL, NULL, 0, ?, ?, ?, ?, ?, ?, ?)",
         )
+        .bind(&kb.entry_id)
+        .bind(world_id)
+        .bind(block_type_str)
+        .bind(&kb.canonical_name)
+        .bind(&kb.status)
+        .bind(&body_json)
+        .bind(&source_anchor_json)
+        .bind(&now)
+        .bind(&now)
         .execute(&mut **tx)
         .await
         .map_err(|e| NexusApiError::Internal {
@@ -1121,5 +1131,66 @@ mod tests {
             !resp.truncated,
             "non-truncated response must have truncated=false"
         );
+    }
+
+    /// v1.184 P1 T2: the Accept-TX insert was converted from compile-time
+    /// `sqlx::query!` to a runtime `sqlx::query` because the owner columns are
+    /// new (unknown to the offline cache). This test executes that runtime
+    /// statement against a migrated pool, proving the bind sequence (types,
+    /// count, order) matches the rebuilt `kb_key_blocks` schema — including
+    /// `Option<String>` body/source-anchor binds and the owner-column literals.
+    #[tokio::test]
+    async fn create_key_blocks_in_tx_runtime_insert_binds_owner_columns() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = nexus_local_db::open_pool(&dir.path().join("test.db"))
+            .await
+            .unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
+        nexus_local_db::narrative_gateway::seed::world(
+            &pool,
+            "wld_accept",
+            "ctr_accept",
+            "Accept World",
+            "accept-world",
+            "private",
+            "manual",
+        )
+        .await;
+
+        let block: serde_json::Map<String, Value> = serde_json::from_value(json!({
+            "schema_version": 1,
+            "entry_id": "kb_spawned",
+            "entry_type": "item",
+            "canonical_name": "Spawned Item",
+            "status": "confirmed",
+            "body": {"summary": "spawned by module"},
+            "extensions": {"nexus": {"world_id": "wld_accept"}},
+            "created_at": "2026-01-01T00:00:00Z",
+        }))
+        .expect("minimal spoke KnowledgeEntry wire fixture");
+
+        let mut tx = pool.begin().await.unwrap();
+        let created = create_key_blocks_in_tx(&mut tx, "wld_accept", std::slice::from_ref(&block))
+            .await
+            .expect("world-matching block must insert");
+        assert_eq!(created, 1);
+        tx.commit().await.unwrap();
+
+        // Read back through the owner-aware store: owner columns must
+        // round-trip as a World owner, never fabricated/NULL.
+        let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
+        let row = nexus_knowledge::world_kb::KbStore::get_knowledge_entry(&store, "kb_spawned")
+            .await
+            .unwrap();
+        assert_eq!(row.world_id(), Some("wld_accept"));
+        assert_eq!(row.canonical_name, "Spawned Item");
+
+        // The World-scoped lane rejects a non-World owner or a foreign world
+        // BEFORE any insert (422-class BadRequest, not a DB error).
+        let mut tx2 = pool.begin().await.unwrap();
+        let err = create_key_blocks_in_tx(&mut tx2, "wld_other", std::slice::from_ref(&block))
+            .await
+            .expect_err("foreign-world block must be rejected");
+        assert!(matches!(err, NexusApiError::BadRequest { .. }));
     }
 }

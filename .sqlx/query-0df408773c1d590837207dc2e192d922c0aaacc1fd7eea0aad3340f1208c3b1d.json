@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT owner_creator_id as \"owner_creator_id!\", status as \"status!\"\n               FROM narrative_worlds WHERE world_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "owner_creator_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "status!",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "0df408773c1d590837207dc2e192d922c0aaacc1fd7eea0aad3340f1208c3b1d"
+}

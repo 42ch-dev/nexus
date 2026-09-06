@@ -206,7 +206,7 @@ async fn run_combined_doctor(config: &CliConfig) -> Result<()> {
 
     // Check 1: Daemon connectivity
     print!("  [1/3] Daemon connectivity... ");
-    let client = crate::api::DaemonClient::from_config(config);
+    let client = crate::api::DaemonClient::from_config(config)?;
     match client.health_check().await {
         Ok(true) => println!("✓ Running"),
         Ok(false) => {

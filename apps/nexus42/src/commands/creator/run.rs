@@ -63,7 +63,7 @@ pub struct RunCommand {
 /// or required CLI args are missing.
 #[allow(clippy::too_many_lines)]
 pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
-    let client = crate::api::DaemonClient::from_config(config);
+    let client = crate::api::DaemonClient::from_config(config)?;
 
     // Validate --force-gates requires --reason (same rule as legacy `start`).
     if cmd.force_gates && cmd.reason.is_none() {
@@ -1449,7 +1449,7 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let client = crate::api::DaemonClient::new(&mock.uri());
+        let client = crate::api::DaemonClient::new(&mock.uri()).expect("valid mock URL");
         let config = CliConfig {
             active_creator_id: Some("creator_test".to_string()),
             daemon_url: mock.uri(),

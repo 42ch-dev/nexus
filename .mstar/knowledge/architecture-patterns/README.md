@@ -6,6 +6,7 @@ Distilled reusable patterns captured by `mstar-compound` at iteration-close. Par
 | --- | --- |
 | [acp-registry-id-matching.md](acp-registry-id-matching.md) | ACP registry matching: id vs display name — match priority/pinning lists by `registry_agent_id` (stable), not by `name` (mutable label) |
 | [action-registry-command-palette.md](action-registry-command-palette.md) | Action registry + command palette — module store + `useSyncExternalStore`, render-time `available?()`, `useHotkey` conflict-avoidance, WAI-ARIA combobox |
+| [actor-bearer-boundary-composition.md](actor-bearer-boundary-composition.md) | Actor bearer boundary composition — compose identity, binding, owner-scoped knowledge, exact session isolation, bearer memory, and carrier-vs-subject ToM boundaries |
 | [asymmetric-setup-completed-context.md](asymmetric-setup-completed-context.md) | Asymmetric setup-completed context — optimistic `true` for wizard Finish vs await-then-clear `false` for Settings Re-run; prevents SetupGate bounce |
 | [badge-soft-solid-tone.md](badge-soft-solid-tone.md) | Badge soft/solid tone axis |
 | [bounded-drain-completion-contract.md](bounded-drain-completion-contract.md) | Bounded drain-completion contract for synchronous local pipelines — `has_more` must reflect queue advancement, not rows attempted |

@@ -9,7 +9,7 @@
 //!    [`KnowledgeEntry`] — see the [`extensions`] module.
 //! 2. **Surface A delegation** of standard lifecycle invariants to
 //!    [`spoke_operations`] — see the [`ops`] module.
-//! 3. **The `WorldKbEntry` ↔ spoke `KnowledgeEntry` conversion seam** — see
+//! 3. **The `KnowledgeEntryRecord` ↔ spoke `KnowledgeEntry` conversion seam** — see
 //!    the [`conversion`] module (V1.145 P1a).
 //! 4. **The production `BaselinePorts` implementation** ([`NexusAdapter`]
 //!    + 6 port impls) — see the [`adapter`] module (V1.145 P1b).

@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/characters/add-character-binding-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus AddCharacterBindingRequest",
+  "description": "Request body for POST /v1/daemon/characters/:character_id/bindings. Clients never send owner_creator_id.",
+  "type": "object",
+  "required": [
+    "world_id"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "world_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId"
+    },
+    "world_sheet_entry_id": {
+      "type": "string",
+      "maxLength": 128,
+      "description": "Optional WorldSheet KnowledgeEntry id (at most 128 bytes)."
+    }
+  }
+}

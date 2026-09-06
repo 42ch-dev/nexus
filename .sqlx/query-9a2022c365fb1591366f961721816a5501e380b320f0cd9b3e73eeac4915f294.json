@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE character_memory_fragments\n             SET actor_world_binding_id = NULL, revision = ?\n             WHERE fragment_id = ? AND character_id = ? AND revision = ?\n               AND actor_world_binding_id IS NOT NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "9a2022c365fb1591366f961721816a5501e380b320f0cd9b3e73eeac4915f294"
+}

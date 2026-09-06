@@ -174,7 +174,7 @@ async fn start_daemon(
     embedded_mcp: bool,
 ) -> Result<()> {
     // Check if already running
-    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"))?;
     if client.health_check().await? {
         if running_daemon_binary_is_stale(port) {
             println!(
@@ -361,11 +361,14 @@ fn remove_pid_file() -> Result<()> {
 /// Check if a process with the given PID is running
 #[cfg(unix)]
 #[allow(dead_code)]
-// PID cast is safe: Unix PIDs are always positive and within i32 range (max ~4M on Linux)
-#[allow(clippy::cast_possible_wrap)]
 fn is_process_running(pid: u32) -> bool {
+    // Checked conversion: a PID beyond i32 (from a user-writable PID file)
+    // can never be a real process; reject rather than wrap.
+    let Ok(pid_i32) = i32::try_from(pid) else {
+        return false;
+    };
     // Sending signal 0 checks if the process exists without actually sending a signal
-    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), None).is_ok()
+    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid_i32), None).is_ok()
 }
 
 /// True when the daemon listening on `port` started before this `nexus42`
@@ -483,7 +486,7 @@ fn parse_ps_etime(raw: &str) -> Option<u64> {
 /// Stop the daemon by reading PID from file and sending SIGTERM, then SIGKILL
 async fn stop_daemon(port: u16) -> Result<()> {
     // First check if daemon is actually running via health check
-    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"))?;
     if !client.health_check().await? {
         println!("Daemon is not running on port {port}.");
 
@@ -518,10 +521,13 @@ async fn stop_daemon(port: u16) -> Result<()> {
 
     println!("Stopping daemon (PID: {pid})...");
 
-    // Send SIGTERM
-    // PID cast is safe: Unix PIDs are always positive and within i32 range
-    #[allow(clippy::cast_possible_wrap)]
-    let nix_pid = nix::unistd::Pid::from_raw(pid as i32);
+    // Send SIGTERM — a PID beyond i32 (e.g. from a user-writable PID file)
+    // cannot be a real process; skip signaling rather than wrapping.
+    let Ok(pid_i32) = i32::try_from(pid) else {
+        println!("Note: PID {pid} exceeds i32; nothing to signal.");
+        return Ok(());
+    };
+    let nix_pid = nix::unistd::Pid::from_raw(pid_i32);
     if let Err(e) = nix::sys::signal::kill(nix_pid, nix::sys::signal::Signal::SIGTERM) {
         if e == nix::errno::Errno::ESRCH {
             // Process doesn't exist — clean up PID file
@@ -589,7 +595,7 @@ async fn stop_daemon(port: u16) -> Result<()> {
 #[cfg(not(unix))]
 /// Stop the daemon on non-Unix platforms (limited support)
 async fn stop_daemon(port: u16) -> Result<()> {
-    let client = DaemonClient::new(&format!("http://127.0.0.1:{}", port));
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{}", port))?;
     if !client.health_check().await? {
         println!("Daemon is not running on port {}.", port);
         return Ok(());
@@ -606,7 +612,7 @@ async fn stop_daemon(port: u16) -> Result<()> {
 /// Check daemon status
 async fn daemon_status(port: u16, config: &CliConfig) -> Result<()> {
     let daemon_url = format!("http://127.0.0.1:{port}");
-    let client = DaemonClient::new(&daemon_url);
+    let client = DaemonClient::new(&daemon_url)?;
 
     println!("Daemon Status:");
     println!("  URL: {daemon_url}");
@@ -660,7 +666,7 @@ async fn restart_daemon(
     stop_daemon(port).await?;
 
     // Verify the old daemon is fully dead via health check
-    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"))?;
     let confirm_timeout = std::time::Duration::from_secs(3);
     let confirm_start = std::time::Instant::now();
     let mut confirmed_dead = false;
@@ -693,8 +699,10 @@ async fn restart_daemon(
             let pids_str = String::from_utf8_lossy(&output.stdout);
             for pid_str in pids_str.lines() {
                 if let Ok(pid_num) = pid_str.trim().parse::<u32>() {
-                    #[allow(clippy::cast_possible_wrap)]
-                    let nix_pid = nix::unistd::Pid::from_raw(pid_num as i32);
+                    let Ok(pid_i32) = i32::try_from(pid_num) else {
+                        continue;
+                    };
+                    let nix_pid = nix::unistd::Pid::from_raw(pid_i32);
                     let _ = nix::sys::signal::kill(nix_pid, Signal::SIGKILL);
                     eprintln!("  Sent SIGKILL to PID {pid_num}.");
                 }
@@ -757,9 +765,11 @@ fn read_tail_lines(path: &std::path::Path, n: usize) -> Result<Vec<String>> {
 
     while pos > 0 && !done {
         let read_size = (chunk_size as u64).min(pos);
-        // chunk_size (4096) fits in usize; read_size <= chunk_size, so truncation cannot occur
-        #[allow(clippy::cast_possible_truncation)]
-        let read_size_usize = read_size as usize;
+        // Checked conversion: `read_size` is bounded by `chunk_size`, and an
+        // out-of-range value fails the read rather than truncating.
+        let read_size_usize = usize::try_from(read_size).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "read_size exceeds usize")
+        })?;
         pos -= read_size;
 
         reader.seek(SeekFrom::Start(pos))?;
@@ -794,7 +804,7 @@ fn read_tail_lines(path: &std::path::Path, n: usize) -> Result<Vec<String>> {
 /// Reads the daemon's log file or queries the daemon for recent log entries.
 async fn daemon_logs(port: u16, lines: usize) -> Result<()> {
     // First check if daemon is running
-    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"))?;
 
     if !client.health_check().await? {
         println!("Daemon is not running on port {port}.");
@@ -841,7 +851,7 @@ async fn daemon_doctor(port: u16) -> Result<()> {
 
     // Check 1: Daemon connectivity
     print!("  [1/3] Daemon connectivity... ");
-    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"))?;
     match client.health_check().await {
         Ok(true) => {
             println!("✓ Running on port {port}");
@@ -912,7 +922,7 @@ fn validate_cdn_url(url: &str) -> Result<()> {
 /// then opens `http://127.0.0.1:<port>/` with the platform-appropriate
 /// command (`open` on macOS, `xdg-open` on Linux, `start` on Windows).
 async fn open_ui(port: u16) -> Result<()> {
-    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"))?;
 
     // Start daemon in background if not already running.
     if !client.health_check().await? {

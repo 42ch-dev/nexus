@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/characters/memory/delete-character-pending-review-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus DeleteCharacterPendingReviewResponse",
+  "description": "Response body for DELETE /v1/daemon/characters/{character_id}/memory/pending-review/{pending_id}.",
+  "type": "object",
+  "required": ["success", "pending_id"],
+  "additionalProperties": false,
+  "properties": {
+    "success": { "type": "boolean" },
+    "pending_id": { "type": "string", "minLength": 1, "maxLength": 128 }
+  }
+}

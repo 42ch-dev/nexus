@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/characters/list-character-bindings-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListCharacterBindingsResponse",
+  "description": "Response for GET /v1/daemon/characters/:character_id/bindings.",
+  "type": "object",
+  "required": [
+    "items",
+    "pagination"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "https://nexus42.invalid/schemas/domain/actor-world-binding.schema.json"
+      }
+    },
+    "pagination": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/kb/pagination-info.schema.json"
+    }
+  }
+}
