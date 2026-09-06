@@ -153,6 +153,16 @@ fn canonical_body_json(raw: Option<&str>) -> Result<Option<String>, LocalDbError
     }
 }
 
+
+fn validate_existing_summary_member_for_patch(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), LocalDbError> {
+    match obj.get("summary") {
+        None | Some(serde_json::Value::String(_)) | Some(serde_json::Value::Null) => Ok(()),
+        Some(_) => Err(knowledge_entry_not_mutable()),
+    }
+}
+
 fn apply_summary_patch_to_body_json(
     raw: Option<&str>,
     patch: FieldPatch<&str>,
@@ -161,9 +171,11 @@ fn apply_summary_patch_to_body_json(
     match patch {
         FieldPatch::Keep => return Ok(raw.map(str::to_string)),
         FieldPatch::Clear => {
+            validate_existing_summary_member_for_patch(&obj)?;
             obj.remove("summary");
         }
         FieldPatch::Set(summary) => {
+            validate_existing_summary_member_for_patch(&obj)?;
             validate_summary_utf8_bytes(summary)?;
             obj.insert(
                 "summary".into(),

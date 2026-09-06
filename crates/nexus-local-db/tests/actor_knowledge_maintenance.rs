@@ -413,6 +413,128 @@ async fn malformed_body_refuses_summary_edit() {
     assert_conflict(err, ActorContractConflict::KnowledgeEntryNotMutable);
 }
 
+async fn assert_body_and_revision_unchanged(
+    pool: &SqlitePool,
+    entry: &str,
+    expected_body: &str,
+    expected_revision: i64,
+) {
+    let (body_raw, revision): (Option<String>, Option<i64>) = sqlx::query_as(
+        "SELECT body_json, revision FROM kb_key_blocks WHERE key_block_id = ?",
+    )
+    .bind(entry)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(body_raw.as_deref(), Some(expected_body));
+    assert_eq!(revision.unwrap_or(0), expected_revision);
+}
+
+#[tokio::test]
+async fn malformed_numeric_summary_refuses_summary_edit() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, _) = seed_character(&pool).await;
+    let entry = insert_character_ke(&pool, &chr, "fact", Some(r#"{"summary":42}"#)).await;
+    let err = update_actor_knowledge_entry(
+        &pool,
+        OWNER,
+        &chr,
+        &entry,
+        0,
+        ActorKnowledgePatch {
+            canonical_name: None,
+            summary: FieldPatch::Set("nope"),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_conflict(err, ActorContractConflict::KnowledgeEntryNotMutable);
+    assert_body_and_revision_unchanged(&pool, &entry, r#"{"summary":42}"#, 0).await;
+    let err = update_actor_knowledge_entry(
+        &pool,
+        OWNER,
+        &chr,
+        &entry,
+        0,
+        ActorKnowledgePatch {
+            canonical_name: None,
+            summary: FieldPatch::Clear,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_conflict(err, ActorContractConflict::KnowledgeEntryNotMutable);
+    assert_body_and_revision_unchanged(&pool, &entry, r#"{"summary":42}"#, 0).await;
+}
+
+#[tokio::test]
+async fn malformed_object_summary_refuses_summary_edit() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, _) = seed_character(&pool).await;
+    let entry = insert_character_ke(&pool, &chr, "fact", Some(r#"{"summary":{}}"#)).await;
+    let err = update_actor_knowledge_entry(
+        &pool,
+        OWNER,
+        &chr,
+        &entry,
+        0,
+        ActorKnowledgePatch {
+            canonical_name: None,
+            summary: FieldPatch::Set("nope"),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_conflict(err, ActorContractConflict::KnowledgeEntryNotMutable);
+    assert_body_and_revision_unchanged(&pool, &entry, r#"{"summary":{}}"#, 0).await;
+    let err = update_actor_knowledge_entry(
+        &pool,
+        OWNER,
+        &chr,
+        &entry,
+        0,
+        ActorKnowledgePatch {
+            canonical_name: None,
+            summary: FieldPatch::Clear,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_conflict(err, ActorContractConflict::KnowledgeEntryNotMutable);
+    assert_body_and_revision_unchanged(&pool, &entry, r#"{"summary":{}}"#, 0).await;
+}
+
+#[tokio::test]
+async fn string_summary_edits_fine() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, _) = seed_character(&pool).await;
+    let entry = insert_character_ke(&pool, &chr, "fact", Some(r#"{"summary":"text"}"#)).await;
+    let updated = update_actor_knowledge_entry(
+        &pool,
+        OWNER,
+        &chr,
+        &entry,
+        0,
+        ActorKnowledgePatch {
+            canonical_name: None,
+            summary: FieldPatch::Set("edited"),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated.revision, Some(1));
+    let body_raw: Option<String> =
+        sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(&entry)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(body_raw.as_deref(), Some(r#"{"summary":"edited"}"#));
+}
+
 #[tokio::test]
 async fn summary_utf8_byte_boundaries_multibyte() {
     let (pool, _dir) = fresh_pool().await;
