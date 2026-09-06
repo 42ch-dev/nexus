@@ -355,6 +355,11 @@ async fn observe_run_concurrently(
                 Ok(None) => {}
                 Err(_) => {
                     outcome_poll_failed = true;
+                    if let Ok(mut slot) = grace_deadline.lock() {
+                        if slot.is_none() {
+                            *slot = Some(Instant::now() + observation_grace());
+                        }
+                    }
                 }
             }
             sleep(OUTCOME_POLL_INTERVAL).await;
@@ -363,13 +368,13 @@ async fn observe_run_concurrently(
 
     let (stream, outcome) = tokio::join!(stream_fut, outcome_fut);
     let stream = stream?;
-    let (outcome, outcome_poll_failed) = outcome?;
+    let (outcome, _) = outcome?;
 
     let mut notes = ObservationNotes::default();
     if stream.incomplete {
         notes.output_incomplete = true;
     }
-    if outcome.is_none() || outcome_poll_failed {
+    if outcome.is_none() {
         notes.outcome_unavailable = true;
     }
 
@@ -469,7 +474,10 @@ pub(crate) async fn consume_terminal_events(
             if data.is_empty() {
                 continue;
             }
-            let value: serde_json::Value = serde_json::from_str(&data)?;
+            let value: serde_json::Value = match serde_json::from_str(&data) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
             if sse_event_matches(&value, expected_session_id, expected_operation_id) {
                 if let Some(text) = value
                     .get("MessageDelta")
@@ -720,6 +728,159 @@ mod tests {
             .expect("observe must not abort on outcome poll failure");
         assert_eq!(delivery.stream.result, "hello");
         assert!(delivery.notes.outcome_unavailable);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn observe_run_transient_outcome_error_then_captured_exits_zero() {
+        std::env::set_var("NEXUS42_RUN_OBSERVATION_GRACE_SECS", "1");
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(
+                "/v1/daemon/agent-host/sessions/sess-1/events",
+            ))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(format!(
+                        "{}{}",
+                        sse_message_delta_frame("sess-1", "op-1", "hello"),
+                        sse_op_finished_frame("sess-1", "op-1"),
+                    )),
+            )
+            .mount(&server)
+            .await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(
+                "/v1/daemon/agent-host/operations/op-1",
+            ))
+            .respond_with(
+                wiremock::ResponseTemplate::new(500)
+                    .set_body_string("{}")
+                    .append_header("x-attempt", "1"),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(
+                "/v1/daemon/agent-host/operations/op-1",
+            ))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "session_id": "sess-1",
+                    "operation_id": "op-1",
+                    "run_status": "succeeded",
+                    "finish_reason": "end_turn",
+                    "capture": {
+                        "status": "captured",
+                        "pending_id": "run_op1",
+                        "code": null,
+                    },
+                })),
+            )
+            .mount(&server)
+            .await;
+
+        let client = DaemonClient::new(&server.uri()).expect("client");
+        let mut events = client
+            .stream_get("/v1/daemon/agent-host/sessions/sess-1/events")
+            .await
+            .expect("events");
+        let (session, operation) = sample_session_operation();
+        let delivery = observe_run_concurrently(&client, &mut events, &session, &operation)
+            .await
+            .expect("observe");
+        assert_eq!(delivery.stream.result, "hello");
+        assert!(delivery.outcome.is_some());
+        assert!(!delivery.notes.outcome_unavailable);
+        assert_eq!(classify_run_exit(true, &delivery), (0, String::new()));
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn observe_run_outcome_transport_error_with_open_sse_terminates_within_grace() {
+        std::env::set_var("NEXUS42_RUN_OBSERVATION_GRACE_SECS", "1");
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(
+                "/v1/daemon/agent-host/sessions/sess-1/events",
+            ))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(sse_message_delta_frame("sess-1", "op-1", "partial"))
+                    .set_delay(std::time::Duration::from_secs(30)),
+            )
+            .mount(&server)
+            .await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(
+                "/v1/daemon/agent-host/operations/op-1",
+            ))
+            .respond_with(wiremock::ResponseTemplate::new(500).set_body_string("{}"))
+            .mount(&server)
+            .await;
+
+        let client = DaemonClient::new(&server.uri()).expect("client");
+        let mut events = client
+            .stream_get("/v1/daemon/agent-host/sessions/sess-1/events")
+            .await
+            .expect("events");
+        let (session, operation) = sample_session_operation();
+        let started = Instant::now();
+        let delivery = observe_run_concurrently(&client, &mut events, &session, &operation)
+            .await
+            .expect("observe");
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "outcome transport error must arm grace and terminate, took {:?}",
+            started.elapsed()
+        );
+        assert_eq!(delivery.stream.result, "partial");
+        assert!(delivery.outcome.is_none());
+        assert!(delivery.notes.outcome_unavailable);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn consume_terminal_events_malformed_frame_preserves_output() {
+        std::env::set_var("NEXUS42_RUN_OBSERVATION_GRACE_SECS", "1");
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_string(format!(
+                        "{}{}{}",
+                        sse_message_delta_frame("sess-1", "op-1", "hello"),
+                        "data: {not-json}\n\n",
+                        sse_op_finished_frame("sess-1", "op-1"),
+                    )),
+            )
+            .mount(&server)
+            .await;
+        let mut resp = reqwest::Client::new()
+            .get(format!("{}/events", server.uri()))
+            .send()
+            .await
+            .expect("sse request");
+        let grace = std::sync::Arc::new(std::sync::Mutex::new(None::<Instant>));
+        let obs = consume_terminal_events(&mut resp, "sess-1", "op-1", grace)
+            .await
+            .expect("consume must not abort on malformed frame");
+        assert_eq!(obs.result, "hello");
+        assert!(!obs.incomplete);
+    }
+
+    fn sse_op_finished_frame(session_id: &str, operation_id: &str) -> String {
+        let payload = serde_json::json!({
+            "OpFinished": {
+                "session_id": session_id,
+                "op_id": operation_id,
+                "reason": "end_turn",
+            }
+        });
+        format!("data: {payload}\n\n")
     }
 
 }
