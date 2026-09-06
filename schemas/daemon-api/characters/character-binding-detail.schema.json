@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/characters/character-binding-detail.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CharacterBindingDetail",
+  "description": "Response for GET /v1/daemon/characters/:character_id/bindings/:binding_id and successful PATCH on that path.",
+  "type": "object",
+  "required": [
+    "binding"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "binding": {
+      "$ref": "https://nexus42.invalid/schemas/domain/actor-world-binding.schema.json"
+    }
+  }
+}

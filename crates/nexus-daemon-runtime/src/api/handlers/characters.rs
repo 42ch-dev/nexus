@@ -123,6 +123,7 @@ fn binding_from_record(
             .character_id(record.character_id.as_str())
             .world_id(record.world_id.as_str())
             .status(record.status.as_str())
+            .revision(record.revision)
             .world_sheet_entry_id(parse_optional(record.world_sheet_entry_id.as_deref())?)
             .created_at(parse_rfc3339(&record.created_at)?)
             .updated_at(parse_rfc3339(&record.updated_at)?)
@@ -573,6 +574,7 @@ mod conversion_tests {
             world_id: "wld_worldA".into(),
             status: "active".into(),
             world_sheet_entry_id: Some("sheet-1".into()),
+            revision: 0,
             created_at: "2026-09-05T00:00:00Z".into(),
             updated_at: "2026-09-05T00:00:01Z".into(),
         }

@@ -18,6 +18,7 @@ pub struct ActorWorldBindingRecord {
     pub world_id: String,
     pub status: String,
     pub world_sheet_entry_id: Option<String>,
+    pub revision: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -43,6 +44,7 @@ const fn record_from_query(
     world_id: String,
     status: String,
     world_sheet_entry_id: Option<String>,
+    revision: i64,
     created_at: String,
     updated_at: String,
 ) -> ActorWorldBindingRecord {
@@ -52,6 +54,7 @@ const fn record_from_query(
         world_id,
         status,
         world_sheet_entry_id,
+        revision,
         created_at,
         updated_at,
     }
@@ -70,13 +73,20 @@ pub(crate) async fn validate_world_sheet_tx(
             "world_sheet_entry_id must be at most 128 bytes".into(),
         ));
     }
+    if !sheet_id.starts_with("kb_") {
+        return Err(LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::InvalidWorldSheet,
+        });
+    }
     let ok = sqlx::query_scalar!(
         r#"SELECT EXISTS(
             SELECT 1 FROM kb_key_blocks
             WHERE key_block_id = ?
               AND world_id = ?
+              AND owner_kind = 'world'
               AND block_type = 'character'
-              AND status != 'deleted'
+              AND status NOT IN ('deleted', 'merged', 'deprecated')
+              AND creator_only = 0
          ) as "ok!: i64""#,
         sheet_id,
         world_id
@@ -133,6 +143,7 @@ async fn load_binding_tx(
                   world_id as "world_id!",
                   status as "status!",
                   world_sheet_entry_id,
+                  revision as "revision!",
                   created_at as "created_at!",
                   updated_at as "updated_at!"
            FROM actor_world_bindings WHERE binding_id = ?"#,
@@ -147,6 +158,7 @@ async fn load_binding_tx(
             r.world_id,
             r.status,
             r.world_sheet_entry_id,
+            r.revision,
             r.created_at,
             r.updated_at,
         )
@@ -212,6 +224,7 @@ async fn load_binding_pool(
                   world_id as "world_id!",
                   status as "status!",
                   world_sheet_entry_id,
+                  revision as "revision!",
                   created_at as "created_at!",
                   updated_at as "updated_at!"
            FROM actor_world_bindings WHERE binding_id = ?"#,
@@ -226,6 +239,7 @@ async fn load_binding_pool(
             r.world_id,
             r.status,
             r.world_sheet_entry_id,
+            r.revision,
             r.created_at,
             r.updated_at,
         )
@@ -328,6 +342,7 @@ pub async fn list_bindings_for_character(
                   world_id as "world_id!",
                   status as "status!",
                   world_sheet_entry_id,
+                  revision as "revision!",
                   created_at as "created_at!",
                   updated_at as "updated_at!"
            FROM actor_world_bindings
@@ -349,6 +364,7 @@ pub async fn list_bindings_for_character(
                 r.world_id,
                 r.status,
                 r.world_sheet_entry_id,
+                r.revision,
                 r.created_at,
                 r.updated_at,
             )

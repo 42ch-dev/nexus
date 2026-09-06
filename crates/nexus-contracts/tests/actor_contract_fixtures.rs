@@ -1,9 +1,10 @@
 //! Closed Actor/Character/ActorWorldBinding wire fixtures (v1.184 P0 Task 1).
 
 use nexus_contracts::{
-    ActorRef, ActorWorldBinding, ActorWorldBindingStatus, Character, CharacterDetail,
-    CharacterLifecycleRequest, CharacterStatus, CreateCharacterRequest, CreateCharacterResponse,
-    ListCharactersResponse, UpdateCharacterRequest,
+    ActorRef, ActorWorldBinding, ActorWorldBindingStatus, Character, CharacterBindingDetail,
+    CharacterDetail, CharacterLifecycleRequest, CharacterStatus, CreateCharacterRequest,
+    CreateCharacterResponse, ListCharactersResponse, UpdateCharacterBindingRequest,
+    UpdateCharacterRequest,
 };
 use std::str::FromStr;
 
@@ -130,6 +131,7 @@ fn root_status_populates_generated_records() {
         "character_id": chr(),
         "world_id": format!("wld_{HEX32}"),
         "status": "active",
+        "revision": 0,
         "created_at": "2026-09-05T00:00:00Z",
         "updated_at": "2026-09-05T00:00:00Z"
     }))
@@ -178,6 +180,7 @@ fn binding_record() -> serde_json::Value {
         "character_id": chr(),
         "world_id": format!("wld_{HEX32}"),
         "status": "active",
+        "revision": 0,
         "created_at": "2026-09-05T00:00:00Z",
         "updated_at": "2026-09-05T00:00:00Z"
     })
@@ -319,4 +322,42 @@ fn character_revision_and_patch_boundary_fixtures() {
 
     let life = serde_json::json!({"expected_revision": 1});
     serde_json::from_value::<CharacterLifecycleRequest>(life).expect("lifecycle");
+}
+
+#[test]
+fn binding_revision_and_update_request_boundary_fixtures() {
+    let mut binding = binding_record();
+    serde_json::from_value::<ActorWorldBinding>(binding.clone()).expect("revision 0");
+    binding["revision"] = serde_json::json!(9223372036854775806_i64);
+    serde_json::from_value::<ActorWorldBinding>(binding.clone()).expect("max revision");
+    binding.as_object_mut().unwrap().remove("revision");
+    assert!(serde_json::from_value::<ActorWorldBinding>(binding).is_err());
+
+    let patch = serde_json::json!({
+        "expected_revision": 0,
+        "world_sheet_entry_id": format!("kb_{HEX32}")
+    });
+    serde_json::from_value::<UpdateCharacterBindingRequest>(patch).expect("sheet patch");
+    serde_json::from_value::<UpdateCharacterBindingRequest>(serde_json::json!({
+        "expected_revision": 0,
+        "world_sheet_entry_id": null
+    }))
+    .expect("null clears sheet");
+    serde_json::from_value::<UpdateCharacterBindingRequest>(serde_json::json!({
+        "expected_revision": 0
+    }))
+    .expect("omitted sheet member");
+    assert!(serde_json::from_value::<UpdateCharacterBindingRequest>(serde_json::json!({
+        "expected_revision": 0,
+        "extra": true
+    }))
+    .is_err());
+    assert!(serde_json::from_value::<UpdateCharacterBindingRequest>(serde_json::json!({
+        "expected_revision": 0,
+        "world_sheet_entry_id": "x".repeat(129)
+    }))
+    .is_err());
+
+    let detail = serde_json::json!({ "binding": binding_record() });
+    serde_json::from_value::<CharacterBindingDetail>(detail).expect("binding detail");
 }

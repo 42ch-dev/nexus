@@ -5,11 +5,10 @@
  */
 
 /**
- * Response for GET /v1/daemon/characters/:character_id/bindings.
+ * Response for GET /v1/daemon/characters/:character_id/bindings/:binding_id and successful PATCH on that path.
  */
-export interface ListCharacterBindingsResponse {
-  items: NexusActorWorldBinding[];
-  pagination: NexusPaginationInfo;
+export interface CharacterBindingDetail {
+  binding: NexusActorWorldBinding;
 }
 /**
  * Character to World association. Distinct from WorldMembership (Creator to World). v1 APIs create active rows only.
@@ -51,18 +50,4 @@ export interface NexusActorWorldBinding {
    * ISO 8601 / RFC 3339 UTC datetime string
    */
   updated_at: string;
-}
-/**
- * Cursor-based pagination metadata.
- */
-export interface NexusPaginationInfo {
-  limit: number;
-  /**
-   * Opaque cursor returned by the previous page. Clients MUST NOT parse it. Non-null only when another page exists.
-   */
-  next_cursor?: string;
-  /**
-   * True when the client may request another page (equivalent to `next_cursor` being non-null).
-   */
-  has_more: boolean;
 }

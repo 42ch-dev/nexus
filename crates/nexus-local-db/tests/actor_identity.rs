@@ -201,6 +201,40 @@ async fn duplicate_active_binding_is_rejected() {
 }
 
 #[tokio::test]
+async fn migration_preserves_binding_tuple_and_revision_default() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    seed_sheet(&pool, "kb_linked", WORLD_A, "character", "confirmed").await;
+    let created = create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "Linked",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_A,
+            world_sheet_entry_id: Some("kb_linked"),
+        },
+    )
+    .await
+    .unwrap();
+    let row: (String, String, String, String, Option<String>, i64) = sqlx::query_as(
+        "SELECT binding_id, character_id, world_id, status, world_sheet_entry_id, revision FROM actor_world_bindings WHERE binding_id = ?",
+    )
+    .bind(&created.binding.binding_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(row.0, created.binding.binding_id);
+    assert_eq!(row.1, created.character.character_id);
+    assert_eq!(row.2, WORLD_A);
+    assert_eq!(row.3, "active");
+    assert_eq!(row.4.as_deref(), Some("kb_linked"));
+    assert_eq!(row.5, 0);
+    assert_eq!(created.binding.revision, 0);
+}
+
+#[tokio::test]
 async fn world_sheet_rejects_wrong_world_type_or_deleted() {
     let (pool, _dir) = fresh_pool().await;
     seed_creator_and_worlds(&pool).await;
@@ -238,6 +272,67 @@ async fn world_sheet_rejects_wrong_world_type_or_deleted() {
         .await
         .unwrap();
     assert_eq!(chars, 0);
+}
+
+#[tokio::test]
+async fn world_sheet_rejects_merged_deprecated_and_creator_only() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    for (sheet, status) in [
+        ("kb_merged", "merged"),
+        ("kb_deprecated", "deprecated"),
+    ] {
+        seed_sheet(&pool, sheet, WORLD_A, "character", status).await;
+        let err = create_character_with_initial_binding(
+            &pool,
+            CreateCharacterParams {
+                owner_creator_id: OWNER,
+                display_name: sheet,
+                image_uri: None,
+                persona_json: "{}",
+                world_id: WORLD_A,
+                world_sheet_entry_id: Some(sheet),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                LocalDbError::ActorContractConflict {
+                    code: ActorContractConflict::InvalidWorldSheet
+                }
+            ),
+            "sheet {sheet} status {status} should fail, got {err:?}"
+        );
+    }
+    sqlx::query(
+        "INSERT INTO kb_key_blocks          (key_block_id, world_id, block_type, canonical_name, status, body_json, created_at, creator_only)          VALUES (?, ?, 'character', 'private', 'confirmed', '{}', datetime('now'), 1)",
+    )
+    .bind("kb_creator_only")
+    .bind(WORLD_A)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let err = create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "PrivateSheet",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_A,
+            world_sheet_entry_id: Some("kb_creator_only"),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::InvalidWorldSheet
+        }
+    ));
 }
 
 #[tokio::test]

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT binding_id as \"binding_id!\",\n                  character_id as \"character_id!\",\n                  world_id as \"world_id!\",\n                  status as \"status!\",\n                  world_sheet_entry_id,\n                  created_at as \"created_at!\",\n                  updated_at as \"updated_at!\"\n           FROM actor_world_bindings\n           WHERE character_id = ?\n           ORDER BY created_at ASC, binding_id ASC\n           LIMIT ? OFFSET ?",
+  "query": "SELECT binding_id as \"binding_id!\",\n                  character_id as \"character_id!\",\n                  world_id as \"world_id!\",\n                  status as \"status!\",\n                  world_sheet_entry_id,\n                  revision as \"revision!\",\n                  created_at as \"created_at!\",\n                  updated_at as \"updated_at!\"\n           FROM actor_world_bindings\n           WHERE character_id = ?\n           ORDER BY created_at ASC, binding_id ASC\n           LIMIT ? OFFSET ?",
   "describe": {
     "columns": [
       {
@@ -29,13 +29,18 @@
         "type_info": "Text"
       },
       {
-        "name": "created_at!",
+        "name": "revision!",
         "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "created_at!",
+        "ordinal": 6,
         "type_info": "Text"
       },
       {
         "name": "updated_at!",
-        "ordinal": 6,
+        "ordinal": 7,
         "type_info": "Text"
       }
     ],
@@ -49,8 +54,9 @@
       false,
       true,
       false,
+      false,
       false
     ]
   },
-  "hash": "ba7f1524e096f3cea54fed8f8bc63eeb54b3789f9b189d597b591fe6bbf89f04"
+  "hash": "734ceef15d8c781b1aa29d14fb5f9ad6e730bfbc1e5f732e4ad0814888cdd62f"
 }
