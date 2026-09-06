@@ -130,9 +130,10 @@ pub use character_memory_fragment::{
     CharacterMemoryFragmentRecord, NewCharacterMemoryFragment,
 };
 pub use character_pending_review::{
-    count_character_pending_reviews, create_character_pending_review,
+    capture_character_run, count_character_pending_reviews, create_character_pending_review,
     delete_character_pending_review, delete_character_pending_review_in_tx,
     get_character_pending_review, list_character_pending_reviews, CharacterPendingReviewRecord,
+    RunCaptureInput, RunCaptureReceipt, RUN_PENDING_ID_PREFIX,
 };
 pub use character_soul_meta::{
     delete_character_soul_meta, get_character_soul_meta, upsert_character_soul_meta,

@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT operation_id as \"operation_id!\", session_id as \"session_id!\",\n                  character_id as \"character_id!\", binding_id as \"binding_id!\",\n                  lifecycle_epoch as \"lifecycle_epoch!\", pending_id as \"pending_id!\",\n                  captured_at as \"captured_at!\"\n           FROM character_run_captures WHERE operation_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "operation_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "session_id!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "character_id!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "binding_id!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "lifecycle_epoch!",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "pending_id!",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "captured_at!",
+        "ordinal": 6,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3baff1817bbae3a2ccb5d5abe251544520ecec18cf9656ec2414081a0d91abac"
+}

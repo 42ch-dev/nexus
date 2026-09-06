@@ -5,18 +5,9 @@
  */
 
 /**
- * Response for POST /v1/daemon/agent-host/sessions/{session_id}/operations.
+ * Terminal or initial capture observation for a Character Host operation. Required nullable members avoid ambiguous absence on the wire.
  */
-export interface OperationResponse {
-  operation_id: string;
-  session_id: string;
-  status: string;
-  capture?: NexusCharacterRunCaptureOutcome;
-}
-/**
- * Initial capture observation for Character prompts; omitted on legacy/Creator operations.
- */
-export interface NexusCharacterRunCaptureOutcome {
+export interface CharacterRunCaptureOutcome {
   status: "disabled" | "pending" | "captured" | "skipped" | "failed";
   pending_id: string | null;
   code:

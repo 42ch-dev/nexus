@@ -24,4 +24,8 @@ export interface CharacterPendingReviewInfo {
    * ISO 8601 / RFC 3339 UTC datetime string
    */
   created_at: string;
+  /**
+   * Host operation id for run capture provenance; null for manual capture rows.
+   */
+  source_operation_id: string | null;
 }

@@ -1571,7 +1571,7 @@ async fn run_character(
         ))
         .await?;
 
-    let op_req = ExecuteOperationRequest::Prompt { content: prompt };
+    let op_req = ExecuteOperationRequest::Prompt { content: prompt, remember: None };
     let operation: OperationResponse = client
         .post(
             &format!(

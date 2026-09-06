@@ -43,6 +43,7 @@ use nexus_contracts::daemon_api::characters::memory::review_character_memory_res
 use nexus_contracts::daemon_api::characters::soul::character_soul_narrative_request::CharacterSoulNarrativeRequest;
 use nexus_contracts::daemon_api::characters::soul::character_soul_narrative_response::CharacterSoulNarrativeResponse;
 use nexus_creator_memory::review::PendingReviewInput;
+use nexus_local_db::RUN_PENDING_ID_PREFIX;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -161,6 +162,7 @@ pub async fn capture_pending_review(
         task_kind,
         raw_digest,
         created_at,
+        source_operation_id: None,
     };
     nexus_local_db::create_character_pending_review(state.pool_or_uninit()?, &creator, &record)
         .await?;
@@ -182,6 +184,14 @@ fn validate_capture_input(
         return Err(NexusApiError::InvalidInput {
             field: "pending_id".into(),
             reason: "pending_id must be between 1 and 128 characters".into(),
+        });
+    }
+    if pending_id.starts_with(RUN_PENDING_ID_PREFIX) {
+        return Err(NexusApiError::InvalidInput {
+            field: "pending_id".into(),
+            reason: format!(
+                "pending_id cannot use the reserved {RUN_PENDING_ID_PREFIX} prefix"
+            ),
         });
     }
     let session_id = req.session_id.as_str();
@@ -243,6 +253,7 @@ pub async fn list_pending_reviews(
                 "task_kind": r.task_kind,
                 "raw_digest": r.raw_digest,
                 "created_at": r.created_at,
+                "source_operation_id": r.source_operation_id,
             }))
         })
         .collect::<Result<_, _>>()?;

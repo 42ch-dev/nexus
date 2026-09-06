@@ -687,7 +687,7 @@ pub async fn execute_operation(
     // finalization, NOT dropped at HTTP return or Host Ready (durable
     // §11.3.1/§11.6). No SSE subscriber is required for the guard's lifetime.
     let host_op = match req {
-        ExecuteOperationRequest::Prompt { content } => {
+        ExecuteOperationRequest::Prompt { content, remember: _ } => {
             let (content, guard) = prepare_prompt(&state, &sid, content).await?;
             if state.actor_sessions().is_actor_session(&sid) {
                 state
@@ -711,6 +711,7 @@ pub async fn execute_operation(
                 operation_id: op_id.to_string(),
                 session_id: sid.to_string(),
                 status: "started".to_string(),
+                capture: None,
             }));
         }
         ExecuteOperationRequest::SetModel { model } => {
@@ -739,6 +740,7 @@ pub async fn execute_operation(
         operation_id: op_id.to_string(),
         session_id: sid.to_string(),
         status: "started".to_string(),
+        capture: None,
     }))
 }
 
@@ -1229,9 +1231,7 @@ mod tests {
     #[tokio::test]
     async fn execute_operation_rejects_invalid_session_uuid() {
         let state = state_with_host().await;
-        let req = ExecuteOperationRequest::Prompt {
-            content: "hello".to_string(),
-        };
+        let req = ExecuteOperationRequest::Prompt { content: "hello".to_string(), remember: None };
         let result = execute_operation(State(state), Path("bad-uuid".to_string()), Json(req)).await;
         assert!(result.is_err());
         assert_eq!(
@@ -2447,9 +2447,7 @@ mod tests {
         let result = execute_operation(
             State(state),
             Path(created.session_id.clone()),
-            Json(ExecuteOperationRequest::Prompt {
-                content: "hello".to_string(),
-            }),
+            Json(ExecuteOperationRequest::Prompt { content: "hello".to_string(), remember: None }),
         )
         .await
         .expect("legacy prompt");
@@ -2480,9 +2478,7 @@ mod tests {
         let _ = execute_operation(
             State(state),
             Path(created.session_id.clone()),
-            Json(ExecuteOperationRequest::Prompt {
-                content: "Act now.".to_string(),
-            }),
+            Json(ExecuteOperationRequest::Prompt { content: "Act now.".to_string(), remember: None }),
         )
         .await
         .expect("prompt");
@@ -2529,9 +2525,7 @@ mod tests {
         let err = execute_operation(
             State(state),
             Path(created.session_id.clone()),
-            Json(ExecuteOperationRequest::Prompt {
-                content: "Act now.".to_string(),
-            }),
+            Json(ExecuteOperationRequest::Prompt { content: "Act now.".to_string(), remember: None }),
         )
         .await
         .unwrap_err();
@@ -2561,9 +2555,7 @@ mod tests {
         let err = execute_operation(
             State(state),
             Path(created.session_id.clone()),
-            Json(ExecuteOperationRequest::Prompt {
-                content: "Act now.".to_string(),
-            }),
+            Json(ExecuteOperationRequest::Prompt { content: "Act now.".to_string(), remember: None }),
         )
         .await
         .unwrap_err();
@@ -2689,9 +2681,7 @@ mod tests {
         let err = execute_operation(
             State(state.clone()),
             Path(session_id),
-            Json(ExecuteOperationRequest::Prompt {
-                content: "do a thing".into(),
-            }),
+            Json(ExecuteOperationRequest::Prompt { content: "do a thing".into(), remember: None }),
         )
         .await
         .expect_err("retired execute must be stale");
@@ -2754,9 +2744,7 @@ mod tests {
         let started = execute_operation(
             State(state.clone()),
             Path(session_id.clone()),
-            Json(ExecuteOperationRequest::Prompt {
-                content: "do a thing".into(),
-            }),
+            Json(ExecuteOperationRequest::Prompt { content: "do a thing".into(), remember: None }),
         )
         .await
         .expect("start prompt");

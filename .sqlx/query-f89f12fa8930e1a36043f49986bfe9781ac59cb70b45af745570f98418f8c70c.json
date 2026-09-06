@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO character_memory_pending_review\n             (pending_id, session_id, character_id, actor_world_binding_id, task_kind,\n              raw_digest, created_at, source_operation_id)\n             VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "f89f12fa8930e1a36043f49986bfe9781ac59cb70b45af745570f98418f8c70c"
+}

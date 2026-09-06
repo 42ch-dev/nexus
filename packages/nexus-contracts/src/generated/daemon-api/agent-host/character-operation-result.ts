@@ -5,16 +5,17 @@
  */
 
 /**
- * Response for POST /v1/daemon/agent-host/sessions/{session_id}/operations.
+ * Authoritative per-operation run and capture outcome for owner-authorized Character Host operations.
  */
-export interface OperationResponse {
+export interface CharacterOperationResult {
   operation_id: string;
   session_id: string;
-  status: string;
-  capture?: NexusCharacterRunCaptureOutcome;
+  run_status: "running" | "succeeded" | "incomplete" | "failed" | "cancelled";
+  finish_reason: "end_turn" | "max_tokens" | "max_turn_requests" | "refusal" | null;
+  capture: NexusCharacterRunCaptureOutcome;
 }
 /**
- * Initial capture observation for Character prompts; omitted on legacy/Creator operations.
+ * Terminal or initial capture observation for a Character Host operation. Required nullable members avoid ambiguous absence on the wire.
  */
 export interface NexusCharacterRunCaptureOutcome {
   status: "disabled" | "pending" | "captured" | "skipped" | "failed";

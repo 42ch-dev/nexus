@@ -12,6 +12,10 @@ export type ExecuteOperationRequest = Prompt | SetModel | SetMode;
 export interface Prompt {
   kind: "prompt";
   content: string;
+  /**
+   * When true on an admitted stored Character session, opt into explicit run capture after a successful end_turn. Absent or false performs no capture.
+   */
+  remember?: boolean;
 }
 export interface SetModel {
   kind: "set_model";
