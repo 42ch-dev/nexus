@@ -242,19 +242,6 @@ fn assert_target_row_module_referents(row: &KeyBlockRow, entry_id: &str) -> Resu
     Ok(())
 }
 
-async fn sql_exists_i64(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    sql: &str,
-    binds: &[&str],
-) -> Result<bool, LocalDbError> {
-    let mut query = sqlx::query_scalar::<_, i64>(sql);
-    for value in binds {
-        query = query.bind(value);
-    }
-    let hit = query.fetch_one(&mut **tx).await?;
-    Ok(hit != 0)
-}
-
 async fn load_key_block_row_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     entry_id: &str,
@@ -425,88 +412,161 @@ async fn assert_no_protected_referents_tx(
     entry_id: &str,
     row: &KeyBlockRow,
 ) -> Result<(), LocalDbError> {
-    const WORLD_SHEET_SQL: &str =
-        "SELECT EXISTS(SELECT 1 FROM actor_world_bindings WHERE world_sheet_entry_id = ?)";
-    const ANCHORS_SQL: &str =
-        "SELECT EXISTS(SELECT 1 FROM kb_source_anchors WHERE key_block_id = ?)";
-    const RELATIONSHIPS_SQL: &str = "SELECT EXISTS(
-        SELECT 1 FROM kb_relationships
-        WHERE source_entity_id = ? OR target_entity_id = ?
-    )";
-    const MIND_STATES_SQL: &str =
-        "SELECT EXISTS(SELECT 1 FROM mind_states WHERE holder_entry_id = ?)";
-    const FINDINGS_SQL: &str =
-        "SELECT EXISTS(SELECT 1 FROM world_findings WHERE target_entry_id = ?)";
-    const COMPUTE_SQL: &str =
-        "SELECT EXISTS(SELECT 1 FROM compute_sessions WHERE entry_id = ?)";
+    let other_modules_invalid: i64 = sqlx::query_scalar!(
+        r#"SELECT EXISTS(
+            SELECT 1 FROM kb_key_blocks
+            WHERE key_block_id != ?
+              AND modules_json IS NOT NULL
+              AND json_valid(modules_json) = 0
+        ) as "exists!""#,
+        entry_id
+    )
+    .fetch_one(&mut **tx)
+    .await?;
 
-    const OTHER_MODULES_INVALID_SQL: &str = "SELECT EXISTS(
-        SELECT 1 FROM kb_key_blocks
-        WHERE key_block_id != ?
-          AND modules_json IS NOT NULL
-          AND json_valid(modules_json) = 0
-    )";
-    const OTHER_MODULES_REF_SQL: &str = "SELECT EXISTS(
-        SELECT 1 FROM kb_key_blocks
-        WHERE key_block_id != ?
-          AND modules_json IS NOT NULL
-          AND json_valid(modules_json) = 1
-          AND EXISTS (
-            SELECT 1 FROM json_tree(modules_json)
-            WHERE type = 'text' AND value = ?
-          )
-    )";
+    let timeline_modules_invalid: i64 = sqlx::query_scalar!(
+        r#"SELECT EXISTS(
+            SELECT 1 FROM narrative_timeline_events
+            WHERE modules_json IS NOT NULL
+              AND json_valid(modules_json) = 0
+        ) as "exists!""#
+    )
+    .fetch_one(&mut **tx)
+    .await?;
 
-    const TIMELINE_MODULES_INVALID_SQL: &str = "SELECT EXISTS(
-        SELECT 1 FROM narrative_timeline_events
-        WHERE modules_json IS NOT NULL
-          AND json_valid(modules_json) = 0
-    )";
-    const TIMELINE_MODULES_REF_SQL: &str = "SELECT EXISTS(
-        SELECT 1 FROM narrative_timeline_events
-        WHERE modules_json IS NOT NULL
-          AND json_valid(modules_json) = 1
-          AND EXISTS (
-            SELECT 1 FROM json_tree(modules_json)
-            WHERE type = 'text' AND value = ?
-          )
-    )";
+    let timeline_participants_invalid: i64 = sqlx::query_scalar!(
+        r#"SELECT EXISTS(
+            SELECT 1 FROM narrative_timeline_events
+            WHERE affected_key_block_ids_json IS NOT NULL
+              AND (
+                json_valid(affected_key_block_ids_json) = 0
+                OR json_type(affected_key_block_ids_json) != 'array'
+              )
+        ) as "exists!""#
+    )
+    .fetch_one(&mut **tx)
+    .await?;
 
-    const TIMELINE_PARTICIPANTS_INVALID_SQL: &str = "SELECT EXISTS(
-        SELECT 1 FROM narrative_timeline_events
-        WHERE affected_key_block_ids_json IS NOT NULL
-          AND (
-            json_valid(affected_key_block_ids_json) = 0
-            OR json_type(affected_key_block_ids_json) != 'array'
-          )
-    )";
-    const TIMELINE_PARTICIPANTS_REF_SQL: &str = "SELECT EXISTS(
-        SELECT 1 FROM narrative_timeline_events
-        WHERE affected_key_block_ids_json IS NOT NULL
-          AND json_valid(affected_key_block_ids_json) = 1
-          AND json_type(affected_key_block_ids_json) = 'array'
-          AND EXISTS (
-            SELECT 1 FROM json_each(affected_key_block_ids_json)
-            WHERE value = ?
-          )
-    )";
-
-    if sql_exists_i64(tx, OTHER_MODULES_INVALID_SQL, &[entry_id]).await?
-        || sql_exists_i64(tx, TIMELINE_MODULES_INVALID_SQL, &[]).await?
-        || sql_exists_i64(tx, TIMELINE_PARTICIPANTS_INVALID_SQL, &[]).await?
+    if other_modules_invalid != 0
+        || timeline_modules_invalid != 0
+        || timeline_participants_invalid != 0
     {
         return Err(knowledge_reference_state_invalid());
     }
 
-    if sql_exists_i64(tx, WORLD_SHEET_SQL, &[entry_id]).await?
-        || sql_exists_i64(tx, ANCHORS_SQL, &[entry_id]).await?
-        || sql_exists_i64(tx, RELATIONSHIPS_SQL, &[entry_id, entry_id]).await?
-        || sql_exists_i64(tx, MIND_STATES_SQL, &[entry_id]).await?
-        || sql_exists_i64(tx, OTHER_MODULES_REF_SQL, &[entry_id, entry_id]).await?
-        || sql_exists_i64(tx, TIMELINE_MODULES_REF_SQL, &[entry_id]).await?
-        || sql_exists_i64(tx, TIMELINE_PARTICIPANTS_REF_SQL, &[entry_id]).await?
-        || sql_exists_i64(tx, FINDINGS_SQL, &[entry_id]).await?
-        || sql_exists_i64(tx, COMPUTE_SQL, &[entry_id]).await?
+    let world_sheet: i64 = sqlx::query_scalar!(
+        r#"SELECT EXISTS(
+            SELECT 1 FROM actor_world_bindings WHERE world_sheet_entry_id = ?
+        ) as "exists!""#,
+        entry_id
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    let anchors: i64 = sqlx::query_scalar!(
+        r#"SELECT EXISTS(
+            SELECT 1 FROM kb_source_anchors WHERE key_block_id = ?
+        ) as "exists!""#,
+        entry_id
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    let relationships: i64 = sqlx::query_scalar!(
+        r#"SELECT EXISTS(
+            SELECT 1 FROM kb_relationships
+            WHERE source_entity_id = ? OR target_entity_id = ?
+        ) as "exists!""#,
+        entry_id,
+        entry_id
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    let mind_states: i64 = sqlx::query_scalar!(
+        r#"SELECT EXISTS(
+            SELECT 1 FROM mind_states WHERE holder_entry_id = ?
+        ) as "exists!""#,
+        entry_id
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    let other_modules_ref: i64 = sqlx::query_scalar!(
+        r#"SELECT EXISTS(
+            SELECT 1 FROM kb_key_blocks
+            WHERE key_block_id != ?
+              AND modules_json IS NOT NULL
+              AND json_valid(modules_json) = 1
+              AND EXISTS (
+                SELECT 1 FROM json_tree(modules_json)
+                WHERE type = 'text' AND value = ?
+              )
+        ) as "exists!""#,
+        entry_id,
+        entry_id
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    let timeline_modules_ref: i64 = sqlx::query_scalar!(
+        r#"SELECT EXISTS(
+            SELECT 1 FROM narrative_timeline_events
+            WHERE modules_json IS NOT NULL
+              AND json_valid(modules_json) = 1
+              AND EXISTS (
+                SELECT 1 FROM json_tree(modules_json)
+                WHERE type = 'text' AND value = ?
+              )
+        ) as "exists!""#,
+        entry_id
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    let timeline_participants_ref: i64 = sqlx::query_scalar!(
+        r#"SELECT EXISTS(
+            SELECT 1 FROM narrative_timeline_events
+            WHERE affected_key_block_ids_json IS NOT NULL
+              AND json_valid(affected_key_block_ids_json) = 1
+              AND json_type(affected_key_block_ids_json) = 'array'
+              AND EXISTS (
+                SELECT 1 FROM json_each(affected_key_block_ids_json)
+                WHERE value = ?
+              )
+        ) as "exists!""#,
+        entry_id
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    let findings: i64 = sqlx::query_scalar!(
+        r#"SELECT EXISTS(
+            SELECT 1 FROM world_findings WHERE target_entry_id = ?
+        ) as "exists!""#,
+        entry_id
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    let compute_sessions: i64 = sqlx::query_scalar!(
+        r#"SELECT EXISTS(
+            SELECT 1 FROM compute_sessions WHERE entry_id = ?
+        ) as "exists!""#,
+        entry_id
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    if world_sheet != 0
+        || anchors != 0
+        || relationships != 0
+        || mind_states != 0
+        || other_modules_ref != 0
+        || timeline_modules_ref != 0
+        || timeline_participants_ref != 0
+        || findings != 0
+        || compute_sessions != 0
     {
         return Err(knowledge_entry_in_use());
     }
