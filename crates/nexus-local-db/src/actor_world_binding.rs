@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::begin_immediate;
 use crate::character::{
     check_expected_revision, map_actor_constraint, require_active_owned_character_tx,
-    require_owned_active_world, require_owned_character_pool, require_owned_world,
+    require_owned_active_world, require_owned_character_pool,
     require_owned_world_pool, FieldPatch,
 };
 use crate::error::{ActorContractConflict, LocalDbError};
@@ -294,7 +294,7 @@ pub async fn add_actor_world_binding(
     let result = async {
         require_active_owned_character_tx(&mut tx, params.owner_creator_id, params.character_id)
             .await?;
-        require_owned_world(&mut tx, params.owner_creator_id, params.world_id).await?;
+        require_owned_active_world(&mut tx, params.owner_creator_id, params.world_id).await?;
         insert_binding_tx(&mut tx, params, &now).await
     }
     .await;

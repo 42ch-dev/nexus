@@ -882,6 +882,32 @@ async fn remove_binding_holds_activity_fence_blocking_archive() {
 }
 
 #[tokio::test]
+async fn patch_binding_holds_activity_fence_blocking_archive() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr = created["character"]["character_id"].as_str().unwrap();
+    let binding_id = created["binding"]["binding_id"].as_str().unwrap();
+    let guard = ctx
+        .state
+        .actor_sessions()
+        .admit_character_activity(&ctx.pool, OWNER, chr)
+        .await
+        .expect("admit activity as patch_binding does before local-db");
+    let busy = archive_character(&ctx.server, chr, 0).await;
+    assert_eq!(busy.status_code(), 409, "body={}", busy.text());
+    assert_eq!(busy.json::<Value>()["error"]["code"], "character_busy");
+    drop(guard);
+    let ok = patch_binding(
+        &ctx.server,
+        chr,
+        binding_id,
+        json!({ "expected_revision": 0, "world_sheet_entry_id": null }),
+    )
+    .await;
+    assert_eq!(ok.status_code(), 200, "body={}", ok.text());
+}
+
+#[tokio::test]
 async fn patch_rename_collision_is_duplicate_character_display_name() {
     let ctx = ctx().await;
     create_character(&ctx.server, "Ava", WORLD_A).await;
@@ -1062,6 +1088,86 @@ async fn patch_binding_rejects_invalid_world_sheet() {
         chr,
         binding_id,
         json!({ "expected_revision": 0, "world_sheet_entry_id": "kb_wrong_type" }),
+    )
+    .await;
+    assert_eq!(resp.status_code(), 409, "body={}", resp.text());
+    let body: Value = resp.json();
+    assert_eq!(body["error"]["code"], "invalid_world_sheet");
+    assert_ne!(body["error"]["message"], "invalid_world_sheet");
+}
+
+#[tokio::test]
+async fn add_binding_rejects_paused_world_with_404_zero_mutation() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr = created["character"]["character_id"].as_str().unwrap();
+    sqlx::query("UPDATE narrative_worlds SET status = 'paused' WHERE world_id = ?")
+        .bind(WORLD_B)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let before: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM actor_world_bindings WHERE character_id = ?",
+    )
+    .bind(chr)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let resp = ctx
+        .server
+        .post(&format!("/v1/daemon/characters/{chr}/bindings"))
+        .json(&json!({ "world_id": WORLD_B }))
+        .await;
+    assert_eq!(resp.status_code(), 404, "body={}", resp.text());
+    let after: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM actor_world_bindings WHERE character_id = ?",
+    )
+    .bind(chr)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(after, before);
+}
+
+#[tokio::test]
+async fn create_character_rejects_paused_world_with_404_zero_mutation() {
+    let ctx = ctx().await;
+    sqlx::query("UPDATE narrative_worlds SET status = 'paused' WHERE world_id = ?")
+        .bind(WORLD_A)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let chars_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM characters")
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+    let resp = ctx
+        .server
+        .post("/v1/daemon/characters")
+        .json(&json!({ "display_name": "Paused", "world_id": WORLD_A }))
+        .await;
+    assert_eq!(resp.status_code(), 404, "body={}", resp.text());
+    let chars_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM characters")
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+    assert_eq!(chars_after, chars_before);
+}
+
+#[tokio::test]
+async fn patch_binding_rejects_overlength_world_sheet_bytes_at_api() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr = created["character"]["character_id"].as_str().unwrap();
+    let binding_id = created["binding"]["binding_id"].as_str().unwrap();
+    // 128 Unicode scalars but 131 bytes — passes wire maxLength, fails storage bytes check.
+    let overlength = format!("kb_{}{}", "a".repeat(124), "\u{1f3ad}");
+
+    let resp = patch_binding(
+        &ctx.server,
+        chr,
+        binding_id,
+        json!({ "expected_revision": 0, "world_sheet_entry_id": overlength }),
     )
     .await;
     assert_eq!(resp.status_code(), 409, "body={}", resp.text());

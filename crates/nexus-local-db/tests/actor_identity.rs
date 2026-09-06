@@ -1315,6 +1315,18 @@ async fn sequential_link_and_remove_orders() {
         .await
         .unwrap();
 
+    let kb_race_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = 'kb_race'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        kb_race_count,
+        1,
+        "WorldSheet kb_race must survive binding delete (not binding-owned)"
+    );
+
     let after_link_then_remove =
         list_bindings_for_character(&pool, OWNER, &character_id, 100, 0)
             .await
@@ -1373,6 +1385,182 @@ async fn sequential_link_and_remove_orders() {
         final_bindings[0].world_sheet_entry_id.as_deref(),
         Some("kb_race")
     );
+
+    // Subtest 3: remove target first, then link the deleted binding — remove wins.
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    let (character_id, primary, target) = seed_two_binding_link_fixture(&pool).await;
+    let primary_sheet_before: Option<String> = sqlx::query_scalar(
+        "SELECT world_sheet_entry_id FROM actor_world_bindings WHERE binding_id = ?",
+    )
+    .bind(&primary)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    remove_binding(&pool, OWNER, &character_id, &target)
+        .await
+        .unwrap();
+
+    let err = update_actor_world_binding(
+        &pool,
+        OWNER,
+        &character_id,
+        &target,
+        0,
+        FieldPatch::Set("kb_race"),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        LocalDbError::ActorNotFound {
+            resource: "actor_world_binding",
+            ..
+        }
+    ));
+
+    let target_row: Option<String> = sqlx::query_scalar(
+        "SELECT binding_id FROM actor_world_bindings WHERE binding_id = ?",
+    )
+    .bind(&target)
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    assert!(target_row.is_none(), "removed target must stay absent");
+
+    let survivors =
+        list_bindings_for_character(&pool, OWNER, &character_id, 100, 0)
+            .await
+            .unwrap();
+    assert_eq!(survivors.len(), 1);
+    assert_eq!(survivors[0].binding_id, primary);
+    assert_eq!(
+        survivors[0].world_sheet_entry_id.as_deref(),
+        primary_sheet_before.as_deref()
+    );
+
+    let kb_race_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = 'kb_race'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(kb_race_count, 1, "kb_race WorldSheet row must remain");
+}
+
+#[tokio::test]
+async fn add_binding_rejects_paused_world_with_zero_mutation() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    let created = create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "PausedAdd",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_A,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    sqlx::query("UPDATE narrative_worlds SET status = 'paused' WHERE world_id = ?")
+        .bind(WORLD_B)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let before: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM actor_world_bindings WHERE character_id = ?",
+    )
+    .bind(&created.character.character_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let err = add_actor_world_binding(
+        &pool,
+        CreateBindingParams {
+            owner_creator_id: OWNER,
+            character_id: &created.character.character_id,
+            world_id: WORLD_B,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        LocalDbError::ActorNotFound {
+            resource: "world",
+            ..
+        }
+    ));
+
+    let after: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM actor_world_bindings WHERE character_id = ?",
+    )
+    .bind(&created.character.character_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(after, before, "paused world add must not mutate bindings");
+}
+
+#[tokio::test]
+async fn create_character_rejects_paused_world_with_zero_mutation() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    sqlx::query("UPDATE narrative_worlds SET status = 'paused' WHERE world_id = ?")
+        .bind(WORLD_A)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let chars_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM characters")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let binds_before: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM actor_world_bindings")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    let err = create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "PausedCreate",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_A,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        LocalDbError::ActorNotFound {
+            resource: "world",
+            ..
+        }
+    ));
+
+    let chars_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM characters")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let binds_after: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM actor_world_bindings")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(chars_after, chars_before);
+    assert_eq!(binds_after, binds_before);
 }
 
 #[tokio::test]

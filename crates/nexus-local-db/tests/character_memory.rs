@@ -878,6 +878,18 @@ async fn seed_binding_owned_ke(pool: &SqlitePool, binding_id: &str) {
     .unwrap();
 }
 
+async fn seed_binding_owned_ke_deleted(pool: &SqlitePool, binding_id: &str) {
+    sqlx::query(
+        "INSERT INTO kb_key_blocks \
+         (key_block_id, owner_kind, actor_world_binding_id, block_type, canonical_name, status, body_json, created_at) \
+         VALUES ('kb_owned_deleted', 'actor_world_binding', ?, 'character', 'owned', 'deleted', '{}', datetime('now'))",
+    )
+    .bind(binding_id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 #[tokio::test]
 async fn binding_removal_precedence_last_binding_then_ke_then_local_memory() {
     let (pool, _dir) = fresh_pool().await;
@@ -920,6 +932,37 @@ async fn binding_removal_precedence_last_binding_then_ke_then_local_memory() {
         }
     ));
     sqlx::query("DELETE FROM kb_key_blocks WHERE key_block_id = 'kb_owned_mem'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Non-live binding-owned KE still blocks non-last removal.
+    seed_binding_owned_ke_deleted(&pool, &s.binding_a2).await;
+    let binds_before: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM actor_world_bindings WHERE binding_id = ?",
+    )
+    .bind(&s.binding_a2)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let err = remove_binding(&pool, OWNER, &s.char_a, &s.binding_a2)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::BindingHasOwnedKnowledge
+        }
+    ));
+    let binds_after: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM actor_world_bindings WHERE binding_id = ?",
+    )
+    .bind(&s.binding_a2)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(binds_after, binds_before);
+    sqlx::query("DELETE FROM kb_key_blocks WHERE key_block_id = 'kb_owned_deleted'")
         .execute(&pool)
         .await
         .unwrap();

@@ -407,7 +407,7 @@ async fn create_in_tx(
     image_uri: Option<&str>,
     now: &str,
 ) -> Result<CreateCharacterResult, LocalDbError> {
-    require_owned_world(tx, params.owner_creator_id, params.world_id).await?;
+    require_owned_active_world(tx, params.owner_creator_id, params.world_id).await?;
     validate_world_sheet_tx(tx, params.world_id, params.world_sheet_entry_id).await?;
 
     let owner_creator_id = params.owner_creator_id;

@@ -447,3 +447,50 @@ async fn delete_world_blocked_when_inactive_actor_binding_exists() {
     assert_eq!(jobs_after, 1, "extract job queue must be unchanged");
     assert_eq!(bind_count, 1, "binding must remain");
 }
+
+#[tokio::test]
+async fn delete_world_blocked_when_archived_character_has_active_binding() {
+    let (state, _tmp) = handler_state().await;
+    let pool = state.pool().unwrap();
+
+    let created = nexus_local_db::create_character_with_initial_binding(
+        pool,
+        nexus_local_db::CreateCharacterParams {
+            owner_creator_id: "test_creator",
+            display_name: "ArchivedBound",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: "wld_test_world",
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .expect("seed character binding");
+    sqlx::query("UPDATE characters SET status = 'archived' WHERE character_id = ?")
+        .bind(&created.character.character_id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let err = delete_world(State(state.clone()), Path("wld_test_world".to_string()))
+        .await
+        .expect_err("archived character binding must block world delete");
+    assert_eq!(err.status_code(), StatusCode::CONFLICT);
+    assert_eq!(err.error_code(), "world_has_actor_bindings");
+
+    let world_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM narrative_worlds WHERE world_id = 'wld_test_world'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let bind_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM actor_world_bindings WHERE binding_id = ?")
+            .bind(&created.binding.binding_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(world_count, 1, "world row must be unchanged");
+    assert_eq!(bind_count, 1, "binding must remain");
+}
+
