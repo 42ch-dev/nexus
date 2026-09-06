@@ -254,7 +254,7 @@ pub async fn add_entry(
         }
     };
     record.creator_only = creator_only;
-    let store = SqliteKbStore::new(pool);
+    let store = SqliteKbStore::new(pool.clone());
     // Character/binding-owned KE inserts revalidate the stored active owner
     // inside the write transaction (durable §11.3.5) — a route check alone is
     // not sufficient. World-owned inserts keep the existing behavior/texture.
@@ -264,11 +264,19 @@ pub async fn add_entry(
             .await
             .map_err(map_insert_err)
             .map(|r| r.entry_id.clone()),
-        KnowledgeOwnerRef::Character(id) => store
-            .insert_actor_owned_key_block(&creator_id, id, None, record.clone())
-            .await
-            .map_err(map_local_db_insert_err)
-            .map(|r| r.entry_id.clone()),
+        KnowledgeOwnerRef::Character(id) => {
+            // Side-effecting Character activity: hold the activity fence across
+            // the guarded INSERT (durable §11.3.1).
+            let _activity = state
+                .actor_sessions()
+                .admit_character_activity(&pool, &creator_id, id.as_str())
+                .await?;
+            store
+                .insert_actor_owned_key_block(&creator_id, id, None, record.clone())
+                .await
+                .map_err(map_local_db_insert_err)
+                .map(|r| r.entry_id.clone())
+        }
         KnowledgeOwnerRef::ActorWorldBinding(id) => {
             let admitted_character = admitted_character_id(&req);
             let admitted_character = admitted_character.as_deref().ok_or_else(|| {
@@ -277,6 +285,10 @@ pub async fn add_entry(
                     message: "binding-owned KE insert must carry the admitted Character".into(),
                 }
             })?;
+            let _activity = state
+                .actor_sessions()
+                .admit_character_activity(&pool, &creator_id, admitted_character)
+                .await?;
             store
                 .insert_actor_owned_key_block(
                     &creator_id,

@@ -457,18 +457,16 @@ impl CharacterTomService {
         creator_id: &str,
         world_id: &str,
     ) -> Result<(), NexusApiError> {
-        // Dynamic query (static column list, filter by world id) — the new
-        // status-free text is not in the `.sqlx` metadata; the workspace-wide
-        // metadata refresh belongs to the designated integration owner.
-        let owner: Option<String> = sqlx::query_scalar(
-            "SELECT owner_creator_id FROM narrative_worlds WHERE world_id = ?",
+        let row = sqlx::query!(
+            r#"SELECT owner_creator_id AS "owner_creator_id!"
+               FROM narrative_worlds WHERE world_id = ?"#,
+            world_id
         )
-        .bind(world_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(NexusApiError::from)?;
-        match owner {
-            Some(stored) if stored == creator_id => Ok(()),
+        match row {
+            Some(stored) if stored.owner_creator_id == creator_id => Ok(()),
             Some(_) | None => Err(not_found("world", world_id)),
         }
     }

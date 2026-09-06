@@ -249,18 +249,15 @@ impl ActorKnowledgeViewService {
             .await?;
         // Retained read (durable §11.2): include owned archived Character and
         // binding scopes — never silently drop them with `status = 'active'`.
-        // Dynamic query (static column list, owned-data filter); the `.sqlx`
-        // metadata refresh for a new query text belongs to the integration
-        // owner.
-        let bindings = sqlx::query_as::<_, (String, String)>(
-            r#"SELECT b.character_id, b.binding_id
+        let bindings = sqlx::query!(
+            r#"SELECT b.character_id AS "character_id!", b.binding_id AS "binding_id!"
               FROM actor_world_bindings b
               INNER JOIN characters c ON c.character_id = b.character_id
               WHERE b.world_id = ?
                 AND c.owner_creator_id = ?"#,
+            world_id,
+            creator_id
         )
-        .bind(world_id)
-        .bind(creator_id)
         .fetch_all(&self.pool)
         .await
         .map_err(|err| NexusApiError::Internal {
@@ -269,7 +266,9 @@ impl ActorKnowledgeViewService {
         })?;
 
         let mut seen_characters = std::collections::BTreeSet::new();
-        for (character_id, binding_id) in bindings {
+        for row in bindings {
+            let character_id = row.character_id;
+            let binding_id = row.binding_id;
             if seen_characters.insert(character_id.clone()) {
                 items.extend(
                     self.component(
@@ -352,18 +351,16 @@ impl ActorKnowledgeViewService {
         creator_id: &str,
         world_id: &str,
     ) -> Result<(), NexusApiError> {
-        // Dynamic query (static column list, filter by world id) — the new
-        // status-free text is not in the `.sqlx` metadata; the workspace-wide
-        // metadata refresh belongs to the designated integration owner.
-        let owner: Option<String> = sqlx::query_scalar(
-            "SELECT owner_creator_id FROM narrative_worlds WHERE world_id = ?",
+        let row = sqlx::query!(
+            r#"SELECT owner_creator_id AS "owner_creator_id!"
+               FROM narrative_worlds WHERE world_id = ?"#,
+            world_id
         )
-        .bind(world_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(NexusApiError::from)?;
-        match owner {
-            Some(stored) if stored == creator_id => Ok(()),
+        match row {
+            Some(stored) if stored.owner_creator_id == creator_id => Ok(()),
             Some(_) | None => Err(not_found("world", world_id)),
         }
     }
@@ -440,19 +437,17 @@ impl ActorKnowledgeViewService {
         binding_id: &str,
         world_id: &str,
     ) -> Result<(), NexusApiError> {
-        // Dynamic query (static column list, filter by binding id) — the new
-        // status-free text is not in the `.sqlx` metadata; the workspace-wide
-        // metadata refresh belongs to the designated integration owner.
-        let row = sqlx::query_as::<_, (String, String)>(
-            "SELECT character_id, world_id FROM actor_world_bindings WHERE binding_id = ?",
+        let row = sqlx::query!(
+            r#"SELECT character_id AS "character_id!", world_id AS "world_id!"
+               FROM actor_world_bindings WHERE binding_id = ?"#,
+            binding_id
         )
-        .bind(binding_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(NexusApiError::from)?;
         match row {
-            Some((stored_character, stored_world))
-                if stored_character == character_id && stored_world == world_id =>
+            Some(stored)
+                if stored.character_id == character_id && stored.world_id == world_id =>
             {
                 Ok(())
             }
