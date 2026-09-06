@@ -874,3 +874,93 @@ async fn character_tom_full_mind_p0_p4_dogfood() {
         "B prompt must not include A ToM"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn restored_character_run_mints_fresh_session_after_archive() {
+    let host = MockHost::new();
+    let d = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let g = seed(&d).await;
+
+    let pre = json_out(
+        &d
+            .cli(&run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &[]))
+            .await,
+    );
+    assert!(pre.get("session").is_some());
+    let pre_session = pre["session"]["session_id"].as_str().unwrap().to_string();
+
+    let show = json_out(
+        &d
+            .cli(&[
+                "creator",
+                "character",
+                "show",
+                &g.character_a,
+                "--json",
+            ])
+            .await,
+    );
+    let revision = show["character"]["revision"].as_i64().unwrap();
+
+    assert!(
+        d.cli(&[
+            "creator",
+            "character",
+            "archive",
+            &g.character_a,
+            "--expected-revision",
+            &revision.to_string(),
+            "--json",
+        ])
+        .await
+        .status
+        .success()
+    );
+
+    let archived_show = json_out(
+        &d
+            .cli(&[
+                "creator",
+                "character",
+                "show",
+                &g.character_a,
+                "--json",
+            ])
+            .await,
+    );
+    let archived_revision = archived_show["character"]["revision"].as_i64().unwrap();
+
+    let denied = d
+        .cli(&run_args(
+            &g.character_a,
+            &g.world_w1,
+            &g.bind_a_w1,
+            &[],
+        ))
+        .await;
+    assert!(!denied.status.success(), "archived run must fail");
+    assert!(stderr(&denied).contains("character_inactive"));
+
+    assert!(
+        d.cli(&[
+            "creator",
+            "character",
+            "restore",
+            &g.character_a,
+            "--expected-revision",
+            &archived_revision.to_string(),
+            "--json",
+        ])
+        .await
+        .status
+        .success()
+    );
+
+    let post = json_out(
+        &d
+            .cli(&run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &[]))
+            .await,
+    );
+    let post_session = post["session"]["session_id"].as_str().unwrap();
+    assert_ne!(pre_session, post_session, "restore must mint a fresh session");
+}

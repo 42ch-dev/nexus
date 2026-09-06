@@ -386,3 +386,118 @@ async fn knowledge_add_list_view_json_round_trip() {
     let view_body: Value = serde_json::from_str(&stdout(&viewed)).unwrap();
     assert_eq!(view_body["items"][0]["canonical_name"], "CharNote");
 }
+
+#[tokio::test]
+async fn edit_archive_restore_cli_honors_explicit_revision_cas() {
+    let d = LiveDaemon::start().await;
+    activate_owner(&d).await;
+
+    let created = d
+        .cli(&[
+            "creator",
+            "character",
+            "create",
+            "--display-name",
+            "Ava",
+            "--world-id",
+            WORLD_A,
+            "--image-uri",
+            "https://example.test/ava.png",
+            "--persona",
+            "{\"role\":\"scout\"}",
+            "--json",
+        ])
+        .await;
+    assert!(created.status.success(), "create: {}", stderr(&created));
+    let created_body: Value = serde_json::from_str(&stdout(&created)).unwrap();
+    let chr = created_body["character"]["character_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let edited = d
+        .cli(&[
+            "creator",
+            "character",
+            "edit",
+            &chr,
+            "--expected-revision",
+            "0",
+            "--display-name",
+            "Ada",
+            "--clear-image-uri",
+            "--json",
+        ])
+        .await;
+    assert!(edited.status.success(), "edit: {}", stderr(&edited));
+    let edit_body: Value = serde_json::from_str(&stdout(&edited)).unwrap();
+    assert_eq!(edit_body["character"]["display_name"], "Ada");
+    assert_eq!(edit_body["character"]["revision"], 1);
+    assert!(
+        edit_body["character"].get("image_uri").map_or(true, |v| v.is_null()),
+        "cleared image_uri should be null or omitted: {}",
+        edit_body["character"]["image_uri"]
+    );
+    assert_eq!(edit_body["character"]["persona"]["role"], "scout");
+
+    let stale = d
+        .cli(&[
+            "creator",
+            "character",
+            "edit",
+            &chr,
+            "--expected-revision",
+            "0",
+            "--display-name",
+            "Stale",
+        ])
+        .await;
+    assert!(!stale.status.success(), "stale edit must fail");
+    assert!(stderr(&stale).contains("character_revision_conflict"));
+
+    let archived = d
+        .cli(&[
+            "creator",
+            "character",
+            "archive",
+            &chr,
+            "--expected-revision",
+            "1",
+            "--json",
+        ])
+        .await;
+    assert!(archived.status.success(), "archive: {}", stderr(&archived));
+    let arch_body: Value = serde_json::from_str(&stdout(&archived)).unwrap();
+    assert_eq!(arch_body["character"]["status"], "archived");
+
+    let write_denied = d
+        .cli(&[
+            "creator",
+            "character",
+            "edit",
+            &chr,
+            "--expected-revision",
+            "2",
+            "--display-name",
+            "Nope",
+        ])
+        .await;
+    assert!(!write_denied.status.success());
+    assert!(stderr(&write_denied).contains("character_inactive"));
+
+    let restored = d
+        .cli(&[
+            "creator",
+            "character",
+            "restore",
+            &chr,
+            "--expected-revision",
+            "2",
+            "--json",
+        ])
+        .await;
+    assert!(restored.status.success(), "restore: {}", stderr(&restored));
+    let restore_body: Value = serde_json::from_str(&stdout(&restored)).unwrap();
+    assert_eq!(restore_body["character"]["status"], "active");
+    assert_eq!(restore_body["character"]["character_id"], chr);
+}
