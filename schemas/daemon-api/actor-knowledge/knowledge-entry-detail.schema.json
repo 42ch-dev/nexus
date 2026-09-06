@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/actor-knowledge/knowledge-entry-detail.schema.json",
+  "schema_version": 1,
+  "title": "Nexus KnowledgeEntryDetail",
+  "description": "Response for GET /v1/daemon/characters/:character_id/knowledge/:entry_id and successful PATCH on that path.",
+  "type": "object",
+  "required": ["item", "summary"],
+  "additionalProperties": false,
+  "properties": {
+    "item": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/actor-knowledge/knowledge-view-item.schema.json"
+    },
+    "summary": {
+      "type": ["string", "null"],
+      "maxLength": 65536,
+      "description": "Canonical authored summary from body.summary; null when the summary member is absent."
+    }
+  }
+}

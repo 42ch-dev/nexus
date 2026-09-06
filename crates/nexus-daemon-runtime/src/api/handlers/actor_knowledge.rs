@@ -85,6 +85,7 @@ fn item_from_record(record: &KnowledgeEntryRecord) -> Result<KnowledgeViewItem, 
         "block_type": serde_json::to_value(record.block_type).map_err(wire_err)?,
         "canonical_name": record.canonical_name,
         "status": record.status,
+        "revision": record.revision.unwrap_or(0),
         "created_at": parse_rfc3339(&record.created_at)?,
     });
     serde_json::from_value(value).map_err(wire_err)

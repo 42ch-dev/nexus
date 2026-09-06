@@ -10,11 +10,14 @@
 export type NexusKnowledgeOwnerRef = WorldKnowledgeOwner | CharacterKnowledgeOwner | BindingKnowledgeOwner;
 
 /**
- * Response for GET /v1/daemon/characters/:character_id/knowledge.
+ * Response for GET /v1/daemon/characters/:character_id/knowledge/:entry_id and successful PATCH on that path.
  */
-export interface ListCharacterKnowledgeResponse {
-  items: NexusActorKnowledgeViewItem[];
-  pagination: NexusPaginationInfo;
+export interface KnowledgeEntryDetail {
+  item: NexusActorKnowledgeViewItem;
+  /**
+   * Canonical authored summary from body.summary; null when the summary member is absent.
+   */
+  summary: string | null;
 }
 /**
  * One KnowledgeEntry in an Actor KnowledgeView or Character knowledge list, with deterministic stored-owner metadata.
@@ -89,18 +92,4 @@ export interface BindingKnowledgeOwner {
    * ActorWorldBinding ID (lowercase prefix awb_ and exactly 32 hex characters)
    */
   id: string;
-}
-/**
- * Cursor-based pagination metadata.
- */
-export interface NexusPaginationInfo {
-  limit: number;
-  /**
-   * Opaque cursor returned by the previous page. Clients MUST NOT parse it. Non-null only when another page exists.
-   */
-  next_cursor?: string;
-  /**
-   * True when the client may request another page (equivalent to `next_cursor` being non-null).
-   */
-  has_more: boolean;
 }

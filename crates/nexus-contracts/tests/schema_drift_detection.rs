@@ -1306,6 +1306,21 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ViewResponse
         ),
+        entry!(
+            "schemas/daemon-api/actor-knowledge/knowledge-entry-detail.schema.json",
+            Strict,
+            KnowledgeEntryDetail
+        ),
+        entry!(
+            "schemas/daemon-api/actor-knowledge/update-knowledge-entry-request.schema.json",
+            Strict,
+            UpdateKnowledgeEntryRequest
+        ),
+        entry!(
+            "schemas/daemon-api/actor-knowledge/delete-knowledge-entry-query.schema.json",
+            Strict,
+            DeleteKnowledgeEntryQuery
+        ),
         // v1.184 P2 Task 1 — agent-host session/operation/scan contracts.
         entry!(
             "schemas/daemon-api/agent-host/agent-host-list-sessions-query.schema.json",
