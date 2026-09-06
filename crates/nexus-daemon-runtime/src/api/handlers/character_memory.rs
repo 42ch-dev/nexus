@@ -283,7 +283,7 @@ pub async fn delete_pending_review(
     Path((character_id, pending_id)): Path<(String, String)>,
 ) -> Result<Json<DeleteCharacterPendingReviewResponse>, NexusApiError> {
     let creator = require_creator(&state)?;
-    require_character_write_ctx(&state, &creator, &character_id, None).await?;
+    let _ctx = require_character_write_ctx(&state, &creator, &character_id, None).await?;
     let deleted = nexus_local_db::delete_character_pending_review(
         state.pool_or_uninit()?,
         &creator,
@@ -438,7 +438,7 @@ pub async fn promote_fragment(
         .to_string();
     let req: PromoteCharacterFragmentRequest = parse_canonical_json(&body)?;
     let creator = require_creator(&state)?;
-    require_character_write_ctx(&state, &creator, &character_id, None).await?;
+    let _ctx = require_character_write_ctx(&state, &creator, &character_id, None).await?;
     let expected_revision =
         i64::try_from(req.expected_revision).map_err(|_| NexusApiError::BadRequest {
             code: "invalid_input".into(),

@@ -8,7 +8,7 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use nexus_agent_host::{HostFacade, HostSession, HostSessionId, SessionState};
+use nexus_agent_host::{HostFacade, HostOperationId, HostSession, HostSessionId, SessionState};
 use nexus_contracts::generated::daemon_api::agent_host::session_response::{
     NexusActorRef, NexusSessionViewpoint,
 };
@@ -57,6 +57,11 @@ struct IndexedActorSession {
 struct RetiredActorSession {
     owner_creator_id: String,
     actor_kind: ActorSessionKind,
+    actor_id: String,
+    world_id: String,
+    binding_id: Option<String>,
+    branch_id: Option<String>,
+    event_id: Option<String>,
 }
 
 struct RegistryMaps {
@@ -64,6 +69,9 @@ struct RegistryMaps {
     by_session: HashMap<HostSessionId, IndexedActorSession>,
     key_locks: HashMap<ActorSessionKey, Arc<AsyncMutex<()>>>,
     retired: HashMap<HostSessionId, RetiredActorSession>,
+    /// Indexed Actor operations whose Host session may not yet expose
+    /// `active_op_id` (fail-closed cancel authorization, durable §11.3.4).
+    indexed_operations: HashMap<HostOperationId, HostSessionId>,
     /// Reclaimable per-Character activity fences (durable §11.3). An entry
     /// with no live guard (`Arc::strong_count == 1`) is swept on admission.
     character_fences: HashMap<String, Arc<RwLock<()>>>,
@@ -190,6 +198,7 @@ impl ActorSessionRegistry {
                 by_session: HashMap::new(),
                 key_locks: HashMap::new(),
                 retired: HashMap::new(),
+                indexed_operations: HashMap::new(),
                 character_fences: HashMap::new(),
                 closed: false,
             })),
@@ -288,6 +297,56 @@ impl ActorSessionRegistry {
             .get(session_id)
             .map(|t| (t.owner_creator_id.clone(), t.actor_kind, true))
     }
+
+    /// Tombstone retained after a material transition for overlay/authorization.
+    #[must_use]
+    fn retired_tombstone(&self, session_id: &HostSessionId) -> Option<RetiredActorSession> {
+        self.maps().retired.get(session_id).cloned()
+    }
+
+    /// Record an indexed Actor operation for fail-closed cancel authorization
+    /// when the Host has not yet surfaced `active_op_id`.
+    pub fn register_indexed_operation(
+        &self,
+        op_id: HostOperationId,
+        session_id: HostSessionId,
+    ) {
+        if self.is_actor_session(&session_id) {
+            self.maps()
+                .indexed_operations
+                .insert(op_id, session_id);
+        }
+    }
+
+    /// Resolve a cancel target to its indexed Actor session when Host listing
+    /// has not yet bound `active_op_id`.
+    #[must_use]
+    pub fn resolve_indexed_operation_session(
+        &self,
+        op_id: &HostOperationId,
+    ) -> Option<HostSessionId> {
+        self.maps().indexed_operations.get(op_id).cloned()
+    }
+
+    /// Drop a registered indexed operation after cancel or terminal completion.
+    pub fn clear_indexed_operation(&self, op_id: &HostOperationId) {
+        self.maps().indexed_operations.remove(op_id);
+    }
+    /// Overlay actor_ref/viewpoint for list/get: live indexed context first,
+    /// then retired tombstones so leftover Host rows stay Actor-shaped.
+    pub fn echo_actor_pair_for_session(
+        &self,
+        session_id: &HostSessionId,
+    ) -> Result<(Option<NexusActorRef>, Option<NexusSessionViewpoint>), NexusApiError> {
+        if let Some(ctx) = self.context_for(session_id) {
+            return echo_actor_pair(&ctx);
+        }
+        if let Some(tombstone) = self.retired_tombstone(session_id) {
+            return echo_retired_pair(&tombstone);
+        }
+        Ok((None, None))
+    }
+
 
     /// True once the process-lifetime maps are closed (daemon shutdown).
     #[must_use]
@@ -409,7 +468,8 @@ impl ActorSessionRegistry {
             if let Some(id) = maps.by_key.remove(&key) {
                 if let Some(row) = maps.by_session.remove(&id) {
                     maps.retired.insert(id.clone(), Self::tombstone_of(&row));
-                    retired_ids.push(id);
+                    retired_ids.push(id.clone());
+                    maps.indexed_operations.retain(|_, sid| sid != &id);
                 }
             }
         }
@@ -433,6 +493,7 @@ impl ActorSessionRegistry {
         maps.by_session.clear();
         maps.key_locks.clear();
         maps.character_fences.clear();
+        maps.indexed_operations.clear();
     }
 
     /// Shut down every retired Actor host session (daemon drain).
@@ -497,6 +558,11 @@ impl ActorSessionRegistry {
         RetiredActorSession {
             owner_creator_id: row.ctx.owner_creator_id.clone(),
             actor_kind: row.key.actor_kind,
+            actor_id: row.key.actor_id.clone(),
+            world_id: row.key.world_id.clone(),
+            binding_id: row.key.binding_id.clone(),
+            branch_id: row.key.branch_id.clone(),
+            event_id: row.key.event_id.clone(),
         }
     }
 
@@ -731,6 +797,100 @@ impl ActorSessionRegistry {
 /// # Errors
 ///
 /// Returns `internal` if stored ids fail generated pattern checks (should not happen).
+
+/// Map a retired-session tombstone onto generated session response optionals
+/// so leftover Host rows stay recognizably Actor-mode (durable §11.3.3).
+///
+/// # Errors
+///
+/// Returns `internal` if stored ids fail generated pattern checks (should not happen).
+fn echo_retired_pair(
+    tombstone: &RetiredActorSession,
+) -> Result<(Option<NexusActorRef>, Option<NexusSessionViewpoint>), NexusApiError> {
+    let actor_ref = match tombstone.actor_kind {
+        ActorSessionKind::Creator => NexusActorRef::CreatorActorRef {
+            actor_kind: "creator"
+                .parse()
+                .map_err(|e: nexus_contracts::generated::daemon_api::agent_host::session_response::error::ConversionError| {
+                    NexusApiError::Internal {
+                        code: "ACTOR_REF_ECHO".into(),
+                        message: e.to_string(),
+                    }
+                })?,
+            creator_id: tombstone.actor_id.parse().map_err(
+                |e: nexus_contracts::generated::daemon_api::agent_host::session_response::error::ConversionError| {
+                    NexusApiError::Internal {
+                        code: "ACTOR_REF_ECHO".into(),
+                        message: e.to_string(),
+                    }
+                },
+            )?,
+        },
+        ActorSessionKind::Character => NexusActorRef::CharacterActorRef {
+            actor_kind: "character"
+                .parse()
+                .map_err(|e: nexus_contracts::generated::daemon_api::agent_host::session_response::error::ConversionError| {
+                    NexusApiError::Internal {
+                        code: "ACTOR_REF_ECHO".into(),
+                        message: e.to_string(),
+                    }
+                })?,
+            character_id: tombstone.actor_id.parse().map_err(
+                |e: nexus_contracts::generated::daemon_api::agent_host::session_response::error::ConversionError| {
+                    NexusApiError::Internal {
+                        code: "ACTOR_REF_ECHO".into(),
+                        message: e.to_string(),
+                    }
+                },
+            )?,
+        },
+    };
+    let viewpoint = NexusSessionViewpoint {
+        world_id: tombstone.world_id.parse().map_err(
+            |e: nexus_contracts::generated::daemon_api::agent_host::session_response::error::ConversionError| {
+                NexusApiError::Internal {
+                    code: "VIEWPOINT_ECHO".into(),
+                    message: e.to_string(),
+                }
+            },
+        )?,
+        binding_id: match &tombstone.binding_id {
+            Some(id) => Some(id.parse().map_err(
+                |e: nexus_contracts::generated::daemon_api::agent_host::session_response::error::ConversionError| {
+                    NexusApiError::Internal {
+                        code: "VIEWPOINT_ECHO".into(),
+                        message: e.to_string(),
+                    }
+                },
+            )?),
+            None => None,
+        },
+        branch_id: match &tombstone.branch_id {
+            Some(id) => Some(id.parse().map_err(
+                |e: nexus_contracts::generated::daemon_api::agent_host::session_response::error::ConversionError| {
+                    NexusApiError::Internal {
+                        code: "VIEWPOINT_ECHO".into(),
+                        message: e.to_string(),
+                    }
+                },
+            )?),
+            None => None,
+        },
+        event_id: match &tombstone.event_id {
+            Some(id) => Some(id.parse().map_err(
+                |e: nexus_contracts::generated::daemon_api::agent_host::session_response::error::ConversionError| {
+                    NexusApiError::Internal {
+                        code: "VIEWPOINT_ECHO".into(),
+                        message: e.to_string(),
+                    }
+                },
+            )?),
+            None => None,
+        },
+    };
+    Ok((Some(actor_ref), Some(viewpoint)))
+}
+
 pub fn echo_actor_pair(
     ctx: &AdmittedActorContext,
 ) -> Result<(Option<NexusActorRef>, Option<NexusSessionViewpoint>), NexusApiError> {

@@ -375,8 +375,16 @@ fn overlay_actor_pair(
 >{
     state
         .actor_sessions()
-        .context_for(session_id)
-        .map_or_else(|| Ok((None, None)), |ctx| echo_actor_pair(&ctx))
+        .echo_actor_pair_for_session(session_id)
+}
+
+fn session_for_operation<'a>(
+    sessions: &'a [nexus_agent_host::HostSession],
+    op_id: &nexus_agent_host::HostOperationId,
+) -> Option<&'a nexus_agent_host::HostSession> {
+    sessions.iter().find(|s| {
+        s.active_op_id.as_ref() == Some(op_id) || s.state.active_op_id() == Some(op_id)
+    })
 }
 
 /// GET /v1/daemon/agent-host/sessions
@@ -681,6 +689,11 @@ pub async fn execute_operation(
     let host_op = match req {
         ExecuteOperationRequest::Prompt { content } => {
             let (content, guard) = prepare_prompt(&state, &sid, content).await?;
+            if state.actor_sessions().is_actor_session(&sid) {
+                state
+                    .actor_sessions()
+                    .register_indexed_operation(op_id.clone(), sid.clone());
+            }
             let host_op = nexus_agent_host::capability::model::HostOperation::Prompt {
                 op_id: op_id.clone(),
                 content: vec![
@@ -769,8 +782,12 @@ pub async fn cancel_operation(
     // and authorize the owner BEFORE cancelling; a foreign id is 404 with no
     // Host effect. (P3 replaces this lookup with trusted operation records.)
     let sessions = host.list_sessions().await.map_err(|e| map_host_error(&e))?;
-    if let Some(session) = sessions.iter().find(|s| s.active_op_id.as_ref() == Some(&op_id)) {
-        authorize_actor_session(&state, &session.id)?;
+    let indexed_session = session_for_operation(&sessions, &op_id)
+        .map(|s| s.id.clone())
+        .or_else(|| state.actor_sessions().resolve_indexed_operation_session(&op_id));
+    if let Some(session_id) = indexed_session {
+        authorize_actor_session(&state, &session_id)?;
+        state.actor_sessions().clear_indexed_operation(&op_id);
     }
     host.cancel(op_id).await.map_err(|e| map_host_error(&e))?;
 
@@ -2724,6 +2741,93 @@ mod tests {
             0,
             "foreign cancel must not reach Host"
         );
+    }
+
+    /// The session list filters foreign Character-indexed rows before
+    /// pagination: a foreign Character session never appears in another
+    /// Cancel of an indexed Character operation is fail-closed when Host has
+    /// not yet surfaced `active_op_id`: foreign caller → 404, zero Host cancels.
+    #[tokio::test]
+    async fn foreign_cancel_without_host_active_op_id_404s_with_zero_host_cancels() {
+        let (_tmp, mut state, host) = state_with_prompt_host().await;
+        let (session_id, _character_id, _binding_id) = create_actor_session(&state).await;
+        let started = execute_operation(
+            State(state.clone()),
+            Path(session_id.clone()),
+            Json(ExecuteOperationRequest::Prompt {
+                content: "do a thing".into(),
+            }),
+        )
+        .await
+        .expect("start prompt");
+        let op_uuid = nexus_agent_host::HostOperationId(
+            started.operation_id.parse().expect("uuid"),
+        );
+        assert!(
+            host.sessions
+                .lock()
+                .expect("sessions")
+                .get(&nexus_agent_host::HostSessionId(
+                    session_id.parse().expect("uuid")
+                ))
+                .expect("session")
+                .active_op_id
+                .is_none(),
+            "test models Host before active_op_id is indexed"
+        );
+
+        std::fs::write(
+            state.nexus_home().join("config.toml"),
+            "active_creator_id = \"ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"
+
+[active_workspace_slug_by_creator]
+\"ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\" = \"default\"
+",
+        )
+        .unwrap();
+        let err = cancel_operation(
+            State(state.clone()),
+            Path(format!("{op_uuid}:cancel")),
+        )
+        .await
+        .expect_err("foreign cancel");
+        assert_eq!(err.error_code(), "not_found");
+        assert_eq!(
+            host.cancels.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "foreign cancel must not reach Host"
+        );
+    }
+
+    /// Retired Character sessions still overlay actor_ref/viewpoint on list/get.
+    #[tokio::test]
+    async fn retired_session_overlay_keeps_actor_ref_on_list_and_get() {
+        let (_tmp, state, _host) = state_with_prompt_host().await;
+        let (session_id, character_id, _binding_id) = create_actor_session(&state).await;
+        state.actor_sessions().retire_character_sessions(&character_id);
+
+        let listed = list_sessions(
+            State(state.clone()),
+            Query(AgentHostListSessionsQuery {
+                limit: None,
+                cursor: None,
+            }),
+        )
+        .await
+        .expect("list");
+        let row = listed
+            .items
+            .iter()
+            .find(|s| s.session_id == session_id)
+            .expect("retired host row still listed");
+        assert!(row.actor_ref.is_some(), "retired row keeps actor_ref overlay");
+        assert!(row.viewpoint.is_some(), "retired row keeps viewpoint overlay");
+
+        let got = get_session(State(state.clone()), Path(session_id.clone()))
+            .await
+            .expect("get retired session");
+        assert!(got.actor_ref.is_some());
+        assert!(got.viewpoint.is_some());
     }
 
     /// The session list filters foreign Character-indexed rows before

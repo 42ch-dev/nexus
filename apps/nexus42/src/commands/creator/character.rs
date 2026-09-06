@@ -883,6 +883,9 @@ async fn edit_character(
             "edit requires at least one mutable field (--display-name, --image-uri, --clear-image-uri, --persona, or --clear-persona)".into(),
         ));
     }
+    // Unlike archive/restore (generated `CharacterLifecycleRequest`), edit
+    // hand-rolls the PATCH body so explicit JSON null clears (`--clear-*`) are
+    // expressible; the generated `UpdateCharacterRequest` skips absent members.
     let mut body = serde_json::json!({ "expected_revision": expected_revision });
     if let Some(name) = display_name {
         body["display_name"] = serde_json::Value::String(name);

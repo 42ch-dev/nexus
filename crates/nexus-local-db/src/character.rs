@@ -564,11 +564,11 @@ pub async fn update_character(
         let (display_name, image_uri, persona_json) = apply_character_patch_fields(&current, patch).await?;
         let now = chrono::Utc::now().to_rfc3339();
         let new_revision = expected_revision + 1;
-        let updated = sqlx::query!(
+        let updated = map_actor_constraint(sqlx::query!(
             r#"UPDATE characters SET display_name = ?, image_uri = ?, persona_json = ?, updated_at = ?, revision = ?
                WHERE character_id = ? AND owner_creator_id = ? AND revision = ? AND status = 'active'"#,
             display_name, image_uri, persona_json, now, new_revision, character_id, owner_creator_id, expected_revision
-        ).execute(&mut *tx).await?.rows_affected();
+        ).execute(&mut *tx).await)?.rows_affected();
         if updated == 0 { return Err(revision_conflict()); }
         load_character(&mut tx, character_id).await?.ok_or_else(|| LocalDbError::ActorNotFound {
             resource: "character", id: character_id.to_string(),

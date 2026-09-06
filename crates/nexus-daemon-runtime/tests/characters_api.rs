@@ -812,6 +812,88 @@ async fn archive_refuses_character_busy_while_activity_outstanding() {
     assert_eq!(ok.status_code(), 200, "body={}", ok.text());
 }
 
+#[tokio::test]
+async fn add_binding_holds_activity_fence_blocking_archive() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let id = created["character"]["character_id"].as_str().unwrap();
+    let guard = ctx
+        .state
+        .actor_sessions()
+        .admit_character_activity(&ctx.pool, OWNER, id)
+        .await
+        .expect("admit activity as add_binding does before local-db");
+    let busy = archive_character(&ctx.server, id, 0).await;
+    assert_eq!(busy.status_code(), 409, "body={}", busy.text());
+    assert_eq!(busy.json::<Value>()["error"]["code"], "character_busy");
+    drop(guard);
+    let ok = ctx
+        .server
+        .post(&format!("/v1/daemon/characters/{id}/bindings"))
+        .json(&json!({ "world_id": WORLD_B }))
+        .await;
+    assert_eq!(ok.status_code(), 201, "body={}", ok.text());
+}
+
+#[tokio::test]
+async fn remove_binding_holds_activity_fence_blocking_archive() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let id = created["character"]["character_id"].as_str().unwrap();
+    let binding_id = ctx
+        .server
+        .post(&format!("/v1/daemon/characters/{id}/bindings"))
+        .json(&json!({ "world_id": WORLD_B }))
+        .await
+        .json::<Value>()["binding"]["binding_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let guard = ctx
+        .state
+        .actor_sessions()
+        .admit_character_activity(&ctx.pool, OWNER, id)
+        .await
+        .expect("admit activity as remove_binding does before local-db");
+    let busy = archive_character(&ctx.server, id, 0).await;
+    assert_eq!(busy.status_code(), 409, "body={}", busy.text());
+    assert_eq!(busy.json::<Value>()["error"]["code"], "character_busy");
+    drop(guard);
+    let ok = ctx
+        .server
+        .delete(&format!("/v1/daemon/characters/{id}/bindings/{binding_id}"))
+        .await;
+    assert_eq!(ok.status_code(), 204, "body={}", ok.text());
+}
+
+#[tokio::test]
+async fn patch_rename_collision_is_duplicate_character_display_name() {
+    let ctx = ctx().await;
+    create_character(&ctx.server, "Ava", WORLD_A).await;
+    let second = create_character(&ctx.server, "Bea", WORLD_B).await;
+    let second_id = second["character"]["character_id"].as_str().unwrap();
+    let resp = patch_character(
+        &ctx.server,
+        second_id,
+        json!({ "expected_revision": 0, "display_name": "Ava" }),
+    )
+    .await;
+    assert_eq!(resp.status_code(), 409, "body={}", resp.text());
+    assert_eq!(
+        resp.json::<Value>()["error"]["code"],
+        "duplicate_character_display_name"
+    );
+    let row: (String, i64) = sqlx::query_as(
+        "SELECT display_name, revision FROM characters WHERE character_id = ?",
+    )
+    .bind(second_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(row.0, "Bea");
+    assert_eq!(row.1, 0);
+}
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 

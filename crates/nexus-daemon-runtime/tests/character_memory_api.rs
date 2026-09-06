@@ -43,6 +43,7 @@ struct Ctx {
     server: TestServer,
     pool: sqlx::SqlitePool,
     nexus_home: std::path::PathBuf,
+    state: WorkspaceState,
 }
 
 async fn ctx() -> Ctx {
@@ -57,13 +58,14 @@ async fn ctx() -> Ctx {
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
     let pool = state.pool().unwrap().clone();
     seed_actor_fixture(&pool).await;
-    let server = TestServer::new(api::create_router(state, DaemonApiConfig::keyless()))
+    let server = TestServer::new(api::create_router(state.clone(), DaemonApiConfig::keyless()))
         .expect("test server");
     Ctx {
         _tmp: tmp,
         server,
         pool,
         nexus_home,
+        state,
     }
 }
 
@@ -1120,3 +1122,94 @@ async fn review_is_bounded_at_batch_limit_with_correct_has_more() {
         .unwrap();
     assert_eq!(total.0, 0, "short digests are dropped, not fragmented");
 }
+
+#[allow(clippy::future_not_send)]
+async fn archive_character(server: &TestServer, id: &str, expected_revision: i64) -> axum_test::TestResponse {
+    server
+        .post(&format!("/v1/daemon/characters/{id}/archive"))
+        .json(&json!({ "expected_revision": expected_revision }))
+        .await
+}
+
+#[tokio::test]
+async fn delete_pending_review_holds_activity_fence_blocking_archive() {
+    let ctx = ctx().await;
+    let (chr, _bind) = create_character(&ctx.server, "Ava", WORLD_A).await;
+    capture(
+        &ctx.server,
+        &chr,
+        "pend_busy",
+        None,
+        Some("research"),
+        FRAGMENT_DIGEST,
+        "2026-01-01T00:00:01Z",
+    )
+    .await;
+    let guard = ctx
+        .state
+        .actor_sessions()
+        .admit_character_activity(&ctx.pool, OWNER, &chr)
+        .await
+        .expect("admit activity as delete_pending_review does before local-db");
+    let busy = archive_character(&ctx.server, &chr, 0).await;
+    assert_eq!(busy.status_code(), 409, "body={}", busy.text());
+    assert_eq!(j(&busy)["error"]["code"], "character_busy");
+    drop(guard);
+    let ok = ctx
+        .server
+        .delete(&format!(
+            "{}/pending-review/pend_busy",
+            memory_base(&chr)
+        ))
+        .await;
+    assert_eq!(ok.status_code(), 200, "body={}", ok.text());
+}
+
+#[tokio::test]
+async fn promote_fragment_holds_activity_fence_blocking_archive() {
+    let ctx = ctx().await;
+    let (chr, bind1) = create_character(&ctx.server, "Ava", WORLD_A).await;
+    capture(
+        &ctx.server,
+        &chr,
+        "pend_promote",
+        Some(&bind1),
+        Some("research"),
+        FRAGMENT_DIGEST,
+        "2026-01-01T00:00:01Z",
+    )
+    .await;
+    ctx.server
+        .post(&format!("{}/review", memory_base(&chr)))
+        .json(&json!({ "binding_id": bind1 }))
+        .await;
+    let fragment_id = ctx
+        .server
+        .get(&format!(
+            "{}/fragments?binding_id={bind1}",
+            memory_base(&chr)
+        ))
+        .await
+        .json::<Value>()["fragments"][0]["fragment_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let promote_path = format!("{}/fragments/{fragment_id}:promote", memory_base(&chr));
+    let guard = ctx
+        .state
+        .actor_sessions()
+        .admit_character_activity(&ctx.pool, OWNER, &chr)
+        .await
+        .expect("admit activity as promote_fragment does before local-db");
+    let busy = archive_character(&ctx.server, &chr, 0).await;
+    assert_eq!(busy.status_code(), 409, "body={}", busy.text());
+    assert_eq!(j(&busy)["error"]["code"], "character_busy");
+    drop(guard);
+    let ok = ctx
+        .server
+        .post(&promote_path)
+        .json(&json!({ "expected_revision": 0 }))
+        .await;
+    assert_eq!(ok.status_code(), 200, "body={}", ok.text());
+}
+

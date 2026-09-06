@@ -255,9 +255,9 @@ fn character_patch_is_empty(patch: &CharacterPatch<'_>) -> bool {
 /// 2. `transition_character` `BEGIN IMMEDIATE` commit (revision/epoch increment),
 /// 3. while the fence is still held, `retire_character_sessions` only when the
 ///    returned epoch differs from the guard's pre-transition epoch,
-/// 4. one Host shutdown attempt per retired id outside registry locks (failures
-///    are logged and cannot undo the committed transition),
-/// 5. guard release on return.
+/// 4. release the exclusive fence, then one Host shutdown attempt per retired id
+///    outside registry locks (failures are logged and cannot undo the commit),
+/// 5. return the committed record.
 async fn execute_character_lifecycle(
     state: &WorkspaceState,
     owner: &str,
@@ -266,24 +266,27 @@ async fn execute_character_lifecycle(
     target: CharacterStatus,
 ) -> Result<CharacterRecord, NexusApiError> {
     let registry = state.actor_sessions();
-    let guard = registry
-        .try_character_transition(state.pool_or_uninit()?, owner, character_id)
+    let (record, retired_ids) = {
+        let guard = registry
+            .try_character_transition(state.pool_or_uninit()?, owner, character_id)
+            .await?;
+        let pre_epoch = guard.epoch();
+
+        let record = nexus_local_db::transition_character(
+            state.pool_or_uninit()?,
+            owner,
+            character_id,
+            expected_revision,
+            target,
+        )
         .await?;
-    let pre_epoch = guard.epoch();
 
-    let record = nexus_local_db::transition_character(
-        state.pool_or_uninit()?,
-        owner,
-        character_id,
-        expected_revision,
-        target,
-    )
-    .await?;
-
-    let retired_ids = if record.lifecycle_epoch != pre_epoch {
-        registry.retire_character_sessions(character_id)
-    } else {
-        Vec::new()
+        let retired_ids = if record.lifecycle_epoch != pre_epoch {
+            registry.retire_character_sessions(character_id)
+        } else {
+            Vec::new()
+        };
+        (record, retired_ids)
     };
 
     if !retired_ids.is_empty() {
@@ -395,6 +398,10 @@ pub async fn add_binding(
 ) -> Result<(StatusCode, Json<AddCharacterBindingResponse>), NexusApiError> {
     let req: AddCharacterBindingRequest = parse_canonical_json(&body)?;
     let owner = require_creator(&state)?;
+    let _guard = state
+        .actor_sessions()
+        .admit_character_activity(state.pool_or_uninit()?, &owner, &character_id)
+        .await?;
     let binding = nexus_local_db::add_actor_world_binding(
         state.pool_or_uninit()?,
         CreateBindingParams {
@@ -455,6 +462,10 @@ pub async fn remove_binding(
     Path((character_id, binding_id)): Path<(String, String)>,
 ) -> Result<StatusCode, NexusApiError> {
     let owner = require_creator(&state)?;
+    let _guard = state
+        .actor_sessions()
+        .admit_character_activity(state.pool_or_uninit()?, &owner, &character_id)
+        .await?;
     nexus_local_db::remove_binding(state.pool_or_uninit()?, &owner, &character_id, &binding_id)
         .await?;
     Ok(StatusCode::NO_CONTENT)
@@ -474,6 +485,8 @@ pub async fn patch_character(
             message: err.to_string(),
         })?;
     let patch = build_character_patch(&raw, &req, &mut persona_buf)?;
+    // Wire-shape validation intentionally precedes owner/404 admission so an
+    // empty patch on a foreign/missing Character returns 400, not 404.
     if character_patch_is_empty(&patch) {
         return Err(NexusApiError::BadRequest {
             code: "invalid_input".into(),
