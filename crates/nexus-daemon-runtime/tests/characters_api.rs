@@ -409,6 +409,21 @@ async fn foreign_binding_routes_are_404_and_do_not_mutate() {
             .fetch_one(&ctx.pool)
             .await
             .unwrap();
+    let show = ctx
+        .server
+        .get(&format!("/v1/daemon/characters/{chr}/bindings/{binding_id}"))
+        .await;
+    assert_eq!(show.status_code(), 404, "body={}", show.text());
+    assert_eq!(show.json::<Value>()["error"]["code"], "not_found");
+
+    let patch = ctx
+        .server
+        .patch(&format!("/v1/daemon/characters/{chr}/bindings/{binding_id}"))
+        .json(&json!({ "expected_revision": 0, "world_sheet_entry_id": null }))
+        .await;
+    assert_eq!(patch.status_code(), 404, "body={}", patch.text());
+    assert_eq!(patch.json::<Value>()["error"]["code"], "not_found");
+
     let removed = ctx
         .server
         .delete(&format!(
@@ -892,6 +907,167 @@ async fn patch_rename_collision_is_duplicate_character_display_name() {
     .unwrap();
     assert_eq!(row.0, "Bea");
     assert_eq!(row.1, 0);
+}
+
+
+#[allow(clippy::future_not_send)]
+async fn patch_binding(server: &TestServer, chr: &str, binding_id: &str, body: Value) -> axum_test::TestResponse {
+    server
+        .patch(&format!("/v1/daemon/characters/{chr}/bindings/{binding_id}"))
+        .json(&body)
+        .await
+}
+
+#[tokio::test]
+async fn binding_detail_link_relink_clear_and_cas_errors() {
+    let ctx = ctx().await;
+    sqlx::query(
+        "INSERT INTO kb_key_blocks          (key_block_id, world_id, block_type, canonical_name, status, body_json, created_at)          VALUES ('kb_sheet_a', ?, 'character', 'sheet_a', 'confirmed', '{}', datetime('now'))",
+    )
+    .bind(WORLD_A)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO kb_key_blocks          (key_block_id, world_id, block_type, canonical_name, status, body_json, created_at)          VALUES ('kb_sheet_b', ?, 'character', 'sheet_b', 'confirmed', '{}', datetime('now'))",
+    )
+    .bind(WORLD_A)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr = created["character"]["character_id"].as_str().unwrap();
+    let binding_id = created["binding"]["binding_id"].as_str().unwrap();
+
+    let show = ctx
+        .server
+        .get(&format!("/v1/daemon/characters/{chr}/bindings/{binding_id}"))
+        .await;
+    assert_eq!(show.status_code(), 200, "body={}", show.text());
+    assert_eq!(show.json::<Value>()["binding"]["revision"], 0);
+
+    let linked = patch_binding(
+        &ctx.server,
+        chr,
+        binding_id,
+        json!({ "expected_revision": 0, "world_sheet_entry_id": "kb_sheet_a" }),
+    )
+    .await;
+    assert_eq!(linked.status_code(), 200, "body={}", linked.text());
+    let linked_body: Value = linked.json();
+    assert_eq!(linked_body["binding"]["revision"], 1);
+    assert_eq!(linked_body["binding"]["world_sheet_entry_id"], "kb_sheet_a");
+
+    let relinked = patch_binding(
+        &ctx.server,
+        chr,
+        binding_id,
+        json!({ "expected_revision": 1, "world_sheet_entry_id": "kb_sheet_b" }),
+    )
+    .await;
+    assert_eq!(relinked.status_code(), 200);
+    assert_eq!(relinked.json::<Value>()["binding"]["revision"], 2);
+
+    let cleared = patch_binding(
+        &ctx.server,
+        chr,
+        binding_id,
+        json!({ "expected_revision": 2, "world_sheet_entry_id": null }),
+    )
+    .await;
+    assert_eq!(cleared.status_code(), 200);
+    let cleared_body: Value = cleared.json();
+    assert_eq!(cleared_body["binding"]["revision"], 3);
+    assert!(cleared_body["binding"]["world_sheet_entry_id"].is_null());
+
+    let noop = patch_binding(
+        &ctx.server,
+        chr,
+        binding_id,
+        json!({ "expected_revision": 3, "world_sheet_entry_id": null }),
+    )
+    .await;
+    assert_eq!(noop.status_code(), 200, "body={}", noop.text());
+    assert_eq!(noop.json::<Value>()["binding"]["revision"], 3);
+
+    let stale = patch_binding(
+        &ctx.server,
+        chr,
+        binding_id,
+        json!({ "expected_revision": 2, "world_sheet_entry_id": null }),
+    )
+    .await;
+    assert_eq!(stale.status_code(), 409, "body={}", stale.text());
+    assert_eq!(stale.json::<Value>()["error"]["code"], "binding_revision_conflict");
+
+    let empty = patch_binding(
+        &ctx.server,
+        chr,
+        binding_id,
+        json!({ "expected_revision": 3 }),
+    )
+    .await;
+    assert_eq!(empty.status_code(), 422);
+    assert_eq!(empty.json::<Value>()["error"]["code"], "invalid_input");
+}
+
+#[tokio::test]
+async fn binding_detail_retained_read_survives_archive() {
+    let ctx = ctx().await;
+    seed_sheet(&ctx.pool, "kb_retained", WORLD_A, "character", "confirmed").await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr = created["character"]["character_id"].as_str().unwrap();
+    let binding_id = created["binding"]["binding_id"].as_str().unwrap();
+    patch_binding(
+        &ctx.server,
+        chr,
+        binding_id,
+        json!({ "expected_revision": 0, "world_sheet_entry_id": "kb_retained" }),
+    )
+    .await;
+
+    archive_character(&ctx.server, chr, 0).await;
+
+    let show = ctx
+        .server
+        .get(&format!("/v1/daemon/characters/{chr}/bindings/{binding_id}"))
+        .await;
+    assert_eq!(show.status_code(), 200, "body={}", show.text());
+    assert_eq!(
+        show.json::<Value>()["binding"]["world_sheet_entry_id"],
+        "kb_retained"
+    );
+
+    let denied = patch_binding(
+        &ctx.server,
+        chr,
+        binding_id,
+        json!({ "expected_revision": 1, "world_sheet_entry_id": null }),
+    )
+    .await;
+    assert_eq!(denied.status_code(), 409, "body={}", denied.text());
+    assert_eq!(denied.json::<Value>()["error"]["code"], "character_inactive");
+}
+
+#[tokio::test]
+async fn patch_binding_rejects_invalid_world_sheet() {
+    let ctx = ctx().await;
+    seed_sheet(&ctx.pool, "kb_wrong_type", WORLD_A, "location", "confirmed").await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr = created["character"]["character_id"].as_str().unwrap();
+    let binding_id = created["binding"]["binding_id"].as_str().unwrap();
+
+    let resp = patch_binding(
+        &ctx.server,
+        chr,
+        binding_id,
+        json!({ "expected_revision": 0, "world_sheet_entry_id": "kb_wrong_type" }),
+    )
+    .await;
+    assert_eq!(resp.status_code(), 409, "body={}", resp.text());
+    let body: Value = resp.json();
+    assert_eq!(body["error"]["code"], "invalid_world_sheet");
+    assert_ne!(body["error"]["message"], "invalid_world_sheet");
 }
 
 use std::sync::atomic::{AtomicUsize, Ordering};

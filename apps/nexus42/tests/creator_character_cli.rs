@@ -544,3 +544,308 @@ async fn edit_without_mutable_fields_is_invalid_input() {
         "unexpected stderr: {err}"
     );
 }
+async fn seed_character_sheet(
+    d: &LiveDaemon,
+    key_block_id: &str,
+    world_id: &str,
+    canonical_name: &str,
+) {
+    sqlx::query(
+        "INSERT INTO kb_key_blocks          (key_block_id, world_id, block_type, canonical_name, status, body_json, created_at)          VALUES (?, ?, 'character', ?, 'confirmed', '{}', datetime('now'))",
+    )
+    .bind(key_block_id)
+    .bind(world_id)
+    .bind(canonical_name)
+    .execute(&d.pool)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn binding_detail_edit_link_relink_clear_and_refusals() {
+    let d = LiveDaemon::start().await;
+    activate_owner(&d).await;
+    seed_character_sheet(&d, "kb_sheet_a", WORLD_A, "sheet_a").await;
+    seed_character_sheet(&d, "kb_sheet_b", WORLD_A, "sheet_b").await;
+
+    let created = d
+        .cli(&[
+            "creator",
+            "character",
+            "create",
+            "--display-name",
+            "Ava",
+            "--world-id",
+            WORLD_A,
+            "--json",
+        ])
+        .await;
+    assert!(created.status.success(), "create: {}", stderr(&created));
+    let created_body: Value = serde_json::from_str(&stdout(&created)).unwrap();
+    let chr = created_body["character"]["character_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let binding_id = created_body["binding"]["binding_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let shown = d
+        .cli(&[
+            "creator",
+            "character",
+            "binding",
+            "show",
+            "--character-id",
+            &chr,
+            "--binding-id",
+            &binding_id,
+            "--json",
+        ])
+        .await;
+    assert!(shown.status.success(), "show: {}", stderr(&shown));
+    let show_body: Value = serde_json::from_str(&stdout(&shown)).unwrap();
+    assert_eq!(show_body["binding"]["revision"], 0);
+
+    let linked = d
+        .cli(&[
+            "creator",
+            "character",
+            "binding",
+            "edit",
+            "--character-id",
+            &chr,
+            "--binding-id",
+            &binding_id,
+            "--expected-revision",
+            "0",
+            "--world-sheet-entry-id",
+            "kb_sheet_a",
+            "--json",
+        ])
+        .await;
+    assert!(linked.status.success(), "link: {}", stderr(&linked));
+    let linked_body: Value = serde_json::from_str(&stdout(&linked)).unwrap();
+    assert_eq!(linked_body["binding"]["revision"], 1);
+    assert_eq!(linked_body["binding"]["world_sheet_entry_id"], "kb_sheet_a");
+
+    let relinked = d
+        .cli(&[
+            "creator",
+            "character",
+            "binding",
+            "edit",
+            "--character-id",
+            &chr,
+            "--binding-id",
+            &binding_id,
+            "--expected-revision",
+            "1",
+            "--world-sheet-entry-id",
+            "kb_sheet_b",
+            "--json",
+        ])
+        .await;
+    assert!(relinked.status.success(), "relink: {}", stderr(&relinked));
+    let relink_body: Value = serde_json::from_str(&stdout(&relinked)).unwrap();
+    assert_eq!(relink_body["binding"]["revision"], 2);
+
+    let cleared = d
+        .cli(&[
+            "creator",
+            "character",
+            "binding",
+            "edit",
+            "--character-id",
+            &chr,
+            "--binding-id",
+            &binding_id,
+            "--expected-revision",
+            "2",
+            "--clear-world-sheet",
+            "--json",
+        ])
+        .await;
+    assert!(cleared.status.success(), "clear: {}", stderr(&cleared));
+    let clear_body: Value = serde_json::from_str(&stdout(&cleared)).unwrap();
+    assert_eq!(clear_body["binding"]["revision"], 3);
+    assert!(clear_body["binding"]["world_sheet_entry_id"].is_null());
+
+    let stale = d
+        .cli(&[
+            "creator",
+            "character",
+            "binding",
+            "edit",
+            "--character-id",
+            &chr,
+            "--binding-id",
+            &binding_id,
+            "--expected-revision",
+            "2",
+            "--clear-world-sheet",
+        ])
+        .await;
+    assert!(!stale.status.success());
+    assert!(
+        stderr(&stale).contains("binding_revision_conflict"),
+        "stderr={}",
+        stderr(&stale)
+    );
+
+    let second = d
+        .cli(&[
+            "creator",
+            "character",
+            "binding",
+            "add",
+            "--character-id",
+            &chr,
+            "--world-id",
+            WORLD_B,
+            "--json",
+        ])
+        .await;
+    assert!(second.status.success(), "add second: {}", stderr(&second));
+    let second_body: Value = serde_json::from_str(&stdout(&second)).unwrap();
+    let second_binding = second_body["binding"]["binding_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let removed = d
+        .cli(&[
+            "creator",
+            "character",
+            "binding",
+            "remove",
+            "--character-id",
+            &chr,
+            "--binding-id",
+            &second_binding,
+        ])
+        .await;
+    assert!(removed.status.success(), "remove: {}", stderr(&removed));
+    assert!(stdout(&removed).is_empty(), "remove stdout must be empty");
+
+    let last = d
+        .cli(&[
+            "creator",
+            "character",
+            "binding",
+            "remove",
+            "--character-id",
+            &chr,
+            "--binding-id",
+            &binding_id,
+        ])
+        .await;
+    assert!(!last.status.success());
+    assert!(
+        stderr(&last).contains("last_active_actor_world_binding"),
+        "stderr={}",
+        stderr(&last)
+    );
+}
+
+#[tokio::test]
+async fn binding_show_retained_after_archive() {
+    let d = LiveDaemon::start().await;
+    activate_owner(&d).await;
+    seed_character_sheet(&d, "kb_retained", WORLD_A, "retained").await;
+
+    let created = d
+        .cli(&[
+            "creator",
+            "character",
+            "create",
+            "--display-name",
+            "Ava",
+            "--world-id",
+            WORLD_A,
+            "--json",
+        ])
+        .await;
+    assert!(created.status.success(), "create: {}", stderr(&created));
+    let created_body: Value = serde_json::from_str(&stdout(&created)).unwrap();
+    let chr = created_body["character"]["character_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let binding_id = created_body["binding"]["binding_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let linked = d
+        .cli(&[
+            "creator",
+            "character",
+            "binding",
+            "edit",
+            "--character-id",
+            &chr,
+            "--binding-id",
+            &binding_id,
+            "--expected-revision",
+            "0",
+            "--world-sheet-entry-id",
+            "kb_retained",
+            "--json",
+        ])
+        .await;
+    assert!(linked.status.success(), "link: {}", stderr(&linked));
+
+    let archived = d
+        .cli(&[
+            "creator",
+            "character",
+            "archive",
+            &chr,
+            "--expected-revision",
+            "0",
+            "--json",
+        ])
+        .await;
+    assert!(archived.status.success(), "archive: {}", stderr(&archived));
+
+    let shown = d
+        .cli(&[
+            "creator",
+            "character",
+            "binding",
+            "show",
+            "--character-id",
+            &chr,
+            "--binding-id",
+            &binding_id,
+            "--json",
+        ])
+        .await;
+    assert!(shown.status.success(), "retained show: {}", stderr(&shown));
+    let show_body: Value = serde_json::from_str(&stdout(&shown)).unwrap();
+    assert_eq!(show_body["binding"]["world_sheet_entry_id"], "kb_retained");
+
+    let denied = d
+        .cli(&[
+            "creator",
+            "character",
+            "binding",
+            "edit",
+            "--character-id",
+            &chr,
+            "--binding-id",
+            &binding_id,
+            "--expected-revision",
+            "1",
+            "--clear-world-sheet",
+        ])
+        .await;
+    assert!(!denied.status.success());
+    assert!(
+        stderr(&denied).contains("character_inactive"),
+        "stderr={}",
+        stderr(&denied)
+    );
+}

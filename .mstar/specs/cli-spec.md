@@ -16,6 +16,7 @@
 **V1.175 P1 amendment:** §6.2G.3-6 — reading / fork / inspector leaves (groups 3, 5, 6), strategy patch leaves (group 1), outline/timeline/chapter leaves (group 2), KB entity patch + memory closure + findings triage (groups 4, 7, 8). Thin daemon-HTTP leaves over existing routes (AR-83); no daemon route changes.
 **V1.182 P1 amendment:** §6.3B — hidden `nexus42 ops inspect [SESSION_ID] [--json]` operator group (BL-04): daemon-free read-only checkpoint projection with shared `resume_rules`; never triggers resume.
 **V1.185 P0 amendment:** §6.2I — `nexus42 creator character edit|archive|restore` identity lifecycle (explicit revision CAS; thin daemon-HTTP leaves).
+**V1.185 P1 amendment:** §6.2I — `nexus42 creator character binding show|edit` WorldSheet maintenance (binding revision CAS; thin daemon-HTTP leaves).
 
 ## 0. 文档定位
 
@@ -895,6 +896,31 @@ Rules:
 - **No CLI-side lifecycle logic.** The CLI maps flags to generated request
   bodies and prints responses; fences, epoch retirement, and Host cleanup run
   only in the daemon handlers.
+
+### 6.2I.1 V1.185 P1 amendment — `nexus42 creator character binding` WorldSheet maintenance (Normative)
+
+Normative: [actor-product-model.md](./actor-product-model.md) §11.4.
+
+Thin daemon-HTTP leaves over generated `CharacterBindingDetail` and
+`UpdateCharacterBindingRequest`. Only `world_sheet_entry_id` is mutable via
+`binding edit`; `--clear-world-sheet` maps to JSON `null`. The CLI never
+performs a hidden GET-and-retry overwrite. `binding show` and successful edits
+support `--json` for verbatim DTO output.
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 creator character binding show --character-id <id> --binding-id <id> [--json]` | Fetch one binding (`GET /v1/daemon/characters/:character_id/bindings/:binding_id`). Retained reads survive Character archive. |
+| `nexus42 creator character binding edit --character-id <id> --binding-id <id> --expected-revision <n> (--world-sheet-entry-id <kb_id> \| --clear-world-sheet) [--json]` | Link, relink, or clear the optional WorldSheet (`PATCH` on the same path). Requires exactly one of `--world-sheet-entry-id` or `--clear-world-sheet`. |
+
+Rules:
+
+- **Binding revision CAS.** Stale `--expected-revision` returns **409
+  `binding_revision_conflict`**; invalid WorldSheet targets return **409
+  `invalid_world_sheet`** without leaking target facts.
+- **Archived Character writes.** `binding edit` on an archived Character returns
+  **409 `character_inactive`**; retained `binding show` still succeeds.
+- **Remove unchanged.** `binding remove` success emits empty stdout (non-JSON);
+  last-binding and dependency refusals keep stable 409 codes with zero mutation.
 
 ### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
 
