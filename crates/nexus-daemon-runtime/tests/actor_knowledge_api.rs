@@ -22,6 +22,7 @@ struct Ctx {
     _tmp: TestTempRoot,
     server: TestServer,
     pool: sqlx::SqlitePool,
+    state: WorkspaceState,
 }
 
 async fn ctx() -> Ctx {
@@ -36,12 +37,13 @@ async fn ctx() -> Ctx {
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
     let pool = state.pool().unwrap().clone();
     seed_actor_fixture(&pool).await;
-    let server = TestServer::new(api::create_router(state, DaemonApiConfig::keyless()))
+    let server = TestServer::new(api::create_router(state.clone(), DaemonApiConfig::keyless()))
         .expect("test server");
     Ctx {
         _tmp: tmp,
         server,
         pool,
+        state,
     }
 }
 
@@ -905,7 +907,9 @@ async fn inactive_world_and_character_fail_closed_on_view_and_add() {
         .await;
     assert_eq!(ok.status_code(), 200, "control: {}", ok.text());
 
-    // Archive the Character: view + character-owned add fail closed.
+    // Archive the Character: the KnowledgeView is a retained read and still
+    // 200 (owned Character + stored binding tuple); the character-owned add
+    // fails closed with character_inactive.
     sqlx::query("UPDATE characters SET status = 'archived' WHERE character_id = ?")
         .bind(&chr)
         .execute(&ctx.pool)
@@ -922,13 +926,12 @@ async fn inactive_world_and_character_fail_closed_on_view_and_add() {
         .await;
     assert_eq!(
         view_archived_chr.status_code(),
-        409,
-        "{}",
+        200,
+        "archived Character view is retained: {}",
         view_archived_chr.text()
     );
     let body: Value = view_archived_chr.json();
-    assert_eq!(body["error"]["code"], "character_inactive");
-    assert!(body.get("items").is_none());
+    assert!(body.get("items").is_some());
 
     let add_archived_chr = ctx
         .server
@@ -949,7 +952,9 @@ async fn inactive_world_and_character_fail_closed_on_view_and_add() {
     let body: Value = add_archived_chr.json();
     assert_eq!(body["error"]["code"], "character_inactive");
 
-    // Archive the World: even the Creator component of a view fails closed.
+    // Archive the World: the Creator view is a retained read (an owned
+    // archived World keeps its retained history visible); the World-owned add
+    // still fails closed with world_inactive.
     sqlx::query("UPDATE narrative_worlds SET status = 'archived' WHERE world_id = ?")
         .bind(WORLD_A)
         .execute(&ctx.pool)
@@ -965,12 +970,12 @@ async fn inactive_world_and_character_fail_closed_on_view_and_add() {
         .await;
     assert_eq!(
         view_archived_world.status_code(),
-        409,
-        "{}",
+        200,
+        "archived World Creator view is retained: {}",
         view_archived_world.text()
     );
     let body: Value = view_archived_world.json();
-    assert_eq!(body["error"]["code"], "world_inactive");
+    assert!(body.get("items").is_some());
 
     let add_archived_world = ctx
         .server
@@ -991,3 +996,43 @@ async fn inactive_world_and_character_fail_closed_on_view_and_add() {
     let body: Value = add_archived_world.json();
     assert_eq!(body["error"]["code"], "world_inactive");
 }
+/// Fix round 1 (L2): character-owned KB add admits and holds the per-Character
+/// activity fence so a concurrent lifecycle transition refuses `character_busy`
+/// (durable §11.3.1/§11.3.2).
+#[tokio::test]
+async fn kb_character_add_holds_activity_fence() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "FenceKb", WORLD_A).await;
+    let chr = created["character"]["character_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let guard = ctx
+        .state
+        .actor_sessions()
+        .admit_character_activity(&ctx.pool, OWNER, &chr)
+        .await
+        .expect("admit activity as add_entry does before insert");
+    let busy = ctx
+        .state
+        .actor_sessions()
+        .try_character_transition(&ctx.pool, OWNER, &chr)
+        .await
+        .expect_err("archive blocked while KB-add activity fence held");
+    assert_eq!(busy.error_code(), "character_busy");
+    assert_eq!(busy.status_code(), axum::http::StatusCode::CONFLICT);
+
+    drop(guard);
+    add_entry(
+        &ctx.server,
+        json!({
+            "owner_kind": "character",
+            "character_id": chr,
+            "block_type": "item",
+            "canonical_name": "HeldFence"
+        }),
+    )
+    .await;
+}
+

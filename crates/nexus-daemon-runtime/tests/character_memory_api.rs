@@ -43,6 +43,7 @@ struct Ctx {
     server: TestServer,
     pool: sqlx::SqlitePool,
     nexus_home: std::path::PathBuf,
+    state: WorkspaceState,
 }
 
 async fn ctx() -> Ctx {
@@ -57,13 +58,14 @@ async fn ctx() -> Ctx {
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
     let pool = state.pool().unwrap().clone();
     seed_actor_fixture(&pool).await;
-    let server = TestServer::new(api::create_router(state, DaemonApiConfig::keyless()))
+    let server = TestServer::new(api::create_router(state.clone(), DaemonApiConfig::keyless()))
         .expect("test server");
     Ctx {
         _tmp: tmp,
         server,
         pool,
         nexus_home,
+        state,
     }
 }
 
@@ -820,7 +822,9 @@ async fn foreign_missing_inactive_character_and_binding_fail_before_side_effects
         .unwrap();
 
     let missing = "chr_ffffffffffffffffffffffffffffffff";
-    for target in [missing, foreign_chr.as_str(), archived_chr.as_str()] {
+    for target in [missing, foreign_chr.as_str()] {
+        // Missing/foreign Character: writes and reads all 404 (existence
+        // hidden from non-owners).
         let resp = capture(
             &ctx.server,
             target,
@@ -831,9 +835,10 @@ async fn foreign_missing_inactive_character_and_binding_fail_before_side_effects
             "2026-01-01T00:00:01Z",
         )
         .await;
-        assert!(
-            resp.status_code() == 403 || resp.status_code() == 404,
-            "capture against {target} must deny, got {}: {}",
+        assert_eq!(
+            resp.status_code(),
+            404,
+            "capture against {target} must 404, got {}: {}",
             resp.status_code(),
             resp.text()
         );
@@ -842,36 +847,75 @@ async fn foreign_missing_inactive_character_and_binding_fail_before_side_effects
             .post(&format!("{}/review", memory_base(target)))
             .json(&json!({}))
             .await;
-        assert!(
-            resp.status_code() == 403 || resp.status_code() == 404,
-            "review against {target} must deny"
-        );
+        assert_eq!(resp.status_code(), 404, "review against {target} must 404");
         let resp = ctx
             .server
             .post(&format!("/v1/daemon/characters/{target}/soul/reflect"))
             .json(&json!({ "force_regenerate": false }))
             .await;
-        assert!(
-            resp.status_code() == 403 || resp.status_code() == 404,
-            "reflect against {target} must deny"
+        assert_eq!(
+            resp.status_code(),
+            404,
+            "reflect against {target} must 404"
         );
+        let resp = ctx
+            .server
+            .get(&format!("{}/pending-review", memory_base(target)))
+            .await;
+        assert_eq!(resp.status_code(), 404, "read against {target} must 404");
     }
-    // Foreign/missing → 404 (existence hidden from non-owners); inactive → 403.
-    let resp = ctx
-        .server
-        .get(&format!("{}/pending-review", memory_base(missing)))
-        .await;
-    assert_eq!(resp.status_code(), 404);
-    let resp = ctx
-        .server
-        .get(&format!("{}/pending-review", memory_base(&foreign_chr)))
-        .await;
-    assert_eq!(resp.status_code(), 404);
+    // Archived Character (owned by the active Creator): retained reads → 200,
+    // writes → 409 character_inactive.
     let resp = ctx
         .server
         .get(&format!("{}/pending-review", memory_base(&archived_chr)))
         .await;
-    assert_eq!(resp.status_code(), 403);
+    assert_eq!(
+        resp.status_code(),
+        200,
+        "archived pending list is a retained read: {}",
+        resp.text()
+    );
+    let resp = ctx
+        .server
+        .post(&format!("{}/review", memory_base(&archived_chr)))
+        .json(&json!({}))
+        .await;
+    assert_eq!(
+        resp.status_code(),
+        409,
+        "archived review must be 409 character_inactive: {}",
+        resp.text()
+    );
+    assert_eq!(j(&resp)["error"]["code"], "character_inactive");
+    let resp = ctx
+        .server
+        .post(&format!("{}/pending-review", memory_base(&archived_chr)))
+        .json(&json!({
+            "pending_id": "pend_archived",
+            "session_id": "sess_archived",
+            "raw_digest": FRAGMENT_DIGEST,
+            "created_at": "2026-01-01T00:00:01Z"
+        }))
+        .await;
+    assert_eq!(
+        resp.status_code(),
+        409,
+        "archived capture must be 409 character_inactive: {}",
+        resp.text()
+    );
+    assert_eq!(j(&resp)["error"]["code"], "character_inactive");
+    let resp = ctx
+        .server
+        .post(&format!("/v1/daemon/characters/{archived_chr}/soul/reflect"))
+        .json(&json!({ "force_regenerate": false }))
+        .await;
+    assert_eq!(
+        resp.status_code(),
+        200,
+        "archived force=false reflect is a retained read: {}",
+        resp.text()
+    );
 
     // A binding of a different Character is not a valid scope for this one.
     let (chr_b, bind_b) = create_character(&ctx.server, "Boris", WORLD_A).await;
@@ -911,7 +955,8 @@ async fn foreign_missing_inactive_character_and_binding_fail_before_side_effects
     );
     assert_eq!(sql_count(&ctx.pool, "character_memory_fragments").await, 0);
 
-    // The archived character's binding scope is also denied.
+    // The archived character's binding scope stays a retained read (stored
+    // binding tuple, no liveness).
     let resp = ctx
         .server
         .get(&format!(
@@ -919,7 +964,12 @@ async fn foreign_missing_inactive_character_and_binding_fail_before_side_effects
             memory_base(&archived_chr)
         ))
         .await;
-    assert_eq!(resp.status_code(), 403);
+    assert_eq!(
+        resp.status_code(),
+        200,
+        "archived binding read is retained: {}",
+        resp.text()
+    );
 
     // Valid bindings still work after the deny matrix (no state drift).
     assert_eq!(count_pending(&ctx.server, &chr, Some(&bind1)).await, 0);
@@ -1072,3 +1122,94 @@ async fn review_is_bounded_at_batch_limit_with_correct_has_more() {
         .unwrap();
     assert_eq!(total.0, 0, "short digests are dropped, not fragmented");
 }
+
+#[allow(clippy::future_not_send)]
+async fn archive_character(server: &TestServer, id: &str, expected_revision: i64) -> axum_test::TestResponse {
+    server
+        .post(&format!("/v1/daemon/characters/{id}/archive"))
+        .json(&json!({ "expected_revision": expected_revision }))
+        .await
+}
+
+#[tokio::test]
+async fn delete_pending_review_holds_activity_fence_blocking_archive() {
+    let ctx = ctx().await;
+    let (chr, _bind) = create_character(&ctx.server, "Ava", WORLD_A).await;
+    capture(
+        &ctx.server,
+        &chr,
+        "pend_busy",
+        None,
+        Some("research"),
+        FRAGMENT_DIGEST,
+        "2026-01-01T00:00:01Z",
+    )
+    .await;
+    let guard = ctx
+        .state
+        .actor_sessions()
+        .admit_character_activity(&ctx.pool, OWNER, &chr)
+        .await
+        .expect("admit activity as delete_pending_review does before local-db");
+    let busy = archive_character(&ctx.server, &chr, 0).await;
+    assert_eq!(busy.status_code(), 409, "body={}", busy.text());
+    assert_eq!(j(&busy)["error"]["code"], "character_busy");
+    drop(guard);
+    let ok = ctx
+        .server
+        .delete(&format!(
+            "{}/pending-review/pend_busy",
+            memory_base(&chr)
+        ))
+        .await;
+    assert_eq!(ok.status_code(), 200, "body={}", ok.text());
+}
+
+#[tokio::test]
+async fn promote_fragment_holds_activity_fence_blocking_archive() {
+    let ctx = ctx().await;
+    let (chr, bind1) = create_character(&ctx.server, "Ava", WORLD_A).await;
+    capture(
+        &ctx.server,
+        &chr,
+        "pend_promote",
+        Some(&bind1),
+        Some("research"),
+        FRAGMENT_DIGEST,
+        "2026-01-01T00:00:01Z",
+    )
+    .await;
+    ctx.server
+        .post(&format!("{}/review", memory_base(&chr)))
+        .json(&json!({ "binding_id": bind1 }))
+        .await;
+    let fragment_id = ctx
+        .server
+        .get(&format!(
+            "{}/fragments?binding_id={bind1}",
+            memory_base(&chr)
+        ))
+        .await
+        .json::<Value>()["fragments"][0]["fragment_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let promote_path = format!("{}/fragments/{fragment_id}:promote", memory_base(&chr));
+    let guard = ctx
+        .state
+        .actor_sessions()
+        .admit_character_activity(&ctx.pool, OWNER, &chr)
+        .await
+        .expect("admit activity as promote_fragment does before local-db");
+    let busy = archive_character(&ctx.server, &chr, 0).await;
+    assert_eq!(busy.status_code(), 409, "body={}", busy.text());
+    assert_eq!(j(&busy)["error"]["code"], "character_busy");
+    drop(guard);
+    let ok = ctx
+        .server
+        .post(&promote_path)
+        .json(&json!({ "expected_revision": 0 }))
+        .await;
+    assert_eq!(ok.status_code(), 200, "body={}", ok.text());
+}
+

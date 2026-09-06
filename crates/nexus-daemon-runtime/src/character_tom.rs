@@ -212,7 +212,12 @@ impl CharacterTomService {
         viewer_character_id: &str,
         query: CharacterTomListQuery,
     ) -> Result<CharacterTomPage, NexusApiError> {
-        self.admit_viewer(
+        // ToM list is a retained read (§11.2): read the owned Character's
+        // stored bindings and carriers with the owner + stored binding tuple,
+        // not liveness. No L2 subject-reactivation requirement on historical
+        // rows. Foreign/missing rows and a missing/foreign World still fail
+        // closed (indistinguishable).
+        self.admit_viewer_retained(
             caller_creator_id,
             viewer_character_id,
             &query.world_id,
@@ -409,6 +414,61 @@ impl CharacterTomService {
             .require_active_binding(viewer_character_id, binding_id, world_id)
             .await?;
         Ok(())
+    }
+
+    /// Retained-data read admission (v1.185 P0 Task 2): owned Character (any
+    /// status), the stored binding tuple (`binding_id` belongs to the viewer
+    /// Character and targets `world_id`, any binding status), and an owned
+    /// World (any status). Liveness is not required for a read; missing,
+    /// foreign, or cross-Character rows are indistinguishable from missing and
+    /// fail closed.
+    async fn admit_viewer_retained(
+        &self,
+        caller_creator_id: &str,
+        viewer_character_id: &str,
+        world_id: &str,
+        binding_id: &str,
+    ) -> Result<(), NexusApiError> {
+        self.require_owned_character(caller_creator_id, viewer_character_id)
+            .await?;
+        self.require_owned_world(caller_creator_id, world_id).await?;
+        self.views
+            .require_stored_binding_tuple(viewer_character_id, binding_id, world_id)
+            .await?;
+        Ok(())
+    }
+
+    /// Owned Character with no status requirement (retained reads).
+    async fn require_owned_character(
+        &self,
+        creator_id: &str,
+        character_id: &str,
+    ) -> Result<(), NexusApiError> {
+        let row = nexus_local_db::get_character(&self.pool, creator_id, character_id).await?;
+        match row {
+            Some(_) => Ok(()),
+            None => Err(not_found("character", character_id)),
+        }
+    }
+
+    /// Owned World with no status requirement (retained reads).
+    async fn require_owned_world(
+        &self,
+        creator_id: &str,
+        world_id: &str,
+    ) -> Result<(), NexusApiError> {
+        let row = sqlx::query!(
+            r#"SELECT owner_creator_id AS "owner_creator_id!"
+               FROM narrative_worlds WHERE world_id = ?"#,
+            world_id
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(NexusApiError::from)?;
+        match row {
+            Some(stored) if stored.owner_creator_id == creator_id => Ok(()),
+            Some(_) | None => Err(not_found("world", world_id)),
+        }
     }
 
     /// In-transaction revalidation of the complete live record scope

@@ -11,8 +11,8 @@
 use futures_util::TryStreamExt;
 use sqlx::SqlitePool;
 
-use crate::actor_world_binding::require_active_owned_provenance_pool;
-use crate::character::{require_active_owned_character, require_owned_character_pool};
+use crate::actor_world_binding::require_owned_binding_provenance_pool;
+use crate::character::{require_active_owned_character_tx, require_owned_character_pool};
 use crate::error::LocalDbError;
 use crate::soul_narrative::{build_stats_fingerprint, SoulNarrativeFragmentStats};
 
@@ -99,12 +99,13 @@ async fn load_narrative(
 /// Read the cached narrative for a Character scope.
 ///
 /// `binding_id = None` reads the shared Character scope; `Some(b)` reads the
-/// binding-local scope and requires the exact active binding.
+/// binding-local scope and requires the stored binding tuple plus an existing
+/// owned World (liveness not required).
 ///
 /// # Errors
 ///
 /// Returns `LocalDbError::ActorNotFound` when the Character (or, for a
-/// binding-scoped read, the binding) is missing, foreign, or inactive;
+/// binding-scoped read, the binding/World) is missing or foreign;
 /// `LocalDbError` on database failure.
 pub async fn get_character_soul_narrative(
     pool: &SqlitePool,
@@ -114,7 +115,7 @@ pub async fn get_character_soul_narrative(
 ) -> Result<Option<CharacterSoulNarrativeRecord>, LocalDbError> {
     require_owned_character_pool(pool, owner_creator_id, character_id).await?;
     if let Some(binding_id) = binding_id {
-        require_active_owned_provenance_pool(pool, owner_creator_id, character_id, binding_id)
+        require_owned_binding_provenance_pool(pool, owner_creator_id, character_id, binding_id)
             .await?;
     }
     load_narrative(pool, character_id, binding_id).await
@@ -138,7 +139,7 @@ pub async fn upsert_character_soul_narrative(
 ) -> Result<(), LocalDbError> {
     let mut tx = crate::begin_immediate(pool).await?;
     let result = async {
-        require_active_owned_character(&mut tx, owner_creator_id, &record.character_id).await?;
+        require_active_owned_character_tx(&mut tx, owner_creator_id, &record.character_id).await?;
         crate::actor_world_binding::require_valid_provenance_tx(
             &mut tx,
             owner_creator_id,
@@ -276,7 +277,7 @@ async fn update_stats_cache(
 /// # Errors
 ///
 /// Returns `LocalDbError::ActorNotFound` when the Character (or, for a
-/// binding-scoped read, the binding) is missing, foreign, or inactive;
+/// binding-scoped read, the binding/World) is missing or foreign;
 /// `LocalDbError` on database failure.
 pub async fn character_soul_narrative_fragment_stats(
     pool: &SqlitePool,
@@ -292,7 +293,7 @@ pub async fn character_soul_narrative_fragment_stats(
 > {
     require_owned_character_pool(pool, owner_creator_id, character_id).await?;
     if let Some(binding_id) = binding_id {
-        require_active_owned_provenance_pool(pool, owner_creator_id, character_id, binding_id)
+        require_owned_binding_provenance_pool(pool, owner_creator_id, character_id, binding_id)
             .await?;
     }
 

@@ -588,6 +588,85 @@ impl SqliteKbStore {
             created_at,
         })
     }
+
+    /// Insert a Character- or ActorWorldBinding-owned KE with in-transaction
+    /// active-owner revalidation (v1.185 P0 Task 2, durable §11.3.5): a KE
+    /// insert must not rely only on an earlier route check — the stored owner
+    /// + provenance tuple is re-verified inside the same `BEGIN IMMEDIATE`
+    /// transaction as the row.
+    ///
+    /// `binding_id` is `None` for a Character-owned KE and the admitted
+    /// binding id for a binding-owned KE. The supplying `character_id` is the
+    /// admitted owner Character. A World-owned KE is a no-op wrapper here
+    /// (World maintenance is out of scope) and just delegates to the checked
+    /// insert.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LocalDbError::ActorContractConflict::CharacterInactive` for an
+    /// archived Character, `ActorNotFound` for a foreign/missing Character,
+    /// a foreign/missing/inactive binding, or a foreign/missing/non-active
+    /// World; `ActorContractConflict` duplicate mappings and `LocalDbError`
+    /// on database failure are preserved.
+    pub async fn insert_actor_owned_key_block(
+        &self,
+        owner_creator_id: &str,
+        character_id: &str,
+        binding_id: Option<&str>,
+        kb: KnowledgeEntryRecord,
+    ) -> Result<KbInsertResult, LocalDbError> {
+        let mut tx = crate::begin_immediate(&self.pool).await?;
+        let result = async {
+            // Stored live revalidation in the same write transaction as the
+            // INSERT (Task 1's canonical active gate).
+            crate::character::require_active_owned_character_tx(
+                &mut tx,
+                owner_creator_id,
+                character_id,
+            )
+            .await?;
+            if let Some(binding_id) = binding_id {
+                crate::actor_world_binding::require_valid_provenance_tx(
+                    &mut tx,
+                    owner_creator_id,
+                    character_id,
+                    Some(binding_id),
+                )
+                .await?;
+            }
+            self.insert_key_block_in_tx(&mut tx, kb)
+                .await
+                .map_err(map_kb_store_to_local_db)
+        }
+        .await;
+        match result {
+            Ok(inserted) => {
+                tx.commit().await?;
+                Ok(inserted)
+            }
+            Err(err) => {
+                let _ = tx.rollback().await;
+                Err(err)
+            }
+        }
+    }
+}
+
+/// Map a `KbStoreError` to the canonical local-db error so the daemon can
+/// surface stable contract codes (duplicate → constraint; validation →
+/// validation).
+fn map_kb_store_to_local_db(err: KbStoreError) -> LocalDbError {
+    match err {
+        KbStoreError::Duplicate { name, .. } => LocalDbError::ConstraintViolation {
+            table: "kb_key_blocks".to_string(),
+            constraint: format!("duplicate canonical_name '{name}'"),
+        },
+        KbStoreError::Validation(e) => LocalDbError::ValidationError(e.to_string()),
+        KbStoreError::ValidationLegacy(e) => LocalDbError::ValidationError(e),
+        other => LocalDbError::Sqlx(sqlx::Error::Protocol(format!(
+            "kb store error: {other}"
+        ))),
+    }
 }
 
 // Row type matching the kb_key_blocks DDL.
@@ -3160,5 +3239,69 @@ mod tests {
             matches!(err, LocalDbError::VersionMismatch { .. }),
             "same-world stale revision keeps VersionMismatch: {err:?}"
         );
+    }
+
+    /// v1.185 P0 Task 2: a Character/binding-owned KE insert revalidates the
+    /// active owned Character inside the write transaction (durable §11.3.5),
+    /// not just the route check. An archived Character refuses
+    /// `character_inactive` with zero mutation; an active one inserts.
+    #[tokio::test]
+    async fn insert_actor_owned_key_block_revalidates_active_owner_in_tx() {
+        let (pool, _dir) = fresh_pool().await;
+        crate::ensure_creator_row(&pool, "ctr_a", "A").await.unwrap();
+        sqlx::query(
+            "INSERT INTO characters \
+             (character_id, owner_creator_id, display_name, status, image_uri, persona_json, \
+              created_at, updated_at) \
+             VALUES ('chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab', 'ctr_a', 'AOwner', 'active', NULL, '{}', \
+              '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let store = SqliteKbStore::new(pool.clone());
+        let kb = KnowledgeEntryRecord::for_character(
+            "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab",
+            BlockType::Character,
+            "GuardKe",
+        );
+        let inserted = store
+            .insert_actor_owned_key_block("ctr_a", "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab", None, kb)
+            .await
+            .expect("active owned Character inserts");
+        assert!(!inserted.entry_id.is_empty());
+        assert!(inserted.entry_id.starts_with("kb_"));
+
+        // Archive the Character: the guarded insert now refuses character_inactive
+        // and leaves the KB untouched.
+        sqlx::query("UPDATE characters SET status = 'archived' WHERE character_id = ?")
+            .bind("chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let kb2 = KnowledgeEntryRecord::for_character(
+            "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab",
+            BlockType::Character,
+            "GuardKe2",
+        );
+        let err = store
+            .insert_actor_owned_key_block("ctr_a", "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab", None, kb2)
+            .await
+            .expect_err("archived Character must refuse");
+        assert!(
+            matches!(
+                err,
+                LocalDbError::ActorContractConflict {
+                    code: crate::ActorContractConflict::CharacterInactive
+                }
+            ),
+            "expected CharacterInactive: {err:?}"
+        );
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1, "archived insert must not create a row");
     }
 }

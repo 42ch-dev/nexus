@@ -661,7 +661,16 @@ fn character_routes() -> Router<WorkspaceState> {
         )
         .route(
             "/v1/daemon/characters/:character_id",
-            get(handlers::characters::get_character),
+            get(handlers::characters::get_character)
+                .patch(handlers::characters::patch_character),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/archive",
+            post(handlers::characters::archive_character),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/restore",
+            post(handlers::characters::restore_character),
         )
         .route(
             "/v1/daemon/characters/:character_id/bindings",

@@ -2,7 +2,8 @@
 
 use nexus_contracts::{
     ActorRef, ActorWorldBinding, ActorWorldBindingStatus, Character, CharacterDetail,
-    CharacterStatus, CreateCharacterRequest, CreateCharacterResponse, ListCharactersResponse,
+    CharacterLifecycleRequest, CharacterStatus, CreateCharacterRequest, CreateCharacterResponse,
+    ListCharactersResponse, UpdateCharacterRequest,
 };
 use std::str::FromStr;
 
@@ -54,7 +55,8 @@ fn character_rejects_bounds_and_extra_properties() {
         "status": "active",
         "persona": {},
         "created_at": "2026-09-05T00:00:00Z",
-        "updated_at": "2026-09-05T00:00:00Z"
+        "updated_at": "2026-09-05T00:00:00Z",
+        "revision": 0
     });
     serde_json::from_value::<Character>(valid.clone()).expect("valid character");
     valid["display_name"] = serde_json::json!("");
@@ -102,7 +104,8 @@ fn root_status_populates_generated_records() {
         "status": "active",
         "persona": {},
         "created_at": "2026-09-05T00:00:00Z",
-        "updated_at": "2026-09-05T00:00:00Z"
+        "updated_at": "2026-09-05T00:00:00Z",
+        "revision": 0
     }))
     .expect("character");
     assert_eq!(character.status, CharacterStatus::Active);
@@ -116,6 +119,7 @@ fn root_status_populates_generated_records() {
         persona: character.persona.clone(),
         schema_version: character.schema_version,
         status: CharacterStatus::Active,
+        revision: character.revision,
         updated_at: character.updated_at,
     };
     assert_eq!(constructed.status, CharacterStatus::Active);
@@ -161,6 +165,7 @@ fn character_record(display_name: &str) -> serde_json::Value {
         "display_name": display_name,
         "status": "active",
         "persona": {},
+        "revision": 0,
         "created_at": "2026-09-05T00:00:00Z",
         "updated_at": "2026-09-05T00:00:00Z"
     })
@@ -249,7 +254,8 @@ fn rust_fixtures_cover_malformed_ids() {
         "status": "active",
         "persona": {},
         "created_at": "2026-09-05T00:00:00Z",
-        "updated_at": "2026-09-05T00:00:00Z"
+        "updated_at": "2026-09-05T00:00:00Z",
+        "revision": 0
     });
     character["character_id"] = serde_json::json!("chr_ABCDEF");
     assert!(serde_json::from_value::<Character>(character.clone()).is_err());
@@ -263,7 +269,8 @@ fn rust_fixtures_cover_malformed_ids() {
         "world_id": format!("wld_{HEX32}"),
         "status": "active",
         "created_at": "2026-09-05T00:00:00Z",
-        "updated_at": "2026-09-05T00:00:00Z"
+        "updated_at": "2026-09-05T00:00:00Z",
+        "revision": 0
     });
     assert!(serde_json::from_value::<ActorWorldBinding>(binding.clone()).is_err());
     binding["binding_id"] = serde_json::json!(format!("awb_{HEX32}"));
@@ -278,4 +285,38 @@ fn rust_fixtures_cover_malformed_ids() {
         "actor_kind":"creator","creator_id": format!("CTR_{HEX32}")
     }))
     .is_err());
+}
+
+#[test]
+fn character_revision_and_patch_boundary_fixtures() {
+    let mut character = serde_json::json!({
+        "schema_version": 1,
+        "character_id": chr(),
+        "owner_creator_id": ctr(),
+        "display_name": "Ada",
+        "status": "active",
+        "persona": {},
+        "revision": 0,
+        "created_at": "2026-09-05T00:00:00Z",
+        "updated_at": "2026-09-05T00:00:00Z"
+    });
+    serde_json::from_value::<Character>(character.clone()).expect("revision 0");
+    character["revision"] = serde_json::json!(9223372036854775806_i64);
+    serde_json::from_value::<Character>(character.clone()).expect("max revision");
+    character.as_object_mut().unwrap().remove("revision");
+    assert!(serde_json::from_value::<Character>(character).is_err());
+
+    let patch = serde_json::json!({"expected_revision": 0, "display_name": "Ada"});
+    serde_json::from_value::<UpdateCharacterRequest>(patch).expect("patch");
+    assert!(serde_json::from_value::<UpdateCharacterRequest>(serde_json::json!({
+        "expected_revision": 0,
+        "display_name": ""
+    })).is_err());
+    assert!(serde_json::from_value::<UpdateCharacterRequest>(serde_json::json!({
+        "expected_revision": 0,
+        "extra": true
+    })).is_err());
+
+    let life = serde_json::json!({"expected_revision": 1});
+    serde_json::from_value::<CharacterLifecycleRequest>(life).expect("lifecycle");
 }

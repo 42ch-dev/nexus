@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT character_id as \"character_id!\",\n                  owner_creator_id as \"owner_creator_id!\",\n                  display_name as \"display_name!\",\n                  status as \"status!\",\n                  image_uri,\n                  persona_json as \"persona_json!\",\n                  created_at as \"created_at!\",\n                  updated_at as \"updated_at!\"\n           FROM characters WHERE character_id = ?",
+  "query": "SELECT character_id as \"character_id!\",\n                  owner_creator_id as \"owner_creator_id!\",\n                  display_name as \"display_name!\",\n                  status as \"status!\",\n                  image_uri,\n                  persona_json as \"persona_json!\",\n                  created_at as \"created_at!\",\n                  updated_at as \"updated_at!\",\n                  revision as \"revision!\",\n                  lifecycle_epoch as \"lifecycle_epoch!\"\n           FROM characters\n           WHERE character_id = ? AND owner_creator_id = ?",
   "describe": {
     "columns": [
       {
@@ -42,10 +42,20 @@
         "name": "updated_at!",
         "ordinal": 7,
         "type_info": "Text"
+      },
+      {
+        "name": "revision!",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "lifecycle_epoch!",
+        "ordinal": 9,
+        "type_info": "Integer"
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 2
     },
     "nullable": [
       false,
@@ -55,8 +65,10 @@
       true,
       false,
       false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "c79c0c44dbd2ecaaf7748d3114c60b5b6a487055ddc265ddcf2b4017b7df2797"
+  "hash": "44fc04bdbc58316da7abe9b8b9dafe2ebc577bdbc91fc57120c75b5a21a9b7ea"
 }

@@ -22,6 +22,7 @@ struct Ctx {
     server: TestServer,
     pool: sqlx::SqlitePool,
     nexus_home: std::path::PathBuf,
+    state: WorkspaceState,
 }
 
 async fn ctx() -> Ctx {
@@ -36,13 +37,14 @@ async fn ctx() -> Ctx {
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
     let pool = state.pool().unwrap().clone();
     seed_actor_fixture(&pool).await;
-    let server = TestServer::new(api::create_router(state, DaemonApiConfig::keyless()))
+    let server = TestServer::new(api::create_router(state.clone(), DaemonApiConfig::keyless()))
         .expect("test server");
     Ctx {
         _tmp: tmp,
         server,
         pool,
         nexus_home,
+        state,
     }
 }
 
@@ -588,4 +590,513 @@ async fn list_paginates_large_fixture_with_sql_bounds() {
     seen.sort();
     ids.sort();
     assert_eq!(seen, ids);
+}
+
+#[allow(clippy::future_not_send)]
+async fn patch_character(server: &TestServer, id: &str, body: Value) -> axum_test::TestResponse {
+    server
+        .patch(&format!("/v1/daemon/characters/{id}"))
+        .json(&body)
+        .await
+}
+
+#[allow(clippy::future_not_send)]
+async fn archive_character(server: &TestServer, id: &str, expected_revision: i64) -> axum_test::TestResponse {
+    server
+        .post(&format!("/v1/daemon/characters/{id}/archive"))
+        .json(&json!({ "expected_revision": expected_revision }))
+        .await
+}
+
+#[allow(clippy::future_not_send)]
+async fn restore_character(server: &TestServer, id: &str, expected_revision: i64) -> axum_test::TestResponse {
+    server
+        .post(&format!("/v1/daemon/characters/{id}/restore"))
+        .json(&json!({ "expected_revision": expected_revision }))
+        .await
+}
+
+#[tokio::test]
+async fn patch_character_cas_updates_revision_and_selected_fields() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let id = created["character"]["character_id"].as_str().unwrap();
+    let resp = patch_character(
+        &ctx.server,
+        id,
+        json!({
+            "expected_revision": 0,
+            "display_name": "Ada",
+            "image_uri": "https://example.test/ava.png",
+            "persona": { "tone": "dry" }
+        }),
+    )
+    .await;
+    assert_eq!(resp.status_code(), 200, "body={}", resp.text());
+    let body: Value = resp.json();
+    assert_eq!(body["character"]["display_name"], "Ada");
+    assert_eq!(body["character"]["revision"], 1);
+    assert_eq!(body["character"]["image_uri"], "https://example.test/ava.png");
+    assert_eq!(body["character"]["persona"]["tone"], "dry");
+}
+
+#[tokio::test]
+async fn patch_stale_revision_is_character_revision_conflict() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let id = created["character"]["character_id"].as_str().unwrap();
+    let ok = patch_character(&ctx.server, id, json!({ "expected_revision": 0, "display_name": "Ada" })).await;
+    assert_eq!(ok.status_code(), 200);
+    let stale = patch_character(&ctx.server, id, json!({ "expected_revision": 0, "display_name": "Bea" })).await;
+    assert_eq!(stale.status_code(), 409, "body={}", stale.text());
+    let body: Value = stale.json();
+    assert_eq!(body["error"]["code"], "character_revision_conflict");
+}
+
+#[tokio::test]
+async fn patch_omit_vs_clear_members() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let id = created["character"]["character_id"].as_str().unwrap();
+    patch_character(
+        &ctx.server,
+        id,
+        json!({
+            "expected_revision": 0,
+            "image_uri": "https://example.test/keep.png",
+            "persona": { "role": "scout" }
+        }),
+    )
+    .await;
+    let omit = patch_character(
+        &ctx.server,
+        id,
+        json!({ "expected_revision": 1, "display_name": "Ava2" }),
+    )
+    .await;
+    assert_eq!(omit.status_code(), 200, "body={}", omit.text());
+    let kept: Value = omit.json();
+    assert_eq!(kept["character"]["image_uri"], "https://example.test/keep.png");
+    assert_eq!(kept["character"]["persona"]["role"], "scout");
+
+    let cleared = patch_character(
+        &ctx.server,
+        id,
+        json!({ "expected_revision": 2, "image_uri": null, "persona": null }),
+    )
+    .await;
+    assert_eq!(cleared.status_code(), 200, "body={}", cleared.text());
+    let body: Value = cleared.json();
+    assert!(body["character"]["image_uri"].is_null());
+    assert_eq!(body["character"]["persona"], json!({}));
+}
+
+#[tokio::test]
+async fn patch_no_op_leaves_revision_unchanged() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let id = created["character"]["character_id"].as_str().unwrap();
+    let before = patch_character(
+        &ctx.server,
+        id,
+        json!({ "expected_revision": 0, "display_name": "Ava" }),
+    )
+    .await;
+    assert_eq!(before.status_code(), 200);
+    let body: Value = before.json();
+    assert_eq!(body["character"]["revision"], 0);
+}
+
+#[tokio::test]
+async fn archive_restore_round_trip_and_list_includes_archived() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let id = created["character"]["character_id"].as_str().unwrap();
+
+    let archived = archive_character(&ctx.server, id, 0).await;
+    assert_eq!(archived.status_code(), 200, "body={}", archived.text());
+    let arch_body: Value = archived.json();
+    assert_eq!(arch_body["character"]["status"], "archived");
+    assert_eq!(arch_body["character"]["revision"], 1);
+
+    let list = ctx.server.get("/v1/daemon/characters").await;
+    let listed: Value = list.json();
+    assert!(listed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|c| c["character_id"] == id && c["status"] == "archived"));
+
+    let write_denied = patch_character(
+        &ctx.server,
+        id,
+        json!({ "expected_revision": 1, "display_name": "Nope" }),
+    )
+    .await;
+    assert_eq!(write_denied.status_code(), 409, "body={}", write_denied.text());
+    let denied_body: Value = write_denied.json();
+    assert_eq!(denied_body["error"]["code"], "character_inactive");
+
+    let restored = restore_character(&ctx.server, id, 1).await;
+    assert_eq!(restored.status_code(), 200, "body={}", restored.text());
+    let restored_body: Value = restored.json();
+    assert_eq!(restored_body["character"]["status"], "active");
+    assert_eq!(restored_body["character"]["character_id"], id);
+    assert_eq!(restored_body["character"]["revision"], 2);
+}
+
+#[tokio::test]
+async fn archive_same_state_cas_no_op_keeps_revision() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let id = created["character"]["character_id"].as_str().unwrap();
+    let first = archive_character(&ctx.server, id, 0).await;
+    assert_eq!(first.status_code(), 200);
+    let again = archive_character(&ctx.server, id, 1).await;
+    assert_eq!(again.status_code(), 200, "body={}", again.text());
+    let body: Value = again.json();
+    assert_eq!(body["character"]["status"], "archived");
+    assert_eq!(body["character"]["revision"], 1);
+}
+
+#[tokio::test]
+async fn restore_requires_active_owned_world_binding() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let id = created["character"]["character_id"].as_str().unwrap();
+    archive_character(&ctx.server, id, 0).await;
+    sqlx::query("UPDATE narrative_worlds SET status = 'paused' WHERE owner_creator_id = ?")
+        .bind(OWNER)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let resp = restore_character(&ctx.server, id, 1).await;
+    assert_eq!(resp.status_code(), 409, "body={}", resp.text());
+    let fail_body: Value = resp.json();
+    assert_eq!(
+        fail_body["error"]["code"],
+        "character_restore_requires_active_binding"
+    );
+}
+
+#[tokio::test]
+async fn restore_name_collision_is_duplicate_character_display_name() {
+    let ctx = ctx().await;
+    let first = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let first_id = first["character"]["character_id"].as_str().unwrap();
+    archive_character(&ctx.server, first_id, 0).await;
+    create_character(&ctx.server, "Ava", WORLD_B).await;
+    let resp = restore_character(&ctx.server, first_id, 1).await;
+    assert_eq!(resp.status_code(), 409, "body={}", resp.text());
+    let dup_body: Value = resp.json();
+    assert_eq!(dup_body["error"]["code"], "duplicate_character_display_name");
+}
+
+#[tokio::test]
+async fn archive_refuses_character_busy_while_activity_outstanding() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let id = created["character"]["character_id"].as_str().unwrap();
+    let guard = ctx
+        .state
+        .actor_sessions()
+        .admit_character_activity(&ctx.pool, OWNER, id)
+        .await
+        .expect("admit activity");
+    let busy = archive_character(&ctx.server, id, 0).await;
+    assert_eq!(busy.status_code(), 409, "body={}", busy.text());
+    let busy_body: Value = busy.json();
+    assert_eq!(busy_body["error"]["code"], "character_busy");
+    drop(guard);
+    let ok = archive_character(&ctx.server, id, 0).await;
+    assert_eq!(ok.status_code(), 200, "body={}", ok.text());
+}
+
+#[tokio::test]
+async fn add_binding_holds_activity_fence_blocking_archive() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let id = created["character"]["character_id"].as_str().unwrap();
+    let guard = ctx
+        .state
+        .actor_sessions()
+        .admit_character_activity(&ctx.pool, OWNER, id)
+        .await
+        .expect("admit activity as add_binding does before local-db");
+    let busy = archive_character(&ctx.server, id, 0).await;
+    assert_eq!(busy.status_code(), 409, "body={}", busy.text());
+    assert_eq!(busy.json::<Value>()["error"]["code"], "character_busy");
+    drop(guard);
+    let ok = ctx
+        .server
+        .post(&format!("/v1/daemon/characters/{id}/bindings"))
+        .json(&json!({ "world_id": WORLD_B }))
+        .await;
+    assert_eq!(ok.status_code(), 201, "body={}", ok.text());
+}
+
+#[tokio::test]
+async fn remove_binding_holds_activity_fence_blocking_archive() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let id = created["character"]["character_id"].as_str().unwrap();
+    let binding_id = ctx
+        .server
+        .post(&format!("/v1/daemon/characters/{id}/bindings"))
+        .json(&json!({ "world_id": WORLD_B }))
+        .await
+        .json::<Value>()["binding"]["binding_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let guard = ctx
+        .state
+        .actor_sessions()
+        .admit_character_activity(&ctx.pool, OWNER, id)
+        .await
+        .expect("admit activity as remove_binding does before local-db");
+    let busy = archive_character(&ctx.server, id, 0).await;
+    assert_eq!(busy.status_code(), 409, "body={}", busy.text());
+    assert_eq!(busy.json::<Value>()["error"]["code"], "character_busy");
+    drop(guard);
+    let ok = ctx
+        .server
+        .delete(&format!("/v1/daemon/characters/{id}/bindings/{binding_id}"))
+        .await;
+    assert_eq!(ok.status_code(), 204, "body={}", ok.text());
+}
+
+#[tokio::test]
+async fn patch_rename_collision_is_duplicate_character_display_name() {
+    let ctx = ctx().await;
+    create_character(&ctx.server, "Ava", WORLD_A).await;
+    let second = create_character(&ctx.server, "Bea", WORLD_B).await;
+    let second_id = second["character"]["character_id"].as_str().unwrap();
+    let resp = patch_character(
+        &ctx.server,
+        second_id,
+        json!({ "expected_revision": 0, "display_name": "Ava" }),
+    )
+    .await;
+    assert_eq!(resp.status_code(), 409, "body={}", resp.text());
+    assert_eq!(
+        resp.json::<Value>()["error"]["code"],
+        "duplicate_character_display_name"
+    );
+    let row: (String, i64) = sqlx::query_as(
+        "SELECT display_name, revision FROM characters WHERE character_id = ?",
+    )
+    .bind(second_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(row.0, "Bea");
+    assert_eq!(row.1, 0);
+}
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use nexus_agent_host::{HostFacade, HostSession, HostSessionId, SessionState};
+
+struct CountingHost {
+    shutdowns: AtomicUsize,
+    execs: AtomicUsize,
+    sessions: std::sync::Mutex<std::collections::HashMap<HostSessionId, HostSession>>,
+}
+
+impl CountingHost {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            shutdowns: AtomicUsize::new(0),
+            execs: AtomicUsize::new(0),
+            sessions: std::sync::Mutex::new(std::collections::HashMap::new()),
+        })
+    }
+}
+
+#[async_trait]
+impl HostFacade for CountingHost {
+    async fn start(
+        &self,
+        _config: nexus_agent_host::capability::model::HostStartConfig,
+    ) -> nexus_agent_host::HostResult<()> {
+        Ok(())
+    }
+
+    async fn create_session(
+        &self,
+        request: nexus_agent_host::capability::CreateSessionRequest,
+    ) -> nexus_agent_host::HostResult<HostSession> {
+        let session = HostSession {
+            id: HostSessionId::new(),
+            provider_id: request.provider_id,
+            state: SessionState::Ready,
+            created_at: chrono::Utc::now(),
+            active_op_id: None,
+            negotiated_capabilities:
+                nexus_agent_host::capability::model::CapabilityDescriptor::native_cli_limited(),
+        };
+        self.sessions
+            .lock()
+            .expect("sessions")
+            .insert(session.id.clone(), session.clone());
+        Ok(session)
+    }
+
+    async fn exec(
+        &self,
+        _session_id: HostSessionId,
+        _op: nexus_agent_host::capability::model::HostOperation,
+    ) -> nexus_agent_host::HostResult<nexus_agent_host::capability::model::HostEventStream> {
+        self.execs.fetch_add(1, Ordering::SeqCst);
+        Ok(Box::pin(futures_util::stream::empty()))
+    }
+
+    async fn cancel(
+        &self,
+        _op_id: nexus_agent_host::HostOperationId,
+    ) -> nexus_agent_host::HostResult<()> {
+        Ok(())
+    }
+
+    async fn health(
+        &self,
+    ) -> nexus_agent_host::HostResult<nexus_agent_host::capability::model::HostHealth> {
+        Ok(nexus_agent_host::capability::model::HostHealth {
+            running: true,
+            active_sessions: self.sessions.lock().expect("sessions").len(),
+            active_operations: 0,
+        })
+    }
+
+    async fn shutdown(&self) -> nexus_agent_host::HostResult<()> {
+        Ok(())
+    }
+
+    async fn shutdown_session(&self, session_id: HostSessionId) -> nexus_agent_host::HostResult<()> {
+        self.shutdowns.fetch_add(1, Ordering::SeqCst);
+        self.sessions.lock().expect("sessions").remove(&session_id);
+        Ok(())
+    }
+
+    async fn list_sessions(&self) -> nexus_agent_host::HostResult<Vec<HostSession>> {
+        Ok(self
+            .sessions
+            .lock()
+            .expect("sessions")
+            .values()
+            .cloned()
+            .collect())
+    }
+
+    async fn provider_catalog(&self) -> nexus_agent_host::HostResult<nexus_agent_host::ProviderCatalog> {
+        Ok(nexus_agent_host::ProviderCatalog::new())
+    }
+
+    fn subscribe_events(
+        &self,
+        _session_id: HostSessionId,
+    ) -> tokio::sync::broadcast::Receiver<nexus_agent_host::capability::model::HostEvent> {
+        tokio::sync::broadcast::channel(1).1
+    }
+}
+
+async fn ctx_with_host() -> (Ctx, Arc<CountingHost>) {
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    std::fs::write(
+        nexus_home.join("config.toml"),
+        format!(
+            "active_creator_id = \"{OWNER}\"\n\n[active_workspace_slug_by_creator]\n\"{OWNER}\" = \"default\"\n"
+        ),
+    )
+    .unwrap();
+    let mut state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+    let host = CountingHost::new();
+    state.set_agent_host(host.clone());
+    let pool = state.pool().unwrap().clone();
+    seed_actor_fixture(&pool).await;
+    let server = TestServer::new(api::create_router(state.clone(), DaemonApiConfig::keyless()))
+        .expect("test server");
+    let ctx = Ctx {
+        _tmp: tmp,
+        server,
+        pool,
+        nexus_home,
+        state,
+    };
+    (ctx, host)
+}
+
+async fn create_character_session(server: &TestServer, character_id: &str, binding_id: &str) -> String {
+    let resp = server
+        .post("/v1/daemon/agent-host/sessions")
+        .json(&json!({
+            "provider_id": "mock-provider",
+            "actor_ref": {"actor_kind": "character", "character_id": character_id},
+            "viewpoint": {"world_id": WORLD_A, "binding_id": binding_id}
+        }))
+        .await;
+    assert_eq!(resp.status_code(), 200, "create session: {}", resp.text());
+    let body: Value = resp.json();
+    body["session_id"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn patch_empty_body_is_invalid_input() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let id = created["character"]["character_id"].as_str().unwrap();
+    let resp = patch_character(&ctx.server, id, json!({ "expected_revision": 0 })).await;
+    assert_canonical_invalid_input(&resp);
+}
+
+#[tokio::test]
+async fn restore_same_state_cas_no_op_keeps_session_executable_without_shutdown() {
+    let (ctx, host) = ctx_with_host().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let id = created["character"]["character_id"].as_str().unwrap();
+    let binding_id = created["binding"]["binding_id"].as_str().unwrap();
+    let session_id = create_character_session(&ctx.server, id, binding_id).await;
+
+    let before_shutdowns = host.shutdowns.load(Ordering::SeqCst);
+    let no_op = restore_character(&ctx.server, id, 0).await;
+    assert_eq!(no_op.status_code(), 200, "body={}", no_op.text());
+    assert_eq!(
+        host.shutdowns.load(Ordering::SeqCst),
+        before_shutdowns,
+        "same-state restore no-op must not retire sessions"
+    );
+
+    let exec = ctx
+        .server
+        .post(&format!("/v1/daemon/agent-host/sessions/{session_id}/operations"))
+        .json(&json!({"kind": "prompt", "content": "ping"}))
+        .await;
+    assert_eq!(exec.status_code(), 200, "execute after no-op: {}", exec.text());
+    assert_eq!(host.execs.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn pre_archive_session_execute_is_stale_after_material_archive() {
+    let (ctx, host) = ctx_with_host().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let id = created["character"]["character_id"].as_str().unwrap();
+    let binding_id = created["binding"]["binding_id"].as_str().unwrap();
+    let session_id = create_character_session(&ctx.server, id, binding_id).await;
+
+    let archived = archive_character(&ctx.server, id, 0).await;
+    assert_eq!(archived.status_code(), 200, "body={}", archived.text());
+    assert_eq!(host.shutdowns.load(Ordering::SeqCst), 1);
+
+    let exec = ctx
+        .server
+        .post(&format!("/v1/daemon/agent-host/sessions/{session_id}/operations"))
+        .json(&json!({"kind": "prompt", "content": "nope"}))
+        .await;
+    assert_eq!(exec.status_code(), 409, "body={}", exec.text());
+    let body: Value = exec.json();
+    assert_eq!(body["error"]["code"], "actor_session_stale");
+    assert_eq!(host.execs.load(Ordering::SeqCst), 0);
 }

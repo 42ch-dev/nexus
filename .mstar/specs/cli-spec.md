@@ -15,6 +15,7 @@
 **V1.65 Prepare amendment:** outline and chapter-structure editing becomes UI-first through the bundled Web UI chapter-content Daemon API. CLI parity for existing creator/run/chapter workflows is retained; no shipped CLI command is removed or renamed by this UI-first slice.
 **V1.175 P1 amendment:** §6.2G.3-6 — reading / fork / inspector leaves (groups 3, 5, 6), strategy patch leaves (group 1), outline/timeline/chapter leaves (group 2), KB entity patch + memory closure + findings triage (groups 4, 7, 8). Thin daemon-HTTP leaves over existing routes (AR-83); no daemon route changes.
 **V1.182 P1 amendment:** §6.3B — hidden `nexus42 ops inspect [SESSION_ID] [--json]` operator group (BL-04): daemon-free read-only checkpoint projection with shared `resume_rules`; never triggers resume.
+**V1.185 P0 amendment:** §6.2I — `nexus42 creator character edit|archive|restore` identity lifecycle (explicit revision CAS; thin daemon-HTTP leaves).
 
 ## 0. 文档定位
 
@@ -865,6 +866,35 @@ Rules:
   journeys: rule-suggestion adoption; retention).
 - **World findings are read-only (AR-87 #1).** `creator world findings`
   is a GET-only read; any world-findings write route is a P1 non-goal.
+
+### 6.2I V1.185 P0 amendment — `nexus42 creator character` identity lifecycle (Normative)
+
+Normative: [actor-product-model.md](./actor-product-model.md) §11 (developer maintenance contract).
+
+Thin daemon-HTTP leaves over generated DTOs (`UpdateCharacterRequest`,
+`CharacterLifecycleRequest`, `CharacterDetail`). All mutations require an
+explicit `--expected-revision`; the CLI never performs a hidden GET-and-retry
+overwrite. `--json` emits the daemon DTO verbatim; human output prints the
+returned revision and status. Owner-wide `list`/`show` include archived
+Characters; run and identity writes on archived rows return **409
+`character_inactive`**.
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 creator character edit <character_id> --expected-revision <n> [--display-name <text>] [--image-uri <uri> \| --clear-image-uri] [--persona <json-object> \| --clear-persona] [--json]` | Patch Character identity metadata (`PATCH /v1/daemon/characters/:character_id`). Only flags present on the CLI are sent in the JSON body; `--clear-image-uri` / `--clear-persona` map to JSON `null` clears. |
+| `nexus42 creator character archive <character_id> --expected-revision <n> [--json]` | Archive (freeze) a Character (`POST /v1/daemon/characters/:character_id/archive`). Same-state CAS is a no-op and keeps current sessions. |
+| `nexus42 creator character restore <character_id> --expected-revision <n> [--json]` | Restore an archived Character to active with the same `character_id` (`POST /v1/daemon/characters/:character_id/restore`). Requires at least one owned active World binding; name collision returns **409 `duplicate_character_display_name`**. |
+
+Rules:
+
+- **Revision CAS (PL-5).** Stale `--expected-revision` returns **409
+  `character_revision_conflict`** with the current revision echoed; the CLI
+  surfaces the named code and exits non-zero without retrying.
+- **Lifecycle busy gate.** Archive/restore while another Character activity is
+  in flight returns **409 `character_busy`**.
+- **No CLI-side lifecycle logic.** The CLI maps flags to generated request
+  bodies and prints responses; fences, epoch retirement, and Host cleanup run
+  only in the daemon handlers.
 
 ### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
 

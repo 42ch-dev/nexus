@@ -4,10 +4,12 @@
 //! repositories and the shared bearer-parameterized memory pipeline. The
 //! active Creator is the only trusted owner; request bodies never carry
 //! `owner_creator_id`. Every mutating entrypoint is sealed behind
-//! [`BearerPipelineCtx::character`] (format + owner + active lifecycle) so a
-//! foreign/missing/inactive Character rejects before any DB row, file write,
-//! or synthesis. Binding-local provenance requires the exact active binding of
-//! the path Character in an owned active World.
+//! [`BearerPipelineCtx::character_read`] / [`character_write`] so a foreign or
+//! missing Character rejects before any DB row, file write, or synthesis;
+//! retained reads permit an archived Character's rows while every mutation
+//! admits a per-Character activity fence (an archived Character is `409
+//! character_inactive`). Binding-local provenance requires the exact active
+//! binding of the path Character in an owned active World.
 
 #![allow(clippy::missing_errors_doc)]
 
@@ -96,28 +98,36 @@ fn pagination_info(limit: u32, has_more: bool, next_cursor: Option<&str>) -> ser
     })
 }
 
-/// Resolve the path Character owner, returning 404 for missing/foreign,
-/// then 403 for inactive via the sealed `BearerPipelineCtx::character`.
-async fn require_character_ctx<'a>(
+/// Read-only Character pipeline context for retained-data reads (v1.185 P0
+/// Task 2). A foreign or missing Character is `404 not_found`; an archived
+/// Character is still readable (no lifecycle admission for reads). The
+/// returned context is read-only and cannot mutate.
+async fn require_character_read_ctx<'a>(
     state: &WorkspaceState,
     owner_creator_id: &'a str,
     character_id: &'a str,
     scope_id: Option<&'a str>,
 ) -> Result<BearerPipelineCtx<'a>, NexusApiError> {
     let pool = state.pool_or_uninit()?;
-    let owned = nexus_local_db::get_character(pool, owner_creator_id, character_id)
-        .await?
-        .ok_or_else(|| NexusApiError::NotFound(format!("character {character_id}")))?;
-    if owned.status != "active" {
-        return Err(NexusApiError::Forbidden {
-            resource: "character_memory".into(),
-            reason: format!(
-                "character '{character_id}' is not active (status '{}'); only active Characters may access memory",
-                owned.status
-            ),
-        });
-    }
-    BearerPipelineCtx::character(pool, owner_creator_id, character_id, scope_id).await
+    BearerPipelineCtx::character_read(pool, owner_creator_id, character_id, scope_id).await
+}
+
+/// Writable Character pipeline context: admits one per-Character activity
+/// (404 foreign/missing, 409 `character_inactive` for an archived Character),
+/// holds the fence through all DB/file/provider effects, and returns a
+/// writable context that owns the guard.
+async fn require_character_write_ctx<'a>(
+    state: &WorkspaceState,
+    owner_creator_id: &'a str,
+    character_id: &'a str,
+    scope_id: Option<&'a str>,
+) -> Result<BearerPipelineCtx<'a>, NexusApiError> {
+    let pool = state.pool_or_uninit()?;
+    let guard = state
+        .actor_sessions()
+        .admit_character_activity(pool, owner_creator_id, character_id)
+        .await?;
+    BearerPipelineCtx::character_write(guard, owner_creator_id, character_id, scope_id)
 }
 
 /// `POST /v1/daemon/characters/{character_id}/memory/pending-review`
@@ -129,7 +139,7 @@ pub async fn capture_pending_review(
     let req: CaptureCharacterPendingReviewRequest = parse_canonical_json(&body)?;
     let creator = require_creator(&state)?;
     let binding_id = optional_str(req.binding_id.as_ref());
-    let _ctx = require_character_ctx(&state, &creator, &character_id, binding_id).await?;
+    let _ctx = require_character_write_ctx(&state, &creator, &character_id, binding_id).await?;
 
     let pending_id = req.pending_id.as_str().to_string();
     let session_id = req.session_id.as_str().to_string();
@@ -206,7 +216,7 @@ pub async fn list_pending_reviews(
 ) -> Result<Json<ListCharacterPendingReviewsResponse>, NexusApiError> {
     let creator = require_creator(&state)?;
     let binding_id = optional_str(query.binding_id.as_ref());
-    require_character_ctx(&state, &creator, &character_id, binding_id).await?;
+    require_character_read_ctx(&state, &creator, &character_id, binding_id).await?;
 
     let limit = resolve_limit(query.limit)?;
     let offset = decode_offset_cursor(&query.cursor)?;
@@ -252,7 +262,7 @@ pub async fn count_pending_reviews(
 ) -> Result<Json<CountCharacterPendingReviewsResponse>, NexusApiError> {
     let creator = require_creator(&state)?;
     let binding_id = optional_str(query.binding_id.as_ref());
-    require_character_ctx(&state, &creator, &character_id, binding_id).await?;
+    require_character_read_ctx(&state, &creator, &character_id, binding_id).await?;
     let count = nexus_local_db::count_character_pending_reviews(
         state.pool_or_uninit()?,
         &creator,
@@ -273,7 +283,7 @@ pub async fn delete_pending_review(
     Path((character_id, pending_id)): Path<(String, String)>,
 ) -> Result<Json<DeleteCharacterPendingReviewResponse>, NexusApiError> {
     let creator = require_creator(&state)?;
-    require_character_ctx(&state, &creator, &character_id, None).await?;
+    let _ctx = require_character_write_ctx(&state, &creator, &character_id, None).await?;
     let deleted = nexus_local_db::delete_character_pending_review(
         state.pool_or_uninit()?,
         &creator,
@@ -303,9 +313,10 @@ pub async fn review(
     let req: ReviewCharacterMemoryRequest = parse_canonical_json(&body)?;
     let creator = require_creator(&state)?;
     let binding_id = optional_str(req.binding_id.as_ref());
-    require_character_ctx(&state, &creator, &character_id, binding_id).await?;
-
     let pool = state.pool_or_uninit()?.clone();
+    // Review drains the queue and promotes/writes files: hold a writable
+    // activity context across the whole batch (includes file promotion).
+    let ctx = require_character_write_ctx(&state, &creator, &character_id, binding_id).await?;
     let nexus_home = state.nexus_home().to_owned();
     // Fetch batch_limit + 1 so the extra row proves more rows exist; truncate
     // the processing slice back to the documented batch bound (mirrors the
@@ -339,9 +350,8 @@ pub async fn review(
         })
         .collect();
     let deadline = tokio::time::Instant::now() + REVIEW_CALL_TIMEOUT;
-    let ctx = BearerPipelineCtx::character(&pool, &creator, &character_id, binding_id).await?;
     let mut outcome =
-        process_bearer_review_batch(&inputs, &nexus_home, &ctx, &pool, deadline).await;
+        process_bearer_review_batch(&inputs, &nexus_home, &ctx, &pool, deadline).await?;
     let deadline_stopped = outcome.processed < processing_slice;
     outcome.has_more = more_in_db || deadline_stopped || outcome.any_row_remained_pending;
     outcome.more_in_db = more_in_db;
@@ -366,7 +376,7 @@ pub async fn list_fragments(
 ) -> Result<Json<ListCharacterMemoryFragmentsResponse>, NexusApiError> {
     let creator = require_creator(&state)?;
     let binding_id = optional_str(query.binding_id.as_ref());
-    require_character_ctx(&state, &creator, &character_id, binding_id).await?;
+    require_character_read_ctx(&state, &creator, &character_id, binding_id).await?;
 
     let limit = resolve_limit(query.limit)?;
     let offset = decode_offset_cursor(&query.cursor)?;
@@ -428,7 +438,7 @@ pub async fn promote_fragment(
         .to_string();
     let req: PromoteCharacterFragmentRequest = parse_canonical_json(&body)?;
     let creator = require_creator(&state)?;
-    require_character_ctx(&state, &creator, &character_id, None).await?;
+    let _ctx = require_character_write_ctx(&state, &creator, &character_id, None).await?;
     let expected_revision =
         i64::try_from(req.expected_revision).map_err(|_| NexusApiError::BadRequest {
             code: "invalid_input".into(),
@@ -488,8 +498,16 @@ pub async fn reflect_soul(
     let req: CharacterSoulNarrativeRequest = parse_canonical_json(&body)?;
     let creator = require_creator(&state)?;
     let binding_id = optional_str(req.binding_id.as_ref());
-    require_character_ctx(&state, &creator, &character_id, binding_id).await?;
+    let pool = state.pool_or_uninit()?;
 
+    // A non-regenerating reflect is an observational retained read and must
+    // never create a cache/file or call the synthesizer (§11.2). A forced
+    // reflect persists a synthesized narrative: it requires activity.
+    let ctx = if req.force_regenerate {
+        require_character_write_ctx(&state, &creator, &character_id, binding_id).await?
+    } else {
+        require_character_read_ctx(&state, &creator, &character_id, binding_id).await?
+    };
     let synthesizer = if req.force_regenerate {
         let registry =
             state
@@ -502,8 +520,6 @@ pub async fn reflect_soul(
         None
     };
 
-    let pool = state.pool_or_uninit()?;
-    let ctx = BearerPipelineCtx::character(pool, &creator, &character_id, binding_id).await?;
     let outcome =
         reflect_bearer_soul(pool, &ctx, req.force_regenerate, synthesizer.as_ref()).await?;
     Ok(Json(map_character_reflect_outcome(&character_id, &outcome)))

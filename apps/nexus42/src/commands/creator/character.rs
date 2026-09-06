@@ -35,6 +35,7 @@ use nexus_contracts::daemon_api::characters::tom::record_character_tom_response:
 use nexus_contracts::daemon_api::characters::{
     add_character_binding_request::AddCharacterBindingRequest,
     add_character_binding_response::AddCharacterBindingResponse, character_detail::CharacterDetail,
+    character_lifecycle_request::CharacterLifecycleRequest,
     create_character_request::CreateCharacterRequest,
     create_character_response::CreateCharacterResponse,
     list_character_bindings_response::ListCharacterBindingsResponse,
@@ -104,6 +105,40 @@ pub enum CharacterCommand {
     Tom {
         #[command(subcommand)]
         command: CharacterTomCommand,
+    },
+    /// Edit Character identity metadata (explicit revision CAS)
+    Edit {
+        character_id: String,
+        #[arg(long)]
+        expected_revision: u64,
+        #[arg(long)]
+        display_name: Option<String>,
+        #[arg(long)]
+        image_uri: Option<String>,
+        #[arg(long)]
+        clear_image_uri: bool,
+        #[arg(long)]
+        persona: Option<String>,
+        #[arg(long)]
+        clear_persona: bool,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Archive (freeze) a Character
+    Archive {
+        character_id: String,
+        #[arg(long)]
+        expected_revision: u64,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Restore an archived Character to active
+    Restore {
+        character_id: String,
+        #[arg(long)]
+        expected_revision: u64,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     /// Run a Character prompt through the existing Agent Host
     Run {
@@ -640,6 +675,39 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                 .await
             }
         },
+        CharacterCommand::Edit {
+            character_id,
+            expected_revision,
+            display_name,
+            image_uri,
+            clear_image_uri,
+            persona,
+            clear_persona,
+            json,
+        } => {
+            edit_character(
+                &client,
+                &character_id,
+                expected_revision,
+                display_name,
+                image_uri,
+                clear_image_uri,
+                persona,
+                clear_persona,
+                json,
+            )
+            .await
+        }
+        CharacterCommand::Archive {
+            character_id,
+            expected_revision,
+            json,
+        } => archive_character(&client, &character_id, expected_revision, json).await,
+        CharacterCommand::Restore {
+            character_id,
+            expected_revision,
+            json,
+        } => restore_character(&client, &character_id, expected_revision, json).await,
         CharacterCommand::Run {
             character_id,
             world_id,
@@ -767,6 +835,125 @@ async fn show(client: &DaemonClient, character_id: &str, json: bool) -> Result<(
         println!("owner:        {}", *c.owner_creator_id);
     }
     Ok(())
+}
+
+fn print_character_detail(resp: &CharacterDetail, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(resp)?);
+    } else {
+        let c = &resp.character;
+        println!("character_id: {}", *c.character_id);
+        println!("display_name: {}", *c.display_name);
+        println!("status:       {}", c.status);
+        println!("revision:     {}", c.revision);
+        println!("owner:        {}", *c.owner_creator_id);
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn edit_character(
+    client: &DaemonClient,
+    character_id: &str,
+    expected_revision: u64,
+    display_name: Option<String>,
+    image_uri: Option<String>,
+    clear_image_uri: bool,
+    persona: Option<String>,
+    clear_persona: bool,
+    json: bool,
+) -> Result<()> {
+    if clear_image_uri && image_uri.is_some() {
+        return Err(CliError::Other(
+            "use either --image-uri or --clear-image-uri, not both".into(),
+        ));
+    }
+    if clear_persona && persona.is_some() {
+        return Err(CliError::Other(
+            "use either --persona or --clear-persona, not both".into(),
+        ));
+    }
+    if display_name.is_none()
+        && image_uri.is_none()
+        && !clear_image_uri
+        && persona.is_none()
+        && !clear_persona
+    {
+        return Err(CliError::Other(
+            "edit requires at least one mutable field (--display-name, --image-uri, --clear-image-uri, --persona, or --clear-persona)".into(),
+        ));
+    }
+    // Unlike archive/restore (generated `CharacterLifecycleRequest`), edit
+    // hand-rolls the PATCH body so explicit JSON null clears (`--clear-*`) are
+    // expressible; the generated `UpdateCharacterRequest` skips absent members.
+    let mut body = serde_json::json!({ "expected_revision": expected_revision });
+    if let Some(name) = display_name {
+        body["display_name"] = serde_json::Value::String(name);
+    }
+    if clear_image_uri {
+        body["image_uri"] = serde_json::Value::Null;
+    } else if let Some(uri) = image_uri {
+        body["image_uri"] = serde_json::Value::String(uri);
+    }
+    if clear_persona {
+        body["persona"] = serde_json::Value::Null;
+    } else if let Some(raw) = persona {
+        body["persona"] = serde_json::Value::Object(parse_persona(Some(raw))?);
+    }
+    let resp: CharacterDetail = client
+        .patch(&format!("/v1/daemon/characters/{character_id}"), &body)
+        .await?;
+    print_character_detail(&resp, json)
+}
+
+async fn archive_character(
+    client: &DaemonClient,
+    character_id: &str,
+    expected_revision: u64,
+    json: bool,
+) -> Result<()> {
+    let req: CharacterLifecycleRequest = CharacterLifecycleRequest::builder()
+        .expected_revision(i64::try_from(expected_revision).map_err(|_| {
+            CliError::Other("expected_revision is out of range for i64".into())
+        })?)
+        .try_into()
+        .map_err(
+            |e: nexus_contracts::daemon_api::characters::character_lifecycle_request::error::ConversionError| {
+                CliError::Other(e.to_string())
+            },
+        )?;
+    let resp: CharacterDetail = client
+        .post(
+            &format!("/v1/daemon/characters/{character_id}/archive"),
+            &req,
+        )
+        .await?;
+    print_character_detail(&resp, json)
+}
+
+async fn restore_character(
+    client: &DaemonClient,
+    character_id: &str,
+    expected_revision: u64,
+    json: bool,
+) -> Result<()> {
+    let req: CharacterLifecycleRequest = CharacterLifecycleRequest::builder()
+        .expected_revision(i64::try_from(expected_revision).map_err(|_| {
+            CliError::Other("expected_revision is out of range for i64".into())
+        })?)
+        .try_into()
+        .map_err(
+            |e: nexus_contracts::daemon_api::characters::character_lifecycle_request::error::ConversionError| {
+                CliError::Other(e.to_string())
+            },
+        )?;
+    let resp: CharacterDetail = client
+        .post(
+            &format!("/v1/daemon/characters/{character_id}/restore"),
+            &req,
+        )
+        .await?;
+    print_character_detail(&resp, json)
 }
 
 async fn add_binding(

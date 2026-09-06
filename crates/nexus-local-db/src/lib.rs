@@ -77,7 +77,8 @@ pub use actor_world_binding::{
 };
 pub use character::{
     create_character_with_initial_binding, get_character, list_characters, mint_character_id,
-    CharacterRecord, CreateCharacterParams, CreateCharacterResult,
+    require_active_owned_character_tx, transition_character, update_character, CharacterPatch,
+    CharacterRecord, CharacterStatus, CreateCharacterParams, CreateCharacterResult, FieldPatch,
 };
 
 // Re-export sqlx pool type for consumers

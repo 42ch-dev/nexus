@@ -17,7 +17,8 @@
 // V1.164: 17 → 18 — mind_states table (migration 20260814000002_create_mind_states.sql).
 // V1.165: 18 → 19 — world_findings table (DR-68 / AR-1; migration 20260815000001_create_world_findings.sql).
 // V1.184: 19 → 20 — characters + actor_world_bindings (P0 actor contract).
-pub const DB_SCHEMA_VERSION: u32 = 20;
+// V1.185: 20 → 21 — characters.revision + characters.lifecycle_epoch (P0 character lifecycle; migration 20260906000001_character_lifecycle.sql).
+pub const DB_SCHEMA_VERSION: u32 = 21;
 
 /// Contract schema version from generated wire types
 ///

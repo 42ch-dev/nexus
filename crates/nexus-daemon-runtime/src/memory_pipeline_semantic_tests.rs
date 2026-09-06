@@ -1,10 +1,12 @@
 //! Dual-bearer memory-pipeline semantic suite (v1.184 P3 Task 2 fix round 1).
 //!
-//! Lives outside the `memory_pipeline` module so it cannot fabricate a
-//! [`BearerPipelineCtx`] (fields are private). Every Character context is
-//! obtained through the validated `BearerPipelineCtx::character` constructor,
-//! which verifies format, ownership, and the active lifecycle before any DB
-//! read, file write, or synthesis.
+//! Lives outside the `api::handlers::memory_pipeline` module so it cannot
+//! fabricate a [`BearerPipelineCtx`] (fields are private). Character contexts
+//! are obtained only through [`BearerPipelineCtx::character_read`] (retained
+//! reads; owned Character at any status) or [`BearerPipelineCtx::character_write`]
+//! (writable; wraps an already-admitted
+//! [`ActorSessionRegistry::admit_character_activity`] guard) — never the removed
+//! `character` constructor.
 
 #![allow(clippy::unwrap_used)]
 
@@ -12,6 +14,7 @@ use crate::api::errors::NexusApiError;
 use crate::api::handlers::memory_pipeline::{
     process_bearer_review_batch, reflect_bearer_soul, BearerPipelineCtx, ReflectState,
 };
+use crate::workspace::actor_sessions::ActorSessionRegistry;
 use nexus_creator_memory::bearer::MemoryBearerRef;
 use nexus_creator_memory::errors::MemoryError;
 use nexus_creator_memory::long_term_memory::LongTermMemory;
@@ -40,6 +43,7 @@ struct Sync {
     nexus_home: PathBuf,
     pool: sqlx::SqlitePool,
     chr_a: String,
+    registry: ActorSessionRegistry,
 }
 
 async fn setup() -> Sync {
@@ -78,6 +82,7 @@ async fn setup() -> Sync {
         nexus_home,
         pool,
         chr_a: created.character.character_id,
+        registry: ActorSessionRegistry::new(),
     }
 }
 
@@ -85,10 +90,19 @@ fn ctxc() -> BearerPipelineCtx<'static> {
     BearerPipelineCtx::creator(OWNER_A, None)
 }
 
-async fn ctxh<'a>(pool: &'a sqlx::SqlitePool, chr: &'a str) -> BearerPipelineCtx<'a> {
-    BearerPipelineCtx::character(pool, OWNER_A, chr, None)
+/// Writable Character pipeline context: admits one per-Character activity
+/// fence and transfers the guard into the context (held for all effects).
+async fn ctxh_write<'a>(
+    registry: &ActorSessionRegistry,
+    pool: &'a sqlx::SqlitePool,
+    chr: &'a str,
+) -> BearerPipelineCtx<'a> {
+    let guard = registry
+        .admit_character_activity(pool, OWNER_A, chr)
         .await
-        .expect("active owned Character must authorize")
+        .expect("active owned Character must admit");
+    BearerPipelineCtx::character_write(guard, OWNER_A, chr, None)
+        .expect("guard identity matches")
 }
 
 fn pcr(id: &str, sess: &str, digest: &str, kind: &str) -> PendingReviewInput {
@@ -202,7 +216,7 @@ async fn review_both_arms_share_classification_and_isolate_storage() {
         &pool,
         horizon,
     )
-    .await;
+    .await.expect("review batch");
     assert_eq!(creator_out.promoted, 1);
     assert_eq!(creator_out.fragmented, 1);
     assert_eq!(creator_out.dropped, 1);
@@ -214,11 +228,11 @@ async fn review_both_arms_share_classification_and_isolate_storage() {
             pch("c_d", "s_d", DROP_DIGEST, "unknown", &chr),
         ],
         &home,
-        &ctxh(&pool, &chr).await,
+        &ctxh_write(&s.registry, &pool, &chr).await,
         &pool,
         horizon,
     )
-    .await;
+    .await.expect("review batch");
     assert_eq!(char_out.promoted, 1);
     assert_eq!(char_out.fragmented, 1);
     assert_eq!(char_out.dropped, 1);
@@ -399,7 +413,7 @@ async fn reflect_both_arms_report_insufficient_data_and_ungenerated() {
     let chr = s.chr_a.clone();
 
     let c_ctx = ctxc();
-    let h_ctx = ctxh(&pool, &chr).await;
+    let h_ctx = ctxh_write(&s.registry, &pool, &chr).await;
     let no_synth: Option<&NoSynth> = None;
 
     assert_eq!(
@@ -490,30 +504,43 @@ async fn reflect_both_arms_report_insufficient_data_and_ungenerated() {
 }
 
 #[tokio::test]
-async fn character_provenance_rejects_foreign_owner_before_side_effects() {
+async fn character_provenance_foreign_and_missing_are_404_on_read_and_write() {
     let s = setup().await;
     let charted = s.chr_a.clone();
 
-    let res = BearerPipelineCtx::character(&s.pool, OWNER_B, &charted, None).await;
-    assert!(res.is_err());
-    assert!(matches!(res, Err(NexusApiError::Forbidden { .. })));
+    // Foreign owner (Character owned by OWNER_A, caller OWNER_B) is 404 on
+    // both the read and write context paths — existence is hidden.
+    let read = BearerPipelineCtx::character_read(&s.pool, OWNER_B, &charted, None).await;
+    assert!(matches!(read, Err(NexusApiError::NotFound(_))));
+    let write = s
+        .registry
+        .admit_character_activity(&s.pool, OWNER_B, &charted)
+        .await;
+    assert!(matches!(write, Err(NexusApiError::NotFound(_))));
 
-    let res = BearerPipelineCtx::character(
+    // A missing Character is 404 the same way.
+    let read = BearerPipelineCtx::character_read(
         &s.pool,
         OWNER_A,
         "chr_ffffffffffffffffffffffffffffffff",
         None,
     )
     .await;
-    assert!(res.is_err());
+    assert!(matches!(read, Err(NexusApiError::NotFound(_))));
+    let write = s
+        .registry
+        .admit_character_activity(&s.pool, OWNER_A, "chr_ffffffffffffffffffffffffffffffff")
+        .await;
+    assert!(matches!(write, Err(NexusApiError::NotFound(_))));
 
     drop(s.tmp);
 }
 
-/// An owned-but-archived Character must be rejected by the context
-/// constructor with no DB/file/synthesis side effects.
+/// An owned-but-archived Character remains READABLE (retained read, no
+/// liveness admission) but rejects a write-context admission with `409
+/// character_inactive` and zero DB/file/synthesis side effects.
 #[tokio::test]
-async fn character_provenance_rejects_inactive_character_before_side_effects() {
+async fn character_provenance_archived_reads_retained_writes_character_inactive() {
     let s = setup().await;
     let charted = s.chr_a.clone();
 
@@ -525,12 +552,32 @@ async fn character_provenance_rejects_inactive_character_before_side_effects() {
         .await
         .unwrap();
 
-    let res = BearerPipelineCtx::character(&s.pool, OWNER_A, &charted, None).await;
-    assert!(res.is_err());
-    assert!(matches!(res, Err(NexusApiError::Forbidden { .. })));
+    // Retained read succeeds (archived rows stay readable).
+    let read = BearerPipelineCtx::character_read(&s.pool, OWNER_A, &charted, None)
+        .await
+        .expect("archived Character retained read ctx");
 
-    // No side effect happened for the archived Character: the pipeline never
-    // got a context, so no SOUL/LTM file and no DB row is created.
+    // A write admission refuses with the stable 409 character_inactive code.
+    let write = s
+        .registry
+        .admit_character_activity(&s.pool, OWNER_A, &charted)
+        .await
+        .expect_err("archived Character must not admit activity");
+    assert_eq!(write.error_code(), "character_inactive");
+
+    // The read context is read-only: it cannot enter a mutation helper.
+    let horizon = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    let batch = process_bearer_review_batch(&[], &s.nexus_home, &read, &s.pool, horizon)
+        .await
+        .expect_err("read ctx cannot process a review batch");
+    assert_eq!(batch.error_code(), "forbidden");
+    let no_synth: Option<&NoSynth> = None;
+    let _reflect = reflect_bearer_soul(&s.pool, &read, true, no_synth)
+        .await
+        .expect_err("read ctx cannot force a reflect");
+
+    // No side effect happened for the archived Character: no SOUL/LTM file
+    // and no DB row is created (the read ctx never wrote).
     let hdir = MemoryBearerRef::Character {
         owner_creator_id: OWNER_A,
         character_id: &charted,
@@ -699,7 +746,7 @@ async fn promoted_character_long_term_memory_is_projected_into_run() {
     };
 
     let s = setup().await;
-    let ctx = ctxh(&s.pool, &s.chr_a).await;
+    let ctx = ctxh_write(&s.registry, &s.pool, &s.chr_a).await;
 
     // A high-signal creative digest (>= 80 chars, brainstorm) → PromoteToLongTerm.
     let promote_digest =
@@ -732,7 +779,7 @@ async fn promoted_character_long_term_memory_is_projected_into_run() {
     );
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     let outcome =
-        process_bearer_review_batch(&[input], &s.nexus_home, &ctx, &s.pool, deadline).await;
+        process_bearer_review_batch(&[input], &s.nexus_home, &ctx, &s.pool, deadline).await.expect("review batch");
     assert_eq!(outcome.promoted, 1, "high-signal brainstorm must promote");
     assert_eq!(outcome.fragmented, 0);
 
@@ -815,7 +862,7 @@ async fn binding_local_promote_stays_binding_local_no_global_ltm() {
         .next()
         .unwrap()
         .binding_id;
-    let ctx = ctxh(&s.pool, &s.chr_a).await;
+    let ctx = ctxh_write(&s.registry, &s.pool, &s.chr_a).await;
     let marker = "BINDING_LOCAL_PROMOTE_MARKER";
 
     // High-signal creative digest on a binding-local (World-life) scope. The
@@ -856,7 +903,7 @@ async fn binding_local_promote_stays_binding_local_no_global_ltm() {
     };
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     let outcome =
-        process_bearer_review_batch(&[input], &s.nexus_home, &ctx, &s.pool, deadline).await;
+        process_bearer_review_batch(&[input], &s.nexus_home, &ctx, &s.pool, deadline).await.expect("review batch");
     assert_eq!(
         outcome.promoted, 0,
         "binding-local Promote must not write global LTM"
@@ -1005,6 +1052,41 @@ async fn admitted_binding_fragments_retain_capacity_when_ltm_is_full() {
     drop(s.tmp);
 }
 
+/// A held writable Character pipeline context keeps the per-Character
+/// activity fence busy, so an archive/restore `try_character_transition`
+/// refuses with `character_busy` until the context guard is dropped (durable
+/// §11.3.1/§11.3.2). Barrier-driven, no sleeps. When the write guard is
+/// released, the transition admits again (fence reclaimed).
+#[tokio::test]
+async fn activity_guard_prevents_freeze_until_write_ctx_drops() {
+    let s = setup().await;
+    let charted = s.chr_a.clone();
+
+    let ctx = ctxh_write(&s.registry, &s.pool, &charted).await;
+
+    // While a side-effecting activity (represented by the writable ctx's
+    // held guard) is outstanding, the lifecycle exclusive transition refuses.
+    let busy = s
+        .registry
+        .try_character_transition(&s.pool, OWNER_A, &charted)
+        .await
+        .expect_err("busy with an active write context");
+    assert_eq!(busy.error_code(), "character_busy");
+    assert_eq!(busy.status_code(), axum::http::StatusCode::CONFLICT);
+
+    // Drop the write context (activity finished) → the fence is reclaimed and
+    // a transition can proceed.
+    drop(ctx);
+    let transition = s
+        .registry
+        .try_character_transition(&s.pool, OWNER_A, &charted)
+        .await
+        .expect("transition admits after activity drains");
+    assert_eq!(transition.character_id(), charted);
+
+    drop(s.tmp);
+}
+
 #[tokio::test]
 async fn tom_projection_fills_both_slots_when_l1_exceeds_single_page() {
     // QC fix round 1 (F-003): L1 and L2 are fetched through the same bounded
@@ -1144,7 +1226,7 @@ async fn review_failed_queue_advance_rolls_back_fragment_and_reports_no_success(
         &s.pool,
         horizon,
     )
-    .await;
+    .await.expect("review batch");
     assert_eq!(
         creator_out.fragmented, 0,
         "failed queue advance must not report a created fragment"
@@ -1157,11 +1239,11 @@ async fn review_failed_queue_advance_rolls_back_fragment_and_reports_no_success(
     let char_out = process_bearer_review_batch(
         &[pch("ch_f", "s_f", FRAGMENT_DIGEST, "research", &s.chr_a)],
         &s.nexus_home,
-        &ctxh(&s.pool, &s.chr_a).await,
+        &ctxh_write(&s.registry, &s.pool, &s.chr_a).await,
         &s.pool,
         horizon,
     )
-    .await;
+    .await.expect("review batch");
     assert_eq!(char_out.fragmented, 0);
     assert!(char_out.any_row_remained_pending);
 
@@ -1207,7 +1289,7 @@ async fn review_failed_queue_advance_rolls_back_fragment_and_reports_no_success(
         &s.pool,
         horizon,
     )
-    .await;
+    .await.expect("review batch");
     assert_eq!(creator_ok.fragmented, 1);
     assert!(!creator_ok.any_row_remained_pending);
     assert_eq!(
@@ -1302,7 +1384,7 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
         &s.pool,
         horizon,
     )
-    .await;
+    .await.expect("review batch");
     assert_eq!(creator_out.promoted, 0, "failed claim reports no success");
     assert!(creator_out.any_row_remained_pending);
     assert_eq!(
@@ -1319,11 +1401,11 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
             &s.chr_a,
         )],
         &s.nexus_home,
-        &ctxh(&s.pool, &s.chr_a).await,
+        &ctxh_write(&s.registry, &s.pool, &s.chr_a).await,
         &s.pool,
         horizon,
     )
-    .await;
+    .await.expect("review batch");
     assert_eq!(char_out.promoted, 0);
     assert!(char_out.any_row_remained_pending);
     assert_eq!(count_md(&character_ltm), 0);
@@ -1358,7 +1440,7 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
         &s.pool,
         horizon,
     )
-    .await;
+    .await.expect("review batch");
     assert_eq!(creator_retry.promoted, 1);
     assert!(!creator_retry.any_row_remained_pending);
     assert_eq!(count_md(&creator_ltm), 1);
@@ -1375,11 +1457,11 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
             &s.chr_a,
         )],
         &s.nexus_home,
-        &ctxh(&s.pool, &s.chr_a).await,
+        &ctxh_write(&s.registry, &s.pool, &s.chr_a).await,
         &s.pool,
         horizon,
     )
-    .await;
+    .await.expect("review batch");
     assert_eq!(char_retry.promoted, 1);
     assert_eq!(count_md(&character_ltm), 1);
     assert_eq!(
@@ -1421,7 +1503,7 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
     assert_eq!(count_md(&creator_ltm), 2);
 
     let resume =
-        process_bearer_review_batch(&[input2], &s.nexus_home, &ctxc(), &s.pool, horizon).await;
+        process_bearer_review_batch(&[input2], &s.nexus_home, &ctxc(), &s.pool, horizon).await.expect("review batch");
     assert_eq!(
         resume.promoted, 1,
         "AlreadyPromoted resume advances the queue"
@@ -1478,11 +1560,11 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
     let char_resume = process_bearer_review_batch(
         &[char_input2],
         &s.nexus_home,
-        &ctxh(&s.pool, &s.chr_a).await,
+        &ctxh_write(&s.registry, &s.pool, &s.chr_a).await,
         &s.pool,
         horizon,
     )
-    .await;
+    .await.expect("review batch");
     assert_eq!(
         char_resume.promoted, 1,
         "Character AlreadyPromoted resume advances the queue"
@@ -1521,7 +1603,7 @@ async fn review_stale_promote_writes_no_file_and_reports_no_success() {
         &s.pool,
         horizon,
     )
-    .await;
+    .await.expect("review batch");
     assert_eq!(creator_out.promoted, 0);
     assert!(creator_out.any_row_remained_pending);
     let creator_ltm = MemoryBearerRef::Creator(OWNER_A).long_term_memory_dir(&s.nexus_home);
@@ -1539,11 +1621,11 @@ async fn review_stale_promote_writes_no_file_and_reports_no_success() {
             &s.chr_a,
         )],
         &s.nexus_home,
-        &ctxh(&s.pool, &s.chr_a).await,
+        &ctxh_write(&s.registry, &s.pool, &s.chr_a).await,
         &s.pool,
         horizon,
     )
-    .await;
+    .await.expect("review batch");
     assert_eq!(char_out.promoted, 0);
     assert!(char_out.any_row_remained_pending);
     let character_ltm = MemoryBearerRef::Character {
@@ -1576,7 +1658,7 @@ async fn review_stale_zero_delete_rolls_back_fragment_insert() {
         &s.pool,
         horizon,
     )
-    .await;
+    .await.expect("review batch");
     assert_eq!(
         creator_out.fragmented, 0,
         "zero-row delete must not report success"
@@ -1597,11 +1679,11 @@ async fn review_stale_zero_delete_rolls_back_fragment_insert() {
             &s.chr_a,
         )],
         &s.nexus_home,
-        &ctxh(&s.pool, &s.chr_a).await,
+        &ctxh_write(&s.registry, &s.pool, &s.chr_a).await,
         &s.pool,
         horizon,
     )
-    .await;
+    .await.expect("review batch");
     assert_eq!(char_out.fragmented, 0);
     assert!(char_out.any_row_remained_pending);
     assert_eq!(
@@ -1683,7 +1765,7 @@ async fn review_promote_filesystem_failure_rolls_back_claim_and_recovers() {
         &s.pool,
         horizon,
     )
-    .await;
+    .await.expect("review batch");
     assert_eq!(
         creator_out.promoted, 0,
         "filesystem failure reports no success"
@@ -1704,11 +1786,11 @@ async fn review_promote_filesystem_failure_rolls_back_claim_and_recovers() {
             &s.chr_a,
         )],
         &s.nexus_home,
-        &ctxh(&s.pool, &s.chr_a).await,
+        &ctxh_write(&s.registry, &s.pool, &s.chr_a).await,
         &s.pool,
         horizon,
     )
-    .await;
+    .await.expect("review batch");
     assert_eq!(char_out.promoted, 0);
     assert!(char_out.any_row_remained_pending);
     assert_eq!(
@@ -1731,7 +1813,7 @@ async fn review_promote_filesystem_failure_rolls_back_claim_and_recovers() {
         &s.pool,
         horizon,
     )
-    .await;
+    .await.expect("review batch");
     assert_eq!(creator_retry.promoted, 1, "retry promotes after recovery");
     assert!(!creator_retry.any_row_remained_pending);
     assert_eq!(count_md(&creator_ltm), 1);
@@ -1749,11 +1831,11 @@ async fn review_promote_filesystem_failure_rolls_back_claim_and_recovers() {
             &s.chr_a,
         )],
         &s.nexus_home,
-        &ctxh(&s.pool, &s.chr_a).await,
+        &ctxh_write(&s.registry, &s.pool, &s.chr_a).await,
         &s.pool,
         horizon,
     )
-    .await;
+    .await.expect("review batch");
     assert_eq!(char_retry.promoted, 1);
     assert_eq!(count_md(&character_ltm), 1);
     assert_eq!(

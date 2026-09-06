@@ -32,10 +32,18 @@ pub struct ActorViewpoint {
 #[derive(Debug, Clone)]
 pub struct AdmittedActorContext {
     pub actor: AdmittedActor,
+    /// Trusted owner: the active Creator admitted at request time. Stored in
+    /// the session index and retired tombstones for later owner authorization
+    /// (v1.185 P0 Task 2); never taken from a request body.
+    pub owner_creator_id: String,
     pub world_id: String,
     pub binding_id: Option<String>,
     pub branch_id: Option<String>,
     pub event_id: Option<String>,
+    /// Stored Character `lifecycle_epoch` at admission (`None` for Creator).
+    /// Execution compares this indexed epoch against the current stored epoch
+    /// after activity admission; a mismatch is `actor_session_stale`.
+    pub character_epoch: Option<i64>,
     pub view: ActorKnowledgePage,
 }
 
@@ -77,7 +85,6 @@ impl ActorAdmissionService {
     /// Admit stored Creator/Character/World/binding ownership and load the P1 view.
     ///
     /// # Errors
-    ///
     /// Auth, ownership, status, or view-composition failures. No host/MCA side effects.
     pub async fn admit(
         &self,
@@ -85,6 +92,7 @@ impl ActorAdmissionService {
         actor: AdmittedActor,
         viewpoint: ActorViewpoint,
     ) -> Result<AdmittedActorContext, NexusApiError> {
+        let mut character_epoch = None;
         match &actor {
             AdmittedActor::Creator { creator_id } => {
                 if creator_id != caller_creator_id {
@@ -106,8 +114,10 @@ impl ActorAdmissionService {
                         message: "binding_id is required for Character actor_ref".into(),
                     });
                 };
-                self.require_active_owned_character(caller_creator_id, character_id)
+                let stored = self
+                    .require_active_owned_character(caller_creator_id, character_id)
                     .await?;
+                character_epoch = Some(stored.lifecycle_epoch);
                 self.require_active_owned_world(caller_creator_id, &viewpoint.world_id)
                     .await?;
                 self.views
@@ -126,10 +136,12 @@ impl ActorAdmissionService {
             .await?;
         Ok(AdmittedActorContext {
             actor,
+            owner_creator_id: caller_creator_id.to_string(),
             world_id: viewpoint.world_id,
             binding_id: viewpoint.binding_id,
             branch_id: viewpoint.branch_id,
             event_id: viewpoint.event_id,
+            character_epoch,
             view,
         })
     }
@@ -221,10 +233,10 @@ impl ActorAdmissionService {
         &self,
         creator_id: &str,
         character_id: &str,
-    ) -> Result<(), NexusApiError> {
+    ) -> Result<nexus_local_db::CharacterRecord, NexusApiError> {
         let row = nexus_local_db::get_character(&self.pool, creator_id, character_id).await?;
         match row {
-            Some(stored) if stored.status == "active" => Ok(()),
+            Some(stored) if stored.status == "active" => Ok(stored),
             Some(stored) => Err(NexusApiError::ConflictCoded {
                 code: "character_inactive".into(),
                 message: format!("character {character_id} is {}", stored.status),
