@@ -14,6 +14,7 @@
 // `#[cfg(unix)]` gate was wrong and broke `kb_relationships` (which imports
 // `crate::cas`) on the Windows x64 build.
 pub mod actor_world_binding;
+pub mod actor_knowledge_store;
 pub mod cas;
 pub mod character;
 pub mod character_memory_fragment;
@@ -71,6 +72,10 @@ pub use version::{DB_SCHEMA_VERSION, SCHEMA_VERSION};
 // Re-export error types
 pub use error::{ActorContractConflict, LocalDbError};
 
+pub use actor_knowledge_store::{
+    delete_actor_knowledge_entry, get_actor_knowledge_entry, update_actor_knowledge_entry,
+    ActorKnowledgePatch, ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES,
+};
 pub use actor_world_binding::{
     add_actor_world_binding, count_bindings_for_world_tx, get_actor_world_binding,
     list_bindings_for_character, mint_binding_id, remove_binding, update_actor_world_binding,
