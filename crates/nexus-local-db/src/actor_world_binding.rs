@@ -69,9 +69,9 @@ pub(crate) async fn validate_world_sheet_tx(
         return Ok(());
     };
     if sheet_id.len() > 128 {
-        return Err(LocalDbError::ValidationError(
-            "world_sheet_entry_id must be at most 128 bytes".into(),
-        ));
+        return Err(LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::InvalidWorldSheet,
+        });
     }
     if !sheet_id.starts_with("kb_") {
         return Err(LocalDbError::ActorContractConflict {

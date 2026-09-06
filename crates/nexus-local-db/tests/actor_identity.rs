@@ -336,6 +336,51 @@ async fn world_sheet_rejects_merged_deprecated_and_creator_only() {
 }
 
 #[tokio::test]
+async fn world_sheet_rejects_overlength_id_without_leaking_facts() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    let overlength = format!("kb_{}", "a".repeat(126));
+
+    let err = create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "Overlength",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_A,
+            world_sheet_entry_id: Some(&overlength),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            LocalDbError::ActorContractConflict {
+                code: ActorContractConflict::InvalidWorldSheet
+            }
+        ),
+        "overlength sheet id must map to invalid_world_sheet, got {err:?}"
+    );
+    assert!(
+        !matches!(err, LocalDbError::ValidationError(_)),
+        "must not leak target facts via ValidationError"
+    );
+
+    let chars: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM characters")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let binds: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM actor_world_bindings")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(chars, 0);
+    assert_eq!(binds, 0);
+}
+
+#[tokio::test]
 async fn last_binding_remove_is_zero_mutation_conflict() {
     let (pool, _dir) = fresh_pool().await;
     seed_creator_and_worlds(&pool).await;
