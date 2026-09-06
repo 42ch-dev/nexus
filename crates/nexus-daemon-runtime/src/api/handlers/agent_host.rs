@@ -115,13 +115,13 @@ fn map_host_error(e: &nexus_agent_host::HostError) -> NexusApiError {
 
 /// Parse a session ID path parameter as UUID.
 ///
-/// Returns 422 Unprocessable Entity for malformed IDs.
+/// Returns 400 Bad Request for malformed IDs (agent-host spec boundary rule:
+/// 400 invalid id, 404 unknown session).
 fn parse_session_id(raw: &str) -> Result<Uuid, NexusApiError> {
-    raw.parse::<Uuid>()
-        .map_err(|_| NexusApiError::BadRequest {
-            code: "invalid_input".into(),
-            message: format!("session_id must be a valid UUID, got: {raw}"),
-        })
+    raw.parse::<Uuid>().map_err(|_| NexusApiError::InvalidInput {
+        field: "session_id".into(),
+        reason: format!("must be a valid UUID, got: {raw}"),
+    })
 }
 
 /// Authorize a Character-indexed (or retired) session against the active
@@ -150,13 +150,12 @@ fn authorize_actor_session(
 
 /// Parse an operation ID path parameter as UUID.
 ///
-/// Returns 422 Unprocessable Entity for malformed IDs.
+/// Returns 400 Bad Request for malformed IDs (agent-host spec boundary rule).
 fn parse_operation_id(raw: &str) -> Result<Uuid, NexusApiError> {
-    raw.parse::<Uuid>()
-        .map_err(|_| NexusApiError::BadRequest {
-            code: "invalid_input".into(),
-            message: format!("operation_id must be a valid UUID, got: {raw}"),
-        })
+    raw.parse::<Uuid>().map_err(|_| NexusApiError::InvalidInput {
+        field: "operation_id".into(),
+        reason: format!("must be a valid UUID, got: {raw}"),
+    })
 }
 
 /// Map a session's active op ID to a display string.
@@ -696,10 +695,13 @@ pub async fn execute_operation(
         ExecuteOperationRequest::Prompt { content, remember } => {
             let remember = remember.unwrap_or(false);
             let raw_prompt = content.clone();
-            let is_character = state
-                .actor_sessions()
-                .context_for(&sid)
-                .is_some_and(|ctx| matches!(ctx.actor, AdmittedActor::Character { .. }));
+            let is_character = match state.actor_sessions().context_for(&sid) {
+                // Retired tombstones still identify Character sessions: let
+                // prepare_prompt report 409 actor_session_stale instead of
+                // misclassifying them as legacy/Creator sessions.
+                Some(ctx) => matches!(ctx.actor, AdmittedActor::Character { .. }),
+                None => state.actor_sessions().is_actor_session(&sid),
+            };
             if remember && !is_character {
                 return Err(NexusApiError::BadRequest {
                     code: "invalid_input".into(),
@@ -1273,7 +1275,7 @@ mod tests {
         let result = shutdown_session(State(state), Path("not-a-uuid".to_string())).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status_code(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
         assert_eq!(err.error_code(), "invalid_input");
     }
 
@@ -1283,7 +1285,7 @@ mod tests {
         let result = shutdown_session(State(state), Path(String::new())).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status_code(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
         assert_eq!(err.error_code(), "invalid_input");
     }
 
@@ -1293,7 +1295,7 @@ mod tests {
         let result = shutdown_session(State(state), Path("550e8400-e29b-41d4".to_string())).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status_code(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
@@ -1303,7 +1305,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().status_code(),
-            axum::http::StatusCode::UNPROCESSABLE_ENTITY
+            axum::http::StatusCode::BAD_REQUEST
         );
     }
 
@@ -1327,7 +1329,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().status_code(),
-            axum::http::StatusCode::UNPROCESSABLE_ENTITY
+            axum::http::StatusCode::BAD_REQUEST
         );
     }
 
@@ -1341,7 +1343,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().status_code(),
-            axum::http::StatusCode::UNPROCESSABLE_ENTITY
+            axum::http::StatusCode::BAD_REQUEST
         );
     }
 
@@ -1369,7 +1371,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().status_code(),
-            axum::http::StatusCode::UNPROCESSABLE_ENTITY
+            axum::http::StatusCode::BAD_REQUEST
         );
     }
 
@@ -1383,10 +1385,13 @@ mod tests {
 
     #[tokio::test]
     async fn parse_session_id_rejects_invalid() {
-        assert!(parse_session_id("garbage").is_err());
-        assert!(parse_session_id("").is_err());
-        assert!(parse_session_id("12345").is_err());
-        assert!(parse_session_id("../../etc/passwd").is_err());
+        // agent-host spec boundary rule: malformed id -> 400 InvalidInput.
+        for raw in ["garbage", "", "12345", "../../etc/passwd"] {
+            match parse_session_id(raw) {
+                Err(NexusApiError::InvalidInput { .. }) => {}
+                other => panic!("session_id {raw:?}: expected 400 InvalidInput, got {other:?}"),
+            }
+        }
     }
 
     #[tokio::test]
@@ -1399,8 +1404,13 @@ mod tests {
 
     #[tokio::test]
     async fn parse_operation_id_rejects_invalid() {
-        assert!(parse_operation_id("garbage").is_err());
-        assert!(parse_operation_id("").is_err());
+        // agent-host spec boundary rule: malformed id -> 400 InvalidInput.
+        for raw in ["garbage", ""] {
+            match parse_operation_id(raw) {
+                Err(NexusApiError::InvalidInput { .. }) => {}
+                other => panic!("operation_id {raw:?}: expected 400 InvalidInput, got {other:?}"),
+            }
+        }
     }
 
     // ── Agent scan integration tests ────────────────────────────────────────
@@ -3124,6 +3134,37 @@ mod tests {
                 reason,
             }),
         ]
+    }
+
+    /// remember:true on a RETIRED Character session is not invalid_input:
+    /// it reaches prepare_prompt and reports 409 actor_session_stale.
+    #[tokio::test]
+    async fn remember_on_retired_character_session_reports_stale() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let (character_id, binding_id) = seed_owned_character(&state).await;
+        let created = create_session(
+            State(state.clone()),
+            Json(character_session_req(&character_id, "wld_worldA", &binding_id)),
+        )
+        .await
+        .expect("create");
+        // Retire the session (simulates a material archive).
+        state
+            .actor_sessions()
+            .retire_character_sessions(&character_id);
+        let err = execute_operation(
+            State(state.clone()),
+            Path(created.session_id.clone()),
+            Json(ExecuteOperationRequest::Prompt {
+                content: "hello".into(),
+                remember: Some(true),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status_code(), axum::http::StatusCode::CONFLICT);
+        assert_eq!(err.error_code(), "actor_session_stale");
+        assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
     /// remember:true on legacy/Creator sessions is rejected before exec.

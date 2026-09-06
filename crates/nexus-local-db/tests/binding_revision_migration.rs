@@ -151,5 +151,4 @@ async fn binding_revision_migration_upgrades_populated_v21_db() {
 
     let versions = read_versions(&pool).await.unwrap();
     assert_eq!(versions.db_schema_version, DB_SCHEMA_VERSION);
-    assert_eq!(versions.db_schema_version, 22);
 }

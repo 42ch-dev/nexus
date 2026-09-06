@@ -123,4 +123,4 @@ Each mechanism covers what the others cannot. Row CAS protects the SQLite truth;
 - Drain, digest, persist — `crates/nexus-daemon-runtime/src/actor_run_capture.rs` (`drain_and_finalize_character_operation`, `try_persist_capture`, `DrainAccumulator`, `build_capture_digest`).
 - Receipt dedup, provenance — `crates/nexus-local-db/src/character_pending_review.rs` (`capture_character_run`, `capture_character_run_in_tx`, `receipt_matches_input`), migration `crates/nexus-local-db/migrations/20260906000003_character_run_capture.sql`.
 - Stale-session rejection and session admission order — `crates/nexus-daemon-runtime/src/api/handlers/agent_host.rs` (`prepare_prompt`, retired-session paths).
-- Published slice — the v1.185 iteration package (`.mstar/iterations/v1.185/`) is a local process artifact; the durable authorities are [§11](../../specs/actor-product-model.md) plus the sources above.
+- Published slice — the v1.185 iteration package is a local process artifact (not tracked at HEAD); the durable authorities are [§11](../../specs/actor-product-model.md) plus the sources above.
