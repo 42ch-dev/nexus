@@ -1,10 +1,12 @@
 //! Dual-bearer memory-pipeline semantic suite (v1.184 P3 Task 2 fix round 1).
 //!
-//! Lives outside the `memory_pipeline` module so it cannot fabricate a
-//! [`BearerPipelineCtx`] (fields are private). Every Character context is
-//! obtained through the validated `BearerPipelineCtx::character` constructor,
-//! which verifies format, ownership, and the active lifecycle before any DB
-//! read, file write, or synthesis.
+//! Lives outside the `api::handlers::memory_pipeline` module so it cannot
+//! fabricate a [`BearerPipelineCtx`] (fields are private). Character contexts
+//! are obtained only through [`BearerPipelineCtx::character_read`] (retained
+//! reads; owned Character at any status) or [`BearerPipelineCtx::character_write`]
+//! (writable; wraps an already-admitted
+//! [`ActorSessionRegistry::admit_character_activity`] guard) — never the removed
+//! `character` constructor.
 
 #![allow(clippy::unwrap_used)]
 

@@ -8,11 +8,14 @@
 //! `character_*` repositories which enforce actor/owner provenance before
 //! any persistence.
 //!
-//! Daemon API handlers (`memory.rs`) are the only other consumers: they
-//! resolve the active Creator and pass the Creator arm. Task 3's generated
-//! Character handlers will construct the Character arm through
-//! [`BearerPipelineCtx::character`] (which rejects foreign/invalid actors
-//! before any DB read, file write, or synthesis).
+//! Daemon API handlers use this module as the sole orchestration entrypoint:
+//! `memory.rs` resolves the active Creator and passes [`BearerPipelineCtx::creator`].
+//! Character routes build [`BearerPipelineCtx::character_read`] for retained reads
+//! (owned Character, any lifecycle status — durable §11.2) or
+//! [`BearerPipelineCtx::character_write`] after
+//! [`ActorSessionRegistry::admit_character_activity`] for mutations (foreign/missing
+//! `404`; archived activity admission `409 character_inactive`; the guard is held
+//! through every DB read, file write, and synthesis effect).
 
 use crate::api::errors::NexusApiError;
 use crate::character_tom::{CharacterTomListQuery, CharacterTomService};
