@@ -53,7 +53,7 @@ pub fn build_capture_digest(raw_prompt: &str, response_text: &str) -> Result<Str
     Ok(format!("Prompt:\n{raw_prompt}\n\nResponse:\n{response_text}"))
 }
 
-pub fn run_pending_id(operation_id: &HostOperationId) -> String {
+pub fn run_pending_id(_operation_id: operation_id: &HostOperationIdHostOperationId) -> String {
     format!("run_{}", operation_id.to_string().replace('-', ""))
 }
 
@@ -351,17 +351,19 @@ pub(crate) fn clear_before_operation_finalize_hook() {
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
 }
 
-#[cfg(test)]
 fn fire_before_operation_finalize_hook(
-    registry: &ActorSessionRegistry,
-    operation_id: &HostOperationId,
+    _registry: registry: &ActorSessionRegistryActorSessionRegistry,
+    _operation_id: operation_id: &HostOperationIdHostOperationId,
 ) {
-    let hook = BEFORE_OPERATION_FINALIZE_HOOK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
-    if let Some(hook) = hook {
-        hook(registry, operation_id);
+    #[cfg(test)]
+    {
+        let hook = BEFORE_OPERATION_FINALIZE_HOOK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        if let Some(hook) = hook {
+            hook(registry, operation_id);
+        }
     }
 }
 
