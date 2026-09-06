@@ -905,7 +905,9 @@ async fn inactive_world_and_character_fail_closed_on_view_and_add() {
         .await;
     assert_eq!(ok.status_code(), 200, "control: {}", ok.text());
 
-    // Archive the Character: view + character-owned add fail closed.
+    // Archive the Character: the KnowledgeView is a retained read and still
+    // 200 (owned Character + stored binding tuple); the character-owned add
+    // fails closed with character_inactive.
     sqlx::query("UPDATE characters SET status = 'archived' WHERE character_id = ?")
         .bind(&chr)
         .execute(&ctx.pool)
@@ -922,13 +924,12 @@ async fn inactive_world_and_character_fail_closed_on_view_and_add() {
         .await;
     assert_eq!(
         view_archived_chr.status_code(),
-        409,
-        "{}",
+        200,
+        "archived Character view is retained: {}",
         view_archived_chr.text()
     );
     let body: Value = view_archived_chr.json();
-    assert_eq!(body["error"]["code"], "character_inactive");
-    assert!(body.get("items").is_none());
+    assert!(body.get("items").is_some());
 
     let add_archived_chr = ctx
         .server
@@ -949,7 +950,9 @@ async fn inactive_world_and_character_fail_closed_on_view_and_add() {
     let body: Value = add_archived_chr.json();
     assert_eq!(body["error"]["code"], "character_inactive");
 
-    // Archive the World: even the Creator component of a view fails closed.
+    // Archive the World: the Creator view is a retained read (an owned
+    // archived World keeps its retained history visible); the World-owned add
+    // still fails closed with world_inactive.
     sqlx::query("UPDATE narrative_worlds SET status = 'archived' WHERE world_id = ?")
         .bind(WORLD_A)
         .execute(&ctx.pool)
@@ -965,12 +968,12 @@ async fn inactive_world_and_character_fail_closed_on_view_and_add() {
         .await;
     assert_eq!(
         view_archived_world.status_code(),
-        409,
-        "{}",
+        200,
+        "archived World Creator view is retained: {}",
         view_archived_world.text()
     );
     let body: Value = view_archived_world.json();
-    assert_eq!(body["error"]["code"], "world_inactive");
+    assert!(body.get("items").is_some());
 
     let add_archived_world = ctx
         .server

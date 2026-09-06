@@ -16,6 +16,7 @@
 
 use crate::api::errors::NexusApiError;
 use crate::character_tom::{CharacterTomListQuery, CharacterTomService};
+use crate::workspace::actor_sessions::CharacterActivityGuard;
 use nexus_creator_memory::bearer::MemoryBearerRef;
 use nexus_creator_memory::errors::MemoryError;
 use nexus_creator_memory::review::{
@@ -26,48 +27,67 @@ use nexus_moment_context_assembly::CharacterMindInput;
 use sqlx::SqlitePool;
 use std::path::Path;
 
+/// Whether a pipeline context may mutate. A read-only context (built by
+/// [`BearerPipelineCtx::character_read`]) cannot enter any mutation helper:
+/// review processing, fragment/queue advance, forced reflection persistence,
+/// or any file/DB write fail closed with an error. A writable context
+/// (Creator arm or [`BearerPipelineCtx::character_write`]) carries the
+/// optional per-Character activity guard so it is held through all effects.
+#[derive(Debug)]
+enum BearerCapability {
+    ReadOnly,
+    /// The optional guard is held for the context's whole lifetime so every
+    /// nested DB/file/provider effect stays inside the activity fence; it is
+    /// dropped with the context. Never read explicitly.
+    #[allow(dead_code)]
+    Writable(Option<CharacterActivityGuard>),
+}
+
 /// A bearer plus its scope provenance for one pipeline run.
 ///
 /// This is an **authorization capability**, not a passive data bag: the
 /// fields are private and the only ways to build one are [`Self::creator`]
 /// (the trusted operator's own Creator arm, already authorized by the handler
-/// auth gate) and [`Self::character`] (which verifies format, ownership, and
-/// the ACTIVE lifecycle before the context is returned). Because the fields
-/// are private, a caller cannot fabricate a Character context without passing
-/// the async authorization check, so every Character pipeline entrypoint is
-/// sealed behind owner/active-character validation.
+/// auth gate, writable), [`Self::character_read`] (formats, owner-checks, any
+/// status; read-only — retained reads) and [`Self::character_write`] (wraps an
+/// already-admitted per-Character activity guard; writable). Because the
+/// fields are private, a caller cannot fabricate a Character context without
+/// passing the async authorization check, so every Character pipeline
+/// entrypoint is sealed behind owner validation.
 ///
 /// `scope_id` is the Creator arm's world id or the Character arm's binding
 /// id; `None` = whole Creator / shared Character.
-#[derive(Debug, Clone, Copy)]
+///
+/// `!Copy`: the writable Character arm owns the activity guard, which must be
+/// held across nested async work and cannot be cloned.
+#[derive(Debug)]
 pub struct BearerPipelineCtx<'a> {
     bearer: MemoryBearerRef<'a>,
     scope_id: Option<&'a str>,
+    capability: BearerCapability,
 }
 
 impl<'a> BearerPipelineCtx<'a> {
     /// Build a Creator-arm context (trusted operator; handler already
-    /// authorized the active Creator from config).
+    /// authorized the active Creator from config). Creator behavior is
+    /// unchanged: writable, no per-Character guard needed.
     pub const fn creator(creator_id: &'a str, scope_id: Option<&'a str>) -> Self {
         Self {
             bearer: MemoryBearerRef::Creator(creator_id),
             scope_id,
+            capability: BearerCapability::Writable(None),
         }
     }
 
-    /// Build a Character-arm context, validating format, ownership, and the
-    /// active lifecycle **before** any DB read, file write, or synthesis.
+    /// Build a read-only Character-arm context for retained-data reads.
     ///
-    /// Rejects foreign, non-existent, and inactive/archived Characters
-    /// (fail-closed; never falls back to the Creator's data). Because the
-    /// context fields are private, this is the only way to obtain a
-    /// Character context inside the crate, so mutating entrypoints cannot be
-    /// invoked without a validated, authorized context.
-    ///
-    /// Consumed by the Task 3 generated Character handlers and the dual-bearer
-    /// semantic suite; the public Creator handlers use the Creator arm.
-    #[allow(dead_code)]
-    pub async fn character(
+    /// Validates the bearer format and current ownership (foreign or missing
+    /// Character is `404 not_found`, indistinguishable) but imposes no
+    /// lifecycle requirement: an archived Character's retained memory rows
+    /// stay readable (§11.2). A read-only context cannot synthesize, write a
+    /// file, bootstrap a cache, or advance a queue — any mutation helper
+    /// rejects it.
+    pub async fn character_read(
         pool: &SqlitePool,
         owner_creator_id: &'a str,
         character_id: &'a str,
@@ -85,18 +105,69 @@ impl<'a> BearerPipelineCtx<'a> {
             .await
             .map_err(map_local_db_error)?;
         match owned {
-            None => Err(NexusApiError::Forbidden {
-                resource: "character_memory".into(),
-                reason: format!("character '{character_id}' is not owned by creator '{owner_creator_id}'"),
+            None => Err(NexusApiError::NotFound(format!("character {character_id}"))),
+            Some(_) => Ok(Self {
+                bearer,
+                scope_id,
+                capability: BearerCapability::ReadOnly,
             }),
-            Some(c) if c.status != "active" => Err(NexusApiError::Forbidden {
+        }
+    }
+
+    /// Build a writable Character-arm context from an already-admitted
+    /// activity guard. Verifies the guard's identity matches the supplied
+    /// ids; the guard is transferred into the context and held for its whole
+    /// lifetime (all DB/file/provider effects).
+    pub fn character_write(
+        activity: CharacterActivityGuard,
+        owner_creator_id: &'a str,
+        character_id: &'a str,
+        scope_id: Option<&'a str>,
+    ) -> Result<Self, NexusApiError> {
+        if activity.owner_creator_id() != owner_creator_id
+            || activity.character_id() != character_id
+        {
+            return Err(NexusApiError::Internal {
+                code: "PIPELINE_GUARD_MISMATCH".into(),
+                message: "activity guard identity does not match the requested Character".into(),
+            });
+        }
+        let bearer = MemoryBearerRef::Character {
+            owner_creator_id,
+            character_id,
+        };
+        bearer.validate().map_err(|e| NexusApiError::InvalidInput {
+            field: "character_id".into(),
+            reason: e.to_string(),
+        })?;
+        Ok(Self {
+            bearer,
+            scope_id,
+            capability: BearerCapability::Writable(Some(activity)),
+        })
+    }
+
+    /// The bearer id, for read-only diagnostics.
+    #[must_use]
+    pub fn bearer_id(&self) -> String {
+        self.bearer.id().to_string()
+    }
+
+    /// Borrow the bearer for a read path. Readable contexts and writable
+    /// contexts both allow reads.
+    fn bearer(&self) -> MemoryBearerRef<'a> {
+        self.bearer
+    }
+
+    /// Borrow the bearer only when writable; mutation helpers call this first
+    /// so a read-only context cannot write. Returns `forbidden` otherwise.
+    fn bearer_for_write(&self) -> Result<MemoryBearerRef<'a>, NexusApiError> {
+        match &self.capability {
+            BearerCapability::Writable(_) => Ok(self.bearer),
+            BearerCapability::ReadOnly => Err(NexusApiError::Forbidden {
                 resource: "character_memory".into(),
-                reason: format!(
-                    "character '{character_id}' is not active (status '{}'); only active Characters may enter the memory pipeline",
-                    c.status
-                ),
+                reason: "read-only pipeline context cannot mutate memory".into(),
             }),
-            Some(_) => Ok(Self { bearer, scope_id }),
         }
     }
 }
@@ -121,6 +192,7 @@ fn map_local_db_error(e: nexus_local_db::LocalDbError) -> NexusApiError {
 pub const REVIEW_BATCH_LIMIT: i64 = 50;
 
 /// Outcome of a bounded review batch (V1.80 REL-01; moved from `memory.rs`).
+#[derive(Debug)]
 pub struct ReviewBatchOutcome {
     pub promoted: i64,
     pub fragmented: i64,
@@ -167,7 +239,9 @@ pub async fn process_bearer_review_batch(
     ctx: &BearerPipelineCtx<'_>,
     pool: &SqlitePool,
     deadline: tokio::time::Instant,
-) -> ReviewBatchOutcome {
+) -> Result<ReviewBatchOutcome, NexusApiError> {
+    // A read-only context cannot advance a queue, promote, or write files.
+    ctx.bearer_for_write()?;
     let mut outcome = ReviewBatchOutcome::new();
 
     for input in inputs {
@@ -197,7 +271,7 @@ pub async fn process_bearer_review_batch(
             Err(_elapsed) => {
                 outcome.any_row_remained_pending = true;
                 tracing::info!(
-                    bearer_id = %ctx.bearer.id(),
+                    bearer_id = %ctx.bearer_id(),
                     pending_id = %input.pending_id,
                     processed = outcome.processed,
                     "Review deadline reached mid-batch; returning partial progress"
@@ -207,7 +281,7 @@ pub async fn process_bearer_review_batch(
         }
     }
 
-    outcome
+    Ok(outcome)
 }
 
 /// Classify one pending row, perform the action (promote/fragment/drop), and
@@ -235,7 +309,7 @@ async fn process_single_review_row(
             // promotion. Shared Character scope and the whole Creator arm are
             // unchanged.
             let binding_local =
-                matches!(ctx.bearer, MemoryBearerRef::Character { .. }) && input.scope_id.is_some();
+                matches!(ctx.bearer(), MemoryBearerRef::Character { .. }) && input.scope_id.is_some();
             if binding_local {
                 let fragment = nexus_creator_memory::review::create_fragment_from_review(input);
                 match insert_fragment_and_delete_pending(
@@ -326,7 +400,7 @@ async fn delete_pending_row(
     ctx: &BearerPipelineCtx<'_>,
     pending_id: &str,
 ) -> Result<(), NexusApiError> {
-    match ctx.bearer {
+    match ctx.bearer() {
         MemoryBearerRef::Creator(_) => {
             let pid = pending_id.to_string();
             sqlx::query!(
@@ -398,7 +472,7 @@ async fn claim_pending_and_promote(
     let summarizer = PassthroughSummarizer::new(ctx.bearer);
     match nexus_creator_memory::review::promote_to_long_term(
         nexus_home,
-        ctx.bearer,
+        ctx.bearer(),
         input,
         &summarizer,
     )
@@ -457,7 +531,7 @@ async fn insert_fragment_and_delete_pending(
 ) -> Result<(), NexusApiError> {
     let mut tx = pool.begin().await.map_err(NexusApiError::from)?;
     let result = async {
-        match ctx.bearer {
+        match ctx.bearer() {
             MemoryBearerRef::Creator(_) => {
                 let record = nexus_local_db::memory_fragment::MemoryFragmentRecord {
                     fragment_id: fragment.fragment_id.clone(),
@@ -653,6 +727,13 @@ pub async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer + ?Sized>(
     force: bool,
     synthesizer: Option<&S>,
 ) -> Result<ReflectOutcome, NexusApiError> {
+    // A forced reflect is a mutation request (persist a synthesized
+    // narrative), so a read-only context is rejected up-front — before the
+    // insufficient-data early return, which would otherwise let a read ctx
+    // "succeed" on a forced request.
+    if force {
+        ctx.bearer_for_write()?;
+    }
     // 1. fragment stats + cache row in one DB round-trip.
     let (fragment_stats, cached) = bearer_fragment_stats(pool, ctx).await?;
 
@@ -698,7 +779,8 @@ pub async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer + ?Sized>(
         return Ok(outcome_ungenerated(&fragment_stats));
     }
 
-    // 5. force=true → synthesize (explicit CTA, on-demand only).
+    // 5. force=true → synthesize (explicit CTA, on-demand only). The write
+    //    gate was taken up-front (a read-only context never reaches here).
     let synth = synthesizer.ok_or_else(|| NexusApiError::ServiceUnavailable {
         message: "capability registry not available".to_string(),
     })?;
@@ -709,7 +791,7 @@ pub async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer + ?Sized>(
     let top_keywords = input.top_keywords.clone();
 
     let draft = synth
-        .synthesize(ctx.bearer, input, ctx.scope_id)
+        .synthesize(ctx.bearer(), input, ctx.scope_id)
         .await
         .map_err(map_soul_narrative_memory_error)?;
 
@@ -794,7 +876,7 @@ async fn bearer_fragment_stats(
     ),
     NexusApiError,
 > {
-    match ctx.bearer {
+    match ctx.bearer() {
         MemoryBearerRef::Creator(creator_id) => {
             let (stats, cached) =
                 nexus_local_db::soul_narrative_fragment_stats(pool, creator_id, ctx.scope_id)
@@ -838,7 +920,7 @@ async fn bearer_recent_fragment_signals(
     ctx: &BearerPipelineCtx<'_>,
 ) -> Result<Vec<FragmentSignal>, NexusApiError> {
     const FETCH_LIMIT: i64 = 100;
-    match ctx.bearer {
+    match ctx.bearer() {
         MemoryBearerRef::Creator(creator_id) => {
             let rows =
                 nexus_local_db::list_fragments_limited(pool, creator_id, ctx.scope_id, FETCH_LIMIT)
@@ -892,7 +974,7 @@ async fn bearer_persist_narrative(
         stats.fragment_count,
         stats.max_created_at.as_deref(),
     );
-    match ctx.bearer {
+    match ctx.bearer() {
         MemoryBearerRef::Creator(creator_id) => {
             let record = nexus_local_db::SoulNarrativeRecord {
                 creator_id: creator_id.to_string(),

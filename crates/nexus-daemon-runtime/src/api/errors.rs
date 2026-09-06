@@ -617,6 +617,32 @@ impl From<nexus_local_db::LocalDbError> for NexusApiError {
     }
 }
 
+/// Stable `409 character_busy` (v1.185 P0 Task 2): a Character side-effecting
+/// activity (mutation, memory pipeline, session create/Prompt in flight) must
+/// refuse lifecycle archive/restore rather than force-cancel or wait on a
+/// provider (durable §11.3.2).
+pub fn character_busy(character_id: &str) -> NexusApiError {
+    NexusApiError::ConflictCoded {
+        code: "character_busy".into(),
+        message: format!(
+            "character {character_id} has an in-flight activity; cancel it or retry after it drains"
+        ),
+    }
+}
+
+/// Stable `409 actor_session_stale` (v1.185 P0 Task 3): the stored session
+/// lifecycle epoch no longer matches the current Character epoch (a material
+/// archive/restore retired the session). Never falls back to the Creator/legacy
+/// context; a fresh session must be admitted and minted (durable §11.3.4).
+pub fn actor_session_stale(session_id: &str) -> NexusApiError {
+    NexusApiError::ConflictCoded {
+        code: "actor_session_stale".into(),
+        message: format!(
+            "actor session {session_id} is stale (retired by a Character lifecycle transition)"
+        ),
+    }
+}
+
 // Note: These tests remain inline because they use `crate::test_utils::create_test_workspace`,
 // which is a private test-only helper. Integration tests in `tests/` cannot access
 // `#[cfg(test)]` modules. Consider extracting the pure unit tests (error mapping logic)
@@ -1134,6 +1160,17 @@ mod tests {
     }
 
     // ── V1.147 P3 T1 (F2): input-validation failures → 422 + per-entry detail
+    // ── v1.185 P0 Task 2: structured Activity/lifecycle conflict helpers ──
+    #[test]
+    fn character_busy_and_actor_session_stale_map_to_409() {
+        let busy = character_busy("chr_00");
+        assert_eq!(busy.status_code(), StatusCode::CONFLICT);
+        assert_eq!(busy.error_code(), "character_busy");
+        let stale = actor_session_stale("sess_00");
+        assert_eq!(stale.status_code(), StatusCode::CONFLICT);
+        assert_eq!(stale.error_code(), "actor_session_stale");
+    }
+
     #[test]
     fn input_validation_failed_maps_to_422_with_invalid_input_code() {
         let err = NexusApiError::InputValidationFailed {

@@ -820,7 +820,9 @@ async fn foreign_missing_inactive_character_and_binding_fail_before_side_effects
         .unwrap();
 
     let missing = "chr_ffffffffffffffffffffffffffffffff";
-    for target in [missing, foreign_chr.as_str(), archived_chr.as_str()] {
+    for target in [missing, foreign_chr.as_str()] {
+        // Missing/foreign Character: writes and reads all 404 (existence
+        // hidden from non-owners).
         let resp = capture(
             &ctx.server,
             target,
@@ -831,9 +833,10 @@ async fn foreign_missing_inactive_character_and_binding_fail_before_side_effects
             "2026-01-01T00:00:01Z",
         )
         .await;
-        assert!(
-            resp.status_code() == 403 || resp.status_code() == 404,
-            "capture against {target} must deny, got {}: {}",
+        assert_eq!(
+            resp.status_code(),
+            404,
+            "capture against {target} must 404, got {}: {}",
             resp.status_code(),
             resp.text()
         );
@@ -842,36 +845,75 @@ async fn foreign_missing_inactive_character_and_binding_fail_before_side_effects
             .post(&format!("{}/review", memory_base(target)))
             .json(&json!({}))
             .await;
-        assert!(
-            resp.status_code() == 403 || resp.status_code() == 404,
-            "review against {target} must deny"
-        );
+        assert_eq!(resp.status_code(), 404, "review against {target} must 404");
         let resp = ctx
             .server
             .post(&format!("/v1/daemon/characters/{target}/soul/reflect"))
             .json(&json!({ "force_regenerate": false }))
             .await;
-        assert!(
-            resp.status_code() == 403 || resp.status_code() == 404,
-            "reflect against {target} must deny"
+        assert_eq!(
+            resp.status_code(),
+            404,
+            "reflect against {target} must 404"
         );
+        let resp = ctx
+            .server
+            .get(&format!("{}/pending-review", memory_base(target)))
+            .await;
+        assert_eq!(resp.status_code(), 404, "read against {target} must 404");
     }
-    // Foreign/missing → 404 (existence hidden from non-owners); inactive → 403.
-    let resp = ctx
-        .server
-        .get(&format!("{}/pending-review", memory_base(missing)))
-        .await;
-    assert_eq!(resp.status_code(), 404);
-    let resp = ctx
-        .server
-        .get(&format!("{}/pending-review", memory_base(&foreign_chr)))
-        .await;
-    assert_eq!(resp.status_code(), 404);
+    // Archived Character (owned by the active Creator): retained reads → 200,
+    // writes → 409 character_inactive.
     let resp = ctx
         .server
         .get(&format!("{}/pending-review", memory_base(&archived_chr)))
         .await;
-    assert_eq!(resp.status_code(), 403);
+    assert_eq!(
+        resp.status_code(),
+        200,
+        "archived pending list is a retained read: {}",
+        resp.text()
+    );
+    let resp = ctx
+        .server
+        .post(&format!("{}/review", memory_base(&archived_chr)))
+        .json(&json!({}))
+        .await;
+    assert_eq!(
+        resp.status_code(),
+        409,
+        "archived review must be 409 character_inactive: {}",
+        resp.text()
+    );
+    assert_eq!(j(&resp)["error"]["code"], "character_inactive");
+    let resp = ctx
+        .server
+        .post(&format!("{}/pending-review", memory_base(&archived_chr)))
+        .json(&json!({
+            "pending_id": "pend_archived",
+            "session_id": "sess_archived",
+            "raw_digest": FRAGMENT_DIGEST,
+            "created_at": "2026-01-01T00:00:01Z"
+        }))
+        .await;
+    assert_eq!(
+        resp.status_code(),
+        409,
+        "archived capture must be 409 character_inactive: {}",
+        resp.text()
+    );
+    assert_eq!(j(&resp)["error"]["code"], "character_inactive");
+    let resp = ctx
+        .server
+        .post(&format!("/v1/daemon/characters/{archived_chr}/soul/reflect"))
+        .json(&json!({ "force_regenerate": false }))
+        .await;
+    assert_eq!(
+        resp.status_code(),
+        200,
+        "archived force=false reflect is a retained read: {}",
+        resp.text()
+    );
 
     // A binding of a different Character is not a valid scope for this one.
     let (chr_b, bind_b) = create_character(&ctx.server, "Boris", WORLD_A).await;
@@ -911,7 +953,8 @@ async fn foreign_missing_inactive_character_and_binding_fail_before_side_effects
     );
     assert_eq!(sql_count(&ctx.pool, "character_memory_fragments").await, 0);
 
-    // The archived character's binding scope is also denied.
+    // The archived character's binding scope stays a retained read (stored
+    // binding tuple, no liveness).
     let resp = ctx
         .server
         .get(&format!(
@@ -919,7 +962,12 @@ async fn foreign_missing_inactive_character_and_binding_fail_before_side_effects
             memory_base(&archived_chr)
         ))
         .await;
-    assert_eq!(resp.status_code(), 403);
+    assert_eq!(
+        resp.status_code(),
+        200,
+        "archived binding read is retained: {}",
+        resp.text()
+    );
 
     // Valid bindings still work after the deny matrix (no state drift).
     assert_eq!(count_pending(&ctx.server, &chr, Some(&bind1)).await, 0);

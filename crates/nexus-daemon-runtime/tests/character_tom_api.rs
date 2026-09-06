@@ -423,7 +423,8 @@ async fn inactive_viewer_world_and_subject_fail_closed() {
     let bind_a = a["binding"]["binding_id"].as_str().unwrap().to_string();
     let carrier = seed_carrier(&ctx.pool, &chr_a).await;
 
-    // Archived viewer: record and list reject 409 before any mutation.
+    // Archived viewer: record rejects 409 before any mutation (write needs
+    // activity); the historical ToM list is a retained read and still 200.
     set_character_status(&ctx.pool, &chr_a, "archived").await;
     let resp = record(
         &ctx.server,
@@ -441,8 +442,8 @@ async fn inactive_viewer_world_and_subject_fail_closed() {
     let resp = ctx.server.get(&path).await;
     assert_eq!(
         resp.status_code(),
-        409,
-        "archived viewer list: {}",
+        200,
+        "archived viewer list is a retained read: {}",
         resp.text()
     );
     set_character_status(&ctx.pool, &chr_a, "active").await;

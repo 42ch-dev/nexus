@@ -653,7 +653,7 @@ pub async fn review(
             .collect();
         let ctx = BearerPipelineCtx::creator(&active_creator, None);
         let mut batch =
-            process_bearer_review_batch(&inputs, &nexus_home, &ctx, &pool, deadline).await;
+            process_bearer_review_batch(&inputs, &nexus_home, &ctx, &pool, deadline).await?;
 
         // `has_more` is the drain-completion contract: `true` means the queue
         // may not be fully drained and the client should re-request
@@ -1020,7 +1020,8 @@ mod tests {
             &pool,
             deadline,
         )
-        .await;
+        .await
+        .expect("creator batch");
 
         assert_eq!(outcome.processed, 0, "past deadline must inspect zero rows");
         assert_eq!(outcome.promoted, 0);

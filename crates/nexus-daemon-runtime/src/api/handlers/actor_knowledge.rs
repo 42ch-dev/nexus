@@ -187,7 +187,7 @@ pub async fn add_entry(
                     code: "invalid_input".into(),
                     message: "world_id is required for world-owned knowledge".into(),
                 })?;
-            service.require_owned_world(&creator_id, world_id).await?;
+            service.require_active_owned_world(&creator_id, world_id).await?;
             KnowledgeOwnerRef::world(world_id)
         }
         AddKnowledgeEntryRequestOwnerKind::Character => {
@@ -204,7 +204,7 @@ pub async fn add_entry(
                 }
             })?;
             service
-                .require_owned_character(&creator_id, character_id)
+                .require_active_owned_character(&creator_id, character_id)
                 .await?;
             KnowledgeOwnerRef::character(character_id)
         }
@@ -232,9 +232,9 @@ pub async fn add_entry(
                     message: "world_id is required for binding-owned knowledge".into(),
                 })?;
             service
-                .require_owned_character(&creator_id, character_id)
+                .require_active_owned_character(&creator_id, character_id)
                 .await?;
-            service.require_owned_world(&creator_id, world_id).await?;
+            service.require_active_owned_world(&creator_id, world_id).await?;
             service
                 .require_active_binding(character_id, binding_id, world_id)
                 .await?;
@@ -255,12 +255,42 @@ pub async fn add_entry(
     };
     record.creator_only = creator_only;
     let store = SqliteKbStore::new(pool);
-    store
-        .insert_knowledge_entry(record.clone())
-        .await
-        .map_err(map_insert_err)?;
+    // Character/binding-owned KE inserts revalidate the stored active owner
+    // inside the write transaction (durable §11.3.5) — a route check alone is
+    // not sufficient. World-owned inserts keep the existing behavior/texture.
+    let inserted = match &owner {
+        KnowledgeOwnerRef::World(_) => store
+            .insert_knowledge_entry(record.clone())
+            .await
+            .map_err(map_insert_err)
+            .map(|r| r.entry_id.clone()),
+        KnowledgeOwnerRef::Character(id) => store
+            .insert_actor_owned_key_block(&creator_id, id, None, record.clone())
+            .await
+            .map_err(map_local_db_insert_err)
+            .map(|r| r.entry_id.clone()),
+        KnowledgeOwnerRef::ActorWorldBinding(id) => {
+            let admitted_character = admitted_character_id(&req);
+            let admitted_character = admitted_character.as_deref().ok_or_else(|| {
+                NexusApiError::Internal {
+                    code: "ACTOR_KNOWLEDGE_INSERT_FAILED".into(),
+                    message: "binding-owned KE insert must carry the admitted Character".into(),
+                }
+            })?;
+            store
+                .insert_actor_owned_key_block(
+                    &creator_id,
+                    admitted_character,
+                    Some(id),
+                    record.clone(),
+                )
+                .await
+                .map_err(map_local_db_insert_err)
+                .map(|r| r.entry_id.clone())
+        }
+    }?;
     let stored = store
-        .get_knowledge_entry(&record.entry_id)
+        .get_knowledge_entry(&inserted)
         .await
         .map_err(map_insert_err)?;
     Ok((
@@ -271,6 +301,37 @@ pub async fn add_entry(
                 .try_into(),
         )?),
     ))
+}
+
+use nexus_local_db::LocalDbError;
+
+/// Admitted Character for a binding-owned KE insert (already validated above
+/// by `require_active_owned_character` / `require_active_binding`).
+fn admitted_character_id(req: &AddKnowledgeEntryRequest) -> Option<String> {
+    optional_str(req.character_id.as_ref()).map(str::to_string)
+}
+
+/// Map a guarded-create `LocalDbError` to the canonical daemon envelope: a
+/// contract conflict maps to its stable 409 code; an actor row we failed to
+/// create maps to 404 (existence hidden); everything else is internal.
+fn map_local_db_insert_err(err: LocalDbError) -> NexusApiError {
+    match err {
+        LocalDbError::ActorContractConflict { code } => NexusApiError::ConflictCoded {
+            code: code.as_str().to_string(),
+            message: code.message().to_string(),
+        },
+        LocalDbError::ActorNotFound { resource, id } => {
+            NexusApiError::NotFound(format!("{resource} {id}"))
+        }
+        LocalDbError::ConstraintViolation { .. } => NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: err.to_string(),
+        },
+        other => NexusApiError::Internal {
+            code: "ACTOR_KNOWLEDGE_INSERT_FAILED".into(),
+            message: other.to_string(),
+        },
+    }
 }
 
 /// `GET /v1/daemon/characters/{character_id}/knowledge`
