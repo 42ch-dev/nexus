@@ -1064,6 +1064,22 @@ async fn patch_detail(
 }
 
 #[allow(clippy::future_not_send)]
+
+#[allow(clippy::future_not_send)]
+async fn delete_detail_query(
+    server: &TestServer,
+    character_id: &str,
+    entry_id: &str,
+    query: &str,
+) -> axum_test::TestResponse {
+    let path = if query.is_empty() {
+        format!("/v1/daemon/characters/{character_id}/knowledge/{entry_id}")
+    } else {
+        format!("/v1/daemon/characters/{character_id}/knowledge/{entry_id}?{query}")
+    };
+    server.delete(&path).await
+}
+
 async fn delete_detail(
     server: &TestServer,
     character_id: &str,
@@ -1350,3 +1366,33 @@ async fn knowledge_archived_character_detail_read_write_split() {
     let body: Value = write.json();
     assert_eq!(body["error"]["code"], "character_inactive");
 }
+
+#[tokio::test]
+async fn knowledge_delete_malformed_expected_revision_is_invalid_input() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr = created["character"]["character_id"].as_str().unwrap();
+    let added = add_entry(
+        &ctx.server,
+        json!({
+            "owner_kind": "character",
+            "character_id": chr,
+            "block_type": "item",
+            "canonical_name": "DeleteQuery"
+        }),
+    )
+    .await;
+    let entry_id = added["item"]["entry_id"].as_str().unwrap();
+
+    for (query, label) in [
+        ("", "missing"),
+        ("expected_revision=abc", "non-integer"),
+        ("expected_revision=9223372036854775807", "overflow"),
+    ] {
+        let resp = delete_detail_query(&ctx.server, chr, entry_id, query).await;
+        assert_eq!(resp.status_code(), 422, "{label}: {}", resp.text());
+        let body: Value = resp.json();
+        assert_eq!(body["error"]["code"], "invalid_input", "{label}");
+    }
+}
+

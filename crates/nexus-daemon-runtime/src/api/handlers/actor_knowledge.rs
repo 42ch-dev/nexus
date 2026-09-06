@@ -13,7 +13,7 @@ use crate::api::handlers::world_kb_guards::require_creator;
 use crate::workspace::WorkspaceState;
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, Uri};
 use axum::Json;
 use chrono::{DateTime, Utc};
 use nexus_contracts::daemon_api::actor_knowledge::{
@@ -21,7 +21,6 @@ use nexus_contracts::daemon_api::actor_knowledge::{
     add_knowledge_entry_response::{
         AddKnowledgeEntryResponse, NexusActorKnowledgeViewItem as CreatedItem,
     },
-    delete_knowledge_entry_query::DeleteKnowledgeEntryQuery,
     knowledge_entry_detail::{
         KnowledgeEntryDetail, NexusActorKnowledgeViewItem as DetailItem,
     },
@@ -112,6 +111,53 @@ fn detail_from_record(record: &KnowledgeEntryRecord) -> Result<KnowledgeEntryDet
         "summary": summary,
     });
     serde_json::from_value(value).map_err(wire_err)
+}
+
+
+const KNOWLEDGE_DELETE_MAX_EXPECTED_REVISION: i64 = 9_223_372_036_854_775_806;
+
+fn knowledge_delete_invalid_input(message: impl Into<String>) -> NexusApiError {
+    NexusApiError::BadRequest {
+        code: "invalid_input".into(),
+        message: message.into(),
+    }
+}
+
+fn parse_delete_expected_revision(uri: &Uri) -> Result<i64, NexusApiError> {
+    let query = uri
+        .query()
+        .ok_or_else(|| knowledge_delete_invalid_input("expected_revision is required"))?;
+    let mut expected_revision: Option<&str> = None;
+    for pair in query.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        let (key, value) = match pair.split_once('=') {
+            Some((k, v)) => (k, v),
+            None => (pair, ""),
+        };
+        if key == "expected_revision" {
+            if expected_revision.is_some() {
+                return Err(knowledge_delete_invalid_input(
+                    "duplicate expected_revision query parameter",
+                ));
+            }
+            expected_revision = Some(value);
+        } else {
+            return Err(knowledge_delete_invalid_input(format!(
+                "unexpected query parameter '{key}'"
+            )));
+        }
+    }
+    let raw = expected_revision
+        .ok_or_else(|| knowledge_delete_invalid_input("expected_revision is required"))?;
+    let parsed = raw
+        .parse::<i64>()
+        .map_err(|_| knowledge_delete_invalid_input("expected_revision must be an integer"))?;
+    if !(0..=KNOWLEDGE_DELETE_MAX_EXPECTED_REVISION).contains(&parsed) {
+        return Err(knowledge_delete_invalid_input("expected_revision is out of range"));
+    }
+    Ok(parsed)
 }
 
 fn knowledge_patch_is_empty(raw: &serde_json::Map<String, serde_json::Value>) -> bool {
@@ -554,8 +600,9 @@ pub async fn patch_knowledge_entry(
 pub async fn delete_knowledge_entry(
     State(state): State<WorkspaceState>,
     Path((character_id, entry_id)): Path<(String, String)>,
-    Query(query): Query<DeleteKnowledgeEntryQuery>,
+    uri: Uri,
 ) -> Result<StatusCode, NexusApiError> {
+    let expected_revision = parse_delete_expected_revision(&uri)?;
     let owner = require_creator(&state)?;
     let pool = state.pool_or_uninit()?;
     let _activity = state
@@ -567,7 +614,7 @@ pub async fn delete_knowledge_entry(
         &owner,
         &character_id,
         &entry_id,
-        query.expected_revision,
+        expected_revision,
     )
     .await?;
     Ok(StatusCode::NO_CONTENT)
