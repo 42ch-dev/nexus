@@ -634,6 +634,23 @@ pub fn character_busy(character_id: &str) -> NexusApiError {
 /// lifecycle epoch no longer matches the current Character epoch (a material
 /// archive/restore retired the session). Never falls back to the Creator/legacy
 /// context; a fresh session must be admitted and minted (durable §11.3.4).
+
+/// Stable `409 actor_operation_capacity` (v1.185 P3): too many nonterminal Character operations.
+pub fn actor_operation_capacity() -> NexusApiError {
+    NexusApiError::ConflictCoded {
+        code: "actor_operation_capacity".into(),
+        message: "character operation outcome capacity reached; wait for in-flight operations to finish".into(),
+    }
+}
+
+/// Stable `409 actor_operation_finished` (v1.185 P3): cancel after terminal finalization.
+pub fn actor_operation_finished() -> NexusApiError {
+    NexusApiError::ConflictCoded {
+        code: "actor_operation_finished".into(),
+        message: "operation already finished; cancel cannot erase capture".into(),
+    }
+}
+
 pub fn actor_session_stale(session_id: &str) -> NexusApiError {
     NexusApiError::ConflictCoded {
         code: "actor_session_stale".into(),
