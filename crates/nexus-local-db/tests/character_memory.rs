@@ -2013,3 +2013,66 @@ async fn migration_preserves_manual_pending_source_null() {
     assert!(source.is_none());
 }
 
+#[tokio::test]
+async fn pending_source_operation_id_enforces_receipt_foreign_key() {
+    let (pool, _dir) = fresh_pool().await;
+    let s = seed(&pool).await;
+
+    let fk_table: Option<String> = sqlx::query_scalar(
+        "SELECT \"table\" FROM pragma_foreign_key_list('character_memory_pending_review') \
+         WHERE \"from\" = 'source_operation_id' LIMIT 1",
+    )
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        fk_table.as_deref(),
+        Some("character_run_captures"),
+        "expected source_operation_id FK to character_run_captures"
+    );
+
+    let err = sqlx::query(
+        "INSERT INTO character_memory_pending_review \
+         (pending_id, session_id, character_id, task_kind, raw_digest, created_at, source_operation_id) \
+         VALUES ('pend_forged', 'sess_fk', ?, 'unknown', 'x', datetime('now'), 'op_nonexistent')",
+    )
+    .bind(&s.char_a)
+    .execute(&pool)
+    .await
+    .unwrap_err();
+    assert!(err.to_string().contains("FOREIGN KEY"), "{err}");
+
+    let epoch = character_epoch(&pool, &s.char_a).await;
+    let input = run_capture_input(
+        "op_fk_ok",
+        "sess_fk_ok",
+        &s.char_a,
+        &s.binding_a1,
+        "run_opfkok000000000000000000000000",
+        "digest fk ok",
+        epoch,
+    );
+    capture_character_run(&pool, OWNER, input).await.unwrap();
+
+    let source: Option<String> = sqlx::query_scalar!(
+        "SELECT source_operation_id FROM character_memory_pending_review WHERE pending_id = ?",
+        "run_opfkok000000000000000000000000"
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(source.as_deref(), Some("op_fk_ok"));
+
+    create_character_pending_review(&pool, OWNER, &pending("pend_manual_fk", &s.char_a, None))
+        .await
+        .unwrap();
+    let manual_source: Option<String> = sqlx::query_scalar!(
+        "SELECT source_operation_id FROM character_memory_pending_review WHERE pending_id = ?",
+        "pend_manual_fk"
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(manual_source.is_none());
+}
+
