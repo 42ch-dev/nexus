@@ -5,8 +5,8 @@ use uuid::Uuid;
 
 use crate::begin_immediate;
 use crate::character::{
-    map_actor_constraint, require_active_owned_character, require_owned_active_world,
-    require_owned_character, require_owned_world,
+    map_actor_constraint, require_active_owned_character_tx, require_owned_active_world,
+    require_owned_character_pool, require_owned_world,
 };
 use crate::error::{ActorContractConflict, LocalDbError};
 
@@ -254,6 +254,19 @@ pub(crate) async fn require_valid_provenance_tx(
 ///
 /// Returns `LocalDbError::ActorNotFound` for a missing, foreign, inactive, or
 /// non-active-World binding; `LocalDbError` on database failure.
+/// Retained-data read provenance: owned Character + exact active binding tuple.
+pub(crate) async fn require_owned_binding_provenance_pool(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+    character_id: &str,
+    binding_id: &str,
+) -> Result<(), LocalDbError> {
+    require_owned_character_pool(pool, owner_creator_id, character_id).await?;
+    require_active_character_binding_pool(pool, character_id, binding_id).await?;
+    Ok(())
+}
+
+/// Write-path provenance: active binding plus owned active World.
 pub(crate) async fn require_active_owned_provenance_pool(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -278,7 +291,7 @@ pub async fn add_actor_world_binding(
     let now = chrono::Utc::now().to_rfc3339();
     let mut tx = begin_immediate(pool).await?;
     let result = async {
-        require_active_owned_character(&mut tx, params.owner_creator_id, params.character_id)
+        require_active_owned_character_tx(&mut tx, params.owner_creator_id, params.character_id)
             .await?;
         require_owned_world(&mut tx, params.owner_creator_id, params.world_id).await?;
         insert_binding_tx(&mut tx, params, &now).await
@@ -413,7 +426,7 @@ async fn remove_binding_tx(
     character_id: &str,
     binding_id: &str,
 ) -> Result<(), LocalDbError> {
-    require_owned_character(tx, owner_creator_id, character_id).await?;
+    require_active_owned_character_tx(tx, owner_creator_id, character_id).await?;
     let binding = require_active_character_binding_tx(tx, character_id, binding_id).await?;
     require_owned_active_world(tx, owner_creator_id, &binding.world_id).await?;
 

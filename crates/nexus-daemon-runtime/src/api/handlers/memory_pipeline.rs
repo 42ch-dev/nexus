@@ -378,9 +378,14 @@ async fn claim_pending_and_promote(
                 .await
                 .map_err(map_local_db_error)?
         }
-        MemoryBearerRef::Character { character_id, .. } => {
+        MemoryBearerRef::Character {
+            character_id,
+            owner_creator_id,
+            ..
+        } => {
             nexus_local_db::delete_character_pending_review_in_tx(
                 &mut tx,
+                owner_creator_id,
                 character_id,
                 &input.pending_id,
             )
@@ -491,6 +496,7 @@ async fn insert_fragment_and_delete_pending(
                     .map_err(map_local_db_error)?;
                 let deleted = nexus_local_db::delete_character_pending_review_in_tx(
                     &mut tx,
+                    owner_creator_id,
                     character_id,
                     pending_id,
                 )

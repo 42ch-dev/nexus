@@ -97,6 +97,12 @@ pub enum ActorContractConflict {
     BindingHasOwnedKnowledge,
     BindingHasLocalMemory,
     CharacterFragmentAlreadyShared,
+    /// v1.185 P0: mutation targets an owned but archived Character.
+    CharacterInactive,
+    /// v1.185 P0: `expected_revision` does not match stored Character revision.
+    CharacterRevisionConflict,
+    /// v1.185 P0: restore lacks a retained active binding into an owned active World.
+    CharacterRestoreRequiresActiveBinding,
 }
 
 impl ActorContractConflict {
@@ -111,6 +117,11 @@ impl ActorContractConflict {
             Self::BindingHasOwnedKnowledge => "binding_has_owned_knowledge",
             Self::BindingHasLocalMemory => "binding_has_local_memory",
             Self::CharacterFragmentAlreadyShared => "character_fragment_already_shared",
+            Self::CharacterInactive => "character_inactive",
+            Self::CharacterRevisionConflict => "character_revision_conflict",
+            Self::CharacterRestoreRequiresActiveBinding => {
+                "character_restore_requires_active_binding"
+            }
         }
     }
 
@@ -139,6 +150,15 @@ impl ActorContractConflict {
             }
             Self::CharacterFragmentAlreadyShared => {
                 "Character memory fragment is already shared (no binding provenance to clear)"
+            }
+            Self::CharacterInactive => {
+                "Character is archived; this mutation requires an active Character"
+            }
+            Self::CharacterRevisionConflict => {
+                "Character revision no longer matches; re-read and retry with the current revision"
+            }
+            Self::CharacterRestoreRequiresActiveBinding => {
+                "Restore requires at least one retained active binding into an owned active World"
             }
         }
     }

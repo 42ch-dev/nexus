@@ -247,15 +247,30 @@ pub async fn delete_character_pending_review(
     character_id: &str,
     pending_id: &str,
 ) -> Result<bool, LocalDbError> {
-    require_owned_character_pool(pool, owner_creator_id, character_id).await?;
-    let result = sqlx::query!(
-        "DELETE FROM character_memory_pending_review WHERE pending_id = ? AND character_id = ?",
-        pending_id,
-        character_id
-    )
-    .execute(pool)
-    .await?;
-    Ok(result.rows_affected() > 0)
+    let mut tx = crate::begin_immediate(pool).await?;
+    let result = async {
+        require_active_owned_character(&mut tx, owner_creator_id, character_id).await?;
+        let deleted = sqlx::query!(
+            "DELETE FROM character_memory_pending_review WHERE pending_id = ? AND character_id = ?",
+            pending_id,
+            character_id
+        )
+        .execute(&mut *tx)
+        .await?
+        .rows_affected() > 0;
+        Ok(deleted)
+    }
+    .await;
+    match result {
+        Ok(deleted) => {
+            tx.commit().await?;
+            Ok(deleted)
+        }
+        Err(err) => {
+            let _ = tx.rollback().await;
+            Err(err)
+        }
+    }
 }
 
 /// Delete a Character pending review row inside a caller-owned transaction.
@@ -270,9 +285,11 @@ pub async fn delete_character_pending_review(
 /// already gone.
 pub async fn delete_character_pending_review_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    owner_creator_id: &str,
     character_id: &str,
     pending_id: &str,
 ) -> Result<bool, LocalDbError> {
+    require_active_owned_character(&mut *tx, owner_creator_id, character_id).await?;
     let result = sqlx::query!(
         "DELETE FROM character_memory_pending_review WHERE pending_id = ? AND character_id = ?",
         pending_id,

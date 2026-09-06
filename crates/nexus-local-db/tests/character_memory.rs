@@ -15,8 +15,8 @@ use nexus_local_db::{
     delete_character_pending_review, delete_character_soul_meta, get_character_fragment,
     get_character_pending_review, get_character_soul_meta, get_character_soul_narrative,
     list_character_fragments, list_character_pending_reviews, promote_character_fragment_to_shared,
-    remove_binding, upsert_character_soul_meta, upsert_character_soul_narrative,
-    ActorContractConflict, CharacterPendingReviewRecord, CharacterSoulMeta,
+    remove_binding, transition_character, upsert_character_soul_meta, upsert_character_soul_narrative,
+    ActorContractConflict, CharacterStatus, CharacterPendingReviewRecord, CharacterSoulMeta,
     CharacterSoulNarrativeRecord, CreateBindingParams, CreateCharacterParams, LocalDbError,
     NewCharacterMemoryFragment,
 };
@@ -1475,4 +1475,64 @@ async fn frag_binding(pool: &SqlitePool, character_id: &str, fragment_id: &str) 
     .fetch_optional(pool)
     .await
     .unwrap()
+}
+
+
+async fn archive_character(pool: &SqlitePool, character_id: &str, revision: i64) {
+    transition_character(pool, OWNER, character_id, revision, CharacterStatus::Archived)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn archived_character_retained_reads_and_mutators_inactive() {
+    let (pool, _dir) = fresh_pool().await;
+    let seed = seed(&pool).await;
+    let pending_id = "pend_arch";
+    create_character_pending_review(
+        &pool,
+        OWNER,
+        &pending("pend_arch", &seed.char_a, Some(&seed.binding_a1)),
+    )
+    .await
+    .unwrap();
+    create_character_fragment(
+        &pool,
+        OWNER,
+        &NewCharacterMemoryFragment {
+            fragment_id: "frag_arch".into(),
+            session_id: "sess".into(),
+            character_id: seed.char_a.clone(),
+            actor_world_binding_id: None,
+            keywords: "[]".into(),
+            summary: "s".into(),
+            created_at: "2026-09-05T00:00:00Z".into(),
+            ttl: None,
+        },
+    )
+    .await
+    .unwrap();
+    let rev = sqlx::query_scalar::<_, i64>("SELECT revision FROM characters WHERE character_id = ?")
+        .bind(&seed.char_a)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    archive_character(&pool, &seed.char_a, rev).await;
+    assert!(get_character_pending_review(&pool, OWNER, &seed.char_a, Some(&seed.binding_a1), pending_id)
+        .await
+        .unwrap()
+        .is_some());
+    assert!(delete_character_pending_review(&pool, OWNER, &seed.char_a, pending_id)
+        .await
+        .is_err());
+    assert!(create_character_pending_review(
+        &pool,
+        OWNER,
+        &pending("pend2", &seed.char_a, None),
+    )
+    .await
+    .is_err());
+    assert!(delete_character_fragment(&pool, OWNER, &seed.char_a, "frag_arch")
+        .await
+        .is_err());
 }

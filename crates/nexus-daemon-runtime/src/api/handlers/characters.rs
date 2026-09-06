@@ -102,6 +102,7 @@ fn character_from_record(record: &CharacterRecord) -> Result<Character, NexusApi
             .owner_creator_id(record.owner_creator_id.as_str())
             .display_name(record.display_name.as_str())
             .status(record.status.as_str())
+            .revision(record.revision)
             .persona(persona)
             .image_uri(parse_optional(record.image_uri.as_deref())?)
             .created_at(parse_rfc3339(&record.created_at)?)
@@ -340,6 +341,8 @@ mod conversion_tests {
             persona_json: r#"{"tone":"calm"}"#.into(),
             created_at: "2026-09-05T00:00:00Z".into(),
             updated_at: "2026-09-05T00:00:01Z".into(),
+            revision: 0,
+            lifecycle_epoch: 0,
         }
     }
 

@@ -4,8 +4,9 @@
 
 use nexus_local_db::{
     add_actor_world_binding, create_character_with_initial_binding, get_character,
-    list_bindings_for_character, mint_character_id, remove_binding, ActorContractConflict,
-    CreateBindingParams, CreateCharacterParams, LocalDbError,
+    list_bindings_for_character, mint_character_id, remove_binding, transition_character,
+    update_character, ActorContractConflict, CharacterPatch, CharacterStatus,
+    CreateBindingParams, CreateCharacterParams, FieldPatch, LocalDbError,
 };
 use sqlx::SqlitePool;
 
@@ -484,9 +485,8 @@ async fn binding_admission_rejects_archived_character() {
     .unwrap_err();
     assert!(matches!(
         err,
-        LocalDbError::ActorNotFound {
-            resource: "character",
-            ..
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::CharacterInactive
         }
     ));
     let extra: i64 = sqlx::query_scalar(
@@ -564,4 +564,192 @@ async fn actor_conflict_display_is_human_readable() {
     .to_string();
     assert_ne!(msg, "last_active_actor_world_binding");
     assert!(msg.contains("last active"));
+}
+
+
+#[tokio::test]
+async fn stale_character_revision_rejects_update() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    let created = create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "Ava",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_A,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    let id = &created.character.character_id;
+    let err = update_character(
+        &pool,
+        OWNER,
+        id,
+        1,
+        CharacterPatch {
+            display_name: Some("Renamed"),
+            image_uri: FieldPatch::Keep,
+            persona_json: FieldPatch::Keep,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::CharacterRevisionConflict
+        }
+    ));
+}
+
+#[tokio::test]
+async fn update_character_nullable_clear_and_omit() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    let created = create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "Ava",
+            image_uri: Some("https://example.test/x.png"),
+            persona_json: r#"{"k":1}"#,
+            world_id: WORLD_A,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    let id = &created.character.character_id;
+    let cleared = update_character(
+        &pool,
+        OWNER,
+        id,
+        0,
+        CharacterPatch {
+            display_name: None,
+            image_uri: FieldPatch::Clear,
+            persona_json: FieldPatch::Clear,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(cleared.revision, 1);
+    assert!(cleared.image_uri.is_none());
+    assert_eq!(cleared.persona_json, "{}");
+    let noop = update_character(
+        &pool,
+        OWNER,
+        id,
+        cleared.revision,
+        CharacterPatch {
+            display_name: None,
+            image_uri: FieldPatch::Keep,
+            persona_json: FieldPatch::Keep,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(noop.revision, cleared.revision);
+    assert_eq!(noop.updated_at, cleared.updated_at);
+}
+
+#[tokio::test]
+async fn lifecycle_same_state_is_revision_checked_noop() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    let created = create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "Ava",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_A,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    let id = &created.character.character_id;
+    let again = transition_character(&pool, OWNER, id, 0, CharacterStatus::Active)
+        .await
+        .unwrap();
+    assert_eq!(again.revision, 0);
+    assert_eq!(again.lifecycle_epoch, 0);
+}
+
+#[tokio::test]
+async fn restore_requires_active_binding_and_name_collision() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    let created = create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "Shared",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_A,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    let id = &created.character.character_id;
+    sqlx::query("UPDATE narrative_worlds SET status = 'archived' WHERE world_id = ?")
+        .bind(WORLD_A)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let archived = transition_character(&pool, OWNER, id, 0, CharacterStatus::Archived)
+        .await
+        .unwrap();
+    assert_eq!(archived.status, "archived");
+    assert_eq!(archived.lifecycle_epoch, 1);
+    let err = transition_character(&pool, OWNER, id, archived.revision, CharacterStatus::Active)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::CharacterRestoreRequiresActiveBinding
+        }
+    ));
+    sqlx::query("UPDATE narrative_worlds SET status = 'active' WHERE world_id = ?")
+        .bind(WORLD_A)
+        .execute(&pool)
+        .await
+        .unwrap();
+    create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "Shared",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_B,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    let err = transition_character(&pool, OWNER, id, archived.revision, CharacterStatus::Active)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::DuplicateCharacterDisplayName
+        }
+    ));
+    let row: String = sqlx::query_scalar("SELECT status FROM characters WHERE character_id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(row, "archived");
 }

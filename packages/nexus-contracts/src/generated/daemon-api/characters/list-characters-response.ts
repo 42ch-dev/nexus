@@ -46,6 +46,10 @@ export interface NexusCharacter {
     [k: string]: unknown | undefined;
   };
   /**
+   * Optimistic-concurrency token, initially 0. Every successful material edit increments it once; mutations require `expected_revision` equal to the stored value. `lifecycle_epoch` is internal and never exposed on the wire.
+   */
+  revision: number;
+  /**
    * ISO 8601 / RFC 3339 UTC datetime string
    */
   created_at: string;
