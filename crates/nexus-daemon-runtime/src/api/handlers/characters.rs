@@ -329,12 +329,17 @@ async fn execute_character_lifecycle(
         )
         .await?;
 
-        drop(guard);
+        // §11.3.3: retire old session keys while the exclusive fence is
+        // still held — no new session can be admitted at the new epoch in
+        // this window, so the blanket retire cannot hit a fresh session.
+        // The guard is released before the (fallible, one-attempt) Host
+        // shutdown loop below.
         let retired_ids = if record.lifecycle_epoch == pre_epoch {
             Vec::new()
         } else {
             registry.retire_character_sessions(character_id)
         };
+        drop(guard);
         (record, retired_ids)
     };
 
