@@ -29,6 +29,7 @@
 #![allow(clippy::missing_errors_doc)]
 
 use crate::api::errors::NexusApiError;
+use crate::api::handlers::workspaces::validate_slug;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -363,6 +364,13 @@ pub async fn list_entries(
             reason,
         }
     })?;
+    // `workspace_slug` is a logical single-segment workspace identifier (not
+    // an arbitrary filesystem selection): it is joined raw into the KB dir
+    // layout, so a separator/`..`/absolute form would escape the workspace
+    // root. Validate before any path resolution.
+    if let Some(slug) = query.workspace_slug.as_deref() {
+        validate_slug("workspace_slug", slug)?;
+    }
 
     let home = dirs::home_dir().ok_or_else(|| NexusApiError::Internal {
         code: "HOME_DIR_ERROR".into(),
@@ -435,6 +443,10 @@ pub async fn add_entry(
             reason,
         }
     })?;
+    // See list_entries: `workspace_slug` must stay a single path segment.
+    if let Some(slug) = req.workspace_slug.as_deref() {
+        validate_slug("workspace_slug", slug)?;
+    }
 
     // Get content from either inline content or file path
     let content = if let Some(ref content) = req.content {
@@ -769,6 +781,84 @@ pub async fn delete_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::extract::{Path as AxumPath, State as AxumState};
+
+    #[tokio::test]
+    async fn list_and_add_reject_non_segment_workspace_slug() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let nexus_home = tmp.path().join(".nexus42");
+        std::fs::create_dir_all(&nexus_home).expect("nexus_home");
+        let db_path = nexus_home.join("state.db");
+        let state =
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        for slug in ["../escape", "a\\b", "..", "/abs", "", "."] {
+            let list_err = list_entries(
+                AxumState(state.clone()),
+                Query(ListKbEntriesQuery {
+                    creator_id: Some("ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string()),
+                    workspace_slug: Some(slug.to_string()),
+                    scope: None,
+                    q: None,
+                    limit: None,
+                    cursor: None,
+                }),
+            )
+            .await
+            .expect_err("list must reject non-segment workspace_slug");
+            assert!(
+                matches!(list_err, NexusApiError::InvalidInput { ref field, .. } if field == "workspace_slug"),
+                "slug {slug:?}: unexpected list error: {list_err:?}"
+            );
+
+            // The invalid logical ID must win over the missing import file.
+            // Without validation this returns NotFound, without writing to HOME.
+            let add_err = add_entry(
+                AxumState(state.clone()),
+                Json(AddKbEntryRequest {
+                    creator_id: "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+                    workspace_slug: Some(slug.to_string()),
+                    scope: None,
+                    title: None,
+                    content: None,
+                    file_path: Some(tmp.path().join("missing.md").to_string_lossy().into_owned()),
+                }),
+            )
+            .await
+            .expect_err("add must reject non-segment workspace_slug");
+            assert!(
+                matches!(add_err, NexusApiError::InvalidInput { ref field, .. } if field == "workspace_slug"),
+                "slug {slug:?}: unexpected add error: {add_err:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn get_and_delete_entry_reject_dotdot_id_before_any_fs_op() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let nexus_home = tmp.path().join(".nexus42");
+        std::fs::create_dir_all(&nexus_home).expect("nexus_home");
+        let db_path = nexus_home.join("state.db");
+        let state =
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let get_err = get_entry(
+            AxumState(state.clone()),
+            AxumPath("kb_../../etc/passwd".to_string()),
+        )
+        .await
+        .expect_err("traversal id must be rejected on get");
+        assert!(
+            matches!(get_err, NexusApiError::InvalidInput { ref field, .. } if field == "entry_id")
+        );
+
+        let del_err = delete_entry(AxumState(state), AxumPath("../etc".to_string()))
+            .await
+            .expect_err("traversal id must be rejected on delete");
+        assert!(
+            matches!(del_err, NexusApiError::InvalidInput { ref field, .. } if field == "entry_id")
+        );
+    }
 
     #[test]
     fn validate_entry_id_rejects_traversal() {

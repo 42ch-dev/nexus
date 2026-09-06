@@ -154,7 +154,8 @@ fn auth_token_login() {
         .env("HOME", tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("token stored"));
+        .stdout(predicate::str::contains("test-access").not())
+        .stderr(predicate::str::contains("test-access").not());
 }
 
 /// Test auth logout (clears local `AuthStore`, no daemon)

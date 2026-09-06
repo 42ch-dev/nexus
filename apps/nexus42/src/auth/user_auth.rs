@@ -165,10 +165,6 @@ pub fn login_with_token(
     let store = AuthStore::load()?;
     if let Some(t) = &store.user_token {
         println!("  User: {}", t.user_id);
-        println!(
-            "  Token: {}...",
-            &t.access_token[..t.access_token.len().min(16)]
-        );
         println!("  Expires: {}", t.expires_at);
     }
 

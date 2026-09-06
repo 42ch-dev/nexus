@@ -136,7 +136,7 @@ fn cache_workspaces(items: Vec<WorkspaceSummary>) {
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 /// Validate a slug: non-empty, single path segment, no `.` / `..`.
-fn validate_slug(label: &str, value: &str) -> Result<(), NexusApiError> {
+pub(crate) fn validate_slug(label: &str, value: &str) -> Result<(), NexusApiError> {
     if value.is_empty()
         || value.contains('/')
         || value.contains('\\')
