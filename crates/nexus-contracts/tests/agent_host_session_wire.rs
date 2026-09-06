@@ -187,8 +187,7 @@ fn session_list_response_pins_nested_viewpoint_bytes() {
 #[test]
 fn legacy_prompt_json_omits_remember() {
     let req: ExecuteOperationRequest =
-        serde_json::from_str(r#"{"kind":"prompt","content":"hello"}"#)
-            .expect("legacy prompt");
+        serde_json::from_str(r#"{"kind":"prompt","content":"hello"}"#).expect("legacy prompt");
     match req {
         ExecuteOperationRequest::Prompt { content, remember } => {
             assert_eq!(content, "hello");
@@ -212,11 +211,12 @@ fn prompt_remember_roundtrip() {
 
 #[test]
 fn set_model_rejects_remember_field() {
-    assert!(serde_json::from_value::<ExecuteOperationRequest>(serde_json::json!({
-        "kind": "set_model",
-        "model": "opus",
-        "remember": true
-    }))
-    .is_err());
+    assert!(
+        serde_json::from_value::<ExecuteOperationRequest>(serde_json::json!({
+            "kind": "set_model",
+            "model": "opus",
+            "remember": true
+        }))
+        .is_err()
+    );
 }
-

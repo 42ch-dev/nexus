@@ -29,7 +29,11 @@ pub struct CharacterRecord {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FieldPatch<T> { Keep, Set(T), Clear }
+pub enum FieldPatch<T> {
+    Keep,
+    Set(T),
+    Clear,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct CharacterPatch<'a> {
@@ -40,14 +44,18 @@ pub struct CharacterPatch<'a> {
 
 impl Default for CharacterPatch<'_> {
     fn default() -> Self {
-        Self { display_name: None, image_uri: FieldPatch::Keep, persona_json: FieldPatch::Keep }
+        Self {
+            display_name: None,
+            image_uri: FieldPatch::Keep,
+            persona_json: FieldPatch::Keep,
+        }
     }
 }
 
 impl CharacterPatch<'_> {
     /// True when the patch carries no mutable fields (§11 empty patch).
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.display_name.is_none()
             && matches!(self.image_uri, FieldPatch::Keep)
             && matches!(self.persona_json, FieldPatch::Keep)
@@ -55,11 +63,18 @@ impl CharacterPatch<'_> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CharacterStatus { Active, Archived }
+pub enum CharacterStatus {
+    Active,
+    Archived,
+}
 
 impl CharacterStatus {
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
-        match self { Self::Active => "active", Self::Archived => "archived" }
+        match self {
+            Self::Active => "active",
+            Self::Archived => "archived",
+        }
     }
 }
 
@@ -74,15 +89,20 @@ pub(crate) fn check_expected_revision(expected_revision: i64) -> Result<(), Loca
     Ok(())
 }
 
-fn revision_conflict() -> LocalDbError {
-    LocalDbError::ActorContractConflict { code: ActorContractConflict::CharacterRevisionConflict }
+const fn revision_conflict() -> LocalDbError {
+    LocalDbError::ActorContractConflict {
+        code: ActorContractConflict::CharacterRevisionConflict,
+    }
 }
 
-fn character_inactive(_character_id: &str) -> LocalDbError {
-    LocalDbError::ActorContractConflict { code: ActorContractConflict::CharacterInactive }
+const fn character_inactive(_character_id: &str) -> LocalDbError {
+    LocalDbError::ActorContractConflict {
+        code: ActorContractConflict::CharacterInactive,
+    }
 }
 
-fn record_from_parts(
+#[allow(clippy::too_many_arguments)] // row mapper mirrors SQL projection
+const fn record_from_parts(
     character_id: String,
     owner_creator_id: String,
     display_name: String,
@@ -256,10 +276,20 @@ async fn load_character(
     )
     .fetch_optional(&mut **tx)
     .await?;
-    Ok(row.map(|r| record_from_parts(
-        r.character_id, r.owner_creator_id, r.display_name, r.status, r.image_uri,
-        r.persona_json, r.created_at, r.updated_at, r.revision, r.lifecycle_epoch,
-    )))
+    Ok(row.map(|r| {
+        record_from_parts(
+            r.character_id,
+            r.owner_creator_id,
+            r.display_name,
+            r.status,
+            r.image_uri,
+            r.persona_json,
+            r.created_at,
+            r.updated_at,
+            r.revision,
+            r.lifecycle_epoch,
+        )
+    }))
 }
 
 /// Ownership-scoped Character lookup. Foreign ids are not distinguished from missing.
@@ -290,10 +320,20 @@ pub async fn get_character(
     )
     .fetch_optional(pool)
     .await?;
-    Ok(row.map(|r| record_from_parts(
-        r.character_id, r.owner_creator_id, r.display_name, r.status, r.image_uri,
-        r.persona_json, r.created_at, r.updated_at, r.revision, r.lifecycle_epoch,
-    )))
+    Ok(row.map(|r| {
+        record_from_parts(
+            r.character_id,
+            r.owner_creator_id,
+            r.display_name,
+            r.status,
+            r.image_uri,
+            r.persona_json,
+            r.created_at,
+            r.updated_at,
+            r.revision,
+            r.lifecycle_epoch,
+        )
+    }))
 }
 
 /// List Characters owned by `owner_creator_id` with SQL `LIMIT`/`OFFSET`.
@@ -332,10 +372,20 @@ pub async fn list_characters(
     .await?;
     Ok(rows
         .into_iter()
-        .map(|r| record_from_parts(
-            r.character_id, r.owner_creator_id, r.display_name, r.status, r.image_uri,
-            r.persona_json, r.created_at, r.updated_at, r.revision, r.lifecycle_epoch,
-        ))
+        .map(|r| {
+            record_from_parts(
+                r.character_id,
+                r.owner_creator_id,
+                r.display_name,
+                r.status,
+                r.image_uri,
+                r.persona_json,
+                r.created_at,
+                r.updated_at,
+                r.revision,
+                r.lifecycle_epoch,
+            )
+        })
         .collect())
 }
 
@@ -444,6 +494,10 @@ pub(crate) async fn require_owned_character(
     }
 }
 
+/// # Errors
+///
+/// Returns `LocalDbError::ActorNotFound` when missing or foreign, inactive conflict,
+/// or database failure.
 pub async fn require_active_owned_character_tx(
     tx: &mut Transaction<'_, Sqlite>,
     owner_creator_id: &str,
@@ -483,30 +537,47 @@ pub(crate) async fn require_owned_character_pool(
     }
 }
 
-fn patch_is_no_op(current: &CharacterRecord, patch: CharacterPatch<'_>) -> Result<bool, LocalDbError> {
+fn patch_is_no_op(
+    current: &CharacterRecord,
+    patch: CharacterPatch<'_>,
+) -> Result<bool, LocalDbError> {
     let mut material = false;
     if let Some(name) = patch.display_name {
         let normalized = normalize_display_name(name)?;
-        if normalized != current.display_name { material = true; }
+        if normalized != current.display_name {
+            material = true;
+        }
     }
     match patch.image_uri {
         FieldPatch::Keep => {}
-        FieldPatch::Clear => { if current.image_uri.is_some() { material = true; } }
+        FieldPatch::Clear => {
+            if current.image_uri.is_some() {
+                material = true;
+            }
+        }
         FieldPatch::Set(uri) => {
-            if validate_image_uri(Some(uri))? != current.image_uri { material = true; }
+            if validate_image_uri(Some(uri))? != current.image_uri {
+                material = true;
+            }
         }
     }
     match patch.persona_json {
         FieldPatch::Keep => {}
-        FieldPatch::Clear => { if current.persona_json != "{}" { material = true; } }
+        FieldPatch::Clear => {
+            if current.persona_json != "{}" {
+                material = true;
+            }
+        }
         FieldPatch::Set(raw) => {
-            if validate_persona_json(raw)? != current.persona_json { material = true; }
+            if validate_persona_json(raw)? != current.persona_json {
+                material = true;
+            }
         }
     }
     Ok(!material)
 }
 
-async fn apply_character_patch_fields(
+fn apply_character_patch_fields(
     current: &CharacterRecord,
     patch: CharacterPatch<'_>,
 ) -> Result<(String, Option<String>, String), LocalDbError> {
@@ -528,6 +599,9 @@ async fn apply_character_patch_fields(
     Ok((display_name, image_uri, persona_json))
 }
 
+/// # Errors
+///
+/// Returns `LocalDbError` on ownership, CAS, validation, or database failure.
 pub async fn update_character(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -541,7 +615,7 @@ pub async fn update_character(
         let current = require_active_owned_character_tx(&mut tx, owner_creator_id, character_id).await?;
         if current.revision != expected_revision { return Err(revision_conflict()); }
         if patch_is_no_op(&current, patch)? { return Ok(current); }
-        let (display_name, image_uri, persona_json) = apply_character_patch_fields(&current, patch).await?;
+        let (display_name, image_uri, persona_json) = apply_character_patch_fields(&current, patch)?;
         let now = chrono::Utc::now().to_rfc3339();
         let new_revision = expected_revision + 1;
         let updated = map_actor_constraint(sqlx::query!(
@@ -555,8 +629,14 @@ pub async fn update_character(
         })
     }.await;
     match result {
-        Ok(row) => { tx.commit().await?; Ok(row) }
-        Err(err) => { let _ = tx.rollback().await; Err(err) }
+        Ok(row) => {
+            tx.commit().await?;
+            Ok(row)
+        }
+        Err(err) => {
+            let _ = tx.rollback().await;
+            Err(err)
+        }
     }
 }
 
@@ -572,11 +652,17 @@ async fn restore_has_active_binding_tx(
              WHERE b.character_id = ? AND b.status = 'active'
                AND w.owner_creator_id = ? AND w.status = 'active'
            ) as "exists!: i64""#,
-        character_id, owner_creator_id
-    ).fetch_one(&mut **tx).await?;
+        character_id,
+        owner_creator_id
+    )
+    .fetch_one(&mut **tx)
+    .await?;
     Ok(exists != 0)
 }
 
+/// # Errors
+///
+/// Returns `LocalDbError` on ownership, CAS, lifecycle guard, or database failure.
 pub async fn transition_character(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -588,14 +674,18 @@ pub async fn transition_character(
     let mut tx = begin_immediate(pool).await?;
     let result = async {
         let current = require_owned_character(&mut tx, owner_creator_id, character_id).await?;
-        if current.revision != expected_revision { return Err(revision_conflict()); }
-        if current.status == target.as_str() { return Ok(current); }
-        if target == CharacterStatus::Active {
-            if !restore_has_active_binding_tx(&mut tx, owner_creator_id, character_id).await? {
-                return Err(LocalDbError::ActorContractConflict {
-                    code: ActorContractConflict::CharacterRestoreRequiresActiveBinding,
-                });
-            }
+        if current.revision != expected_revision {
+            return Err(revision_conflict());
+        }
+        if current.status == target.as_str() {
+            return Ok(current);
+        }
+        if target == CharacterStatus::Active
+            && !restore_has_active_binding_tx(&mut tx, owner_creator_id, character_id).await?
+        {
+            return Err(LocalDbError::ActorContractConflict {
+                code: ActorContractConflict::CharacterRestoreRequiresActiveBinding,
+            });
         }
         let now = chrono::Utc::now().to_rfc3339();
         let status = target.as_str();
@@ -607,13 +697,23 @@ pub async fn transition_character(
             status, now, new_revision, new_epoch,
             character_id, owner_creator_id, expected_revision
         ).execute(&mut *tx).await)?;
-        load_character(&mut tx, character_id).await?.ok_or_else(|| LocalDbError::ActorNotFound {
-            resource: "character", id: character_id.to_string(),
-        })
-    }.await;
+        load_character(&mut tx, character_id)
+            .await?
+            .ok_or_else(|| LocalDbError::ActorNotFound {
+                resource: "character",
+                id: character_id.to_string(),
+            })
+    }
+    .await;
     match result {
-        Ok(row) => { tx.commit().await?; Ok(row) }
-        Err(err) => { let _ = tx.rollback().await; Err(err) }
+        Ok(row) => {
+            tx.commit().await?;
+            Ok(row)
+        }
+        Err(err) => {
+            let _ = tx.rollback().await;
+            Err(err)
+        }
     }
 }
 

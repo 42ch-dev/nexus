@@ -105,7 +105,7 @@ pub enum ActorContractConflict {
     BindingRevisionConflict,
     /// v1.185 P0: restore lacks a retained active binding into an owned active World.
     CharacterRestoreRequiresActiveBinding,
-    /// v1.185 P2: duplicate canonical_name for the same owner scope.
+    /// v1.185 P2: duplicate `canonical_name` for the same owner scope.
     DuplicateActorKnowledge,
     /// v1.185 P2: `expected_revision` does not match stored knowledge entry revision.
     KnowledgeRevisionConflict,

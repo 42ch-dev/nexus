@@ -21,9 +21,7 @@ use nexus_contracts::daemon_api::actor_knowledge::{
     add_knowledge_entry_response::{
         AddKnowledgeEntryResponse, NexusActorKnowledgeViewItem as CreatedItem,
     },
-    knowledge_entry_detail::{
-        KnowledgeEntryDetail, NexusActorKnowledgeViewItem as DetailItem,
-    },
+    knowledge_entry_detail::{KnowledgeEntryDetail, NexusActorKnowledgeViewItem as DetailItem},
     knowledge_view_item::KnowledgeViewItem,
     list_character_knowledge_query::ListCharacterKnowledgeQuery,
     list_character_knowledge_response::{
@@ -42,9 +40,7 @@ use nexus_knowledge::world_kb::knowledge_entry::{
     parse_stored_created_at, KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef,
 };
 use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
-use nexus_local_db::{
-    kb_store::SqliteKbStore, ActorKnowledgePatch, FieldPatch, LocalDbError,
-};
+use nexus_local_db::{kb_store::SqliteKbStore, ActorKnowledgePatch, FieldPatch, LocalDbError};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -103,7 +99,9 @@ fn summary_wire_value(record: &KnowledgeEntryRecord) -> Option<&str> {
         .and_then(|body| body.summary.as_deref())
 }
 
-fn detail_from_record(record: &KnowledgeEntryRecord) -> Result<KnowledgeEntryDetail, NexusApiError> {
+fn detail_from_record(
+    record: &KnowledgeEntryRecord,
+) -> Result<KnowledgeEntryDetail, NexusApiError> {
     let item = item_from_record(record)?;
     let summary = summary_wire_value(record);
     let value = serde_json::json!({
@@ -112,7 +110,6 @@ fn detail_from_record(record: &KnowledgeEntryRecord) -> Result<KnowledgeEntryDet
     });
     serde_json::from_value(value).map_err(wire_err)
 }
-
 
 const KNOWLEDGE_DELETE_MAX_EXPECTED_REVISION: i64 = 9_223_372_036_854_775_806;
 
@@ -155,7 +152,9 @@ fn parse_delete_expected_revision(uri: &Uri) -> Result<i64, NexusApiError> {
         .parse::<i64>()
         .map_err(|_| knowledge_delete_invalid_input("expected_revision must be an integer"))?;
     if !(0..=KNOWLEDGE_DELETE_MAX_EXPECTED_REVISION).contains(&parsed) {
-        return Err(knowledge_delete_invalid_input("expected_revision is out of range"));
+        return Err(knowledge_delete_invalid_input(
+            "expected_revision is out of range",
+        ));
     }
     Ok(parsed)
 }
@@ -206,17 +205,13 @@ fn build_actor_knowledge_patch<'a>(
     })
 }
 
-fn apply_create_summary(
-    record: &mut KnowledgeEntryRecord,
-    summary: Option<&str>,
-) -> Result<(), NexusApiError> {
+fn apply_create_summary(record: &mut KnowledgeEntryRecord, summary: Option<&str>) {
     if let Some(text) = summary {
         record.body = Some(KnowledgeEntryBody {
             summary: Some(text.to_string()),
             ..KnowledgeEntryBody::default()
         });
     }
-    Ok(())
 }
 
 fn item_from_record(record: &KnowledgeEntryRecord) -> Result<KnowledgeViewItem, NexusApiError> {
@@ -347,7 +342,9 @@ pub async fn add_entry(
                     code: "invalid_input".into(),
                     message: "world_id is required for world-owned knowledge".into(),
                 })?;
-            service.require_active_owned_world(&creator_id, world_id).await?;
+            service
+                .require_active_owned_world(&creator_id, world_id)
+                .await?;
             KnowledgeOwnerRef::world(world_id)
         }
         AddKnowledgeEntryRequestOwnerKind::Character => {
@@ -394,7 +391,9 @@ pub async fn add_entry(
             service
                 .require_active_owned_character(&creator_id, character_id)
                 .await?;
-            service.require_active_owned_world(&creator_id, world_id).await?;
+            service
+                .require_active_owned_world(&creator_id, world_id)
+                .await?;
             service
                 .require_active_binding(character_id, binding_id, world_id)
                 .await?;
@@ -419,7 +418,7 @@ pub async fn add_entry(
         &owner,
         KnowledgeOwnerRef::Character(_) | KnowledgeOwnerRef::ActorWorldBinding(_)
     ) {
-        apply_create_summary(&mut record, create_summary)?;
+        apply_create_summary(&mut record, create_summary);
     }
     let store = SqliteKbStore::new(pool.clone());
     // Character/binding-owned KE inserts revalidate the stored active owner
@@ -430,7 +429,7 @@ pub async fn add_entry(
             .insert_knowledge_entry(record.clone())
             .await
             .map_err(map_insert_err)
-            .map(|r| r.entry_id.clone()),
+            .map(|r| r.entry_id),
         KnowledgeOwnerRef::Character(id) => {
             // Side-effecting Character activity: hold the activity fence across
             // the guarded INSERT (durable §11.3.1).
@@ -442,16 +441,17 @@ pub async fn add_entry(
                 .insert_actor_owned_key_block(&creator_id, id, None, record.clone())
                 .await
                 .map_err(map_local_db_insert_err)
-                .map(|r| r.entry_id.clone())
+                .map(|r| r.entry_id)
         }
         KnowledgeOwnerRef::ActorWorldBinding(id) => {
             let admitted_character = admitted_character_id(&req);
-            let admitted_character = admitted_character.as_deref().ok_or_else(|| {
-                NexusApiError::Internal {
-                    code: "ACTOR_KNOWLEDGE_INSERT_FAILED".into(),
-                    message: "binding-owned KE insert must carry the admitted Character".into(),
-                }
-            })?;
+            let admitted_character =
+                admitted_character
+                    .as_deref()
+                    .ok_or_else(|| NexusApiError::Internal {
+                        code: "ACTOR_KNOWLEDGE_INSERT_FAILED".into(),
+                        message: "binding-owned KE insert must carry the admitted Character".into(),
+                    })?;
             let _activity = state
                 .actor_sessions()
                 .admit_character_activity(&pool, &creator_id, admitted_character)
@@ -465,7 +465,7 @@ pub async fn add_entry(
                 )
                 .await
                 .map_err(map_local_db_insert_err)
-                .map(|r| r.entry_id.clone())
+                .map(|r| r.entry_id)
         }
     }?;
     let stored = store
@@ -623,4 +623,3 @@ pub async fn delete_knowledge_entry(
     .await?;
     Ok(StatusCode::NO_CONTENT)
 }
-

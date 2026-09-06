@@ -1164,20 +1164,17 @@ async fn summary_patch_does_not_clobber_tom_modules_on_carrier() {
 
     let store = SqliteKbStore::new(ctx.pool.clone());
     let mut kb = KnowledgeEntryRecord::for_character(chr, BlockType::Character, "TomCarrier");
-    kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
-        summary: Some("carrier summary".into()),
-        ..Default::default()
-    });
+    kb.body = Some(
+        nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
+            summary: Some("carrier summary".into()),
+            ..Default::default()
+        },
+    );
     kb.modules = Some(json!({ "belief": [] }));
     let carrier = kb.entry_id.clone();
     store.insert_knowledge_entry(kb).await.unwrap();
 
-    let resp = record(
-        &ctx.server,
-        chr,
-        l1_body(WORLD_A, bind, &carrier, chr, 0),
-    )
-    .await;
+    let resp = record(&ctx.server, chr, l1_body(WORLD_A, bind, &carrier, chr, 0)).await;
     assert_eq!(resp.status_code(), 200, "{}", resp.text());
 
     let patched = ctx
@@ -1211,12 +1208,7 @@ async fn tom_cas_bumps_revision_blocking_stale_summary_patch() {
     let bind = created["binding"]["binding_id"].as_str().unwrap();
     let carrier = seed_carrier(&ctx.pool, chr).await;
 
-    let resp = record(
-        &ctx.server,
-        chr,
-        l1_body(WORLD_A, bind, &carrier, chr, 0),
-    )
-    .await;
+    let resp = record(&ctx.server, chr, l1_body(WORLD_A, bind, &carrier, chr, 0)).await;
     assert_eq!(resp.status_code(), 200, "{}", resp.text());
 
     let stale = ctx

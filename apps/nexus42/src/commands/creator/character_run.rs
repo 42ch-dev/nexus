@@ -20,8 +20,7 @@ fn observation_grace() -> Duration {
     std::env::var("NEXUS42_RUN_OBSERVATION_GRACE_SECS")
         .ok()
         .and_then(|raw| raw.parse::<u64>().ok())
-        .map(Duration::from_secs)
-        .unwrap_or(DEFAULT_OBSERVATION_GRACE)
+        .map_or(DEFAULT_OBSERVATION_GRACE, Duration::from_secs)
 }
 
 #[derive(Debug, Clone)]
@@ -115,8 +114,7 @@ pub async fn run_character_with_observation(
         )
         .await?;
 
-    let delivery =
-        observe_run_concurrently(client, &mut events, &session, &operation).await?;
+    let delivery = observe_run_concurrently(client, &mut events, &session, &operation).await?;
 
     if json {
         let mut payload = serde_json::json!({
@@ -171,7 +169,7 @@ fn print_run_human(delivery: &RunDelivery) {
             println!("capture_pending_id: {}", pid.as_str());
         }
         if let Some(code) = &outcome.capture.code {
-            println!("capture_code: {}", code);
+            println!("capture_code: {code}");
         }
     } else if delivery.notes.outcome_unavailable {
         println!("capture_outcome: unavailable");
@@ -213,9 +211,7 @@ fn classify_run_exit(remember: bool, delivery: &RunDelivery) -> (i32, String) {
         if run_status == Some(CharacterOperationResultRunStatus::Succeeded) {
             return (1, msg);
         }
-        if run_status.is_none()
-            && !delivery.stream.incomplete
-            && !delivery.stream.result.is_empty()
+        if run_status.is_none() && !delivery.stream.incomplete && !delivery.stream.result.is_empty()
         {
             return (1, msg);
         }
@@ -227,8 +223,10 @@ fn classify_run_exit(remember: bool, delivery: &RunDelivery) -> (i32, String) {
                 return (0, String::new());
             }
             match capture.map(|c| c.status) {
-                Some(NexusCharacterRunCaptureOutcomeStatus::Captured) => (0, String::new()),
-                Some(NexusCharacterRunCaptureOutcomeStatus::Disabled) => (0, String::new()),
+                Some(
+                    NexusCharacterRunCaptureOutcomeStatus::Captured
+                    | NexusCharacterRunCaptureOutcomeStatus::Disabled,
+                ) => (0, String::new()),
                 Some(
                     NexusCharacterRunCaptureOutcomeStatus::Skipped
                     | NexusCharacterRunCaptureOutcomeStatus::Failed,
@@ -236,9 +234,7 @@ fn classify_run_exit(remember: bool, delivery: &RunDelivery) -> (i32, String) {
                     1,
                     format!(
                         "run succeeded but capture {}",
-                        capture
-                            .map(|c| c.status.to_string())
-                            .unwrap_or_else(|| "failed".into())
+                        capture.map_or_else(|| "failed".into(), |c| c.status.to_string())
                     ),
                 ),
                 Some(NexusCharacterRunCaptureOutcomeStatus::Pending) => (
@@ -249,10 +245,10 @@ fn classify_run_exit(remember: bool, delivery: &RunDelivery) -> (i32, String) {
             }
         }
         Some(
-            CharacterOperationResultRunStatus::Incomplete
+            status @ (CharacterOperationResultRunStatus::Incomplete
             | CharacterOperationResultRunStatus::Failed
-            | CharacterOperationResultRunStatus::Cancelled,
-        ) => (1, format!("run {}", run_status.unwrap())),
+            | CharacterOperationResultRunStatus::Cancelled),
+        ) => (1, format!("run {status}")),
         Some(CharacterOperationResultRunStatus::Running) => (
             1,
             "operation still running after observation window".to_string(),
@@ -280,13 +276,14 @@ fn infer_run_status_from_stream(
     }
     for event in &delivery.stream.events {
         if let Some(inner) = event.get("OpFinished") {
-            return Some(match inner.get("reason").and_then(serde_json::Value::as_str) {
-                Some("end_turn") => CharacterOperationResultRunStatus::Succeeded,
-                Some("max_tokens") | Some("max_turn_requests") | Some("refusal") => {
-                    CharacterOperationResultRunStatus::Incomplete
-                }
-                _ => CharacterOperationResultRunStatus::Succeeded,
-            });
+            return Some(
+                match inner.get("reason").and_then(serde_json::Value::as_str) {
+                    Some("max_tokens" | "max_turn_requests" | "refusal") => {
+                        CharacterOperationResultRunStatus::Incomplete
+                    }
+                    _ => CharacterOperationResultRunStatus::Succeeded,
+                },
+            );
         }
         if event.get("OpFailed").is_some() {
             return Some(CharacterOperationResultRunStatus::Failed);
@@ -328,17 +325,24 @@ async fn observe_run_concurrently(
 ) -> Result<RunDelivery> {
     let session_id = session.session_id.clone();
     let operation_id = operation.operation_id.clone();
-    let outcome_path = format!("/v1/daemon/agent-host/operations/{}", operation.operation_id);
+    let outcome_path = format!(
+        "/v1/daemon/agent-host/operations/{}",
+        operation.operation_id
+    );
     let client = client.clone();
     let grace_deadline = std::sync::Arc::new(std::sync::Mutex::new(None::<Instant>));
 
-    let stream_fut = consume_terminal_events(events, &session_id, &operation_id, grace_deadline.clone());
+    let stream_fut =
+        consume_terminal_events(events, &session_id, &operation_id, grace_deadline.clone());
     let outcome_fut = async move {
         let mut outcome_poll_failed = false;
         loop {
             if let Ok(slot) = grace_deadline.lock() {
                 if slot.is_some_and(|deadline| Instant::now() >= deadline) {
-                    return Ok::<(Option<CharacterOperationResult>, bool), CliError>((None, outcome_poll_failed));
+                    return Ok::<(Option<CharacterOperationResult>, bool), CliError>((
+                        None,
+                        outcome_poll_failed,
+                    ));
                 }
             }
             match client.get_character_operation_result(&outcome_path).await {
@@ -387,7 +391,8 @@ async fn observe_run_concurrently(
     })
 }
 
-pub(crate) async fn consume_terminal_events(
+#[allow(clippy::too_many_lines)]
+async fn consume_terminal_events(
     resp: &mut reqwest::Response,
     expected_session_id: &str,
     expected_operation_id: &str,
@@ -396,7 +401,6 @@ pub(crate) async fn consume_terminal_events(
     let mut buf = String::new();
     let mut result = String::new();
     let mut events = Vec::new();
-
 
     let start_grace = || {
         if let Ok(mut slot) = grace_deadline.lock() {
@@ -424,23 +428,9 @@ pub(crate) async fn consume_terminal_events(
             });
         }
 
-        let chunk = match tokio::time::timeout(
-            OUTCOME_POLL_INTERVAL,
-            resp.chunk(),
-        )
-        .await
-        {
+        let chunk = match tokio::time::timeout(OUTCOME_POLL_INTERVAL, resp.chunk()).await {
             Ok(Ok(Some(chunk))) => chunk,
-            Ok(Ok(None)) => {
-                start_grace();
-                return Ok(StreamObservation {
-                    result,
-                    events,
-                    op_failed: false,
-                    incomplete: true,
-                });
-            }
-            Ok(Err(_)) => {
+            Ok(Ok(None) | Err(_)) => {
                 start_grace();
                 return Ok(StreamObservation {
                     result,
@@ -560,7 +550,6 @@ mod tests {
             },
         }
     }
-
 
     #[test]
     fn classify_missed_sse_with_captured_outcome_is_nonzero() {
@@ -877,13 +866,12 @@ mod tests {
         let server = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("GET"))
             .respond_with(
-                wiremock::ResponseTemplate::new(200)
-                    .set_body_string(format!(
-                        "{}{}{}",
-                        sse_message_delta_frame("sess-1", "op-1", "hello"),
-                        "data: {not-json}\n\n",
-                        sse_op_finished_frame("sess-1", "op-1"),
-                    )),
+                wiremock::ResponseTemplate::new(200).set_body_string(format!(
+                    "{}{}{}",
+                    sse_message_delta_frame("sess-1", "op-1", "hello"),
+                    "data: {not-json}\n\n",
+                    sse_op_finished_frame("sess-1", "op-1"),
+                )),
             )
             .mount(&server)
             .await;
@@ -910,5 +898,4 @@ mod tests {
         });
         format!("data: {payload}\n\n")
     }
-
 }

@@ -861,7 +861,10 @@ async fn character_run_remember_review_promote_journey() {
     .await;
     let fragments_json = json_out(&fragments_out);
     let fragments = fragments_json["fragments"].as_array().unwrap();
-    assert!(!fragments.is_empty(), "fragments list should include local rows");
+    assert!(
+        !fragments.is_empty(),
+        "fragments list should include local rows"
+    );
     let fragment_id = fragments[0]["fragment_id"].as_str().unwrap();
 
     let promote = cli_ok(
@@ -900,7 +903,11 @@ async fn character_run_remember_review_promote_journey() {
         ],
     )
     .await;
-    assert!(third.status.success(), "post-promote run: {}", stderr(&third));
+    assert!(
+        third.status.success(),
+        "post-promote run: {}",
+        stderr(&third)
+    );
     let prompt = host.last_prompt();
     assert!(prompt.contains("## Character Memory"), "{prompt}");
     assert!(
@@ -909,10 +916,9 @@ async fn character_run_remember_review_promote_journey() {
     );
 
     // Creator memory tables remain untouched (no run capture writes there).
-    let creator_pending: (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM memory_pending_review")
-            .fetch_one(&d.pool)
-            .await
-            .unwrap();
+    let creator_pending: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM memory_pending_review")
+        .fetch_one(&d.pool)
+        .await
+        .unwrap();
     assert_eq!(creator_pending.0, 0);
 }

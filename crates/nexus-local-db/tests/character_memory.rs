@@ -15,11 +15,10 @@ use nexus_local_db::{
     delete_character_pending_review, delete_character_soul_meta, get_character_fragment,
     get_character_pending_review, get_character_soul_meta, get_character_soul_narrative,
     list_character_fragments, list_character_pending_reviews, promote_character_fragment_to_shared,
-    remove_binding, transition_character, upsert_character_soul_meta, upsert_character_soul_narrative,
-    ActorContractConflict, CharacterStatus, CharacterPendingReviewRecord, CharacterSoulMeta,
-    RunCaptureInput,
-    CharacterSoulNarrativeRecord, CreateBindingParams, CreateCharacterParams, LocalDbError,
-    NewCharacterMemoryFragment,
+    remove_binding, transition_character, upsert_character_soul_meta,
+    upsert_character_soul_narrative, ActorContractConflict, CharacterPendingReviewRecord,
+    CharacterSoulMeta, CharacterSoulNarrativeRecord, CharacterStatus, CreateBindingParams,
+    CreateCharacterParams, LocalDbError, NewCharacterMemoryFragment, RunCaptureInput,
 };
 use sqlx::SqlitePool;
 
@@ -893,6 +892,7 @@ async fn seed_binding_owned_ke_deleted(pool: &SqlitePool, binding_id: &str) {
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn binding_removal_precedence_last_binding_then_ke_then_local_memory() {
     let (pool, _dir) = fresh_pool().await;
     let s = seed(&pool).await;
@@ -940,13 +940,12 @@ async fn binding_removal_precedence_last_binding_then_ke_then_local_memory() {
 
     // Non-live binding-owned KE still blocks non-last removal.
     seed_binding_owned_ke_deleted(&pool, &s.binding_a2).await;
-    let binds_before: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM actor_world_bindings WHERE binding_id = ?",
-    )
-    .bind(&s.binding_a2)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let binds_before: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM actor_world_bindings WHERE binding_id = ?")
+            .bind(&s.binding_a2)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     let err = remove_binding(&pool, OWNER, &s.char_a, &s.binding_a2)
         .await
         .unwrap_err();
@@ -956,13 +955,12 @@ async fn binding_removal_precedence_last_binding_then_ke_then_local_memory() {
             code: ActorContractConflict::BindingHasOwnedKnowledge
         }
     ));
-    let binds_after: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM actor_world_bindings WHERE binding_id = ?",
-    )
-    .bind(&s.binding_a2)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let binds_after: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM actor_world_bindings WHERE binding_id = ?")
+            .bind(&s.binding_a2)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(binds_after, binds_before);
     sqlx::query("DELETE FROM kb_key_blocks WHERE key_block_id = 'kb_owned_deleted'")
         .execute(&pool)
@@ -1283,6 +1281,7 @@ async fn inactive_binding_rows_remain_readable_as_retained_data() {
 // ── Fix-1: owned active World provenance ─────────────────────────────────
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn archived_or_paused_world_rejects_provenance_writes_but_retains_reads() {
     let (pool, _dir) = fresh_pool().await;
     let s = seed(&pool).await;
@@ -1374,18 +1373,16 @@ async fn archived_or_paused_world_rejects_provenance_writes_but_retains_reads() 
     .unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].fragment_id, "frag_arch_r");
-    assert!(
-        get_character_fragment(
-            &pool,
-            OWNER,
-            &s.char_a,
-            Some("awb_ccccccccccccccccccccccccccccccc1"),
-            "frag_arch_r",
-        )
-        .await
-        .unwrap()
-        .is_some()
-    );
+    assert!(get_character_fragment(
+        &pool,
+        OWNER,
+        &s.char_a,
+        Some("awb_ccccccccccccccccccccccccccccccc1"),
+        "frag_arch_r",
+    )
+    .await
+    .unwrap()
+    .is_some());
 
     // Removal of a binding onto a non-active World is refused with zero
     // mutation.
@@ -1552,14 +1549,20 @@ async fn frag_binding(pool: &SqlitePool, character_id: &str, fragment_id: &str) 
     .unwrap()
 }
 
-
 async fn archive_character(pool: &SqlitePool, character_id: &str, revision: i64) {
-    transition_character(pool, OWNER, character_id, revision, CharacterStatus::Archived)
-        .await
-        .unwrap();
+    transition_character(
+        pool,
+        OWNER,
+        character_id,
+        revision,
+        CharacterStatus::Archived,
+    )
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn archived_character_retained_reads_and_mutators_inactive() {
     let (pool, _dir) = fresh_pool().await;
     let seed = seed(&pool).await;
@@ -1601,18 +1604,25 @@ async fn archived_character_retained_reads_and_mutators_inactive() {
     )
     .await
     .unwrap();
-    let rev = sqlx::query_scalar::<_, i64>("SELECT revision FROM characters WHERE character_id = ?")
-        .bind(&seed.char_a)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let rev =
+        sqlx::query_scalar::<_, i64>("SELECT revision FROM characters WHERE character_id = ?")
+            .bind(&seed.char_a)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     archive_character(&pool, &seed.char_a, rev).await;
 
     // Retained reads succeed with the archived Character + owned live World.
-    assert!(get_character_pending_review(&pool, OWNER, &seed.char_a, Some(&seed.binding_a1), pending_id)
-        .await
-        .unwrap()
-        .is_some());
+    assert!(get_character_pending_review(
+        &pool,
+        OWNER,
+        &seed.char_a,
+        Some(&seed.binding_a1),
+        pending_id
+    )
+    .await
+    .unwrap()
+    .is_some());
     assert_eq!(
         list_character_pending_reviews(&pool, OWNER, &seed.char_a, Some(&seed.binding_a1), 10, 0)
             .await
@@ -1626,14 +1636,22 @@ async fn archived_character_retained_reads_and_mutators_inactive() {
             .unwrap(),
         1
     );
-    assert!(get_character_fragment(&pool, OWNER, &seed.char_a, None, "frag_arch")
-        .await
-        .unwrap()
-        .is_some());
-    assert!(get_character_fragment(&pool, OWNER, &seed.char_a, Some(&seed.binding_a1), "frag_arch_b1")
-        .await
-        .unwrap()
-        .is_some());
+    assert!(
+        get_character_fragment(&pool, OWNER, &seed.char_a, None, "frag_arch")
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(get_character_fragment(
+        &pool,
+        OWNER,
+        &seed.char_a,
+        Some(&seed.binding_a1),
+        "frag_arch_b1"
+    )
+    .await
+    .unwrap()
+    .is_some());
     assert_eq!(
         list_character_fragments(&pool, OWNER, &seed.char_a, Some(&seed.binding_a1), 10, 0)
             .await
@@ -1641,10 +1659,12 @@ async fn archived_character_retained_reads_and_mutators_inactive() {
             .len(),
         1
     );
-    assert!(get_character_soul_narrative(&pool, OWNER, &seed.char_a, Some(&seed.binding_a1))
-        .await
-        .unwrap()
-        .is_some());
+    assert!(
+        get_character_soul_narrative(&pool, OWNER, &seed.char_a, Some(&seed.binding_a1))
+            .await
+            .unwrap()
+            .is_some()
+    );
     let (stats, _) =
         character_soul_narrative_fragment_stats(&pool, OWNER, &seed.char_a, Some(&seed.binding_a1))
             .await
@@ -1662,13 +1682,9 @@ async fn archived_character_retained_reads_and_mutators_inactive() {
             code: ActorContractConflict::CharacterInactive
         }
     ));
-    let err = create_character_pending_review(
-        &pool,
-        OWNER,
-        &pending("pend2", &seed.char_a, None),
-    )
-    .await
-    .unwrap_err();
+    let err = create_character_pending_review(&pool, OWNER, &pending("pend2", &seed.char_a, None))
+        .await
+        .unwrap_err();
     assert!(matches!(
         err,
         LocalDbError::ActorContractConflict {
@@ -1684,13 +1700,10 @@ async fn archived_character_retained_reads_and_mutators_inactive() {
             code: ActorContractConflict::CharacterInactive
         }
     ));
-    let err = upsert_character_soul_narrative(
-        &pool,
-        OWNER,
-        &narrative(&seed.char_a, None, "shared2"),
-    )
-    .await
-    .unwrap_err();
+    let err =
+        upsert_character_soul_narrative(&pool, OWNER, &narrative(&seed.char_a, None, "shared2"))
+            .await
+            .unwrap_err();
     assert!(matches!(
         err,
         LocalDbError::ActorContractConflict {
@@ -1698,7 +1711,10 @@ async fn archived_character_retained_reads_and_mutators_inactive() {
         }
     ));
 
-    assert_eq!(table_count(&pool, "character_memory_pending_review").await, 1);
+    assert_eq!(
+        table_count(&pool, "character_memory_pending_review").await,
+        1
+    );
     assert_eq!(table_count(&pool, "character_memory_fragments").await, 2);
     assert_eq!(table_count(&pool, "character_soul_narratives").await, 1);
 }
@@ -1788,7 +1804,7 @@ async fn retained_reads_fail_closed_for_foreign_or_missing_world() {
     }
 }
 
-fn run_capture_input<'a>(
+const fn run_capture_input<'a>(
     op: &'a str,
     session: &'a str,
     character_id: &'a str,
@@ -1845,7 +1861,10 @@ async fn run_capture_two_operations_same_session() {
     );
     capture_character_run(&pool, OWNER, input_a).await.unwrap();
     capture_character_run(&pool, OWNER, input_b).await.unwrap();
-    assert_eq!(table_count(&pool, "character_memory_pending_review").await, 2);
+    assert_eq!(
+        table_count(&pool, "character_memory_pending_review").await,
+        2
+    );
     assert_eq!(table_count(&pool, "character_run_captures").await, 2);
 }
 
@@ -1867,10 +1886,16 @@ async fn run_capture_replay_after_pending_consumed_returns_receipt_only() {
     delete_character_pending_review(&pool, OWNER, &s.char_a, &receipt.pending_id)
         .await
         .unwrap();
-    assert_eq!(table_count(&pool, "character_memory_pending_review").await, 0);
+    assert_eq!(
+        table_count(&pool, "character_memory_pending_review").await,
+        0
+    );
     let replay = capture_character_run(&pool, OWNER, input).await.unwrap();
     assert_eq!(replay, receipt);
-    assert_eq!(table_count(&pool, "character_memory_pending_review").await, 0);
+    assert_eq!(
+        table_count(&pool, "character_memory_pending_review").await,
+        0
+    );
 }
 
 #[tokio::test]
@@ -1923,7 +1948,9 @@ async fn run_capture_stale_epoch_and_archived_character_denied() {
         "digest stale",
         epoch + 1,
     );
-    let err = capture_character_run(&pool, OWNER, input).await.unwrap_err();
+    let err = capture_character_run(&pool, OWNER, input)
+        .await
+        .unwrap_err();
     assert!(matches!(
         err,
         LocalDbError::ActorContractConflict {
@@ -1931,15 +1958,9 @@ async fn run_capture_stale_epoch_and_archived_character_denied() {
         }
     ));
 
-    transition_character(
-        &pool,
-        OWNER,
-        &s.char_a,
-        0,
-        CharacterStatus::Archived,
-    )
-    .await
-    .unwrap();
+    transition_character(&pool, OWNER, &s.char_a, 0, CharacterStatus::Archived)
+        .await
+        .unwrap();
     let archived_input = run_capture_input(
         "op_archived",
         "sess_archived",
@@ -1985,7 +2006,9 @@ async fn run_capture_rollback_leaves_no_orphan_on_pending_failure() {
         captured_at: "2026-09-06T12:00:00Z",
         lifecycle_epoch: epoch,
     };
-    let err = capture_character_run(&pool, OWNER, dup_pending).await.unwrap_err();
+    let err = capture_character_run(&pool, OWNER, dup_pending)
+        .await
+        .unwrap_err();
     assert!(!matches!(
         err,
         LocalDbError::ActorContractConflict {
@@ -1993,7 +2016,10 @@ async fn run_capture_rollback_leaves_no_orphan_on_pending_failure() {
         }
     ));
     assert_eq!(table_count(&pool, "character_run_captures").await, 1);
-    assert_eq!(table_count(&pool, "character_memory_pending_review").await, 1);
+    assert_eq!(
+        table_count(&pool, "character_memory_pending_review").await,
+        1
+    );
 }
 
 #[tokio::test]
@@ -2075,4 +2101,3 @@ async fn pending_source_operation_id_enforces_receipt_foreign_key() {
     .unwrap();
     assert!(manual_source.is_none());
 }
-

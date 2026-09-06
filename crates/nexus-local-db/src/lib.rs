@@ -13,8 +13,8 @@
 // V1.153 P2 T2: cas is pure SQL (OCC helpers — no unix APIs); the former
 // `#[cfg(unix)]` gate was wrong and broke `kb_relationships` (which imports
 // `crate::cas`) on the Windows x64 build.
-pub mod actor_world_binding;
 pub mod actor_knowledge_store;
+pub mod actor_world_binding;
 pub mod cas;
 pub mod character;
 pub mod character_memory_fragment;

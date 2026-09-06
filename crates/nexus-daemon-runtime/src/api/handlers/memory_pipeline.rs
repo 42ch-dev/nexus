@@ -158,7 +158,7 @@ impl<'a> BearerPipelineCtx<'a> {
 
     /// Borrow the bearer for a read path. Readable contexts and writable
     /// contexts both allow reads.
-    fn bearer(&self) -> MemoryBearerRef<'a> {
+    const fn bearer(&self) -> MemoryBearerRef<'a> {
         self.bearer
     }
 
@@ -311,8 +311,8 @@ async fn process_single_review_row(
             // Character-shared after the explicit revision-checked fragment
             // promotion. Shared Character scope and the whole Creator arm are
             // unchanged.
-            let binding_local =
-                matches!(ctx.bearer(), MemoryBearerRef::Character { .. }) && input.scope_id.is_some();
+            let binding_local = matches!(ctx.bearer(), MemoryBearerRef::Character { .. })
+                && input.scope_id.is_some();
             if binding_local {
                 let fragment = nexus_creator_memory::review::create_fragment_from_review(input);
                 match insert_fragment_and_delete_pending(
@@ -459,16 +459,14 @@ async fn claim_pending_and_promote(
             character_id,
             owner_creator_id,
             ..
-        } => {
-            nexus_local_db::delete_character_pending_review_in_tx(
-                &mut tx,
-                owner_creator_id,
-                character_id,
-                &input.pending_id,
-            )
-            .await
-            .map_err(map_local_db_error)?
-        }
+        } => nexus_local_db::delete_character_pending_review_in_tx(
+            &mut tx,
+            owner_creator_id,
+            character_id,
+            &input.pending_id,
+        )
+        .await
+        .map_err(map_local_db_error)?,
     };
     require_exactly_one_pending_delete(deleted, &input.pending_id)?;
 

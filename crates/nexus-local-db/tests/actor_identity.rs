@@ -279,10 +279,7 @@ async fn world_sheet_rejects_wrong_world_type_or_deleted() {
 async fn world_sheet_rejects_merged_deprecated_and_creator_only() {
     let (pool, _dir) = fresh_pool().await;
     seed_creator_and_worlds(&pool).await;
-    for (sheet, status) in [
-        ("kb_merged", "merged"),
-        ("kb_deprecated", "deprecated"),
-    ] {
+    for (sheet, status) in [("kb_merged", "merged"), ("kb_deprecated", "deprecated")] {
         seed_sheet(&pool, sheet, WORLD_A, "character", status).await;
         let err = create_character_with_initial_binding(
             &pool,
@@ -707,7 +704,6 @@ async fn actor_conflict_display_is_human_readable() {
     assert!(msg.contains("last active"));
 }
 
-
 #[tokio::test]
 async fn stale_character_revision_rejects_update() {
     let (pool, _dir) = fresh_pool().await;
@@ -949,11 +945,12 @@ async fn binding_detail_link_relink_clear_and_noop() {
     assert_eq!(linked.revision, 1);
     assert_eq!(linked.world_sheet_entry_id.as_deref(), Some("kb_sheet_a"));
 
-    let body: String = sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
-        .bind("kb_sheet_a")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let body: String =
+        sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind("kb_sheet_a")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(body, r#"{"name":"Ava"}"#);
 
     let relinked = update_actor_world_binding(
@@ -1169,7 +1166,10 @@ async fn binding_update_rejects_archived_character_and_world() {
     .unwrap_err();
     assert!(matches!(
         err,
-        LocalDbError::ActorNotFound { resource: "world", .. }
+        LocalDbError::ActorNotFound {
+            resource: "world",
+            ..
+        }
     ));
 }
 
@@ -1228,28 +1228,27 @@ async fn binding_detail_hides_foreign_owner_and_tuple_mismatch() {
     )
     .await
     .unwrap();
-    assert!(
-        get_actor_world_binding(&pool, OTHER, &created.character.character_id, &created.binding.binding_id)
-            .await
-            .unwrap()
-            .is_none()
-    );
-    assert!(
-        get_actor_world_binding(
-            &pool,
-            OWNER,
-            &created.character.character_id,
-            "awb_00000000000000000000000000000000",
-        )
-        .await
-        .unwrap()
-        .is_none()
-    );
+    assert!(get_actor_world_binding(
+        &pool,
+        OTHER,
+        &created.character.character_id,
+        &created.binding.binding_id
+    )
+    .await
+    .unwrap()
+    .is_none());
+    assert!(get_actor_world_binding(
+        &pool,
+        OWNER,
+        &created.character.character_id,
+        "awb_00000000000000000000000000000000",
+    )
+    .await
+    .unwrap()
+    .is_none());
 }
 
-async fn seed_two_binding_link_fixture(
-    pool: &SqlitePool,
-) -> (String, String, String) {
+async fn seed_two_binding_link_fixture(pool: &SqlitePool) -> (String, String, String) {
     seed_sheet(pool, "kb_race", WORLD_B, "character", "confirmed").await;
     let created = create_character_with_initial_binding(
         pool,
@@ -1283,6 +1282,7 @@ async fn seed_two_binding_link_fixture(
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn sequential_link_and_remove_orders() {
     // Subtest 1: link then remove the same non-last target — both succeed.
     let (pool, _dir) = fresh_pool().await;
@@ -1307,40 +1307,36 @@ async fn sequential_link_and_remove_orders() {
         .await
         .unwrap();
     assert_eq!(mid.len(), 2);
-    assert!(
-        mid.iter().any(|b| b.binding_id == target && b.world_sheet_entry_id.as_deref() == Some("kb_race"))
-    );
+    assert!(mid
+        .iter()
+        .any(|b| b.binding_id == target && b.world_sheet_entry_id.as_deref() == Some("kb_race")));
 
     remove_binding(&pool, OWNER, &character_id, &target)
         .await
         .unwrap();
 
-    let kb_race_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = 'kb_race'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let kb_race_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = 'kb_race'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(
-        kb_race_count,
-        1,
+        kb_race_count, 1,
         "WorldSheet kb_race must survive binding delete (not binding-owned)"
     );
 
-    let after_link_then_remove =
-        list_bindings_for_character(&pool, OWNER, &character_id, 100, 0)
-            .await
-            .unwrap();
+    let after_link_then_remove = list_bindings_for_character(&pool, OWNER, &character_id, 100, 0)
+        .await
+        .unwrap();
     assert_eq!(after_link_then_remove.len(), 1);
     assert_eq!(after_link_then_remove[0].binding_id, primary);
     assert_eq!(after_link_then_remove[0].world_id, WORLD_A);
-    let target_row: Option<String> = sqlx::query_scalar(
-        "SELECT binding_id FROM actor_world_bindings WHERE binding_id = ?",
-    )
-    .bind(&target)
-    .fetch_optional(&pool)
-    .await
-    .unwrap();
+    let target_row: Option<String> =
+        sqlx::query_scalar("SELECT binding_id FROM actor_world_bindings WHERE binding_id = ?")
+            .bind(&target)
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
     assert!(target_row.is_none(), "target binding must be deleted");
 
     // Subtest 2: remove the other non-last binding first, then link the survivor.
@@ -1352,10 +1348,9 @@ async fn sequential_link_and_remove_orders() {
         .await
         .unwrap();
 
-    let after_remove =
-        list_bindings_for_character(&pool, OWNER, &character_id, 100, 0)
-            .await
-            .unwrap();
+    let after_remove = list_bindings_for_character(&pool, OWNER, &character_id, 100, 0)
+        .await
+        .unwrap();
     assert_eq!(after_remove.len(), 1);
     assert_eq!(after_remove[0].binding_id, target);
     assert_eq!(after_remove[0].world_id, WORLD_B);
@@ -1374,10 +1369,9 @@ async fn sequential_link_and_remove_orders() {
     assert_eq!(linked.world_sheet_entry_id.as_deref(), Some("kb_race"));
     assert_eq!(linked.revision, 1);
 
-    let final_bindings =
-        list_bindings_for_character(&pool, OWNER, &character_id, 100, 0)
-            .await
-            .unwrap();
+    let final_bindings = list_bindings_for_character(&pool, OWNER, &character_id, 100, 0)
+        .await
+        .unwrap();
     assert_eq!(final_bindings.len(), 1);
     assert_eq!(final_bindings[0].binding_id, target);
     assert_eq!(final_bindings[0].world_id, WORLD_B);
@@ -1420,19 +1414,17 @@ async fn sequential_link_and_remove_orders() {
         }
     ));
 
-    let target_row: Option<String> = sqlx::query_scalar(
-        "SELECT binding_id FROM actor_world_bindings WHERE binding_id = ?",
-    )
-    .bind(&target)
-    .fetch_optional(&pool)
-    .await
-    .unwrap();
-    assert!(target_row.is_none(), "removed target must stay absent");
-
-    let survivors =
-        list_bindings_for_character(&pool, OWNER, &character_id, 100, 0)
+    let target_row: Option<String> =
+        sqlx::query_scalar("SELECT binding_id FROM actor_world_bindings WHERE binding_id = ?")
+            .bind(&target)
+            .fetch_optional(&pool)
             .await
             .unwrap();
+    assert!(target_row.is_none(), "removed target must stay absent");
+
+    let survivors = list_bindings_for_character(&pool, OWNER, &character_id, 100, 0)
+        .await
+        .unwrap();
     assert_eq!(survivors.len(), 1);
     assert_eq!(survivors[0].binding_id, primary);
     assert_eq!(
@@ -1440,12 +1432,11 @@ async fn sequential_link_and_remove_orders() {
         primary_sheet_before.as_deref()
     );
 
-    let kb_race_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = 'kb_race'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let kb_race_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = 'kb_race'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(kb_race_count, 1, "kb_race WorldSheet row must remain");
 }
 
@@ -1472,13 +1463,12 @@ async fn add_binding_rejects_paused_world_with_zero_mutation() {
         .await
         .unwrap();
 
-    let before: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM actor_world_bindings WHERE character_id = ?",
-    )
-    .bind(&created.character.character_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let before: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM actor_world_bindings WHERE character_id = ?")
+            .bind(&created.character.character_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
 
     let err = add_actor_world_binding(
         &pool,
@@ -1499,13 +1489,12 @@ async fn add_binding_rejects_paused_world_with_zero_mutation() {
         }
     ));
 
-    let after: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM actor_world_bindings WHERE character_id = ?",
-    )
-    .bind(&created.character.character_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let after: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM actor_world_bindings WHERE character_id = ?")
+            .bind(&created.character.character_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(after, before, "paused world add must not mutate bindings");
 }
 
@@ -1523,11 +1512,10 @@ async fn create_character_rejects_paused_world_with_zero_mutation() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    let binds_before: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM actor_world_bindings")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let binds_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM actor_world_bindings")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
 
     let err = create_character_with_initial_binding(
         &pool,
@@ -1554,11 +1542,10 @@ async fn create_character_rejects_paused_world_with_zero_mutation() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    let binds_after: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM actor_world_bindings")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let binds_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM actor_world_bindings")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert_eq!(chars_after, chars_before);
     assert_eq!(binds_after, binds_before);
 }

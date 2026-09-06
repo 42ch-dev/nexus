@@ -388,6 +388,7 @@ async fn knowledge_add_list_view_json_round_trip() {
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn edit_archive_restore_cli_honors_explicit_revision_cas() {
     let d = LiveDaemon::start().await;
     activate_owner(&d).await;
@@ -434,7 +435,7 @@ async fn edit_archive_restore_cli_honors_explicit_revision_cas() {
     assert_eq!(edit_body["character"]["display_name"], "Ada");
     assert_eq!(edit_body["character"]["revision"], 1);
     assert!(
-        edit_body["character"].get("image_uri").map_or(true, |v| v.is_null()),
+        edit_body["character"]["image_uri"].is_null(),
         "cleared image_uri should be null or omitted: {}",
         edit_body["character"]["image_uri"]
     );
@@ -502,7 +503,6 @@ async fn edit_archive_restore_cli_honors_explicit_revision_cas() {
     assert_eq!(restore_body["character"]["character_id"], chr);
 }
 
-
 #[tokio::test]
 async fn edit_without_mutable_fields_is_invalid_input() {
     let d = LiveDaemon::start().await;
@@ -562,6 +562,7 @@ async fn seed_character_sheet(
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn binding_detail_edit_link_relink_clear_and_refusals() {
     let d = LiveDaemon::start().await;
     activate_owner(&d).await;
@@ -850,8 +851,8 @@ async fn binding_show_retained_after_archive() {
     );
 }
 
-
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn knowledge_show_edit_remove_summary_journey() {
     let d = LiveDaemon::start().await;
     activate_owner(&d).await;
@@ -896,10 +897,7 @@ async fn knowledge_show_edit_remove_summary_journey() {
         .await;
     assert!(added.status.success(), "add: {}", stderr(&added));
     let added_body: Value = serde_json::from_str(&stdout(&added)).unwrap();
-    let entry_id = added_body["item"]["entry_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let entry_id = added_body["item"]["entry_id"].as_str().unwrap().to_string();
     let revision = added_body["item"]["revision"].as_u64().unwrap();
 
     let shown = d
@@ -1044,4 +1042,3 @@ async fn summary_file_over_byte_limit_rejects_via_metadata_precheck() {
         "oversized summary-file must fail fast via metadata precheck"
     );
 }
-

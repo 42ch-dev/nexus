@@ -593,7 +593,7 @@ impl SqliteKbStore {
     /// active-owner revalidation (v1.185 P0 Task 2, durable §11.3.5): a KE
     /// insert must not rely only on an earlier route check — the stored owner
     /// + provenance tuple is re-verified inside the same `BEGIN IMMEDIATE`
-    /// transaction as the row.
+    ///   transaction as the row.
     ///
     /// `binding_id` is `None` for a Character-owned KE and the admitted
     /// binding id for a binding-owned KE. The supplying `character_id` is the
@@ -658,15 +658,13 @@ impl SqliteKbStore {
     }
 }
 
-
 fn validate_actor_owned_create_summary(kb: &KnowledgeEntryRecord) -> Result<(), LocalDbError> {
     const MAX_SUMMARY_UTF8_BYTES: usize = 65_536;
     if let Some(body) = &kb.body {
         if let Some(summary) = &body.summary {
             if summary.len() > MAX_SUMMARY_UTF8_BYTES {
                 return Err(LocalDbError::ValidationError(format!(
-                    "summary must be at most {} UTF-8 bytes",
-                    MAX_SUMMARY_UTF8_BYTES
+                    "summary must be at most {MAX_SUMMARY_UTF8_BYTES} UTF-8 bytes"
                 )));
             }
         }
@@ -685,9 +683,7 @@ pub(crate) fn map_kb_store_to_local_db(err: KbStoreError) -> LocalDbError {
         },
         KbStoreError::Validation(e) => LocalDbError::ValidationError(e.to_string()),
         KbStoreError::ValidationLegacy(e) => LocalDbError::ValidationError(e),
-        other => LocalDbError::Sqlx(sqlx::Error::Protocol(format!(
-            "kb store error: {other}"
-        ))),
+        other => LocalDbError::Sqlx(sqlx::Error::Protocol(format!("kb store error: {other}"))),
     }
 }
 
@@ -3270,7 +3266,9 @@ mod tests {
     #[tokio::test]
     async fn insert_actor_owned_key_block_revalidates_active_owner_in_tx() {
         let (pool, _dir) = fresh_pool().await;
-        crate::ensure_creator_row(&pool, "ctr_a", "A").await.unwrap();
+        crate::ensure_creator_row(&pool, "ctr_a", "A")
+            .await
+            .unwrap();
         sqlx::query(
             "INSERT INTO characters \
              (character_id, owner_creator_id, display_name, status, image_uri, persona_json, \
@@ -3308,7 +3306,12 @@ mod tests {
             "GuardKe2",
         );
         let err = store
-            .insert_actor_owned_key_block("ctr_a", "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab", None, kb2)
+            .insert_actor_owned_key_block(
+                "ctr_a",
+                "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab",
+                None,
+                kb2,
+            )
             .await
             .expect_err("archived Character must refuse");
         assert!(

@@ -37,8 +37,11 @@ async fn ctx() -> Ctx {
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
     let pool = state.pool().unwrap().clone();
     seed_actor_fixture(&pool).await;
-    let server = TestServer::new(api::create_router(state.clone(), DaemonApiConfig::keyless()))
-        .expect("test server");
+    let server = TestServer::new(api::create_router(
+        state.clone(),
+        DaemonApiConfig::keyless(),
+    ))
+    .expect("test server");
     Ctx {
         _tmp: tmp,
         server,
@@ -1040,7 +1043,11 @@ async fn kb_character_add_holds_activity_fence() {
 
 // axum-test `AutoFuture` is not `Send` by design; helpers only on single-threaded runtime.
 #[allow(clippy::future_not_send)]
-async fn detail(server: &TestServer, character_id: &str, entry_id: &str) -> axum_test::TestResponse {
+async fn detail(
+    server: &TestServer,
+    character_id: &str,
+    entry_id: &str,
+) -> axum_test::TestResponse {
     server
         .get(&format!(
             "/v1/daemon/characters/{character_id}/knowledge/{entry_id}"
@@ -1064,8 +1071,6 @@ async fn patch_detail(
 }
 
 #[allow(clippy::future_not_send)]
-
-#[allow(clippy::future_not_send)]
 async fn delete_detail_query(
     server: &TestServer,
     character_id: &str,
@@ -1080,6 +1085,7 @@ async fn delete_detail_query(
     server.delete(&path).await
 }
 
+#[allow(clippy::future_not_send)]
 async fn delete_detail(
     server: &TestServer,
     character_id: &str,
@@ -1139,11 +1145,12 @@ async fn knowledge_detail_summary_lifecycle_and_preserves_body_keys() {
     assert_eq!(body["summary"], "edited summary");
     assert_eq!(body["item"]["revision"], 1);
 
-    let row: (String,) = sqlx::query_as("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
-        .bind(entry_id)
-        .fetch_one(&ctx.pool)
-        .await
-        .unwrap();
+    let row: (String,) =
+        sqlx::query_as("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(entry_id)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
     let stored: Value = serde_json::from_str(&row.0).unwrap();
     assert_eq!(stored["custom_flag"], true);
 
@@ -1420,4 +1427,3 @@ async fn character_create_oversize_multibyte_summary_is_invalid_input() {
     let body: Value = resp.json();
     assert_eq!(body["error"]["code"], "invalid_input");
 }
-

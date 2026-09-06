@@ -228,15 +228,18 @@ impl DaemonClient {
         Ok(data)
     }
 
-
     /// Poll-friendly GET for Character operation outcomes.
     ///
     /// Returns `None` when the daemon responds **404** (expired or not yet
     /// registered). Other non-success statuses surface as [`CliError::Api`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CliError`] on transport or non-404 API failures.
     pub async fn get_character_operation_result(
         &self,
         path: &str,
-    ) -> Result<Option<nexus_contracts::daemon_api::agent_host::character_operation_result::CharacterOperationResult>> {
+    ) -> Result<Option<nexus_contracts::daemon_api::agent_host::character_operation_result::CharacterOperationResult>>{
         let url = format!("{}{}", self.base_url, path);
         let resp = self.send_authenticated(self.http.get(&url), path).await?;
         if resp.status().as_u16() == 404 {

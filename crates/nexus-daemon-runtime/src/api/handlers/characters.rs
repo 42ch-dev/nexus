@@ -41,11 +41,11 @@ use nexus_contracts::daemon_api::characters::{
     update_character_binding_request::UpdateCharacterBindingRequest,
     update_character_request::UpdateCharacterRequest,
 };
+use nexus_contracts::{ActorWorldBinding, Character};
 use nexus_local_db::{
     actor_world_binding::ActorWorldBindingRecord, character::CharacterRecord, CharacterPatch,
     CharacterStatus, CreateBindingParams, CreateCharacterParams, FieldPatch,
 };
-use nexus_contracts::{ActorWorldBinding, Character};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -178,19 +178,26 @@ fn optional_str(value: Option<&impl std::ops::Deref<Target = String>>) -> Option
     value.map(|s| s.as_str())
 }
 
-fn character_detail_from_record(record: &CharacterRecord) -> Result<CharacterDetail, NexusApiError> {
+fn character_detail_from_record(
+    record: &CharacterRecord,
+) -> Result<CharacterDetail, NexusApiError> {
     finish_builder(
         CharacterDetail::builder()
-            .character(map_wire::<DetailCharacterWire>(character_from_record(record)?)?)
+            .character(map_wire::<DetailCharacterWire>(character_from_record(
+                record,
+            )?)?)
             .try_into(),
     )
 }
 
-fn parse_request_object(bytes: &Bytes) -> Result<serde_json::Map<String, serde_json::Value>, NexusApiError> {
-    let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|err| NexusApiError::BadRequest {
-        code: "invalid_input".into(),
-        message: err.to_string(),
-    })?;
+fn parse_request_object(
+    bytes: &Bytes,
+) -> Result<serde_json::Map<String, serde_json::Value>, NexusApiError> {
+    let value: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(|err| NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: err.to_string(),
+        })?;
     value
         .as_object()
         .cloned()
@@ -251,7 +258,7 @@ fn build_character_patch<'a>(
     })
 }
 
-fn character_patch_is_empty(patch: &CharacterPatch<'_>) -> bool {
+const fn character_patch_is_empty(patch: &CharacterPatch<'_>) -> bool {
     patch.is_empty()
 }
 
@@ -322,10 +329,11 @@ async fn execute_character_lifecycle(
         )
         .await?;
 
-        let retired_ids = if record.lifecycle_epoch != pre_epoch {
-            registry.retire_character_sessions(character_id)
-        } else {
+        drop(guard);
+        let retired_ids = if record.lifecycle_epoch == pre_epoch {
             Vec::new()
+        } else {
+            registry.retire_character_sessions(character_id)
         };
         (record, retired_ids)
     };
@@ -575,10 +583,12 @@ pub async fn patch_character(
 ) -> Result<Json<CharacterDetail>, NexusApiError> {
     let raw = parse_request_object(&body)?;
     let mut persona_buf = None;
-    let req: UpdateCharacterRequest = serde_json::from_value(serde_json::Value::Object(raw.clone()))
-        .map_err(|err| NexusApiError::BadRequest {
-            code: "invalid_input".into(),
-            message: err.to_string(),
+    let req: UpdateCharacterRequest =
+        serde_json::from_value(serde_json::Value::Object(raw.clone())).map_err(|err| {
+            NexusApiError::BadRequest {
+                code: "invalid_input".into(),
+                message: err.to_string(),
+            }
         })?;
     let patch = build_character_patch(&raw, &req, &mut persona_buf)?;
     // Wire-shape validation intentionally precedes owner/404 admission so an

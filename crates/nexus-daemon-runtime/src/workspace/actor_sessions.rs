@@ -16,8 +16,8 @@ use sqlx::SqlitePool;
 use tokio::sync::{Mutex as AsyncMutex, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 use nexus_contracts::generated::daemon_api::agent_host::character_operation_result::{
-    CharacterOperationResult, CharacterOperationResultRunStatus,
-    NexusCharacterRunCaptureOutcome, NexusCharacterRunCaptureOutcomeStatus,
+    CharacterOperationResult, CharacterOperationResultRunStatus, NexusCharacterRunCaptureOutcome,
+    NexusCharacterRunCaptureOutcomeStatus,
 };
 
 use crate::actor_admission::AdmittedActorContext;
@@ -163,13 +163,9 @@ fn shutting_down() -> NexusApiError {
     }
 }
 
-/// Owned per-Character activity fence (durable §11.3). Private, owned,
-/// non-Copy: the only way to obtain one is
-/// [`ActorSessionRegistry::admit_character_activity`], which owner-checks and
-/// re-reads status/epoch under the fence. Hold it through every
-/// DB/file/provider/terminal-capture effect of the admitted activity; drop
-/// releases the fence (and for a Prompt, only after terminal finalization in
-/// the server-owned drain).
+/// Owned per-Character activity fence (durable §11.3).
+///
+/// Private, owned, non-Copy: obtain only via [`ActorSessionRegistry::admit_character_activity`], which owner-checks and re-reads status/epoch under the fence. Hold through every DB/file/provider/terminal-capture effect; drop releases the fence (and for a Prompt, only after terminal finalization in the server-owned drain).
 pub struct CharacterActivityGuard {
     _read: OwnedRwLockReadGuard<()>,
     owner_creator_id: String,
@@ -207,12 +203,9 @@ impl std::fmt::Debug for CharacterActivityGuard {
     }
 }
 
-/// Exclusive per-Character lifecycle fence for archive/restore (durable
-/// §11.3.2). Obtained only via
-/// [`ActorSessionRegistry::try_character_transition`] (busy refusal). Stores
-/// the lifecycle epoch re-read under the exclusive fence: retire session reuse
-/// keys only when the committed transition returns a different epoch (a
-/// same-state CAS no-op retires nothing).
+/// Exclusive per-Character lifecycle fence for archive/restore (durable §11.3.2).
+///
+/// Obtained only via [`ActorSessionRegistry::try_character_transition`] (busy refusal). Stores the lifecycle epoch re-read under the exclusive fence: retire session reuse keys only when the committed transition returns a different epoch (a same-state CAS no-op retires nothing).
 pub struct CharacterTransitionGuard {
     _write: OwnedRwLockWriteGuard<()>,
     owner_creator_id: String,
@@ -352,11 +345,7 @@ impl ActorSessionRegistry {
     ) -> Option<(String, ActorSessionKind, bool)> {
         let maps = self.maps();
         if let Some(row) = maps.by_session.get(session_id) {
-            return Some((
-                row.ctx.owner_creator_id.clone(),
-                row.key.actor_kind,
-                false,
-            ));
+            return Some((row.ctx.owner_creator_id.clone(), row.key.actor_kind, false));
         }
         maps.retired
             .get(session_id)
@@ -371,15 +360,9 @@ impl ActorSessionRegistry {
 
     /// Record an indexed Actor operation for fail-closed cancel authorization
     /// when the Host has not yet surfaced `active_op_id`.
-    pub fn register_indexed_operation(
-        &self,
-        op_id: HostOperationId,
-        session_id: HostSessionId,
-    ) {
+    pub fn register_indexed_operation(&self, op_id: HostOperationId, session_id: HostSessionId) {
         if self.is_actor_session(&session_id) {
-            self.maps()
-                .indexed_operations
-                .insert(op_id, session_id);
+            self.maps().indexed_operations.insert(op_id, session_id);
         }
     }
 
@@ -393,8 +376,12 @@ impl ActorSessionRegistry {
         self.maps().indexed_operations.get(op_id).cloned()
     }
 
-
     /// Reserve a Character operation outcome before Host exec (§11.6).
+    ///
+    /// # Errors
+    ///
+    /// Returns capacity or shutdown conflicts.
+    #[allow(clippy::needless_pass_by_value)] // snapshot is stored by value in the operation map
     pub fn reserve_character_operation(
         &self,
         snapshot: CharacterOperationSnapshot,
@@ -410,7 +397,7 @@ impl ActorSessionRegistry {
             return Err(crate::api::errors::actor_operation_capacity());
         }
         maps.operation_seq += 1;
-        let _seq = maps.operation_seq;
+        let seq = maps.operation_seq;
         maps.character_operations.insert(
             snapshot.operation_id.clone(),
             CharacterOperationRecord {
@@ -418,13 +405,18 @@ impl ActorSessionRegistry {
                 session_id: snapshot.session_id.clone(),
                 phase: OperationPhase::Running,
                 outcome: running_outcome(&snapshot),
-                _seq,
+                _seq: seq,
             },
         );
+        drop(maps);
         Ok(())
     }
 
     /// Owner-scoped authoritative operation outcome.
+    ///
+    /// # Errors
+    ///
+    /// Returns `NotFound` when the operation is missing or foreign.
     pub fn character_operation_result(
         &self,
         owner_creator_id: &str,
@@ -436,9 +428,12 @@ impl ActorSessionRegistry {
             .get(operation_id)
             .ok_or_else(|| NexusApiError::NotFound(format!("operation {operation_id}")))?;
         if record.owner_creator_id != owner_creator_id {
+            drop(maps);
             return Err(NexusApiError::NotFound(format!("operation {operation_id}")));
         }
-        Ok(record.outcome.clone())
+        let outcome = record.outcome.clone();
+        drop(maps);
+        Ok(outcome)
     }
 
     /// Remove an unstarted reservation after exec admission failure.
@@ -447,6 +442,10 @@ impl ActorSessionRegistry {
     }
 
     /// Latch cancel intent before awaiting Host.cancel.
+    ///
+    /// # Errors
+    ///
+    /// Returns `NotFound` or `actor_operation_finished` when cancel is invalid.
     pub fn request_operation_cancel(
         &self,
         owner_creator_id: &str,
@@ -460,7 +459,7 @@ impl ActorSessionRegistry {
         if record.owner_creator_id != owner_creator_id {
             return Err(NexusApiError::NotFound(format!("operation {operation_id}")));
         }
-        match record.phase {
+        let result = match record.phase {
             OperationPhase::Running => {
                 record.phase = OperationPhase::CancelRequested;
                 Ok(())
@@ -469,7 +468,9 @@ impl ActorSessionRegistry {
             OperationPhase::Finalizing | OperationPhase::Terminal => {
                 Err(crate::api::errors::actor_operation_finished())
             }
-        }
+        };
+        drop(maps);
+        result
     }
 
     /// Move a draining operation into finalization and return whether cancel
@@ -480,7 +481,10 @@ impl ActorSessionRegistry {
         let mut maps = self.maps();
         if let Some(record) = maps.character_operations.get_mut(operation_id) {
             let cancel_requested = matches!(record.phase, OperationPhase::CancelRequested);
-            if matches!(record.phase, OperationPhase::Running | OperationPhase::CancelRequested) {
+            if matches!(
+                record.phase,
+                OperationPhase::Running | OperationPhase::CancelRequested
+            ) {
                 record.phase = OperationPhase::Finalizing;
             }
             cancel_requested
@@ -506,6 +510,7 @@ impl ActorSessionRegistry {
                 }
             }
         }
+        drop(maps);
     }
 
     #[must_use]
@@ -528,8 +533,12 @@ impl ActorSessionRegistry {
     pub fn clear_indexed_operation(&self, op_id: &HostOperationId) {
         self.maps().indexed_operations.remove(op_id);
     }
-    /// Overlay actor_ref/viewpoint for list/get: live indexed context first,
+    /// Overlay `actor_ref/viewpoint` for list/get: live indexed context first,
     /// then retired tombstones so leftover Host rows stay Actor-shaped.
+    ///
+    /// # Errors
+    ///
+    /// Returns `internal` when stored ids fail generated pattern checks.
     pub fn echo_actor_pair_for_session(
         &self,
         session_id: &HostSessionId,
@@ -542,7 +551,6 @@ impl ActorSessionRegistry {
         }
         Ok((None, None))
     }
-
 
     /// True once the process-lifetime maps are closed (daemon shutdown).
     #[must_use]
@@ -649,14 +657,13 @@ impl ActorSessionRegistry {
     /// (durable §11.3.3): remove old-epoch reuse keys and move their ids to
     /// owner-retaining tombstones. Returns the retired ids for one physical
     /// Host shutdown attempt each, outside DB/registry locks.
+    #[must_use]
     pub fn retire_character_sessions(&self, character_id: &str) -> Vec<HostSessionId> {
         let mut maps = self.maps();
         let keys: Vec<ActorSessionKey> = maps
             .by_key
             .keys()
-            .filter(|k| {
-                k.actor_kind == ActorSessionKind::Character && k.actor_id == character_id
-            })
+            .filter(|k| k.actor_kind == ActorSessionKind::Character && k.actor_id == character_id)
             .cloned()
             .collect();
         let mut retired_ids = Vec::new();
@@ -988,12 +995,6 @@ impl ActorSessionRegistry {
     }
 }
 
-/// Map admitted context onto generated session response optionals.
-///
-/// # Errors
-///
-/// Returns `internal` if stored ids fail generated pattern checks (should not happen).
-
 /// Map a retired-session tombstone onto generated session response optionals
 /// so leftover Host rows stay recognizably Actor-mode (durable §11.3.3).
 ///
@@ -1087,6 +1088,9 @@ fn echo_retired_pair(
     Ok((Some(actor_ref), Some(viewpoint)))
 }
 
+/// # Errors
+///
+/// Returns `internal` if stored ids fail generated pattern checks.
 pub fn echo_actor_pair(
     ctx: &AdmittedActorContext,
 ) -> Result<(Option<NexusActorRef>, Option<NexusSessionViewpoint>), NexusApiError> {
@@ -2170,7 +2174,7 @@ mod tests {
 
     /// Seed an owned active Character (with one active binding to an owned
     /// active World) behind a fresh registry; returns (registry, pool, tmp,
-    /// character_id, binding_id).
+    /// `character_id`, `binding_id`).
     async fn seeded_character() -> (
         ActorSessionRegistry,
         sqlx::SqlitePool,
@@ -2181,7 +2185,9 @@ mod tests {
         let (tmp, home, db_path) = crate::test_utils::create_test_workspace().await;
         let state = crate::workspace::WorkspaceState::new_for_testing(home, db_path, None).await;
         let pool = state.pool().unwrap().clone();
-        nexus_local_db::ensure_creator_row(&pool, DB_OWNER, "Owner").await.unwrap();
+        nexus_local_db::ensure_creator_row(&pool, DB_OWNER, "Owner")
+            .await
+            .unwrap();
         sqlx::query(
             "INSERT INTO narrative_worlds \
              (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
@@ -2320,9 +2326,9 @@ mod tests {
         // is also retired, because a committed transition invalidates all the
         // Character's reusable sessions; a later restore mints a brand-new one.
         let mut retired_ids = registry.retire_character_sessions(&character_id);
-        retired_ids.sort_by_key(|id| id.to_string());
+        retired_ids.sort_by_key(std::string::ToString::to_string);
         let mut expected = vec![old_session.id.clone(), new_session.id.clone()];
-        expected.sort_by_key(|id| id.to_string());
+        expected.sort_by_key(std::string::ToString::to_string);
         assert_eq!(retired_ids, expected);
         assert_eq!(registry.len(), 0);
         for id in [&old_session.id, &new_session.id] {
@@ -2393,8 +2399,6 @@ mod tests {
         drop(tmp);
     }
 
-
-
     /// Terminal operation FIFO evicts the oldest committed outcome after 1024 rows.
     #[test]
     fn terminal_operation_fifo_evicts_oldest() {
@@ -2419,7 +2423,9 @@ mod tests {
                 remember: false,
                 raw_prompt: "x".into(),
             };
-            registry.reserve_character_operation(snapshot).expect("reserve");
+            registry
+                .reserve_character_operation(snapshot)
+                .expect("reserve");
             registry.commit_operation_terminal(
                 &op_id,
                 CharacterOperationResult {
@@ -2459,5 +2465,4 @@ mod tests {
         drop(guard);
         drop(tmp);
     }
-
 }

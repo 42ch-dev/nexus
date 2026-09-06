@@ -6,8 +6,7 @@ use uuid::Uuid;
 use crate::begin_immediate;
 use crate::character::{
     check_expected_revision, map_actor_constraint, require_active_owned_character_tx,
-    require_owned_active_world, require_owned_character_pool,
-    require_owned_world_pool, FieldPatch,
+    require_owned_active_world, require_owned_character_pool, require_owned_world_pool, FieldPatch,
 };
 use crate::error::{ActorContractConflict, LocalDbError};
 
@@ -39,6 +38,7 @@ pub fn mint_binding_id() -> String {
     format!("awb_{}", Uuid::new_v4().simple())
 }
 
+#[allow(clippy::too_many_arguments)] // row mapper mirrors SQL projection
 const fn record_from_query(
     binding_id: String,
     character_id: String,
@@ -393,28 +393,22 @@ pub async fn count_bindings_for_world_tx(
     Ok(count)
 }
 
-fn binding_revision_conflict() -> LocalDbError {
+const fn binding_revision_conflict() -> LocalDbError {
     LocalDbError::ActorContractConflict {
         code: ActorContractConflict::BindingRevisionConflict,
     }
 }
 
-fn resolved_world_sheet_patch(
-    current: &Option<String>,
-    patch: FieldPatch<&str>,
-) -> Option<String> {
+fn resolved_world_sheet_patch(current: Option<&String>, patch: FieldPatch<&str>) -> Option<String> {
     match patch {
-        FieldPatch::Keep => current.clone(),
+        FieldPatch::Keep => current.cloned(),
         FieldPatch::Clear => None,
         FieldPatch::Set(id) => Some(id.to_string()),
     }
 }
 
-fn binding_sheet_patch_is_no_op(
-    current: &Option<String>,
-    patch: FieldPatch<&str>,
-) -> bool {
-    resolved_world_sheet_patch(current, patch) == *current
+fn binding_sheet_patch_is_no_op(current: Option<&String>, patch: FieldPatch<&str>) -> bool {
+    resolved_world_sheet_patch(current, patch) == current.cloned()
 }
 
 /// Owner-scoped binding detail with path tuple validation.
@@ -451,14 +445,14 @@ pub async fn get_actor_world_binding(
     }
 }
 
-/// Patch the optional WorldSheet link on an owned active binding.
+/// Patch the optional `WorldSheet` link on an owned active binding.
 ///
 /// Only `world_sheet_entry_id` is mutable. Null clears; omission (`Keep`) retains;
 /// material changes bump binding revision once inside `BEGIN IMMEDIATE`.
 ///
 /// # Errors
 ///
-/// Returns `LocalDbError` on ownership, activity, CAS, or WorldSheet validation failure.
+/// Returns `LocalDbError` on ownership, activity, CAS, or `WorldSheet` validation failure.
 pub async fn update_actor_world_binding(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -505,12 +499,12 @@ async fn update_actor_world_binding_tx(
     if binding.revision != expected_revision {
         return Err(binding_revision_conflict());
     }
-    if binding_sheet_patch_is_no_op(&binding.world_sheet_entry_id, world_sheet_entry_id) {
+    if binding_sheet_patch_is_no_op(binding.world_sheet_entry_id.as_ref(), world_sheet_entry_id) {
         return Ok(binding);
     }
 
     let new_sheet =
-        resolved_world_sheet_patch(&binding.world_sheet_entry_id, world_sheet_entry_id);
+        resolved_world_sheet_patch(binding.world_sheet_entry_id.as_ref(), world_sheet_entry_id);
     validate_world_sheet_tx(tx, &binding.world_id, new_sheet.as_deref()).await?;
 
     let now = chrono::Utc::now().to_rfc3339();

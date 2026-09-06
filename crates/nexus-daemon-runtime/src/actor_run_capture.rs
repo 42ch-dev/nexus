@@ -41,31 +41,41 @@ fn checked_capture_digest_byte_len(raw_prompt: &str, response_text: &str) -> Opt
         .checked_add(response_text.len())
 }
 
+#[must_use]
 pub fn capture_digest_byte_len(raw_prompt: &str, response_text: &str) -> usize {
     checked_capture_digest_byte_len(raw_prompt, response_text).unwrap_or(usize::MAX)
 }
 
-pub fn prompt_digest_prefix_bytes(raw_prompt: &str) -> usize {
-    CAPTURE_DIGEST_STATIC_OVERHEAD
-        .checked_add(raw_prompt.len())
-        .unwrap_or(usize::MAX)
+#[must_use]
+pub const fn prompt_digest_prefix_bytes(raw_prompt: &str) -> usize {
+    CAPTURE_DIGEST_STATIC_OVERHEAD.saturating_add(raw_prompt.len())
 }
 
-pub fn build_capture_digest(raw_prompt: &str, response_text: &str) -> Result<String, DigestBuildError> {
+/// # Errors
+///
+/// Returns `DigestBuildError` when the response is empty or the digest exceeds the byte cap.
+pub fn build_capture_digest(
+    raw_prompt: &str,
+    response_text: &str,
+) -> Result<String, DigestBuildError> {
     if response_text.trim().is_empty() {
         return Err(DigestBuildError::EmptyResponse);
     }
     match checked_capture_digest_byte_len(raw_prompt, response_text) {
         None => Err(DigestBuildError::TooLarge),
         Some(len) if len > MAX_CAPTURE_DIGEST_BYTES => Err(DigestBuildError::TooLarge),
-        Some(_) => Ok(format!("Prompt:\n{raw_prompt}\n\nResponse:\n{response_text}")),
+        Some(_) => Ok(format!(
+            "Prompt:\n{raw_prompt}\n\nResponse:\n{response_text}"
+        )),
     }
 }
 
+#[must_use]
 pub fn run_pending_id(operation_id: &HostOperationId) -> String {
     format!("run_{}", operation_id.to_string().replace('-', ""))
 }
 
+#[must_use]
 pub fn event_matches_operation(
     event: &HostEvent,
     session_id: &HostSessionId,
@@ -96,7 +106,8 @@ pub struct DrainAccumulator {
 }
 
 impl DrainAccumulator {
-    pub fn for_prompt(raw_prompt: &str) -> Self {
+    #[must_use]
+    pub const fn for_prompt(raw_prompt: &str) -> Self {
         let prompt_prefix_bytes = prompt_digest_prefix_bytes(raw_prompt);
         Self {
             message_text: String::new(),
@@ -114,16 +125,13 @@ impl DrainAccumulator {
                 if self.digest_too_large {
                     return;
                 }
-                let next_total = match self
+                let Some(next_total) = self
                     .prompt_prefix_bytes
                     .checked_add(self.message_text.len())
                     .and_then(|n| n.checked_add(text.len()))
-                {
-                    Some(n) => n,
-                    None => {
-                        self.digest_too_large = true;
-                        return;
-                    }
+                else {
+                    self.digest_too_large = true;
+                    return;
                 };
                 if next_total > MAX_CAPTURE_DIGEST_BYTES {
                     self.digest_too_large = true;
@@ -150,7 +158,7 @@ impl Default for DrainAccumulator {
     }
 }
 
-fn map_finish_reason(reason: &FinishReason) -> CharacterOperationResultFinishReason {
+const fn map_finish_reason(reason: &FinishReason) -> CharacterOperationResultFinishReason {
     match reason {
         FinishReason::EndTurn => CharacterOperationResultFinishReason::EndTurn,
         FinishReason::MaxTokens => CharacterOperationResultFinishReason::MaxTokens,
@@ -159,7 +167,7 @@ fn map_finish_reason(reason: &FinishReason) -> CharacterOperationResultFinishRea
     }
 }
 
-fn disabled_capture() -> NexusCharacterRunCaptureOutcome {
+const fn disabled_capture() -> NexusCharacterRunCaptureOutcome {
     NexusCharacterRunCaptureOutcome {
         status: NexusCharacterRunCaptureOutcomeStatus::Disabled,
         pending_id: None,
@@ -167,7 +175,9 @@ fn disabled_capture() -> NexusCharacterRunCaptureOutcome {
     }
 }
 
-fn skipped_capture(code: NexusCharacterRunCaptureOutcomeCode) -> NexusCharacterRunCaptureOutcome {
+const fn skipped_capture(
+    code: NexusCharacterRunCaptureOutcomeCode,
+) -> NexusCharacterRunCaptureOutcome {
     NexusCharacterRunCaptureOutcome {
         status: NexusCharacterRunCaptureOutcomeStatus::Skipped,
         pending_id: None,
@@ -175,7 +185,9 @@ fn skipped_capture(code: NexusCharacterRunCaptureOutcomeCode) -> NexusCharacterR
     }
 }
 
-fn failed_capture(code: NexusCharacterRunCaptureOutcomeCode) -> NexusCharacterRunCaptureOutcome {
+const fn failed_capture(
+    code: NexusCharacterRunCaptureOutcomeCode,
+) -> NexusCharacterRunCaptureOutcome {
     NexusCharacterRunCaptureOutcome {
         status: NexusCharacterRunCaptureOutcomeStatus::Failed,
         pending_id: None,
@@ -183,7 +195,7 @@ fn failed_capture(code: NexusCharacterRunCaptureOutcomeCode) -> NexusCharacterRu
     }
 }
 
-fn pending_capture() -> NexusCharacterRunCaptureOutcome {
+const fn pending_capture() -> NexusCharacterRunCaptureOutcome {
     NexusCharacterRunCaptureOutcome {
         status: NexusCharacterRunCaptureOutcomeStatus::Pending,
         pending_id: None,
@@ -191,7 +203,8 @@ fn pending_capture() -> NexusCharacterRunCaptureOutcome {
     }
 }
 
-pub fn initial_capture_outcome(remember: bool) -> OperationCaptureOutcome {
+#[must_use]
+pub const fn initial_capture_outcome(remember: bool) -> OperationCaptureOutcome {
     if remember {
         OperationCaptureOutcome {
             status: OperationCaptureOutcomeStatus::Pending,
@@ -207,10 +220,13 @@ pub fn initial_capture_outcome(remember: bool) -> OperationCaptureOutcome {
     }
 }
 
-fn run_status_from_terminal(
+const fn run_status_from_terminal(
     acc: &DrainAccumulator,
     cancel_requested: bool,
-) -> (CharacterOperationResultRunStatus, Option<CharacterOperationResultFinishReason>) {
+) -> (
+    CharacterOperationResultRunStatus,
+    Option<CharacterOperationResultFinishReason>,
+) {
     if cancel_requested && !acc.saw_terminal {
         return (CharacterOperationResultRunStatus::Cancelled, None);
     }
@@ -257,7 +273,11 @@ async fn try_persist_capture(
     let Some(binding_id) = snapshot.ctx.binding_id.as_deref() else {
         return failed_capture(NexusCharacterRunCaptureOutcomeCode::CaptureScopeChanged);
     };
-    if guard.epoch() != snapshot.ctx.character_epoch.unwrap_or(guard.epoch()) {
+    let expected_epoch = snapshot
+        .ctx
+        .character_epoch
+        .unwrap_or_else(|| guard.epoch());
+    if guard.epoch() != expected_epoch {
         return failed_capture(NexusCharacterRunCaptureOutcomeCode::CaptureScopeChanged);
     }
     let digest = match build_capture_digest(raw_prompt, response_text) {
@@ -341,16 +361,13 @@ fn finalize_capture_outcome(
     }
 }
 
-
 #[cfg(test)]
-type BeforeFinalizeHook = std::sync::Arc<dyn Fn(&ActorSessionRegistry, &HostOperationId) + Send + Sync>;
+type BeforeFinalizeHook =
+    std::sync::Arc<dyn Fn(&ActorSessionRegistry, &HostOperationId) + Send + Sync>;
 
 #[cfg(test)]
 static BEFORE_OPERATION_FINALIZE_HOOK: std::sync::Mutex<Option<BeforeFinalizeHook>> =
     std::sync::Mutex::new(None);
-
-#[cfg(test)]
-static FINALIZE_HOOK_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
 pub(crate) fn set_before_operation_finalize_hook(
@@ -368,6 +385,11 @@ pub(crate) fn clear_before_operation_finalize_hook() {
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
 }
 
+#[allow(
+    clippy::missing_const_for_fn,
+    unused_variables,
+    clippy::used_underscore_binding
+)]
 fn fire_before_operation_finalize_hook(
     _registry: &ActorSessionRegistry,
     _operation_id: &HostOperationId,
@@ -439,13 +461,8 @@ pub async fn drain_and_finalize_character_operation(
         None
     };
 
-    let capture = finalize_capture_outcome(
-        &snapshot,
-        &acc,
-        cancel_requested,
-        run_status,
-        persisted,
-    );
+    let capture =
+        finalize_capture_outcome(&snapshot, &acc, cancel_requested, run_status, persisted);
 
     let outcome = CharacterOperationResult {
         operation_id: op_id.to_string(),
@@ -460,18 +477,17 @@ pub async fn drain_and_finalize_character_operation(
     drop(activity_guard);
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actor_knowledge_view::AdmittedActor;
+    use crate::workspace::actor_sessions::{ActorSessionRegistry, CharacterOperationSnapshot};
     use nexus_agent_host::capability::model::{
         FinishReason, HostEvent, OperationFailedEvent, OperationFinishedEvent, TextDeltaEvent,
     };
     use nexus_contracts::generated::daemon_api::agent_host::character_operation_result::{
         NexusCharacterRunCaptureOutcomeCode, NexusCharacterRunCaptureOutcomeStatus,
     };
-    use crate::actor_knowledge_view::AdmittedActor;
-    use crate::workspace::actor_sessions::{ActorSessionRegistry, CharacterOperationSnapshot};
 
     fn sample_snapshot(remember: bool, raw_prompt: &str) -> CharacterOperationSnapshot {
         let session_id = HostSessionId::new();
@@ -502,7 +518,7 @@ mod tests {
         }
     }
 
-fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent {
+    fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent {
         HostEvent::MessageDelta(TextDeltaEvent {
             session_id: snapshot.session_id.clone(),
             op_id: snapshot.operation_id.clone(),
@@ -534,7 +550,10 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
         })
     }
 
-    fn stream_of(events: Vec<HostEvent>) -> std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<HostEvent, HostError>> + Send>> {
+    fn stream_of(
+        events: Vec<HostEvent>,
+    ) -> std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<HostEvent, HostError>> + Send>>
+    {
         Box::pin(futures_util::stream::iter(events.into_iter().map(Ok)))
     }
 
@@ -567,9 +586,17 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
     fn event_matching_ignores_foreign_session() {
         let snapshot = sample_snapshot(true, "p");
         let foreign = foreign_message(&snapshot, "nope");
-        assert!(!event_matches_operation(&foreign, &snapshot.session_id, &snapshot.operation_id));
+        assert!(!event_matches_operation(
+            &foreign,
+            &snapshot.session_id,
+            &snapshot.operation_id
+        ));
         let local = message_delta(&snapshot, "yes");
-        assert!(event_matches_operation(&local, &snapshot.session_id, &snapshot.operation_id));
+        assert!(event_matches_operation(
+            &local,
+            &snapshot.session_id,
+            &snapshot.operation_id
+        ));
     }
 
     #[test]
@@ -600,7 +627,10 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
         let huge = "x".repeat(MAX_CAPTURE_DIGEST_BYTES * 2);
         acc.apply_matching(&message_delta(&snapshot, &huge));
         assert!(acc.digest_too_large);
-        assert!(acc.message_text.is_empty(), "must reject before copying delta");
+        assert!(
+            acc.message_text.is_empty(),
+            "must reject before copying delta"
+        );
     }
 
     #[test]
@@ -611,13 +641,14 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
         assert!(acc.message_text.is_empty());
     }
 
-
     #[tokio::test]
     async fn oversized_prompt_production_drain_classifies_at_entry() {
         let huge_prompt = "p".repeat(MAX_CAPTURE_DIGEST_BYTES);
         let snapshot = sample_snapshot(true, &huge_prompt);
         let registry = ActorSessionRegistry::new();
-        registry.reserve_character_operation(snapshot.clone()).unwrap();
+        registry
+            .reserve_character_operation(snapshot.clone())
+            .unwrap();
         drain_and_finalize_character_operation(
             sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap(),
             registry.clone(),
@@ -635,8 +666,14 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
                 &snapshot.operation_id,
             )
             .expect("outcome");
-        assert_eq!(result.run_status, CharacterOperationResultRunStatus::Succeeded);
-        assert_eq!(result.capture.status, NexusCharacterRunCaptureOutcomeStatus::Failed);
+        assert_eq!(
+            result.run_status,
+            CharacterOperationResultRunStatus::Succeeded
+        );
+        assert_eq!(
+            result.capture.status,
+            NexusCharacterRunCaptureOutcomeStatus::Failed
+        );
         assert_eq!(
             result.capture.code,
             Some(NexusCharacterRunCaptureOutcomeCode::CaptureTooLarge)
@@ -647,7 +684,9 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
     async fn oversized_single_delta_preserves_run_success() {
         let snapshot = sample_snapshot(true, "p");
         let registry = ActorSessionRegistry::new();
-        registry.reserve_character_operation(snapshot.clone()).unwrap();
+        registry
+            .reserve_character_operation(snapshot.clone())
+            .unwrap();
         let huge = "y".repeat(MAX_CAPTURE_DIGEST_BYTES * 2);
         drain_and_finalize_character_operation(
             sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap(),
@@ -666,8 +705,14 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
                 &snapshot.operation_id,
             )
             .expect("outcome");
-        assert_eq!(result.run_status, CharacterOperationResultRunStatus::Succeeded);
-        assert_eq!(result.capture.status, NexusCharacterRunCaptureOutcomeStatus::Failed);
+        assert_eq!(
+            result.run_status,
+            CharacterOperationResultRunStatus::Succeeded
+        );
+        assert_eq!(
+            result.capture.status,
+            NexusCharacterRunCaptureOutcomeStatus::Failed
+        );
         assert_eq!(
             result.capture.code,
             Some(NexusCharacterRunCaptureOutcomeCode::CaptureTooLarge)
@@ -678,7 +723,9 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
     async fn opt_out_yields_disabled_capture() {
         let snapshot = sample_snapshot(false, "hello");
         let registry = ActorSessionRegistry::new();
-        registry.reserve_character_operation(snapshot.clone()).unwrap();
+        registry
+            .reserve_character_operation(snapshot.clone())
+            .unwrap();
         let events = vec![
             message_delta(&snapshot, "answer"),
             op_finished(&snapshot, FinishReason::EndTurn),
@@ -693,20 +740,25 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
         )
         .await;
         let result = registry
-            .character_operation_result(
-                "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                &op_id,
-            )
+            .character_operation_result("ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &op_id)
             .expect("outcome");
-        assert_eq!(result.capture.status, NexusCharacterRunCaptureOutcomeStatus::Disabled);
-        assert_eq!(result.run_status, CharacterOperationResultRunStatus::Succeeded);
+        assert_eq!(
+            result.capture.status,
+            NexusCharacterRunCaptureOutcomeStatus::Disabled
+        );
+        assert_eq!(
+            result.run_status,
+            CharacterOperationResultRunStatus::Succeeded
+        );
     }
 
     #[tokio::test]
     async fn end_turn_without_remember_is_disabled() {
         let snapshot = sample_snapshot(false, "q");
         let registry = ActorSessionRegistry::new();
-        registry.reserve_character_operation(snapshot.clone()).unwrap();
+        registry
+            .reserve_character_operation(snapshot.clone())
+            .unwrap();
         drain_and_finalize_character_operation(
             sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap(),
             registry.clone(),
@@ -724,14 +776,19 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
                 &snapshot.operation_id,
             )
             .expect("outcome");
-        assert_eq!(result.capture.status, NexusCharacterRunCaptureOutcomeStatus::Disabled);
+        assert_eq!(
+            result.capture.status,
+            NexusCharacterRunCaptureOutcomeStatus::Disabled
+        );
     }
 
     #[tokio::test]
     async fn max_tokens_marks_incomplete_and_skips_capture() {
         let snapshot = sample_snapshot(true, "q");
         let registry = ActorSessionRegistry::new();
-        registry.reserve_character_operation(snapshot.clone()).unwrap();
+        registry
+            .reserve_character_operation(snapshot.clone())
+            .unwrap();
         drain_and_finalize_character_operation(
             sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap(),
             registry.clone(),
@@ -749,8 +806,14 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
                 &snapshot.operation_id,
             )
             .expect("outcome");
-        assert_eq!(result.run_status, CharacterOperationResultRunStatus::Incomplete);
-        assert_eq!(result.capture.status, NexusCharacterRunCaptureOutcomeStatus::Skipped);
+        assert_eq!(
+            result.run_status,
+            CharacterOperationResultRunStatus::Incomplete
+        );
+        assert_eq!(
+            result.capture.status,
+            NexusCharacterRunCaptureOutcomeStatus::Skipped
+        );
         assert_eq!(
             result.capture.code,
             Some(NexusCharacterRunCaptureOutcomeCode::RunIncomplete)
@@ -759,12 +822,15 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
 
     #[tokio::test]
     async fn refusal_and_failure_skip_capture() {
-        for (reason, status) in [
-            (FinishReason::Refusal, CharacterOperationResultRunStatus::Incomplete),
-        ] {
+        for (reason, status) in [(
+            FinishReason::Refusal,
+            CharacterOperationResultRunStatus::Incomplete,
+        )] {
             let snapshot = sample_snapshot(true, "q");
             let registry = ActorSessionRegistry::new();
-            registry.reserve_character_operation(snapshot.clone()).unwrap();
+            registry
+                .reserve_character_operation(snapshot.clone())
+                .unwrap();
             drain_and_finalize_character_operation(
                 sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap(),
                 registry.clone(),
@@ -783,12 +849,17 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
                 )
                 .expect("outcome");
             assert_eq!(result.run_status, status);
-            assert_eq!(result.capture.status, NexusCharacterRunCaptureOutcomeStatus::Skipped);
+            assert_eq!(
+                result.capture.status,
+                NexusCharacterRunCaptureOutcomeStatus::Skipped
+            );
         }
 
         let snapshot = sample_snapshot(true, "q");
         let registry = ActorSessionRegistry::new();
-        registry.reserve_character_operation(snapshot.clone()).unwrap();
+        registry
+            .reserve_character_operation(snapshot.clone())
+            .unwrap();
         drain_and_finalize_character_operation(
             sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap(),
             registry.clone(),
@@ -819,7 +890,9 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
     async fn eof_without_terminal_fails_run_and_skips_capture() {
         let snapshot = sample_snapshot(true, "q");
         let registry = ActorSessionRegistry::new();
-        registry.reserve_character_operation(snapshot.clone()).unwrap();
+        registry
+            .reserve_character_operation(snapshot.clone())
+            .unwrap();
         drain_and_finalize_character_operation(
             sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap(),
             registry.clone(),
@@ -835,14 +908,19 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
             )
             .expect("outcome");
         assert_eq!(result.run_status, CharacterOperationResultRunStatus::Failed);
-        assert_eq!(result.capture.status, NexusCharacterRunCaptureOutcomeStatus::Skipped);
+        assert_eq!(
+            result.capture.status,
+            NexusCharacterRunCaptureOutcomeStatus::Skipped
+        );
     }
 
     #[tokio::test]
     async fn cancel_suppresses_capture_even_on_end_turn() {
         let snapshot = sample_snapshot(true, "q");
         let registry = ActorSessionRegistry::new();
-        registry.reserve_character_operation(snapshot.clone()).unwrap();
+        registry
+            .reserve_character_operation(snapshot.clone())
+            .unwrap();
         registry
             .request_operation_cancel(
                 "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -866,7 +944,10 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
                 &snapshot.operation_id,
             )
             .expect("outcome");
-        assert_eq!(result.run_status, CharacterOperationResultRunStatus::Cancelled);
+        assert_eq!(
+            result.run_status,
+            CharacterOperationResultRunStatus::Cancelled
+        );
         assert_eq!(
             result.capture.code,
             Some(NexusCharacterRunCaptureOutcomeCode::RunCancelled)
@@ -881,18 +962,18 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
         assert!(!pending.contains('-'));
     }
 
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancel_latched_at_finalize_boundary_suppresses_capture() {
         use std::sync::{Arc, Barrier};
         use std::thread;
 
-        let _hook_guard = FINALIZE_HOOK_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         clear_before_operation_finalize_hook();
 
         let snapshot = sample_snapshot(true, "q");
         let registry = ActorSessionRegistry::new();
-        registry.reserve_character_operation(snapshot.clone()).unwrap();
+        registry
+            .reserve_character_operation(snapshot.clone())
+            .unwrap();
         let owner = snapshot.owner_creator_id.clone();
         let op_id = snapshot.operation_id.clone();
 
@@ -948,7 +1029,10 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
         let result = registry
             .character_operation_result(&owner, &op_id)
             .expect("outcome");
-        assert_eq!(result.run_status, CharacterOperationResultRunStatus::Cancelled);
+        assert_eq!(
+            result.run_status,
+            CharacterOperationResultRunStatus::Cancelled
+        );
         assert_eq!(
             result.capture.status,
             NexusCharacterRunCaptureOutcomeStatus::Skipped
@@ -963,7 +1047,9 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
     async fn op_failed_with_accepted_cancel_yields_cancelled_not_failed() {
         let snapshot = sample_snapshot(true, "q");
         let registry = ActorSessionRegistry::new();
-        registry.reserve_character_operation(snapshot.clone()).unwrap();
+        registry
+            .reserve_character_operation(snapshot.clone())
+            .unwrap();
         registry
             .request_operation_cancel(
                 "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -989,7 +1075,10 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
                 &snapshot.operation_id,
             )
             .expect("outcome");
-        assert_eq!(result.run_status, CharacterOperationResultRunStatus::Cancelled);
+        assert_eq!(
+            result.run_status,
+            CharacterOperationResultRunStatus::Cancelled
+        );
         assert_ne!(result.run_status, CharacterOperationResultRunStatus::Failed);
         assert_eq!(
             result.capture.code,
@@ -997,13 +1086,15 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
         );
     }
 
-
     #[test]
     fn digest_exact_boundary_accepted() {
         let prompt = "boundary";
         let overhead = prompt_digest_prefix_bytes(prompt);
         let response = "z".repeat(MAX_CAPTURE_DIGEST_BYTES - overhead);
-        assert_eq!(capture_digest_byte_len(prompt, &response), MAX_CAPTURE_DIGEST_BYTES);
+        assert_eq!(
+            capture_digest_byte_len(prompt, &response),
+            MAX_CAPTURE_DIGEST_BYTES
+        );
         assert!(build_capture_digest(prompt, &response).is_ok());
     }
 
@@ -1029,11 +1120,11 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
 
         let snapshot = sample_snapshot(true, "q");
         let registry = ActorSessionRegistry::new();
-        registry.reserve_character_operation(snapshot.clone()).unwrap();
-        registry.register_indexed_operation(
-            snapshot.operation_id.clone(),
-            snapshot.session_id.clone(),
-        );
+        registry
+            .reserve_character_operation(snapshot.clone())
+            .unwrap();
+        registry
+            .register_indexed_operation(snapshot.operation_id.clone(), snapshot.session_id.clone());
         let items = vec![
             Err(nexus_agent_host::HostError::ProviderUnavailable {
                 provider_id: ProviderId::new("mock"),
@@ -1060,11 +1151,9 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
             )
             .expect("terminal outcome committed once");
         assert_eq!(result.run_status, CharacterOperationResultRunStatus::Failed);
-        assert!(
-            registry
-                .resolve_indexed_operation_session(&snapshot.operation_id)
-                .is_none()
-        );
+        assert!(registry
+            .resolve_indexed_operation_session(&snapshot.operation_id)
+            .is_none());
     }
 
     #[tokio::test]
@@ -1101,6 +1190,8 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
             .admit_character_activity(&pool, owner, &created.character.character_id)
             .await
             .expect("admit");
+        let guard_epoch = guard.epoch();
+        drop(guard);
         let mut snapshot = sample_snapshot(true, "q");
         snapshot.owner_creator_id = owner.to_string();
         snapshot.ctx.owner_creator_id = owner.to_string();
@@ -1109,10 +1200,14 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
         };
         snapshot.ctx.world_id = "wld_worldA".into();
         snapshot.ctx.binding_id = None;
-        snapshot.ctx.character_epoch = Some(guard.epoch());
+        snapshot.ctx.character_epoch = Some(guard_epoch);
         registry
             .reserve_character_operation(snapshot.clone())
             .unwrap();
+        let guard = registry
+            .admit_character_activity(&pool, owner, &created.character.character_id)
+            .await
+            .expect("readmit");
         drain_and_finalize_character_operation(
             pool,
             registry.clone(),
@@ -1127,8 +1222,14 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
         let result = registry
             .character_operation_result(owner, &snapshot.operation_id)
             .expect("outcome");
-        assert_eq!(result.run_status, CharacterOperationResultRunStatus::Succeeded);
-        assert_eq!(result.capture.status, NexusCharacterRunCaptureOutcomeStatus::Failed);
+        assert_eq!(
+            result.run_status,
+            CharacterOperationResultRunStatus::Succeeded
+        );
+        assert_eq!(
+            result.capture.status,
+            NexusCharacterRunCaptureOutcomeStatus::Failed
+        );
         assert_eq!(
             result.capture.code,
             Some(NexusCharacterRunCaptureOutcomeCode::CaptureScopeChanged)

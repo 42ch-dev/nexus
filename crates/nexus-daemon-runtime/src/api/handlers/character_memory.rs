@@ -189,9 +189,7 @@ fn validate_capture_input(
     if pending_id.starts_with(RUN_PENDING_ID_PREFIX) {
         return Err(NexusApiError::BadRequest {
             code: "invalid_input".into(),
-            message: format!(
-                "pending_id cannot use the reserved {RUN_PENDING_ID_PREFIX} prefix"
-            ),
+            message: format!("pending_id cannot use the reserved {RUN_PENDING_ID_PREFIX} prefix"),
         });
     }
     let session_id = req.session_id.as_str();
@@ -363,6 +361,7 @@ pub async fn review(
     let deadline = tokio::time::Instant::now() + REVIEW_CALL_TIMEOUT;
     let mut outcome =
         process_bearer_review_batch(&inputs, &nexus_home, &ctx, &pool, deadline).await?;
+    drop(ctx);
     let deadline_stopped = outcome.processed < processing_slice;
     outcome.has_more = more_in_db || deadline_stopped || outcome.any_row_remained_pending;
     outcome.more_in_db = more_in_db;
@@ -533,6 +532,7 @@ pub async fn reflect_soul(
 
     let outcome =
         reflect_bearer_soul(pool, &ctx, req.force_regenerate, synthesizer.as_ref()).await?;
+    drop(ctx);
     Ok(Json(map_character_reflect_outcome(&character_id, &outcome)))
 }
 

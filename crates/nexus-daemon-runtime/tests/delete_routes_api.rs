@@ -493,4 +493,3 @@ async fn delete_world_blocked_when_archived_character_has_active_binding() {
     assert_eq!(world_count, 1, "world row must be unchanged");
     assert_eq!(bind_count, 1, "binding must remain");
 }
-

@@ -83,6 +83,11 @@ impl HostFacade for MockHost {
         Ok(session)
     }
 
+    #[allow(
+        clippy::redundant_clone,
+        clippy::if_not_else,
+        clippy::branches_sharing_code
+    )]
     async fn exec(
         &self,
         session_id: HostSessionId,
@@ -882,28 +887,20 @@ async fn restored_character_run_mints_fresh_session_after_archive() {
     let g = seed(&d).await;
 
     let pre = json_out(
-        &d
-            .cli(&run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &[]))
+        &d.cli(&run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &[]))
             .await,
     );
     assert!(pre.get("session").is_some());
     let pre_session = pre["session"]["session_id"].as_str().unwrap().to_string();
 
     let show = json_out(
-        &d
-            .cli(&[
-                "creator",
-                "character",
-                "show",
-                &g.character_a,
-                "--json",
-            ])
+        &d.cli(&["creator", "character", "show", &g.character_a, "--json"])
             .await,
     );
     let revision = show["character"]["revision"].as_i64().unwrap();
 
-    assert!(
-        d.cli(&[
+    assert!(d
+        .cli(&[
             "creator",
             "character",
             "archive",
@@ -914,35 +911,22 @@ async fn restored_character_run_mints_fresh_session_after_archive() {
         ])
         .await
         .status
-        .success()
-    );
+        .success());
 
     let archived_show = json_out(
-        &d
-            .cli(&[
-                "creator",
-                "character",
-                "show",
-                &g.character_a,
-                "--json",
-            ])
+        &d.cli(&["creator", "character", "show", &g.character_a, "--json"])
             .await,
     );
     let archived_revision = archived_show["character"]["revision"].as_i64().unwrap();
 
     let denied = d
-        .cli(&run_args(
-            &g.character_a,
-            &g.world_w1,
-            &g.bind_a_w1,
-            &[],
-        ))
+        .cli(&run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &[]))
         .await;
     assert!(!denied.status.success(), "archived run must fail");
     assert!(stderr(&denied).contains("character_inactive"));
 
-    assert!(
-        d.cli(&[
+    assert!(d
+        .cli(&[
             "creator",
             "character",
             "restore",
@@ -953,18 +937,18 @@ async fn restored_character_run_mints_fresh_session_after_archive() {
         ])
         .await
         .status
-        .success()
-    );
+        .success());
 
     let post = json_out(
-        &d
-            .cli(&run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &[]))
+        &d.cli(&run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &[]))
             .await,
     );
     let post_session = post["session"]["session_id"].as_str().unwrap();
-    assert_ne!(pre_session, post_session, "restore must mint a fresh session");
+    assert_ne!(
+        pre_session, post_session,
+        "restore must mint a fresh session"
+    );
 }
-
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn character_run_includes_edited_summary_and_shared_ke_across_worlds() {
@@ -1072,6 +1056,11 @@ impl HostFacade for P3MockHost {
         self.inner.create_session(request).await
     }
 
+    #[allow(
+        clippy::redundant_clone,
+        clippy::if_not_else,
+        clippy::branches_sharing_code
+    )]
     async fn exec(
         &self,
         session_id: HostSessionId,
@@ -1136,13 +1125,10 @@ impl HostFacade for P3MockHost {
             stream_events.push(Ok(wrong_finished));
         }
         stream_events.push(Ok(finished.clone()));
+        let _ = self.inner.events.send(started.clone());
+        let _ = self.inner.events.send(delta.clone());
         if script != P3RunScript::MissedSseTerminal as u8 {
-            let _ = self.inner.events.send(started.clone());
-            let _ = self.inner.events.send(delta.clone());
-            let _ = self.inner.events.send(finished.clone());
-        } else {
-            let _ = self.inner.events.send(started.clone());
-            let _ = self.inner.events.send(delta.clone());
+            let _ = self.inner.events.send(finished);
         }
         Ok(Box::pin(futures_util::stream::iter(stream_events)))
     }
@@ -1198,12 +1184,7 @@ async fn character_run_remember_captures_pending_json() {
 
     let out = cli_run_fast_grace(
         &d,
-        &run_args(
-            &g.character_a,
-            &g.world_w1,
-            &g.bind_a_w1,
-            &["--remember"],
-        ),
+        &run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &["--remember"]),
     )
     .await;
     assert!(out.status.success(), "remember run: {}", stderr(&out));
@@ -1270,12 +1251,7 @@ async fn character_run_max_tokens_remember_nonzero() {
 
     let out = cli_run_fast_grace(
         &d,
-        &run_args(
-            &g.character_a,
-            &g.world_w1,
-            &g.bind_a_w1,
-            &["--remember"],
-        ),
+        &run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &["--remember"]),
     )
     .await;
     assert!(!out.status.success(), "max_tokens remember must fail exit");
@@ -1293,12 +1269,7 @@ async fn character_run_missed_sse_preserves_outcome() {
 
     let out = cli_run_fast_grace(
         &d,
-        &run_args(
-            &g.character_a,
-            &g.world_w1,
-            &g.bind_a_w1,
-            &["--remember"],
-        ),
+        &run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &["--remember"]),
     )
     .await;
     assert!(!out.status.success(), "missed sse: {}", stderr(&out));

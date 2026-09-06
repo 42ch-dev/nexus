@@ -1,3 +1,4 @@
+#![allow(clippy::significant_drop_tightening)]
 //! Dual-bearer memory-pipeline semantic suite (v1.184 P3 Task 2 fix round 1).
 //!
 //! Lives outside the `api::handlers::memory_pipeline` module so it cannot
@@ -101,8 +102,7 @@ async fn ctxh_write<'a>(
         .admit_character_activity(pool, OWNER_A, chr)
         .await
         .expect("active owned Character must admit");
-    BearerPipelineCtx::character_write(guard, OWNER_A, chr, None)
-        .expect("guard identity matches")
+    BearerPipelineCtx::character_write(guard, OWNER_A, chr, None).expect("guard identity matches")
 }
 
 fn pcr(id: &str, sess: &str, digest: &str, kind: &str) -> PendingReviewInput {
@@ -217,7 +217,8 @@ async fn review_both_arms_share_classification_and_isolate_storage() {
         &pool,
         horizon,
     )
-    .await.expect("review batch");
+    .await
+    .expect("review batch");
     assert_eq!(creator_out.promoted, 1);
     assert_eq!(creator_out.fragmented, 1);
     assert_eq!(creator_out.dropped, 1);
@@ -233,7 +234,8 @@ async fn review_both_arms_share_classification_and_isolate_storage() {
         &pool,
         horizon,
     )
-    .await.expect("review batch");
+    .await
+    .expect("review batch");
     assert_eq!(char_out.promoted, 1);
     assert_eq!(char_out.fragmented, 1);
     assert_eq!(char_out.dropped, 1);
@@ -780,8 +782,9 @@ async fn promoted_character_long_term_memory_is_projected_into_run() {
         &s.chr_a,
     );
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    let outcome =
-        process_bearer_review_batch(&[input], &s.nexus_home, &ctx, &s.pool, deadline).await.expect("review batch");
+    let outcome = process_bearer_review_batch(&[input], &s.nexus_home, &ctx, &s.pool, deadline)
+        .await
+        .expect("review batch");
     assert_eq!(outcome.promoted, 1, "high-signal brainstorm must promote");
     assert_eq!(outcome.fragmented, 0);
 
@@ -905,8 +908,9 @@ async fn binding_local_promote_stays_binding_local_no_global_ltm() {
         created_at: "2026-01-01T00:00:01Z".to_string(),
     };
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    let outcome =
-        process_bearer_review_batch(&[input], &s.nexus_home, &ctx, &s.pool, deadline).await.expect("review batch");
+    let outcome = process_bearer_review_batch(&[input], &s.nexus_home, &ctx, &s.pool, deadline)
+        .await
+        .expect("review batch");
     assert_eq!(
         outcome.promoted, 0,
         "binding-local Promote must not write global LTM"
@@ -1230,7 +1234,8 @@ async fn review_failed_queue_advance_rolls_back_fragment_and_reports_no_success(
         &s.pool,
         horizon,
     )
-    .await.expect("review batch");
+    .await
+    .expect("review batch");
     assert_eq!(
         creator_out.fragmented, 0,
         "failed queue advance must not report a created fragment"
@@ -1247,7 +1252,8 @@ async fn review_failed_queue_advance_rolls_back_fragment_and_reports_no_success(
         &s.pool,
         horizon,
     )
-    .await.expect("review batch");
+    .await
+    .expect("review batch");
     assert_eq!(char_out.fragmented, 0);
     assert!(char_out.any_row_remained_pending);
 
@@ -1293,7 +1299,8 @@ async fn review_failed_queue_advance_rolls_back_fragment_and_reports_no_success(
         &s.pool,
         horizon,
     )
-    .await.expect("review batch");
+    .await
+    .expect("review batch");
     assert_eq!(creator_ok.fragmented, 1);
     assert!(!creator_ok.any_row_remained_pending);
     assert_eq!(
@@ -1389,7 +1396,8 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
         &s.pool,
         horizon,
     )
-    .await.expect("review batch");
+    .await
+    .expect("review batch");
     assert_eq!(creator_out.promoted, 0, "failed claim reports no success");
     assert!(creator_out.any_row_remained_pending);
     assert_eq!(
@@ -1410,7 +1418,8 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
         &s.pool,
         horizon,
     )
-    .await.expect("review batch");
+    .await
+    .expect("review batch");
     assert_eq!(char_out.promoted, 0);
     assert!(char_out.any_row_remained_pending);
     assert_eq!(count_md(&character_ltm), 0);
@@ -1445,7 +1454,8 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
         &s.pool,
         horizon,
     )
-    .await.expect("review batch");
+    .await
+    .expect("review batch");
     assert_eq!(creator_retry.promoted, 1);
     assert!(!creator_retry.any_row_remained_pending);
     assert_eq!(count_md(&creator_ltm), 1);
@@ -1466,7 +1476,8 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
         &s.pool,
         horizon,
     )
-    .await.expect("review batch");
+    .await
+    .expect("review batch");
     assert_eq!(char_retry.promoted, 1);
     assert_eq!(count_md(&character_ltm), 1);
     assert_eq!(
@@ -1507,8 +1518,9 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
     .expect("simulated crashed attempt writes the file");
     assert_eq!(count_md(&creator_ltm), 2);
 
-    let resume =
-        process_bearer_review_batch(&[input2], &s.nexus_home, &ctxc(), &s.pool, horizon).await.expect("review batch");
+    let resume = process_bearer_review_batch(&[input2], &s.nexus_home, &ctxc(), &s.pool, horizon)
+        .await
+        .expect("review batch");
     assert_eq!(
         resume.promoted, 1,
         "AlreadyPromoted resume advances the queue"
@@ -1570,7 +1582,8 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
         &s.pool,
         horizon,
     )
-    .await.expect("review batch");
+    .await
+    .expect("review batch");
     assert_eq!(
         char_resume.promoted, 1,
         "Character AlreadyPromoted resume advances the queue"
@@ -1609,7 +1622,8 @@ async fn review_stale_promote_writes_no_file_and_reports_no_success() {
         &s.pool,
         horizon,
     )
-    .await.expect("review batch");
+    .await
+    .expect("review batch");
     assert_eq!(creator_out.promoted, 0);
     assert!(creator_out.any_row_remained_pending);
     let creator_ltm = MemoryBearerRef::Creator(OWNER_A).long_term_memory_dir(&s.nexus_home);
@@ -1631,7 +1645,8 @@ async fn review_stale_promote_writes_no_file_and_reports_no_success() {
         &s.pool,
         horizon,
     )
-    .await.expect("review batch");
+    .await
+    .expect("review batch");
     assert_eq!(char_out.promoted, 0);
     assert!(char_out.any_row_remained_pending);
     let character_ltm = MemoryBearerRef::Character {
@@ -1664,7 +1679,8 @@ async fn review_stale_zero_delete_rolls_back_fragment_insert() {
         &s.pool,
         horizon,
     )
-    .await.expect("review batch");
+    .await
+    .expect("review batch");
     assert_eq!(
         creator_out.fragmented, 0,
         "zero-row delete must not report success"
@@ -1689,7 +1705,8 @@ async fn review_stale_zero_delete_rolls_back_fragment_insert() {
         &s.pool,
         horizon,
     )
-    .await.expect("review batch");
+    .await
+    .expect("review batch");
     assert_eq!(char_out.fragmented, 0);
     assert!(char_out.any_row_remained_pending);
     assert_eq!(
@@ -1772,7 +1789,8 @@ async fn review_promote_filesystem_failure_rolls_back_claim_and_recovers() {
         &s.pool,
         horizon,
     )
-    .await.expect("review batch");
+    .await
+    .expect("review batch");
     assert_eq!(
         creator_out.promoted, 0,
         "filesystem failure reports no success"
@@ -1797,7 +1815,8 @@ async fn review_promote_filesystem_failure_rolls_back_claim_and_recovers() {
         &s.pool,
         horizon,
     )
-    .await.expect("review batch");
+    .await
+    .expect("review batch");
     assert_eq!(char_out.promoted, 0);
     assert!(char_out.any_row_remained_pending);
     assert_eq!(
@@ -1820,7 +1839,8 @@ async fn review_promote_filesystem_failure_rolls_back_claim_and_recovers() {
         &s.pool,
         horizon,
     )
-    .await.expect("review batch");
+    .await
+    .expect("review batch");
     assert_eq!(creator_retry.promoted, 1, "retry promotes after recovery");
     assert!(!creator_retry.any_row_remained_pending);
     assert_eq!(count_md(&creator_ltm), 1);
@@ -1842,7 +1862,8 @@ async fn review_promote_filesystem_failure_rolls_back_claim_and_recovers() {
         &s.pool,
         horizon,
     )
-    .await.expect("review batch");
+    .await
+    .expect("review batch");
     assert_eq!(char_retry.promoted, 1);
     assert_eq!(count_md(&character_ltm), 1);
     assert_eq!(

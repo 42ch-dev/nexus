@@ -362,7 +362,8 @@ pub async fn delete_character_fragment(
         )
         .execute(&mut *tx)
         .await?
-        .rows_affected() > 0;
+        .rows_affected()
+            > 0;
         Ok(deleted)
     }
     .await;

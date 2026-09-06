@@ -11,8 +11,8 @@
 )]
 
 pub mod actor_admission;
-pub mod actor_run_capture;
 pub mod actor_knowledge_view;
+pub mod actor_run_capture;
 pub mod api;
 pub mod auth;
 pub mod auto_chronology;

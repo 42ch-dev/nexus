@@ -1,12 +1,12 @@
 //! Closed Actor/Character/ActorWorldBinding wire fixtures (v1.184 P0 Task 1).
 
 use nexus_contracts::{
-    ActorRef, ActorWorldBinding, ActorWorldBindingStatus, AddKnowledgeEntryRequest,
-    Character, CharacterBindingDetail, CharacterDetail, CharacterLifecycleRequest,
-    CharacterOperationResult, CharacterPendingReviewInfo, CharacterRunCaptureOutcome,
-    CharacterStatus, CreateCharacterRequest, CreateCharacterResponse, DeleteKnowledgeEntryQuery,
-    KnowledgeEntryDetail, KnowledgeViewItem, ListCharactersResponse,
-    UpdateCharacterBindingRequest, UpdateCharacterRequest, UpdateKnowledgeEntryRequest,
+    ActorRef, ActorWorldBinding, ActorWorldBindingStatus, AddKnowledgeEntryRequest, Character,
+    CharacterBindingDetail, CharacterDetail, CharacterLifecycleRequest, CharacterOperationResult,
+    CharacterPendingReviewInfo, CharacterRunCaptureOutcome, CharacterStatus,
+    CreateCharacterRequest, CreateCharacterResponse, DeleteKnowledgeEntryQuery,
+    KnowledgeEntryDetail, KnowledgeViewItem, ListCharactersResponse, UpdateCharacterBindingRequest,
+    UpdateCharacterRequest, UpdateKnowledgeEntryRequest,
 };
 use std::str::FromStr;
 
@@ -306,21 +306,27 @@ fn character_revision_and_patch_boundary_fixtures() {
         "updated_at": "2026-09-05T00:00:00Z"
     });
     serde_json::from_value::<Character>(character.clone()).expect("revision 0");
-    character["revision"] = serde_json::json!(9223372036854775806_i64);
+    character["revision"] = serde_json::json!(9_223_372_036_854_775_806_i64);
     serde_json::from_value::<Character>(character.clone()).expect("max revision");
     character.as_object_mut().unwrap().remove("revision");
     assert!(serde_json::from_value::<Character>(character).is_err());
 
     let patch = serde_json::json!({"expected_revision": 0, "display_name": "Ada"});
     serde_json::from_value::<UpdateCharacterRequest>(patch).expect("patch");
-    assert!(serde_json::from_value::<UpdateCharacterRequest>(serde_json::json!({
-        "expected_revision": 0,
-        "display_name": ""
-    })).is_err());
-    assert!(serde_json::from_value::<UpdateCharacterRequest>(serde_json::json!({
-        "expected_revision": 0,
-        "extra": true
-    })).is_err());
+    assert!(
+        serde_json::from_value::<UpdateCharacterRequest>(serde_json::json!({
+            "expected_revision": 0,
+            "display_name": ""
+        }))
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<UpdateCharacterRequest>(serde_json::json!({
+            "expected_revision": 0,
+            "extra": true
+        }))
+        .is_err()
+    );
 
     let life = serde_json::json!({"expected_revision": 1});
     serde_json::from_value::<CharacterLifecycleRequest>(life).expect("lifecycle");
@@ -330,7 +336,7 @@ fn character_revision_and_patch_boundary_fixtures() {
 fn binding_revision_and_update_request_boundary_fixtures() {
     let mut binding = binding_record();
     serde_json::from_value::<ActorWorldBinding>(binding.clone()).expect("revision 0");
-    binding["revision"] = serde_json::json!(9223372036854775806_i64);
+    binding["revision"] = serde_json::json!(9_223_372_036_854_775_806_i64);
     serde_json::from_value::<ActorWorldBinding>(binding.clone()).expect("max revision");
     binding.as_object_mut().unwrap().remove("revision");
     assert!(serde_json::from_value::<ActorWorldBinding>(binding).is_err());
@@ -349,16 +355,20 @@ fn binding_revision_and_update_request_boundary_fixtures() {
         "expected_revision": 0
     }))
     .expect("omitted sheet member");
-    assert!(serde_json::from_value::<UpdateCharacterBindingRequest>(serde_json::json!({
-        "expected_revision": 0,
-        "extra": true
-    }))
-    .is_err());
-    assert!(serde_json::from_value::<UpdateCharacterBindingRequest>(serde_json::json!({
-        "expected_revision": 0,
-        "world_sheet_entry_id": "x".repeat(129)
-    }))
-    .is_err());
+    assert!(
+        serde_json::from_value::<UpdateCharacterBindingRequest>(serde_json::json!({
+            "expected_revision": 0,
+            "extra": true
+        }))
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<UpdateCharacterBindingRequest>(serde_json::json!({
+            "expected_revision": 0,
+            "world_sheet_entry_id": "x".repeat(129)
+        }))
+        .is_err()
+    );
 
     let detail = serde_json::json!({ "binding": binding_record() });
     serde_json::from_value::<CharacterBindingDetail>(detail).expect("binding detail");
@@ -381,7 +391,7 @@ fn knowledge_view_item_json() -> serde_json::Value {
 fn knowledge_view_item_revision_and_closed_shape_fixtures() {
     let mut item = knowledge_view_item_json();
     serde_json::from_value::<KnowledgeViewItem>(item.clone()).expect("revision 0");
-    item["revision"] = serde_json::json!(9223372036854775806_i64);
+    item["revision"] = serde_json::json!(9_223_372_036_854_775_806_i64);
     serde_json::from_value::<KnowledgeViewItem>(item.clone()).expect("max revision");
     item.as_object_mut().unwrap().remove("revision");
     assert!(serde_json::from_value::<KnowledgeViewItem>(item.clone()).is_err());
@@ -405,11 +415,13 @@ fn knowledge_entry_detail_and_update_request_boundary_fixtures() {
         "summary": null
     }))
     .expect("detail with null summary");
-    assert!(serde_json::from_value::<KnowledgeEntryDetail>(serde_json::json!({
-        "item": knowledge_view_item_json(),
-        "summary": "x".repeat(65537)
-    }))
-    .is_err());
+    assert!(
+        serde_json::from_value::<KnowledgeEntryDetail>(serde_json::json!({
+            "item": knowledge_view_item_json(),
+            "summary": "x".repeat(65537)
+        }))
+        .is_err()
+    );
 
     let patch = serde_json::json!({
         "expected_revision": 0,
@@ -427,21 +439,27 @@ fn knowledge_entry_detail_and_update_request_boundary_fixtures() {
         "canonical_name": "note-beta"
     }))
     .expect("omitted summary");
-    assert!(serde_json::from_value::<UpdateKnowledgeEntryRequest>(serde_json::json!({
-        "expected_revision": 0,
-        "owner": { "kind": "character", "id": chr() }
-    }))
-    .is_err());
-    assert!(serde_json::from_value::<UpdateKnowledgeEntryRequest>(serde_json::json!({
-        "expected_revision": 0,
-        "body": { "summary": "x" }
-    }))
-    .is_err());
-    assert!(serde_json::from_value::<UpdateKnowledgeEntryRequest>(serde_json::json!({
-        "expected_revision": 0,
-        "modules": {}
-    }))
-    .is_err());
+    assert!(
+        serde_json::from_value::<UpdateKnowledgeEntryRequest>(serde_json::json!({
+            "expected_revision": 0,
+            "owner": { "kind": "character", "id": chr() }
+        }))
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<UpdateKnowledgeEntryRequest>(serde_json::json!({
+            "expected_revision": 0,
+            "body": { "summary": "x" }
+        }))
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<UpdateKnowledgeEntryRequest>(serde_json::json!({
+            "expected_revision": 0,
+            "modules": {}
+        }))
+        .is_err()
+    );
 }
 
 #[test]
@@ -461,30 +479,36 @@ fn add_knowledge_entry_request_summary_and_closed_shape_fixtures() {
         "summary": ""
     }))
     .expect("empty summary is explicit value");
-    assert!(serde_json::from_value::<AddKnowledgeEntryRequest>(serde_json::json!({
-        "owner_kind": "character",
-        "character_id": chr(),
-        "block_type": "info_point",
-        "canonical_name": "note-alpha",
-        "summary": "x".repeat(65537)
-    }))
-    .is_err());
-    assert!(serde_json::from_value::<AddKnowledgeEntryRequest>(serde_json::json!({
-        "owner_kind": "character",
-        "character_id": chr(),
-        "block_type": "info_point",
-        "canonical_name": "note-alpha",
-        "owner": { "kind": "character", "id": chr() }
-    }))
-    .is_err());
-    assert!(serde_json::from_value::<AddKnowledgeEntryRequest>(serde_json::json!({
-        "owner_kind": "character",
-        "character_id": chr(),
-        "block_type": "info_point",
-        "canonical_name": "note-alpha",
-        "body": { "summary": "x" }
-    }))
-    .is_err());
+    assert!(
+        serde_json::from_value::<AddKnowledgeEntryRequest>(serde_json::json!({
+            "owner_kind": "character",
+            "character_id": chr(),
+            "block_type": "info_point",
+            "canonical_name": "note-alpha",
+            "summary": "x".repeat(65537)
+        }))
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<AddKnowledgeEntryRequest>(serde_json::json!({
+            "owner_kind": "character",
+            "character_id": chr(),
+            "block_type": "info_point",
+            "canonical_name": "note-alpha",
+            "owner": { "kind": "character", "id": chr() }
+        }))
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<AddKnowledgeEntryRequest>(serde_json::json!({
+            "owner_kind": "character",
+            "character_id": chr(),
+            "block_type": "info_point",
+            "canonical_name": "note-alpha",
+            "body": { "summary": "x" }
+        }))
+        .is_err()
+    );
 }
 
 #[test]
@@ -493,14 +517,14 @@ fn delete_knowledge_entry_query_boundary_fixtures() {
         "expected_revision": 0
     }))
     .expect("delete query");
-assert!(serde_json::from_value::<DeleteKnowledgeEntryQuery>(serde_json::json!({
-        "expected_revision": 0,
-        "extra": true
-    }))
-    .is_err());
+    assert!(
+        serde_json::from_value::<DeleteKnowledgeEntryQuery>(serde_json::json!({
+            "expected_revision": 0,
+            "extra": true
+        }))
+        .is_err()
+    );
 }
-
-
 
 #[test]
 fn character_pending_review_info_requires_source_operation_id() {
@@ -522,11 +546,11 @@ fn character_pending_review_info_requires_source_operation_id() {
         "created_at": "2026-09-05T10:00:00Z",
         "source_operation_id": "op_host_1"
     });
-    let manual_parsed = serde_json::from_value::<CharacterPendingReviewInfo>(manual.clone())
-        .expect("manual pending");
+    let manual_parsed =
+        serde_json::from_value::<CharacterPendingReviewInfo>(manual).expect("manual pending");
     assert!(manual_parsed.source_operation_id.is_none());
-    let run_parsed = serde_json::from_value::<CharacterPendingReviewInfo>(run.clone())
-        .expect("run pending");
+    let run_parsed =
+        serde_json::from_value::<CharacterPendingReviewInfo>(run).expect("run pending");
     assert!(run_parsed.source_operation_id.is_some());
 }
 

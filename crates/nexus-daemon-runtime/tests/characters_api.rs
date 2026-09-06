@@ -37,8 +37,11 @@ async fn ctx() -> Ctx {
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
     let pool = state.pool().unwrap().clone();
     seed_actor_fixture(&pool).await;
-    let server = TestServer::new(api::create_router(state.clone(), DaemonApiConfig::keyless()))
-        .expect("test server");
+    let server = TestServer::new(api::create_router(
+        state.clone(),
+        DaemonApiConfig::keyless(),
+    ))
+    .expect("test server");
     Ctx {
         _tmp: tmp,
         server,
@@ -411,14 +414,18 @@ async fn foreign_binding_routes_are_404_and_do_not_mutate() {
             .unwrap();
     let show = ctx
         .server
-        .get(&format!("/v1/daemon/characters/{chr}/bindings/{binding_id}"))
+        .get(&format!(
+            "/v1/daemon/characters/{chr}/bindings/{binding_id}"
+        ))
         .await;
     assert_eq!(show.status_code(), 404, "body={}", show.text());
     assert_eq!(show.json::<Value>()["error"]["code"], "not_found");
 
     let patch = ctx
         .server
-        .patch(&format!("/v1/daemon/characters/{chr}/bindings/{binding_id}"))
+        .patch(&format!(
+            "/v1/daemon/characters/{chr}/bindings/{binding_id}"
+        ))
         .json(&json!({ "expected_revision": 0, "world_sheet_entry_id": null }))
         .await;
     assert_eq!(patch.status_code(), 404, "body={}", patch.text());
@@ -616,7 +623,11 @@ async fn patch_character(server: &TestServer, id: &str, body: Value) -> axum_tes
 }
 
 #[allow(clippy::future_not_send)]
-async fn archive_character(server: &TestServer, id: &str, expected_revision: i64) -> axum_test::TestResponse {
+async fn archive_character(
+    server: &TestServer,
+    id: &str,
+    expected_revision: i64,
+) -> axum_test::TestResponse {
     server
         .post(&format!("/v1/daemon/characters/{id}/archive"))
         .json(&json!({ "expected_revision": expected_revision }))
@@ -624,7 +635,11 @@ async fn archive_character(server: &TestServer, id: &str, expected_revision: i64
 }
 
 #[allow(clippy::future_not_send)]
-async fn restore_character(server: &TestServer, id: &str, expected_revision: i64) -> axum_test::TestResponse {
+async fn restore_character(
+    server: &TestServer,
+    id: &str,
+    expected_revision: i64,
+) -> axum_test::TestResponse {
     server
         .post(&format!("/v1/daemon/characters/{id}/restore"))
         .json(&json!({ "expected_revision": expected_revision }))
@@ -651,7 +666,10 @@ async fn patch_character_cas_updates_revision_and_selected_fields() {
     let body: Value = resp.json();
     assert_eq!(body["character"]["display_name"], "Ada");
     assert_eq!(body["character"]["revision"], 1);
-    assert_eq!(body["character"]["image_uri"], "https://example.test/ava.png");
+    assert_eq!(
+        body["character"]["image_uri"],
+        "https://example.test/ava.png"
+    );
     assert_eq!(body["character"]["persona"]["tone"], "dry");
 }
 
@@ -660,9 +678,19 @@ async fn patch_stale_revision_is_character_revision_conflict() {
     let ctx = ctx().await;
     let created = create_character(&ctx.server, "Ava", WORLD_A).await;
     let id = created["character"]["character_id"].as_str().unwrap();
-    let ok = patch_character(&ctx.server, id, json!({ "expected_revision": 0, "display_name": "Ada" })).await;
+    let ok = patch_character(
+        &ctx.server,
+        id,
+        json!({ "expected_revision": 0, "display_name": "Ada" }),
+    )
+    .await;
     assert_eq!(ok.status_code(), 200);
-    let stale = patch_character(&ctx.server, id, json!({ "expected_revision": 0, "display_name": "Bea" })).await;
+    let stale = patch_character(
+        &ctx.server,
+        id,
+        json!({ "expected_revision": 0, "display_name": "Bea" }),
+    )
+    .await;
     assert_eq!(stale.status_code(), 409, "body={}", stale.text());
     let body: Value = stale.json();
     assert_eq!(body["error"]["code"], "character_revision_conflict");
@@ -691,7 +719,10 @@ async fn patch_omit_vs_clear_members() {
     .await;
     assert_eq!(omit.status_code(), 200, "body={}", omit.text());
     let kept: Value = omit.json();
-    assert_eq!(kept["character"]["image_uri"], "https://example.test/keep.png");
+    assert_eq!(
+        kept["character"]["image_uri"],
+        "https://example.test/keep.png"
+    );
     assert_eq!(kept["character"]["persona"]["role"], "scout");
 
     let cleared = patch_character(
@@ -748,7 +779,12 @@ async fn archive_restore_round_trip_and_list_includes_archived() {
         json!({ "expected_revision": 1, "display_name": "Nope" }),
     )
     .await;
-    assert_eq!(write_denied.status_code(), 409, "body={}", write_denied.text());
+    assert_eq!(
+        write_denied.status_code(),
+        409,
+        "body={}",
+        write_denied.text()
+    );
     let denied_body: Value = write_denied.json();
     assert_eq!(denied_body["error"]["code"], "character_inactive");
 
@@ -804,7 +840,10 @@ async fn restore_name_collision_is_duplicate_character_display_name() {
     let resp = restore_character(&ctx.server, first_id, 1).await;
     assert_eq!(resp.status_code(), 409, "body={}", resp.text());
     let dup_body: Value = resp.json();
-    assert_eq!(dup_body["error"]["code"], "duplicate_character_display_name");
+    assert_eq!(
+        dup_body["error"]["code"],
+        "duplicate_character_display_name"
+    );
 }
 
 #[tokio::test]
@@ -924,22 +963,27 @@ async fn patch_rename_collision_is_duplicate_character_display_name() {
         resp.json::<Value>()["error"]["code"],
         "duplicate_character_display_name"
     );
-    let row: (String, i64) = sqlx::query_as(
-        "SELECT display_name, revision FROM characters WHERE character_id = ?",
-    )
-    .bind(second_id)
-    .fetch_one(&ctx.pool)
-    .await
-    .unwrap();
+    let row: (String, i64) =
+        sqlx::query_as("SELECT display_name, revision FROM characters WHERE character_id = ?")
+            .bind(second_id)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
     assert_eq!(row.0, "Bea");
     assert_eq!(row.1, 0);
 }
 
-
 #[allow(clippy::future_not_send)]
-async fn patch_binding(server: &TestServer, chr: &str, binding_id: &str, body: Value) -> axum_test::TestResponse {
+async fn patch_binding(
+    server: &TestServer,
+    chr: &str,
+    binding_id: &str,
+    body: Value,
+) -> axum_test::TestResponse {
     server
-        .patch(&format!("/v1/daemon/characters/{chr}/bindings/{binding_id}"))
+        .patch(&format!(
+            "/v1/daemon/characters/{chr}/bindings/{binding_id}"
+        ))
         .json(&body)
         .await
 }
@@ -967,7 +1011,9 @@ async fn binding_detail_link_relink_clear_and_cas_errors() {
 
     let show = ctx
         .server
-        .get(&format!("/v1/daemon/characters/{chr}/bindings/{binding_id}"))
+        .get(&format!(
+            "/v1/daemon/characters/{chr}/bindings/{binding_id}"
+        ))
         .await;
     assert_eq!(show.status_code(), 200, "body={}", show.text());
     assert_eq!(show.json::<Value>()["binding"]["revision"], 0);
@@ -1024,7 +1070,10 @@ async fn binding_detail_link_relink_clear_and_cas_errors() {
     )
     .await;
     assert_eq!(stale.status_code(), 409, "body={}", stale.text());
-    assert_eq!(stale.json::<Value>()["error"]["code"], "binding_revision_conflict");
+    assert_eq!(
+        stale.json::<Value>()["error"]["code"],
+        "binding_revision_conflict"
+    );
 
     let empty = patch_binding(
         &ctx.server,
@@ -1056,7 +1105,9 @@ async fn binding_detail_retained_read_survives_archive() {
 
     let show = ctx
         .server
-        .get(&format!("/v1/daemon/characters/{chr}/bindings/{binding_id}"))
+        .get(&format!(
+            "/v1/daemon/characters/{chr}/bindings/{binding_id}"
+        ))
         .await;
     assert_eq!(show.status_code(), 200, "body={}", show.text());
     assert_eq!(
@@ -1072,7 +1123,10 @@ async fn binding_detail_retained_read_survives_archive() {
     )
     .await;
     assert_eq!(denied.status_code(), 409, "body={}", denied.text());
-    assert_eq!(denied.json::<Value>()["error"]["code"], "character_inactive");
+    assert_eq!(
+        denied.json::<Value>()["error"]["code"],
+        "character_inactive"
+    );
 }
 
 #[tokio::test]
@@ -1106,26 +1160,24 @@ async fn add_binding_rejects_paused_world_with_404_zero_mutation() {
         .execute(&ctx.pool)
         .await
         .unwrap();
-    let before: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM actor_world_bindings WHERE character_id = ?",
-    )
-    .bind(chr)
-    .fetch_one(&ctx.pool)
-    .await
-    .unwrap();
+    let before: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM actor_world_bindings WHERE character_id = ?")
+            .bind(chr)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
     let resp = ctx
         .server
         .post(&format!("/v1/daemon/characters/{chr}/bindings"))
         .json(&json!({ "world_id": WORLD_B }))
         .await;
     assert_eq!(resp.status_code(), 404, "body={}", resp.text());
-    let after: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM actor_world_bindings WHERE character_id = ?",
-    )
-    .bind(chr)
-    .fetch_one(&ctx.pool)
-    .await
-    .unwrap();
+    let after: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM actor_world_bindings WHERE character_id = ?")
+            .bind(chr)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
     assert_eq!(after, before);
 }
 
@@ -1257,7 +1309,10 @@ impl HostFacade for CountingHost {
         Ok(())
     }
 
-    async fn shutdown_session(&self, session_id: HostSessionId) -> nexus_agent_host::HostResult<()> {
+    async fn shutdown_session(
+        &self,
+        session_id: HostSessionId,
+    ) -> nexus_agent_host::HostResult<()> {
         self.shutdowns.fetch_add(1, Ordering::SeqCst);
         self.sessions.lock().expect("sessions").remove(&session_id);
         Ok(())
@@ -1273,7 +1328,9 @@ impl HostFacade for CountingHost {
             .collect())
     }
 
-    async fn provider_catalog(&self) -> nexus_agent_host::HostResult<nexus_agent_host::ProviderCatalog> {
+    async fn provider_catalog(
+        &self,
+    ) -> nexus_agent_host::HostResult<nexus_agent_host::ProviderCatalog> {
         Ok(nexus_agent_host::ProviderCatalog::new())
     }
 
@@ -1299,8 +1356,11 @@ async fn ctx_with_host() -> (Ctx, Arc<CountingHost>) {
     state.set_agent_host(host.clone());
     let pool = state.pool().unwrap().clone();
     seed_actor_fixture(&pool).await;
-    let server = TestServer::new(api::create_router(state.clone(), DaemonApiConfig::keyless()))
-        .expect("test server");
+    let server = TestServer::new(api::create_router(
+        state.clone(),
+        DaemonApiConfig::keyless(),
+    ))
+    .expect("test server");
     let ctx = Ctx {
         _tmp: tmp,
         server,
@@ -1311,7 +1371,12 @@ async fn ctx_with_host() -> (Ctx, Arc<CountingHost>) {
     (ctx, host)
 }
 
-async fn create_character_session(server: &TestServer, character_id: &str, binding_id: &str) -> String {
+#[allow(clippy::future_not_send)]
+async fn create_character_session(
+    server: &TestServer,
+    character_id: &str,
+    binding_id: &str,
+) -> String {
     let resp = server
         .post("/v1/daemon/agent-host/sessions")
         .json(&json!({
@@ -1353,10 +1418,17 @@ async fn restore_same_state_cas_no_op_keeps_session_executable_without_shutdown(
 
     let exec = ctx
         .server
-        .post(&format!("/v1/daemon/agent-host/sessions/{session_id}/operations"))
+        .post(&format!(
+            "/v1/daemon/agent-host/sessions/{session_id}/operations"
+        ))
         .json(&json!({"kind": "prompt", "content": "ping"}))
         .await;
-    assert_eq!(exec.status_code(), 200, "execute after no-op: {}", exec.text());
+    assert_eq!(
+        exec.status_code(),
+        200,
+        "execute after no-op: {}",
+        exec.text()
+    );
     assert_eq!(host.execs.load(Ordering::SeqCst), 1);
 }
 
@@ -1374,7 +1446,9 @@ async fn pre_archive_session_execute_is_stale_after_material_archive() {
 
     let exec = ctx
         .server
-        .post(&format!("/v1/daemon/agent-host/sessions/{session_id}/operations"))
+        .post(&format!(
+            "/v1/daemon/agent-host/sessions/{session_id}/operations"
+        ))
         .json(&json!({"kind": "prompt", "content": "nope"}))
         .await;
     assert_eq!(exec.status_code(), 409, "body={}", exec.text());

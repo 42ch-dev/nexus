@@ -121,10 +121,14 @@ pub async fn delete_character_soul_meta(
     let mut tx = crate::begin_immediate(pool).await?;
     let result = async {
         require_active_owned_character_tx(&mut tx, owner_creator_id, character_id).await?;
-        let deleted = sqlx::query!("DELETE FROM character_soul_meta WHERE character_id = ?", character_id)
-            .execute(&mut *tx)
-            .await?
-            .rows_affected() > 0;
+        let deleted = sqlx::query!(
+            "DELETE FROM character_soul_meta WHERE character_id = ?",
+            character_id
+        )
+        .execute(&mut *tx)
+        .await?
+        .rows_affected()
+            > 0;
         Ok(deleted)
     }
     .await;

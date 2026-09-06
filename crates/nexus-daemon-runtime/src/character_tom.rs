@@ -431,7 +431,8 @@ impl CharacterTomService {
     ) -> Result<(), NexusApiError> {
         self.require_owned_character(caller_creator_id, viewer_character_id)
             .await?;
-        self.require_owned_world(caller_creator_id, world_id).await?;
+        self.require_owned_world(caller_creator_id, world_id)
+            .await?;
         self.views
             .require_stored_binding_tuple(viewer_character_id, binding_id, world_id)
             .await?;

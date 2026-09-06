@@ -12,12 +12,9 @@ use nexus_contracts::daemon_api::actor_knowledge::{
     add_knowledge_entry_request::AddKnowledgeEntryRequest,
     add_knowledge_entry_response::AddKnowledgeEntryResponse,
     knowledge_entry_detail::KnowledgeEntryDetail,
-    list_character_knowledge_response::ListCharacterKnowledgeResponse,
-    view_request::ViewRequest,
+    list_character_knowledge_response::ListCharacterKnowledgeResponse, view_request::ViewRequest,
     view_response::ViewResponse,
 };
-use nexus_local_db::ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES;
-use std::path::PathBuf;
 use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_request::CaptureCharacterPendingReviewRequest;
 use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_response::CaptureCharacterPendingReviewResponse;
 use nexus_contracts::daemon_api::characters::memory::count_character_pending_reviews_response::CountCharacterPendingReviewsResponse;
@@ -37,14 +34,15 @@ use nexus_contracts::daemon_api::characters::tom::record_character_tom_response:
 use nexus_contracts::daemon_api::characters::{
     add_character_binding_request::AddCharacterBindingRequest,
     add_character_binding_response::AddCharacterBindingResponse,
-    character_binding_detail::CharacterBindingDetail,
-    character_detail::CharacterDetail,
+    character_binding_detail::CharacterBindingDetail, character_detail::CharacterDetail,
     character_lifecycle_request::CharacterLifecycleRequest,
     create_character_request::CreateCharacterRequest,
     create_character_response::CreateCharacterResponse,
     list_character_bindings_response::ListCharacterBindingsResponse,
     list_characters_response::ListCharactersResponse,
 };
+use nexus_local_db::ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES;
+use std::path::PathBuf;
 
 /// `creator character` subcommands.
 #[derive(Debug, Subcommand)]
@@ -170,7 +168,7 @@ pub enum CharacterCommand {
         event_id: Option<String>,
         #[arg(long, default_value_t = false)]
         json: bool,
-        /// Opt into explicit run-to-memory capture after a successful end_turn
+        /// Opt into explicit run-to-memory capture after a successful `end_turn`
         #[arg(long, default_value_t = false)]
         remember: bool,
     },
@@ -210,7 +208,7 @@ pub enum BindingCommand {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// Patch a binding WorldSheet link
+    /// Patch a binding `WorldSheet` link
     Edit {
         #[arg(long)]
         character_id: String,
@@ -303,7 +301,7 @@ pub enum KnowledgeCommand {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    /// Edit canonical_name and/or summary with revision CAS
+    /// Edit `canonical_name` and/or summary with revision CAS
     Edit {
         #[arg(long)]
         character_id: String,
@@ -560,16 +558,18 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                 world_sheet_entry_id,
                 clear_world_sheet,
                 json,
-            } => edit_binding(
-                &client,
-                &character_id,
-                &binding_id,
-                expected_revision,
-                world_sheet_entry_id,
-                clear_world_sheet,
-                json,
-            )
-            .await,
+            } => {
+                edit_binding(
+                    &client,
+                    &character_id,
+                    &binding_id,
+                    expected_revision,
+                    world_sheet_entry_id,
+                    clear_world_sheet,
+                    json,
+                )
+                .await
+            }
             BindingCommand::Remove {
                 character_id,
                 binding_id,
@@ -1092,7 +1092,6 @@ async fn restore_character(
     print_character_detail(&resp, json)
 }
 
-
 fn print_binding_detail(resp: &CharacterBindingDetail, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(resp)?);
@@ -1105,8 +1104,7 @@ fn print_binding_detail(resp: &CharacterBindingDetail, json: bool) -> Result<()>
             b.revision,
             b.world_sheet_entry_id
                 .as_ref()
-                .map(|id| id.as_str())
-                .unwrap_or("-")
+                .map_or("-", |id| id.as_str())
         );
     }
     Ok(())
@@ -1242,7 +1240,6 @@ async fn remove_binding(
     Ok(())
 }
 
-
 fn load_bounded_summary_text(
     summary: Option<String>,
     summary_file: Option<PathBuf>,
@@ -1338,7 +1335,6 @@ async fn add_knowledge(
     Ok(())
 }
 
-
 async fn show_knowledge(
     client: &DaemonClient,
     character_id: &str,
@@ -1386,9 +1382,7 @@ async fn edit_knowledge(
     }
     let resp: KnowledgeEntryDetail = client
         .patch(
-            &format!(
-                "/v1/daemon/characters/{character_id}/knowledge/{entry_id}"
-            ),
+            &format!("/v1/daemon/characters/{character_id}/knowledge/{entry_id}"),
             &body,
         )
         .await?;

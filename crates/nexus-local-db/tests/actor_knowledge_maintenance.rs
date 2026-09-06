@@ -27,7 +27,9 @@ async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
 
 async fn seed(pool: &SqlitePool) {
     for (id, name) in [(OWNER, "Owner"), (OTHER, "Other")] {
-        nexus_local_db::ensure_creator_row(pool, id, name).await.unwrap();
+        nexus_local_db::ensure_creator_row(pool, id, name)
+            .await
+            .unwrap();
     }
     sqlx::query(
         "INSERT INTO narrative_worlds \
@@ -140,14 +142,12 @@ async fn summary_patch_preserves_unknown_body_keys_and_modules() {
     seed(&pool).await;
     let (chr, _) = seed_character(&pool).await;
     let entry = insert_character_ke(&pool, &chr, "fact", None).await;
-    sqlx::query(
-        "UPDATE kb_key_blocks SET body_json = ? WHERE key_block_id = ?",
-    )
-    .bind(r#"{"summary":"old","custom_flag":true}"#)
-    .bind(&entry)
-    .execute(&pool)
-    .await
-    .unwrap();
+    sqlx::query("UPDATE kb_key_blocks SET body_json = ? WHERE key_block_id = ?")
+        .bind(r#"{"summary":"old","custom_flag":true}"#)
+        .bind(&entry)
+        .execute(&pool)
+        .await
+        .unwrap();
     sqlx::query("UPDATE kb_key_blocks SET modules_json = ? WHERE key_block_id = ?")
         .bind(r#"{"pack":{"tier":1}}"#)
         .bind(&entry)
@@ -168,19 +168,21 @@ async fn summary_patch_preserves_unknown_body_keys_and_modules() {
     .await
     .unwrap();
     assert_eq!(updated.revision, Some(1));
-    let body_raw: String = sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
-        .bind(&entry)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let body_raw: String =
+        sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(&entry)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     let body: serde_json::Value = serde_json::from_str(&body_raw).unwrap();
     assert_eq!(body["summary"], "new");
     assert_eq!(body["custom_flag"], true);
-    let modules: String = sqlx::query_scalar("SELECT modules_json FROM kb_key_blocks WHERE key_block_id = ?")
-        .bind(&entry)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let modules: String =
+        sqlx::query_scalar("SELECT modules_json FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(&entry)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert!(modules.contains("pack"));
 }
 
@@ -308,13 +310,7 @@ async fn clear_on_string_summary_removes_key_and_bumps_revision() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert!(
-        body_raw.is_none()
-            || !body_raw
-                .as_ref()
-                .expect("body")
-                .contains("\"summary\"")
-    );
+    assert!(body_raw.is_none() || !body_raw.as_ref().expect("body").contains("\"summary\""));
 }
 
 #[tokio::test]
@@ -419,13 +415,12 @@ async fn assert_body_and_revision_unchanged(
     expected_body: &str,
     expected_revision: i64,
 ) {
-    let (body_raw, revision): (Option<String>, Option<i64>) = sqlx::query_as(
-        "SELECT body_json, revision FROM kb_key_blocks WHERE key_block_id = ?",
-    )
-    .bind(entry)
-    .fetch_one(pool)
-    .await
-    .unwrap();
+    let (body_raw, revision): (Option<String>, Option<i64>) =
+        sqlx::query_as("SELECT body_json, revision FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(entry)
+            .fetch_one(pool)
+            .await
+            .unwrap();
     assert_eq!(body_raw.as_deref(), Some(expected_body));
     assert_eq!(revision.unwrap_or(0), expected_revision);
 }
@@ -583,11 +578,12 @@ async fn unreferenced_delete_removes_row() {
     delete_actor_knowledge_entry(&pool, OWNER, &chr, &entry, 0)
         .await
         .unwrap();
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = ?")
-        .bind(&entry)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(&entry)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(count, 0);
 }
 
@@ -659,27 +655,22 @@ async fn tom_cas_bumps_revision_blocking_stale_delete() {
     let entry = insert_character_ke(&pool, &chr, "carrier", None).await;
     let modules = r#"{"mental":{"beliefs":[]}}"#;
     let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
-    let bumped = cas_update_key_block_modules_in_tx(
-        &mut tx,
-        &entry,
-        modules,
-        0,
-        &chr,
-        "awb_nonexistent",
-    )
-    .await
-    .unwrap();
+    let bumped =
+        cas_update_key_block_modules_in_tx(&mut tx, &entry, modules, 0, &chr, "awb_nonexistent")
+            .await
+            .unwrap();
     assert_eq!(bumped, 1);
     tx.commit().await.unwrap();
     let del_err = delete_actor_knowledge_entry(&pool, OWNER, &chr, &entry, 0)
         .await
         .unwrap_err();
     assert_conflict(del_err, ActorContractConflict::KnowledgeRevisionConflict);
-    let rev: i64 = sqlx::query_scalar("SELECT COALESCE(revision,0) FROM kb_key_blocks WHERE key_block_id = ?")
-        .bind(&entry)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let rev: i64 =
+        sqlx::query_scalar("SELECT COALESCE(revision,0) FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(&entry)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(rev, 1);
 }
 
@@ -703,13 +694,11 @@ async fn binding_owned_ke_foreign_world_read_returns_none() {
         .insert_actor_owned_key_block(OWNER, &chr, Some(&binding_id), kb)
         .await
         .unwrap();
-    sqlx::query(
-        "UPDATE actor_world_bindings SET world_id = 'wld_foreign' WHERE binding_id = ?",
-    )
-    .bind(&binding_id)
-    .execute(&pool)
-    .await
-    .unwrap();
+    sqlx::query("UPDATE actor_world_bindings SET world_id = 'wld_foreign' WHERE binding_id = ?")
+        .bind(&binding_id)
+        .execute(&pool)
+        .await
+        .unwrap();
     assert!(
         get_actor_knowledge_entry(&pool, OWNER, &chr, &inserted.entry_id)
             .await
@@ -739,13 +728,12 @@ async fn canonical_only_rename_allows_malformed_body() {
     .await
     .unwrap();
     assert_eq!(updated.canonical_name, "newName");
-    let body_raw: Option<String> = sqlx::query_scalar(
-        "SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?",
-    )
-    .bind(&entry)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let body_raw: Option<String> =
+        sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(&entry)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(body_raw.as_deref(), Some("[]"));
 }
 
@@ -847,11 +835,12 @@ async fn delete_succeeds_when_target_modules_reference_unrelated_kb_id() {
     delete_actor_knowledge_entry(&pool, OWNER, &chr, &entry, 0)
         .await
         .unwrap();
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = ?")
-        .bind(&entry)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(&entry)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(count, 0);
 }
 

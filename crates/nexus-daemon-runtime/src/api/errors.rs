@@ -617,10 +617,10 @@ impl From<nexus_local_db::LocalDbError> for NexusApiError {
     }
 }
 
-/// Stable `409 character_busy` (v1.185 P0 Task 2): a Character side-effecting
-/// activity (mutation, memory pipeline, session create/Prompt in flight) must
-/// refuse lifecycle archive/restore rather than force-cancel or wait on a
-/// provider (durable §11.3.2).
+/// Stable `409 character_busy` (v1.185 P0 Task 2): a Character side-effecting activity.
+///
+/// Mutation, memory pipeline, or session create/Prompt in flight must refuse lifecycle archive/restore rather than force-cancel or wait on a provider (durable §11.3.2).
+#[must_use]
 pub fn character_busy(character_id: &str) -> NexusApiError {
     NexusApiError::ConflictCoded {
         code: "character_busy".into(),
@@ -630,20 +630,19 @@ pub fn character_busy(character_id: &str) -> NexusApiError {
     }
 }
 
-/// Stable `409 actor_session_stale` (v1.185 P0 Task 3): the stored session
-/// lifecycle epoch no longer matches the current Character epoch (a material
-/// archive/restore retired the session). Never falls back to the Creator/legacy
-/// context; a fresh session must be admitted and minted (durable §11.3.4).
-
 /// Stable `409 actor_operation_capacity` (v1.185 P3): too many nonterminal Character operations.
+#[must_use]
 pub fn actor_operation_capacity() -> NexusApiError {
     NexusApiError::ConflictCoded {
         code: "actor_operation_capacity".into(),
-        message: "character operation outcome capacity reached; wait for in-flight operations to finish".into(),
+        message:
+            "character operation outcome capacity reached; wait for in-flight operations to finish"
+                .into(),
     }
 }
 
 /// Stable `409 actor_operation_finished` (v1.185 P3): cancel after terminal finalization.
+#[must_use]
 pub fn actor_operation_finished() -> NexusApiError {
     NexusApiError::ConflictCoded {
         code: "actor_operation_finished".into(),
@@ -651,6 +650,12 @@ pub fn actor_operation_finished() -> NexusApiError {
     }
 }
 
+/// Stable `409 actor_session_stale` (v1.185 P0 Task 3): the stored session
+/// lifecycle epoch no longer matches the current Character epoch (a material
+/// archive/restore retired the session).
+///
+/// Never falls back to the Creator/legacy context; a fresh session must be admitted and minted (durable §11.3.4).
+#[must_use]
 pub fn actor_session_stale(session_id: &str) -> NexusApiError {
     NexusApiError::ConflictCoded {
         code: "actor_session_stale".into(),

@@ -58,8 +58,11 @@ async fn ctx() -> Ctx {
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
     let pool = state.pool().unwrap().clone();
     seed_actor_fixture(&pool).await;
-    let server = TestServer::new(api::create_router(state.clone(), DaemonApiConfig::keyless()))
-        .expect("test server");
+    let server = TestServer::new(api::create_router(
+        state.clone(),
+        DaemonApiConfig::keyless(),
+    ))
+    .expect("test server");
     Ctx {
         _tmp: tmp,
         server,
@@ -853,11 +856,7 @@ async fn foreign_missing_inactive_character_and_binding_fail_before_side_effects
             .post(&format!("/v1/daemon/characters/{target}/soul/reflect"))
             .json(&json!({ "force_regenerate": false }))
             .await;
-        assert_eq!(
-            resp.status_code(),
-            404,
-            "reflect against {target} must 404"
-        );
+        assert_eq!(resp.status_code(), 404, "reflect against {target} must 404");
         let resp = ctx
             .server
             .get(&format!("{}/pending-review", memory_base(target)))
@@ -907,7 +906,9 @@ async fn foreign_missing_inactive_character_and_binding_fail_before_side_effects
     assert_eq!(j(&resp)["error"]["code"], "character_inactive");
     let resp = ctx
         .server
-        .post(&format!("/v1/daemon/characters/{archived_chr}/soul/reflect"))
+        .post(&format!(
+            "/v1/daemon/characters/{archived_chr}/soul/reflect"
+        ))
         .json(&json!({ "force_regenerate": false }))
         .await;
     assert_eq!(
@@ -1124,7 +1125,11 @@ async fn review_is_bounded_at_batch_limit_with_correct_has_more() {
 }
 
 #[allow(clippy::future_not_send)]
-async fn archive_character(server: &TestServer, id: &str, expected_revision: i64) -> axum_test::TestResponse {
+async fn archive_character(
+    server: &TestServer,
+    id: &str,
+    expected_revision: i64,
+) -> axum_test::TestResponse {
     server
         .post(&format!("/v1/daemon/characters/{id}/archive"))
         .json(&json!({ "expected_revision": expected_revision }))
@@ -1157,10 +1162,7 @@ async fn delete_pending_review_holds_activity_fence_blocking_archive() {
     drop(guard);
     let ok = ctx
         .server
-        .delete(&format!(
-            "{}/pending-review/pend_busy",
-            memory_base(&chr)
-        ))
+        .delete(&format!("{}/pending-review/pend_busy", memory_base(&chr)))
         .await;
     assert_eq!(ok.status_code(), 200, "body={}", ok.text());
 }
@@ -1212,4 +1214,3 @@ async fn promote_fragment_holds_activity_fence_blocking_archive() {
         .await;
     assert_eq!(ok.status_code(), 200, "body={}", ok.text());
 }
-

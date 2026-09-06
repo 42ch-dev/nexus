@@ -4,16 +4,13 @@ use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use nexus_knowledge::world_kb::validation::validate_canonical_name;
 use sqlx::SqlitePool;
 
-use crate::character::{
-    check_expected_revision, require_active_owned_character_tx, FieldPatch,
-};
+use crate::character::{check_expected_revision, require_active_owned_character_tx, FieldPatch};
 use crate::error::ActorContractConflict;
 use crate::kb_store::{map_kb_store_to_local_db, KeyBlockRow};
 use crate::LocalDbError;
 
 /// Maximum UTF-8 byte length for `body.summary` (durable §11.5).
 pub const ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES: usize = 65_536;
-
 
 /// Patch surface for Character-scoped knowledge maintenance (handoff §2).
 #[derive(Debug, Clone, Copy)]
@@ -22,31 +19,31 @@ pub struct ActorKnowledgePatch<'a> {
     pub summary: FieldPatch<&'a str>,
 }
 
-fn knowledge_revision_conflict() -> LocalDbError {
+const fn knowledge_revision_conflict() -> LocalDbError {
     LocalDbError::ActorContractConflict {
         code: ActorContractConflict::KnowledgeRevisionConflict,
     }
 }
 
-fn knowledge_entry_not_mutable() -> LocalDbError {
+const fn knowledge_entry_not_mutable() -> LocalDbError {
     LocalDbError::ActorContractConflict {
         code: ActorContractConflict::KnowledgeEntryNotMutable,
     }
 }
 
-fn knowledge_entry_in_use() -> LocalDbError {
+const fn knowledge_entry_in_use() -> LocalDbError {
     LocalDbError::ActorContractConflict {
         code: ActorContractConflict::KnowledgeEntryInUse,
     }
 }
 
-fn knowledge_reference_state_invalid() -> LocalDbError {
+const fn knowledge_reference_state_invalid() -> LocalDbError {
     LocalDbError::ActorContractConflict {
         code: ActorContractConflict::KnowledgeReferenceStateInvalid,
     }
 }
 
-fn duplicate_actor_knowledge() -> LocalDbError {
+const fn duplicate_actor_knowledge() -> LocalDbError {
     LocalDbError::ActorContractConflict {
         code: ActorContractConflict::DuplicateActorKnowledge,
     }
@@ -87,17 +84,19 @@ fn map_kb_actor_constraint<T>(result: Result<T, sqlx::Error>) -> Result<T, Local
 fn validate_summary_utf8_bytes(summary: &str) -> Result<(), LocalDbError> {
     if summary.len() > ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES {
         return Err(LocalDbError::ValidationError(format!(
-            "summary must be at most {} UTF-8 bytes",
-            ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES
+            "summary must be at most {ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES} UTF-8 bytes"
         )));
     }
     Ok(())
 }
 
 fn module_value_nonempty(value: &serde_json::Value) -> bool {
-    !value.is_null()
-        && !(value.is_object() && value.as_object().is_some_and(|o| o.is_empty()))
-        && !(value.is_array() && value.as_array().is_some_and(|a| a.is_empty()))
+    match value {
+        serde_json::Value::Null => false,
+        serde_json::Value::Object(map) => !map.is_empty(),
+        serde_json::Value::Array(items) => !items.is_empty(),
+        _ => true,
+    }
 }
 
 fn json_modules_has_authoritative_mind(modules_json: Option<&str>) -> Result<bool, LocalDbError> {
@@ -108,12 +107,11 @@ fn json_modules_has_authoritative_mind(modules_json: Option<&str>) -> Result<boo
         serde_json::from_str(raw).map_err(|_| knowledge_reference_state_invalid())?;
     let obj = value
         .as_object()
-        .ok_or_else(|| knowledge_reference_state_invalid())?;
+        .ok_or(knowledge_reference_state_invalid())?;
     let mental_nonempty = obj.get("mental").is_some_and(module_value_nonempty);
     let belief_nonempty = obj.get("belief").is_some_and(module_value_nonempty);
     Ok(mental_nonempty || belief_nonempty)
 }
-
 
 fn json_value_contains_exact_id_scalar(value: &serde_json::Value, entry_id: &str) -> bool {
     match value {
@@ -139,7 +137,7 @@ fn parse_body_object(
             value
                 .as_object()
                 .cloned()
-                .ok_or_else(|| knowledge_entry_not_mutable())
+                .ok_or(knowledge_entry_not_mutable())
         }
     }
 }
@@ -153,12 +151,11 @@ fn canonical_body_json(raw: Option<&str>) -> Result<Option<String>, LocalDbError
     }
 }
 
-
 fn validate_existing_summary_member_for_patch(
     obj: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), LocalDbError> {
     match obj.get("summary") {
-        None | Some(serde_json::Value::String(_)) | Some(serde_json::Value::Null) => Ok(()),
+        None | Some(serde_json::Value::String(_) | serde_json::Value::Null) => Ok(()),
         Some(_) => Err(knowledge_entry_not_mutable()),
     }
 }
@@ -198,20 +195,18 @@ fn actor_knowledge_patch_is_no_op(
             return Ok(false);
         }
     }
-    match patch.summary {
-        FieldPatch::Keep => Ok(true),
-        _ => {
-            let after =
-                apply_summary_patch_to_body_json(row.body_json.as_deref(), patch.summary)?;
-            Ok(
-                canonical_body_json(row.body_json.as_deref())?
-                    == canonical_body_json(after.as_deref())?,
-            )
-        }
+    if patch.summary != FieldPatch::Keep {
+        let after = apply_summary_patch_to_body_json(row.body_json.as_deref(), patch.summary)?;
+        return Ok(canonical_body_json(row.body_json.as_deref())?
+            == canonical_body_json(after.as_deref())?);
     }
+    Ok(true)
 }
 
-fn assert_target_row_module_referents(row: &KeyBlockRow, entry_id: &str) -> Result<(), LocalDbError> {
+fn assert_target_row_module_referents(
+    row: &KeyBlockRow,
+    entry_id: &str,
+) -> Result<(), LocalDbError> {
     let Some(raw) = row.modules_json.as_deref() else {
         return Ok(());
     };
@@ -326,6 +321,10 @@ async fn character_owned_for_read(
 }
 
 /// Stored-owner scoped knowledge detail read (retained archive reads allowed).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` on database failure.
 pub async fn get_actor_knowledge_entry(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -350,9 +349,7 @@ pub async fn get_actor_knowledge_entry(
     let Some(row) = row else {
         return Ok(None);
     };
-    if !row_in_character_retained_read_scope(pool, owner_creator_id, &row, character_id)
-        .await?
-    {
+    if !row_in_character_retained_read_scope(pool, owner_creator_id, &row, character_id).await? {
         return Ok(None);
     }
     row.to_record().map(Some).map_err(map_kb_store_to_local_db)
@@ -367,12 +364,13 @@ async fn prepare_actor_knowledge_write_tx(
 ) -> Result<KeyBlockRow, LocalDbError> {
     check_expected_revision(expected_revision)?;
     require_active_owned_character_tx(tx, owner_creator_id, character_id).await?;
-    let row = load_key_block_row_tx(tx, entry_id)
-        .await?
-        .ok_or_else(|| LocalDbError::ActorNotFound {
-            resource: "knowledge_entry",
-            id: entry_id.to_string(),
-        })?;
+    let row =
+        load_key_block_row_tx(tx, entry_id)
+            .await?
+            .ok_or_else(|| LocalDbError::ActorNotFound {
+                resource: "knowledge_entry",
+                id: entry_id.to_string(),
+            })?;
     if !row_in_character_read_scope_tx(tx, &row, character_id).await? {
         return Err(LocalDbError::ActorNotFound {
             resource: "knowledge_entry",
@@ -398,6 +396,7 @@ async fn prepare_actor_knowledge_write_tx(
     Ok(row)
 }
 
+#[allow(clippy::too_many_lines)]
 async fn assert_no_protected_referents_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     entry_id: &str,
@@ -566,6 +565,9 @@ async fn assert_no_protected_referents_tx(
     Ok(())
 }
 
+/// # Errors
+///
+/// Returns `LocalDbError` on ownership, CAS, validation, or database failure.
 pub async fn update_actor_knowledge_entry(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -658,6 +660,9 @@ pub async fn update_actor_knowledge_entry(
     }
 }
 
+/// # Errors
+///
+/// Returns `LocalDbError` on ownership, CAS, referent guard, or database failure.
 pub async fn delete_actor_knowledge_entry(
     pool: &SqlitePool,
     owner_creator_id: &str,

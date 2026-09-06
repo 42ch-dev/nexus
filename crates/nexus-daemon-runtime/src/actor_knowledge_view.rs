@@ -446,9 +446,7 @@ impl ActorKnowledgeViewService {
         .await
         .map_err(NexusApiError::from)?;
         match row {
-            Some(stored)
-                if stored.character_id == character_id && stored.world_id == world_id =>
-            {
+            Some(stored) if stored.character_id == character_id && stored.world_id == world_id => {
                 Ok(())
             }
             _ => Err(not_found("actor_world_binding", binding_id)),

@@ -56,7 +56,8 @@ pub struct RunCaptureReceipt {
     pub captured_at: String,
 }
 
-fn record_from_row(
+#[allow(clippy::too_many_arguments)] // row mapper mirrors SQL projection
+const fn record_from_row(
     pending_id: String,
     session_id: String,
     character_id: String,
@@ -78,7 +79,7 @@ fn record_from_row(
     }
 }
 
-fn receipt_from_row(
+const fn receipt_from_row(
     operation_id: String,
     session_id: String,
     character_id: String,
@@ -134,13 +135,13 @@ async fn fetch_run_capture_receipt(
     }))
 }
 
-fn run_capture_provenance_conflict() -> LocalDbError {
+const fn run_capture_provenance_conflict() -> LocalDbError {
     LocalDbError::ActorContractConflict {
         code: ActorContractConflict::RunCaptureProvenanceConflict,
     }
 }
 
-fn run_capture_scope_changed() -> LocalDbError {
+const fn run_capture_scope_changed() -> LocalDbError {
     LocalDbError::ActorContractConflict {
         code: ActorContractConflict::RunCaptureScopeChanged,
     }
@@ -154,6 +155,10 @@ fn is_unique_violation(err: &sqlx::Error) -> bool {
 }
 
 /// Create a Character pending review record (idempotent on retry).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` on ownership, provenance, or database failure.
 pub async fn create_character_pending_review(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -200,6 +205,10 @@ pub async fn create_character_pending_review(
 }
 
 /// Atomically record one run capture receipt and enqueue its pending row.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` on ownership, provenance, idempotency conflict, or database failure.
 pub async fn capture_character_run(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -262,7 +271,8 @@ async fn capture_character_run_in_tx(
 
     if let Err(err) = insert_receipt {
         if is_unique_violation(&err) {
-            if let Some(existing) = fetch_run_capture_receipt(&mut **tx, input.operation_id).await? {
+            if let Some(existing) = fetch_run_capture_receipt(&mut **tx, input.operation_id).await?
+            {
                 return if receipt_matches_input(&existing, &input) {
                     Ok(existing)
                 } else {
@@ -300,6 +310,9 @@ async fn capture_character_run_in_tx(
     ))
 }
 
+/// # Errors
+///
+/// Returns `LocalDbError` on ownership, provenance, or database failure.
 pub async fn get_character_pending_review(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -344,6 +357,9 @@ pub async fn get_character_pending_review(
     }))
 }
 
+/// # Errors
+///
+/// Returns `LocalDbError` on ownership, provenance, or database failure.
 pub async fn list_character_pending_reviews(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -396,6 +412,9 @@ pub async fn list_character_pending_reviews(
         .collect())
 }
 
+/// # Errors
+///
+/// Returns `LocalDbError` on ownership or database failure.
 pub async fn delete_character_pending_review(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -412,7 +431,8 @@ pub async fn delete_character_pending_review(
         )
         .execute(&mut *tx)
         .await?
-        .rows_affected() > 0;
+        .rows_affected()
+            > 0;
         Ok(deleted)
     }
     .await;
@@ -428,6 +448,9 @@ pub async fn delete_character_pending_review(
     }
 }
 
+/// # Errors
+///
+/// Returns `LocalDbError` on ownership or database failure.
 pub async fn delete_character_pending_review_in_tx(
     tx: &mut Transaction<'_, sqlx::Sqlite>,
     owner_creator_id: &str,
@@ -445,6 +468,13 @@ pub async fn delete_character_pending_review_in_tx(
     Ok(result.rows_affected() > 0)
 }
 
+/// # Errors
+///
+/// Returns `LocalDbError` on ownership, provenance, or database failure.
+///
+/// # Panics
+///
+/// Panics if the SQL `COUNT` result cannot fit in `usize` (should not occur).
 pub async fn count_character_pending_reviews(
     pool: &SqlitePool,
     owner_creator_id: &str,
