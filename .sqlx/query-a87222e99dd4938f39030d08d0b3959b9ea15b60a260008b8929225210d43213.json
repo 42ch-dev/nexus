@@ -1,0 +1,134 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT key_block_id as \"key_block_id!\", owner_kind as \"owner_kind!\", world_id, character_id,\n                actor_world_binding_id, creator_only as \"creator_only!\", block_type as \"block_type!\",\n                canonical_name as \"canonical_name!\", status as \"status!\", revision, body_json,\n                source_anchor_json, created_from_command_id, created_at as \"created_at!\", updated_at,\n                source_work_id, source_chapter, source_provenance_kind, extensions_nexus_json, modules_json\n         FROM kb_key_blocks WHERE key_block_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "key_block_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "owner_kind!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "world_id",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "character_id",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "actor_world_binding_id",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "creator_only!",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "block_type!",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "canonical_name!",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "status!",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "revision",
+        "ordinal": 9,
+        "type_info": "Integer"
+      },
+      {
+        "name": "body_json",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_anchor_json",
+        "ordinal": 11,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_from_command_id",
+        "ordinal": 12,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!",
+        "ordinal": 13,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 14,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_work_id",
+        "ordinal": 15,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_chapter",
+        "ordinal": 16,
+        "type_info": "Integer"
+      },
+      {
+        "name": "source_provenance_kind",
+        "ordinal": 17,
+        "type_info": "Text"
+      },
+      {
+        "name": "extensions_nexus_json",
+        "ordinal": 18,
+        "type_info": "Text"
+      },
+      {
+        "name": "modules_json",
+        "ordinal": 19,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "a87222e99dd4938f39030d08d0b3959b9ea15b60a260008b8929225210d43213"
+}

@@ -14,6 +14,7 @@ use crate::LocalDbError;
 /// Maximum UTF-8 byte length for `body.summary` (durable §11.5).
 pub const ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES: usize = 65_536;
 
+
 /// Patch surface for Character-scoped knowledge maintenance (handoff §2).
 #[derive(Debug, Clone, Copy)]
 pub struct ActorKnowledgePatch<'a> {
@@ -203,19 +204,6 @@ fn actor_knowledge_patch_is_no_op(
     Ok(true)
 }
 
-fn json_value_has_exact_kb_entry_id_scalar(value: &serde_json::Value) -> bool {
-    match value {
-        serde_json::Value::String(s) => s.starts_with("kb_") && s.len() > 10,
-        serde_json::Value::Array(items) => items
-            .iter()
-            .any(json_value_has_exact_kb_entry_id_scalar),
-        serde_json::Value::Object(map) => map
-            .values()
-            .any(json_value_has_exact_kb_entry_id_scalar),
-        _ => false,
-    }
-}
-
 fn assert_target_row_module_referents(row: &KeyBlockRow, entry_id: &str) -> Result<(), LocalDbError> {
     let Some(raw) = row.modules_json.as_deref() else {
         return Ok(());
@@ -231,7 +219,7 @@ fn assert_target_row_module_referents(row: &KeyBlockRow, entry_id: &str) -> Resu
     let obj = value.as_object().expect("object checked");
     for key in ["self", "observation", "other", "mental", "belief"] {
         if let Some(slot) = obj.get(key) {
-            if json_value_has_exact_kb_entry_id_scalar(slot) {
+            if json_value_contains_exact_id_scalar(slot, entry_id) {
                 return Err(knowledge_entry_in_use());
             }
         }
@@ -246,18 +234,16 @@ async fn load_key_block_row_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     entry_id: &str,
 ) -> Result<Option<KeyBlockRow>, LocalDbError> {
-    let row = sqlx::query_as::<_, KeyBlockRow>(
-        r"SELECT
-            key_block_id, owner_kind, world_id, character_id,
-            actor_world_binding_id, creator_only,
-            block_type, canonical_name, status,
-            revision, body_json, source_anchor_json, created_from_command_id,
-            created_at, updated_at, source_work_id, source_chapter,
-            source_provenance_kind, extensions_nexus_json, modules_json
-        FROM kb_key_blocks
-        WHERE key_block_id = ?",
+    let row = sqlx::query_as!(
+        KeyBlockRow,
+        r#"SELECT key_block_id as "key_block_id!", owner_kind as "owner_kind!", world_id, character_id,
+                actor_world_binding_id, creator_only as "creator_only!", block_type as "block_type!",
+                canonical_name as "canonical_name!", status as "status!", revision, body_json,
+                source_anchor_json, created_from_command_id, created_at as "created_at!", updated_at,
+                source_work_id, source_chapter, source_provenance_kind, extensions_nexus_json, modules_json
+         FROM kb_key_blocks WHERE key_block_id = ?"#,
+        entry_id
     )
-    .bind(entry_id)
     .fetch_optional(&mut **tx)
     .await?;
     Ok(row)
@@ -276,10 +262,10 @@ async fn row_in_character_read_scope_tx(
                     "malformed binding-owned knowledge row".into(),
                 ))
             })?;
-            let owner_character: Option<String> = sqlx::query_scalar(
-                "SELECT character_id FROM actor_world_bindings WHERE binding_id = ?",
+            let owner_character = sqlx::query_scalar!(
+                r#"SELECT character_id as "character_id!" FROM actor_world_bindings WHERE binding_id = ?"#,
+                binding_id
             )
-            .bind(binding_id)
             .fetch_optional(&mut **tx)
             .await?;
             Ok(owner_character.as_deref() == Some(character_id))
@@ -323,10 +309,10 @@ async fn character_owned_for_read(
     owner_creator_id: &str,
     character_id: &str,
 ) -> Result<bool, LocalDbError> {
-    let owned: Option<String> = sqlx::query_scalar(
-        "SELECT owner_creator_id FROM characters WHERE character_id = ?",
+    let owned = sqlx::query_scalar!(
+        r#"SELECT owner_creator_id as "owner_creator_id!" FROM characters WHERE character_id = ?"#,
+        character_id
     )
-    .bind(character_id)
     .fetch_optional(pool)
     .await?;
     Ok(matches!(owned.as_deref(), Some(stored) if stored == owner_creator_id))
@@ -342,18 +328,16 @@ pub async fn get_actor_knowledge_entry(
     if !character_owned_for_read(pool, owner_creator_id, character_id).await? {
         return Ok(None);
     }
-    let row = sqlx::query_as::<_, KeyBlockRow>(
-        r"SELECT
-            key_block_id, owner_kind, world_id, character_id,
-            actor_world_binding_id, creator_only,
-            block_type, canonical_name, status,
-            revision, body_json, source_anchor_json, created_from_command_id,
-            created_at, updated_at, source_work_id, source_chapter,
-            source_provenance_kind, extensions_nexus_json, modules_json
-        FROM kb_key_blocks
-        WHERE key_block_id = ?",
+    let row = sqlx::query_as!(
+        KeyBlockRow,
+        r#"SELECT key_block_id as "key_block_id!", owner_kind as "owner_kind!", world_id, character_id,
+                actor_world_binding_id, creator_only as "creator_only!", block_type as "block_type!",
+                canonical_name as "canonical_name!", status as "status!", revision, body_json,
+                source_anchor_json, created_from_command_id, created_at as "created_at!", updated_at,
+                source_work_id, source_chapter, source_provenance_kind, extensions_nexus_json, modules_json
+         FROM kb_key_blocks WHERE key_block_id = ?"#,
+        entry_id
     )
-    .bind(entry_id)
     .fetch_optional(pool)
     .await?;
     let Some(row) = row else {
@@ -613,8 +597,8 @@ pub async fn update_actor_knowledge_entry(
         let now = chrono::Utc::now().to_rfc3339();
         let new_revision = expected_revision + 1;
         let updated = map_kb_actor_constraint(
-            sqlx::query(
-                r"UPDATE kb_key_blocks
+            sqlx::query!(
+                r#"UPDATE kb_key_blocks
                    SET canonical_name = ?, body_json = ?, revision = ?, updated_at = ?
                    WHERE key_block_id = ?
                      AND COALESCE(revision, 0) = ?
@@ -628,16 +612,16 @@ pub async fn update_actor_knowledge_entry(
                            WHERE character_id = ? AND status = 'active'
                          )
                        )
-                     )",
+                     )"#,
+                canonical_name,
+                body_json,
+                new_revision,
+                now,
+                entry_id,
+                expected_revision,
+                character_id,
+                character_id
             )
-            .bind(&canonical_name)
-            .bind(&body_json)
-            .bind(new_revision)
-            .bind(&now)
-            .bind(entry_id)
-            .bind(expected_revision)
-            .bind(character_id)
-            .bind(character_id)
             .execute(&mut *tx)
             .await,
         )?
@@ -686,8 +670,8 @@ pub async fn delete_actor_knowledge_entry(
         .await?;
         assert_no_protected_referents_tx(&mut tx, entry_id, &row).await?;
         let deleted = map_kb_actor_constraint(
-            sqlx::query(
-                r"DELETE FROM kb_key_blocks
+            sqlx::query!(
+                r#"DELETE FROM kb_key_blocks
                    WHERE key_block_id = ?
                      AND COALESCE(revision, 0) = ?
                      AND status NOT IN ('deleted', 'merged', 'deprecated')
@@ -700,12 +684,12 @@ pub async fn delete_actor_knowledge_entry(
                            WHERE character_id = ? AND status = 'active'
                          )
                        )
-                     )",
+                     )"#,
+                entry_id,
+                expected_revision,
+                character_id,
+                character_id
             )
-            .bind(entry_id)
-            .bind(expected_revision)
-            .bind(character_id)
-            .bind(character_id)
             .execute(&mut *tx)
             .await,
         )?

@@ -597,3 +597,45 @@ async fn delete_malformed_other_modules_json_is_reference_state_invalid() {
         .unwrap_err();
     assert_conflict(err, ActorContractConflict::KnowledgeReferenceStateInvalid);
 }
+
+#[tokio::test]
+async fn delete_succeeds_when_target_modules_reference_unrelated_kb_id() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, _) = seed_character(&pool).await;
+    let other = insert_character_ke(&pool, &chr, "otherKe", None).await;
+    let entry = insert_character_ke(&pool, &chr, "target", None).await;
+    sqlx::query("UPDATE kb_key_blocks SET modules_json = ? WHERE key_block_id = ?")
+        .bind(format!(r#"{{"observation":"{other}"}}"#))
+        .bind(&entry)
+        .execute(&pool)
+        .await
+        .unwrap();
+    delete_actor_knowledge_entry(&pool, OWNER, &chr, &entry, 0)
+        .await
+        .unwrap();
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = ?")
+        .bind(&entry)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
+async fn delete_refused_when_target_modules_reference_own_id() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, _) = seed_character(&pool).await;
+    let entry = insert_character_ke(&pool, &chr, "selfRef", None).await;
+    sqlx::query("UPDATE kb_key_blocks SET modules_json = ? WHERE key_block_id = ?")
+        .bind(format!(r#"{{"other":"{entry}"}}"#))
+        .bind(&entry)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let err = delete_actor_knowledge_entry(&pool, OWNER, &chr, &entry, 0)
+        .await
+        .unwrap_err();
+    assert_conflict(err, ActorContractConflict::KnowledgeEntryInUse);
+}
