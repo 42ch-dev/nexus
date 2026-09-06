@@ -501,3 +501,46 @@ async fn edit_archive_restore_cli_honors_explicit_revision_cas() {
     assert_eq!(restore_body["character"]["status"], "active");
     assert_eq!(restore_body["character"]["character_id"], chr);
 }
+
+
+#[tokio::test]
+async fn edit_without_mutable_fields_is_invalid_input() {
+    let d = LiveDaemon::start().await;
+    activate_owner(&d).await;
+
+    let created = d
+        .cli(&[
+            "creator",
+            "character",
+            "create",
+            "--display-name",
+            "Ava",
+            "--world-id",
+            WORLD_A,
+            "--json",
+        ])
+        .await;
+    assert!(created.status.success(), "create: {}", stderr(&created));
+    let created_body: Value = serde_json::from_str(&stdout(&created)).unwrap();
+    let chr = created_body["character"]["character_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let empty = d
+        .cli(&[
+            "creator",
+            "character",
+            "edit",
+            &chr,
+            "--expected-revision",
+            "0",
+        ])
+        .await;
+    assert!(!empty.status.success(), "empty edit must fail");
+    let err = stderr(&empty);
+    assert!(
+        err.contains("at least one mutable field") || err.contains("invalid_input"),
+        "unexpected stderr: {err}"
+    );
+}

@@ -811,3 +811,210 @@ async fn archive_refuses_character_busy_while_activity_outstanding() {
     let ok = archive_character(&ctx.server, id, 0).await;
     assert_eq!(ok.status_code(), 200, "body={}", ok.text());
 }
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use nexus_agent_host::{HostFacade, HostSession, HostSessionId, SessionState};
+
+struct CountingHost {
+    shutdowns: AtomicUsize,
+    execs: AtomicUsize,
+    sessions: std::sync::Mutex<std::collections::HashMap<HostSessionId, HostSession>>,
+}
+
+impl CountingHost {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            shutdowns: AtomicUsize::new(0),
+            execs: AtomicUsize::new(0),
+            sessions: std::sync::Mutex::new(std::collections::HashMap::new()),
+        })
+    }
+}
+
+#[async_trait]
+impl HostFacade for CountingHost {
+    async fn start(
+        &self,
+        _config: nexus_agent_host::capability::model::HostStartConfig,
+    ) -> nexus_agent_host::HostResult<()> {
+        Ok(())
+    }
+
+    async fn create_session(
+        &self,
+        request: nexus_agent_host::capability::CreateSessionRequest,
+    ) -> nexus_agent_host::HostResult<HostSession> {
+        let session = HostSession {
+            id: HostSessionId::new(),
+            provider_id: request.provider_id,
+            state: SessionState::Ready,
+            created_at: chrono::Utc::now(),
+            active_op_id: None,
+            negotiated_capabilities:
+                nexus_agent_host::capability::model::CapabilityDescriptor::native_cli_limited(),
+        };
+        self.sessions
+            .lock()
+            .expect("sessions")
+            .insert(session.id.clone(), session.clone());
+        Ok(session)
+    }
+
+    async fn exec(
+        &self,
+        _session_id: HostSessionId,
+        _op: nexus_agent_host::capability::model::HostOperation,
+    ) -> nexus_agent_host::HostResult<nexus_agent_host::capability::model::HostEventStream> {
+        self.execs.fetch_add(1, Ordering::SeqCst);
+        Ok(Box::pin(futures_util::stream::empty()))
+    }
+
+    async fn cancel(
+        &self,
+        _op_id: nexus_agent_host::HostOperationId,
+    ) -> nexus_agent_host::HostResult<()> {
+        Ok(())
+    }
+
+    async fn health(
+        &self,
+    ) -> nexus_agent_host::HostResult<nexus_agent_host::capability::model::HostHealth> {
+        Ok(nexus_agent_host::capability::model::HostHealth {
+            running: true,
+            active_sessions: self.sessions.lock().expect("sessions").len(),
+            active_operations: 0,
+        })
+    }
+
+    async fn shutdown(&self) -> nexus_agent_host::HostResult<()> {
+        Ok(())
+    }
+
+    async fn shutdown_session(&self, session_id: HostSessionId) -> nexus_agent_host::HostResult<()> {
+        self.shutdowns.fetch_add(1, Ordering::SeqCst);
+        self.sessions.lock().expect("sessions").remove(&session_id);
+        Ok(())
+    }
+
+    async fn list_sessions(&self) -> nexus_agent_host::HostResult<Vec<HostSession>> {
+        Ok(self
+            .sessions
+            .lock()
+            .expect("sessions")
+            .values()
+            .cloned()
+            .collect())
+    }
+
+    async fn provider_catalog(&self) -> nexus_agent_host::HostResult<nexus_agent_host::ProviderCatalog> {
+        Ok(nexus_agent_host::ProviderCatalog::new())
+    }
+
+    fn subscribe_events(
+        &self,
+        _session_id: HostSessionId,
+    ) -> tokio::sync::broadcast::Receiver<nexus_agent_host::capability::model::HostEvent> {
+        tokio::sync::broadcast::channel(1).1
+    }
+}
+
+async fn ctx_with_host() -> (Ctx, Arc<CountingHost>) {
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    std::fs::write(
+        nexus_home.join("config.toml"),
+        format!(
+            "active_creator_id = \"{OWNER}\"\n\n[active_workspace_slug_by_creator]\n\"{OWNER}\" = \"default\"\n"
+        ),
+    )
+    .unwrap();
+    let mut state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+    let host = CountingHost::new();
+    state.set_agent_host(host.clone());
+    let pool = state.pool().unwrap().clone();
+    seed_actor_fixture(&pool).await;
+    let server = TestServer::new(api::create_router(state.clone(), DaemonApiConfig::keyless()))
+        .expect("test server");
+    let ctx = Ctx {
+        _tmp: tmp,
+        server,
+        pool,
+        nexus_home,
+        state,
+    };
+    (ctx, host)
+}
+
+async fn create_character_session(server: &TestServer, character_id: &str, binding_id: &str) -> String {
+    let resp = server
+        .post("/v1/daemon/agent-host/sessions")
+        .json(&json!({
+            "provider_id": "mock-provider",
+            "actor_ref": {"actor_kind": "character", "character_id": character_id},
+            "viewpoint": {"world_id": WORLD_A, "binding_id": binding_id}
+        }))
+        .await;
+    assert_eq!(resp.status_code(), 200, "create session: {}", resp.text());
+    let body: Value = resp.json();
+    body["session_id"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn patch_empty_body_is_invalid_input() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let id = created["character"]["character_id"].as_str().unwrap();
+    let resp = patch_character(&ctx.server, id, json!({ "expected_revision": 0 })).await;
+    assert_canonical_invalid_input(&resp);
+}
+
+#[tokio::test]
+async fn restore_same_state_cas_no_op_keeps_session_executable_without_shutdown() {
+    let (ctx, host) = ctx_with_host().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let id = created["character"]["character_id"].as_str().unwrap();
+    let binding_id = created["binding"]["binding_id"].as_str().unwrap();
+    let session_id = create_character_session(&ctx.server, id, binding_id).await;
+
+    let before_shutdowns = host.shutdowns.load(Ordering::SeqCst);
+    let no_op = restore_character(&ctx.server, id, 0).await;
+    assert_eq!(no_op.status_code(), 200, "body={}", no_op.text());
+    assert_eq!(
+        host.shutdowns.load(Ordering::SeqCst),
+        before_shutdowns,
+        "same-state restore no-op must not retire sessions"
+    );
+
+    let exec = ctx
+        .server
+        .post(&format!("/v1/daemon/agent-host/sessions/{session_id}/operations"))
+        .json(&json!({"kind": "prompt", "content": "ping"}))
+        .await;
+    assert_eq!(exec.status_code(), 200, "execute after no-op: {}", exec.text());
+    assert_eq!(host.execs.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn pre_archive_session_execute_is_stale_after_material_archive() {
+    let (ctx, host) = ctx_with_host().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let id = created["character"]["character_id"].as_str().unwrap();
+    let binding_id = created["binding"]["binding_id"].as_str().unwrap();
+    let session_id = create_character_session(&ctx.server, id, binding_id).await;
+
+    let archived = archive_character(&ctx.server, id, 0).await;
+    assert_eq!(archived.status_code(), 200, "body={}", archived.text());
+    assert_eq!(host.shutdowns.load(Ordering::SeqCst), 1);
+
+    let exec = ctx
+        .server
+        .post(&format!("/v1/daemon/agent-host/sessions/{session_id}/operations"))
+        .json(&json!({"kind": "prompt", "content": "nope"}))
+        .await;
+    assert_eq!(exec.status_code(), 409, "body={}", exec.text());
+    let body: Value = exec.json();
+    assert_eq!(body["error"]["code"], "actor_session_stale");
+    assert_eq!(host.execs.load(Ordering::SeqCst), 0);
+}

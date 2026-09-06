@@ -44,6 +44,16 @@ impl Default for CharacterPatch<'_> {
     }
 }
 
+impl CharacterPatch<'_> {
+    /// True when the patch carries no mutable fields (§11 empty patch).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.display_name.is_none()
+            && matches!(self.image_uri, FieldPatch::Keep)
+            && matches!(self.persona_json, FieldPatch::Keep)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CharacterStatus { Active, Archived }
 

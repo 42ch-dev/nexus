@@ -246,6 +246,10 @@ fn build_character_patch<'a>(
     })
 }
 
+fn character_patch_is_empty(patch: &CharacterPatch<'_>) -> bool {
+    patch.is_empty()
+}
+
 /// Material lifecycle transition ordering (durable §11.3.2–§11.3.3):
 /// 1. `try_character_transition` exclusive fence (busy refusal before DB),
 /// 2. `transition_character` `BEGIN IMMEDIATE` commit (revision/epoch increment),
@@ -470,6 +474,12 @@ pub async fn patch_character(
             message: err.to_string(),
         })?;
     let patch = build_character_patch(&raw, &req, &mut persona_buf)?;
+    if character_patch_is_empty(&patch) {
+        return Err(NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: "patch must include at least one mutable field".into(),
+        });
+    }
     let owner = require_creator(&state)?;
     let _guard = state
         .actor_sessions()

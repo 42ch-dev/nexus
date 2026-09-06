@@ -140,9 +140,9 @@ impl std::fmt::Debug for CharacterActivityGuard {
 /// Exclusive per-Character lifecycle fence for archive/restore (durable
 /// §11.3.2). Obtained only via
 /// [`ActorSessionRegistry::try_character_transition`] (busy refusal). Stores
-/// the pre-transition epoch: retire session reuse keys only when the
-/// committed transition returns a different epoch (a same-state CAS no-op
-/// retires nothing).
+/// the lifecycle epoch re-read under the exclusive fence: retire session reuse
+/// keys only when the committed transition returns a different epoch (a
+/// same-state CAS no-op retires nothing).
 pub struct CharacterTransitionGuard {
     _write: OwnedRwLockWriteGuard<()>,
     owner_creator_id: String,
@@ -163,7 +163,7 @@ impl CharacterTransitionGuard {
         &self.character_id
     }
 
-    /// Stored lifecycle epoch read before the transition.
+    /// Stored lifecycle epoch re-read under the exclusive fence at transition start.
     #[must_use]
     pub const fn epoch(&self) -> i64 {
         self.epoch
@@ -368,13 +368,19 @@ impl ActorSessionRegistry {
         owner_creator_id: &str,
         character_id: &str,
     ) -> Result<CharacterTransitionGuard, NexusApiError> {
-        let stored = nexus_local_db::get_character(pool, owner_creator_id, character_id)
+        // Owner-check before allocating a fence (no fence state leaks existence).
+        nexus_local_db::get_character(pool, owner_creator_id, character_id)
             .await?
             .ok_or_else(|| NexusApiError::NotFound(format!("character {character_id}")))?;
         let fence = self.fence_for(character_id)?;
         let write = fence
             .try_write_owned()
             .map_err(|_| crate::api::errors::character_busy(character_id))?;
+        // Re-read under the exclusive fence so pre-transition epoch is exact for
+        // material-vs-no-op session retirement (durable §11.3.2–§11.3.3).
+        let stored = nexus_local_db::get_character(pool, owner_creator_id, character_id)
+            .await?
+            .ok_or_else(|| NexusApiError::NotFound(format!("character {character_id}")))?;
         Ok(CharacterTransitionGuard {
             _write: write,
             owner_creator_id: owner_creator_id.to_string(),
@@ -1988,4 +1994,48 @@ mod tests {
 
         drop(tmp);
     }
+    /// Regression: lifecycle epoch used for material-vs-no-op decisions is
+    /// re-read under the exclusive fence after any interleaved transition.
+    #[tokio::test]
+    async fn transition_guard_rereads_epoch_under_exclusive_fence() {
+        let (registry, pool, tmp, character_id, _) = seeded_character().await;
+        {
+            let guard = registry
+                .try_character_transition(&pool, DB_OWNER, &character_id)
+                .await
+                .expect("first material archive");
+            assert_eq!(guard.epoch(), 0);
+            nexus_local_db::transition_character(
+                &pool,
+                DB_OWNER,
+                &character_id,
+                0,
+                nexus_local_db::CharacterStatus::Archived,
+            )
+            .await
+            .expect("archive");
+        }
+        let guard = registry
+            .try_character_transition(&pool, DB_OWNER, &character_id)
+            .await
+            .expect("same-state archive acquires fence");
+        assert_eq!(
+            guard.epoch(),
+            1,
+            "epoch must be re-read under fence, not a stale pre-fence snapshot"
+        );
+        let row = nexus_local_db::transition_character(
+            &pool,
+            DB_OWNER,
+            &character_id,
+            1,
+            nexus_local_db::CharacterStatus::Archived,
+        )
+        .await
+        .expect("same-state archive no-op");
+        assert_eq!(guard.epoch(), row.lifecycle_epoch);
+        drop(tmp);
+    }
+
+
 }

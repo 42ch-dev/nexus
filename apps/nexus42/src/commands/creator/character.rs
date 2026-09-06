@@ -873,6 +873,16 @@ async fn edit_character(
             "use either --persona or --clear-persona, not both".into(),
         ));
     }
+    if display_name.is_none()
+        && image_uri.is_none()
+        && !clear_image_uri
+        && persona.is_none()
+        && !clear_persona
+    {
+        return Err(CliError::Other(
+            "edit requires at least one mutable field (--display-name, --image-uri, --clear-image-uri, --persona, or --clear-persona)".into(),
+        ));
+    }
     let mut body = serde_json::json!({ "expected_revision": expected_revision });
     if let Some(name) = display_name {
         body["display_name"] = serde_json::Value::String(name);
