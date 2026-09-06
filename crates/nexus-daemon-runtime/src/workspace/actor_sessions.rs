@@ -472,23 +472,21 @@ impl ActorSessionRegistry {
         }
     }
 
+    /// Move a draining operation into finalization and return whether cancel
+    /// intent was latched. The cancel read and phase transition are atomic
+    /// under the registry lock so no window can observe stale cancel state.
     #[must_use]
-    pub fn operation_cancel_requested(&self, operation_id: &HostOperationId) -> bool {
-        self.maps()
-            .character_operations
-            .get(operation_id)
-            .is_some_and(|r| matches!(r.phase, OperationPhase::CancelRequested))
-    }
-
-    /// Move a draining operation into finalization.
-    pub fn begin_operation_finalizing(&self, operation_id: &HostOperationId) -> Result<(), NexusApiError> {
+    pub fn begin_operation_finalizing(&self, operation_id: &HostOperationId) -> bool {
         let mut maps = self.maps();
         if let Some(record) = maps.character_operations.get_mut(operation_id) {
+            let cancel_requested = matches!(record.phase, OperationPhase::CancelRequested);
             if matches!(record.phase, OperationPhase::Running | OperationPhase::CancelRequested) {
                 record.phase = OperationPhase::Finalizing;
             }
+            cancel_requested
+        } else {
+            false
         }
-        Ok(())
     }
 
     /// Commit terminal outcome and enforce terminal FIFO retention.

@@ -171,6 +171,9 @@ fn run_status_from_terminal(
     if cancel_requested && !acc.saw_terminal {
         return (CharacterOperationResultRunStatus::Cancelled, None);
     }
+    if cancel_requested && acc.run_failed {
+        return (CharacterOperationResultRunStatus::Cancelled, None);
+    }
     if acc.run_failed {
         return (CharacterOperationResultRunStatus::Failed, None);
     }
@@ -297,6 +300,47 @@ fn finalize_capture_outcome(
     }
 }
 
+
+#[cfg(test)]
+type BeforeFinalizeHook = std::sync::Arc<dyn Fn(&ActorSessionRegistry, &HostOperationId) + Send + Sync>;
+
+#[cfg(test)]
+static BEFORE_OPERATION_FINALIZE_HOOK: std::sync::Mutex<Option<BeforeFinalizeHook>> =
+    std::sync::Mutex::new(None);
+
+#[cfg(test)]
+static FINALIZE_HOOK_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn set_before_operation_finalize_hook(
+    hook: impl Fn(&ActorSessionRegistry, &HostOperationId) + Send + Sync + 'static,
+) {
+    *BEFORE_OPERATION_FINALIZE_HOOK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(std::sync::Arc::new(hook));
+}
+
+#[cfg(test)]
+pub(crate) fn clear_before_operation_finalize_hook() {
+    *BEFORE_OPERATION_FINALIZE_HOOK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+}
+
+#[cfg(test)]
+fn fire_before_operation_finalize_hook(
+    registry: &ActorSessionRegistry,
+    operation_id: &HostOperationId,
+) {
+    let hook = BEFORE_OPERATION_FINALIZE_HOOK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    if let Some(hook) = hook {
+        hook(registry, operation_id);
+    }
+}
+
 pub async fn drain_and_finalize_character_operation(
     pool: SqlitePool,
     registry: ActorSessionRegistry,
@@ -326,10 +370,10 @@ pub async fn drain_and_finalize_character_operation(
         }
     }
 
-    let cancel_requested = registry.operation_cancel_requested(&op_id);
-    let (run_status, finish_reason) = run_status_from_terminal(&acc, cancel_requested);
+    fire_before_operation_finalize_hook(&registry, &op_id);
 
-    let _ = registry.begin_operation_finalizing(&op_id);
+    let cancel_requested = registry.begin_operation_finalizing(&op_id);
+    let (run_status, finish_reason) = run_status_from_terminal(&acc, cancel_requested);
 
     let persisted = if snapshot.remember
         && !cancel_requested
@@ -713,6 +757,113 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
         let pending = run_pending_id(&op);
         assert!(pending.starts_with("run_"));
         assert!(!pending.contains('-'));
+    }
+
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancel_latched_at_finalize_boundary_suppresses_capture() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let _hook_guard = FINALIZE_HOOK_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        clear_before_operation_finalize_hook();
+
+        let snapshot = sample_snapshot(true, "q");
+        let registry = ActorSessionRegistry::new();
+        registry.reserve_character_operation(snapshot.clone()).unwrap();
+        let owner = snapshot.owner_creator_id.clone();
+        let op_id = snapshot.operation_id.clone();
+
+        let at_boundary = Arc::new(Barrier::new(2));
+        let cancel_done = Arc::new(Barrier::new(2));
+        let reg_for_cancel = registry.clone();
+        let owner_for_cancel = owner.clone();
+        let op_for_cancel = op_id.clone();
+        let at_boundary_cancel = Arc::clone(&at_boundary);
+        let cancel_done_cancel = Arc::clone(&cancel_done);
+
+        let cancel_thread = thread::spawn(move || {
+            at_boundary_cancel.wait();
+            reg_for_cancel
+                .request_operation_cancel(&owner_for_cancel, &op_for_cancel)
+                .expect("cancel latch");
+            cancel_done_cancel.wait();
+        });
+
+        set_before_operation_finalize_hook({
+            let at_boundary_drain = Arc::clone(&at_boundary);
+            let cancel_done_drain = Arc::clone(&cancel_done);
+            move |_reg, _op| {
+                at_boundary_drain.wait();
+                cancel_done_drain.wait();
+            }
+        });
+
+        drain_and_finalize_character_operation(
+            sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap(),
+            registry.clone(),
+            stream_of(vec![
+                message_delta(&snapshot, "late"),
+                op_finished(&snapshot, FinishReason::EndTurn),
+            ]),
+            None,
+            snapshot,
+        )
+        .await;
+        cancel_thread.join().expect("cancel thread");
+
+        clear_before_operation_finalize_hook();
+
+        let result = registry
+            .character_operation_result(&owner, &op_id)
+            .expect("outcome");
+        assert_eq!(result.run_status, CharacterOperationResultRunStatus::Cancelled);
+        assert_eq!(
+            result.capture.status,
+            NexusCharacterRunCaptureOutcomeStatus::Skipped
+        );
+        assert_eq!(
+            result.capture.code,
+            Some(NexusCharacterRunCaptureOutcomeCode::RunCancelled)
+        );
+    }
+
+    #[tokio::test]
+    async fn op_failed_with_accepted_cancel_yields_cancelled_not_failed() {
+        let snapshot = sample_snapshot(true, "q");
+        let registry = ActorSessionRegistry::new();
+        registry.reserve_character_operation(snapshot.clone()).unwrap();
+        registry
+            .request_operation_cancel(
+                "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                &snapshot.operation_id,
+            )
+            .unwrap();
+        drain_and_finalize_character_operation(
+            sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap(),
+            registry.clone(),
+            stream_of(vec![HostEvent::OpFailed(OperationFailedEvent {
+                session_id: snapshot.session_id.clone(),
+                op_id: snapshot.operation_id.clone(),
+                error_category: "internal".into(),
+                error_message: "boom".into(),
+            })]),
+            None,
+            snapshot.clone(),
+        )
+        .await;
+        let result = registry
+            .character_operation_result(
+                "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                &snapshot.operation_id,
+            )
+            .expect("outcome");
+        assert_eq!(result.run_status, CharacterOperationResultRunStatus::Cancelled);
+        assert_ne!(result.run_status, CharacterOperationResultRunStatus::Failed);
+        assert_eq!(
+            result.capture.code,
+            Some(NexusCharacterRunCaptureOutcomeCode::RunCancelled)
+        );
     }
 
     #[test]
