@@ -251,7 +251,7 @@ Two competing removals cannot both remove the final active binding. Capture vers
 
 | Surface | Contract |
 |---|---|
-| Existing `POST /actor-knowledge/entries` | Existing add request gains optional `summary:string`. For Character/binding owners it writes `body.summary` atomically with the row; omission preserves current body-less create. `summary` on World-owned create rejects `400 invalid_input` (World maintenance expansion is out of scope). Existing response stays `{item}`, with revised KnowledgeViewItem below. |
+| Existing `POST /actor-knowledge/entries` | Existing add request gains optional `summary:string`. For Character/binding owners it writes `body.summary` atomically with the row; omission preserves current body-less create. `summary` on World-owned create rejects HTTP 422 `invalid_input` (World maintenance expansion is out of scope). Existing response stays `{item}`, with revised KnowledgeViewItem below. |
 | `GET /characters/{character_id}/knowledge/{entry_id}` | `200` `actor-knowledge/knowledge-entry-detail.schema.json`: `{item: KnowledgeViewItem, summary: string|null}` |
 | `PATCH` on that detail path | `actor-knowledge/update-knowledge-entry-request.schema.json`: required `expected_revision`; optional non-null `canonical_name`, nullable `summary`; at least one mutable member; response is detail |
 | `DELETE` on that detail path | `actor-knowledge/delete-knowledge-entry-query.schema.json`: required `expected_revision` query parameter; success `204` with empty body |
