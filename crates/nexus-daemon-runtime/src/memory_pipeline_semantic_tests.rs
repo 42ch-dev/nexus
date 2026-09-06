@@ -200,6 +200,7 @@ async fn review_both_arms_share_classification_and_isolate_storage() {
                 task_kind: kind.to_string(),
                 raw_digest: digest.to_string(),
                 created_at: "2026-01-01T00:00:01Z".to_string(),
+                source_operation_id: None,
             },
         )
         .await
@@ -766,6 +767,7 @@ async fn promoted_character_long_term_memory_is_projected_into_run() {
             task_kind: "brainstorm".to_string(),
             raw_digest: promote_digest.clone(),
             created_at: "2026-01-01T00:00:01Z".to_string(),
+            source_operation_id: None,
         },
     )
     .await
@@ -888,6 +890,7 @@ async fn binding_local_promote_stays_binding_local_no_global_ltm() {
             task_kind: "brainstorm".to_string(),
             raw_digest: digest.clone(),
             created_at: "2026-01-01T00:00:01Z".to_string(),
+            source_operation_id: None,
         },
     )
     .await
@@ -1196,6 +1199,7 @@ async fn review_failed_queue_advance_rolls_back_fragment_and_reports_no_success(
             task_kind: "research".to_string(),
             raw_digest: FRAGMENT_DIGEST.to_string(),
             created_at: "2026-01-01T00:00:01Z".to_string(),
+            source_operation_id: None,
         },
     )
     .await
@@ -1342,6 +1346,7 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
             task_kind: "brainstorm".to_string(),
             raw_digest: PROMOTE_DIGEST.to_string(),
             created_at: "2026-01-01T00:00:01Z".to_string(),
+            source_operation_id: None,
         },
     )
     .await
@@ -1532,6 +1537,7 @@ async fn review_promote_claim_first_and_already_promoted_resume() {
             task_kind: "brainstorm".to_string(),
             raw_digest: PROMOTE_DIGEST.to_string(),
             created_at: "2026-01-01T00:00:02Z".to_string(),
+            source_operation_id: None,
         },
     )
     .await
@@ -1732,6 +1738,7 @@ async fn review_promote_filesystem_failure_rolls_back_claim_and_recovers() {
             task_kind: "brainstorm".to_string(),
             raw_digest: PROMOTE_DIGEST.to_string(),
             created_at: "2026-01-01T00:00:01Z".to_string(),
+            source_operation_id: None,
         },
     )
     .await

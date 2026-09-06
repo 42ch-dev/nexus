@@ -43,6 +43,7 @@ use nexus_contracts::daemon_api::characters::memory::review_character_memory_res
 use nexus_contracts::daemon_api::characters::soul::character_soul_narrative_request::CharacterSoulNarrativeRequest;
 use nexus_contracts::daemon_api::characters::soul::character_soul_narrative_response::CharacterSoulNarrativeResponse;
 use nexus_creator_memory::review::PendingReviewInput;
+use nexus_local_db::RUN_PENDING_ID_PREFIX;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -161,6 +162,7 @@ pub async fn capture_pending_review(
         task_kind,
         raw_digest,
         created_at,
+        source_operation_id: None,
     };
     nexus_local_db::create_character_pending_review(state.pool_or_uninit()?, &creator, &record)
         .await?;
@@ -179,29 +181,37 @@ fn validate_capture_input(
 ) -> Result<(), NexusApiError> {
     let pending_id = req.pending_id.as_str();
     if pending_id.is_empty() || pending_id.len() > 128 {
-        return Err(NexusApiError::InvalidInput {
-            field: "pending_id".into(),
-            reason: "pending_id must be between 1 and 128 characters".into(),
+        return Err(NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: "pending_id must be between 1 and 128 characters".into(),
+        });
+    }
+    if pending_id.starts_with(RUN_PENDING_ID_PREFIX) {
+        return Err(NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: format!(
+                "pending_id cannot use the reserved {RUN_PENDING_ID_PREFIX} prefix"
+            ),
         });
     }
     let session_id = req.session_id.as_str();
     if session_id.is_empty() || session_id.len() > 128 {
-        return Err(NexusApiError::InvalidInput {
-            field: "session_id".into(),
-            reason: "session_id must be between 1 and 128 characters".into(),
+        return Err(NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: "session_id must be between 1 and 128 characters".into(),
         });
     }
     if raw_digest.is_empty() || raw_digest.len() > MAX_DIGEST_BYTES {
-        return Err(NexusApiError::InvalidInput {
-            field: "raw_digest".into(),
-            reason: format!("raw_digest must be between 1 and {MAX_DIGEST_BYTES} bytes"),
+        return Err(NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: format!("raw_digest must be between 1 and {MAX_DIGEST_BYTES} bytes"),
         });
     }
     if let Some(kind) = optional_str(req.task_kind.as_ref()) {
         if kind.len() > 64 {
-            return Err(NexusApiError::InvalidInput {
-                field: "task_kind".into(),
-                reason: "task_kind must be at most 64 characters".into(),
+            return Err(NexusApiError::BadRequest {
+                code: "invalid_input".into(),
+                message: "task_kind must be at most 64 characters".into(),
             });
         }
     }
@@ -243,6 +253,7 @@ pub async fn list_pending_reviews(
                 "task_kind": r.task_kind,
                 "raw_digest": r.raw_digest,
                 "created_at": r.created_at,
+                "source_operation_id": r.source_operation_id,
             }))
         })
         .collect::<Result<_, _>>()?;

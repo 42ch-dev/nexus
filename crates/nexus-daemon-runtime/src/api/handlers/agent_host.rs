@@ -9,6 +9,7 @@
 //! - GET    /v1/daemon/agent-host/sessions/{session_id}            — Get session detail
 //! - DELETE /v1/daemon/agent-host/sessions/{session_id}            — Shutdown a single session
 //! - POST   /v1/daemon/agent-host/sessions/{session_id}/operations — Execute a host operation
+//! - GET    /v1/daemon/agent-host/operations/{operation_id}            — Character operation outcome
 //! - POST   /v1/daemon/agent-host/operations/{operation_id}:cancel — Cancel in-flight operation
 //! - GET    /v1/daemon/agent-host/sessions/{session_id}/events     — SSE event stream
 
@@ -21,15 +22,20 @@ use crate::actor_admission::{
 };
 use crate::actor_knowledge_view::AdmittedActor;
 use crate::api::handlers::world_kb_guards::require_creator;
-use crate::workspace::actor_sessions::{echo_actor_pair, ActorSessionRegistry};
+use crate::actor_run_capture::{
+    drain_and_finalize_character_operation, initial_capture_outcome,
+};
+use crate::workspace::actor_sessions::{
+    echo_actor_pair, ActorSessionRegistry, CharacterOperationSnapshot,
+};
 use axum::extract::{Path, Query, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::Json;
 use futures_util::StreamExt;
 use nexus_contracts::generated::daemon_api::agent_host::{
-    AgentHostListSessionsQuery, AgentScanEntry, CancelOperationResponse, CreateSessionRequest,
-    ExecuteOperationRequest, OperationResponse, ScanRequest, ScanResponse, SessionListResponse,
-    SessionResponse, ShutdownSessionResponse,
+    AgentHostListSessionsQuery, AgentScanEntry, CancelOperationResponse, CharacterOperationResult,
+    CreateSessionRequest, ExecuteOperationRequest, OperationResponse, ScanRequest, ScanResponse,
+    SessionListResponse, SessionResponse, ShutdownSessionResponse,
 };
 use nexus_local_db::narrative_gateway::SqliteNarrativeGateway;
 use nexus_local_db::SqliteKnowledgeStore;
@@ -109,12 +115,12 @@ fn map_host_error(e: &nexus_agent_host::HostError) -> NexusApiError {
 
 /// Parse a session ID path parameter as UUID.
 ///
-/// Returns 400 Bad Request for malformed IDs.
+/// Returns 422 Unprocessable Entity for malformed IDs.
 fn parse_session_id(raw: &str) -> Result<Uuid, NexusApiError> {
     raw.parse::<Uuid>()
-        .map_err(|_| NexusApiError::InvalidInput {
-            field: "session_id".into(),
-            reason: format!("session_id must be a valid UUID, got: {raw}"),
+        .map_err(|_| NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: format!("session_id must be a valid UUID, got: {raw}"),
         })
 }
 
@@ -144,12 +150,12 @@ fn authorize_actor_session(
 
 /// Parse an operation ID path parameter as UUID.
 ///
-/// Returns 400 Bad Request for malformed IDs.
+/// Returns 422 Unprocessable Entity for malformed IDs.
 fn parse_operation_id(raw: &str) -> Result<Uuid, NexusApiError> {
     raw.parse::<Uuid>()
-        .map_err(|_| NexusApiError::InvalidInput {
-            field: "operation_id".into(),
-            reason: format!("operation_id must be a valid UUID, got: {raw}"),
+        .map_err(|_| NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: format!("operation_id must be a valid UUID, got: {raw}"),
         })
 }
 
@@ -687,30 +693,83 @@ pub async fn execute_operation(
     // finalization, NOT dropped at HTTP return or Host Ready (durable
     // §11.3.1/§11.6). No SSE subscriber is required for the guard's lifetime.
     let host_op = match req {
-        ExecuteOperationRequest::Prompt { content } => {
+        ExecuteOperationRequest::Prompt { content, remember } => {
+            let remember = remember.unwrap_or(false);
+            let raw_prompt = content.clone();
+            let is_character = state
+                .actor_sessions()
+                .context_for(&sid)
+                .is_some_and(|ctx| matches!(ctx.actor, AdmittedActor::Character { .. }));
+            if remember && !is_character {
+                return Err(NexusApiError::BadRequest {
+                    code: "invalid_input".into(),
+                    message: "remember requires an admitted stored Character session with an active binding".into(),
+                });
+            }
             let (content, guard) = prepare_prompt(&state, &sid, content).await?;
-            if state.actor_sessions().is_actor_session(&sid) {
+            let capture = if is_character {
+                Some(initial_capture_outcome(remember))
+            } else {
+                None
+            };
+            let snapshot = if is_character {
+                let ctx = state
+                    .actor_sessions()
+                    .context_for(&sid)
+                    .expect("character session context");
+                let creator_id = require_creator(&state)?;
+                let snapshot = CharacterOperationSnapshot {
+                    owner_creator_id: creator_id,
+                    ctx,
+                    session_id: sid.clone(),
+                    operation_id: op_id.clone(),
+                    remember,
+                    raw_prompt: raw_prompt.clone(),
+                };
+                state
+                    .actor_sessions()
+                    .reserve_character_operation(snapshot.clone())?;
                 state
                     .actor_sessions()
                     .register_indexed_operation(op_id.clone(), sid.clone());
-            }
+                Some(snapshot)
+            } else {
+                None
+            };
             let host_op = nexus_agent_host::capability::model::HostOperation::Prompt {
                 op_id: op_id.clone(),
                 content: vec![
                     nexus_agent_host::capability::model::HostContentBlock::Text { text: content },
                 ],
             };
-            let stream = host
-                .exec(sid.clone(), host_op)
-                .await
-                .map_err(|e| map_host_error(&e))?;
-            // Move the guard into the drain task — it is released only when
-            // the stream reaches terminal state (drain completes).
-            tokio::spawn(drive_operation_stream(stream, guard));
+            let stream = host.exec(sid.clone(), host_op).await.map_err(|e| {
+                if snapshot.is_some() {
+                    state.actor_sessions().remove_operation_reservation(&op_id);
+                    state.actor_sessions().clear_indexed_operation(&op_id);
+                }
+                map_host_error(&e)
+            })?;
+            if let Some(snapshot) = snapshot {
+                let pool = state.pool_or_uninit()?.clone();
+                let registry = state.actor_sessions().clone();
+                tokio::spawn(async move {
+                    drain_and_finalize_character_operation(
+                        pool,
+                        registry,
+                        stream,
+                        guard,
+                        snapshot,
+                    )
+                    .await;
+                });
+            } else {
+                tokio::spawn(drive_operation_stream(stream, guard));
+            }
             return Ok(Json(OperationResponse {
                 operation_id: op_id.to_string(),
                 session_id: sid.to_string(),
                 status: "started".to_string(),
+                capture,
             }));
         }
         ExecuteOperationRequest::SetModel { model } => {
@@ -739,6 +798,7 @@ pub async fn execute_operation(
         operation_id: op_id.to_string(),
         session_id: sid.to_string(),
         status: "started".to_string(),
+        capture: None,
     }))
 }
 
@@ -753,6 +813,28 @@ async fn drive_operation_stream(
         // Events are broadcast by HostManager; draining drives the state machine.
     }
     // `_activity_guard` drops here, after terminal finalization.
+}
+
+
+/// GET /v1/daemon/agent-host/operations/{operation_id}
+///
+/// Returns the authoritative Character operation outcome for the active owner.
+pub async fn get_operation_result(
+    State(state): State<WorkspaceState>,
+    Path(operation_id): Path<String>,
+) -> Result<Json<CharacterOperationResult>, NexusApiError> {
+    if operation_id.ends_with(":cancel") {
+        return Err(NexusApiError::NotFound(format!(
+            "Operation route '{operation_id}' not found"
+        )));
+    }
+    let uuid = parse_operation_id(&operation_id)?;
+    let creator_id = require_creator(&state)?;
+    let op_id = nexus_agent_host::HostOperationId(uuid);
+    let result = state
+        .actor_sessions()
+        .character_operation_result(&creator_id, &op_id)?;
+    Ok(Json(result))
 }
 
 /// `POST /v1/daemon/agent-host/operations/{operation_id}:cancel` — cancel in-flight operation.
@@ -775,19 +857,30 @@ pub async fn cancel_operation(
         .to_string();
 
     let uuid = parse_operation_id(&operation_id)?;
-    let host = get_host(&state)?;
 
     let op_id = nexus_agent_host::HostOperationId(uuid);
-    // P0: resolve the cancel's active Host operation to its indexed session
-    // and authorize the owner BEFORE cancelling; a foreign id is 404 with no
-    // Host effect. (P3 replaces this lookup with trusted operation records.)
-    let sessions = host.list_sessions().await.map_err(|e| map_host_error(&e))?;
-    let indexed_session = session_for_operation(&sessions, &op_id)
-        .map(|s| s.id.clone())
-        .or_else(|| state.actor_sessions().resolve_indexed_operation_session(&op_id));
-    if let Some(session_id) = indexed_session {
+    let creator_id = require_creator(&state)?;
+    let host = get_host(&state)?;
+
+    if state.actor_sessions().operation_owner(&op_id).is_some() {
+        state
+            .actor_sessions()
+            .request_operation_cancel(&creator_id, &op_id)?;
+        let session_id = state
+            .actor_sessions()
+            .operation_session_id(&op_id)
+            .or_else(|| state.actor_sessions().resolve_indexed_operation_session(&op_id))
+            .ok_or_else(|| NexusApiError::NotFound(format!("operation {operation_id}")))?;
         authorize_actor_session(&state, &session_id)?;
-        state.actor_sessions().clear_indexed_operation(&op_id);
+    } else {
+        let sessions = host.list_sessions().await.map_err(|e| map_host_error(&e))?;
+        let indexed_session = session_for_operation(&sessions, &op_id)
+            .map(|s| s.id.clone())
+            .or_else(|| state.actor_sessions().resolve_indexed_operation_session(&op_id));
+        if let Some(session_id) = indexed_session {
+            authorize_actor_session(&state, &session_id)?;
+            state.actor_sessions().clear_indexed_operation(&op_id);
+        }
     }
     host.cancel(op_id).await.map_err(|e| map_host_error(&e))?;
 
@@ -1180,7 +1273,7 @@ mod tests {
         let result = shutdown_session(State(state), Path("not-a-uuid".to_string())).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(err.status_code(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(err.error_code(), "invalid_input");
     }
 
@@ -1190,7 +1283,7 @@ mod tests {
         let result = shutdown_session(State(state), Path(String::new())).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(err.status_code(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(err.error_code(), "invalid_input");
     }
 
@@ -1200,7 +1293,7 @@ mod tests {
         let result = shutdown_session(State(state), Path("550e8400-e29b-41d4".to_string())).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(err.status_code(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     #[tokio::test]
@@ -1210,7 +1303,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().status_code(),
-            axum::http::StatusCode::BAD_REQUEST
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY
         );
     }
 
@@ -1229,14 +1322,12 @@ mod tests {
     #[tokio::test]
     async fn execute_operation_rejects_invalid_session_uuid() {
         let state = state_with_host().await;
-        let req = ExecuteOperationRequest::Prompt {
-            content: "hello".to_string(),
-        };
+        let req = ExecuteOperationRequest::Prompt { content: "hello".to_string(), remember: None };
         let result = execute_operation(State(state), Path("bad-uuid".to_string()), Json(req)).await;
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().status_code(),
-            axum::http::StatusCode::BAD_REQUEST
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY
         );
     }
 
@@ -1250,7 +1341,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().status_code(),
-            axum::http::StatusCode::BAD_REQUEST
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY
         );
     }
 
@@ -1278,7 +1369,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().status_code(),
-            axum::http::StatusCode::BAD_REQUEST
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY
         );
     }
 
@@ -2258,6 +2349,79 @@ mod tests {
         assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
+
+    fn rebind_host_event(
+        event: nexus_agent_host::capability::model::HostEvent,
+        session_id: nexus_agent_host::HostSessionId,
+        op_id: nexus_agent_host::HostOperationId,
+    ) -> nexus_agent_host::capability::model::HostEvent {
+        use nexus_agent_host::capability::model::{
+            HostEvent, OperationFailedEvent, OperationFinishedEvent, PlanUpdateEvent,
+            TextDeltaEvent, ToolCallEvent, ToolCallUpdateEvent,
+        };
+        match event {
+            HostEvent::MessageDelta(TextDeltaEvent { text, .. }) => {
+                HostEvent::MessageDelta(TextDeltaEvent {
+                    session_id,
+                    op_id,
+                    text,
+                })
+            }
+            HostEvent::ThoughtDelta(TextDeltaEvent { text, .. }) => {
+                HostEvent::ThoughtDelta(TextDeltaEvent {
+                    session_id,
+                    op_id,
+                    text,
+                })
+            }
+            HostEvent::OpFinished(OperationFinishedEvent { reason, .. }) => {
+                HostEvent::OpFinished(OperationFinishedEvent {
+                    session_id,
+                    op_id,
+                    reason,
+                })
+            }
+            HostEvent::OpFailed(OperationFailedEvent {
+                error_category,
+                error_message,
+                ..
+            }) => HostEvent::OpFailed(OperationFailedEvent {
+                session_id,
+                op_id,
+                error_category,
+                error_message,
+            }),
+            HostEvent::ToolCall(ToolCallEvent {
+                tool_call_id,
+                tool_name,
+                ..
+            }) => HostEvent::ToolCall(ToolCallEvent {
+                session_id,
+                op_id,
+                tool_call_id,
+                tool_name,
+            }),
+            HostEvent::ToolCallUpdate(ToolCallUpdateEvent {
+                tool_call_id,
+                content,
+                ..
+            }) => HostEvent::ToolCallUpdate(ToolCallUpdateEvent {
+                session_id,
+                op_id,
+                tool_call_id,
+                content,
+            }),
+            HostEvent::PlanUpdate(PlanUpdateEvent { content, .. }) => {
+                HostEvent::PlanUpdate(PlanUpdateEvent {
+                    session_id,
+                    op_id,
+                    content,
+                })
+            }
+            other => other,
+        }
+    }
+
     struct PromptHost {
         sessions: std::sync::Mutex<
             std::collections::HashMap<
@@ -2266,6 +2430,8 @@ mod tests {
             >,
         >,
         ops: std::sync::Mutex<Vec<nexus_agent_host::capability::model::HostOperation>>,
+        stream_scripts: std::sync::Mutex<std::collections::VecDeque<Vec<nexus_agent_host::capability::model::HostEvent>>>,
+        // When true, queued stream events get rebound to the exec session/op.
         execs: std::sync::atomic::AtomicU64,
         cancels: std::sync::atomic::AtomicU64,
         shutdowns: std::sync::atomic::AtomicU64,
@@ -2278,6 +2444,7 @@ mod tests {
             Arc::new(Self {
                 sessions: std::sync::Mutex::new(std::collections::HashMap::new()),
                 ops: std::sync::Mutex::new(Vec::new()),
+                stream_scripts: std::sync::Mutex::new(std::collections::VecDeque::new()),
                 execs: std::sync::atomic::AtomicU64::new(0),
                 cancels: std::sync::atomic::AtomicU64::new(0),
                 shutdowns: std::sync::atomic::AtomicU64::new(0),
@@ -2298,6 +2465,13 @@ mod tests {
                 },
                 other => panic!("expected prompt, got {other:?}"),
             }
+        }
+
+        fn queue_stream(&self, events: Vec<nexus_agent_host::capability::model::HostEvent>) {
+            self.stream_scripts
+                .lock()
+                .expect("stream_scripts")
+                .push_back(events);
         }
     }
 
@@ -2332,13 +2506,28 @@ mod tests {
 
         async fn exec(
             &self,
-            _session_id: nexus_agent_host::HostSessionId,
+            session_id: nexus_agent_host::HostSessionId,
             op: nexus_agent_host::capability::model::HostOperation,
         ) -> nexus_agent_host::HostResult<nexus_agent_host::capability::model::HostEventStream>
         {
             self.execs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            self.ops.lock().expect("ops").push(op);
-            Ok(Box::pin(futures_util::stream::empty()))
+            self.ops.lock().expect("ops").push(op.clone());
+            let script = self
+                .stream_scripts
+                .lock()
+                .expect("stream_scripts")
+                .pop_front()
+                .unwrap_or_default();
+            let rebound = match &op {
+                nexus_agent_host::capability::model::HostOperation::Prompt { op_id, .. } => {
+                    script
+                        .into_iter()
+                        .map(|event| rebind_host_event(event, session_id.clone(), op_id.clone()))
+                        .collect::<Vec<_>>()
+                }
+                _ => script,
+            };
+            Ok(Box::pin(futures_util::stream::iter(rebound.into_iter().map(Ok))))
         }
 
         async fn cancel(
@@ -2447,9 +2636,7 @@ mod tests {
         let result = execute_operation(
             State(state),
             Path(created.session_id.clone()),
-            Json(ExecuteOperationRequest::Prompt {
-                content: "hello".to_string(),
-            }),
+            Json(ExecuteOperationRequest::Prompt { content: "hello".to_string(), remember: None }),
         )
         .await
         .expect("legacy prompt");
@@ -2480,9 +2667,7 @@ mod tests {
         let _ = execute_operation(
             State(state),
             Path(created.session_id.clone()),
-            Json(ExecuteOperationRequest::Prompt {
-                content: "Act now.".to_string(),
-            }),
+            Json(ExecuteOperationRequest::Prompt { content: "Act now.".to_string(), remember: None }),
         )
         .await
         .expect("prompt");
@@ -2529,9 +2714,7 @@ mod tests {
         let err = execute_operation(
             State(state),
             Path(created.session_id.clone()),
-            Json(ExecuteOperationRequest::Prompt {
-                content: "Act now.".to_string(),
-            }),
+            Json(ExecuteOperationRequest::Prompt { content: "Act now.".to_string(), remember: None }),
         )
         .await
         .unwrap_err();
@@ -2561,9 +2744,7 @@ mod tests {
         let err = execute_operation(
             State(state),
             Path(created.session_id.clone()),
-            Json(ExecuteOperationRequest::Prompt {
-                content: "Act now.".to_string(),
-            }),
+            Json(ExecuteOperationRequest::Prompt { content: "Act now.".to_string(), remember: None }),
         )
         .await
         .unwrap_err();
@@ -2689,9 +2870,7 @@ mod tests {
         let err = execute_operation(
             State(state.clone()),
             Path(session_id),
-            Json(ExecuteOperationRequest::Prompt {
-                content: "do a thing".into(),
-            }),
+            Json(ExecuteOperationRequest::Prompt { content: "do a thing".into(), remember: None }),
         )
         .await
         .expect_err("retired execute must be stale");
@@ -2754,9 +2933,7 @@ mod tests {
         let started = execute_operation(
             State(state.clone()),
             Path(session_id.clone()),
-            Json(ExecuteOperationRequest::Prompt {
-                content: "do a thing".into(),
-            }),
+            Json(ExecuteOperationRequest::Prompt { content: "do a thing".into(), remember: None }),
         )
         .await
         .expect("start prompt");
@@ -2902,4 +3079,259 @@ mod tests {
         .expect("list ok");
         assert_eq!(listed.items.len(), 1, "foreign Character session filtered");
     }
+
+
+    async fn wait_for_terminal_operation(state: &WorkspaceState, operation_id: &str) {
+        use nexus_contracts::generated::daemon_api::agent_host::character_operation_result::CharacterOperationResultRunStatus;
+        let op = nexus_agent_host::HostOperationId(
+            uuid::Uuid::parse_str(operation_id).expect("op uuid"),
+        );
+        for _ in 0..100 {
+            if let Ok(result) = state
+                .actor_sessions()
+                .character_operation_result(
+                    "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    &op,
+                )
+            {
+                if !matches!(result.run_status, CharacterOperationResultRunStatus::Running) {
+                    return;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("operation {operation_id} did not reach terminal state");
+    }
+
+    fn capture_script(
+        session_id: &nexus_agent_host::HostSessionId,
+        op_id: &nexus_agent_host::HostOperationId,
+        text: &str,
+        reason: nexus_agent_host::capability::model::FinishReason,
+    ) -> Vec<nexus_agent_host::capability::model::HostEvent> {
+        use nexus_agent_host::capability::model::{
+            HostEvent, OperationFinishedEvent, TextDeltaEvent,
+        };
+        vec![
+            HostEvent::MessageDelta(TextDeltaEvent {
+                session_id: session_id.clone(),
+                op_id: op_id.clone(),
+                text: text.into(),
+            }),
+            HostEvent::OpFinished(OperationFinishedEvent {
+                session_id: session_id.clone(),
+                op_id: op_id.clone(),
+                reason,
+            }),
+        ]
+    }
+
+    /// remember:true on legacy/Creator sessions is rejected before exec.
+    #[tokio::test]
+    async fn remember_rejects_legacy_prompt_before_exec() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let created = create_session(
+            State(state.clone()),
+            Json(
+                serde_json::from_value(serde_json::json!({
+                    "provider_id": "prov",
+                    "cwd": "/tmp"
+                }))
+                .unwrap(),
+            ),
+        )
+        .await
+        .expect("legacy create");
+        let err = execute_operation(
+            State(state),
+            Path(created.session_id.clone()),
+            Json(ExecuteOperationRequest::Prompt {
+                content: "hello".into(),
+                remember: Some(true),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status_code(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(err.error_code(), "invalid_input");
+        assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    /// Character prompt with remember returns pending capture immediately.
+    #[tokio::test]
+    async fn character_remember_returns_pending_capture() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let (character_id, binding_id) = seed_owned_character(&state).await;
+        let created = create_session(
+            State(state.clone()),
+            Json(character_session_req(&character_id, "wld_worldA", &binding_id)),
+        )
+        .await
+        .expect("create");
+        host.queue_stream(vec![]);
+        let resp = execute_operation(
+            State(state.clone()),
+            Path(created.session_id.clone()),
+            Json(ExecuteOperationRequest::Prompt {
+                content: "Act now.".into(),
+                remember: Some(true),
+            }),
+        )
+        .await
+        .expect("prompt");
+        assert_eq!(resp.0.status, "started");
+        let capture = resp.0.capture.expect("capture");
+        assert_eq!(capture.status.to_string(), "pending");
+    }
+
+    /// Drain-finalized end_turn with remember persists capture candidate.
+    #[tokio::test]
+    async fn character_end_turn_capture_persists_pending_row() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let (character_id, binding_id) = seed_owned_character(&state).await;
+        let created = create_session(
+            State(state.clone()),
+            Json(character_session_req(&character_id, "wld_worldA", &binding_id)),
+        )
+        .await
+        .expect("create");
+        let sid = nexus_agent_host::HostSessionId::new();
+        let op_id = nexus_agent_host::HostOperationId::new();
+        host.queue_stream(capture_script(&sid, &op_id, "visible answer", nexus_agent_host::capability::model::FinishReason::EndTurn));
+        let resp = execute_operation(
+            State(state.clone()),
+            Path(created.session_id.clone()),
+            Json(ExecuteOperationRequest::Prompt {
+                content: "user prompt".into(),
+                remember: Some(true),
+            }),
+        )
+        .await
+        .expect("prompt");
+        // Wait for server-owned drain to finalize.
+        wait_for_terminal_operation(&state, &resp.0.operation_id).await;
+        let Json(outcome) = get_operation_result(
+            State(state.clone()),
+            Path(resp.0.operation_id.clone()),
+        )
+        .await
+        .expect("get outcome");
+        assert_eq!(outcome.run_status.to_string(), "succeeded");
+        assert_eq!(outcome.capture.status.to_string(), "captured");
+        assert!(outcome.capture.pending_id.is_some());
+        let operation_id = resp.0.operation_id.clone();
+        let pending_id = outcome.capture.pending_id.unwrap().to_string();
+        let row: (String, Option<String>) = sqlx::query_as(
+            "SELECT pending_id, source_operation_id FROM character_memory_pending_review WHERE pending_id = ?",
+        )
+        .bind(&pending_id)
+        .fetch_one(state.pool().unwrap())
+        .await
+        .expect("pending row");
+        assert_eq!(row.1.as_deref(), Some(operation_id.as_str()));
+    }
+
+    /// Cancel after terminal finalization returns actor_operation_finished.
+    #[tokio::test]
+    async fn cancel_after_terminal_returns_finished_conflict() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let (character_id, binding_id) = seed_owned_character(&state).await;
+        let created = create_session(
+            State(state.clone()),
+            Json(character_session_req(&character_id, "wld_worldA", &binding_id)),
+        )
+        .await
+        .expect("create");
+        host.queue_stream(vec![]);
+        let resp = execute_operation(
+            State(state.clone()),
+            Path(created.session_id.clone()),
+            Json(ExecuteOperationRequest::Prompt {
+                content: "q".into(),
+                remember: Some(false),
+            }),
+        )
+        .await
+        .expect("prompt");
+        wait_for_terminal_operation(&state, &resp.0.operation_id).await;
+        let err = cancel_operation(State(state), Path(format!("{}:cancel", resp.0.operation_id)))
+            .await
+            .unwrap_err();
+        assert_eq!(err.error_code(), "actor_operation_finished");
+        assert_eq!(host.cancels.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    /// Foreign owner cannot read operation outcome.
+    #[tokio::test]
+    async fn get_operation_outcome_hides_foreign_owner() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let (character_id, binding_id) = seed_owned_character(&state).await;
+        let created = create_session(
+            State(state.clone()),
+            Json(character_session_req(&character_id, "wld_worldA", &binding_id)),
+        )
+        .await
+        .expect("create");
+        host.queue_stream(vec![]);
+        let resp = execute_operation(
+            State(state.clone()),
+            Path(created.session_id.clone()),
+            Json(ExecuteOperationRequest::Prompt {
+                content: "q".into(),
+                remember: Some(false),
+            }),
+        )
+        .await
+        .expect("prompt");
+        wait_for_terminal_operation(&state, &resp.0.operation_id).await;
+        std::fs::write(
+            state.nexus_home().join("config.toml"),
+            "active_creator_id = \"ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n\n[active_workspace_slug_by_creator]\n\"ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\" = \"default\"\n",
+        )
+        .unwrap();
+        let err = get_operation_result(State(state), Path(resp.0.operation_id.clone()))
+            .await
+            .unwrap_err();
+        assert_eq!(err.error_code(), "not_found");
+    }
+
+    /// Nonterminal operation capacity is bounded at 128 before provider exec.
+    #[tokio::test]
+    async fn character_operation_capacity_refuses_before_exec() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let (character_id, binding_id) = seed_owned_character(&state).await;
+        let created = create_session(
+            State(state.clone()),
+            Json(character_session_req(&character_id, "wld_worldA", &binding_id)),
+        )
+        .await
+        .expect("create");
+        let ctx = state.actor_sessions().context_for(
+            &nexus_agent_host::HostSessionId(uuid::Uuid::parse_str(&created.session_id).unwrap()),
+        ).expect("ctx");
+        for _ in 0..128 {
+            let snapshot = CharacterOperationSnapshot {
+                owner_creator_id: "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                ctx: ctx.clone(),
+                session_id: nexus_agent_host::HostSessionId(uuid::Uuid::parse_str(&created.session_id).unwrap()),
+                operation_id: nexus_agent_host::HostOperationId::new(),
+                remember: false,
+                raw_prompt: "x".into(),
+            };
+            state.actor_sessions().reserve_character_operation(snapshot).expect("reserve");
+        }
+        let err = execute_operation(
+            State(state),
+            Path(created.session_id.clone()),
+            Json(ExecuteOperationRequest::Prompt {
+                content: "blocked".into(),
+                remember: Some(false),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.error_code(), "actor_operation_capacity");
+        assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
 }

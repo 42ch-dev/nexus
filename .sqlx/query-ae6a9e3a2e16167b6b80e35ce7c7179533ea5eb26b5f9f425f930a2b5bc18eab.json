@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT lifecycle_epoch as \"lifecycle_epoch!\" FROM characters WHERE character_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "lifecycle_epoch!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ae6a9e3a2e16167b6b80e35ce7c7179533ea5eb26b5f9f425f930a2b5bc18eab"
+}

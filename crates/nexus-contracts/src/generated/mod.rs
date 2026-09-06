@@ -58,6 +58,8 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("AgentHostListSessionsQuery", 1),
     ("AgentScanEntry", 1),
     ("CancelOperationResponse", 1),
+    ("CharacterOperationResult", 1),
+    ("CharacterRunCaptureOutcome", 1),
     ("CreateSessionRequest", 1),
     ("ExecuteOperationRequest", 1),
     ("OperationResponse", 1),

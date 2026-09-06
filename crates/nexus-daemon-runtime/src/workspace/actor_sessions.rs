@@ -3,7 +3,7 @@
 //! Indexes only Actor-mode sessions. Legacy creates never enter these maps.
 //! Concurrent creates for one exact key serialize on a per-key lock.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -14,6 +14,11 @@ use nexus_contracts::generated::daemon_api::agent_host::session_response::{
 };
 use sqlx::SqlitePool;
 use tokio::sync::{Mutex as AsyncMutex, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
+
+use nexus_contracts::generated::daemon_api::agent_host::character_operation_result::{
+    CharacterOperationResult, CharacterOperationResultRunStatus,
+    NexusCharacterRunCaptureOutcome, NexusCharacterRunCaptureOutcomeStatus,
+};
 
 use crate::actor_admission::AdmittedActorContext;
 use crate::actor_knowledge_view::AdmittedActor;
@@ -64,6 +69,60 @@ struct RetiredActorSession {
     event_id: Option<String>,
 }
 
+/// Internal phase for per-operation cancel/finalize ordering (§11.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OperationPhase {
+    Running,
+    CancelRequested,
+    Finalizing,
+    Terminal,
+}
+
+/// Immutable admission snapshot for one Character Host operation.
+#[derive(Debug, Clone)]
+pub struct CharacterOperationSnapshot {
+    pub owner_creator_id: String,
+    pub ctx: AdmittedActorContext,
+    pub session_id: HostSessionId,
+    pub operation_id: HostOperationId,
+    pub remember: bool,
+    pub raw_prompt: String,
+}
+
+struct CharacterOperationRecord {
+    owner_creator_id: String,
+    session_id: HostSessionId,
+    phase: OperationPhase,
+    outcome: CharacterOperationResult,
+    _seq: u64,
+}
+
+const MAX_NONTERMINAL_OPERATIONS: usize = 128;
+const MAX_TERMINAL_OPERATIONS: usize = 1024;
+
+fn running_outcome(snapshot: &CharacterOperationSnapshot) -> CharacterOperationResult {
+    let capture = if snapshot.remember {
+        NexusCharacterRunCaptureOutcome {
+            status: NexusCharacterRunCaptureOutcomeStatus::Pending,
+            pending_id: None,
+            code: None,
+        }
+    } else {
+        NexusCharacterRunCaptureOutcome {
+            status: NexusCharacterRunCaptureOutcomeStatus::Disabled,
+            pending_id: None,
+            code: None,
+        }
+    };
+    CharacterOperationResult {
+        operation_id: snapshot.operation_id.to_string(),
+        session_id: snapshot.session_id.to_string(),
+        run_status: CharacterOperationResultRunStatus::Running,
+        finish_reason: None,
+        capture,
+    }
+}
+
 struct RegistryMaps {
     by_key: HashMap<ActorSessionKey, HostSessionId>,
     by_session: HashMap<HostSessionId, IndexedActorSession>,
@@ -75,6 +134,9 @@ struct RegistryMaps {
     /// Reclaimable per-Character activity fences (durable §11.3). An entry
     /// with no live guard (`Arc::strong_count == 1`) is swept on admission.
     character_fences: HashMap<String, Arc<RwLock<()>>>,
+    character_operations: HashMap<HostOperationId, CharacterOperationRecord>,
+    terminal_fifo: VecDeque<HostOperationId>,
+    operation_seq: u64,
     closed: bool,
 }
 /// Test-only hook invoked after a session lock is reclaimed.
@@ -200,6 +262,9 @@ impl ActorSessionRegistry {
                 retired: HashMap::new(),
                 indexed_operations: HashMap::new(),
                 character_fences: HashMap::new(),
+                character_operations: HashMap::new(),
+                terminal_fifo: VecDeque::new(),
+                operation_seq: 0,
                 closed: false,
             })),
             #[cfg(test)]
@@ -326,6 +391,137 @@ impl ActorSessionRegistry {
         op_id: &HostOperationId,
     ) -> Option<HostSessionId> {
         self.maps().indexed_operations.get(op_id).cloned()
+    }
+
+
+    /// Reserve a Character operation outcome before Host exec (§11.6).
+    pub fn reserve_character_operation(
+        &self,
+        snapshot: CharacterOperationSnapshot,
+    ) -> Result<(), NexusApiError> {
+        let mut maps = self.maps();
+        Self::reject_if_closed(&maps)?;
+        let nonterminal = maps
+            .character_operations
+            .values()
+            .filter(|r| !matches!(r.phase, OperationPhase::Terminal))
+            .count();
+        if nonterminal >= MAX_NONTERMINAL_OPERATIONS {
+            return Err(crate::api::errors::actor_operation_capacity());
+        }
+        maps.operation_seq += 1;
+        let _seq = maps.operation_seq;
+        maps.character_operations.insert(
+            snapshot.operation_id.clone(),
+            CharacterOperationRecord {
+                owner_creator_id: snapshot.owner_creator_id.clone(),
+                session_id: snapshot.session_id.clone(),
+                phase: OperationPhase::Running,
+                outcome: running_outcome(&snapshot),
+                _seq,
+            },
+        );
+        Ok(())
+    }
+
+    /// Owner-scoped authoritative operation outcome.
+    pub fn character_operation_result(
+        &self,
+        owner_creator_id: &str,
+        operation_id: &HostOperationId,
+    ) -> Result<CharacterOperationResult, NexusApiError> {
+        let maps = self.maps();
+        let record = maps
+            .character_operations
+            .get(operation_id)
+            .ok_or_else(|| NexusApiError::NotFound(format!("operation {operation_id}")))?;
+        if record.owner_creator_id != owner_creator_id {
+            return Err(NexusApiError::NotFound(format!("operation {operation_id}")));
+        }
+        Ok(record.outcome.clone())
+    }
+
+    /// Remove an unstarted reservation after exec admission failure.
+    pub fn remove_operation_reservation(&self, operation_id: &HostOperationId) {
+        self.maps().character_operations.remove(operation_id);
+    }
+
+    /// Latch cancel intent before awaiting Host.cancel.
+    pub fn request_operation_cancel(
+        &self,
+        owner_creator_id: &str,
+        operation_id: &HostOperationId,
+    ) -> Result<(), NexusApiError> {
+        let mut maps = self.maps();
+        let record = maps
+            .character_operations
+            .get_mut(operation_id)
+            .ok_or_else(|| NexusApiError::NotFound(format!("operation {operation_id}")))?;
+        if record.owner_creator_id != owner_creator_id {
+            return Err(NexusApiError::NotFound(format!("operation {operation_id}")));
+        }
+        match record.phase {
+            OperationPhase::Running => {
+                record.phase = OperationPhase::CancelRequested;
+                Ok(())
+            }
+            OperationPhase::CancelRequested => Ok(()),
+            OperationPhase::Finalizing | OperationPhase::Terminal => {
+                Err(crate::api::errors::actor_operation_finished())
+            }
+        }
+    }
+
+    /// Move a draining operation into finalization and return whether cancel
+    /// intent was latched. The cancel read and phase transition are atomic
+    /// under the registry lock so no window can observe stale cancel state.
+    #[must_use]
+    pub fn begin_operation_finalizing(&self, operation_id: &HostOperationId) -> bool {
+        let mut maps = self.maps();
+        if let Some(record) = maps.character_operations.get_mut(operation_id) {
+            let cancel_requested = matches!(record.phase, OperationPhase::CancelRequested);
+            if matches!(record.phase, OperationPhase::Running | OperationPhase::CancelRequested) {
+                record.phase = OperationPhase::Finalizing;
+            }
+            cancel_requested
+        } else {
+            false
+        }
+    }
+
+    /// Commit terminal outcome and enforce terminal FIFO retention.
+    pub fn commit_operation_terminal(
+        &self,
+        operation_id: &HostOperationId,
+        outcome: CharacterOperationResult,
+    ) {
+        let mut maps = self.maps();
+        if let Some(record) = maps.character_operations.get_mut(operation_id) {
+            record.phase = OperationPhase::Terminal;
+            record.outcome = outcome;
+            maps.terminal_fifo.push_back(operation_id.clone());
+            while maps.terminal_fifo.len() > MAX_TERMINAL_OPERATIONS {
+                if let Some(evicted) = maps.terminal_fifo.pop_front() {
+                    maps.character_operations.remove(&evicted);
+                }
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn operation_owner(&self, operation_id: &HostOperationId) -> Option<String> {
+        self.maps()
+            .character_operations
+            .get(operation_id)
+            .map(|r| r.owner_creator_id.clone())
+    }
+
+    #[must_use]
+    pub fn operation_session_id(&self, operation_id: &HostOperationId) -> Option<HostSessionId> {
+        self.maps()
+            .character_operations
+            .get(operation_id)
+            .map(|r| r.session_id.clone())
     }
 
     /// Drop a registered indexed operation after cancel or terminal completion.
@@ -2197,5 +2393,71 @@ mod tests {
         drop(tmp);
     }
 
+
+
+    /// Terminal operation FIFO evicts the oldest committed outcome after 1024 rows.
+    #[test]
+    fn terminal_operation_fifo_evicts_oldest() {
+        let registry = ActorSessionRegistry::new();
+        let ctx = base_character_ctx();
+        let session_id = HostSessionId::new();
+        let mut first_op = None;
+        let mut last_op = None;
+        for i in 0..1025 {
+            let op_id = HostOperationId::new();
+            if i == 0 {
+                first_op = Some(op_id.clone());
+            }
+            if i == 1024 {
+                last_op = Some(op_id.clone());
+            }
+            let snapshot = CharacterOperationSnapshot {
+                owner_creator_id: DB_OWNER.to_string(),
+                ctx: ctx.clone(),
+                session_id: session_id.clone(),
+                operation_id: op_id.clone(),
+                remember: false,
+                raw_prompt: "x".into(),
+            };
+            registry.reserve_character_operation(snapshot).expect("reserve");
+            registry.commit_operation_terminal(
+                &op_id,
+                CharacterOperationResult {
+                    operation_id: op_id.to_string(),
+                    session_id: session_id.to_string(),
+                    run_status: CharacterOperationResultRunStatus::Succeeded,
+                    finish_reason: None,
+                    capture: NexusCharacterRunCaptureOutcome {
+                        status: NexusCharacterRunCaptureOutcomeStatus::Disabled,
+                        pending_id: None,
+                        code: None,
+                    },
+                },
+            );
+        }
+        let first = first_op.expect("first");
+        assert!(registry
+            .character_operation_result(DB_OWNER, &first)
+            .is_err());
+        let last = last_op.expect("last");
+        assert!(registry.character_operation_result(DB_OWNER, &last).is_ok());
+    }
+
+    /// Archive refuses while a Character prompt activity guard is still held.
+    #[tokio::test]
+    async fn archive_refuses_while_prompt_activity_outstanding() {
+        let (registry, pool, tmp, character_id, _binding) = seeded_character().await;
+        let guard = registry
+            .admit_character_activity(&pool, DB_OWNER, &character_id)
+            .await
+            .expect("admit prompt activity");
+        let busy = registry
+            .try_character_transition(&pool, DB_OWNER, &character_id)
+            .await
+            .expect_err("archive blocked during capture drain");
+        assert_eq!(busy.error_code(), "character_busy");
+        drop(guard);
+        drop(tmp);
+    }
 
 }

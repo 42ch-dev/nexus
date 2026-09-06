@@ -115,6 +115,10 @@ pub enum ActorContractConflict {
     KnowledgeReferenceStateInvalid,
     /// v1.185 P2: mutation targets a non-live or malformed writable knowledge row.
     KnowledgeEntryNotMutable,
+    /// v1.185 P3: run capture receipt provenance conflicts with an existing row.
+    RunCaptureProvenanceConflict,
+    /// v1.185 P3: run capture scope changed (epoch/binding/Character) before commit.
+    RunCaptureScopeChanged,
 }
 
 impl ActorContractConflict {
@@ -140,6 +144,8 @@ impl ActorContractConflict {
             Self::KnowledgeEntryInUse => "knowledge_entry_in_use",
             Self::KnowledgeReferenceStateInvalid => "knowledge_reference_state_invalid",
             Self::KnowledgeEntryNotMutable => "knowledge_entry_not_mutable",
+            Self::RunCaptureProvenanceConflict => "run_capture_provenance_conflict",
+            Self::RunCaptureScopeChanged => "run_capture_scope_changed",
         }
     }
 
@@ -195,6 +201,12 @@ impl ActorContractConflict {
             }
             Self::KnowledgeEntryNotMutable => {
                 "Knowledge entry is not live or its stored body cannot be edited"
+            }
+            Self::RunCaptureProvenanceConflict => {
+                "Run capture receipt provenance conflicts with an existing operation record"
+            }
+            Self::RunCaptureScopeChanged => {
+                "Run capture scope changed before the capture transaction could commit"
             }
         }
     }

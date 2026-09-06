@@ -10,6 +10,10 @@
   "properties": {
     "operation_id": { "type": "string" },
     "session_id": { "type": "string" },
-    "status": { "type": "string" }
+    "status": { "type": "string" },
+    "capture": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/agent-host/character-run-capture-outcome.schema.json",
+      "description": "Initial capture observation for Character prompts; omitted on legacy/Creator operations."
+    }
   }
 }

@@ -3,6 +3,7 @@
 use nexus_contracts::{
     ActorRef, ActorWorldBinding, ActorWorldBindingStatus, AddKnowledgeEntryRequest,
     Character, CharacterBindingDetail, CharacterDetail, CharacterLifecycleRequest,
+    CharacterOperationResult, CharacterPendingReviewInfo, CharacterRunCaptureOutcome,
     CharacterStatus, CreateCharacterRequest, CreateCharacterResponse, DeleteKnowledgeEntryQuery,
     KnowledgeEntryDetail, KnowledgeViewItem, ListCharactersResponse,
     UpdateCharacterBindingRequest, UpdateCharacterRequest, UpdateKnowledgeEntryRequest,
@@ -499,3 +500,54 @@ assert!(serde_json::from_value::<DeleteKnowledgeEntryQuery>(serde_json::json!({
     .is_err());
 }
 
+
+
+#[test]
+fn character_pending_review_info_requires_source_operation_id() {
+    let manual = serde_json::json!({
+        "pending_id": "pend_1",
+        "session_id": "sess_1",
+        "character_id": chr(),
+        "task_kind": "unknown",
+        "raw_digest": "digest",
+        "created_at": "2026-09-05T10:00:00Z",
+        "source_operation_id": null
+    });
+    let run = serde_json::json!({
+        "pending_id": "run_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "session_id": "sess_1",
+        "character_id": chr(),
+        "task_kind": "unknown",
+        "raw_digest": "digest",
+        "created_at": "2026-09-05T10:00:00Z",
+        "source_operation_id": "op_host_1"
+    });
+    let manual_parsed = serde_json::from_value::<CharacterPendingReviewInfo>(manual.clone())
+        .expect("manual pending");
+    assert!(manual_parsed.source_operation_id.is_none());
+    let run_parsed = serde_json::from_value::<CharacterPendingReviewInfo>(run.clone())
+        .expect("run pending");
+    assert!(run_parsed.source_operation_id.is_some());
+}
+
+#[test]
+fn character_operation_result_and_capture_outcome_roundtrip() {
+    let capture = serde_json::json!({
+        "status": "pending",
+        "pending_id": null,
+        "code": null
+    });
+    serde_json::from_value::<CharacterRunCaptureOutcome>(capture).expect("capture");
+    let result = serde_json::json!({
+        "operation_id": "op_1",
+        "session_id": "sess_1",
+        "run_status": "running",
+        "finish_reason": null,
+        "capture": {
+            "status": "disabled",
+            "pending_id": null,
+            "code": null
+        }
+    });
+    serde_json::from_value::<CharacterOperationResult>(result).expect("operation result");
+}

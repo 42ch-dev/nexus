@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO character_run_captures\n         (operation_id, session_id, character_id, binding_id, lifecycle_epoch, pending_id, captured_at)\n         VALUES (?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "d7760a46ce4ef0759dfc7bc0c93284d77c9f7c312dcd1e470f001040170cead1"
+}

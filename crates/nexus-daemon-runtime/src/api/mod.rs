@@ -68,7 +68,8 @@ fn agent_host_tier2_routes() -> Router<WorkspaceState> {
         )
         .route(
             "/v1/daemon/agent-host/operations/:operation_id",
-            post(handlers::agent_host::cancel_operation),
+            get(handlers::agent_host::get_operation_result)
+                .post(handlers::agent_host::cancel_operation),
         )
         .route(
             "/v1/daemon/agent-host/sessions/:session_id/events",

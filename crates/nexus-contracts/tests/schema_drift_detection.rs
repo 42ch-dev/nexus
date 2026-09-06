@@ -1256,6 +1256,11 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             CharacterLifecycleRequest
         ),
         entry!(
+            "schemas/daemon-api/characters/memory/character-pending-review-info.schema.json",
+            Strict,
+            CharacterPendingReviewInfo
+        ),
+        entry!(
             "schemas/daemon-api/characters/character-binding-detail.schema.json",
             Strict,
             CharacterBindingDetail
@@ -1331,6 +1336,16 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             "schemas/daemon-api/agent-host/agent-scan-entry.schema.json",
             Strict,
             AgentScanEntry
+        ),
+        entry!(
+            "schemas/daemon-api/agent-host/character-operation-result.schema.json",
+            Strict,
+            CharacterOperationResult
+        ),
+        entry!(
+            "schemas/daemon-api/agent-host/character-run-capture-outcome.schema.json",
+            Strict,
+            CharacterRunCaptureOutcome
         ),
         entry!(
             "schemas/daemon-api/agent-host/cancel-operation-response.schema.json",

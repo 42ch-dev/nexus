@@ -17,6 +17,7 @@
 **V1.182 P1 amendment:** §6.3B — hidden `nexus42 ops inspect [SESSION_ID] [--json]` operator group (BL-04): daemon-free read-only checkpoint projection with shared `resume_rules`; never triggers resume.
 **V1.185 P0 amendment:** §6.2I — `nexus42 creator character edit|archive|restore` identity lifecycle (explicit revision CAS; thin daemon-HTTP leaves).
 **V1.185 P1 amendment:** §6.2I — `nexus42 creator character binding show|edit` WorldSheet maintenance (binding revision CAS; thin daemon-HTTP leaves).
+**V1.185 P3 amendment:** §6.2I.3 — `nexus42 creator character run --remember` + owner outcome observation (thin daemon-HTTP leaves).
 **V1.185 P2 amendment:** §6.2I.2 — `nexus42 creator character knowledge show|edit|remove` authored-content maintenance (knowledge revision CAS; thin daemon-HTTP leaves; `--summary`/`--summary-file` on add/edit).
 
 ## 0. 文档定位
@@ -954,6 +955,43 @@ Rules:
 - **No CLI-side storage logic.** The CLI maps flags to generated request bodies
   and prints responses; CAS, referent inventory, and activity guards run only in
   daemon handlers / local-db.
+
+
+### 6.2I.3 V1.185 P3 amendment — `nexus42 creator character run` observation + `--remember` (Normative)
+
+Normative: [actor-product-model.md](./actor-product-model.md) §11.6.
+
+Thin daemon-HTTP leaves over generated Agent Host session/operation DTOs plus the
+owner-only `CharacterOperationResult` outcome surface. Run output observation
+uses the existing session SSE stream; capture observation uses
+`GET /v1/daemon/agent-host/operations/:operation_id` polled concurrently (100ms)
+with a ≤30s grace window after the first terminal observation. The CLI never
+reruns provider execution for capture or outcome recovery.
+
+| Flag / output | Purpose |
+| --- | --- |
+| `--remember` (default **false**) | Opt into explicit run-to-memory capture after a successful `end_turn`. Maps to `ExecuteOperationRequest.Prompt.remember`. |
+| `--json` | Emits `session`, `operation`, `result`, `events`, and when available `outcome` (`CharacterOperationResult`). Adds `output_observation: incomplete` and/or `capture_outcome_observation: unavailable` when grace expires without the peer observation. |
+| Human output | Prints `run_status` and `capture_status` / `capture_pending_id` / `capture_code` on separate lines from `result`. |
+
+Rules:
+
+- **Run vs capture exit codes.** Opt-out succeeded runs exit **0** when SSE
+  terminal observation is complete. `remember` + `captured` exits **0** only
+  when both the matching SSE `end_turn` terminal and the terminal GET outcome
+  are observed. Missed SSE terminal with a successful GET outcome exits
+  **nonzero** while preserving streamed `result` and `outcome`. `remember`
+  with terminal `skipped`/`failed` capture, incomplete/failed/cancelled runs,
+  or unavailable capture outcome after grace exits **nonzero** while preserving
+  streamed `result` text when received.
+- **Correlation.** SSE terminal handling ignores foreign `session_id` / `op_id`
+  pairs; only the launched operation's `MessageDelta` text contributes to
+  `result`.
+- **Outcome authority.** `outcome.capture` from the GET route is authoritative
+  for terminal capture status; initial `operation.capture` on POST remains
+  `pending`/`disabled` only.
+- **No CLI digest.** The CLI does not accept digests, `source_operation_id`, or
+  capture bodies; daemon drain + storage own capture content.
 
 ### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
 

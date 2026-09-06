@@ -9,7 +9,7 @@
 #![allow(clippy::unwrap_used)]
 
 use nexus_local_db::{
-    add_actor_world_binding, character_soul_narrative_fragment_stats,
+    add_actor_world_binding, capture_character_run, character_soul_narrative_fragment_stats,
     count_character_pending_reviews, create_character_fragment, create_character_pending_review,
     create_character_with_initial_binding, delete_character_fragment,
     delete_character_pending_review, delete_character_soul_meta, get_character_fragment,
@@ -17,6 +17,7 @@ use nexus_local_db::{
     list_character_fragments, list_character_pending_reviews, promote_character_fragment_to_shared,
     remove_binding, transition_character, upsert_character_soul_meta, upsert_character_soul_narrative,
     ActorContractConflict, CharacterStatus, CharacterPendingReviewRecord, CharacterSoulMeta,
+    RunCaptureInput,
     CharacterSoulNarrativeRecord, CreateBindingParams, CreateCharacterParams, LocalDbError,
     NewCharacterMemoryFragment,
 };
@@ -130,6 +131,7 @@ fn pending(
         task_kind: "brainstorm".to_string(),
         raw_digest: format!("digest for {pending_id}"),
         created_at: "2026-09-05T10:00:00Z".to_string(),
+        source_operation_id: None,
     }
 }
 
@@ -1785,3 +1787,292 @@ async fn retained_reads_fail_closed_for_foreign_or_missing_world() {
             .unwrap();
     }
 }
+
+fn run_capture_input<'a>(
+    op: &'a str,
+    session: &'a str,
+    character_id: &'a str,
+    binding_id: &'a str,
+    pending_id: &'a str,
+    digest: &'a str,
+    epoch: i64,
+) -> RunCaptureInput<'a> {
+    RunCaptureInput {
+        operation_id: op,
+        session_id: session,
+        character_id,
+        binding_id,
+        pending_id,
+        raw_digest: digest,
+        captured_at: "2026-09-06T12:00:00Z",
+        lifecycle_epoch: epoch,
+    }
+}
+
+async fn character_epoch(pool: &SqlitePool, character_id: &str) -> i64 {
+    sqlx::query_scalar!(
+        r#"SELECT lifecycle_epoch as "lifecycle_epoch!" FROM characters WHERE character_id = ?"#,
+        character_id
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn run_capture_two_operations_same_session() {
+    let (pool, _dir) = fresh_pool().await;
+    let s = seed(&pool).await;
+    let epoch = character_epoch(&pool, &s.char_a).await;
+    let session = "sess_shared_run";
+    let input_a = run_capture_input(
+        "op_run_a",
+        session,
+        &s.char_a,
+        &s.binding_a1,
+        "run_opruna000000000000000000000000",
+        "digest a",
+        epoch,
+    );
+    let input_b = run_capture_input(
+        "op_run_b",
+        session,
+        &s.char_a,
+        &s.binding_a1,
+        "run_oprunb000000000000000000000000",
+        "digest b",
+        epoch,
+    );
+    capture_character_run(&pool, OWNER, input_a).await.unwrap();
+    capture_character_run(&pool, OWNER, input_b).await.unwrap();
+    assert_eq!(table_count(&pool, "character_memory_pending_review").await, 2);
+    assert_eq!(table_count(&pool, "character_run_captures").await, 2);
+}
+
+#[tokio::test]
+async fn run_capture_replay_after_pending_consumed_returns_receipt_only() {
+    let (pool, _dir) = fresh_pool().await;
+    let s = seed(&pool).await;
+    let epoch = character_epoch(&pool, &s.char_a).await;
+    let input = run_capture_input(
+        "op_replay",
+        "sess_replay",
+        &s.char_a,
+        &s.binding_a1,
+        "run_opreplay0000000000000000000000",
+        "digest replay",
+        epoch,
+    );
+    let receipt = capture_character_run(&pool, OWNER, input).await.unwrap();
+    delete_character_pending_review(&pool, OWNER, &s.char_a, &receipt.pending_id)
+        .await
+        .unwrap();
+    assert_eq!(table_count(&pool, "character_memory_pending_review").await, 0);
+    let replay = capture_character_run(&pool, OWNER, input).await.unwrap();
+    assert_eq!(replay, receipt);
+    assert_eq!(table_count(&pool, "character_memory_pending_review").await, 0);
+}
+
+#[tokio::test]
+async fn run_capture_conflicting_receipt_tuple_rejects() {
+    let (pool, _dir) = fresh_pool().await;
+    let s = seed(&pool).await;
+    let epoch = character_epoch(&pool, &s.char_a).await;
+    let base = run_capture_input(
+        "op_conflict",
+        "sess_conflict",
+        &s.char_a,
+        &s.binding_a1,
+        "run_opconflict00000000000000000000",
+        "digest one",
+        epoch,
+    );
+    capture_character_run(&pool, OWNER, base).await.unwrap();
+    let conflict = RunCaptureInput {
+        operation_id: "op_conflict",
+        session_id: "sess_conflict",
+        character_id: &s.char_a,
+        binding_id: &s.binding_a1,
+        pending_id: "run_opconflict00000000000000000001",
+        raw_digest: "digest two",
+        captured_at: "2026-09-06T12:00:00Z",
+        lifecycle_epoch: epoch,
+    };
+    let err = capture_character_run(&pool, OWNER, conflict)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::RunCaptureProvenanceConflict
+        }
+    ));
+}
+
+#[tokio::test]
+async fn run_capture_stale_epoch_and_archived_character_denied() {
+    let (pool, _dir) = fresh_pool().await;
+    let s = seed(&pool).await;
+    let epoch = character_epoch(&pool, &s.char_a).await;
+    let input = run_capture_input(
+        "op_stale_epoch",
+        "sess_stale",
+        &s.char_a,
+        &s.binding_a1,
+        "run_opstale00000000000000000000000",
+        "digest stale",
+        epoch + 1,
+    );
+    let err = capture_character_run(&pool, OWNER, input).await.unwrap_err();
+    assert!(matches!(
+        err,
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::RunCaptureScopeChanged
+        }
+    ));
+
+    transition_character(
+        &pool,
+        OWNER,
+        &s.char_a,
+        0,
+        CharacterStatus::Archived,
+    )
+    .await
+    .unwrap();
+    let archived_input = run_capture_input(
+        "op_archived",
+        "sess_archived",
+        &s.char_a,
+        &s.binding_a1,
+        "run_oparchived00000000000000000000",
+        "digest archived",
+        epoch,
+    );
+    let err = capture_character_run(&pool, OWNER, archived_input)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::CharacterInactive
+        }
+    ));
+}
+
+#[tokio::test]
+async fn run_capture_rollback_leaves_no_orphan_on_pending_failure() {
+    let (pool, _dir) = fresh_pool().await;
+    let s = seed(&pool).await;
+    let epoch = character_epoch(&pool, &s.char_a).await;
+    let input = run_capture_input(
+        "op_orphan",
+        "sess_orphan",
+        &s.char_a,
+        &s.binding_a1,
+        "run_oporphan0000000000000000000000",
+        "digest orphan",
+        epoch,
+    );
+    capture_character_run(&pool, OWNER, input).await.unwrap();
+    let dup_pending = RunCaptureInput {
+        operation_id: "op_orphan2",
+        session_id: "sess_orphan2",
+        character_id: &s.char_a,
+        binding_id: &s.binding_a1,
+        pending_id: "run_oporphan0000000000000000000000",
+        raw_digest: "digest orphan2",
+        captured_at: "2026-09-06T12:00:00Z",
+        lifecycle_epoch: epoch,
+    };
+    let err = capture_character_run(&pool, OWNER, dup_pending).await.unwrap_err();
+    assert!(!matches!(
+        err,
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::RunCaptureProvenanceConflict
+        }
+    ));
+    assert_eq!(table_count(&pool, "character_run_captures").await, 1);
+    assert_eq!(table_count(&pool, "character_memory_pending_review").await, 1);
+}
+
+#[tokio::test]
+async fn migration_preserves_manual_pending_source_null() {
+    let (pool, _dir) = fresh_pool().await;
+    let s = seed(&pool).await;
+    create_character_pending_review(&pool, OWNER, &pending("pend_legacy", &s.char_a, None))
+        .await
+        .unwrap();
+    let source: Option<String> = sqlx::query_scalar!(
+        "SELECT source_operation_id FROM character_memory_pending_review WHERE pending_id = ?",
+        "pend_legacy"
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(source.is_none());
+}
+
+#[tokio::test]
+async fn pending_source_operation_id_enforces_receipt_foreign_key() {
+    let (pool, _dir) = fresh_pool().await;
+    let s = seed(&pool).await;
+
+    let fk_table: Option<String> = sqlx::query_scalar(
+        "SELECT \"table\" FROM pragma_foreign_key_list('character_memory_pending_review') \
+         WHERE \"from\" = 'source_operation_id' LIMIT 1",
+    )
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        fk_table.as_deref(),
+        Some("character_run_captures"),
+        "expected source_operation_id FK to character_run_captures"
+    );
+
+    let err = sqlx::query(
+        "INSERT INTO character_memory_pending_review \
+         (pending_id, session_id, character_id, task_kind, raw_digest, created_at, source_operation_id) \
+         VALUES ('pend_forged', 'sess_fk', ?, 'unknown', 'x', datetime('now'), 'op_nonexistent')",
+    )
+    .bind(&s.char_a)
+    .execute(&pool)
+    .await
+    .unwrap_err();
+    assert!(err.to_string().contains("FOREIGN KEY"), "{err}");
+
+    let epoch = character_epoch(&pool, &s.char_a).await;
+    let input = run_capture_input(
+        "op_fk_ok",
+        "sess_fk_ok",
+        &s.char_a,
+        &s.binding_a1,
+        "run_opfkok000000000000000000000000",
+        "digest fk ok",
+        epoch,
+    );
+    capture_character_run(&pool, OWNER, input).await.unwrap();
+
+    let source: Option<String> = sqlx::query_scalar!(
+        "SELECT source_operation_id FROM character_memory_pending_review WHERE pending_id = ?",
+        "run_opfkok000000000000000000000000"
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(source.as_deref(), Some("op_fk_ok"));
+
+    create_character_pending_review(&pool, OWNER, &pending("pend_manual_fk", &s.char_a, None))
+        .await
+        .unwrap();
+    let manual_source: Option<String> = sqlx::query_scalar!(
+        "SELECT source_operation_id FROM character_memory_pending_review WHERE pending_id = ?",
+        "pend_manual_fk"
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(manual_source.is_none());
+}
+

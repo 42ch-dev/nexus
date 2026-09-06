@@ -54,6 +54,8 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   AgentHostListSessionsQuery: 1,
   AgentScanEntry: 1,
   CancelOperationResponse: 1,
+  CharacterOperationResult: 1,
+  CharacterRunCaptureOutcome: 1,
   CreateSessionRequest: 1,
   ExecuteOperationRequest: 1,
   OperationResponse: 1,

@@ -13,7 +13,11 @@
       "additionalProperties": false,
       "properties": {
         "kind": { "type": "string", "enum": ["prompt"] },
-        "content": { "type": "string" }
+        "content": { "type": "string" },
+        "remember": {
+          "type": "boolean",
+          "description": "When true on an admitted stored Character session, opt into explicit run capture after a successful end_turn. Absent or false performs no capture."
+        }
       }
     },
     {
