@@ -678,7 +678,9 @@ fn character_routes() -> Router<WorkspaceState> {
         )
         .route(
             "/v1/daemon/characters/:character_id/bindings/:binding_id",
-            delete(handlers::characters::remove_binding),
+            get(handlers::characters::get_binding)
+                .patch(handlers::characters::patch_binding)
+                .delete(handlers::characters::remove_binding),
         )
         .route(
             "/v1/daemon/characters/:character_id/knowledge",

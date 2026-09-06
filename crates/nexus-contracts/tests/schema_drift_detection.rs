@@ -1255,6 +1255,16 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             CharacterLifecycleRequest
         ),
+        entry!(
+            "schemas/daemon-api/characters/character-binding-detail.schema.json",
+            Strict,
+            CharacterBindingDetail
+        ),
+        entry!(
+            "schemas/daemon-api/characters/update-character-binding-request.schema.json",
+            Strict,
+            UpdateCharacterBindingRequest
+        ),
         // v1.184 P1 Task 3 / fix1 — Actor KnowledgeView contracts.
         entry!(
             "schemas/domain/knowledge-owner-ref.schema.json",

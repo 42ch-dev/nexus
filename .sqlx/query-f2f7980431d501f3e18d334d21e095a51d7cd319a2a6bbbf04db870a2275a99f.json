@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT EXISTS(\n            SELECT 1 FROM kb_key_blocks\n            WHERE key_block_id = ?\n              AND world_id = ?\n              AND owner_kind = 'world'\n              AND block_type = 'character'\n              AND status NOT IN ('deleted', 'merged', 'deprecated')\n              AND creator_only = 0\n         ) as \"ok!: i64\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "ok!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f2f7980431d501f3e18d334d21e095a51d7cd319a2a6bbbf04db870a2275a99f"
+}

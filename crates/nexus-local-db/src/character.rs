@@ -65,7 +65,7 @@ impl CharacterStatus {
 
 const MAX_EXPECTED_REVISION: i64 = 9_223_372_036_854_775_806;
 
-fn check_expected_revision(expected_revision: i64) -> Result<(), LocalDbError> {
+pub(crate) fn check_expected_revision(expected_revision: i64) -> Result<(), LocalDbError> {
     if !(0..=MAX_EXPECTED_REVISION).contains(&expected_revision) {
         return Err(LocalDbError::ValidationError(format!(
             "expected_revision must be within 0..={MAX_EXPECTED_REVISION}"
@@ -175,27 +175,7 @@ pub(crate) fn validate_persona_json(raw: &str) -> Result<String, LocalDbError> {
     Ok(serialized)
 }
 
-pub(crate) async fn require_owned_world(
-    tx: &mut Transaction<'_, Sqlite>,
-    owner_creator_id: &str,
-    world_id: &str,
-) -> Result<(), LocalDbError> {
-    let owner = sqlx::query_scalar!(
-        r#"SELECT owner_creator_id as "owner_creator_id!" FROM narrative_worlds WHERE world_id = ?"#,
-        world_id
-    )
-    .fetch_optional(&mut **tx)
-    .await?;
-    match owner {
-        Some(stored) if stored == owner_creator_id => Ok(()),
-        Some(_) | None => Err(LocalDbError::ActorNotFound {
-            resource: "world",
-            id: world_id.to_string(),
-        }),
-    }
-}
-
-/// Pool variant of [`require_owned_world`] for retained-data read paths.
+/// Owned World validation for retained-data read paths.
 ///
 /// The World must exist and be owned by `owner_creator_id`; no status
 /// requirement applies (retained reads tolerate an archived World).
@@ -407,7 +387,7 @@ async fn create_in_tx(
     image_uri: Option<&str>,
     now: &str,
 ) -> Result<CreateCharacterResult, LocalDbError> {
-    require_owned_world(tx, params.owner_creator_id, params.world_id).await?;
+    require_owned_active_world(tx, params.owner_creator_id, params.world_id).await?;
     validate_world_sheet_tx(tx, params.world_id, params.world_sheet_entry_id).await?;
 
     let owner_creator_id = params.owner_creator_id;

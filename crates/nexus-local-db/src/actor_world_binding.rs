@@ -5,8 +5,9 @@ use uuid::Uuid;
 
 use crate::begin_immediate;
 use crate::character::{
-    map_actor_constraint, require_active_owned_character_tx, require_owned_active_world,
-    require_owned_character_pool, require_owned_world,
+    check_expected_revision, map_actor_constraint, require_active_owned_character_tx,
+    require_owned_active_world, require_owned_character_pool,
+    require_owned_world_pool, FieldPatch,
 };
 use crate::error::{ActorContractConflict, LocalDbError};
 
@@ -18,6 +19,7 @@ pub struct ActorWorldBindingRecord {
     pub world_id: String,
     pub status: String,
     pub world_sheet_entry_id: Option<String>,
+    pub revision: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -43,6 +45,7 @@ const fn record_from_query(
     world_id: String,
     status: String,
     world_sheet_entry_id: Option<String>,
+    revision: i64,
     created_at: String,
     updated_at: String,
 ) -> ActorWorldBindingRecord {
@@ -52,6 +55,7 @@ const fn record_from_query(
         world_id,
         status,
         world_sheet_entry_id,
+        revision,
         created_at,
         updated_at,
     }
@@ -66,17 +70,24 @@ pub(crate) async fn validate_world_sheet_tx(
         return Ok(());
     };
     if sheet_id.len() > 128 {
-        return Err(LocalDbError::ValidationError(
-            "world_sheet_entry_id must be at most 128 bytes".into(),
-        ));
+        return Err(LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::InvalidWorldSheet,
+        });
+    }
+    if !sheet_id.starts_with("kb_") {
+        return Err(LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::InvalidWorldSheet,
+        });
     }
     let ok = sqlx::query_scalar!(
         r#"SELECT EXISTS(
             SELECT 1 FROM kb_key_blocks
             WHERE key_block_id = ?
               AND world_id = ?
+              AND owner_kind = 'world'
               AND block_type = 'character'
-              AND status != 'deleted'
+              AND status NOT IN ('deleted', 'merged', 'deprecated')
+              AND creator_only = 0
          ) as "ok!: i64""#,
         sheet_id,
         world_id
@@ -133,6 +144,7 @@ async fn load_binding_tx(
                   world_id as "world_id!",
                   status as "status!",
                   world_sheet_entry_id,
+                  revision as "revision!",
                   created_at as "created_at!",
                   updated_at as "updated_at!"
            FROM actor_world_bindings WHERE binding_id = ?"#,
@@ -147,6 +159,7 @@ async fn load_binding_tx(
             r.world_id,
             r.status,
             r.world_sheet_entry_id,
+            r.revision,
             r.created_at,
             r.updated_at,
         )
@@ -212,6 +225,7 @@ async fn load_binding_pool(
                   world_id as "world_id!",
                   status as "status!",
                   world_sheet_entry_id,
+                  revision as "revision!",
                   created_at as "created_at!",
                   updated_at as "updated_at!"
            FROM actor_world_bindings WHERE binding_id = ?"#,
@@ -226,6 +240,7 @@ async fn load_binding_pool(
             r.world_id,
             r.status,
             r.world_sheet_entry_id,
+            r.revision,
             r.created_at,
             r.updated_at,
         )
@@ -279,7 +294,7 @@ pub async fn add_actor_world_binding(
     let result = async {
         require_active_owned_character_tx(&mut tx, params.owner_creator_id, params.character_id)
             .await?;
-        require_owned_world(&mut tx, params.owner_creator_id, params.world_id).await?;
+        require_owned_active_world(&mut tx, params.owner_creator_id, params.world_id).await?;
         insert_binding_tx(&mut tx, params, &now).await
     }
     .await;
@@ -328,6 +343,7 @@ pub async fn list_bindings_for_character(
                   world_id as "world_id!",
                   status as "status!",
                   world_sheet_entry_id,
+                  revision as "revision!",
                   created_at as "created_at!",
                   updated_at as "updated_at!"
            FROM actor_world_bindings
@@ -349,6 +365,7 @@ pub async fn list_bindings_for_character(
                 r.world_id,
                 r.status,
                 r.world_sheet_entry_id,
+                r.revision,
                 r.created_at,
                 r.updated_at,
             )
@@ -374,6 +391,155 @@ pub async fn count_bindings_for_world_tx(
     .fetch_one(&mut **tx)
     .await?;
     Ok(count)
+}
+
+fn binding_revision_conflict() -> LocalDbError {
+    LocalDbError::ActorContractConflict {
+        code: ActorContractConflict::BindingRevisionConflict,
+    }
+}
+
+fn resolved_world_sheet_patch(
+    current: &Option<String>,
+    patch: FieldPatch<&str>,
+) -> Option<String> {
+    match patch {
+        FieldPatch::Keep => current.clone(),
+        FieldPatch::Clear => None,
+        FieldPatch::Set(id) => Some(id.to_string()),
+    }
+}
+
+fn binding_sheet_patch_is_no_op(
+    current: &Option<String>,
+    patch: FieldPatch<&str>,
+) -> bool {
+    resolved_world_sheet_patch(current, patch) == *current
+}
+
+/// Owner-scoped binding detail with path tuple validation.
+///
+/// Retained reads tolerate archived Character/World status; missing, foreign,
+/// or tuple-mismatched bindings are indistinguishable (`None`).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` on database failure.
+pub async fn get_actor_world_binding(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+    character_id: &str,
+    binding_id: &str,
+) -> Result<Option<ActorWorldBindingRecord>, LocalDbError> {
+    let owned = sqlx::query_scalar!(
+        r#"SELECT owner_creator_id as "owner_creator_id!" FROM characters WHERE character_id = ?"#,
+        character_id
+    )
+    .fetch_optional(pool)
+    .await?;
+    if !matches!(owned.as_deref(), Some(stored) if stored == owner_creator_id) {
+        return Ok(None);
+    }
+    let binding = load_binding_pool(pool, binding_id).await?;
+    let Some(binding) = binding.filter(|b| b.character_id == character_id) else {
+        return Ok(None);
+    };
+    match require_owned_world_pool(pool, owner_creator_id, &binding.world_id).await {
+        Ok(()) => Ok(Some(binding)),
+        Err(LocalDbError::ActorNotFound { .. }) => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+/// Patch the optional WorldSheet link on an owned active binding.
+///
+/// Only `world_sheet_entry_id` is mutable. Null clears; omission (`Keep`) retains;
+/// material changes bump binding revision once inside `BEGIN IMMEDIATE`.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` on ownership, activity, CAS, or WorldSheet validation failure.
+pub async fn update_actor_world_binding(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+    character_id: &str,
+    binding_id: &str,
+    expected_revision: i64,
+    world_sheet_entry_id: FieldPatch<&str>,
+) -> Result<ActorWorldBindingRecord, LocalDbError> {
+    check_expected_revision(expected_revision)?;
+    let mut tx = begin_immediate(pool).await?;
+    let result = update_actor_world_binding_tx(
+        &mut tx,
+        owner_creator_id,
+        character_id,
+        binding_id,
+        expected_revision,
+        world_sheet_entry_id,
+    )
+    .await;
+    match result {
+        Ok(row) => {
+            tx.commit().await?;
+            Ok(row)
+        }
+        Err(err) => {
+            let _ = tx.rollback().await;
+            Err(err)
+        }
+    }
+}
+
+async fn update_actor_world_binding_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    owner_creator_id: &str,
+    character_id: &str,
+    binding_id: &str,
+    expected_revision: i64,
+    world_sheet_entry_id: FieldPatch<&str>,
+) -> Result<ActorWorldBindingRecord, LocalDbError> {
+    require_active_owned_character_tx(tx, owner_creator_id, character_id).await?;
+    let binding = require_active_character_binding_tx(tx, character_id, binding_id).await?;
+    require_owned_active_world(tx, owner_creator_id, &binding.world_id).await?;
+
+    if binding.revision != expected_revision {
+        return Err(binding_revision_conflict());
+    }
+    if binding_sheet_patch_is_no_op(&binding.world_sheet_entry_id, world_sheet_entry_id) {
+        return Ok(binding);
+    }
+
+    let new_sheet =
+        resolved_world_sheet_patch(&binding.world_sheet_entry_id, world_sheet_entry_id);
+    validate_world_sheet_tx(tx, &binding.world_id, new_sheet.as_deref()).await?;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let new_revision = expected_revision + 1;
+    let updated = map_actor_constraint(
+        sqlx::query!(
+            r#"UPDATE actor_world_bindings
+               SET world_sheet_entry_id = ?, updated_at = ?, revision = ?
+               WHERE binding_id = ? AND character_id = ? AND status = 'active' AND revision = ?"#,
+            new_sheet,
+            now,
+            new_revision,
+            binding_id,
+            character_id,
+            expected_revision
+        )
+        .execute(&mut **tx)
+        .await,
+    )?
+    .rows_affected();
+    if updated == 0 {
+        return Err(binding_revision_conflict());
+    }
+    load_binding_tx(tx, binding_id)
+        .await?
+        .ok_or_else(|| LocalDbError::ActorNotFound {
+            resource: "actor_world_binding",
+            id: binding_id.to_string(),
+        })
 }
 
 /// Authoritative binding removal. Last active binding is a zero-mutation 409.

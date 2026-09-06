@@ -60,6 +60,9 @@ function matches(schema, data, cache) {
     return schema.enum.includes(data);
   }
   const types = Array.isArray(schema.type) ? schema.type : schema.type ? [schema.type] : [];
+  if (data === null) {
+    return types.includes('null');
+  }
   if (types.includes('object')) {
     if (data === null || typeof data !== 'object' || Array.isArray(data)) {
       return false;
@@ -151,6 +154,8 @@ function main() {
   const character = compile('schemas/domain/character.schema.json', cache);
   const binding = compile('schemas/domain/actor-world-binding.schema.json', cache);
   const createReq = compile('schemas/daemon-api/characters/create-character-request.schema.json', cache);
+  const bindingDetail = compile('schemas/daemon-api/characters/character-binding-detail.schema.json', cache);
+  const updateBindingReq = compile('schemas/daemon-api/characters/update-character-binding-request.schema.json', cache);
   const detail = compile('schemas/daemon-api/characters/character-detail.schema.json', cache);
   const createRes = compile('schemas/daemon-api/characters/create-character-response.schema.json', cache);
   const listRes = compile('schemas/daemon-api/characters/list-characters-response.schema.json', cache);
@@ -171,6 +176,7 @@ function main() {
     display_name: 'Ada',
     status: 'active',
     persona: {},
+    revision: 0,
     created_at: TS,
     updated_at: TS,
   };
@@ -192,6 +198,7 @@ function main() {
     character_id: CHR,
     world_id: WLD,
     status: 'active',
+    revision: 0,
     created_at: TS,
     updated_at: TS,
   };
@@ -221,6 +228,11 @@ function main() {
     'create response leading whitespace',
   );
   assertAccept(listRes, { items: [validCharacter], pagination }, 'list response');
+  assertAccept(bindingDetail, { binding: validBinding }, 'binding detail');
+  assertAccept(updateBindingReq, { expected_revision: 0, world_sheet_entry_id: `kb_${HEX32}` }, 'update binding patch');
+  assertAccept(updateBindingReq, { expected_revision: 0, world_sheet_entry_id: null }, 'update binding null clear');
+  assertReject(updateBindingReq, { expected_revision: 0, extra: true }, 'update binding unknown member');
+  assertReject(updateBindingReq, { expected_revision: 0, world_sheet_entry_id: 'x'.repeat(129) }, 'update binding sheet too long');
   assertReject(
     listRes,
     { items: [{ ...validCharacter, display_name: 'Ada ' }], pagination },

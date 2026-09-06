@@ -34,7 +34,9 @@ use nexus_contracts::daemon_api::characters::tom::record_character_tom_request::
 use nexus_contracts::daemon_api::characters::tom::record_character_tom_response::RecordCharacterTomResponse;
 use nexus_contracts::daemon_api::characters::{
     add_character_binding_request::AddCharacterBindingRequest,
-    add_character_binding_response::AddCharacterBindingResponse, character_detail::CharacterDetail,
+    add_character_binding_response::AddCharacterBindingResponse,
+    character_binding_detail::CharacterBindingDetail,
+    character_detail::CharacterDetail,
     character_lifecycle_request::CharacterLifecycleRequest,
     create_character_request::CreateCharacterRequest,
     create_character_response::CreateCharacterResponse,
@@ -191,6 +193,30 @@ pub enum BindingCommand {
         limit: Option<i64>,
         #[arg(long)]
         cursor: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Show one binding detail
+    Show {
+        #[arg(long)]
+        character_id: String,
+        #[arg(long)]
+        binding_id: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Patch a binding WorldSheet link
+    Edit {
+        #[arg(long)]
+        character_id: String,
+        #[arg(long)]
+        binding_id: String,
+        #[arg(long)]
+        expected_revision: u64,
+        #[arg(long)]
+        world_sheet_entry_id: Option<String>,
+        #[arg(long, default_value_t = false)]
+        clear_world_sheet: bool,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -474,6 +500,28 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                 cursor,
                 json,
             } => list_bindings(&client, &character_id, limit, cursor, json).await,
+            BindingCommand::Show {
+                character_id,
+                binding_id,
+                json,
+            } => show_binding(&client, &character_id, &binding_id, json).await,
+            BindingCommand::Edit {
+                character_id,
+                binding_id,
+                expected_revision,
+                world_sheet_entry_id,
+                clear_world_sheet,
+                json,
+            } => edit_binding(
+                &client,
+                &character_id,
+                &binding_id,
+                expected_revision,
+                world_sheet_entry_id,
+                clear_world_sheet,
+                json,
+            )
+            .await,
             BindingCommand::Remove {
                 character_id,
                 binding_id,
@@ -956,6 +1004,74 @@ async fn restore_character(
     print_character_detail(&resp, json)
 }
 
+
+fn print_binding_detail(resp: &CharacterBindingDetail, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(resp)?);
+    } else {
+        let b = &resp.binding;
+        println!(
+            "{}  {}  rev={}  sheet={}",
+            *b.binding_id,
+            *b.world_id,
+            b.revision,
+            b.world_sheet_entry_id
+                .as_ref()
+                .map(|id| id.as_str())
+                .unwrap_or("-")
+        );
+    }
+    Ok(())
+}
+
+async fn show_binding(
+    client: &DaemonClient,
+    character_id: &str,
+    binding_id: &str,
+    json: bool,
+) -> Result<()> {
+    let resp: CharacterBindingDetail = client
+        .get(&format!(
+            "/v1/daemon/characters/{character_id}/bindings/{binding_id}"
+        ))
+        .await?;
+    print_binding_detail(&resp, json)
+}
+
+async fn edit_binding(
+    client: &DaemonClient,
+    character_id: &str,
+    binding_id: &str,
+    expected_revision: u64,
+    world_sheet_entry_id: Option<String>,
+    clear_world_sheet: bool,
+    json: bool,
+) -> Result<()> {
+    if clear_world_sheet && world_sheet_entry_id.is_some() {
+        return Err(CliError::Other(
+            "use either --world-sheet-entry-id or --clear-world-sheet, not both".into(),
+        ));
+    }
+    if !clear_world_sheet && world_sheet_entry_id.is_none() {
+        return Err(CliError::Other(
+            "edit requires --world-sheet-entry-id or --clear-world-sheet".into(),
+        ));
+    }
+    let mut body = serde_json::json!({ "expected_revision": expected_revision });
+    if clear_world_sheet {
+        body["world_sheet_entry_id"] = serde_json::Value::Null;
+    } else if let Some(id) = world_sheet_entry_id {
+        body["world_sheet_entry_id"] = serde_json::Value::String(id);
+    }
+    let resp: CharacterBindingDetail = client
+        .patch(
+            &format!("/v1/daemon/characters/{character_id}/bindings/{binding_id}"),
+            &body,
+        )
+        .await?;
+    print_binding_detail(&resp, json)
+}
+
 async fn add_binding(
     client: &DaemonClient,
     character_id: &str,
@@ -1034,8 +1150,6 @@ async fn remove_binding(
         .await?;
     if json {
         println!("{{}}");
-    } else {
-        println!("Binding {binding_id} removed.");
     }
     Ok(())
 }

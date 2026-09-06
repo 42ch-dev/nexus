@@ -101,6 +101,8 @@ pub enum ActorContractConflict {
     CharacterInactive,
     /// v1.185 P0: `expected_revision` does not match stored Character revision.
     CharacterRevisionConflict,
+    /// v1.185 P1: `expected_revision` does not match stored binding revision.
+    BindingRevisionConflict,
     /// v1.185 P0: restore lacks a retained active binding into an owned active World.
     CharacterRestoreRequiresActiveBinding,
 }
@@ -119,6 +121,7 @@ impl ActorContractConflict {
             Self::CharacterFragmentAlreadyShared => "character_fragment_already_shared",
             Self::CharacterInactive => "character_inactive",
             Self::CharacterRevisionConflict => "character_revision_conflict",
+            Self::BindingRevisionConflict => "binding_revision_conflict",
             Self::CharacterRestoreRequiresActiveBinding => {
                 "character_restore_requires_active_binding"
             }
@@ -156,6 +159,9 @@ impl ActorContractConflict {
             }
             Self::CharacterRevisionConflict => {
                 "Character revision no longer matches; re-read and retry with the current revision"
+            }
+            Self::BindingRevisionConflict => {
+                "Binding revision no longer matches; re-read and retry with the current revision"
             }
             Self::CharacterRestoreRequiresActiveBinding => {
                 "Restore requires at least one retained active binding into an owned active World"

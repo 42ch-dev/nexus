@@ -19,6 +19,9 @@ use nexus_contracts::daemon_api::characters::{
     add_character_binding_response::{
         AddCharacterBindingResponse, NexusActorWorldBinding as AddedBindingWire,
     },
+    character_binding_detail::{
+        CharacterBindingDetail, NexusActorWorldBinding as DetailBindingWire,
+    },
     character_detail::{CharacterDetail, NexusCharacter as DetailCharacterWire},
     character_lifecycle_request::CharacterLifecycleRequest,
     create_character_request::CreateCharacterRequest,
@@ -35,6 +38,7 @@ use nexus_contracts::daemon_api::characters::{
     list_characters_response::{
         ListCharactersResponse, NexusCharacter as ListedCharacterWire, NexusPaginationInfo,
     },
+    update_character_binding_request::UpdateCharacterBindingRequest,
     update_character_request::UpdateCharacterRequest,
 };
 use nexus_local_db::{
@@ -123,6 +127,7 @@ fn binding_from_record(
             .character_id(record.character_id.as_str())
             .world_id(record.world_id.as_str())
             .status(record.status.as_str())
+            .revision(record.revision)
             .world_sheet_entry_id(parse_optional(record.world_sheet_entry_id.as_deref())?)
             .created_at(parse_rfc3339(&record.created_at)?)
             .updated_at(parse_rfc3339(&record.updated_at)?)
@@ -248,6 +253,42 @@ fn build_character_patch<'a>(
 
 fn character_patch_is_empty(patch: &CharacterPatch<'_>) -> bool {
     patch.is_empty()
+}
+
+fn binding_detail_from_record(
+    record: &ActorWorldBindingRecord,
+) -> Result<CharacterBindingDetail, NexusApiError> {
+    finish_builder(
+        CharacterBindingDetail::builder()
+            .binding(map_wire::<DetailBindingWire>(binding_from_record(record)?)?)
+            .try_into(),
+    )
+}
+
+fn binding_patch_is_empty(raw: &serde_json::Map<String, serde_json::Value>) -> bool {
+    !raw.contains_key("world_sheet_entry_id")
+}
+
+fn build_binding_sheet_patch<'a>(
+    raw: &'a serde_json::Map<String, serde_json::Value>,
+    req: &'a UpdateCharacterBindingRequest,
+) -> Result<FieldPatch<&'a str>, NexusApiError> {
+    match raw.get("world_sheet_entry_id") {
+        None => Err(NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: "patch must include at least one mutable field".into(),
+        }),
+        Some(serde_json::Value::Null) => Ok(FieldPatch::Clear),
+        Some(_) => Ok(FieldPatch::Set(
+            req.world_sheet_entry_id
+                .as_ref()
+                .ok_or_else(|| NexusApiError::BadRequest {
+                    code: "invalid_input".into(),
+                    message: "world_sheet_entry_id must be a non-null string when present".into(),
+                })?
+                .as_str(),
+        )),
+    }
 }
 
 /// Material lifecycle transition ordering (durable §11.3.2–§11.3.3):
@@ -456,6 +497,61 @@ pub async fn list_bindings(
     )?))
 }
 
+/// `GET /v1/daemon/characters/{character_id}/bindings/{binding_id}`
+pub async fn get_binding(
+    State(state): State<WorkspaceState>,
+    Path((character_id, binding_id)): Path<(String, String)>,
+) -> Result<Json<CharacterBindingDetail>, NexusApiError> {
+    let owner = require_creator(&state)?;
+    let row = nexus_local_db::get_actor_world_binding(
+        state.pool_or_uninit()?,
+        &owner,
+        &character_id,
+        &binding_id,
+    )
+    .await?
+    .ok_or_else(|| NexusApiError::NotFound(format!("binding {binding_id}")))?;
+    Ok(Json(binding_detail_from_record(&row)?))
+}
+
+/// `PATCH /v1/daemon/characters/{character_id}/bindings/{binding_id}`
+pub async fn patch_binding(
+    State(state): State<WorkspaceState>,
+    Path((character_id, binding_id)): Path<(String, String)>,
+    body: Bytes,
+) -> Result<Json<CharacterBindingDetail>, NexusApiError> {
+    let raw = parse_request_object(&body)?;
+    let req: UpdateCharacterBindingRequest =
+        serde_json::from_value(serde_json::Value::Object(raw.clone())).map_err(|err| {
+            NexusApiError::BadRequest {
+                code: "invalid_input".into(),
+                message: err.to_string(),
+            }
+        })?;
+    if binding_patch_is_empty(&raw) {
+        return Err(NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: "patch must include at least one mutable field".into(),
+        });
+    }
+    let sheet_patch = build_binding_sheet_patch(&raw, &req)?;
+    let owner = require_creator(&state)?;
+    let _guard = state
+        .actor_sessions()
+        .admit_character_activity(state.pool_or_uninit()?, &owner, &character_id)
+        .await?;
+    let record = nexus_local_db::update_actor_world_binding(
+        state.pool_or_uninit()?,
+        &owner,
+        &character_id,
+        &binding_id,
+        req.expected_revision,
+        sheet_patch,
+    )
+    .await?;
+    Ok(Json(binding_detail_from_record(&record)?))
+}
+
 /// `DELETE /v1/daemon/characters/{character_id}/bindings/{binding_id}`
 pub async fn remove_binding(
     State(state): State<WorkspaceState>,
@@ -573,6 +669,7 @@ mod conversion_tests {
             world_id: "wld_worldA".into(),
             status: "active".into(),
             world_sheet_entry_id: Some("sheet-1".into()),
+            revision: 0,
             created_at: "2026-09-05T00:00:00Z".into(),
             updated_at: "2026-09-05T00:00:01Z".into(),
         }

@@ -11,6 +11,7 @@
     "character_id",
     "world_id",
     "status",
+    "revision",
     "created_at",
     "updated_at"
   ],
@@ -30,6 +31,12 @@
     },
     "status": {
       "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/ActorWorldBindingStatus"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9223372036854775806,
+      "description": "Optimistic-concurrency token, initially 0. Independent of Character revision/epoch."
     },
     "world_sheet_entry_id": {
       "type": "string",
