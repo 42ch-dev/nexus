@@ -1,6 +1,6 @@
 # Embedding Readiness Contract (RN-OGA-3)
 
-> **Status:** Normative — V1.181 P0 (readiness-contract form; posture user-locked 2026-09-02 grill-me). Promoted from the iteration-package draft [`../iterations/v1.181/specs/embedding-readiness-contract-draft.md`](../iterations/v1.181/specs/embedding-readiness-contract-draft.md), which remains in the v1.181 package as provenance. Review-chain locks (product-manager → architect, 2026-09-02) are recorded inline as **Lock** notes.
+> **Status:** Normative — V1.181 P0 (readiness-contract form; posture user-locked 2026-09-02 grill-me). Promoted from the iteration-package draft in the v1.181 package (historical provenance; iteration packages are local process artifacts, not tracked at HEAD). Review-chain locks (product-manager → architect, 2026-09-02) are recorded inline as **Lock** notes.
 > **Document class:** Master
 > **Scope:** the embedding identity tuple, the fail-closed derived-index protocol, the `EmbeddingProvider` trait seam, the `NoEmbeddings` OSS posture, and the platform injection contract. Governs the `crates/nexus-embedding/` contract crate. **No OSS embedding execution.**
 > **Coordinates with:** [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md), [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md), [spoke-adapter-architecture.md](spoke-adapter-architecture.md)

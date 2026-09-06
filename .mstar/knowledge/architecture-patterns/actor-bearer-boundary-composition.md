@@ -31,7 +31,7 @@ related_components:
 
 A Character crosses identity, World membership, knowledge, execution, memory, and mental-state storage. Isolation is sound only when every layer derives scope from stored rows and passes an admitted capability forward. Rechecking only the route payload, revision, or provider session id leaves cross-Actor seams.
 
-Normative product semantics live in [Actor Product Model](../../specs/actor-product-model.md). This document captures the reusable implementation pattern validated by the v1.184 package in [`iterations/v1.184/specs/`](../../iterations/v1.184/specs/).
+Normative product semantics live in [Actor Product Model](../../specs/actor-product-model.md). This document captures the reusable implementation pattern validated by the shipped v1.184 Actor vertical ([Actor Product Model §10](../../specs/actor-product-model.md)); the v1.184 iteration package is a local process artifact and is not tracked at HEAD.
 
 ## Guidance
 
@@ -85,8 +85,10 @@ Apply this pattern when adding an Actor kind, widening World/binding visibility,
 
 ## Examples
 
-- [Actor identity and binding](../../iterations/v1.184/specs/actor-identity-binding.md)
-- [Actor knowledge ownership and view](../../iterations/v1.184/specs/actor-knowledge-view.md)
-- [Actor execution and session isolation](../../iterations/v1.184/specs/actor-execution.md)
-- [Character SOUL and Memory](../../iterations/v1.184/specs/character-memory.md)
-- [Character ToM L1/L2](../../iterations/v1.184/specs/character-tom.md)
+Durable spec/source authority for each shipped slice (the v1.184 package files behind these remain historical provenance only):
+
+- Actor identity and binding — [Actor Product Model §2/§4.2](../../specs/actor-product-model.md)
+- Actor knowledge ownership and view — [Actor Product Model §5](../../specs/actor-product-model.md)
+- Actor execution and session isolation — [Actor Product Model §6](../../specs/actor-product-model.md), [agent-host.md](../../specs/agent-host.md)
+- Character SOUL and Memory — [Actor Product Model §4.1](../../specs/actor-product-model.md), [creator-memory-soul-lifecycle.md](../../specs/creator-memory-soul-lifecycle.md)
+- Character ToM L1/L2 — [Actor Product Model §4.1](../../specs/actor-product-model.md), [spoke-adapter-architecture.md](../../specs/spoke-adapter-architecture.md)
