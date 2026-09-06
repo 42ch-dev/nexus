@@ -207,6 +207,117 @@ async fn no_op_patch_does_not_bump_revision() {
 }
 
 #[tokio::test]
+async fn clear_on_explicit_null_summary_removes_key_and_bumps_revision() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, _) = seed_character(&pool).await;
+    let entry = insert_character_ke(&pool, &chr, "fact", None).await;
+    sqlx::query("UPDATE kb_key_blocks SET body_json = ? WHERE key_block_id = ?")
+        .bind(r#"{"summary":null}"#)
+        .bind(&entry)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let updated = update_actor_knowledge_entry(
+        &pool,
+        OWNER,
+        &chr,
+        &entry,
+        0,
+        ActorKnowledgePatch {
+            canonical_name: None,
+            summary: FieldPatch::Clear,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated.revision, Some(1));
+    let body_raw: Option<String> =
+        sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(&entry)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    match body_raw {
+        None => {}
+        Some(raw) => {
+            let body: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            assert!(body.get("summary").is_none());
+        }
+    }
+}
+
+#[tokio::test]
+async fn clear_on_absent_summary_key_is_no_op() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, _) = seed_character(&pool).await;
+    let entry = insert_character_ke(&pool, &chr, "fact", None).await;
+    let before_updated: Option<String> =
+        sqlx::query_scalar("SELECT updated_at FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(&entry)
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+    let out = update_actor_knowledge_entry(
+        &pool,
+        OWNER,
+        &chr,
+        &entry,
+        0,
+        ActorKnowledgePatch {
+            canonical_name: None,
+            summary: FieldPatch::Clear,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.revision.unwrap_or(0), 0);
+    let after_updated: Option<String> =
+        sqlx::query_scalar("SELECT updated_at FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(&entry)
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+    assert_eq!(before_updated, after_updated);
+}
+
+#[tokio::test]
+async fn clear_on_string_summary_removes_key_and_bumps_revision() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, _) = seed_character(&pool).await;
+    let entry = insert_character_ke(&pool, &chr, "fact", Some(r#"{"summary":"note"}"#)).await;
+    let updated = update_actor_knowledge_entry(
+        &pool,
+        OWNER,
+        &chr,
+        &entry,
+        0,
+        ActorKnowledgePatch {
+            canonical_name: None,
+            summary: FieldPatch::Clear,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated.revision, Some(1));
+    let body_raw: Option<String> =
+        sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(&entry)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        body_raw.is_none()
+            || !body_raw
+                .as_ref()
+                .expect("body")
+                .contains("\"summary\"")
+    );
+}
+
+#[tokio::test]
 async fn stale_revision_is_knowledge_revision_conflict() {
     let (pool, _dir) = fresh_pool().await;
     seed(&pool).await;

@@ -144,13 +144,12 @@ fn parse_body_object(
     }
 }
 
-fn current_summary_from_body(raw: Option<&str>) -> Result<Option<String>, LocalDbError> {
+fn canonical_body_json(raw: Option<&str>) -> Result<Option<String>, LocalDbError> {
     let obj = parse_body_object(raw)?;
-    match obj.get("summary") {
-        None => Ok(None),
-        Some(serde_json::Value::String(s)) => Ok(Some(s.clone())),
-        Some(serde_json::Value::Null) => Ok(None),
-        _ => Err(knowledge_entry_not_mutable()),
+    if obj.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(serde_json::Value::Object(obj).to_string()))
     }
 }
 
@@ -188,20 +187,16 @@ fn actor_knowledge_patch_is_no_op(
         }
     }
     match patch.summary {
-        FieldPatch::Keep => {}
-        FieldPatch::Clear => {
-            if current_summary_from_body(row.body_json.as_deref())?.is_some() {
-                return Ok(false);
-            }
-        }
-        FieldPatch::Set(summary) => {
-            let current = current_summary_from_body(row.body_json.as_deref())?;
-            if current.as_deref() != Some(summary) {
-                return Ok(false);
-            }
+        FieldPatch::Keep => Ok(true),
+        _ => {
+            let after =
+                apply_summary_patch_to_body_json(row.body_json.as_deref(), patch.summary)?;
+            Ok(
+                canonical_body_json(row.body_json.as_deref())?
+                    == canonical_body_json(after.as_deref())?,
+            )
         }
     }
-    Ok(true)
 }
 
 fn assert_target_row_module_referents(row: &KeyBlockRow, entry_id: &str) -> Result<(), LocalDbError> {

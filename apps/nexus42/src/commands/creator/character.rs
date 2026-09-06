@@ -1,7 +1,7 @@
 //! `creator character` — thin `DaemonClient` surface for Character identity and bindings.
 
 use crate::api::DaemonClient;
-use crate::commands::creator::work_utils::query_path;
+use crate::commands::creator::work_utils::{query_path, read_file_bounded};
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
@@ -1250,16 +1250,11 @@ fn load_bounded_summary_text(
         ));
     }
     if let Some(path) = summary_file {
-        let bytes = std::fs::read(&path)?;
-        if bytes.len() > ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES {
-            return Err(CliError::Other(format!(
-                "summary file exceeds {} UTF-8 bytes",
-                ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES
-            )));
-        }
-        let text = String::from_utf8(bytes).map_err(|err| {
-            CliError::Other(format!("summary file must be valid UTF-8: {err}"))
-        })?;
+        let text = read_file_bounded(
+            &path.to_string_lossy(),
+            ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES,
+            "--summary-file",
+        )?;
         return Ok(Some(text));
     }
     Ok(summary)
