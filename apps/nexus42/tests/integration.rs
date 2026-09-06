@@ -4,6 +4,40 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
 
+#[test]
+fn debug_dump_reports_invalid_daemon_configuration() {
+    let home = TempDir::new().unwrap();
+    let nexus_home = home.path().join(".nexus42");
+    std::fs::create_dir_all(&nexus_home).unwrap();
+    std::fs::write(nexus_home.join("config.toml"), "daemon_url = \"\"\n").unwrap();
+
+    for format in ["json", "toml"] {
+        let output = Command::cargo_bin("nexus42")
+            .unwrap()
+            .args(["system", "debug", "dump-workspace", "--format", format])
+            .env("HOME", home.path())
+            .env_remove("NEXUS_API_KEY")
+            .current_dir(home.path())
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let snapshot: serde_json::Value = match format {
+            "json" => serde_json::from_slice(&output).unwrap(),
+            "toml" => serde_json::to_value(
+                toml::from_str::<toml::Value>(std::str::from_utf8(&output).unwrap()).unwrap(),
+            )
+            .unwrap(),
+            _ => unreachable!(),
+        };
+        assert!(
+            snapshot["daemon_status"]["error"].is_string(),
+            "debug output must report the configuration failure: {snapshot}"
+        );
+    }
+}
+
 /// Test that CLI shows help
 #[test]
 fn cli_shows_help() {

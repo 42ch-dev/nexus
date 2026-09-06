@@ -471,7 +471,7 @@ async fn kb_list(config: &CliConfig, scope: &KbScope, world_id: Option<&str>) ->
     let (creator_id, slug, home) = resolve_kb_paths(config)?;
 
     // Try daemon API first (T40: migration)
-    let client = crate::api::DaemonClient::from_config(config);
+    let client = crate::api::DaemonClient::from_config(config)?;
     if client.health_check().await? {
         match client.list_kb_entries(&creator_id, Some(&slug), None).await {
             Ok(resp) => {
@@ -557,7 +557,7 @@ async fn kb_search(
     let (creator_id, slug, home) = resolve_kb_paths(config)?;
 
     // Try daemon API first (T40: migration)
-    let client = crate::api::DaemonClient::from_config(config);
+    let client = crate::api::DaemonClient::from_config(config)?;
     if client.health_check().await? {
         match client
             .list_kb_entries(&creator_id, Some(&slug), Some(query))
@@ -634,7 +634,7 @@ async fn kb_show(
     paths::validate_entry_id_safe(entry_id).map_err(CliError::Other)?;
 
     // Try daemon API first (T40: migration)
-    let client = crate::api::DaemonClient::from_config(config);
+    let client = crate::api::DaemonClient::from_config(config)?;
     if client.health_check().await? {
         match client.get_kb_entry(entry_id).await {
             Ok(resp) => {
@@ -734,7 +734,7 @@ async fn kb_add(
     let (creator_id, slug, _home) = resolve_kb_paths(config)?;
 
     // Try daemon API first (T40: migration)
-    let client = crate::api::DaemonClient::from_config(config);
+    let client = crate::api::DaemonClient::from_config(config)?;
     if client.health_check().await? {
         let content = std::fs::read_to_string(file)?;
         let req = crate::api::models::AddKbEntryRequest {
@@ -824,7 +824,7 @@ async fn kb_remove(
     paths::validate_entry_id_safe(entry_id).map_err(CliError::Other)?;
 
     // Try daemon API first (T40: migration)
-    let client = crate::api::DaemonClient::from_config(config);
+    let client = crate::api::DaemonClient::from_config(config)?;
     if client.health_check().await? {
         match client.delete_kb_entry(entry_id).await {
             Ok(_resp) => {

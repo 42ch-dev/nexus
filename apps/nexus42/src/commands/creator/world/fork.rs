@@ -97,7 +97,7 @@ pub enum ForkCommand {
 /// `CliError::Other` when the fork-point event cannot be resolved for
 /// parent-branch derivation.
 pub async fn run(cmd: ForkCommand, config: &CliConfig) -> Result<()> {
-    let client = DaemonClient::from_config(config);
+    let client = DaemonClient::from_config(config)?;
     match cmd {
         ForkCommand::Create {
             world_id,

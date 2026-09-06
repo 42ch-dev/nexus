@@ -421,7 +421,7 @@ fn review_human_lines(outcome: &DrainOutcome) -> Vec<String> {
 ///
 /// See [`drain_review_queue`] for the drain contract.
 async fn review(config: &CliConfig, creator_id: &str, json: bool) -> Result<()> {
-    let client = DaemonClient::from_config(config);
+    let client = DaemonClient::from_config(config)?;
     let outcome = drain_review_queue(&client, creator_id).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&review_json(outcome))?);
@@ -434,7 +434,7 @@ async fn review(config: &CliConfig, creator_id: &str, json: bool) -> Result<()> 
 }
 
 async fn fragments(config: &CliConfig, creator_id: &str, json: bool) -> Result<()> {
-    let client = DaemonClient::from_config(config);
+    let client = DaemonClient::from_config(config)?;
     let result = client.list_memory_fragments(creator_id).await?;
 
     if json {
@@ -462,7 +462,7 @@ async fn fragments(config: &CliConfig, creator_id: &str, json: bool) -> Result<(
 }
 
 async fn pending_list(config: &CliConfig, creator_id: &str, json: bool) -> Result<()> {
-    let client = DaemonClient::from_config(config);
+    let client = DaemonClient::from_config(config)?;
     let result = client.list_pending_reviews(creator_id, None).await?;
 
     if json {
@@ -507,7 +507,7 @@ async fn pending_list(config: &CliConfig, creator_id: &str, json: bool) -> Resul
 /// `creator memory pending count [--json]` — count pending review entries
 /// (`GET /v1/daemon/memory/pending-review/count`, AR-86).
 async fn pending_count(config: &CliConfig, creator_id: &str, json: bool) -> Result<()> {
-    let client = DaemonClient::from_config(config);
+    let client = DaemonClient::from_config(config)?;
     let result = client.count_pending_reviews(creator_id).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&result)?);
@@ -526,7 +526,7 @@ async fn pending_show(
     pending_id: &str,
     json: bool,
 ) -> Result<()> {
-    let client = DaemonClient::from_config(config);
+    let client = DaemonClient::from_config(config)?;
     // The list endpoint is cursor-paginated at 50 rows/page; a creator with
     // more pending reviews can bury the requested ID past page 1. Walk
     // `pagination.next_cursor` until the ID is found or the pages are
@@ -580,7 +580,7 @@ async fn pending_dismiss(
     pending_id: &str,
     json: bool,
 ) -> Result<()> {
-    let client = DaemonClient::from_config(config);
+    let client = DaemonClient::from_config(config)?;
     let result = client
         .dismiss_pending_review(pending_id, creator_id)
         .await?;

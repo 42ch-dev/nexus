@@ -239,7 +239,7 @@ async fn init_workspace(
     let display_name = name.unwrap_or_else(|| workspace_slug.clone());
 
     // Try daemon API first (T25: CLI → daemon migration)
-    let client = crate::api::DaemonClient::from_config(&CliConfig::load()?);
+    let client = crate::api::DaemonClient::from_config(&CliConfig::load()?)?;
     if client.health_check().await? {
         let req = crate::api::models::CreateWorkspaceRequest {
             creator_id: creator_id.clone(),
@@ -937,7 +937,7 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
         CreatorWorkspaceCommand::List => {
             let home = user_home()?;
             // Try daemon API first (T26: migration)
-            let client = crate::api::DaemonClient::from_config(config);
+            let client = crate::api::DaemonClient::from_config(config)?;
             if client.health_check().await? {
                 match client.list_workspaces(Some(creator_id)).await {
                     Ok(resp) => {
@@ -994,7 +994,7 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
             validate_workspace_slug(&workspace_slug)?;
 
             // Try daemon API first (T26: migration)
-            let client = crate::api::DaemonClient::from_config(config);
+            let client = crate::api::DaemonClient::from_config(config)?;
             if client.health_check().await? {
                 let req = crate::api::models::CreateWorkspaceRequest {
                     creator_id: creator_id.to_string(),
@@ -1063,7 +1063,7 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
             validate_workspace_slug(&workspace_slug)?;
 
             // Try daemon API first (T26: migration)
-            let client = crate::api::DaemonClient::from_config(config);
+            let client = crate::api::DaemonClient::from_config(config)?;
             if client.health_check().await? {
                 let req = crate::api::models::SetActiveWorkspaceRequest {
                     creator_id: Some(creator_id.to_string()),
@@ -1422,7 +1422,7 @@ async fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Resul
 
     // Try daemon API for enriched info when checking active creator
     if config.active_creator_id.as_deref() == Some(id.as_str()) {
-        let client = crate::api::DaemonClient::from_config(config);
+        let client = crate::api::DaemonClient::from_config(config)?;
         if client.health_check().await? {
             match client.get_active_creator().await {
                 Ok(daemon_resp) => {
@@ -1504,7 +1504,7 @@ async fn use_creator(_config: &CliConfig, creator_ref: &str) -> Result<()> {
 
     // Try daemon API first
     let daemon_config = CliConfig::load()?;
-    let client = crate::api::DaemonClient::from_config(&daemon_config);
+    let client = crate::api::DaemonClient::from_config(&daemon_config)?;
     if client.health_check().await? {
         let req = crate::api::models::SetActiveCreatorRequest {
             creator_id: resolved_id.clone(),
@@ -1804,7 +1804,7 @@ async fn logout_creator(config: &CliConfig) -> Result<()> {
     let creator_id = creator_id.expect("checked above");
 
     // Try daemon API first (T33: migration)
-    let client = crate::api::DaemonClient::from_config(config);
+    let client = crate::api::DaemonClient::from_config(config)?;
     if client.health_check().await? {
         if let Err(e) = client.logout_creator(creator_id).await {
             eprintln!("nexus42: daemon logout failed, continuing with local cleanup: {e}");

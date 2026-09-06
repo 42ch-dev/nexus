@@ -209,7 +209,7 @@ pub async fn run(cmd: AcpCommand, config: &CliConfig) -> Result<()> {
 /// Show daemon and ACP agent status.
 pub(super) async fn cmd_status() -> Result<()> {
     let client =
-        crate::api::DaemonClient::new(&format!("http://127.0.0.1:{}", crate::config::DAEMON_PORT));
+        crate::api::DaemonClient::new(&format!("http://127.0.0.1:{}", crate::config::DAEMON_PORT))?;
 
     let status =
         client
@@ -280,7 +280,7 @@ async fn cmd_doctor(port: u16, config: &CliConfig) -> Result<()> {
     // Check 1: Daemon connectivity
     print!("  [1/3] Daemon connectivity... ");
     let daemon_url = format!("http://127.0.0.1:{port}");
-    let client = crate::api::DaemonClient::new(&daemon_url);
+    let client = crate::api::DaemonClient::new(&daemon_url)?;
     match client.health_check().await {
         Ok(true) => println!("✓ Running"),
         Ok(false) => {
@@ -1445,7 +1445,8 @@ mod tests {
     #[tokio::test]
     async fn acp_status_non_running() {
         // Probe an unused port so the test is independent of a live local daemon.
-        let client = crate::api::DaemonClient::new("http://127.0.0.1:19999");
+        let client =
+            crate::api::DaemonClient::new("http://127.0.0.1:19999").expect("valid loopback URL");
         let result = client.get_runtime_status().await;
         assert!(
             result.is_err(),

@@ -399,7 +399,7 @@ pub enum CharacterSoulCommand {
 /// Returns daemon/network errors from [`DaemonClient`].
 #[allow(clippy::too_many_lines)] // single CLI command dispatcher
 pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
-    let client = DaemonClient::from_config(config);
+    let client = DaemonClient::from_config(config)?;
     match cmd {
         CharacterCommand::Create {
             display_name,

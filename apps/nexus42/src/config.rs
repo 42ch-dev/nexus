@@ -12,7 +12,7 @@ const NEXUS_DIR: &str = ".nexus42";
 pub const DAEMON_PORT: u16 = 8420;
 
 /// CLI configuration file structure
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CliConfig {
     /// Active workspace path
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -53,6 +53,22 @@ pub struct CliConfig {
     /// Not serialized to config.toml — resolved at startup from `~/.nexus42/device-id`.
     #[serde(skip)]
     pub device_id: String,
+}
+
+impl Default for CliConfig {
+    fn default() -> Self {
+        Self {
+            workspace_path: None,
+            active_creator_id: None,
+            active_workspace_slug_by_creator: HashMap::new(),
+            platform_url: default_platform_url(),
+            daemon_url: default_daemon_url(),
+            runtime_mode: default_runtime_mode(),
+            setup_completed: None,
+            degradation_snapshot: None,
+            device_id: String::new(),
+        }
+    }
 }
 
 fn default_platform_url() -> String {

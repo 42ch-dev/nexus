@@ -626,7 +626,7 @@ async fn cmd_run(
         None => resolve_module_id_from_fixture(input_path)?,
     };
 
-    let client = DaemonClient::from_config(config);
+    let client = DaemonClient::from_config(config)?;
     let body = serde_json::json!({
         "world_id": world,
         "module_id": module_id,

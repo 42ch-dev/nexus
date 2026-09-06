@@ -514,7 +514,7 @@ pub enum InspirationAction {
 ///
 /// Returns an error if the daemon API call fails.
 pub async fn handle_works(cmd: WorksCommand, config: &CliConfig) -> Result<()> {
-    let client = crate::api::DaemonClient::from_config(config);
+    let client = crate::api::DaemonClient::from_config(config)?;
 
     match cmd {
         WorksCommand::List { status, json } => handle_list(&client, status, json).await,
@@ -1581,22 +1581,22 @@ enum FindingsResult {
 /// Uses a shorter timeout (`FINDINGS_FETCH_TIMEOUT`) than the default
 /// 30s so a slow findings endpoint does not block the status command.
 async fn fetch_open_findings(client: &DaemonClient, work_id: &str) -> FindingsResult {
-    let findings_client = DaemonClient::with_timeouts(
-        client.base_url(),
-        crate::api::daemon_client::DEFAULT_CONNECT_TIMEOUT,
-        FINDINGS_FETCH_TIMEOUT,
-    )
-    .expect("failed to build findings daemon client");
     let path =
         format!("/v1/daemon/works/{work_id}/findings?status=open&limit={FINDINGS_FETCH_LIMIT}");
     // R-V146P0-QC3-S2: observe the silent degradation path — a failed/timeout
     // findings fetch previously vanished into `Unavailable` with no trace.
-    let result = findings_client
-        .get::<serde_json::Value>(&path)
-        .await
-        .map_or(FindingsResult::Unavailable, |v| {
-            FindingsResult::Fetched(v.as_array().cloned().unwrap_or_default())
-        });
+    let result = async {
+        let findings_client = DaemonClient::with_timeouts(
+            client.base_url(),
+            crate::api::daemon_client::DEFAULT_CONNECT_TIMEOUT,
+            FINDINGS_FETCH_TIMEOUT,
+        )?;
+        findings_client.get::<serde_json::Value>(&path).await
+    }
+    .await
+    .map_or(FindingsResult::Unavailable, |v| {
+        FindingsResult::Fetched(v.as_array().cloned().unwrap_or_default())
+    });
     if matches!(result, FindingsResult::Unavailable) {
         tracing::warn!(
             work_id = %work_id,
@@ -1619,25 +1619,27 @@ async fn fetch_open_findings(client: &DaemonClient, work_id: &str) -> FindingsRe
 /// endpoint cannot block the JSON status command longer than the findings
 /// fetch. Mirrors `fetch_open_findings`'s timeout policy.
 async fn fetch_stale_findings(client: &DaemonClient) -> Option<serde_json::Value> {
-    let stale_client = DaemonClient::with_timeouts(
-        client.base_url(),
-        crate::api::daemon_client::DEFAULT_CONNECT_TIMEOUT,
-        STALE_FETCH_TIMEOUT,
-    )
-    .expect("M-2: failed to build stale-findings daemon client");
-    stale_client
-        .get::<serde_json::Value>("/v1/daemon/findings/stale")
-        .await
-        .map_err(|e| {
-            // R-V146P0-QC3-S2: observe the silent `.ok()` swallow — a failed
-            // stale fetch previously vanished into `None` with no trace.
-            tracing::warn!(
-                error = %e,
-                "stale findings fetch failed or timed out; degrading to None"
-            );
-            e
-        })
-        .ok()
+    async {
+        let stale_client = DaemonClient::with_timeouts(
+            client.base_url(),
+            crate::api::daemon_client::DEFAULT_CONNECT_TIMEOUT,
+            STALE_FETCH_TIMEOUT,
+        )?;
+        stale_client
+            .get::<serde_json::Value>("/v1/daemon/findings/stale")
+            .await
+    }
+    .await
+    .map_err(|e| {
+        // R-V146P0-QC3-S2: observe the silent `.ok()` swallow — a failed
+        // stale fetch previously vanished into `None` with no trace.
+        tracing::warn!(
+            error = %e,
+            "stale findings fetch failed or timed out; degrading to None"
+        );
+        e
+    })
+    .ok()
 }
 
 /// Format the human-path stale-findings banner line (R-V146P0-QC3-S3).
@@ -2739,7 +2741,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = DaemonClient::new(&mock_server.uri());
+        let client = DaemonClient::new(&mock_server.uri()).expect("valid mock URL");
 
         let start = std::time::Instant::now();
         let (findings, stale) = fetch_novel_findings_and_stale(&client, "wrk_concurrent").await;
@@ -2783,7 +2785,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = DaemonClient::new(&mock_server.uri());
+        let client = DaemonClient::new(&mock_server.uri()).expect("valid mock URL");
         let (findings, stale) = fetch_novel_findings_and_stale(&client, "wrk_none").await;
 
         assert!(findings.is_none(), "findings None when endpoint 404s");
@@ -2841,7 +2843,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = DaemonClient::new(&mock_server.uri());
+        let client = DaemonClient::new(&mock_server.uri()).expect("valid mock URL");
         let stale = fetch_stale_findings(&client).await;
         assert!(
             stale.is_none(),
@@ -3217,7 +3219,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = DaemonClient::new(&mock_server.uri());
+        let client = DaemonClient::new(&mock_server.uri()).expect("valid mock URL");
         let config = CliConfig {
             active_creator_id: Some("creator_test".to_string()),
             daemon_url: mock_server.uri(),
@@ -3247,7 +3249,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = DaemonClient::new(&mock_server.uri());
+        let client = DaemonClient::new(&mock_server.uri()).expect("valid mock URL");
         let config = CliConfig {
             active_creator_id: Some("creator_test".to_string()),
             daemon_url: mock_server.uri(),

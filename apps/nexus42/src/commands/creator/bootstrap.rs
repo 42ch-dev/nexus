@@ -146,7 +146,7 @@ pub async fn handle_bootstrap(args: BootstrapArgs, config: &CliConfig) -> Result
         other => other.to_string(),
     };
 
-    let client = crate::api::DaemonClient::from_config(config);
+    let client = crate::api::DaemonClient::from_config(config)?;
 
     // Validate --force-gates requires --reason
     if force_gates && reason.is_none() {

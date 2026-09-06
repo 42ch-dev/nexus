@@ -113,23 +113,22 @@ fn daemon_transport(base_url: &str) -> Result<reqwest::ClientBuilder> {
 }
 
 impl DaemonClient {
-    /// Create a new daemon client from config with default timeouts
-    #[must_use]
-    pub fn from_config(config: &CliConfig) -> Self {
+    /// Create a new daemon client from config with default timeouts.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the transport configuration is invalid.
+    pub fn from_config(config: &CliConfig) -> Result<Self> {
         Self::new(&config.daemon_url)
     }
 
     /// Create a new daemon client with a custom base URL and default timeouts.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if the URL violates the daemon transport policy or the reqwest
-    /// client cannot be constructed. Use [`Self::with_timeouts`] for a fallible
-    /// constructor.
-    #[must_use]
-    pub fn new(base_url: &str) -> Self {
+    /// Returns an error if the transport configuration is invalid.
+    pub fn new(base_url: &str) -> Result<Self> {
         Self::with_timeouts(base_url, DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT)
-            .expect("failed to build daemon HTTP client with default timeouts")
     }
 
     /// Create a new daemon client with custom timeouts.
@@ -946,8 +945,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rejects_cleartext_remote_daemon_urls() {
+    fn rejects_invalid_or_insecure_daemon_urls() {
         for base_url in [
+            "",
             "http://198.51.100.1:8420",
             "http://daemon.example",
             "http://localhost.example",
@@ -955,14 +955,7 @@ mod tests {
             "ftp://127.0.0.1:8420",
         ] {
             assert!(
-                matches!(
-                    DaemonClient::with_timeouts(
-                        base_url,
-                        DEFAULT_CONNECT_TIMEOUT,
-                        DEFAULT_REQUEST_TIMEOUT,
-                    ),
-                    Err(CliError::Config(_))
-                ),
+                matches!(DaemonClient::new(base_url), Err(CliError::Config(_))),
                 "insecure daemon endpoint accepted: {base_url}"
             );
         }
@@ -973,7 +966,7 @@ mod tests {
     fn api_key_is_redacted_from_client_and_request_debug() {
         let original_key = std::env::var_os(DAEMON_API_KEY_ENV);
         std::env::set_var(DAEMON_API_KEY_ENV, "  sentinel-daemon-secret  ");
-        let client = DaemonClient::new("http://127.0.0.1:8420");
+        let client = DaemonClient::new("http://127.0.0.1:8420").expect("valid loopback URL");
         match original_key {
             Some(value) => std::env::set_var(DAEMON_API_KEY_ENV, value),
             None => std::env::remove_var(DAEMON_API_KEY_ENV),

@@ -140,7 +140,7 @@ async fn list_presets(
     intent_filter: Option<&str>,
     json_output: bool,
 ) -> Result<()> {
-    let client = crate::api::DaemonClient::from_config(config);
+    let client = crate::api::DaemonClient::from_config(config)?;
 
     // Grouped management endpoint: embedded + system + user (W-002/F-001).
     // A failure here is a real daemon error — surface it instead of silently
@@ -214,7 +214,7 @@ fn build_preset_rows(
 /// output names lanes + orchestration fields; declared signals are labeled
 /// **Declared, not delivered**.
 async fn show_preset(config: &CliConfig, id: &str, json: bool) -> Result<()> {
-    let client = crate::api::DaemonClient::from_config(config);
+    let client = crate::api::DaemonClient::from_config(config)?;
     let profile: PresetProfileResponse = client
         .get(&format!("{ORCHESTRATION_BASE}/presets/{id}/profile"))
         .await?;
@@ -229,7 +229,7 @@ async fn show_preset(config: &CliConfig, id: &str, json: bool) -> Result<()> {
 
 /// Print trigger-lane classification only (AR-25) — never cron authoring.
 async fn trigger_preset(config: &CliConfig, id: &str, json: bool) -> Result<()> {
-    let client = crate::api::DaemonClient::from_config(config);
+    let client = crate::api::DaemonClient::from_config(config)?;
     let profile: PresetProfileResponse = client
         .get(&format!("{ORCHESTRATION_BASE}/presets/{id}/profile"))
         .await?;
@@ -244,7 +244,7 @@ async fn trigger_preset(config: &CliConfig, id: &str, json: bool) -> Result<()> 
 
 /// Scaffold a user preset bundle from templates (`POST /v1/daemon/presets`).
 async fn scaffold_preset(config: &CliConfig, name: &str, json: bool) -> Result<()> {
-    let client = crate::api::DaemonClient::from_config(config);
+    let client = crate::api::DaemonClient::from_config(config)?;
     let resp = client
         .scaffold_preset(&ScaffoldPresetRequest {
             name: name.to_string(),
@@ -280,7 +280,7 @@ async fn validate_preset(
     let resp: serde_json::Value = if offline {
         validate_preset_offline(path)?
     } else {
-        let client = crate::api::DaemonClient::from_config(config);
+        let client = crate::api::DaemonClient::from_config(config)?;
         let body = serde_json::json!({ "path": path });
         client
             .post::<serde_json::Value, _>("/v1/daemon/presets:validate", &body)

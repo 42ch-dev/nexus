@@ -174,7 +174,7 @@ async fn start_daemon(
     embedded_mcp: bool,
 ) -> Result<()> {
     // Check if already running
-    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"))?;
     if client.health_check().await? {
         if running_daemon_binary_is_stale(port) {
             println!(
@@ -486,7 +486,7 @@ fn parse_ps_etime(raw: &str) -> Option<u64> {
 /// Stop the daemon by reading PID from file and sending SIGTERM, then SIGKILL
 async fn stop_daemon(port: u16) -> Result<()> {
     // First check if daemon is actually running via health check
-    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"))?;
     if !client.health_check().await? {
         println!("Daemon is not running on port {port}.");
 
@@ -595,7 +595,7 @@ async fn stop_daemon(port: u16) -> Result<()> {
 #[cfg(not(unix))]
 /// Stop the daemon on non-Unix platforms (limited support)
 async fn stop_daemon(port: u16) -> Result<()> {
-    let client = DaemonClient::new(&format!("http://127.0.0.1:{}", port));
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{}", port))?;
     if !client.health_check().await? {
         println!("Daemon is not running on port {}.", port);
         return Ok(());
@@ -612,7 +612,7 @@ async fn stop_daemon(port: u16) -> Result<()> {
 /// Check daemon status
 async fn daemon_status(port: u16, config: &CliConfig) -> Result<()> {
     let daemon_url = format!("http://127.0.0.1:{port}");
-    let client = DaemonClient::new(&daemon_url);
+    let client = DaemonClient::new(&daemon_url)?;
 
     println!("Daemon Status:");
     println!("  URL: {daemon_url}");
@@ -666,7 +666,7 @@ async fn restart_daemon(
     stop_daemon(port).await?;
 
     // Verify the old daemon is fully dead via health check
-    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"))?;
     let confirm_timeout = std::time::Duration::from_secs(3);
     let confirm_start = std::time::Instant::now();
     let mut confirmed_dead = false;
@@ -804,7 +804,7 @@ fn read_tail_lines(path: &std::path::Path, n: usize) -> Result<Vec<String>> {
 /// Reads the daemon's log file or queries the daemon for recent log entries.
 async fn daemon_logs(port: u16, lines: usize) -> Result<()> {
     // First check if daemon is running
-    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"))?;
 
     if !client.health_check().await? {
         println!("Daemon is not running on port {port}.");
@@ -851,7 +851,7 @@ async fn daemon_doctor(port: u16) -> Result<()> {
 
     // Check 1: Daemon connectivity
     print!("  [1/3] Daemon connectivity... ");
-    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"))?;
     match client.health_check().await {
         Ok(true) => {
             println!("✓ Running on port {port}");
@@ -922,7 +922,7 @@ fn validate_cdn_url(url: &str) -> Result<()> {
 /// then opens `http://127.0.0.1:<port>/` with the platform-appropriate
 /// command (`open` on macOS, `xdg-open` on Linux, `start` on Windows).
 async fn open_ui(port: u16) -> Result<()> {
-    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"))?;
 
     // Start daemon in background if not already running.
     if !client.health_check().await? {

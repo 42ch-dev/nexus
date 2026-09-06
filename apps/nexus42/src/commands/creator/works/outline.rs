@@ -311,7 +311,7 @@ impl ChapterStatusArg {
 /// `not_found`, 422 `outline_validation_failed`, 400 `bad_request` for
 /// other 400s — all named, non-zero exit).
 pub async fn run(cmd: OutlineCommand, config: &CliConfig) -> Result<()> {
-    let client = DaemonClient::from_config(config);
+    let client = DaemonClient::from_config(config)?;
     match cmd {
         OutlineCommand::Show { work_ref, json } => outline_show(&client, &work_ref, json).await,
         OutlineCommand::Patch {
@@ -349,7 +349,7 @@ pub async fn run(cmd: OutlineCommand, config: &CliConfig) -> Result<()> {
 /// `outline_conflict`, 404 `not_found`, 422 `outline_validation_failed`,
 /// 400 `bad_request` for other 400s — all named, non-zero exit).
 pub async fn run_chapter(cmd: ChapterCommand, config: &CliConfig) -> Result<()> {
-    let client = DaemonClient::from_config(config);
+    let client = DaemonClient::from_config(config)?;
     match cmd {
         ChapterCommand::Patch {
             work_ref,
@@ -394,7 +394,7 @@ pub async fn run_chapter(cmd: ChapterCommand, config: &CliConfig) -> Result<()> 
 /// `outline_conflict`, 404 `not_found`, 422 `outline_validation_failed`,
 /// 400 `bad_request` for other 400s — all named, non-zero exit).
 pub async fn run_timeline(cmd: TimelineCommand, config: &CliConfig) -> Result<()> {
-    let client = DaemonClient::from_config(config);
+    let client = DaemonClient::from_config(config)?;
     match cmd {
         TimelineCommand::Patch {
             work_ref,

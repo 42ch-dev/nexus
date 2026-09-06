@@ -188,7 +188,7 @@ impl BlockTypeArg {
 /// `world_kb_conflict`, 404 `not_found`, 422 `world_kb_validation_failed`,
 /// 400 `bad_request` for other 400s — all named, non-zero exit).
 pub async fn run(cmd: KbDaemonCommand, config: &CliConfig) -> Result<()> {
-    let client = DaemonClient::from_config(config);
+    let client = DaemonClient::from_config(config)?;
     match cmd {
         KbDaemonCommand::Entity { command } => match command {
             KbEntityCommand::Patch {

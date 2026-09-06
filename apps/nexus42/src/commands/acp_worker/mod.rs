@@ -127,7 +127,7 @@ pub async fn run(args: AcpWorkerArgs) -> Result<()> {
         "acp-worker starting"
     );
 
-    let daemon_client = crate::api::daemon_client::DaemonClient::new(&args.daemon_url);
+    let daemon_client = crate::api::daemon_client::DaemonClient::new(&args.daemon_url)?;
     let state = Arc::new(MultiplexedWorkerState::new(args.creator, daemon_client));
 
     // The ACP SDK requires LocalSet since its futures are !Send.
@@ -963,7 +963,8 @@ mod tests {
     fn worker_state_defaults() {
         let state = MultiplexedWorkerState::new(
             "test-creator".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
         assert!(!state.shutdown_requested.load(Ordering::Relaxed));
         assert_eq!(state.creator_id, "test-creator");
@@ -1045,7 +1046,8 @@ mod tests {
     fn initialize_with_agent_ref_creates_default_session() {
         let state = MultiplexedWorkerState::new(
             "test-creator".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
         let params = json!({
             "agent_ref": "claude-sonnet-4-20250514"
@@ -1080,7 +1082,8 @@ mod tests {
     fn initialize_with_agents_array_creates_multiple_sessions() {
         let state = MultiplexedWorkerState::new(
             "test-creator".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
         let params = json!({
             "agents": [
@@ -1168,7 +1171,8 @@ mod tests {
     fn agent_start_creates_slot_and_stops_removes() {
         let state = MultiplexedWorkerState::new(
             "test".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
 
         // Start an agent.
@@ -1203,7 +1207,8 @@ mod tests {
     fn acp_prompt_routes_to_correct_session() {
         let state = MultiplexedWorkerState::new(
             "test".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
 
         // Create two sessions.
@@ -1240,7 +1245,8 @@ mod tests {
     fn acp_prompt_errors_on_nonexistent_session() {
         let state = MultiplexedWorkerState::new(
             "test".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
         let sessions = state.sessions.read().expect("lock ok");
         assert!(sessions.get("nonexistent").is_none());
@@ -1250,7 +1256,8 @@ mod tests {
     fn acp_prompt_errors_on_non_ready_session() {
         let state = MultiplexedWorkerState::new(
             "test".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
 
         // Create a session in Error state.
@@ -1273,7 +1280,8 @@ mod tests {
     fn agent_list_returns_all_sessions() {
         let state = MultiplexedWorkerState::new(
             "test".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
 
         {
@@ -1297,7 +1305,8 @@ mod tests {
     fn health_returns_per_session_info() {
         let state = MultiplexedWorkerState::new(
             "test-creator".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
 
         {
@@ -1346,7 +1355,8 @@ mod tests {
     fn shutdown_requests_stop_on_all_sessions() {
         let state = MultiplexedWorkerState::new(
             "test".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
 
         {
@@ -1381,7 +1391,8 @@ mod tests {
     fn initialize_with_no_params_creates_default_session() {
         let state = MultiplexedWorkerState::new(
             "test".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
         let params = json!({});
 
@@ -1414,7 +1425,8 @@ mod tests {
     fn agent_start_with_system_prompt_stores_correctly() {
         let state = MultiplexedWorkerState::new(
             "test".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
 
         // Simulate agent_start IPC with system_prompt.
@@ -1476,7 +1488,8 @@ mod tests {
     fn agent_start_without_system_prompt_works_gracefully() {
         let state = MultiplexedWorkerState::new(
             "test".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
 
         // Simulate agent_start IPC WITHOUT system_prompt.
@@ -1533,7 +1546,8 @@ mod tests {
     fn agent_start_rejects_duplicate_session_id() {
         let state = MultiplexedWorkerState::new(
             "test".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
 
         // Insert first session.
@@ -1558,7 +1572,8 @@ mod tests {
     fn agent_stop_on_nonexistent_returns_none() {
         let state = MultiplexedWorkerState::new(
             "test".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
 
         let removed = {
@@ -1579,7 +1594,8 @@ mod tests {
     fn initialize_idempotent_replaces_sessions() {
         let state = MultiplexedWorkerState::new(
             "test".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
 
         // First init.
@@ -1662,7 +1678,8 @@ mod tests {
     fn crash_isolation_one_slot_crash_does_not_affect_others() {
         let state = MultiplexedWorkerState::new(
             "test".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
 
         // Create two sessions.
@@ -1699,7 +1716,8 @@ mod tests {
     fn crash_isolation_three_slots_one_crashes() {
         let state = MultiplexedWorkerState::new(
             "test".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
 
         // Create three sessions.
@@ -1735,7 +1753,8 @@ mod tests {
     fn crashed_slot_remains_in_sessions_map() {
         let state = MultiplexedWorkerState::new(
             "test".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
 
         {
@@ -1766,7 +1785,8 @@ mod tests {
     fn crash_reason_recorded_in_health() {
         let state = MultiplexedWorkerState::new(
             "test".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
 
         {
@@ -1989,7 +2009,8 @@ mod tests {
     fn session_capture_populated_after_prompts() {
         let state = MultiplexedWorkerState::new(
             "test-creator".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
 
         // Simulate session creation (as in initialize with agent_ref).
@@ -2053,7 +2074,8 @@ mod tests {
     fn session_capture_removed_on_stop() {
         let state = MultiplexedWorkerState::new(
             "test-creator".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
 
         // Create session + capture.
@@ -2101,7 +2123,8 @@ mod tests {
     fn session_capture_cleared_on_reinit() {
         let state = MultiplexedWorkerState::new(
             "test-creator".to_string(),
-            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999"),
+            crate::api::daemon_client::DaemonClient::new("http://127.0.0.1:19999")
+                .expect("valid loopback URL"),
         );
 
         // Create initial captures.

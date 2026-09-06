@@ -236,16 +236,17 @@ impl SessionCapture {
         );
 
         // Use short timeout client for fire-and-forget
-        let timeout_client = DaemonClient::with_timeouts(
-            daemon_client.base_url(),
-            Duration::from_secs(2),
-            Duration::from_secs(5),
-        )
-        .expect("M-2: failed to build session-capture daemon client");
-
-        let result: Result<CreatePendingReviewResponse, crate::errors::CliError> = timeout_client
-            .post("/v1/daemon/memory/pending-review", &request)
-            .await;
+        let result: Result<CreatePendingReviewResponse, crate::errors::CliError> = async {
+            let timeout_client = DaemonClient::with_timeouts(
+                daemon_client.base_url(),
+                Duration::from_secs(2),
+                Duration::from_secs(5),
+            )?;
+            timeout_client
+                .post("/v1/daemon/memory/pending-review", &request)
+                .await
+        }
+        .await;
 
         match result {
             Ok(response) => {
