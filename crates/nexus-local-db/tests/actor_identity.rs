@@ -3,10 +3,11 @@
 #![allow(clippy::unwrap_used)]
 
 use nexus_local_db::{
-    add_actor_world_binding, create_character_with_initial_binding, get_character,
-    list_bindings_for_character, mint_character_id, remove_binding, transition_character,
-    update_character, ActorContractConflict, CharacterPatch, CharacterStatus,
-    CreateBindingParams, CreateCharacterParams, FieldPatch, LocalDbError,
+    add_actor_world_binding, create_character_with_initial_binding, get_actor_world_binding,
+    get_character, list_bindings_for_character, mint_character_id, remove_binding,
+    transition_character, update_actor_world_binding, update_character, ActorContractConflict,
+    CharacterPatch, CharacterStatus, CreateBindingParams, CreateCharacterParams, FieldPatch,
+    LocalDbError,
 };
 use sqlx::SqlitePool;
 
@@ -892,4 +893,464 @@ async fn restore_requires_active_binding_and_name_collision() {
         .await
         .unwrap();
     assert_eq!(row, "archived");
+}
+
+async fn seed_sheet_with_body(
+    pool: &SqlitePool,
+    key_block_id: &str,
+    world_id: &str,
+    canonical_name: &str,
+    body_json: &str,
+) {
+    sqlx::query(
+        "INSERT INTO kb_key_blocks          (key_block_id, world_id, block_type, canonical_name, status, body_json, created_at)          VALUES (?, ?, 'character', ?, 'confirmed', ?, datetime('now'))",
+    )
+    .bind(key_block_id)
+    .bind(world_id)
+    .bind(canonical_name)
+    .bind(body_json)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn binding_detail_link_relink_clear_and_noop() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    seed_sheet_with_body(&pool, "kb_sheet_a", WORLD_A, "sheet_a", r#"{"name":"Ava"}"#).await;
+    seed_sheet_with_body(&pool, "kb_sheet_b", WORLD_A, "sheet_b", r#"{"name":"B"}"#).await;
+    let created = create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "SheetFlow",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_A,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    let character_id = &created.character.character_id;
+    let binding_id = &created.binding.binding_id;
+
+    let linked = update_actor_world_binding(
+        &pool,
+        OWNER,
+        character_id,
+        binding_id,
+        0,
+        FieldPatch::Set("kb_sheet_a"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(linked.revision, 1);
+    assert_eq!(linked.world_sheet_entry_id.as_deref(), Some("kb_sheet_a"));
+
+    let body: String = sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
+        .bind("kb_sheet_a")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(body, r#"{"name":"Ava"}"#);
+
+    let relinked = update_actor_world_binding(
+        &pool,
+        OWNER,
+        character_id,
+        binding_id,
+        linked.revision,
+        FieldPatch::Set("kb_sheet_b"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(relinked.revision, 2);
+    assert_eq!(relinked.world_sheet_entry_id.as_deref(), Some("kb_sheet_b"));
+
+    let cleared = update_actor_world_binding(
+        &pool,
+        OWNER,
+        character_id,
+        binding_id,
+        relinked.revision,
+        FieldPatch::Clear,
+    )
+    .await
+    .unwrap();
+    assert_eq!(cleared.revision, 3);
+    assert!(cleared.world_sheet_entry_id.is_none());
+
+    let noop = update_actor_world_binding(
+        &pool,
+        OWNER,
+        character_id,
+        binding_id,
+        cleared.revision,
+        FieldPatch::Keep,
+    )
+    .await
+    .unwrap();
+    assert_eq!(noop.revision, cleared.revision);
+    assert_eq!(noop.updated_at, cleared.updated_at);
+}
+
+#[tokio::test]
+async fn stale_binding_update_rejects_with_revision_conflict() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    seed_sheet(&pool, "kb_stale", WORLD_A, "character", "confirmed").await;
+    let created = create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "Stale",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_A,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    let err = update_actor_world_binding(
+        &pool,
+        OWNER,
+        &created.character.character_id,
+        &created.binding.binding_id,
+        1,
+        FieldPatch::Set("kb_stale"),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::BindingRevisionConflict
+        }
+    ));
+}
+
+#[tokio::test]
+async fn binding_update_rejects_invalid_world_sheets() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    seed_sheet(&pool, "kb_wrong_world", WORLD_B, "character", "confirmed").await;
+    seed_sheet(&pool, "kb_wrong_type", WORLD_A, "location", "confirmed").await;
+    seed_sheet(&pool, "kb_deleted", WORLD_A, "character", "deleted").await;
+    let created = create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "Invalid",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_A,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    for sheet in ["kb_wrong_world", "kb_wrong_type", "kb_deleted"] {
+        let err = update_actor_world_binding(
+            &pool,
+            OWNER,
+            &created.character.character_id,
+            &created.binding.binding_id,
+            0,
+            FieldPatch::Set(sheet),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                LocalDbError::ActorContractConflict {
+                    code: ActorContractConflict::InvalidWorldSheet
+                }
+            ),
+            "sheet {sheet} should fail, got {err:?}"
+        );
+    }
+    sqlx::query(
+        "INSERT INTO kb_key_blocks          (key_block_id, world_id, block_type, canonical_name, status, body_json, created_at, creator_only)          VALUES (?, ?, 'character', 'private', 'confirmed', '{}', datetime('now'), 1)",
+    )
+    .bind("kb_creator_only")
+    .bind(WORLD_A)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let err = update_actor_world_binding(
+        &pool,
+        OWNER,
+        &created.character.character_id,
+        &created.binding.binding_id,
+        0,
+        FieldPatch::Set("kb_creator_only"),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::InvalidWorldSheet
+        }
+    ));
+    let sheet: Option<String> = sqlx::query_scalar(
+        "SELECT world_sheet_entry_id FROM actor_world_bindings WHERE binding_id = ?",
+    )
+    .bind(&created.binding.binding_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(sheet.is_none());
+}
+
+#[tokio::test]
+async fn binding_update_rejects_archived_character_and_world() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    seed_sheet(&pool, "kb_arch", WORLD_A, "character", "confirmed").await;
+    let created = create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "Archived",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_A,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    sqlx::query("UPDATE characters SET status = 'archived' WHERE character_id = ?")
+        .bind(&created.character.character_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let err = update_actor_world_binding(
+        &pool,
+        OWNER,
+        &created.character.character_id,
+        &created.binding.binding_id,
+        0,
+        FieldPatch::Set("kb_arch"),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::CharacterInactive
+        }
+    ));
+
+    sqlx::query("UPDATE characters SET status = 'active' WHERE character_id = ?")
+        .bind(&created.character.character_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE narrative_worlds SET status = 'archived' WHERE world_id = ?")
+        .bind(WORLD_A)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let err = update_actor_world_binding(
+        &pool,
+        OWNER,
+        &created.character.character_id,
+        &created.binding.binding_id,
+        0,
+        FieldPatch::Set("kb_arch"),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        LocalDbError::ActorNotFound { resource: "world", .. }
+    ));
+}
+
+#[tokio::test]
+async fn binding_detail_retained_read_survives_archive() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    seed_sheet(&pool, "kb_retained", WORLD_A, "character", "confirmed").await;
+    let created = create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "Retain",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_A,
+            world_sheet_entry_id: Some("kb_retained"),
+        },
+    )
+    .await
+    .unwrap();
+    let character_id = &created.character.character_id;
+    let binding_id = &created.binding.binding_id;
+    sqlx::query("UPDATE characters SET status = 'archived' WHERE character_id = ?")
+        .bind(character_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE narrative_worlds SET status = 'archived' WHERE world_id = ?")
+        .bind(WORLD_A)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let detail = get_actor_world_binding(&pool, OWNER, character_id, binding_id)
+        .await
+        .unwrap()
+        .expect("retained binding detail");
+    assert_eq!(detail.world_sheet_entry_id.as_deref(), Some("kb_retained"));
+    assert_eq!(detail.status, "active");
+}
+
+#[tokio::test]
+async fn binding_detail_hides_foreign_owner_and_tuple_mismatch() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    let created = create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "Hidden",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_A,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        get_actor_world_binding(&pool, OTHER, &created.character.character_id, &created.binding.binding_id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        get_actor_world_binding(
+            &pool,
+            OWNER,
+            &created.character.character_id,
+            "awb_00000000000000000000000000000000",
+        )
+        .await
+        .unwrap()
+        .is_none()
+    );
+}
+
+#[tokio::test]
+async fn concurrent_link_and_remove_leave_exactly_one_outcome() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    seed_sheet(&pool, "kb_race", WORLD_A, "character", "confirmed").await;
+    let created = create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "Race",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_A,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    let second = add_actor_world_binding(
+        &pool,
+        CreateBindingParams {
+            owner_creator_id: OWNER,
+            character_id: &created.character.character_id,
+            world_id: WORLD_B,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    let pool_link = pool.clone();
+    let pool_remove = pool.clone();
+    let character_id = created.character.character_id.clone();
+    let target = second.binding_id.clone();
+    let (link_result, remove_result) = tokio::join!(
+        update_actor_world_binding(
+            &pool_link,
+            OWNER,
+            &character_id,
+            &target,
+            0,
+            FieldPatch::Set("kb_race"),
+        ),
+        remove_binding(&pool_remove, OWNER, &character_id, &target),
+    );
+    let link_ok = link_result.is_ok();
+    let remove_ok = remove_result.is_ok();
+    assert!(
+        link_ok ^ remove_ok,
+        "exactly one of link/remove must succeed: link={link_result:?} remove={remove_result:?}"
+    );
+    if remove_ok {
+        let row: Option<String> = sqlx::query_scalar(
+            "SELECT binding_id FROM actor_world_bindings WHERE binding_id = ?",
+        )
+        .bind(&target)
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        assert!(row.is_none());
+    } else {
+        let linked = link_result.unwrap();
+        assert_eq!(linked.world_sheet_entry_id.as_deref(), Some("kb_race"));
+        let err = remove_result.unwrap_err();
+        assert!(matches!(
+            err,
+            LocalDbError::ActorNotFound { resource: "actor_world_binding", .. }
+                | LocalDbError::ActorContractConflict {
+                    code: ActorContractConflict::LastActiveBinding
+                }
+        ));
+    }
+}
+
+#[tokio::test]
+async fn noop_binding_clear_still_checks_revision() {
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    let created = create_character_with_initial_binding(
+        &pool,
+        CreateCharacterParams {
+            owner_creator_id: OWNER,
+            display_name: "NoopClear",
+            image_uri: None,
+            persona_json: "{}",
+            world_id: WORLD_A,
+            world_sheet_entry_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    let err = update_actor_world_binding(
+        &pool,
+        OWNER,
+        &created.character.character_id,
+        &created.binding.binding_id,
+        1,
+        FieldPatch::Clear,
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::BindingRevisionConflict
+        }
+    ));
 }

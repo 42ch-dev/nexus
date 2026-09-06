@@ -65,7 +65,7 @@ impl CharacterStatus {
 
 const MAX_EXPECTED_REVISION: i64 = 9_223_372_036_854_775_806;
 
-fn check_expected_revision(expected_revision: i64) -> Result<(), LocalDbError> {
+pub(crate) fn check_expected_revision(expected_revision: i64) -> Result<(), LocalDbError> {
     if !(0..=MAX_EXPECTED_REVISION).contains(&expected_revision) {
         return Err(LocalDbError::ValidationError(format!(
             "expected_revision must be within 0..={MAX_EXPECTED_REVISION}"

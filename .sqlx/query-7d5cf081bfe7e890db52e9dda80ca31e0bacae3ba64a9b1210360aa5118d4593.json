@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE actor_world_bindings\n               SET world_sheet_entry_id = ?, updated_at = ?, revision = ?\n               WHERE binding_id = ? AND character_id = ? AND status = 'active' AND revision = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "7d5cf081bfe7e890db52e9dda80ca31e0bacae3ba64a9b1210360aa5118d4593"
+}
