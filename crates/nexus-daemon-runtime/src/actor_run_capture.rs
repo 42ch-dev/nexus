@@ -27,21 +27,30 @@ use crate::workspace::actor_sessions::{
 
 pub const MAX_CAPTURE_DIGEST_BYTES: usize = 65_536;
 
+const CAPTURE_DIGEST_STATIC_OVERHEAD: usize = "Prompt:\n".len() + "\n\nResponse:\n".len();
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DigestBuildError {
     EmptyResponse,
     TooLarge,
 }
 
+pub fn capture_digest_byte_len(raw_prompt: &str, response_text: &str) -> usize {
+    CAPTURE_DIGEST_STATIC_OVERHEAD + raw_prompt.len() + response_text.len()
+}
+
+pub fn prompt_digest_prefix_bytes(raw_prompt: &str) -> usize {
+    CAPTURE_DIGEST_STATIC_OVERHEAD + raw_prompt.len()
+}
+
 pub fn build_capture_digest(raw_prompt: &str, response_text: &str) -> Result<String, DigestBuildError> {
     if response_text.trim().is_empty() {
         return Err(DigestBuildError::EmptyResponse);
     }
-    let digest = format!("Prompt:\n{raw_prompt}\n\nResponse:\n{response_text}");
-    if digest.len() > MAX_CAPTURE_DIGEST_BYTES {
+    if capture_digest_byte_len(raw_prompt, response_text) > MAX_CAPTURE_DIGEST_BYTES {
         return Err(DigestBuildError::TooLarge);
     }
-    Ok(digest)
+    Ok(format!("Prompt:\n{raw_prompt}\n\nResponse:\n{response_text}"))
 }
 
 pub fn run_pending_id(operation_id: &HostOperationId) -> String {
@@ -67,28 +76,37 @@ pub fn event_matches_operation(
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct DrainAccumulator {
     pub message_text: String,
     pub digest_too_large: bool,
+    prompt_prefix_bytes: usize,
     pub saw_terminal: bool,
     pub finish_reason: Option<FinishReason>,
     pub run_failed: bool,
 }
 
 impl DrainAccumulator {
-    pub fn apply_matching(&mut self, event: &HostEvent, raw_prompt: &str) {
+    pub fn for_prompt(raw_prompt: &str) -> Self {
+        let prompt_prefix_bytes = prompt_digest_prefix_bytes(raw_prompt);
+        Self {
+            message_text: String::new(),
+            digest_too_large: prompt_prefix_bytes >= MAX_CAPTURE_DIGEST_BYTES,
+            prompt_prefix_bytes,
+            saw_terminal: false,
+            finish_reason: None,
+            run_failed: false,
+        }
+    }
+
+    pub fn apply_matching(&mut self, event: &HostEvent) {
         match event {
             HostEvent::MessageDelta(TextDeltaEvent { text, .. }) => {
                 if self.digest_too_large {
                     return;
                 }
-                let candidate = format!(
-                    "Prompt:\n{raw_prompt}\n\nResponse:\n{}{}",
-                    self.message_text,
-                    text
-                );
-                if candidate.len() > MAX_CAPTURE_DIGEST_BYTES {
+                let next_response_bytes = self.message_text.len() + text.len();
+                if self.prompt_prefix_bytes + next_response_bytes > MAX_CAPTURE_DIGEST_BYTES {
                     self.digest_too_large = true;
                     return;
                 }
@@ -104,6 +122,12 @@ impl DrainAccumulator {
             }
             _ => {}
         }
+    }
+}
+
+impl Default for DrainAccumulator {
+    fn default() -> Self {
+        Self::for_prompt("")
     }
 }
 
@@ -349,8 +373,7 @@ pub async fn drain_and_finalize_character_operation(
     snapshot: CharacterOperationSnapshot,
 ) {
     let op_id = snapshot.operation_id.clone();
-    let raw_prompt = snapshot.raw_prompt.clone();
-    let mut acc = DrainAccumulator::default();
+    let mut acc = DrainAccumulator::for_prompt(&snapshot.raw_prompt);
 
     while let Some(item) = stream.next().await {
         match item {
@@ -358,7 +381,7 @@ pub async fn drain_and_finalize_character_operation(
                 if !event_matches_operation(&event, &snapshot.session_id, &op_id) {
                     continue;
                 }
-                acc.apply_matching(&event, &raw_prompt);
+                acc.apply_matching(&event);
                 if acc.saw_terminal {
                     break;
                 }
@@ -535,21 +558,71 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
     fn accumulator_ignores_thought_and_tools() {
         let snapshot = sample_snapshot(true, "p");
         let mut acc = DrainAccumulator::default();
-        acc.apply_matching(&thought_delta(&snapshot, "secret"), "p");
-        acc.apply_matching(&message_delta(&snapshot, "visible"), "p");
+        let mut acc = DrainAccumulator::for_prompt("p");
+        acc.apply_matching(&thought_delta(&snapshot, "secret"));
+        acc.apply_matching(&message_delta(&snapshot, "visible"));
         assert_eq!(acc.message_text, "visible");
     }
 
     #[test]
     fn accumulator_flags_oversize_without_truncating() {
         let snapshot = sample_snapshot(true, "p");
-        let mut acc = DrainAccumulator::default();
-        let overhead = format!("Prompt:\n{}\n\nResponse:\n", "p").len();
+        let mut acc = DrainAccumulator::for_prompt("p");
+        let overhead = prompt_digest_prefix_bytes("p");
         let chunk = "a".repeat(MAX_CAPTURE_DIGEST_BYTES - overhead);
-        acc.apply_matching(&message_delta(&snapshot, &chunk), "p");
-        acc.apply_matching(&message_delta(&snapshot, "x"), "p");
+        acc.apply_matching(&message_delta(&snapshot, &chunk));
+        acc.apply_matching(&message_delta(&snapshot, "x"));
         assert!(acc.digest_too_large);
         assert_eq!(acc.message_text.len(), MAX_CAPTURE_DIGEST_BYTES - overhead);
+    }
+
+    #[test]
+    fn oversized_single_delta_rejects_before_append() {
+        let snapshot = sample_snapshot(true, "p");
+        let mut acc = DrainAccumulator::for_prompt("p");
+        let huge = "x".repeat(MAX_CAPTURE_DIGEST_BYTES * 2);
+        acc.apply_matching(&message_delta(&snapshot, &huge));
+        assert!(acc.digest_too_large);
+        assert!(acc.message_text.is_empty(), "must reject before copying delta");
+    }
+
+    #[test]
+    fn oversized_prompt_bounded_at_capture_entry() {
+        let huge_prompt = "p".repeat(MAX_CAPTURE_DIGEST_BYTES);
+        let acc = DrainAccumulator::for_prompt(&huge_prompt);
+        assert!(acc.digest_too_large);
+        assert!(acc.message_text.is_empty());
+    }
+
+    #[tokio::test]
+    async fn oversized_single_delta_preserves_run_success() {
+        let snapshot = sample_snapshot(true, "p");
+        let registry = ActorSessionRegistry::new();
+        registry.reserve_character_operation(snapshot.clone()).unwrap();
+        let huge = "y".repeat(MAX_CAPTURE_DIGEST_BYTES * 2);
+        drain_and_finalize_character_operation(
+            sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap(),
+            registry.clone(),
+            stream_of(vec![
+                message_delta(&snapshot, &huge),
+                op_finished(&snapshot, FinishReason::EndTurn),
+            ]),
+            None,
+            snapshot.clone(),
+        )
+        .await;
+        let result = registry
+            .character_operation_result(
+                "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                &snapshot.operation_id,
+            )
+            .expect("outcome");
+        assert_eq!(result.run_status, CharacterOperationResultRunStatus::Succeeded);
+        assert_eq!(result.capture.status, NexusCharacterRunCaptureOutcomeStatus::Failed);
+        assert_eq!(
+            result.capture.code,
+            Some(NexusCharacterRunCaptureOutcomeCode::CaptureTooLarge)
+        );
     }
 
     #[tokio::test]
