@@ -159,7 +159,7 @@ function main() {
   const detail = compile('schemas/daemon-api/characters/character-detail.schema.json', cache);
   const createRes = compile('schemas/daemon-api/characters/create-character-response.schema.json', cache);
   const listRes = compile('schemas/daemon-api/characters/list-characters-response.schema.json', cache);
-  const knowledgeOwner = compile('schemas/domain/knowledge-owner-ref.schema.json', cache);
+  const _knowledgeOwner = compile('schemas/domain/knowledge-owner-ref.schema.json', cache);
   const knowledgeItem = compile('schemas/daemon-api/actor-knowledge/knowledge-view-item.schema.json', cache);
   const addKnowledgeReq = compile('schemas/daemon-api/actor-knowledge/add-knowledge-entry-request.schema.json', cache);
   const knowledgeDetail = compile('schemas/daemon-api/actor-knowledge/knowledge-entry-detail.schema.json', cache);
