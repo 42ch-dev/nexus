@@ -11,9 +11,9 @@
 use sqlx::SqlitePool;
 
 use crate::actor_world_binding::{
-    require_active_owned_provenance_pool, require_valid_provenance_tx,
+    require_owned_binding_provenance_pool, require_valid_provenance_tx,
 };
-use crate::character::{require_active_owned_character, require_owned_character_pool};
+use crate::character::{require_active_owned_character_tx, require_owned_character_pool};
 use crate::error::LocalDbError;
 use crate::MAX_CHARACTER_MEMORY_LIST_LIMIT;
 
@@ -75,7 +75,7 @@ pub async fn create_character_pending_review(
 ) -> Result<(), LocalDbError> {
     let mut tx = crate::begin_immediate(pool).await?;
     let result = async {
-        require_active_owned_character(&mut tx, owner_creator_id, &record.character_id).await?;
+        require_active_owned_character_tx(&mut tx, owner_creator_id, &record.character_id).await?;
         require_valid_provenance_tx(
             &mut tx,
             owner_creator_id,
@@ -122,17 +122,18 @@ pub async fn create_character_pending_review(
 ///
 /// `binding_id = None` reads the shared Character scope (`actor_world_binding_id
 /// IS NULL`); `Some(b)` reads only that binding-local scope and requires the
-/// exact active binding with an owned active World. A local row is therefore
-/// never observable through another binding, another Character's binding, or
-/// the shared scope.
+/// stored binding tuple plus an existing owned World (liveness not required:
+/// retained reads succeed while the Character, binding, or World is
+/// archived). A local row is therefore never observable through another
+/// binding, another Character's binding, or the shared scope.
 ///
 /// Returns None if the record does not exist within that scope.
 ///
 /// # Errors
 ///
 /// Returns `LocalDbError::ActorNotFound` when the Character (or, for a
-/// binding-scoped read, the binding/World) is missing, foreign, inactive, or
-/// not an active World; `LocalDbError` on database failure.
+/// binding-scoped read, the binding/World) is missing or foreign;
+/// `LocalDbError` on database failure.
 pub async fn get_character_pending_review(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -142,7 +143,7 @@ pub async fn get_character_pending_review(
 ) -> Result<Option<CharacterPendingReviewRecord>, LocalDbError> {
     require_owned_character_pool(pool, owner_creator_id, character_id).await?;
     if let Some(binding_id) = binding_id {
-        require_active_owned_provenance_pool(pool, owner_creator_id, character_id, binding_id)
+        require_owned_binding_provenance_pool(pool, owner_creator_id, character_id, binding_id)
             .await?;
     }
     let row = sqlx::query!(
@@ -175,8 +176,9 @@ pub async fn get_character_pending_review(
 /// newest first.
 ///
 /// `binding_id = None` lists the shared Character scope; `Some(b)` lists only
-/// that binding-local scope and requires the exact active binding with an
-/// owned active World. `limit` is clamped to `1..=MAX_CHARACTER_MEMORY_LIST_LIMIT`.
+/// that binding-local scope and requires the stored binding tuple plus an
+/// existing owned World (liveness not required).
+/// `limit` is clamped to `1..=MAX_CHARACTER_MEMORY_LIST_LIMIT`.
 ///
 /// Results are ordered `created_at DESC, pending_id DESC` (a total order, so
 /// offset pagination is deterministic); `offset` skips that many rows of the
@@ -185,8 +187,8 @@ pub async fn get_character_pending_review(
 /// # Errors
 ///
 /// Returns `LocalDbError::ActorNotFound` when the Character (or, for a
-/// binding-scoped read, the binding/World) is missing, foreign, inactive, or
-/// not an active World; `LocalDbError` on database failure.
+/// binding-scoped read, the binding/World) is missing or foreign;
+/// `LocalDbError` on database failure.
 pub async fn list_character_pending_reviews(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -197,7 +199,7 @@ pub async fn list_character_pending_reviews(
 ) -> Result<Vec<CharacterPendingReviewRecord>, LocalDbError> {
     require_owned_character_pool(pool, owner_creator_id, character_id).await?;
     if let Some(binding_id) = binding_id {
-        require_active_owned_provenance_pool(pool, owner_creator_id, character_id, binding_id)
+        require_owned_binding_provenance_pool(pool, owner_creator_id, character_id, binding_id)
             .await?;
     }
     let limit = limit.clamp(1, MAX_CHARACTER_MEMORY_LIST_LIMIT);
@@ -249,7 +251,7 @@ pub async fn delete_character_pending_review(
 ) -> Result<bool, LocalDbError> {
     let mut tx = crate::begin_immediate(pool).await?;
     let result = async {
-        require_active_owned_character(&mut tx, owner_creator_id, character_id).await?;
+        require_active_owned_character_tx(&mut tx, owner_creator_id, character_id).await?;
         let deleted = sqlx::query!(
             "DELETE FROM character_memory_pending_review WHERE pending_id = ? AND character_id = ?",
             pending_id,
@@ -289,7 +291,7 @@ pub async fn delete_character_pending_review_in_tx(
     character_id: &str,
     pending_id: &str,
 ) -> Result<bool, LocalDbError> {
-    require_active_owned_character(&mut *tx, owner_creator_id, character_id).await?;
+    require_active_owned_character_tx(&mut *tx, owner_creator_id, character_id).await?;
     let result = sqlx::query!(
         "DELETE FROM character_memory_pending_review WHERE pending_id = ? AND character_id = ?",
         pending_id,
@@ -303,14 +305,14 @@ pub async fn delete_character_pending_review_in_tx(
 /// Count pending reviews for a Character binding scope.
 ///
 /// `binding_id = None` counts the shared Character scope; `Some(b)` counts only
-/// that binding-local scope and requires the exact active binding with an
-/// owned active World.
+/// that binding-local scope and requires the stored binding tuple plus an
+/// existing owned World (liveness not required).
 ///
 /// # Errors
 ///
 /// Returns `LocalDbError::ActorNotFound` when the Character (or, for a
-/// binding-scoped read, the binding/World) is missing, foreign, inactive, or
-/// not an active World; `LocalDbError` on database failure.
+/// binding-scoped read, the binding/World) is missing or foreign;
+/// `LocalDbError` on database failure.
 ///
 /// # Panics
 ///
@@ -323,7 +325,7 @@ pub async fn count_character_pending_reviews(
 ) -> Result<usize, LocalDbError> {
     require_owned_character_pool(pool, owner_creator_id, character_id).await?;
     if let Some(binding_id) = binding_id {
-        require_active_owned_provenance_pool(pool, owner_creator_id, character_id, binding_id)
+        require_owned_binding_provenance_pool(pool, owner_creator_id, character_id, binding_id)
             .await?;
     }
     let count = sqlx::query_scalar!(

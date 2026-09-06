@@ -185,6 +185,35 @@ pub(crate) async fn require_owned_world(
     }
 }
 
+/// Pool variant of [`require_owned_world`] for retained-data read paths.
+///
+/// The World must exist and be owned by `owner_creator_id`; no status
+/// requirement applies (retained reads tolerate an archived World).
+///
+/// # Errors
+///
+/// Returns `LocalDbError::ActorNotFound` when the World is missing or owned
+/// by another Creator; `LocalDbError` on database failure.
+pub(crate) async fn require_owned_world_pool(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+    world_id: &str,
+) -> Result<(), LocalDbError> {
+    let owner = sqlx::query_scalar!(
+        r#"SELECT owner_creator_id as "owner_creator_id!" FROM narrative_worlds WHERE world_id = ?"#,
+        world_id
+    )
+    .fetch_optional(pool)
+    .await?;
+    match owner {
+        Some(stored) if stored == owner_creator_id => Ok(()),
+        Some(_) | None => Err(LocalDbError::ActorNotFound {
+            resource: "world",
+            id: world_id.to_string(),
+        }),
+    }
+}
+
 /// Owned **and active** World validation (v1.184 P3 provenance rule).
 ///
 /// Character memory provenance requires a binding to target a World that is
@@ -207,33 +236,6 @@ pub(crate) async fn require_owned_active_world(
         world_id
     )
     .fetch_optional(&mut **tx)
-    .await?;
-    match owner {
-        Some(stored) if stored == owner_creator_id => Ok(()),
-        Some(_) | None => Err(LocalDbError::ActorNotFound {
-            resource: "world",
-            id: world_id.to_string(),
-        }),
-    }
-}
-
-/// Pool variant of [`require_owned_active_world`] for read paths.
-///
-/// # Errors
-///
-/// Returns `LocalDbError::ActorNotFound` when the World is missing, owned by
-/// another Creator, or not active; `LocalDbError` on database failure.
-pub(crate) async fn require_owned_active_world_pool(
-    pool: &SqlitePool,
-    owner_creator_id: &str,
-    world_id: &str,
-) -> Result<(), LocalDbError> {
-    let owner = sqlx::query_scalar!(
-        r#"SELECT owner_creator_id as "owner_creator_id!"
-           FROM narrative_worlds WHERE world_id = ? AND status = 'active'"#,
-        world_id
-    )
-    .fetch_optional(pool)
     .await?;
     match owner {
         Some(stored) if stored == owner_creator_id => Ok(()),
@@ -462,14 +464,6 @@ pub async fn require_active_owned_character_tx(
         return Err(character_inactive(character_id));
     }
     Ok(row)
-}
-
-pub(crate) async fn require_active_owned_character(
-    tx: &mut Transaction<'_, Sqlite>,
-    owner_creator_id: &str,
-    character_id: &str,
-) -> Result<CharacterRecord, LocalDbError> {
-    require_active_owned_character_tx(tx, owner_creator_id, character_id).await
 }
 
 /// Pool-scoped ownership check for read paths that do not hold a write
