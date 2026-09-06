@@ -687,6 +687,12 @@ fn character_routes() -> Router<WorkspaceState> {
             get(handlers::actor_knowledge::list_character_knowledge),
         )
         .route(
+            "/v1/daemon/characters/:character_id/knowledge/:entry_id",
+            get(handlers::actor_knowledge::get_knowledge_entry)
+                .patch(handlers::actor_knowledge::patch_knowledge_entry)
+                .delete(handlers::actor_knowledge::delete_knowledge_entry),
+        )
+        .route(
             "/v1/daemon/characters/:character_id/memory/pending-review",
             post(handlers::character_memory::capture_pending_review)
                 .get(handlers::character_memory::list_pending_reviews),

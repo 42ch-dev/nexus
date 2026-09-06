@@ -964,3 +964,66 @@ async fn restored_character_run_mints_fresh_session_after_archive() {
     let post_session = post["session"]["session_id"].as_str().unwrap();
     assert_ne!(pre_session, post_session, "restore must mint a fresh session");
 }
+
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn character_run_includes_edited_summary_and_shared_ke_across_worlds() {
+    let host = MockHost::new();
+    let d = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let g = seed(&d).await;
+
+    let edited = d
+        .cli(&[
+            "creator",
+            "character",
+            "knowledge",
+            "edit",
+            "--character-id",
+            &g.character_a,
+            "--entry-id",
+            &g.ke_a_share,
+            "--expected-revision",
+            "0",
+            "--summary",
+            "AShare edited summary for MCA",
+            "--json",
+        ])
+        .await;
+    assert!(edited.status.success(), "edit share: {}", stderr(&edited));
+
+    let w1 = d
+        .cli(&run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &[]))
+        .await;
+    assert!(w1.status.success(), "w1 run: {}", stderr(&w1));
+    let prompt_w1 = host.last_prompt();
+    assert!(prompt_w1.contains("AShare edited summary for MCA"));
+    assert!(prompt_w1.contains(NAME_A_SHARE));
+    assert!(!prompt_w1.contains(NAME_B_SHARE));
+
+    let w2 = d
+        .cli(&run_args(&g.character_a, &g.world_w2, &g.bind_a_w2, &[]))
+        .await;
+    assert!(w2.status.success(), "w2 run: {}", stderr(&w2));
+    let prompt_w2 = host.last_prompt();
+    assert!(prompt_w2.contains("AShare edited summary for MCA"));
+    assert!(prompt_w2.contains(NAME_A_SHARE));
+    assert!(!prompt_w2.contains(NAME_B_SHARE));
+
+    let shown = d
+        .cli(&[
+            "creator",
+            "character",
+            "knowledge",
+            "show",
+            "--character-id",
+            &g.character_a,
+            "--entry-id",
+            &g.ke_a_share,
+            "--json",
+        ])
+        .await;
+    assert!(shown.status.success(), "show shared ke: {}", stderr(&shown));
+    let detail: Value = json_out(&shown);
+    assert_eq!(detail["item"]["entry_id"], g.ke_a_share);
+    assert_eq!(detail["summary"], "AShare edited summary for MCA");
+}

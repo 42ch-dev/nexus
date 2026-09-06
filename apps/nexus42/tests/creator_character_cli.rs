@@ -849,3 +849,132 @@ async fn binding_show_retained_after_archive() {
         stderr(&denied)
     );
 }
+
+
+#[tokio::test]
+async fn knowledge_show_edit_remove_summary_journey() {
+    let d = LiveDaemon::start().await;
+    activate_owner(&d).await;
+
+    let created = d
+        .cli(&[
+            "creator",
+            "character",
+            "create",
+            "--display-name",
+            "Ava",
+            "--world-id",
+            WORLD_A,
+            "--json",
+        ])
+        .await;
+    assert!(created.status.success(), "create: {}", stderr(&created));
+    let body: Value = serde_json::from_str(&stdout(&created)).unwrap();
+    let chr = body["character"]["character_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let added = d
+        .cli(&[
+            "creator",
+            "character",
+            "knowledge",
+            "add",
+            "--owner",
+            "character",
+            "--character-id",
+            &chr,
+            "--block-type",
+            "item",
+            "--canonical-name",
+            "CliFact",
+            "--summary",
+            "alpha summary",
+            "--json",
+        ])
+        .await;
+    assert!(added.status.success(), "add: {}", stderr(&added));
+    let added_body: Value = serde_json::from_str(&stdout(&added)).unwrap();
+    let entry_id = added_body["item"]["entry_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let revision = added_body["item"]["revision"].as_u64().unwrap();
+
+    let shown = d
+        .cli(&[
+            "creator",
+            "character",
+            "knowledge",
+            "show",
+            "--character-id",
+            &chr,
+            "--entry-id",
+            &entry_id,
+            "--json",
+        ])
+        .await;
+    assert!(shown.status.success(), "show: {}", stderr(&shown));
+    let show_body: Value = serde_json::from_str(&stdout(&shown)).unwrap();
+    assert_eq!(show_body["summary"], "alpha summary");
+
+    let edited = d
+        .cli(&[
+            "creator",
+            "character",
+            "knowledge",
+            "edit",
+            "--character-id",
+            &chr,
+            "--entry-id",
+            &entry_id,
+            "--expected-revision",
+            &revision.to_string(),
+            "--summary",
+            "beta summary",
+            "--json",
+        ])
+        .await;
+    assert!(edited.status.success(), "edit: {}", stderr(&edited));
+    let edit_body: Value = serde_json::from_str(&stdout(&edited)).unwrap();
+    assert_eq!(edit_body["summary"], "beta summary");
+    let rev2 = edit_body["item"]["revision"].as_u64().unwrap();
+
+    let cleared = d
+        .cli(&[
+            "creator",
+            "character",
+            "knowledge",
+            "edit",
+            "--character-id",
+            &chr,
+            "--entry-id",
+            &entry_id,
+            "--expected-revision",
+            &rev2.to_string(),
+            "--clear-summary",
+            "--json",
+        ])
+        .await;
+    assert!(cleared.status.success(), "clear: {}", stderr(&cleared));
+    let clear_body: Value = serde_json::from_str(&stdout(&cleared)).unwrap();
+    assert!(clear_body["summary"].is_null());
+    let rev3 = clear_body["item"]["revision"].as_u64().unwrap();
+
+    let removed = d
+        .cli(&[
+            "creator",
+            "character",
+            "knowledge",
+            "remove",
+            "--character-id",
+            &chr,
+            "--entry-id",
+            &entry_id,
+            "--expected-revision",
+            &rev3.to_string(),
+        ])
+        .await;
+    assert!(removed.status.success(), "remove: {}", stderr(&removed));
+}

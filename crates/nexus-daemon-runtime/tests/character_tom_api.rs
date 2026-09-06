@@ -1154,3 +1154,77 @@ async fn record_rejects_201st_belief_row_without_mutation() {
     assert_eq!(page["items"].as_array().unwrap().len(), 100);
     assert_eq!(page["pagination"]["has_more"], true);
 }
+
+#[tokio::test]
+async fn summary_patch_does_not_clobber_tom_modules_on_carrier() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr = created["character"]["character_id"].as_str().unwrap();
+    let bind = created["binding"]["binding_id"].as_str().unwrap();
+
+    let store = SqliteKbStore::new(ctx.pool.clone());
+    let mut kb = KnowledgeEntryRecord::for_character(chr, BlockType::Character, "TomCarrier");
+    kb.body = Some(nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryBody {
+        summary: Some("carrier summary".into()),
+        ..Default::default()
+    });
+    kb.modules = Some(json!({ "belief": [] }));
+    let carrier = kb.entry_id.clone();
+    store.insert_knowledge_entry(kb).await.unwrap();
+
+    let resp = record(
+        &ctx.server,
+        chr,
+        l1_body(WORLD_A, bind, &carrier, chr, 0),
+    )
+    .await;
+    assert_eq!(resp.status_code(), 200, "{}", resp.text());
+
+    let patched = ctx
+        .server
+        .patch(&format!("/v1/daemon/characters/{chr}/knowledge/{carrier}"))
+        .json(&json!({ "expected_revision": 1, "summary": "updated carrier summary" }))
+        .await;
+    assert_eq!(patched.status_code(), 200, "{}", patched.text());
+    let body: Value = patched.json();
+    assert_eq!(body["summary"], "updated carrier summary");
+    assert_eq!(body["item"]["revision"], 2);
+
+    let len: (i64,) = sqlx::query_as(
+        "SELECT json_array_length(modules_json, '$.belief') FROM kb_key_blocks WHERE key_block_id = ?",
+    )
+    .bind(&carrier)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(len.0, 1, "ToM belief row must survive summary edit");
+
+    let page = list_tom(&ctx.server, chr, WORLD_A, bind).await;
+    assert_eq!(page["items"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn tom_cas_bumps_revision_blocking_stale_summary_patch() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr = created["character"]["character_id"].as_str().unwrap();
+    let bind = created["binding"]["binding_id"].as_str().unwrap();
+    let carrier = seed_carrier(&ctx.pool, chr).await;
+
+    let resp = record(
+        &ctx.server,
+        chr,
+        l1_body(WORLD_A, bind, &carrier, chr, 0),
+    )
+    .await;
+    assert_eq!(resp.status_code(), 200, "{}", resp.text());
+
+    let stale = ctx
+        .server
+        .patch(&format!("/v1/daemon/characters/{chr}/knowledge/{carrier}"))
+        .json(&json!({ "expected_revision": 0, "summary": "late" }))
+        .await;
+    assert_eq!(stale.status_code(), 409, "{}", stale.text());
+    let body: Value = stale.json();
+    assert_eq!(body["error"]["code"], "knowledge_revision_conflict");
+}
