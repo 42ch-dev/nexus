@@ -279,7 +279,7 @@ Any referent gives `knowledge_entry_in_use`, no counts/foreign ids disclosed. In
 
 ### 11.6 Successful run → pending candidate
 
-`schemas/daemon-api/agent-host/execute-operation-request.schema.json` adds optional boolean `remember` **only to Prompt**; absent/false keeps current execution and performs no memory capture. `remember:true` requires a stored admitted Character session with an exact binding; Creator/legacy sessions reject `400 invalid_input` before Host execution. No actor, binding, digest or operation id supplied in the Prompt request can claim capture authority.
+`schemas/daemon-api/agent-host/execute-operation-request.schema.json` adds optional boolean `remember` **only to Prompt**; absent/false keeps current execution and performs no memory capture. `remember:true` requires a stored admitted Character session with an exact binding; Creator/legacy sessions reject HTTP 422 `invalid_input` before Host execution. No actor, binding, digest or operation id supplied in the Prompt request can claim capture authority.
 
 The authority is the **existing server-owned drain of the stream returned by `HostFacade::exec`**, not CLI SSE, a broadcast subscriber, model-written metadata or a fabricated digest. Snapshot active Creator id, Character id, binding id, World/viewpoint, lifecycle epoch, server-minted Host operation id and session id during admission. Transfer the activity guard and that immutable snapshot into the drain.
 
