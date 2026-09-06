@@ -976,10 +976,14 @@ reruns provider execution for capture or outcome recovery.
 
 Rules:
 
-- **Run vs capture exit codes.** Opt-out succeeded runs exit **0**. `remember` +
-  `captured` exits **0**. `remember` with terminal `skipped`/`failed` capture,
-  incomplete/failed/cancelled runs, or unavailable capture outcome after grace
-  exits **nonzero** while preserving streamed `result` text when received.
+- **Run vs capture exit codes.** Opt-out succeeded runs exit **0** when SSE
+  terminal observation is complete. `remember` + `captured` exits **0** only
+  when both the matching SSE `end_turn` terminal and the terminal GET outcome
+  are observed. Missed SSE terminal with a successful GET outcome exits
+  **nonzero** while preserving streamed `result` and `outcome`. `remember`
+  with terminal `skipped`/`failed` capture, incomplete/failed/cancelled runs,
+  or unavailable capture outcome after grace exits **nonzero** while preserving
+  streamed `result` text when received.
 - **Correlation.** SSE terminal handling ignores foreign `session_id` / `op_id`
   pairs; only the launched operation's `MessageDelta` text contributes to
   `result`.

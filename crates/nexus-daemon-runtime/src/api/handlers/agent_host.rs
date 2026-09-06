@@ -115,12 +115,12 @@ fn map_host_error(e: &nexus_agent_host::HostError) -> NexusApiError {
 
 /// Parse a session ID path parameter as UUID.
 ///
-/// Returns 400 Bad Request for malformed IDs.
+/// Returns 422 Unprocessable Entity for malformed IDs.
 fn parse_session_id(raw: &str) -> Result<Uuid, NexusApiError> {
     raw.parse::<Uuid>()
-        .map_err(|_| NexusApiError::InvalidInput {
-            field: "session_id".into(),
-            reason: format!("session_id must be a valid UUID, got: {raw}"),
+        .map_err(|_| NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: format!("session_id must be a valid UUID, got: {raw}"),
         })
 }
 
@@ -150,12 +150,12 @@ fn authorize_actor_session(
 
 /// Parse an operation ID path parameter as UUID.
 ///
-/// Returns 400 Bad Request for malformed IDs.
+/// Returns 422 Unprocessable Entity for malformed IDs.
 fn parse_operation_id(raw: &str) -> Result<Uuid, NexusApiError> {
     raw.parse::<Uuid>()
-        .map_err(|_| NexusApiError::InvalidInput {
-            field: "operation_id".into(),
-            reason: format!("operation_id must be a valid UUID, got: {raw}"),
+        .map_err(|_| NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: format!("operation_id must be a valid UUID, got: {raw}"),
         })
 }
 
@@ -701,9 +701,9 @@ pub async fn execute_operation(
                 .context_for(&sid)
                 .is_some_and(|ctx| matches!(ctx.actor, AdmittedActor::Character { .. }));
             if remember && !is_character {
-                return Err(NexusApiError::InvalidInput {
-                    field: "remember".into(),
-                    reason: "remember requires an admitted stored Character session with an active binding".into(),
+                return Err(NexusApiError::BadRequest {
+                    code: "invalid_input".into(),
+                    message: "remember requires an admitted stored Character session with an active binding".into(),
                 });
             }
             let (content, guard) = prepare_prompt(&state, &sid, content).await?;
@@ -745,6 +745,7 @@ pub async fn execute_operation(
             let stream = host.exec(sid.clone(), host_op).await.map_err(|e| {
                 if snapshot.is_some() {
                     state.actor_sessions().remove_operation_reservation(&op_id);
+                    state.actor_sessions().clear_indexed_operation(&op_id);
                 }
                 map_host_error(&e)
             })?;
@@ -1272,7 +1273,7 @@ mod tests {
         let result = shutdown_session(State(state), Path("not-a-uuid".to_string())).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(err.status_code(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(err.error_code(), "invalid_input");
     }
 
@@ -1282,7 +1283,7 @@ mod tests {
         let result = shutdown_session(State(state), Path(String::new())).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(err.status_code(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(err.error_code(), "invalid_input");
     }
 
@@ -1292,7 +1293,7 @@ mod tests {
         let result = shutdown_session(State(state), Path("550e8400-e29b-41d4".to_string())).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(err.status_code(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     #[tokio::test]
@@ -1302,7 +1303,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().status_code(),
-            axum::http::StatusCode::BAD_REQUEST
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY
         );
     }
 
@@ -1326,7 +1327,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().status_code(),
-            axum::http::StatusCode::BAD_REQUEST
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY
         );
     }
 
@@ -1340,7 +1341,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().status_code(),
-            axum::http::StatusCode::BAD_REQUEST
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY
         );
     }
 
@@ -1368,7 +1369,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().status_code(),
-            axum::http::StatusCode::BAD_REQUEST
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY
         );
     }
 
@@ -3151,6 +3152,7 @@ mod tests {
         )
         .await
         .unwrap_err();
+        assert_eq!(err.status_code(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(err.error_code(), "invalid_input");
         assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 0);
     }

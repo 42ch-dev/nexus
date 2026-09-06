@@ -196,11 +196,13 @@ fn classify_run_exit(remember: bool, delivery: &RunDelivery) -> (i32, String) {
 
     let capture = delivery.outcome.as_ref().map(|o| &o.capture);
 
-    if delivery.notes.output_incomplete && delivery.outcome.is_none() {
-        return (
-            1,
-            "output observation incomplete; capture outcome unavailable".to_string(),
-        );
+    if delivery.notes.output_incomplete {
+        let msg = if delivery.notes.outcome_unavailable {
+            "output observation incomplete; capture outcome unavailable".to_string()
+        } else {
+            "output observation incomplete".to_string()
+        };
+        return (1, msg);
     }
     if delivery.notes.outcome_unavailable && remember {
         let msg = if delivery.notes.output_incomplete {
@@ -276,13 +278,19 @@ fn infer_run_status_from_stream(
     if delivery.stream.op_failed {
         return Some(CharacterOperationResultRunStatus::Failed);
     }
-    if delivery
-        .stream
-        .events
-        .iter()
-        .any(|e| event_matches_terminal(e, true))
-    {
-        return Some(CharacterOperationResultRunStatus::Succeeded);
+    for event in &delivery.stream.events {
+        if let Some(inner) = event.get("OpFinished") {
+            return Some(match inner.get("reason").and_then(serde_json::Value::as_str) {
+                Some("end_turn") => CharacterOperationResultRunStatus::Succeeded,
+                Some("max_tokens") | Some("max_turn_requests") | Some("refusal") => {
+                    CharacterOperationResultRunStatus::Incomplete
+                }
+                _ => CharacterOperationResultRunStatus::Succeeded,
+            });
+        }
+        if event.get("OpFailed").is_some() {
+            return Some(CharacterOperationResultRunStatus::Failed);
+        }
     }
     None
 }
@@ -310,14 +318,6 @@ fn sse_event_matches(
         }
     }
     false
-}
-
-fn event_matches_terminal(value: &serde_json::Value, finished: bool) -> bool {
-    if finished {
-        value.get("OpFinished").is_some()
-    } else {
-        value.get("OpFailed").is_some()
-    }
 }
 
 async fn observe_run_concurrently(
@@ -506,8 +506,8 @@ pub(crate) async fn consume_terminal_events(
                         incomplete: false,
                     });
                 }
+                events.push(value);
             }
-            events.push(value);
         }
     }
 }
@@ -559,6 +559,34 @@ mod tests {
                 code: None,
             },
         }
+    }
+
+
+    #[test]
+    fn classify_missed_sse_with_captured_outcome_is_nonzero() {
+        let mut delivery = sample_delivery(Some(succeeded_captured_outcome()));
+        delivery.notes.output_incomplete = true;
+        let (code, msg) = classify_run_exit(true, &delivery);
+        assert_ne!(code, 0);
+        assert!(msg.contains("incomplete"));
+        assert_eq!(delivery.stream.result, "hello");
+    }
+
+    #[test]
+    fn infer_max_tokens_stream_without_outcome_is_incomplete() {
+        let mut delivery = sample_delivery(None);
+        delivery.stream.events = vec![serde_json::json!({
+            "OpFinished": {
+                "session_id": "sess",
+                "op_id": "op",
+                "reason": "max_tokens",
+            }
+        })];
+        assert_eq!(
+            infer_run_status_from_stream(&delivery),
+            Some(CharacterOperationResultRunStatus::Incomplete)
+        );
+        assert_ne!(classify_run_exit(false, &delivery), (0, String::new()));
     }
 
     #[test]

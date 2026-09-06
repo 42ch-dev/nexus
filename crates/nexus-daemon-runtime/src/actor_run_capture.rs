@@ -35,22 +35,31 @@ pub enum DigestBuildError {
     TooLarge,
 }
 
+fn checked_capture_digest_byte_len(raw_prompt: &str, response_text: &str) -> Option<usize> {
+    CAPTURE_DIGEST_STATIC_OVERHEAD
+        .checked_add(raw_prompt.len())?
+        .checked_add(response_text.len())
+}
+
 pub fn capture_digest_byte_len(raw_prompt: &str, response_text: &str) -> usize {
-    CAPTURE_DIGEST_STATIC_OVERHEAD + raw_prompt.len() + response_text.len()
+    checked_capture_digest_byte_len(raw_prompt, response_text).unwrap_or(usize::MAX)
 }
 
 pub fn prompt_digest_prefix_bytes(raw_prompt: &str) -> usize {
-    CAPTURE_DIGEST_STATIC_OVERHEAD + raw_prompt.len()
+    CAPTURE_DIGEST_STATIC_OVERHEAD
+        .checked_add(raw_prompt.len())
+        .unwrap_or(usize::MAX)
 }
 
 pub fn build_capture_digest(raw_prompt: &str, response_text: &str) -> Result<String, DigestBuildError> {
     if response_text.trim().is_empty() {
         return Err(DigestBuildError::EmptyResponse);
     }
-    if capture_digest_byte_len(raw_prompt, response_text) > MAX_CAPTURE_DIGEST_BYTES {
-        return Err(DigestBuildError::TooLarge);
+    match checked_capture_digest_byte_len(raw_prompt, response_text) {
+        None => Err(DigestBuildError::TooLarge),
+        Some(len) if len > MAX_CAPTURE_DIGEST_BYTES => Err(DigestBuildError::TooLarge),
+        Some(_) => Ok(format!("Prompt:\n{raw_prompt}\n\nResponse:\n{response_text}")),
     }
-    Ok(format!("Prompt:\n{raw_prompt}\n\nResponse:\n{response_text}"))
 }
 
 pub fn run_pending_id(operation_id: &HostOperationId) -> String {
@@ -105,8 +114,18 @@ impl DrainAccumulator {
                 if self.digest_too_large {
                     return;
                 }
-                let next_response_bytes = self.message_text.len() + text.len();
-                if self.prompt_prefix_bytes + next_response_bytes > MAX_CAPTURE_DIGEST_BYTES {
+                let next_total = match self
+                    .prompt_prefix_bytes
+                    .checked_add(self.message_text.len())
+                    .and_then(|n| n.checked_add(text.len()))
+                {
+                    Some(n) => n,
+                    None => {
+                        self.digest_too_large = true;
+                        return;
+                    }
+                };
+                if next_total > MAX_CAPTURE_DIGEST_BYTES {
                     self.digest_too_large = true;
                     return;
                 }
@@ -235,11 +254,9 @@ async fn try_persist_capture(
     let AdmittedActor::Character { character_id } = &snapshot.ctx.actor else {
         return disabled_capture();
     };
-    let binding_id = snapshot
-        .ctx
-        .binding_id
-        .as_deref()
-        .expect("character capture requires binding");
+    let Some(binding_id) = snapshot.ctx.binding_id.as_deref() else {
+        return failed_capture(NexusCharacterRunCaptureOutcomeCode::CaptureScopeChanged);
+    };
     if guard.epoch() != snapshot.ctx.character_epoch.unwrap_or(guard.epoch()) {
         return failed_capture(NexusCharacterRunCaptureOutcomeCode::CaptureScopeChanged);
     }
@@ -390,7 +407,6 @@ pub async fn drain_and_finalize_character_operation(
             }
             Err(_) => {
                 acc.run_failed = true;
-                break;
             }
         }
     }
@@ -899,7 +915,16 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
         set_before_operation_finalize_hook({
             let at_boundary_drain = Arc::clone(&at_boundary);
             let cancel_done_drain = Arc::clone(&cancel_done);
-            move |_reg, _op| {
+            let guard_op = op_id.clone();
+            move |_reg, op| {
+                // The finalize hook is global; without this guard a concurrently
+                // running plain drain test (which also fires the hook during its own
+                // drain_and_finalize_character_operation call) would deadlock on these
+                // barriers. Only block for this test's own operation — every test uses a
+                // fresh HostOperationId, so this is deterministic and isolated.
+                if op != &guard_op {
+                    return;
+                }
                 at_boundary_drain.wait();
                 cancel_done_drain.wait();
             }
@@ -969,6 +994,144 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
         assert_eq!(
             result.capture.code,
             Some(NexusCharacterRunCaptureOutcomeCode::RunCancelled)
+        );
+    }
+
+
+    #[test]
+    fn digest_exact_boundary_accepted() {
+        let prompt = "boundary";
+        let overhead = prompt_digest_prefix_bytes(prompt);
+        let response = "z".repeat(MAX_CAPTURE_DIGEST_BYTES - overhead);
+        assert_eq!(capture_digest_byte_len(prompt, &response), MAX_CAPTURE_DIGEST_BYTES);
+        assert!(build_capture_digest(prompt, &response).is_ok());
+    }
+
+    #[test]
+    fn accumulator_checked_add_overflow_flags_too_large() {
+        let snapshot = sample_snapshot(true, "p");
+        let mut acc = DrainAccumulator {
+            message_text: String::new(),
+            digest_too_large: false,
+            prompt_prefix_bytes: usize::MAX - 1,
+            saw_terminal: false,
+            finish_reason: None,
+            run_failed: false,
+        };
+        acc.apply_matching(&message_delta(&snapshot, "xx"));
+        assert!(acc.digest_too_large);
+        assert!(acc.message_text.is_empty());
+    }
+
+    #[tokio::test]
+    async fn host_error_stream_drains_to_terminal_finalization() {
+        use nexus_agent_host::ProviderId;
+
+        let snapshot = sample_snapshot(true, "q");
+        let registry = ActorSessionRegistry::new();
+        registry.reserve_character_operation(snapshot.clone()).unwrap();
+        registry.register_indexed_operation(
+            snapshot.operation_id.clone(),
+            snapshot.session_id.clone(),
+        );
+        let items = vec![
+            Err(nexus_agent_host::HostError::ProviderUnavailable {
+                provider_id: ProviderId::new("mock"),
+                message: "fault".into(),
+            }),
+            Ok(message_delta(&snapshot, "late")),
+            Ok(op_finished(&snapshot, FinishReason::EndTurn)),
+        ];
+        let stream: std::pin::Pin<
+            Box<dyn futures_util::Stream<Item = Result<HostEvent, HostError>> + Send>,
+        > = Box::pin(futures_util::stream::iter(items));
+        drain_and_finalize_character_operation(
+            sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap(),
+            registry.clone(),
+            stream,
+            None,
+            snapshot.clone(),
+        )
+        .await;
+        let result = registry
+            .character_operation_result(
+                "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                &snapshot.operation_id,
+            )
+            .expect("terminal outcome committed once");
+        assert_eq!(result.run_status, CharacterOperationResultRunStatus::Failed);
+        assert!(
+            registry
+                .resolve_indexed_operation_session(&snapshot.operation_id)
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_binding_fails_capture_without_panic() {
+        let (_tmp, home, db_path) = crate::test_utils::create_test_workspace().await;
+        let state = crate::workspace::WorkspaceState::new_for_testing(home, db_path, None).await;
+        let pool = state.pool().unwrap().clone();
+        let owner = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        nexus_local_db::ensure_creator_row(&pool, owner, "Owner")
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO narrative_worlds              (world_id, workspace_id, owner_creator_id, title, slug, status, visibility,               time_policy, metadata_json, created_at)              VALUES ('wld_worldA', 'ws', ?, 'WorldA', 'worldA', 'active', 'private', 'manual', '{}', datetime('now'))",
+        )
+        .bind(owner)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let created = nexus_local_db::create_character_with_initial_binding(
+            &pool,
+            nexus_local_db::CreateCharacterParams {
+                owner_creator_id: owner,
+                display_name: "Ada",
+                image_uri: None,
+                persona_json: "{}",
+                world_id: "wld_worldA",
+                world_sheet_entry_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        let registry = state.actor_sessions();
+        let guard = registry
+            .admit_character_activity(&pool, owner, &created.character.character_id)
+            .await
+            .expect("admit");
+        let mut snapshot = sample_snapshot(true, "q");
+        snapshot.owner_creator_id = owner.to_string();
+        snapshot.ctx.owner_creator_id = owner.to_string();
+        snapshot.ctx.actor = AdmittedActor::Character {
+            character_id: created.character.character_id.clone(),
+        };
+        snapshot.ctx.world_id = "wld_worldA".into();
+        snapshot.ctx.binding_id = None;
+        snapshot.ctx.character_epoch = Some(guard.epoch());
+        registry
+            .reserve_character_operation(snapshot.clone())
+            .unwrap();
+        drain_and_finalize_character_operation(
+            pool,
+            registry.clone(),
+            stream_of(vec![
+                message_delta(&snapshot, "visible"),
+                op_finished(&snapshot, FinishReason::EndTurn),
+            ]),
+            Some(guard),
+            snapshot.clone(),
+        )
+        .await;
+        let result = registry
+            .character_operation_result(owner, &snapshot.operation_id)
+            .expect("outcome");
+        assert_eq!(result.run_status, CharacterOperationResultRunStatus::Succeeded);
+        assert_eq!(result.capture.status, NexusCharacterRunCaptureOutcomeStatus::Failed);
+        assert_eq!(
+            result.capture.code,
+            Some(NexusCharacterRunCaptureOutcomeCode::CaptureScopeChanged)
         );
     }
 

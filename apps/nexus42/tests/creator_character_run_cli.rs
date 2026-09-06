@@ -1244,6 +1244,22 @@ async fn character_run_wrong_op_terminal_ignored() {
     let payload = json_out(&out);
     assert_eq!(payload["result"], MOCK_RESULT);
     assert_eq!(payload["outcome"]["run_status"], "succeeded");
+    let op_id = payload["operation"]["operation_id"].as_str().unwrap();
+    let session_id = payload["session"]["session_id"].as_str().unwrap();
+    for event in payload["events"].as_array().unwrap() {
+        let sid = event
+            .as_object()
+            .and_then(|o| o.values().next())
+            .and_then(|v| v.get("session_id"))
+            .and_then(|v| v.as_str());
+        let oid = event
+            .as_object()
+            .and_then(|o| o.values().next())
+            .and_then(|v| v.get("op_id"))
+            .and_then(|v| v.as_str());
+        assert_eq!(sid, Some(session_id));
+        assert_eq!(oid, Some(op_id));
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1285,7 +1301,7 @@ async fn character_run_missed_sse_preserves_outcome() {
         ),
     )
     .await;
-    assert!(out.status.success(), "missed sse: {}", stderr(&out));
+    assert!(!out.status.success(), "missed sse: {}", stderr(&out));
     let payload = json_out(&out);
     assert_eq!(payload["result"], MOCK_RESULT);
     assert_eq!(payload["outcome"]["capture"]["status"], "captured");

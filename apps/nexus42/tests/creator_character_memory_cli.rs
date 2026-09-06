@@ -789,7 +789,7 @@ async fn run_remember_json(d: &LiveDaemon, g: &common::rn_act4::RnAct4Graph, chr
 #[allow(clippy::too_many_lines)]
 async fn character_run_remember_review_promote_journey() {
     let host = MockHost::new();
-    let d = LiveDaemon::start_with_agent_host(host).await;
+    let d = LiveDaemon::start_with_agent_host(host.clone()).await;
     let g = seed(&d).await;
     let chr = g.character_a.as_str();
 
@@ -882,6 +882,31 @@ async fn character_run_remember_review_promote_journey() {
     )
     .await;
     assert_eq!(json_out(&promote)["fragment"]["fragment_id"], fragment_id);
+
+    let third = cli_ok(
+        &d,
+        &[
+            "creator",
+            "character",
+            "run",
+            "--character-id",
+            chr,
+            "--world-id",
+            &g.world_w1,
+            "--binding-id",
+            &g.bind_a_w1,
+            "--prompt",
+            "Act after promote.",
+        ],
+    )
+    .await;
+    assert!(third.status.success(), "post-promote run: {}", stderr(&third));
+    let prompt = host.last_prompt();
+    assert!(prompt.contains("## Character Memory"), "{prompt}");
+    assert!(
+        prompt.contains(MOCK_RESULT) || prompt.contains("harbor detail"),
+        "promoted run capture should project into admitted mind: {prompt}"
+    );
 
     // Creator memory tables remain untouched (no run capture writes there).
     let creator_pending: (i64,) =
