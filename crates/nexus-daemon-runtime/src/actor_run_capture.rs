@@ -557,7 +557,6 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
     #[test]
     fn accumulator_ignores_thought_and_tools() {
         let snapshot = sample_snapshot(true, "p");
-        let mut acc = DrainAccumulator::default();
         let mut acc = DrainAccumulator::for_prompt("p");
         acc.apply_matching(&thought_delta(&snapshot, "secret"));
         acc.apply_matching(&message_delta(&snapshot, "visible"));
@@ -592,6 +591,38 @@ fn message_delta(snapshot: &CharacterOperationSnapshot, text: &str) -> HostEvent
         let acc = DrainAccumulator::for_prompt(&huge_prompt);
         assert!(acc.digest_too_large);
         assert!(acc.message_text.is_empty());
+    }
+
+
+    #[tokio::test]
+    async fn oversized_prompt_production_drain_classifies_at_entry() {
+        let huge_prompt = "p".repeat(MAX_CAPTURE_DIGEST_BYTES);
+        let snapshot = sample_snapshot(true, &huge_prompt);
+        let registry = ActorSessionRegistry::new();
+        registry.reserve_character_operation(snapshot.clone()).unwrap();
+        drain_and_finalize_character_operation(
+            sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap(),
+            registry.clone(),
+            stream_of(vec![
+                message_delta(&snapshot, "visible"),
+                op_finished(&snapshot, FinishReason::EndTurn),
+            ]),
+            None,
+            snapshot.clone(),
+        )
+        .await;
+        let result = registry
+            .character_operation_result(
+                "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                &snapshot.operation_id,
+            )
+            .expect("outcome");
+        assert_eq!(result.run_status, CharacterOperationResultRunStatus::Succeeded);
+        assert_eq!(result.capture.status, NexusCharacterRunCaptureOutcomeStatus::Failed);
+        assert_eq!(
+            result.capture.code,
+            Some(NexusCharacterRunCaptureOutcomeCode::CaptureTooLarge)
+        );
     }
 
     #[tokio::test]
