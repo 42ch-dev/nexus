@@ -334,20 +334,27 @@ async fn observe_run_concurrently(
 
     let stream_fut = consume_terminal_events(events, &session_id, &operation_id, grace_deadline.clone());
     let outcome_fut = async move {
+        let mut outcome_poll_failed = false;
         loop {
             if let Ok(slot) = grace_deadline.lock() {
                 if slot.is_some_and(|deadline| Instant::now() >= deadline) {
-                    return Ok::<Option<CharacterOperationResult>, CliError>(None);
+                    return Ok::<(Option<CharacterOperationResult>, bool), CliError>((None, outcome_poll_failed));
                 }
             }
-            if let Some(result) = client.get_character_operation_result(&outcome_path).await? {
-                if result.run_status != CharacterOperationResultRunStatus::Running {
-                    if let Ok(mut slot) = grace_deadline.lock() {
-                        if slot.is_none() {
-                            *slot = Some(Instant::now() + observation_grace());
+            match client.get_character_operation_result(&outcome_path).await {
+                Ok(Some(result)) => {
+                    if result.run_status != CharacterOperationResultRunStatus::Running {
+                        if let Ok(mut slot) = grace_deadline.lock() {
+                            if slot.is_none() {
+                                *slot = Some(Instant::now() + observation_grace());
+                            }
                         }
+                        return Ok((Some(result), outcome_poll_failed));
                     }
-                    return Ok(Some(result));
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    outcome_poll_failed = true;
                 }
             }
             sleep(OUTCOME_POLL_INTERVAL).await;
@@ -356,13 +363,13 @@ async fn observe_run_concurrently(
 
     let (stream, outcome) = tokio::join!(stream_fut, outcome_fut);
     let stream = stream?;
-    let outcome = outcome?;
+    let (outcome, outcome_poll_failed) = outcome?;
 
     let mut notes = ObservationNotes::default();
     if stream.incomplete {
         notes.output_incomplete = true;
     }
-    if outcome.is_none() {
+    if outcome.is_none() || outcome_poll_failed {
         notes.outcome_unavailable = true;
     }
 
@@ -420,6 +427,7 @@ pub(crate) async fn consume_terminal_events(
         {
             Ok(Ok(Some(chunk))) => chunk,
             Ok(Ok(None)) => {
+                start_grace();
                 return Ok(StreamObservation {
                     result,
                     events,
@@ -428,6 +436,7 @@ pub(crate) async fn consume_terminal_events(
                 });
             }
             Ok(Err(_)) => {
+                start_grace();
                 return Ok(StreamObservation {
                     result,
                     events,
@@ -507,15 +516,15 @@ mod tests {
             session: SessionResponse {
                 session_id: "sess".into(),
                 provider_id: "mock".into(),
+                state: "ready".into(),
+                active_op_id: None,
+                model: None,
                 actor_ref: None,
                 viewpoint: None,
-                cwd: None,
-                model: None,
-                mode: None,
-                created_at: None,
             },
             operation: OperationResponse {
                 operation_id: "op".into(),
+                session_id: "sess".into(),
                 status: "started".into(),
                 capture: None,
             },
@@ -573,4 +582,144 @@ mod tests {
         let (code, _) = classify_run_exit(true, &delivery);
         assert_ne!(code, 0);
     }
+
+    fn sample_session_operation() -> (SessionResponse, OperationResponse) {
+        (
+            SessionResponse {
+                session_id: "sess-1".into(),
+                provider_id: "mock".into(),
+                state: "ready".into(),
+                active_op_id: None,
+                model: None,
+                actor_ref: None,
+                viewpoint: None,
+            },
+            OperationResponse {
+                operation_id: "op-1".into(),
+                session_id: "sess-1".into(),
+                status: "started".into(),
+                capture: None,
+            },
+        )
+    }
+
+    fn sse_message_delta_frame(session_id: &str, operation_id: &str, text: &str) -> String {
+        let payload = serde_json::json!({
+            "MessageDelta": {
+                "session_id": session_id,
+                "op_id": operation_id,
+                "text": text,
+            }
+        });
+        format!("data: {payload}\n\n")
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn consume_terminal_events_eof_arms_grace() {
+        std::env::set_var("NEXUS42_RUN_OBSERVATION_GRACE_SECS", "1");
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_string(sse_message_delta_frame("sess-1", "op-1", "partial")),
+            )
+            .mount(&server)
+            .await;
+        let mut resp = reqwest::Client::new()
+            .get(format!("{}/events", server.uri()))
+            .send()
+            .await
+            .expect("sse request");
+        let grace = std::sync::Arc::new(std::sync::Mutex::new(None::<Instant>));
+        let obs = consume_terminal_events(&mut resp, "sess-1", "op-1", grace.clone())
+            .await
+            .expect("consume");
+        assert_eq!(obs.result, "partial");
+        assert!(obs.incomplete);
+        assert!(grace.lock().expect("grace").is_some());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn observe_run_terminates_outcome_poll_after_sse_eof_within_grace() {
+        std::env::set_var("NEXUS42_RUN_OBSERVATION_GRACE_SECS", "1");
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(
+                "/v1/daemon/agent-host/sessions/sess-1/events",
+            ))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(sse_message_delta_frame("sess-1", "op-1", "hello")),
+            )
+            .mount(&server)
+            .await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(
+                "/v1/daemon/agent-host/operations/op-1",
+            ))
+            .respond_with(wiremock::ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let client = DaemonClient::new(&server.uri()).expect("client");
+        let mut events = client
+            .stream_get("/v1/daemon/agent-host/sessions/sess-1/events")
+            .await
+            .expect("events");
+        let (session, operation) = sample_session_operation();
+        let started = Instant::now();
+        let delivery = observe_run_concurrently(&client, &mut events, &session, &operation)
+            .await
+            .expect("observe");
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "outcome poll must terminate within grace, took {:?}",
+            started.elapsed()
+        );
+        assert_eq!(delivery.stream.result, "hello");
+        assert!(delivery.stream.incomplete);
+        assert!(delivery.outcome.is_none());
+        assert!(delivery.notes.outcome_unavailable);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn observe_run_preserves_output_when_outcome_poll_fails() {
+        std::env::set_var("NEXUS42_RUN_OBSERVATION_GRACE_SECS", "1");
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(
+                "/v1/daemon/agent-host/sessions/sess-1/events",
+            ))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(sse_message_delta_frame("sess-1", "op-1", "hello")),
+            )
+            .mount(&server)
+            .await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(
+                "/v1/daemon/agent-host/operations/op-1",
+            ))
+            .respond_with(wiremock::ResponseTemplate::new(500).set_body_string("{}"))
+            .mount(&server)
+            .await;
+
+        let client = DaemonClient::new(&server.uri()).expect("client");
+        let mut events = client
+            .stream_get("/v1/daemon/agent-host/sessions/sess-1/events")
+            .await
+            .expect("events");
+        let (session, operation) = sample_session_operation();
+        let delivery = observe_run_concurrently(&client, &mut events, &session, &operation)
+            .await
+            .expect("observe must not abort on outcome poll failure");
+        assert_eq!(delivery.stream.result, "hello");
+        assert!(delivery.notes.outcome_unavailable);
+    }
+
 }
