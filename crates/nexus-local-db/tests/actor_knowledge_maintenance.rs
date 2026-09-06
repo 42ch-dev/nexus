@@ -449,3 +449,151 @@ async fn tom_cas_bumps_revision_blocking_stale_delete() {
         .unwrap();
     assert_eq!(rev, 1);
 }
+
+#[tokio::test]
+async fn binding_owned_ke_foreign_world_read_returns_none() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, binding_id) = seed_character(&pool).await;
+    sqlx::query(
+        "INSERT INTO narrative_worlds \
+         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json, created_at) \
+         VALUES ('wld_foreign', 'ws', ?, 'Foreign', 'foreign', 'active', 'private', 'manual', '{}', datetime('now'))",
+    )
+    .bind(OTHER)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let store = SqliteKbStore::new(pool.clone());
+    let kb = KnowledgeEntryRecord::for_binding(&binding_id, BlockType::InfoPoint, "bindingFact");
+    let inserted = store
+        .insert_actor_owned_key_block(OWNER, &chr, Some(&binding_id), kb)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE actor_world_bindings SET world_id = 'wld_foreign' WHERE binding_id = ?",
+    )
+    .bind(&binding_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(
+        get_actor_knowledge_entry(&pool, OWNER, &chr, &inserted.entry_id)
+            .await
+            .unwrap()
+            .is_none(),
+        "foreign-world binding KE must 404 on read"
+    );
+}
+
+#[tokio::test]
+async fn canonical_only_rename_allows_malformed_body() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, _) = seed_character(&pool).await;
+    let entry = insert_character_ke(&pool, &chr, "oldName", Some("[]")).await;
+    let updated = update_actor_knowledge_entry(
+        &pool,
+        OWNER,
+        &chr,
+        &entry,
+        0,
+        ActorKnowledgePatch {
+            canonical_name: Some("newName"),
+            summary: FieldPatch::Keep,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated.canonical_name, "newName");
+    let body_raw: Option<String> = sqlx::query_scalar(
+        "SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?",
+    )
+    .bind(&entry)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(body_raw.as_deref(), Some("[]"));
+}
+
+#[tokio::test]
+async fn create_duplicate_maps_to_duplicate_actor_knowledge() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, _) = seed_character(&pool).await;
+    let _first = insert_character_ke(&pool, &chr, "dupName", None).await;
+    let store = SqliteKbStore::new(pool.clone());
+    let kb2 = KnowledgeEntryRecord::for_character(&chr, BlockType::InfoPoint, "dupName");
+    let err = store
+        .insert_actor_owned_key_block(OWNER, &chr, None, kb2)
+        .await
+        .unwrap_err();
+    assert_conflict(err, ActorContractConflict::DuplicateActorKnowledge);
+}
+
+#[tokio::test]
+async fn create_summary_utf8_byte_boundaries_multibyte() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, _) = seed_character(&pool).await;
+    let store = SqliteKbStore::new(pool.clone());
+    let at_limit = "字".repeat(21845) + "a";
+    assert_eq!(at_limit.len(), 65536);
+    let mut kb_ok = KnowledgeEntryRecord::for_character(&chr, BlockType::InfoPoint, "okSummary");
+    kb_ok.body = Some(KnowledgeEntryBody {
+        summary: Some(at_limit.clone()),
+        ..Default::default()
+    });
+    store
+        .insert_actor_owned_key_block(OWNER, &chr, None, kb_ok)
+        .await
+        .unwrap();
+    let over = format!("{at_limit}b");
+    let mut kb_bad = KnowledgeEntryRecord::for_character(&chr, BlockType::InfoPoint, "badSummary");
+    kb_bad.body = Some(KnowledgeEntryBody {
+        summary: Some(over),
+        ..Default::default()
+    });
+    let err = store
+        .insert_actor_owned_key_block(OWNER, &chr, None, kb_bad)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, LocalDbError::ValidationError(_)));
+}
+
+#[tokio::test]
+async fn delete_refused_when_target_row_self_references_in_modules() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, _) = seed_character(&pool).await;
+    let entry = insert_character_ke(&pool, &chr, "selfRef", None).await;
+    sqlx::query("UPDATE kb_key_blocks SET modules_json = ? WHERE key_block_id = ?")
+        .bind(format!(r#"{{"self":"{entry}"}}"#))
+        .bind(&entry)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let err = delete_actor_knowledge_entry(&pool, OWNER, &chr, &entry, 0)
+        .await
+        .unwrap_err();
+    assert_conflict(err, ActorContractConflict::KnowledgeEntryInUse);
+}
+
+#[tokio::test]
+async fn delete_malformed_other_modules_json_is_reference_state_invalid() {
+    let (pool, _dir) = fresh_pool().await;
+    seed(&pool).await;
+    let (chr, _) = seed_character(&pool).await;
+    let entry = insert_character_ke(&pool, &chr, "target", None).await;
+    let other = insert_character_ke(&pool, &chr, "other", None).await;
+    sqlx::query("UPDATE kb_key_blocks SET modules_json = ? WHERE key_block_id = ?")
+        .bind("{not-json")
+        .bind(&other)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let err = delete_actor_knowledge_entry(&pool, OWNER, &chr, &entry, 0)
+        .await
+        .unwrap_err();
+    assert_conflict(err, ActorContractConflict::KnowledgeReferenceStateInvalid);
+}

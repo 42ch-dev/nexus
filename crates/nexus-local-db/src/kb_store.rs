@@ -634,9 +634,15 @@ impl SqliteKbStore {
                 )
                 .await?;
             }
+            validate_actor_owned_create_summary(&kb)?;
             self.insert_key_block_in_tx(&mut tx, kb)
                 .await
-                .map_err(map_kb_store_to_local_db)
+                .map_err(|err| match err {
+                    KbStoreError::Duplicate { .. } => LocalDbError::ActorContractConflict {
+                        code: crate::error::ActorContractConflict::DuplicateActorKnowledge,
+                    },
+                    other => map_kb_store_to_local_db(other),
+                })
         }
         .await;
         match result {
@@ -650,6 +656,22 @@ impl SqliteKbStore {
             }
         }
     }
+}
+
+
+fn validate_actor_owned_create_summary(kb: &KnowledgeEntryRecord) -> Result<(), LocalDbError> {
+    const MAX_SUMMARY_UTF8_BYTES: usize = 65_536;
+    if let Some(body) = &kb.body {
+        if let Some(summary) = &body.summary {
+            if summary.len() > MAX_SUMMARY_UTF8_BYTES {
+                return Err(LocalDbError::ValidationError(format!(
+                    "summary must be at most {} UTF-8 bytes",
+                    MAX_SUMMARY_UTF8_BYTES
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Map a `KbStoreError` to the canonical local-db error so the daemon can

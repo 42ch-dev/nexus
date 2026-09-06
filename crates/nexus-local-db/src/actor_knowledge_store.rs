@@ -113,11 +113,6 @@ fn json_modules_has_authoritative_mind(modules_json: Option<&str>) -> Result<boo
     Ok(mental_nonempty || belief_nonempty)
 }
 
-fn json_contains_exact_id_scalar(raw: &str, entry_id: &str) -> Result<bool, LocalDbError> {
-    let value: serde_json::Value =
-        serde_json::from_str(raw).map_err(|_| knowledge_reference_state_invalid())?;
-    Ok(json_value_contains_exact_id_scalar(&value, entry_id))
-}
 
 fn json_value_contains_exact_id_scalar(value: &serde_json::Value, entry_id: &str) -> bool {
     match value {
@@ -208,6 +203,58 @@ fn actor_knowledge_patch_is_no_op(
     Ok(true)
 }
 
+fn json_value_has_exact_kb_entry_id_scalar(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::String(s) => s.starts_with("kb_") && s.len() > 10,
+        serde_json::Value::Array(items) => items
+            .iter()
+            .any(json_value_has_exact_kb_entry_id_scalar),
+        serde_json::Value::Object(map) => map
+            .values()
+            .any(json_value_has_exact_kb_entry_id_scalar),
+        _ => false,
+    }
+}
+
+fn assert_target_row_module_referents(row: &KeyBlockRow, entry_id: &str) -> Result<(), LocalDbError> {
+    let Some(raw) = row.modules_json.as_deref() else {
+        return Ok(());
+    };
+    let value: serde_json::Value =
+        serde_json::from_str(raw).map_err(|_| knowledge_reference_state_invalid())?;
+    if !value.is_object() {
+        return Err(knowledge_reference_state_invalid());
+    }
+    if json_modules_has_authoritative_mind(Some(raw))? {
+        return Err(knowledge_entry_in_use());
+    }
+    let obj = value.as_object().expect("object checked");
+    for key in ["self", "observation", "other", "mental", "belief"] {
+        if let Some(slot) = obj.get(key) {
+            if json_value_has_exact_kb_entry_id_scalar(slot) {
+                return Err(knowledge_entry_in_use());
+            }
+        }
+    }
+    if json_value_contains_exact_id_scalar(&value, entry_id) {
+        return Err(knowledge_entry_in_use());
+    }
+    Ok(())
+}
+
+async fn sql_exists_i64(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    sql: &str,
+    binds: &[&str],
+) -> Result<bool, LocalDbError> {
+    let mut query = sqlx::query_scalar::<_, i64>(sql);
+    for value in binds {
+        query = query.bind(value);
+    }
+    let hit = query.fetch_one(&mut **tx).await?;
+    Ok(hit != 0)
+}
+
 async fn load_key_block_row_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     entry_id: &str,
@@ -254,6 +301,36 @@ async fn row_in_character_read_scope_tx(
     }
 }
 
+/// Retained-read scope: Character-owned row or binding-owned row with P0 world provenance.
+async fn row_in_character_retained_read_scope(
+    pool: &SqlitePool,
+    owner_creator_id: &str,
+    row: &KeyBlockRow,
+    character_id: &str,
+) -> Result<bool, LocalDbError> {
+    match row.owner_kind.as_str() {
+        "character" => Ok(row.character_id.as_deref() == Some(character_id)),
+        "actor_world_binding" => {
+            let Some(binding_id) = row.actor_world_binding_id.as_deref() else {
+                return Ok(false);
+            };
+            match crate::actor_world_binding::require_owned_binding_provenance_pool(
+                pool,
+                owner_creator_id,
+                character_id,
+                binding_id,
+            )
+            .await
+            {
+                Ok(()) => Ok(true),
+                Err(LocalDbError::ActorNotFound { .. }) => Ok(false),
+                Err(err) => Err(err),
+            }
+        }
+        _ => Ok(false),
+    }
+}
+
 async fn character_owned_for_read(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -295,11 +372,11 @@ pub async fn get_actor_knowledge_entry(
     let Some(row) = row else {
         return Ok(None);
     };
-    let mut tx = pool.begin().await?;
-    if !row_in_character_read_scope_tx(&mut tx, &row, character_id).await? {
+    if !row_in_character_retained_read_scope(pool, owner_creator_id, &row, character_id)
+        .await?
+    {
         return Ok(None);
     }
-    tx.rollback().await?;
     row.to_record().map(Some).map_err(map_kb_store_to_local_db)
 }
 
@@ -348,107 +425,93 @@ async fn assert_no_protected_referents_tx(
     entry_id: &str,
     row: &KeyBlockRow,
 ) -> Result<(), LocalDbError> {
-    let world_sheet: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM actor_world_bindings WHERE world_sheet_entry_id = ?",
-    )
-    .bind(entry_id)
-    .fetch_one(&mut **tx)
-    .await?;
-    if world_sheet > 0 {
+    const WORLD_SHEET_SQL: &str =
+        "SELECT EXISTS(SELECT 1 FROM actor_world_bindings WHERE world_sheet_entry_id = ?)";
+    const ANCHORS_SQL: &str =
+        "SELECT EXISTS(SELECT 1 FROM kb_source_anchors WHERE key_block_id = ?)";
+    const RELATIONSHIPS_SQL: &str = "SELECT EXISTS(
+        SELECT 1 FROM kb_relationships
+        WHERE source_entity_id = ? OR target_entity_id = ?
+    )";
+    const MIND_STATES_SQL: &str =
+        "SELECT EXISTS(SELECT 1 FROM mind_states WHERE holder_entry_id = ?)";
+    const FINDINGS_SQL: &str =
+        "SELECT EXISTS(SELECT 1 FROM world_findings WHERE target_entry_id = ?)";
+    const COMPUTE_SQL: &str =
+        "SELECT EXISTS(SELECT 1 FROM compute_sessions WHERE entry_id = ?)";
+
+    const OTHER_MODULES_INVALID_SQL: &str = "SELECT EXISTS(
+        SELECT 1 FROM kb_key_blocks
+        WHERE key_block_id != ?
+          AND modules_json IS NOT NULL
+          AND json_valid(modules_json) = 0
+    )";
+    const OTHER_MODULES_REF_SQL: &str = "SELECT EXISTS(
+        SELECT 1 FROM kb_key_blocks
+        WHERE key_block_id != ?
+          AND modules_json IS NOT NULL
+          AND json_valid(modules_json) = 1
+          AND EXISTS (
+            SELECT 1 FROM json_tree(modules_json)
+            WHERE type = 'text' AND value = ?
+          )
+    )";
+
+    const TIMELINE_MODULES_INVALID_SQL: &str = "SELECT EXISTS(
+        SELECT 1 FROM narrative_timeline_events
+        WHERE modules_json IS NOT NULL
+          AND json_valid(modules_json) = 0
+    )";
+    const TIMELINE_MODULES_REF_SQL: &str = "SELECT EXISTS(
+        SELECT 1 FROM narrative_timeline_events
+        WHERE modules_json IS NOT NULL
+          AND json_valid(modules_json) = 1
+          AND EXISTS (
+            SELECT 1 FROM json_tree(modules_json)
+            WHERE type = 'text' AND value = ?
+          )
+    )";
+
+    const TIMELINE_PARTICIPANTS_INVALID_SQL: &str = "SELECT EXISTS(
+        SELECT 1 FROM narrative_timeline_events
+        WHERE affected_key_block_ids_json IS NOT NULL
+          AND (
+            json_valid(affected_key_block_ids_json) = 0
+            OR json_type(affected_key_block_ids_json) != 'array'
+          )
+    )";
+    const TIMELINE_PARTICIPANTS_REF_SQL: &str = "SELECT EXISTS(
+        SELECT 1 FROM narrative_timeline_events
+        WHERE affected_key_block_ids_json IS NOT NULL
+          AND json_valid(affected_key_block_ids_json) = 1
+          AND json_type(affected_key_block_ids_json) = 'array'
+          AND EXISTS (
+            SELECT 1 FROM json_each(affected_key_block_ids_json)
+            WHERE value = ?
+          )
+    )";
+
+    if sql_exists_i64(tx, OTHER_MODULES_INVALID_SQL, &[entry_id]).await?
+        || sql_exists_i64(tx, TIMELINE_MODULES_INVALID_SQL, &[]).await?
+        || sql_exists_i64(tx, TIMELINE_PARTICIPANTS_INVALID_SQL, &[]).await?
+    {
+        return Err(knowledge_reference_state_invalid());
+    }
+
+    if sql_exists_i64(tx, WORLD_SHEET_SQL, &[entry_id]).await?
+        || sql_exists_i64(tx, ANCHORS_SQL, &[entry_id]).await?
+        || sql_exists_i64(tx, RELATIONSHIPS_SQL, &[entry_id, entry_id]).await?
+        || sql_exists_i64(tx, MIND_STATES_SQL, &[entry_id]).await?
+        || sql_exists_i64(tx, OTHER_MODULES_REF_SQL, &[entry_id, entry_id]).await?
+        || sql_exists_i64(tx, TIMELINE_MODULES_REF_SQL, &[entry_id]).await?
+        || sql_exists_i64(tx, TIMELINE_PARTICIPANTS_REF_SQL, &[entry_id]).await?
+        || sql_exists_i64(tx, FINDINGS_SQL, &[entry_id]).await?
+        || sql_exists_i64(tx, COMPUTE_SQL, &[entry_id]).await?
+    {
         return Err(knowledge_entry_in_use());
     }
 
-    let anchors: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM kb_source_anchors WHERE key_block_id = ?",
-    )
-    .bind(entry_id)
-    .fetch_one(&mut **tx)
-    .await?;
-    if anchors > 0 {
-        return Err(knowledge_entry_in_use());
-    }
-
-    let relationships: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM kb_relationships WHERE source_entity_id = ? OR target_entity_id = ?",
-    )
-    .bind(entry_id)
-    .bind(entry_id)
-    .fetch_one(&mut **tx)
-    .await?;
-    if relationships > 0 {
-        return Err(knowledge_entry_in_use());
-    }
-
-    let mind_states: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM mind_states WHERE holder_entry_id = ?",
-    )
-    .bind(entry_id)
-    .fetch_one(&mut **tx)
-    .await?;
-    if mind_states > 0 {
-        return Err(knowledge_entry_in_use());
-    }
-
-    if json_modules_has_authoritative_mind(row.modules_json.as_deref())? {
-        return Err(knowledge_entry_in_use());
-    }
-
-    let other_modules: Option<String> = sqlx::query_scalar(
-        "SELECT modules_json FROM kb_key_blocks WHERE key_block_id != ? AND modules_json IS NOT NULL AND EXISTS (SELECT 1 FROM json_tree(modules_json) WHERE type = 'text' AND value = ?) LIMIT 1",
-    )
-    .bind(entry_id)
-    .bind(entry_id)
-    .fetch_optional(&mut **tx)
-    .await?;
-    if other_modules.is_some() {
-        return Err(knowledge_entry_in_use());
-    }
-
-    let timeline_modules: Vec<String> = sqlx::query_scalar(
-        "SELECT modules_json FROM narrative_timeline_events WHERE modules_json IS NOT NULL",
-    )
-    .fetch_all(&mut **tx)
-    .await?;
-    for raw in timeline_modules {
-        if json_contains_exact_id_scalar(&raw, entry_id)? {
-            return Err(knowledge_entry_in_use());
-        }
-    }
-
-    let timeline_participants: Vec<String> = sqlx::query_scalar(
-        "SELECT affected_key_block_ids_json FROM narrative_timeline_events WHERE affected_key_block_ids_json IS NOT NULL",
-    )
-    .fetch_all(&mut **tx)
-    .await?;
-    for raw in timeline_participants {
-        let value: serde_json::Value =
-            serde_json::from_str(&raw).map_err(|_| knowledge_reference_state_invalid())?;
-        let ids = value.as_array().ok_or_else(|| knowledge_reference_state_invalid())?;
-        if ids.iter().any(|v| v.as_str() == Some(entry_id)) {
-            return Err(knowledge_entry_in_use());
-        }
-    }
-
-    let findings: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM world_findings WHERE target_entry_id = ?",
-    )
-    .bind(entry_id)
-    .fetch_one(&mut **tx)
-    .await?;
-    if findings > 0 {
-        return Err(knowledge_entry_in_use());
-    }
-
-    let compute_sessions: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM compute_sessions WHERE entry_id = ?",
-    )
-    .bind(entry_id)
-    .fetch_one(&mut **tx)
-    .await?;
-    if compute_sessions > 0 {
-        return Err(knowledge_entry_in_use());
-    }
-
+    assert_target_row_module_referents(row, entry_id)?;
     Ok(())
 }
 
@@ -482,7 +545,10 @@ pub async fn update_actor_knowledge_entry(
             row.canonical_name.clone()
         };
 
-        let body_json = apply_summary_patch_to_body_json(row.body_json.as_deref(), patch.summary)?;
+        let body_json = match patch.summary {
+            FieldPatch::Keep => row.body_json.clone(),
+            _ => apply_summary_patch_to_body_json(row.body_json.as_deref(), patch.summary)?,
+        };
 
         let now = chrono::Utc::now().to_rfc3339();
         let new_revision = expected_revision + 1;
