@@ -1247,13 +1247,12 @@ async fn binding_detail_hides_foreign_owner_and_tuple_mismatch() {
     );
 }
 
-#[tokio::test]
-async fn concurrent_link_and_remove_leave_exactly_one_outcome() {
-    let (pool, _dir) = fresh_pool().await;
-    seed_creator_and_worlds(&pool).await;
-    seed_sheet(&pool, "kb_race", WORLD_B, "character", "confirmed").await;
+async fn seed_two_binding_link_fixture(
+    pool: &SqlitePool,
+) -> (String, String, String) {
+    seed_sheet(pool, "kb_race", WORLD_B, "character", "confirmed").await;
     let created = create_character_with_initial_binding(
-        &pool,
+        pool,
         CreateCharacterParams {
             owner_creator_id: OWNER,
             display_name: "Race",
@@ -1266,7 +1265,7 @@ async fn concurrent_link_and_remove_leave_exactly_one_outcome() {
     .await
     .unwrap();
     let second = add_actor_world_binding(
-        &pool,
+        pool,
         CreateBindingParams {
             owner_creator_id: OWNER,
             character_id: &created.character.character_id,
@@ -1276,54 +1275,104 @@ async fn concurrent_link_and_remove_leave_exactly_one_outcome() {
     )
     .await
     .unwrap();
-    let pool_link = pool.clone();
-    let pool_remove = pool.clone();
-    let character_id = created.character.character_id.clone();
-    let target = second.binding_id.clone();
-    let (link_result, remove_result) = tokio::join!(
-        update_actor_world_binding(
-            &pool_link,
-            OWNER,
-            &character_id,
-            &target,
-            0,
-            FieldPatch::Set("kb_race"),
-        ),
-        remove_binding(&pool_remove, OWNER, &character_id, &target),
-    );
-    let linked = link_result.expect("link must always succeed");
+    (
+        created.character.character_id,
+        created.binding.binding_id,
+        second.binding_id,
+    )
+}
+
+#[tokio::test]
+async fn sequential_link_and_remove_orders() {
+    // Subtest 1: link then remove the same non-last target — both succeed.
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    let (character_id, primary, target) = seed_two_binding_link_fixture(&pool).await;
+
+    let linked = update_actor_world_binding(
+        &pool,
+        OWNER,
+        &character_id,
+        &target,
+        0,
+        FieldPatch::Set("kb_race"),
+    )
+    .await
+    .unwrap();
     assert_eq!(linked.binding_id, target);
     assert_eq!(linked.world_sheet_entry_id.as_deref(), Some("kb_race"));
-    match remove_result {
-        Ok(()) => {
-            let row: Option<String> = sqlx::query_scalar(
-                "SELECT binding_id FROM actor_world_bindings WHERE binding_id = ?",
-            )
-            .bind(&target)
-            .fetch_optional(&pool)
+    assert_eq!(linked.revision, 1);
+
+    let mid = list_bindings_for_character(&pool, OWNER, &character_id, 100, 0)
+        .await
+        .unwrap();
+    assert_eq!(mid.len(), 2);
+    assert!(
+        mid.iter().any(|b| b.binding_id == target && b.world_sheet_entry_id.as_deref() == Some("kb_race"))
+    );
+
+    remove_binding(&pool, OWNER, &character_id, &target)
+        .await
+        .unwrap();
+
+    let after_link_then_remove =
+        list_bindings_for_character(&pool, OWNER, &character_id, 100, 0)
             .await
             .unwrap();
-            assert!(row.is_none(), "remove succeeded: target binding must be deleted");
-        }
-        Err(LocalDbError::ActorContractConflict {
-            code: ActorContractConflict::LastActiveBinding,
-        }) => {
-            let row: (String, Option<String>) = sqlx::query_as(
-                "SELECT status, world_sheet_entry_id FROM actor_world_bindings WHERE binding_id = ?",
-            )
-            .bind(&target)
-            .fetch_one(&pool)
+    assert_eq!(after_link_then_remove.len(), 1);
+    assert_eq!(after_link_then_remove[0].binding_id, primary);
+    assert_eq!(after_link_then_remove[0].world_id, WORLD_A);
+    let target_row: Option<String> = sqlx::query_scalar(
+        "SELECT binding_id FROM actor_world_bindings WHERE binding_id = ?",
+    )
+    .bind(&target)
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    assert!(target_row.is_none(), "target binding must be deleted");
+
+    // Subtest 2: remove the other non-last binding first, then link the survivor.
+    let (pool, _dir) = fresh_pool().await;
+    seed_creator_and_worlds(&pool).await;
+    let (character_id, primary, target) = seed_two_binding_link_fixture(&pool).await;
+
+    remove_binding(&pool, OWNER, &character_id, &primary)
+        .await
+        .unwrap();
+
+    let after_remove =
+        list_bindings_for_character(&pool, OWNER, &character_id, 100, 0)
             .await
             .unwrap();
-            assert_eq!(row.0, "active");
-            assert_eq!(
-                row.1.as_deref(),
-                Some("kb_race"),
-                "last-active refusal must leave target binding unchanged"
-            );
-        }
-        Err(other) => panic!("remove must succeed or refuse last-active binding, got {other:?}"),
-    }
+    assert_eq!(after_remove.len(), 1);
+    assert_eq!(after_remove[0].binding_id, target);
+    assert_eq!(after_remove[0].world_id, WORLD_B);
+
+    let linked = update_actor_world_binding(
+        &pool,
+        OWNER,
+        &character_id,
+        &target,
+        0,
+        FieldPatch::Set("kb_race"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(linked.binding_id, target);
+    assert_eq!(linked.world_sheet_entry_id.as_deref(), Some("kb_race"));
+    assert_eq!(linked.revision, 1);
+
+    let final_bindings =
+        list_bindings_for_character(&pool, OWNER, &character_id, 100, 0)
+            .await
+            .unwrap();
+    assert_eq!(final_bindings.len(), 1);
+    assert_eq!(final_bindings[0].binding_id, target);
+    assert_eq!(final_bindings[0].world_id, WORLD_B);
+    assert_eq!(
+        final_bindings[0].world_sheet_entry_id.as_deref(),
+        Some("kb_race")
+    );
 }
 
 #[tokio::test]
