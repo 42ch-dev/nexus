@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM kb_key_blocks\n                   WHERE key_block_id = ?\n                     AND COALESCE(revision, 0) = ?\n                     AND status NOT IN ('deleted', 'merged', 'deprecated')\n                     AND (\n                       (owner_kind = 'character' AND character_id = ?)\n                       OR (\n                         owner_kind = 'actor_world_binding'\n                         AND actor_world_binding_id IN (\n                           SELECT binding_id FROM actor_world_bindings\n                           WHERE character_id = ? AND status = 'active'\n                         )\n                       )\n                     )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "d2bdcb44ff5a20c13c2166742944fff847ed4c54c31a54fea619a640bb962c62"
+}

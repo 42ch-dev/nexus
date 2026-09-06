@@ -17,6 +17,7 @@
 **V1.182 P1 amendment:** §6.3B — hidden `nexus42 ops inspect [SESSION_ID] [--json]` operator group (BL-04): daemon-free read-only checkpoint projection with shared `resume_rules`; never triggers resume.
 **V1.185 P0 amendment:** §6.2I — `nexus42 creator character edit|archive|restore` identity lifecycle (explicit revision CAS; thin daemon-HTTP leaves).
 **V1.185 P1 amendment:** §6.2I — `nexus42 creator character binding show|edit` WorldSheet maintenance (binding revision CAS; thin daemon-HTTP leaves).
+**V1.185 P2 amendment:** §6.2I.2 — `nexus42 creator character knowledge show|edit|remove` authored-content maintenance (knowledge revision CAS; thin daemon-HTTP leaves; `--summary`/`--summary-file` on add/edit).
 
 ## 0. 文档定位
 
@@ -921,6 +922,38 @@ Rules:
   **409 `character_inactive`**; retained `binding show` still succeeds.
 - **Remove unchanged.** `binding remove` success emits empty stdout (non-JSON);
   last-binding and dependency refusals keep stable 409 codes with zero mutation.
+
+
+### 6.2I.2 V1.185 P2 amendment — `nexus42 creator character knowledge` authored-content maintenance (Normative)
+
+Normative: [actor-product-model.md](./actor-product-model.md) §11.5.
+
+Thin daemon-HTTP leaves over generated `KnowledgeEntryDetail`,
+`UpdateKnowledgeEntryRequest`, and `DeleteKnowledgeEntryQuery`. Character-scoped
+`show`/`edit`/`remove` pin `--character-id` and `--entry-id`; mutations require
+`--expected-revision`. Summary is the existing `body.summary` contract surface
+only — no second content field or owner rewrite in the CLI.
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 creator character knowledge add ... [--summary <text> \| --summary-file <path>]` | Create Character/binding-owned KE with optional summary (`POST /v1/daemon/actor-knowledge/entries`). World-owned create rejects `summary` with **422 `invalid_input`**. |
+| `nexus42 creator character knowledge show --character-id <id> --entry-id <id> [--json]` | Fetch one KE detail (`GET /v1/daemon/characters/:character_id/knowledge/:entry_id`). Retained reads survive Character archive. |
+| `nexus42 creator character knowledge edit --character-id <id> --entry-id <id> --expected-revision <n> [--canonical-name <text>] [--summary <text> \| --summary-file <path> \| --clear-summary] [--json]` | Patch canonical name and/or summary with revision CAS (`PATCH` on the same path). `--clear-summary` maps to JSON `null`. |
+| `nexus42 creator character knowledge remove --character-id <id> --entry-id <id> --expected-revision <n> [--json]` | Delete an unreferenced KE (`DELETE` on the same path; **204**). |
+
+Rules:
+
+- **Knowledge revision CAS.** Stale `--expected-revision` returns **409
+  `knowledge_revision_conflict`**; referenced rows return **409
+  `knowledge_entry_in_use`**; wrong Character/entry scope returns **404** before
+  revision/referrer disclosure.
+- **Summary file bounds.** `--summary-file` reads at most **65536 UTF-8 bytes**
+  without trim/truncate; invalid UTF-8 is a CLI validation error.
+- **Archived Character writes.** `knowledge edit`/`remove` on an archived Character
+  returns **409 `character_inactive`**; retained `knowledge show` still succeeds.
+- **No CLI-side storage logic.** The CLI maps flags to generated request bodies
+  and prints responses; CAS, referent inventory, and activity guards run only in
+  daemon handlers / local-db.
 
 ### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
 

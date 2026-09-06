@@ -3,16 +3,22 @@
 
 pub mod add_knowledge_entry_request;
 pub mod add_knowledge_entry_response;
+pub mod delete_knowledge_entry_query;
+pub mod knowledge_entry_detail;
 pub mod knowledge_view_item;
 pub mod list_character_knowledge_query;
 pub mod list_character_knowledge_response;
+pub mod update_knowledge_entry_request;
 pub mod view_request;
 pub mod view_response;
 
 pub use add_knowledge_entry_request::*;
 pub use add_knowledge_entry_response::*;
+pub use delete_knowledge_entry_query::*;
+pub use knowledge_entry_detail::*;
 pub use knowledge_view_item::*;
 pub use list_character_knowledge_query::*;
 pub use list_character_knowledge_response::*;
+pub use update_knowledge_entry_request::*;
 pub use view_request::*;
 pub use view_response::*;

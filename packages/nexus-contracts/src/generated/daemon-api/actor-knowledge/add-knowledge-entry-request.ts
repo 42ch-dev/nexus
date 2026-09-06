@@ -49,4 +49,8 @@ export interface AddKnowledgeEntryRequest {
     | "act"
     | "era";
   canonical_name: string;
+  /**
+   * Optional authored summary for Character/binding owners; writes body.summary atomically. Rejected on World-owned create.
+   */
+  summary?: string;
 }

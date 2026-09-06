@@ -1,16 +1,20 @@
 //! `creator character` — thin `DaemonClient` surface for Character identity and bindings.
 
 use crate::api::DaemonClient;
-use crate::commands::creator::work_utils::query_path;
+use crate::commands::creator::work_utils::{query_path, read_file_bounded};
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
 use nexus_contracts::daemon_api::actor_knowledge::{
     add_knowledge_entry_request::AddKnowledgeEntryRequest,
     add_knowledge_entry_response::AddKnowledgeEntryResponse,
-    list_character_knowledge_response::ListCharacterKnowledgeResponse, view_request::ViewRequest,
+    knowledge_entry_detail::KnowledgeEntryDetail,
+    list_character_knowledge_response::ListCharacterKnowledgeResponse,
+    view_request::ViewRequest,
     view_response::ViewResponse,
 };
+use nexus_local_db::ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES;
+use std::path::PathBuf;
 use nexus_contracts::daemon_api::agent_host::{
     create_session_request::CreateSessionRequest,
     execute_operation_request::ExecuteOperationRequest, operation_response::OperationResponse,
@@ -251,6 +255,10 @@ pub enum KnowledgeCommand {
         block_type: String,
         #[arg(long)]
         canonical_name: String,
+        #[arg(long)]
+        summary: Option<String>,
+        #[arg(long)]
+        summary_file: Option<PathBuf>,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -282,6 +290,45 @@ pub enum KnowledgeCommand {
         limit: Option<i64>,
         #[arg(long)]
         cursor: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Show one Character-scoped `KnowledgeEntry` detail (summary + metadata)
+    Show {
+        #[arg(long)]
+        character_id: String,
+        #[arg(long)]
+        entry_id: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Edit canonical_name and/or summary with revision CAS
+    Edit {
+        #[arg(long)]
+        character_id: String,
+        #[arg(long)]
+        entry_id: String,
+        #[arg(long)]
+        expected_revision: u64,
+        #[arg(long)]
+        canonical_name: Option<String>,
+        #[arg(long)]
+        summary: Option<String>,
+        #[arg(long)]
+        summary_file: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        clear_summary: bool,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Delete an unreferenced `KnowledgeEntry` with revision CAS
+    Remove {
+        #[arg(long)]
+        character_id: String,
+        #[arg(long)]
+        entry_id: String,
+        #[arg(long)]
+        expected_revision: u64,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -537,6 +584,8 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                 creator_only,
                 block_type,
                 canonical_name,
+                summary,
+                summary_file,
                 json,
             } => {
                 add_knowledge(
@@ -548,10 +597,46 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                     creator_only,
                     block_type,
                     canonical_name,
+                    summary,
+                    summary_file,
                     json,
                 )
                 .await
             }
+            KnowledgeCommand::Show {
+                character_id,
+                entry_id,
+                json,
+            } => show_knowledge(&client, &character_id, &entry_id, json).await,
+            KnowledgeCommand::Edit {
+                character_id,
+                entry_id,
+                expected_revision,
+                canonical_name,
+                summary,
+                summary_file,
+                clear_summary,
+                json,
+            } => {
+                edit_knowledge(
+                    &client,
+                    &character_id,
+                    &entry_id,
+                    expected_revision,
+                    canonical_name,
+                    summary,
+                    summary_file,
+                    clear_summary,
+                    json,
+                )
+                .await
+            }
+            KnowledgeCommand::Remove {
+                character_id,
+                entry_id,
+                expected_revision,
+                json,
+            } => remove_knowledge(&client, &character_id, &entry_id, expected_revision, json).await,
             KnowledgeCommand::List {
                 character_id,
                 limit,
@@ -1154,6 +1239,45 @@ async fn remove_binding(
     Ok(())
 }
 
+
+fn load_bounded_summary_text(
+    summary: Option<String>,
+    summary_file: Option<PathBuf>,
+) -> Result<Option<String>> {
+    if summary.is_some() && summary_file.is_some() {
+        return Err(CliError::Other(
+            "use either --summary or --summary-file, not both".into(),
+        ));
+    }
+    if let Some(path) = summary_file {
+        let text = read_file_bounded(
+            &path.to_string_lossy(),
+            ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES,
+            "--summary-file",
+        )?;
+        return Ok(Some(text));
+    }
+    Ok(summary)
+}
+
+fn print_knowledge_detail(resp: &KnowledgeEntryDetail, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(resp)?);
+    } else {
+        println!("entry_id: {}", *resp.item.entry_id);
+        println!("canonical_name: {}", *resp.item.canonical_name);
+        println!("revision: {}", resp.item.revision);
+        match resp.summary.as_ref() {
+            Some(text) => {
+                println!("summary:");
+                println!("{}", text.as_str());
+            }
+            None => println!("summary: (none)"),
+        }
+    }
+    Ok(())
+}
+
 fn owner_kind_wire(owner: &str) -> Result<&'static str> {
     match owner {
         "world" => Ok("world"),
@@ -1175,6 +1299,8 @@ async fn add_knowledge(
     creator_only: bool,
     block_type: String,
     canonical_name: String,
+    summary: Option<String>,
+    summary_file: Option<PathBuf>,
     json: bool,
 ) -> Result<()> {
     let mut body = serde_json::json!({
@@ -1192,6 +1318,9 @@ async fn add_knowledge(
     if let Some(id) = binding_id {
         body["binding_id"] = serde_json::Value::String(id);
     }
+    if let Some(text) = load_bounded_summary_text(summary, summary_file)? {
+        body["summary"] = serde_json::Value::String(text);
+    }
     let req: AddKnowledgeEntryRequest = serde_json::from_value(body)?;
     let resp: AddKnowledgeEntryResponse = client
         .post("/v1/daemon/actor-knowledge/entries", &req)
@@ -1202,6 +1331,80 @@ async fn add_knowledge(
         println!("KnowledgeEntry added:");
         println!("  entry_id: {}", *resp.item.entry_id);
         println!("  owner:    {}", serde_json::to_string(&resp.item.owner)?);
+    }
+    Ok(())
+}
+
+
+async fn show_knowledge(
+    client: &DaemonClient,
+    character_id: &str,
+    entry_id: &str,
+    json: bool,
+) -> Result<()> {
+    let resp: KnowledgeEntryDetail = client
+        .get(&format!(
+            "/v1/daemon/characters/{character_id}/knowledge/{entry_id}"
+        ))
+        .await?;
+    print_knowledge_detail(&resp, json)
+}
+
+#[allow(clippy::too_many_arguments)] // CLI arg mapping
+async fn edit_knowledge(
+    client: &DaemonClient,
+    character_id: &str,
+    entry_id: &str,
+    expected_revision: u64,
+    canonical_name: Option<String>,
+    summary: Option<String>,
+    summary_file: Option<PathBuf>,
+    clear_summary: bool,
+    json: bool,
+) -> Result<()> {
+    if clear_summary && (summary.is_some() || summary_file.is_some()) {
+        return Err(CliError::Other(
+            "use either --clear-summary or --summary/--summary-file, not both".into(),
+        ));
+    }
+    if canonical_name.is_none() && !clear_summary && summary.is_none() && summary_file.is_none() {
+        return Err(CliError::Other(
+            "edit requires --canonical-name, --summary, --summary-file, or --clear-summary".into(),
+        ));
+    }
+    let mut body = serde_json::json!({ "expected_revision": expected_revision });
+    if let Some(name) = canonical_name {
+        body["canonical_name"] = serde_json::Value::String(name);
+    }
+    if clear_summary {
+        body["summary"] = serde_json::Value::Null;
+    } else if let Some(text) = load_bounded_summary_text(summary, summary_file)? {
+        body["summary"] = serde_json::Value::String(text);
+    }
+    let resp: KnowledgeEntryDetail = client
+        .patch(
+            &format!(
+                "/v1/daemon/characters/{character_id}/knowledge/{entry_id}"
+            ),
+            &body,
+        )
+        .await?;
+    print_knowledge_detail(&resp, json)
+}
+
+async fn remove_knowledge(
+    client: &DaemonClient,
+    character_id: &str,
+    entry_id: &str,
+    expected_revision: u64,
+    json: bool,
+) -> Result<()> {
+    let path = format!(
+        "/v1/daemon/characters/{character_id}/knowledge/{entry_id}?expected_revision={expected_revision}"
+    );
+    client.delete_no_content(&path).await?;
+    if json {
+        println!("{{}}");
     }
     Ok(())
 }

@@ -159,6 +159,12 @@ function main() {
   const detail = compile('schemas/daemon-api/characters/character-detail.schema.json', cache);
   const createRes = compile('schemas/daemon-api/characters/create-character-response.schema.json', cache);
   const listRes = compile('schemas/daemon-api/characters/list-characters-response.schema.json', cache);
+  const knowledgeOwner = compile('schemas/domain/knowledge-owner-ref.schema.json', cache);
+  const knowledgeItem = compile('schemas/daemon-api/actor-knowledge/knowledge-view-item.schema.json', cache);
+  const addKnowledgeReq = compile('schemas/daemon-api/actor-knowledge/add-knowledge-entry-request.schema.json', cache);
+  const knowledgeDetail = compile('schemas/daemon-api/actor-knowledge/knowledge-entry-detail.schema.json', cache);
+  const updateKnowledgeReq = compile('schemas/daemon-api/actor-knowledge/update-knowledge-entry-request.schema.json', cache);
+  const deleteKnowledgeQuery = compile('schemas/daemon-api/actor-knowledge/delete-knowledge-entry-query.schema.json', cache);
 
   assertAccept(actor, { actor_kind: 'creator', creator_id: CTR }, 'creator actor');
   assertAccept(actor, { actor_kind: 'character', character_id: CHR }, 'character actor');
@@ -238,6 +244,44 @@ function main() {
     { items: [{ ...validCharacter, display_name: 'Ada ' }], pagination },
     'list response trailing whitespace',
   );
+
+
+  const validKnowledgeItem = {
+    entry_id: `kb_${HEX32}`,
+    owner: { kind: 'character', id: CHR },
+    creator_only: false,
+    block_type: 'info_point',
+    canonical_name: 'note-alpha',
+    status: 'confirmed',
+    revision: 0,
+    created_at: TS,
+  };
+  assertAccept(knowledgeItem, validKnowledgeItem, 'knowledge view item');
+  assertReject(knowledgeItem, { ...validKnowledgeItem, revision: undefined }, 'knowledge item missing revision');
+  assertReject(knowledgeItem, { ...validKnowledgeItem, extra: true }, 'knowledge item extra properties');
+  assertAccept(knowledgeDetail, { item: validKnowledgeItem, summary: 'hello' }, 'knowledge detail');
+  assertAccept(knowledgeDetail, { item: validKnowledgeItem, summary: null }, 'knowledge detail null summary');
+  assertAccept(addKnowledgeReq, {
+    owner_kind: 'character',
+    character_id: CHR,
+    block_type: 'info_point',
+    canonical_name: 'note-alpha',
+    summary: '',
+  }, 'add knowledge with empty summary');
+  assertReject(addKnowledgeReq, {
+    owner_kind: 'character',
+    character_id: CHR,
+    block_type: 'info_point',
+    canonical_name: 'note-alpha',
+    body: { summary: 'x' },
+  }, 'add knowledge body injection');
+  assertAccept(updateKnowledgeReq, { expected_revision: 0, summary: null }, 'update knowledge null summary');
+  assertReject(updateKnowledgeReq, { expected_revision: 0, modules: {} }, 'update knowledge modules injection');
+  assertAccept(deleteKnowledgeQuery, { expected_revision: 0 }, 'delete knowledge query');
+  assertReject(deleteKnowledgeQuery, { expected_revision: 0, extra: true }, 'delete knowledge extra query param');
+  assertReject(knowledgeItem, { ...validKnowledgeItem, revision: -1 }, 'knowledge item negative revision');
+  assertReject(deleteKnowledgeQuery, { expected_revision: -1 }, 'delete knowledge negative revision');
+
 
   console.log('actor-contract-fixtures: all assertions passed');
 }

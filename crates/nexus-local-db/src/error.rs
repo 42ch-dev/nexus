@@ -105,6 +105,16 @@ pub enum ActorContractConflict {
     BindingRevisionConflict,
     /// v1.185 P0: restore lacks a retained active binding into an owned active World.
     CharacterRestoreRequiresActiveBinding,
+    /// v1.185 P2: duplicate canonical_name for the same owner scope.
+    DuplicateActorKnowledge,
+    /// v1.185 P2: `expected_revision` does not match stored knowledge entry revision.
+    KnowledgeRevisionConflict,
+    /// v1.185 P2: delete refused because a protected referent still exists.
+    KnowledgeEntryInUse,
+    /// v1.185 P2: malformed JSON in a reference-bearing column.
+    KnowledgeReferenceStateInvalid,
+    /// v1.185 P2: mutation targets a non-live or malformed writable knowledge row.
+    KnowledgeEntryNotMutable,
 }
 
 impl ActorContractConflict {
@@ -125,6 +135,11 @@ impl ActorContractConflict {
             Self::CharacterRestoreRequiresActiveBinding => {
                 "character_restore_requires_active_binding"
             }
+            Self::DuplicateActorKnowledge => "duplicate_actor_knowledge",
+            Self::KnowledgeRevisionConflict => "knowledge_revision_conflict",
+            Self::KnowledgeEntryInUse => "knowledge_entry_in_use",
+            Self::KnowledgeReferenceStateInvalid => "knowledge_reference_state_invalid",
+            Self::KnowledgeEntryNotMutable => "knowledge_entry_not_mutable",
         }
     }
 
@@ -165,6 +180,21 @@ impl ActorContractConflict {
             }
             Self::CharacterRestoreRequiresActiveBinding => {
                 "Restore requires at least one retained active binding into an owned active World"
+            }
+            Self::DuplicateActorKnowledge => {
+                "An active knowledge entry with this canonical name already exists for this owner"
+            }
+            Self::KnowledgeRevisionConflict => {
+                "Knowledge entry revision no longer matches; re-read and retry with the current revision"
+            }
+            Self::KnowledgeEntryInUse => {
+                "Knowledge entry is still referenced and cannot be deleted"
+            }
+            Self::KnowledgeReferenceStateInvalid => {
+                "A reference-bearing column contains invalid JSON"
+            }
+            Self::KnowledgeEntryNotMutable => {
+                "Knowledge entry is not live or its stored body cannot be edited"
             }
         }
     }

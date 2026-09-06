@@ -32,6 +32,11 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 256
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 65536,
+      "description": "Optional authored summary for Character/binding owners; writes body.summary atomically. Rejected on World-owned create."
     }
   }
 }

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT EXISTS(\n            SELECT 1 FROM kb_key_blocks\n            WHERE key_block_id != ?\n              AND modules_json IS NOT NULL\n              AND json_valid(modules_json) = 1\n              AND EXISTS (\n                SELECT 1 FROM json_tree(modules_json)\n                WHERE type = 'text' AND value = ?\n              )\n        ) as \"exists!\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "exists!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0ed58997860d569ace5a4c37d17b75578a6ef80bd8a568cc483aec62bd9ef1c5"
+}

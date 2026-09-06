@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT EXISTS(\n            SELECT 1 FROM narrative_timeline_events\n            WHERE affected_key_block_ids_json IS NOT NULL\n              AND json_valid(affected_key_block_ids_json) = 1\n              AND json_type(affected_key_block_ids_json) = 'array'\n              AND EXISTS (\n                SELECT 1 FROM json_each(affected_key_block_ids_json)\n                WHERE value = ?\n              )\n        ) as \"exists!\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "exists!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8a92fc893ed189205810c48296a9f2ddc43f4eeb7a4f355b383b8b53670a94dc"
+}

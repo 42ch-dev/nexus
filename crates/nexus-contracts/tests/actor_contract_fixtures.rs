@@ -1,10 +1,11 @@
 //! Closed Actor/Character/ActorWorldBinding wire fixtures (v1.184 P0 Task 1).
 
 use nexus_contracts::{
-    ActorRef, ActorWorldBinding, ActorWorldBindingStatus, Character, CharacterBindingDetail,
-    CharacterDetail, CharacterLifecycleRequest, CharacterStatus, CreateCharacterRequest,
-    CreateCharacterResponse, ListCharactersResponse, UpdateCharacterBindingRequest,
-    UpdateCharacterRequest,
+    ActorRef, ActorWorldBinding, ActorWorldBindingStatus, AddKnowledgeEntryRequest,
+    Character, CharacterBindingDetail, CharacterDetail, CharacterLifecycleRequest,
+    CharacterStatus, CreateCharacterRequest, CreateCharacterResponse, DeleteKnowledgeEntryQuery,
+    KnowledgeEntryDetail, KnowledgeViewItem, ListCharactersResponse,
+    UpdateCharacterBindingRequest, UpdateCharacterRequest, UpdateKnowledgeEntryRequest,
 };
 use std::str::FromStr;
 
@@ -361,3 +362,140 @@ fn binding_revision_and_update_request_boundary_fixtures() {
     let detail = serde_json::json!({ "binding": binding_record() });
     serde_json::from_value::<CharacterBindingDetail>(detail).expect("binding detail");
 }
+
+fn knowledge_view_item_json() -> serde_json::Value {
+    serde_json::json!({
+        "entry_id": format!("kb_{HEX32}"),
+        "owner": { "kind": "character", "id": chr() },
+        "creator_only": false,
+        "block_type": "info_point",
+        "canonical_name": "note-alpha",
+        "status": "confirmed",
+        "revision": 0,
+        "created_at": "2026-09-05T00:00:00Z"
+    })
+}
+
+#[test]
+fn knowledge_view_item_revision_and_closed_shape_fixtures() {
+    let mut item = knowledge_view_item_json();
+    serde_json::from_value::<KnowledgeViewItem>(item.clone()).expect("revision 0");
+    item["revision"] = serde_json::json!(9223372036854775806_i64);
+    serde_json::from_value::<KnowledgeViewItem>(item.clone()).expect("max revision");
+    item.as_object_mut().unwrap().remove("revision");
+    assert!(serde_json::from_value::<KnowledgeViewItem>(item.clone()).is_err());
+    item["owner"] = serde_json::json!({ "kind": "world", "id": format!("wld_{HEX32}") });
+    item["revision"] = serde_json::json!(0);
+    serde_json::from_value::<KnowledgeViewItem>(item.clone()).expect("world owner");
+    item["extra"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<KnowledgeViewItem>(item).is_err());
+}
+
+#[test]
+fn knowledge_entry_detail_and_update_request_boundary_fixtures() {
+    let item = knowledge_view_item_json();
+    serde_json::from_value::<KnowledgeEntryDetail>(serde_json::json!({
+        "item": item,
+        "summary": "hello"
+    }))
+    .expect("detail with summary");
+    serde_json::from_value::<KnowledgeEntryDetail>(serde_json::json!({
+        "item": knowledge_view_item_json(),
+        "summary": null
+    }))
+    .expect("detail with null summary");
+    assert!(serde_json::from_value::<KnowledgeEntryDetail>(serde_json::json!({
+        "item": knowledge_view_item_json(),
+        "summary": "x".repeat(65537)
+    }))
+    .is_err());
+
+    let patch = serde_json::json!({
+        "expected_revision": 0,
+        "canonical_name": "note-beta",
+        "summary": ""
+    });
+    serde_json::from_value::<UpdateKnowledgeEntryRequest>(patch).expect("patch all members");
+    serde_json::from_value::<UpdateKnowledgeEntryRequest>(serde_json::json!({
+        "expected_revision": 0,
+        "summary": null
+    }))
+    .expect("null clears summary");
+    serde_json::from_value::<UpdateKnowledgeEntryRequest>(serde_json::json!({
+        "expected_revision": 0,
+        "canonical_name": "note-beta"
+    }))
+    .expect("omitted summary");
+    assert!(serde_json::from_value::<UpdateKnowledgeEntryRequest>(serde_json::json!({
+        "expected_revision": 0,
+        "owner": { "kind": "character", "id": chr() }
+    }))
+    .is_err());
+    assert!(serde_json::from_value::<UpdateKnowledgeEntryRequest>(serde_json::json!({
+        "expected_revision": 0,
+        "body": { "summary": "x" }
+    }))
+    .is_err());
+    assert!(serde_json::from_value::<UpdateKnowledgeEntryRequest>(serde_json::json!({
+        "expected_revision": 0,
+        "modules": {}
+    }))
+    .is_err());
+}
+
+#[test]
+fn add_knowledge_entry_request_summary_and_closed_shape_fixtures() {
+    let base = serde_json::json!({
+        "owner_kind": "character",
+        "character_id": chr(),
+        "block_type": "info_point",
+        "canonical_name": "note-alpha"
+    });
+    serde_json::from_value::<AddKnowledgeEntryRequest>(base).expect("without summary");
+    serde_json::from_value::<AddKnowledgeEntryRequest>(serde_json::json!({
+        "owner_kind": "character",
+        "character_id": chr(),
+        "block_type": "info_point",
+        "canonical_name": "note-alpha",
+        "summary": ""
+    }))
+    .expect("empty summary is explicit value");
+    assert!(serde_json::from_value::<AddKnowledgeEntryRequest>(serde_json::json!({
+        "owner_kind": "character",
+        "character_id": chr(),
+        "block_type": "info_point",
+        "canonical_name": "note-alpha",
+        "summary": "x".repeat(65537)
+    }))
+    .is_err());
+    assert!(serde_json::from_value::<AddKnowledgeEntryRequest>(serde_json::json!({
+        "owner_kind": "character",
+        "character_id": chr(),
+        "block_type": "info_point",
+        "canonical_name": "note-alpha",
+        "owner": { "kind": "character", "id": chr() }
+    }))
+    .is_err());
+    assert!(serde_json::from_value::<AddKnowledgeEntryRequest>(serde_json::json!({
+        "owner_kind": "character",
+        "character_id": chr(),
+        "block_type": "info_point",
+        "canonical_name": "note-alpha",
+        "body": { "summary": "x" }
+    }))
+    .is_err());
+}
+
+#[test]
+fn delete_knowledge_entry_query_boundary_fixtures() {
+    serde_json::from_value::<DeleteKnowledgeEntryQuery>(serde_json::json!({
+        "expected_revision": 0
+    }))
+    .expect("delete query");
+assert!(serde_json::from_value::<DeleteKnowledgeEntryQuery>(serde_json::json!({
+        "expected_revision": 0,
+        "extra": true
+    }))
+    .is_err());
+}
+

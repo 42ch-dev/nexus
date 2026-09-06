@@ -634,9 +634,15 @@ impl SqliteKbStore {
                 )
                 .await?;
             }
+            validate_actor_owned_create_summary(&kb)?;
             self.insert_key_block_in_tx(&mut tx, kb)
                 .await
-                .map_err(map_kb_store_to_local_db)
+                .map_err(|err| match err {
+                    KbStoreError::Duplicate { .. } => LocalDbError::ActorContractConflict {
+                        code: crate::error::ActorContractConflict::DuplicateActorKnowledge,
+                    },
+                    other => map_kb_store_to_local_db(other),
+                })
         }
         .await;
         match result {
@@ -652,10 +658,26 @@ impl SqliteKbStore {
     }
 }
 
+
+fn validate_actor_owned_create_summary(kb: &KnowledgeEntryRecord) -> Result<(), LocalDbError> {
+    const MAX_SUMMARY_UTF8_BYTES: usize = 65_536;
+    if let Some(body) = &kb.body {
+        if let Some(summary) = &body.summary {
+            if summary.len() > MAX_SUMMARY_UTF8_BYTES {
+                return Err(LocalDbError::ValidationError(format!(
+                    "summary must be at most {} UTF-8 bytes",
+                    MAX_SUMMARY_UTF8_BYTES
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Map a `KbStoreError` to the canonical local-db error so the daemon can
 /// surface stable contract codes (duplicate → constraint; validation →
 /// validation).
-fn map_kb_store_to_local_db(err: KbStoreError) -> LocalDbError {
+pub(crate) fn map_kb_store_to_local_db(err: KbStoreError) -> LocalDbError {
     match err {
         KbStoreError::Duplicate { name, .. } => LocalDbError::ConstraintViolation {
             table: "kb_key_blocks".to_string(),
@@ -671,40 +693,40 @@ fn map_kb_store_to_local_db(err: KbStoreError) -> LocalDbError {
 
 // Row type matching the kb_key_blocks DDL.
 #[derive(Debug, Clone, sqlx::FromRow)]
-struct KeyBlockRow {
-    key_block_id: String,
+pub(crate) struct KeyBlockRow {
+    pub(crate) key_block_id: String,
     // v1.184 P1 owner union — `world_id` is nullable now (non-World owners).
-    owner_kind: String,
-    world_id: Option<String>,
-    character_id: Option<String>,
-    actor_world_binding_id: Option<String>,
-    creator_only: i64,
-    block_type: String,
-    canonical_name: String,
-    status: String,
-    revision: Option<i64>,
-    body_json: Option<String>,
-    source_anchor_json: Option<String>,
-    created_from_command_id: Option<String>,
-    created_at: String,
-    updated_at: Option<String>,
+    pub(crate) owner_kind: String,
+    pub(crate) world_id: Option<String>,
+    pub(crate) character_id: Option<String>,
+    pub(crate) actor_world_binding_id: Option<String>,
+    pub(crate) creator_only: i64,
+    pub(crate) block_type: String,
+    pub(crate) canonical_name: String,
+    pub(crate) status: String,
+    pub(crate) revision: Option<i64>,
+    pub(crate) body_json: Option<String>,
+    pub(crate) source_anchor_json: Option<String>,
+    pub(crate) created_from_command_id: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: Option<String>,
     // V1.52 T-A P2: Work→KnowledgeEntryRecord provenance columns
-    source_work_id: Option<String>,
-    source_chapter: Option<i64>,
-    source_provenance_kind: Option<String>,
+    pub(crate) source_work_id: Option<String>,
+    pub(crate) source_chapter: Option<i64>,
+    pub(crate) source_provenance_kind: Option<String>,
     // V1.139 P1 T4: full serialized `extensions.nexus` namespace (Q7 round-trip).
     // Known identity/owner fields stay authoritative in their typed columns
     // above; this column preserves unknown keys when a spoke KnowledgeEntry
     // transits SQLite.
-    extensions_nexus_json: Option<String>,
+    pub(crate) extensions_nexus_json: Option<String>,
     // V1.146 P4 T1: full serialized `modules` namespace (modules durability).
     // Carries per-entry functional dialects (activation, pack, etc.) as a JSON
     // object. NULL for legacy rows; backfilled on next write cycle.
-    modules_json: Option<String>,
+    pub(crate) modules_json: Option<String>,
 }
 
 impl KeyBlockRow {
-    fn to_record(&self) -> Result<KnowledgeEntryRecord, KbStoreError> {
+    pub(crate) fn to_record(&self) -> Result<KnowledgeEntryRecord, KbStoreError> {
         let block_type = parse_block_type(&self.block_type)?;
         let body = self
             .body_json

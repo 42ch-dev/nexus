@@ -6,8 +6,11 @@
 
 export type { AddKnowledgeEntryRequest } from './add-knowledge-entry-request';
 export type { AddKnowledgeEntryResponse } from './add-knowledge-entry-response';
+export type { DeleteKnowledgeEntryQuery } from './delete-knowledge-entry-query';
+export type { KnowledgeEntryDetail } from './knowledge-entry-detail';
 export type { KnowledgeViewItem } from './knowledge-view-item';
 export type { ListCharacterKnowledgeQuery } from './list-character-knowledge-query';
 export type { ListCharacterKnowledgeResponse } from './list-character-knowledge-response';
+export type { UpdateKnowledgeEntryRequest } from './update-knowledge-entry-request';
 export type { ViewRequest } from './view-request';
 export type { ViewResponse } from './view-response';

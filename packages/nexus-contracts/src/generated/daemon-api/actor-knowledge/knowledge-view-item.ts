@@ -45,6 +45,10 @@ export interface KnowledgeViewItem {
    */
   status: "provisional" | "confirmed" | "deprecated" | "merged" | "deleted";
   /**
+   * KnowledgeEntry revision (SQL NULL normalizes to 0).
+   */
+  revision: number;
+  /**
    * ISO 8601 / RFC 3339 UTC datetime string
    */
   created_at: string;
