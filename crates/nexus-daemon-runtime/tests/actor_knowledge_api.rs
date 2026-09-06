@@ -1396,3 +1396,28 @@ async fn knowledge_delete_malformed_expected_revision_is_invalid_input() {
     }
 }
 
+#[tokio::test]
+async fn character_create_oversize_multibyte_summary_is_invalid_input() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr = created["character"]["character_id"].as_str().unwrap();
+    let at_limit = "字".repeat(21845) + "a";
+    assert_eq!(at_limit.len(), 65536);
+    let over = format!("{at_limit}b");
+    assert!(over.len() > 65536);
+    let resp = ctx
+        .server
+        .post("/v1/daemon/actor-knowledge/entries")
+        .json(&json!({
+            "owner_kind": "character",
+            "character_id": chr,
+            "block_type": "item",
+            "canonical_name": "OversizeSummary",
+            "summary": over
+        }))
+        .await;
+    assert_eq!(resp.status_code(), 422, "{}", resp.text());
+    let body: Value = resp.json();
+    assert_eq!(body["error"]["code"], "invalid_input");
+}
+

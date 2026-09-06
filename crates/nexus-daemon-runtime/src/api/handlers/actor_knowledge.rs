@@ -504,6 +504,10 @@ fn map_local_db_insert_err(err: LocalDbError) -> NexusApiError {
             code: "invalid_input".into(),
             message: err.to_string(),
         },
+        LocalDbError::ValidationError(msg) => NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: msg,
+        },
         other => NexusApiError::Internal {
             code: "ACTOR_KNOWLEDGE_INSERT_FAILED".into(),
             message: other.to_string(),
