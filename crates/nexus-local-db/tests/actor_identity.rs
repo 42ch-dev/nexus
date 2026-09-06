@@ -1251,7 +1251,7 @@ async fn binding_detail_hides_foreign_owner_and_tuple_mismatch() {
 async fn concurrent_link_and_remove_leave_exactly_one_outcome() {
     let (pool, _dir) = fresh_pool().await;
     seed_creator_and_worlds(&pool).await;
-    seed_sheet(&pool, "kb_race", WORLD_A, "character", "confirmed").await;
+    seed_sheet(&pool, "kb_race", WORLD_B, "character", "confirmed").await;
     let created = create_character_with_initial_binding(
         &pool,
         CreateCharacterParams {
@@ -1291,32 +1291,38 @@ async fn concurrent_link_and_remove_leave_exactly_one_outcome() {
         ),
         remove_binding(&pool_remove, OWNER, &character_id, &target),
     );
-    let link_ok = link_result.is_ok();
-    let remove_ok = remove_result.is_ok();
-    assert!(
-        link_ok ^ remove_ok,
-        "exactly one of link/remove must succeed: link={link_result:?} remove={remove_result:?}"
-    );
-    if remove_ok {
-        let row: Option<String> = sqlx::query_scalar(
-            "SELECT binding_id FROM actor_world_bindings WHERE binding_id = ?",
-        )
-        .bind(&target)
-        .fetch_optional(&pool)
-        .await
-        .unwrap();
-        assert!(row.is_none());
-    } else {
-        let linked = link_result.unwrap();
-        assert_eq!(linked.world_sheet_entry_id.as_deref(), Some("kb_race"));
-        let err = remove_result.unwrap_err();
-        assert!(matches!(
-            err,
-            LocalDbError::ActorNotFound { resource: "actor_world_binding", .. }
-                | LocalDbError::ActorContractConflict {
-                    code: ActorContractConflict::LastActiveBinding
-                }
-        ));
+    let linked = link_result.expect("link must always succeed");
+    assert_eq!(linked.binding_id, target);
+    assert_eq!(linked.world_sheet_entry_id.as_deref(), Some("kb_race"));
+    match remove_result {
+        Ok(()) => {
+            let row: Option<String> = sqlx::query_scalar(
+                "SELECT binding_id FROM actor_world_bindings WHERE binding_id = ?",
+            )
+            .bind(&target)
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+            assert!(row.is_none(), "remove succeeded: target binding must be deleted");
+        }
+        Err(LocalDbError::ActorContractConflict {
+            code: ActorContractConflict::LastActiveBinding,
+        }) => {
+            let row: (String, Option<String>) = sqlx::query_as(
+                "SELECT status, world_sheet_entry_id FROM actor_world_bindings WHERE binding_id = ?",
+            )
+            .bind(&target)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(row.0, "active");
+            assert_eq!(
+                row.1.as_deref(),
+                Some("kb_race"),
+                "last-active refusal must leave target binding unchanged"
+            );
+        }
+        Err(other) => panic!("remove must succeed or refuse last-active binding, got {other:?}"),
     }
 }
 
