@@ -3,12 +3,17 @@
 //! `ops inspect [SESSION_ID] [--json]` is a **daemon-free, read-only** view
 //! over the v1.180 checkpoint slice (`orchestration_sessions`): it opens the
 //! workspace `state.db` with `nexus_local_db::open_pool_read_only` (no
-//! migrations, no seed, no lock upgrades) and projects the
-//! `resume_driven_sessions` rules 1–4 into a resumable verdict via the
-//! shared `nexus_orchestration::resume_rules` cascade (rule 1 = terminal
-//! status, then context readability, typed failure, chain class); rule 4's
-//! in-memory half (`engine.has_runner`, boot-time state) is carried as the
-//! separate `runner_check` caveat — never folded into the verdict.
+//! migrations, no seed, no lock upgrades) and projects the v1.186 A7
+//! seven-class recovery classifier
+//! (`nexus_orchestration::resume_rules::classify_recovery` — terminal /
+//! unreadable / interrupted / human_wait / converge_merge / safe_boundary /
+//! legacy_unverified) into a resumable verdict via the shared
+//! `nexus_orchestration::resume_rules` module; the daemon's boot-time
+//! in-memory half (`engine.has_runner`, runner reconstruction) is carried as
+//! the separate `runner_check` caveat — never folded into the verdict. v0
+//! rows fall back to the conservative four-rule legacy cascade
+//! (`classify_resumability`) — terminal status, context readability, typed
+//! failure, chain class — which the daemon applies to v0/no-store rows only.
 //!
 //! Contract: `.mstar/sdd/2026-09-03-v1.182-p1-bl04-checkpoint-resume-ux/inspect-contract.md`.
 //!
@@ -26,8 +31,15 @@
 //!   two-class flag: `false` ONLY for corrupt bytes; valid-JSON-unexpected-
 //!   shape is byte-readable → `true`, with the shape anomaly carried in the
 //!   classification/explanation. A v1 row whose durable `run_state_json`
-//!   blob is missing/unparseable is `recovery_class: unreadable`
-//!   (corrupt/unsupported, non-replayable under A7).
+//!   blob is missing/unparseable (or whose execution version is unsupported)
+//!   is `recovery_class: unreadable` with an explicit **non-replayable
+//!   metadata** reason — corrupt v1 run metadata is not the legacy
+//!   `context_unreadable` wording, even when the session `context_json` is
+//!   perfectly readable (a readable context does not make v1 metadata
+//!   replayable).
+//! - `wait_id` is exposed ONLY when the canonical class is `human_wait`; a
+//!   terminal/interrupted/unreadable row carrying stale wait bytes must not
+//!   advertise a usable wait token.
 //! - The checkpoint stores POSITION ONLY — there is no completed-stages
 //!   ledger, so the output never claims one.
 //! - Slice boundary: read-only inspect; the CLI never implies resume can be
@@ -138,6 +150,11 @@ impl std::fmt::Display for Verdict {
 enum ResumeRule {
     TerminalStatus,
     ContextUnreadable,
+    /// A7: v1 run-state metadata is corrupt/unsupported (non-replayable).
+    /// Distinct from [`ResumeRule::ContextUnreadable`] — the session
+    /// `context_json` may be perfectly readable while the v1 durable
+    /// metadata is not.
+    UnreadableMetadata,
     TypedFailure,
     NotConvergeMergeClass,
     ChainClassNoFailure,
@@ -375,7 +392,10 @@ fn project(row: &CheckpointRow) -> InspectDto {
         run_state.as_ref(),
         !live_join_keys.is_empty(),
     );
-    let wait_id = (row.execution_version == 1)
+    // Durable human-wait token (A4): exposed ONLY when the canonical class
+    // is `HumanWait`. A terminal/interrupted/unreadable row carrying stale
+    // wait bytes must not advertise a usable wait token (round-2 Minor).
+    let wait_id = (recovery_class == RecoveryClass::HumanWait)
         .then(|| run_state.as_ref())
         .flatten()
         .and_then(|s| s.wait.as_ref().map(|w| w.wait_id.clone()));
@@ -386,7 +406,7 @@ fn project(row: &CheckpointRow) -> InspectDto {
     // hidden. `LegacyUnverified` routes through the legacy `resumable` above.
     let resumable = match recovery_class {
         RecoveryClass::LegacyUnverified => resumable,
-        class => verdict_for_recovery(class, &row.status, None),
+        class => verdict_for_recovery(class, &row.status),
     };
 
     InspectDto {
@@ -459,7 +479,9 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
         run_state.as_ref(),
         has_live_join_keys,
     );
-    let wait_id = (row.execution_version == 1)
+    // Durable human-wait token (A4): exposed ONLY when the canonical class
+    // is `HumanWait` (round-2 Minor — list must agree with detail).
+    let wait_id = (recovery_class == RecoveryClass::HumanWait)
         .then(|| run_state.as_ref())
         .flatten()
         .and_then(|s| s.wait.as_ref().map(|w| w.wait_id.clone()));
@@ -480,7 +502,7 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
     // hidden. `LegacyUnverified` routes through the legacy cascade above.
     let resumable = match recovery_class {
         RecoveryClass::LegacyUnverified => legacy_resumable,
-        class => verdict_for_recovery(class, &row.status, unreadable_kind),
+        class => verdict_for_recovery(class, &row.status),
     };
 
     InspectDto {
@@ -507,14 +529,23 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
 /// P0, Task 2). v1 rows carry authoritative status/state, so the verdict
 /// comes from [`RecoveryClass`], never from the legacy context-key cascade.
 /// For `LegacyUnverified` (v0) the caller falls back to `verdict_for`.
-fn verdict_for_recovery(
-    class: RecoveryClass,
-    row_status: &str,
-    unreadable_kind: Option<UnreadableKind>,
-) -> ResumableVerdict {
+fn verdict_for_recovery(class: RecoveryClass, row_status: &str) -> ResumableVerdict {
     match class {
         RecoveryClass::Terminal => verdict_for(row_status, ResumeClass::TerminalStatus, None),
-        RecoveryClass::Unreadable => verdict_for(row_status, ResumeClass::ContextUnreadable, unreadable_kind),
+        RecoveryClass::Unreadable => ResumableVerdict {
+            verdict: Verdict::Unknown,
+            rule: ResumeRule::UnreadableMetadata,
+            runner_check: RunnerCheck::NotApplicable,
+            // The v1 durable run-state metadata is corrupt/unsupported (or
+            // the execution version is negative/forward) — an explicit
+            // non-replayable metadata reason, never the legacy
+            // context_unreadable wording. The session `context_json` being
+            // readable does not make v1 metadata replayable.
+            explanation: "v1 run-state metadata unreadable (corrupt/unsupported \
+                          or unsupported execution version) — non-replayable; \
+                          no verdict fabricated"
+                .to_string(),
+        },
         RecoveryClass::ConvergeMerge => verdict_for(
             row_status,
             ResumeClass::ChainClassNoFailure,
@@ -684,6 +715,9 @@ fn render_detail(dto: &InspectDto) -> String {
         ResumeRule::Interrupted => "no — interrupted/uncertain in-flight work (never auto-retried; cancel after ownership-safe cleanup)".to_string(),
         ResumeRule::HumanWait => "no — human wait (A4) token preserved; never stepped or approved at boot".to_string(),
         ResumeRule::SafeBoundary => "no — fully committed boundary with no in-flight work; boot does not auto-drive outside the chain class".to_string(),
+        // A7 unreadable metadata (round-2): explicit non-replayable reason —
+        // distinct from a corrupt/unshaped session context.
+        ResumeRule::UnreadableMetadata => format!("unknown — {}", dto.resumable.explanation),
         // Contract §5 wording split (qc3 S1): corrupt bytes vs parseable-but-
         // unexpected shape — the DTO explanation already distinguishes the two
         // honest wordings, so the human line mirrors the JSON explanation

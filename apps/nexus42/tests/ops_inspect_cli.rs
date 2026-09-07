@@ -1433,6 +1433,10 @@ fn inspect_v1_structurally_corrupt_state_is_unreadable_in_list_and_detail() {
     let detail: Value = serde_json::from_slice(&output).expect("valid json");
     assert_eq!(detail["recovery_class"], json!("unreadable"));
     assert_eq!(detail["resumable"]["verdict"], json!("unknown"));
+    assert_eq!(
+        detail["resumable"]["rule"], json!("unreadable_metadata"),
+        "v1 corrupt metadata must carry the explicit non-replayable metadata reason"
+    );
     assert!(detail.get("wait_id").is_none());
 
     // List: same row must agree (single classifier, structural validation).
@@ -1456,8 +1460,8 @@ fn inspect_v1_structurally_corrupt_state_is_unreadable_in_list_and_detail() {
     assert_eq!(row["resumable"]["verdict"], json!("unknown"));
     assert_eq!(
         row["resumable"]["rule"],
-        json!("context_unreadable"),
-        "detail and list must name the same unreadable rule"
+        json!("unreadable_metadata"),
+        "detail and list must name the same unreadable-metadata rule"
     );
     assert!(row.get("wait_id").is_none());
 }
@@ -1668,4 +1672,143 @@ fn inspect_list_human_output_names_recovery_class() {
         legacy_line.contains("legacy_unverified"),
         "human list row must name recovery_class, got: {legacy_line}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// v1.186 P0 T2 fix round 2 — unreadable-metadata reason + wait_id gating.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn inspect_v1_corrupt_metadata_with_readable_context_is_unreadable_metadata() {
+    // Review round-2 Important: a v1 row whose context_json is perfectly
+    // readable (`{}`) but whose durable run-state metadata is structurally
+    // invalid must NOT be mapped to the legacy `context_unreadable` wording —
+    // the explanation must name the non-replayable v1 metadata explicitly,
+    // and the rule must be `unreadable_metadata`.
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    let structural = br#"{"cancel_requested":"false"}"#;
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        // Readable `{}` context: no `data` object, but that is irrelevant —
+        // the v1 metadata governs, and it is corrupt.
+        seed_session(
+            &pool,
+            &SeedRow::new("ses_meta", "preset_x", "running", Some("task_1"), b"{}"),
+        )
+        .await;
+        set_v1_metadata(&pool, "ses_meta", 1, Some(structural)).await;
+        pool.close().await;
+    });
+
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "ses_meta", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    assert_eq!(parsed["recovery_class"], json!("unreadable"));
+    assert_eq!(parsed["resumable"]["verdict"], json!("unknown"));
+    assert_eq!(
+        parsed["resumable"]["rule"], json!("unreadable_metadata"),
+        "corrupt v1 metadata must not be labelled context_unreadable: {parsed}"
+    );
+    let explanation = parsed["resumable"]["explanation"].as_str().unwrap();
+    assert!(
+        explanation.contains("metadata") && explanation.contains("non-replayable"),
+        "explanation must name the explicit non-replayable metadata reason: {explanation}"
+    );
+    assert!(
+        !explanation.contains("context unreadable"),
+        "readable context must not be labelled context-unreadable: {explanation}"
+    );
+    assert!(
+        parsed.get("wait_id").is_none(),
+        "unreadable rows must not expose a wait token"
+    );
+
+    // Human view mirrors the explicit metadata wording.
+    let human = nexus42(home.path())
+        .args(["ops", "inspect", "ses_meta"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let human = String::from_utf8(human).unwrap();
+    let resumable = human
+        .lines()
+        .find(|l| l.starts_with("resumable:"))
+        .expect("resumable line");
+    assert!(
+        resumable.contains("metadata") && resumable.contains("non-replayable"),
+        "human resumable line must name the metadata reason, got: {resumable}"
+    );
+}
+
+#[test]
+fn inspect_v1_terminal_with_stale_wait_bytes_has_no_wait_id() {
+    // Review round-2 Minor: wait_id is exposed ONLY when the canonical class
+    // is human_wait. A terminal row carrying stale wait bytes (the durable
+    // state still holds an old wait token) must not advertise a usable wait
+    // token — the class is terminal and the row must not suggest resume.
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        // completed + wait-bearing run state (stale bytes).
+        seed_session(
+            &pool,
+            &SeedRow {
+                session_id: "ses_done_wait",
+                preset_id: "preset_x",
+                status: "completed",
+                current_task_id: None,
+                context: b"{}",
+                updated_at: 1_756_990_300,
+                execution_version: 1,
+                state_revision: 9,
+                run_state_json: Some(run_state(None, false, true)),
+            },
+        )
+        .await;
+        // cancelled + wait-bearing run state (stale bytes).
+        seed_session(
+            &pool,
+            &SeedRow {
+                session_id: "ses_cancelled_wait",
+                preset_id: "preset_x",
+                status: "cancelled",
+                current_task_id: None,
+                context: b"{}",
+                updated_at: 1_756_990_300,
+                execution_version: 1,
+                state_revision: 9,
+                run_state_json: Some(run_state(None, false, true)),
+            },
+        )
+        .await;
+        pool.close().await;
+    });
+
+    for id in ["ses_done_wait", "ses_cancelled_wait"] {
+        let output = nexus42(home.path())
+            .args(["ops", "inspect", id, "--json"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+        assert_eq!(parsed["recovery_class"], json!("terminal"), "{id}");
+        assert_eq!(parsed["resumable"]["verdict"], json!("no"), "{id}");
+        assert_eq!(parsed["resumable"]["rule"], json!("terminal_status"), "{id}");
+        assert!(
+            parsed.get("wait_id").is_none(),
+            "terminal rows must not advertise a wait token even with stale \
+             wait bytes: {parsed}"
+        );
+    }
 }
