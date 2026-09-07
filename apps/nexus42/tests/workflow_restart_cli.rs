@@ -380,7 +380,10 @@ async fn restart_durable_status_human_wait_token_survives_not_approved() {
 
     // "Process A": a plain human wait AND a token-bearing wait carrying OLD
     // scheduler join keys (must stay human wait — the A4 token beats old
-    // join keys, never silently advanced to a join re-drive).
+    // join keys, never silently advanced to a join re-drive). Round-4 adds
+    // a third row: a stale CURRENT-GATE marker for a DIFFERENT task
+    // (`_gate_park_other`) alongside broad keys — historical gate markers
+    // must never demote a live human wait either.
     {
         let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
         seed_v1_row(
@@ -393,14 +396,26 @@ async fn restart_durable_status_human_wait_token_survives_not_approved() {
             &chain_context(), &wait_state, 7,
         )
         .await;
+        let stale_marker_context = serde_json::json!({"data": {
+            "_converge_arrivals_j1": ["a"],
+            "_join_wait_start_j1": 1,
+            "_gate_park_other": true
+        }, "chat_history": {"messages": [], "max_messages": 1000}})
+        .to_string()
+        .into_bytes();
+        seed_v1_row(
+            &pool, "wait:stale-marker", "waiting_for_input", Some("task_7"),
+            &stale_marker_context, &wait_state, 8,
+        )
+        .await;
         pool.close().await;
     }
 
     // "Daemon restart": fresh pool reopens the file.
     let (pool_b, dyn_storage, store) = reopen(&db_path).await;
 
-    // The durable wait token is byte-preserved after reopen for BOTH rows.
-    for id in ["wait:plain", "wait:old-joins"] {
+    // The durable wait token is byte-preserved after reopen for ALL rows.
+    for id in ["wait:plain", "wait:old-joins", "wait:stale-marker"] {
         let record = store
             .load_run(&SessionId(id.to_string()))
             .await
@@ -414,13 +429,13 @@ async fn restart_durable_status_human_wait_token_survives_not_approved() {
         );
     }
 
-    // Boot resume must skip both (never stepped, never auto-approved).
+    // Boot resume must skip all three (never stepped, never auto-approved).
     let engine = GraphFlowEngine::new_with_storage_and_workflow_store(
         dyn_storage.clone(),
         store.clone(),
         CapabilityRegistryHolder::with_registry(Arc::new(CapabilityRegistry::with_builtins())),
     );
-    let summaries: Vec<SessionSummary> = ["wait:plain", "wait:old-joins"]
+    let summaries: Vec<SessionSummary> = ["wait:plain", "wait:old-joins", "wait:stale-marker"]
         .iter()
         .map(|id| SessionSummary {
             session_id: SessionId(id.to_string()),
@@ -448,13 +463,17 @@ async fn restart_durable_status_human_wait_token_survives_not_approved() {
             ResumeDecision::SkippedHumanWait {
                 session_id: SessionId("wait:old-joins".to_string())
             },
+            ResumeDecision::SkippedHumanWait {
+                session_id: SessionId("wait:stale-marker".to_string())
+            },
         ],
-        "token-bearing waits (even with old join keys) are never stepped at boot"
+        "token-bearing waits (even with old join keys or a stale gate marker \
+         for another task) are never stepped at boot"
     );
 
     // The token is STILL the same after the resumed boot (no implicit
     // approval, no regeneration, no rewrite).
-    for id in ["wait:plain", "wait:old-joins"] {
+    for id in ["wait:plain", "wait:old-joins", "wait:stale-marker"] {
         let record = store
             .load_run(&SessionId(id.to_string()))
             .await
@@ -468,8 +487,14 @@ async fn restart_durable_status_human_wait_token_survives_not_approved() {
         assert_eq!(record.status, SessionStatus::WaitingForInput, "{id}");
     }
 
-    // Scoped public evidence: inspect agrees on the reopened file.
-    for (id, waits) in [("wait:plain", true), ("wait:old-joins", true)] {
+    // Scoped public evidence: inspect agrees on the reopened file for all
+    // three human-wait rows (including the one with a stale gate marker for
+    // a different task plus broad join keys).
+    for (id, waits) in [
+        ("wait:plain", true),
+        ("wait:old-joins", true),
+        ("wait:stale-marker", true),
+    ] {
         let output = nexus42(user_home)
             .args(["ops", "inspect", id, "--json"])
             .assert()
@@ -874,8 +899,13 @@ async fn restart_durable_status_converge_merge_redrives_after_reopen() {
 /// mints a Manual wait token for scheduler parks, `classify_recovery`
 /// rule 4 cannot misclassify the park as a human wait — rule 5
 /// (`ConvergeMerge`) governs and the daemon re-drives the join.
+///
+/// Round-4 rename: the fixture is now explicitly the ENGINE-PARKED
+/// tokenless shape (`paused` + live join keys + no `_gate_park_*` marker
+/// seed needed — the seeded row IS the writer output), so the test name
+/// states the corrected fixture instead of the old token-row misseed.
 #[tokio::test]
-async fn restart_durable_status_converge_join_token_row_still_redrives() {
+async fn restart_durable_status_engine_parked_join_redrives_after_reopen() {
     let (tmp, _nexus_home, db_path) = test_utils::create_test_workspace().await;
     let user_home = tmp.path();
     let sid = "conv:engine-parked";
@@ -978,6 +1008,159 @@ async fn restart_durable_status_converge_join_token_row_still_redrives() {
         parsed.get("wait_id").is_none(),
         "an engine-parked join must never advertise a wait token: {parsed}"
     );
+
+    pool_b.close().await;
+    drop(tmp);
+}
+
+// ---------------------------------------------------------------------------
+// Scenario 6 — nested child human wait survives restart: parent/root wait
+// names the exact waiting child, the nested token is preserved (never
+// auto-consumed/cleared by boot), and boot skips the wait entirely.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn restart_durable_status_nested_child_wait_preserved_and_never_auto_resumed() {
+    let (tmp, _nexus_home, db_path) = test_utils::create_test_workspace().await;
+    let user_home = tmp.path();
+
+    // "Process A": a real SQLite seed of the ENGINE-PRODUCED nested shape:
+    //   parent row: waiting_for_input + root WaitRecord naming the child
+    //   (child_session_id + child_task_id + its own fresh token);
+    //   child row: waiting_for_input + its own durable token (the child
+    //   parked exactly once — the auto-resume loop is forbidden).
+    {
+        let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
+        let parent_state = serde_json::json!({
+            "wait": {
+                "wait_id": "parent-tok-9", "task_id": "parent_state",
+                "child_session_id": "nested:parent::child:aaa",
+                "child_task_id": "manual_wait_task", "kind": "manual"
+            },
+            "step_in_flight": null, "in_flight": null, "failure": null,
+            "cancel_requested": false,
+        })
+        .to_string()
+        .into_bytes();
+        let child_state = serde_json::json!({
+            "wait": {
+                "wait_id": "child-tok-9", "task_id": "manual_wait_task",
+                "child_session_id": null, "child_task_id": null, "kind": "manual"
+            },
+            "step_in_flight": null, "in_flight": null, "failure": null,
+            "cancel_requested": false,
+        })
+        .to_string()
+        .into_bytes();
+        let ctx = plain_context();
+        // Parent row.
+        seed_v1_row(
+            &pool, "nested:parent", "waiting_for_input", Some("parent_state"),
+            &ctx, &parent_state, 8,
+        )
+        .await;
+        // Child row: same schema with parent_session_id column.
+        sqlx::query(
+            "INSERT INTO orchestration_sessions
+                (session_id, creator_id, preset_id, preset_version, parent_session_id,
+                 current_task_id, status, context_json, created_at, updated_at,
+                 execution_version, state_revision, run_state_json, run_descriptor_json)
+             VALUES (?, 'test_creator', 'e2e-converge', 3, ?, 'manual_wait_task',
+                     'waiting_for_input', ?, 1_756_990_000, 1_756_990_300,
+                     1, 3, ?, ?)",
+        )
+        .bind("nested:parent::child:aaa")
+        .bind("nested:parent")
+        .bind(&ctx)
+        .bind(&child_state)
+        .bind(V1_DESCRIPTOR)
+        .execute(&pool)
+        .await
+        .expect("seed nested child row");
+        pool.close().await;
+    }
+
+    // "Daemon restart": boot must skip the nested wait (HumanWait — never
+    // stepped), the parent token AND the nested child token must be
+    // byte-preserved.
+    let (pool_b, dyn_storage, store) = reopen(&db_path).await;
+
+    let engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+        dyn_storage.clone(),
+        store.clone(),
+        CapabilityRegistryHolder::with_registry(Arc::new(CapabilityRegistry::with_builtins())),
+    );
+    let summary = SessionSummary {
+        session_id: SessionId("nested:parent".to_string()),
+        creator_id: "test_creator".to_string(),
+        preset_id: "e2e-converge".to_string(),
+        status: SessionStatus::WaitingForInput,
+        current_task_id: Some("parent_state".to_string()),
+    };
+    let decisions = resume_driven_sessions(
+        &engine,
+        &dyn_storage,
+        Some(&store),
+        &[summary],
+        &PresetRunConfig::default(),
+        None,
+    )
+    .await;
+    assert_eq!(
+        decisions,
+        vec![ResumeDecision::SkippedHumanWait {
+            session_id: SessionId("nested:parent".to_string())
+        }],
+        "a nested child wait must be skipped at boot — never auto-advanced"
+    );
+
+    // Parent token + child identity survive byte-identical.
+    let parent = store
+        .load_run(&SessionId("nested:parent".to_string()))
+        .await
+        .expect("load_run parent")
+        .expect("parent present");
+    assert_eq!(parent.status, SessionStatus::WaitingForInput);
+    let pw = parent.state.as_ref().and_then(|s| s.wait.as_ref()).expect("parent wait");
+    assert_eq!(pw.wait_id, "parent-tok-9", "parent token preserved");
+    assert_eq!(
+        pw.child_session_id.as_deref(),
+        Some("nested:parent::child:aaa"),
+        "parent wait names the exact waiting child"
+    );
+    assert_eq!(
+        pw.child_task_id.as_deref(),
+        Some("manual_wait_task"),
+        "parent wait carries the child cursor"
+    );
+
+    // The nested child token is untouched (no boot consume/clear).
+    let child = store
+        .load_run(&SessionId("nested:parent::child:aaa".to_string()))
+        .await
+        .expect("load_run child")
+        .expect("child present");
+    assert_eq!(child.status, SessionStatus::WaitingForInput, "child still waiting");
+    assert_eq!(
+        child.state.as_ref().and_then(|s| s.wait.as_ref()).map(|w| w.wait_id.as_str()),
+        Some("child-tok-9"),
+        "the nested child wait token survives restart untouched — no auto-resume"
+    );
+
+    // Scoped public evidence: inspect reports human_wait with the preserved
+    // wait identity on the reopened file.
+    let output = nexus42(user_home)
+        .args(["ops", "inspect", "nested:parent", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid inspect json");
+    assert_eq!(parsed["db_status"], json!("waiting_for_input"));
+    assert_eq!(parsed["recovery_class"], json!("human_wait"));
+    assert_eq!(parsed["wait_id"], json!("parent-tok-9"));
+    assert_eq!(parsed["resumable"]["verdict"], json!("no"));
 
     pool_b.close().await;
     drop(tmp);

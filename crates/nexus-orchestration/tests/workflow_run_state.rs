@@ -4618,3 +4618,632 @@ async fn engine_manual_wait_persists_waiting_for_input_fresh_retained_token() {
         "token-bearing human wait classifies HumanWait (rule 4), unchanged"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Fix round 4 — Critical 1: labeled/conditional-routed manual waits keep
+// their fresh token even with stale/broad join keys (current-gate marker
+// is the ONLY authoritative scheduler-park evidence).
+// ---------------------------------------------------------------------------
+
+/// Judge provider returning a GO verdict whose reason contains the "go"
+/// label (the `resolve_labeled_target` first-token match).
+struct GoJudgeProvider;
+
+#[async_trait::async_trait]
+impl nexus_orchestration::capability::WorkerHandleProvider for GoJudgeProvider {
+    async fn call_acp_prompt(
+        &self,
+        _creator_id: &str,
+        _session_id: &str,
+        _prompt: String,
+        _tool_policy: &str,
+    ) -> Result<serde_json::Value, nexus_orchestration::capability::CapabilityError> {
+        Ok(serde_json::json!({ "full_text": "Go ahead — first-token match routes label 'go'." }))
+    }
+}
+
+/// Registry with the mock judge provider (deterministic labeled routing).
+fn judge_registry_holder() -> nexus_orchestration::CapabilityRegistryHolder {
+    let deps = nexus_orchestration::capability::CapabilityRuntimeDeps {
+        pool: None,
+        worker_provider: Some(std::sync::Arc::new(GoJudgeProvider)),
+        daemon_tool_dispatch: None,
+        cdn_config: None,
+    };
+    nexus_orchestration::CapabilityRegistryHolder::with_registry(std::sync::Arc::new(
+        nexus_orchestration::CapabilityRegistry::with_runtime_deps(&deps),
+    ))
+}
+
+/// Round-4 Critical 1 (labeled route): a genuine manual wait REACHED VIA the
+/// real labeled-routing task path (`resolve_labeled_target` on a judge GO
+/// writes `_merge_manual_state` + `_converge_arrivals_manual_state` for the
+/// routed target) plus seeded stale historical keys. The writer must NOT
+/// re-classify it to `paused`: it must persist `waiting_for_input` with a
+/// fresh retained A4 token, and the canonical classifier must see
+/// `HumanWait` (token beats join keys), never `ConvergeMerge` (which would
+/// auto-step on the next boot).
+#[tokio::test]
+async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
+    use nexus_orchestration::preset::manifest::{ExitWhen, LabeledNext, NextTarget, StateDefinition};
+    use nexus_orchestration::tasks::StateCompositeTask;
+
+    let (pool, db) = fresh_pool().await;
+    let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
+    let storage_arc: Arc<dyn SessionStorage> = storage.clone();
+    let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
+    let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+        storage_arc.clone(),
+        workflow_store.clone(),
+        judge_registry_holder(),
+    );
+
+    // Hand-built graph over the REAL `StateCompositeTask` labeled-routing
+    // path: start (llm_judge + Labeled next) → GoTo manual_state (Manual).
+    let mk_state = |id: &str, exit_when: ExitWhen, next: Option<NextTarget>| {
+        StateCompositeTask::from_manifest(&StateDefinition {
+            id: id.into(),
+            description: None,
+            enter: vec![],
+            exit_when: Some(exit_when),
+            next,
+            terminal: false,
+            context_update: None,
+            merge: None,
+            converge: None,
+            timeout_ms: None,
+            on_timeout: None,
+        })
+    };
+    let registry = judge_registry_holder().get();
+    let start = mk_state(
+        "start",
+        ExitWhen::LlmJudge {
+            template_file: Some("Evaluate: is this outline acceptable?".to_string()),
+            judge_capability: Some("judge.llm".to_string()),
+            min_interval: None,
+        },
+        Some(NextTarget::Labeled(vec![LabeledNext {
+            label: "go".to_string(),
+            target: "manual_state".to_string(),
+        }])),
+    )
+    .with_registry(registry.expect("judge registry holder carries the mock provider"));
+    let manual = mk_state(
+        "manual_state",
+        ExitWhen::Manual,
+        Some(NextTarget::Linear("done".to_string())),
+    );
+
+    let graph = Arc::new(graph_flow::Graph::new("test-labeled-manual"));
+    graph.add_task(Arc::new(start));
+    graph.add_task(Arc::new(manual));
+    let sid = engine
+        .start_session("novel-writing", graph)
+        .await
+        .expect("start session");
+
+    // A prior (historical) cycle left stale broad join keys behind — the
+    // failing fixture shape alongside the routing keys.
+    {
+        let session = storage
+            .get(&sid.0)
+            .await
+            .expect("get session")
+            .expect("present");
+        session.context.set_sync("_merge_other", serde_json::json!(["x"]));
+        session
+            .context
+            .set_sync("_join_wait_start_other", serde_json::json!(1));
+        storage.save(session).await.expect("save seeded session");
+    }
+
+    // Step 1: judge GO routes via the "go" label (GoTo manual_state). The
+    // routing writes `_merge_manual_state` / `_converge_arrivals_manual_state`.
+    let outcome = engine.run_step(&sid).await.expect("judge step");
+    assert!(
+        matches!(outcome, nexus_orchestration::engine::StepOutcome::Paused { .. }),
+        "judge route is an inter-task boundary, got {outcome:?}"
+    );
+
+    // Step 2: the manual wait state parks (WaitForInput). Its context now
+    // carries the routing-written broad keys + the stale historical pair —
+    // the OLD writer misclassified this as a scheduler park.
+    let outcome = engine.run_step(&sid).await.expect("manual wait step");
+    assert!(
+        matches!(
+            outcome,
+            nexus_orchestration::engine::StepOutcome::WaitingForInput { .. }
+        ),
+        "manual wait surfaces as WaitingForInput, got {outcome:?}"
+    );
+
+    let record = storage
+        .load_run(&sid)
+        .await
+        .expect("load_run")
+        .expect("run present");
+    assert_eq!(
+        record.status,
+        SessionStatus::WaitingForInput,
+        "a labeled-routed manual wait persists as waiting_for_input, never paused (A2)"
+    );
+    let wait = record
+        .state
+        .as_ref()
+        .and_then(|s| s.wait.as_ref())
+        .expect("labeled-routed manual wait must carry a fresh A4 token");
+    assert!(!wait.wait_id.is_empty(), "the wait token must be a fresh UUID");
+
+    // The post-step context carries the routing-written BROAD join keys
+    // (`_merge_manual_state` / `_converge_arrivals_manual_state` — written
+    // by labeled ROUTING for the routed target, no gate consumes them) plus
+    // the stale historical pair: exactly the evidence that must never
+    // demote the wait.
+    let persisted = storage
+        .get(&sid.0)
+        .await
+        .expect("get post-step session")
+        .expect("session present");
+    let context_value = serde_json::to_value(&persisted.context).expect("context json");
+    let map = nexus_orchestration::resume_rules::context_data(&context_value).expect("data map");
+    let live = nexus_orchestration::resume_rules::live_join_keys(map);
+    assert!(
+        live.contains(&"_merge_manual_state".to_string())
+            && live.contains(&"_converge_arrivals_manual_state".to_string())
+            && live.contains(&"_merge_other".to_string())
+            && live.contains(&"_join_wait_start_other".to_string()),
+        "labeled-routed manual wait carries live broad join keys (the failing shape): {live:?}"
+    );
+    // ...but NO current-gate park marker for the manual state (the post-step
+    // graph-flow cursor is at `manual_state` — WaitForInput stays there).
+    assert!(
+        !nexus_orchestration::resume_rules::gate_park_live(map, &persisted.current_task_id),
+        "a labeled-routed manual wait carries no current-gate park marker \
+         (cursor '{}')",
+        persisted.current_task_id
+    );
+
+    // Reopen the SAME DB file: the canonical classifier must see HumanWait
+    // (rule 4 — fresh token beats old join keys), never ConvergeMerge.
+    pool.close().await;
+    let pool_b = nexus_local_db::open_pool(db.path()).await.expect("reopen pool");
+    let storage_b = Arc::new(SqliteSessionStorage::new(pool_b.clone().into()));
+    let record_after = storage_b
+        .load_run(&sid)
+        .await
+        .expect("load_run after reopen")
+        .expect("run present");
+    assert_eq!(record_after.status, SessionStatus::WaitingForInput);
+    assert_eq!(
+        record_after
+            .state
+            .as_ref()
+            .and_then(|s| s.wait.as_ref())
+            .map(|w| w.wait_id.as_str()),
+        Some(wait.wait_id.as_str()),
+        "the A4 token is retained unchanged across reopen"
+    );
+    let context_b = storage_b
+        .get(&sid.0)
+        .await
+        .expect("get after reopen")
+        .expect("session present");
+    let context_value_b = serde_json::to_value(&context_b.context).expect("context json");
+    let chain_class = nexus_orchestration::resume_rules::context_data(&context_value_b)
+        .is_some_and(nexus_orchestration::resume_rules::is_converge_merge_chain);
+    assert!(chain_class, "the broad join keys survive reopen");
+    assert_eq!(
+        nexus_orchestration::resume_rules::classify_recovery(
+            &record_after.status,
+            record_after.state.as_ref(),
+            chain_class,
+        ),
+        nexus_orchestration::resume_rules::RecoveryClass::HumanWait,
+        "a labeled-routed manual wait with stale join keys classifies HumanWait (rule 4)"
+    );
+}
+
+/// Round-4 Critical 1 (conditional route): the same contract via conditional
+/// branch routing — `resolve_expression_target` writes
+/// `_converge_arrivals_manual_state` for the routed target; a stale
+/// `_merge_other` / `_join_wait_start_other` pair is pre-seeded as
+/// historical/broad evidence. The manual wait must still persist
+/// `waiting_for_input` + fresh retained token and reopen as HumanWait.
+#[tokio::test]
+async fn engine_conditional_routed_manual_wait_keeps_token_despite_join_keys() {
+    let (pool, db) = fresh_pool().await;
+    let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
+    let storage_arc: Arc<dyn SessionStorage> = storage.clone();
+    let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
+    let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+        storage_arc.clone(),
+        workflow_store.clone(),
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(std::sync::Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        )),
+    );
+
+    let yaml = r#"
+preset:
+  id: cond-manual
+  version: 1
+  kind: creator
+  description: "round-4 — conditional-routed manual wait keeps its token"
+  requires_capabilities: []
+  initial: evaluate
+  terminal: done
+states:
+  - id: evaluate
+    next:
+      branches:
+        - when: "_context.score > 80"
+          target: manual_state
+      default: manual_state
+  - id: manual_state
+    exit_when: { kind: manual }
+    next: done
+  - id: done
+    terminal: true
+"#;
+    let caps = std::sync::Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
+    let mut loaded = nexus_orchestration::preset::load_preset_from_str(yaml, &caps)
+        .expect("conditional preset loads");
+    loaded.source_identity = Some(
+        nexus_orchestration::preset::loader::preset_source_identity(
+            &loaded.manifest,
+            None,
+            Some("e2e-cond-manual"),
+        )
+        .expect("embedded source identity"),
+    );
+    let sid = engine
+        .start_session_with_preset_for_creator(&loaded, "ctr_test")
+        .await
+        .expect("start conditional run");
+
+    // Seed expression input + historical/broad join keys on the persisted
+    // session before stepping (a prior cycle left them behind).
+    {
+        let session = storage
+            .get(&sid.0)
+            .await
+            .expect("get session")
+            .expect("present");
+        session
+            .context
+            .set_sync("score", serde_json::json!(95));
+        session
+            .context
+            .set_sync("_merge_other", serde_json::json!(["x"]));
+        session
+            .context
+            .set_sync("_join_wait_start_other", serde_json::json!(1));
+        storage.save(session).await.expect("save seeded session");
+    }
+
+    // Step 1: conditional branch matches → GoTo manual_state.
+    let outcome = engine.run_step(&sid).await.expect("branch step");
+    assert!(
+        matches!(outcome, nexus_orchestration::engine::StepOutcome::Paused { .. }),
+        "conditional route is an inter-task boundary, got {outcome:?}"
+    );
+
+    // Step 2: the manual wait parks with routing + historical join keys live.
+    let outcome = engine.run_step(&sid).await.expect("manual wait step");
+    assert!(
+        matches!(
+            outcome,
+            nexus_orchestration::engine::StepOutcome::WaitingForInput { .. }
+        ),
+        "manual wait surfaces as WaitingForInput, got {outcome:?}"
+    );
+
+    let record = storage
+        .load_run(&sid)
+        .await
+        .expect("load_run")
+        .expect("run present");
+    assert_eq!(
+        record.status,
+        SessionStatus::WaitingForInput,
+        "a conditional-routed manual wait persists as waiting_for_input, never paused"
+    );
+    let wait = record
+        .state
+        .as_ref()
+        .and_then(|s| s.wait.as_ref())
+        .expect("fresh A4 token");
+    assert!(!wait.wait_id.is_empty(), "fresh UUID token");
+
+    // The routing + historical keys are live; no current-gate marker.
+    let persisted = storage
+        .get(&sid.0)
+        .await
+        .expect("get post-step session")
+        .expect("session present");
+    let context_value = serde_json::to_value(&persisted.context).expect("context json");
+    let map = nexus_orchestration::resume_rules::context_data(&context_value).expect("data map");
+    let live = nexus_orchestration::resume_rules::live_join_keys(map);
+    assert!(
+        live.contains(&"_converge_arrivals_manual_state".to_string())
+            && live.contains(&"_merge_other".to_string())
+            && live.contains(&"_join_wait_start_other".to_string()),
+        "routing + historical join keys stay live (the failing shape): {live:?}"
+    );
+    assert!(
+        !nexus_orchestration::resume_rules::gate_park_live(map, "manual_state"),
+        "no current-gate park marker for the manual state"
+    );
+
+    // Reopen: HumanWait (rule 4 token beats join keys), token retained.
+    pool.close().await;
+    let pool_b = nexus_local_db::open_pool(db.path()).await.expect("reopen pool");
+    let storage_b = Arc::new(SqliteSessionStorage::new(pool_b.clone().into()));
+    let record_after = storage_b
+        .load_run(&sid)
+        .await
+        .expect("load_run after reopen")
+        .expect("run present");
+    assert_eq!(record_after.status, SessionStatus::WaitingForInput);
+    assert_eq!(
+        record_after
+            .state
+            .as_ref()
+            .and_then(|s| s.wait.as_ref())
+            .map(|w| w.wait_id.as_str()),
+        Some(wait.wait_id.as_str()),
+        "A4 token retained unchanged across reopen"
+    );
+    let context_b = storage_b
+        .get(&sid.0)
+        .await
+        .expect("get after reopen")
+        .expect("session present");
+    let context_value_b = serde_json::to_value(&context_b.context).expect("context json");
+    let chain_class = nexus_orchestration::resume_rules::context_data(&context_value_b)
+        .is_some_and(nexus_orchestration::resume_rules::is_converge_merge_chain);
+    assert!(chain_class);
+    assert_eq!(
+        nexus_orchestration::resume_rules::classify_recovery(
+            &record_after.status,
+            record_after.state.as_ref(),
+            chain_class,
+        ),
+        nexus_orchestration::resume_rules::RecoveryClass::HumanWait,
+        "conditional-routed manual wait with stale join keys classifies HumanWait"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Fix round 4 — Critical 2: a nested inner-graph child human wait is
+// preserved and propagated (child WaitRecord/identity/token survive), the
+// parent/root wait names the exact waiting descendant, restart keeps the
+// nested token, and there is NO automatic child resume/replay.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume() {
+    let (pool, db) = fresh_pool().await;
+    let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
+    let storage_arc: Arc<dyn SessionStorage> = storage.clone();
+    let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
+    let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_orchestration::CapabilityRegistry::with_builtins(),
+    ));
+    let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+        storage_arc,
+        workflow_store,
+        caps,
+    );
+
+    // Child graph: a manual wait (human input required).
+    let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
+    inner_graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+
+    // Parent graph: the inner-graph task polls the child.
+    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
+    let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
+        Arc::new(engine.clone()),
+        inner_graph,
+        "parent_state",
+        "_session_id",
+        None,
+    );
+    parent_graph.add_task(Arc::new(inner_task));
+
+    let parent_sid = engine
+        .start_session("novel-writing", parent_graph)
+        .await
+        .expect("start parent session");
+
+    // Parent step: the child parks at its manual wait. The parent must NOT
+    // auto-resume the child and must return WaitingForInput (never
+    // Completed/Paused — the old InnerGraphTask auto-approval bypass).
+    let outcome = engine
+        .run_step(&parent_sid)
+        .await
+        .expect("run_step parent");
+    assert!(
+        matches!(
+            outcome,
+            nexus_orchestration::engine::StepOutcome::WaitingForInput { .. }
+        ),
+        "a child human wait must propagate to the parent as WaitingForInput, got {outcome:?}"
+    );
+
+    // The child's row: still waiting_for_input with its own fresh A4 token.
+    // Revision 3 = start_run(1) → child's own park commit(2) → parent's
+    // atomic child-checkpoint persist bumps it once more (3). The OLD
+    // auto-resume loop re-parked the child up to 256 times — far beyond 3 —
+    // so exactly 3 proves no automatic resume/replay occurred.
+    let children = storage
+        .load_children(&parent_sid)
+        .await
+        .expect("load_children");
+    assert_eq!(children.len(), 1, "one child persisted");
+    let child = &children[0];
+    assert_eq!(
+        child.status,
+        SessionStatus::WaitingForInput,
+        "the child must remain waiting — no auto-resume"
+    );
+    assert_eq!(
+        child.state_revision, 3,
+        "child parked exactly once (no auto-resume/replay loop)"
+    );
+    let child_wait = child
+        .state
+        .as_ref()
+        .and_then(|s| s.wait.as_ref())
+        .expect("child wait record preserved");
+    assert!(
+        !child_wait.wait_id.is_empty(),
+        "child carries its own fresh A4 token"
+    );
+
+    // The parent row: waiting_for_input with a fresh token naming the exact
+    // waiting child (A4 nested path — a parent token alone is insufficient;
+    // the child cursor must be reconstructible).
+    let parent_record = storage
+        .load_run(&parent_sid)
+        .await
+        .expect("load_run")
+        .expect("parent present");
+    assert_eq!(parent_record.status, SessionStatus::WaitingForInput);
+    let parent_wait = parent_record
+        .state
+        .as_ref()
+        .and_then(|s| s.wait.as_ref())
+        .expect("parent wait record present");
+    assert!(!parent_wait.wait_id.is_empty(), "fresh parent UUID token");
+    assert_eq!(
+        parent_wait.child_session_id.as_deref(),
+        Some(child.session_id.0.as_str()),
+        "root WaitRecord must name the exact waiting child"
+    );
+    assert_eq!(
+        parent_wait.child_task_id.as_deref(),
+        Some("manual_wait_task"),
+        "root WaitRecord must carry the waiting child's task cursor"
+    );
+
+    // Reopen the SAME DB file (daemon restart): parent token + child
+    // identity/token survive; the row classifies HumanWait — never stepped
+    // at boot.
+    pool.close().await;
+    let pool_b = nexus_local_db::open_pool(db.path()).await.expect("reopen pool");
+    let storage_b = Arc::new(SqliteSessionStorage::new(pool_b.into()));
+    let parent_after = storage_b
+        .load_run(&parent_sid)
+        .await
+        .expect("load_run after reopen")
+        .expect("parent present");
+    assert_eq!(parent_after.status, SessionStatus::WaitingForInput);
+    let wait_after = parent_after
+        .state
+        .as_ref()
+        .and_then(|s| s.wait.as_ref())
+        .expect("parent token retained after reopen");
+    assert_eq!(
+        wait_after.wait_id, parent_wait.wait_id,
+        "parent wait token retained across reopen"
+    );
+    assert_eq!(
+        wait_after.child_session_id.as_deref(),
+        Some(child.session_id.0.as_str()),
+        "child identity retained across reopen"
+    );
+    assert_eq!(
+        wait_after.child_task_id.as_deref(),
+        Some("manual_wait_task"),
+        "child cursor retained across reopen"
+    );
+
+    let children_after = storage_b
+        .load_children(&parent_sid)
+        .await
+        .expect("load_children after reopen");
+    assert_eq!(children_after.len(), 1, "child row survives reopen");
+    assert_eq!(
+        children_after[0].status,
+        SessionStatus::WaitingForInput,
+        "child status survives reopen unchanged"
+    );
+    assert_eq!(
+        children_after[0]
+            .state
+            .as_ref()
+            .and_then(|s| s.wait.as_ref())
+            .map(|w| w.wait_id.as_str()),
+        Some(child_wait.wait_id.as_str()),
+        "the nested child wait token survives restart untouched (no consume, no clear)"
+    );
+
+    // Recovery hydration must reattach the waiting child (not clear it),
+    // and the canonical classifier must see a human wait so daemon boot
+    // skips the nested wait (A7 rule 4, never auto-stepped).
+    let storage_b_dyn: Arc<dyn SessionStorage> = storage_b.clone();
+    let storage_b_store: Arc<dyn WorkflowStateStore> = storage_b.clone();
+    let engine_after = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+        storage_b_dyn,
+        storage_b_store,
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        )),
+    );
+    let summary = nexus_orchestration::engine::SessionSummary {
+        session_id: parent_sid.clone(),
+        creator_id: String::new(),
+        preset_id: "novel-writing".to_string(),
+        status: SessionStatus::WaitingForInput,
+        current_task_id: Some("parent_state".to_string()),
+    };
+    engine_after.recover_sessions(vec![summary]).await;
+    engine_after
+        .shared_state()
+        .hydrate_children(&parent_sid)
+        .await
+        .expect("hydrate children after reopen");
+    let shared = engine_after.shared_state();
+    let children_map = shared.children.read().await;
+    let hydrated = children_map
+        .get(&parent_sid.0)
+        .expect("children hydrated for recovered parent");
+    assert_eq!(hydrated.len(), 1, "waiting child reattached, not cleared");
+    assert_eq!(
+        hydrated[0].status,
+        SessionStatus::WaitingForInput,
+        "hydrated child stays waiting (no automatic resume)"
+    );
+    assert_eq!(
+        hydrated[0]
+            .state
+            .wait
+            .as_ref()
+            .map(|w| w.wait_id.as_str()),
+        Some(child_wait.wait_id.as_str()),
+        "hydrated child carries the SAME nested token"
+    );
+    drop(children_map);
+    drop(shared);
+
+    let context_b = storage_b
+        .get(&parent_sid.0)
+        .await
+        .expect("get parent after reopen")
+        .expect("parent present");
+    let context_value_b = serde_json::to_value(&context_b.context).expect("context json");
+    let chain_class = nexus_orchestration::resume_rules::context_data(&context_value_b)
+        .is_some_and(nexus_orchestration::resume_rules::is_converge_merge_chain);
+    assert!(!chain_class, "a nested human wait carries no join keys");
+    assert_eq!(
+        nexus_orchestration::resume_rules::classify_recovery(
+            &parent_after.status,
+            parent_after.state.as_ref(),
+            chain_class,
+        ),
+        nexus_orchestration::resume_rules::RecoveryClass::HumanWait,
+        "a nested child wait reopens as HumanWait (never ConvergeMerge/auto-stepped)"
+    );
+}

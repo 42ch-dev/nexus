@@ -219,9 +219,35 @@ pub fn live_join_keys(data: &Map<String, Value>) -> Vec<String> {
 }
 
 /// Chain-class predicate (rule 3 positive): at least one live join key.
+///
+/// Round-4 note: the routing writers (`resolve_labeled_target` /
+/// `resolve_expression_target` / `record_converge_arrival`) emit
+/// `_merge_*` / `_converge_arrivals_*` / `_join_wait_start_*` for ANY routed
+/// target — including plain manual-wait states — so this broad test is NOT
+/// authoritative that the CURRENT step parked at a scheduler gate. The
+/// authoritative scheduler-park evidence is [`gate_park_live`] (the
+/// state-scoped `_gate_park_{state_id}` marker the gated task writes only at
+/// its genuine gate waits). This predicate remains only as the persisted
+/// legacy chain-class view for v0 recovery projections.
 #[must_use]
 pub fn is_converge_merge_chain(data: &Map<String, Value>) -> bool {
     data.iter().any(|(k, v)| !v.is_null() && is_join_key(k))
+}
+
+/// Authoritative current-gate scheduler-park predicate (round 4, Critical 1).
+///
+/// Returns `true` only when the context carries a live `_gate_park_{task}`
+/// marker for the task the run is CURRENTLY parked at. The gated
+/// `StateCompositeTask` writes that marker exactly at its merge/converge
+/// `WaitForInput` returns and nulls it on gate success/leave/deadline expiry,
+/// so a genuine manual/nested wait — even one reached through labeled/
+/// conditional routing with stale or broad `_merge_*` / `_converge_arrivals_*`
+/// / `_join_wait_start_*` keys — never matches and keeps its fresh retained
+/// A4 token (A4 precedence in `classify_recovery` rule 4 unchanged).
+#[must_use]
+pub fn gate_park_live(data: &Map<String, Value>, current_task_id: &str) -> bool {
+    data.get(&format!("_gate_park_{current_task_id}"))
+        .is_some_and(|v| !v.is_null())
 }
 
 fn is_join_key(key: &str) -> bool {
@@ -365,6 +391,51 @@ mod tests {
         }));
         assert!(live_join_keys(&cleared).is_empty());
         assert!(!is_converge_merge_chain(&cleared));
+    }
+
+    // Round-4 Critical 1: the current-gate park marker is the ONLY
+    // authoritative scheduler-park evidence. A genuine manual wait reached
+    // through labeled/conditional routing carries broad join keys but NO
+    // marker for its own state — `gate_park_live` must return false there,
+    // while a parked merge/converge gate carries a live marker for the
+    // CURRENT task.
+    #[test]
+    fn gate_park_marker_is_current_task_authoritative() {
+        // Parked gate: live marker for the current task.
+        let parked = data(&json!({
+            "_gate_park_join": true,
+            "_converge_arrivals_join": ["a"],
+            "_join_wait_start_join": 1
+        }));
+        assert!(gate_park_live(&parked, "join"));
+        // A DIFFERENT current task (e.g. the routed manual wait) is not the
+        // gate — the marker names the gate state, not this task.
+        assert!(!gate_park_live(&parked, "manual_wait_state"));
+
+        // Manual wait with broad/stale join keys but no marker for its own
+        // state: never classified as a scheduler park.
+        let manual_with_joins = data(&json!({
+            "_converge_arrivals_manual_wait_state": ["pred"],
+            "_merge_manual_wait_state": ["go"],
+            "_join_wait_start_join": 1
+        }));
+        assert!(!gate_park_live(&manual_with_joins, "manual_wait_state"));
+
+        // Cleared marker (null) is not live.
+        let cleared_marker = data(&json!({"_gate_park_join": null}));
+        assert!(!gate_park_live(&cleared_marker, "join"));
+
+        // Absent marker + no keys: not a park.
+        let plain = data(&json!({"_creator_id": "c"}));
+        assert!(!gate_park_live(&plain, "join"));
+        // A live marker with the same key name but value present for the
+        // current task is live regardless of other stale keys.
+        let marked_with_stale = data(&json!({
+            "_gate_park_manual_wait_state": true,
+            "_converge_arrivals_other": ["x"],
+            "_join_wait_start_other": 5
+        }));
+        assert!(gate_park_live(&marked_with_stale, "manual_wait_state"));
     }
 
     #[test]

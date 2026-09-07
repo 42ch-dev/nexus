@@ -624,6 +624,13 @@ mod tests {
             unreachable!("not used by driver unit tests")
         }
 
+        async fn get_current_task_id(
+            &self,
+            _session_id: &SessionId,
+        ) -> Result<Option<String>, EngineError> {
+            unreachable!("not used by driver unit tests")
+        }
+
         async fn start_session_with_preset(
             &self,
             _loaded: &nexus_orchestration::preset::LoadedPreset,

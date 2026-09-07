@@ -1872,6 +1872,12 @@ states:
         ) -> Result<graph_flow::Context, crate::engine::EngineError> {
             unimplemented!()
         }
+        async fn get_current_task_id(
+            &self,
+            _: &crate::engine::SessionId,
+        ) -> Result<Option<String>, crate::engine::EngineError> {
+            unimplemented!("wiring test must not query session cursors")
+        }
         async fn has_runner(&self, _: &crate::engine::SessionId) -> bool {
             unimplemented!("wiring test must not query runner existence")
         }

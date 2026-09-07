@@ -347,6 +347,16 @@ pub trait OrchestrationEngine: Send + Sync {
     async fn get_context(&self, session_id: &SessionId)
         -> Result<graph_flow::Context, EngineError>;
 
+    /// Retrieve the current task id for a session (authoritative persisted
+    /// cursor). `Ok(None)` when no session snapshot exists or the call is
+    /// unsupported (in-memory/test engines). Used by `InnerGraphTask` to
+    /// name the exact waiting child in the propagated root `WaitRecord`
+    /// (round-4 Critical 2 / A4 child cursor).
+    async fn get_current_task_id(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<String>, EngineError>;
+
     /// Returns `true` when a `FlowRunner` exists for the session (started
     /// in-process or reconstructed at boot via `recover_sessions`).
     ///
@@ -522,6 +532,23 @@ impl EngineSharedState {
             map.insert(parent_session_id.0.clone(), checkpoints);
         }
         Ok(())
+    }
+
+    /// Authoritative persisted cursor for a session (round-4 Critical 2).
+    ///
+    /// Reads the current task id from the storage snapshot — the same
+    /// source `commit_transition` persists — rather than the in-memory
+    /// tracker (which may lag after recovery). `Ok(None)` when no session
+    /// row exists yet (or storage errors are treated as absent by callers).
+    async fn current_task_id(
+        state: &EngineSharedState,
+        session_id: &SessionId,
+    ) -> Result<Option<String>, EngineError> {
+        match state.storage.get(&session_id.0).await {
+            Ok(Some(session)) => Ok(Some(session.current_task_id)),
+            Ok(None) => Ok(None),
+            Err(e) => Err(EngineError::GraphFlow(e)),
+        }
     }
 
     /// Persist a control-signal transition authoritatively (A2/A5) when a
@@ -799,28 +826,34 @@ impl EngineSharedState {
                 // join persists as `paused` with NO human-wait token (A2:
                 // "Distinguish persisted scheduler joins (paused + existing
                 // join keys) from human waits (waiting_for_input + A4 wait
-                // record)"). The join gates write their tracker keys
-                // (`_merge_*` / `_converge_arrivals_*` / `_join_wait_start_*`)
-                // into the post-step root context BEFORE returning
-                // `WaitForInput`; genuine manual/nested human waits never
-                // carry live join keys. Re-classifying the engine-written
-                // status to `paused` for those rows is the writer-side
-                // counterpart of the canonical A7 classifier — scheduler
-                // joins must be represented WITHOUT a human wait token, so
-                // rule 4 (token beats old join keys) can never misclassify a
-                // park as a human wait on a later boot. The bounded join
-                // deadline re-check (DR-06) keeps firing on every restart.
+                // record)"). Classification is authoritative to the CURRENT
+                // gate: the gated `StateCompositeTask` writes a state-scoped
+                // marker `_gate_park_{state_id}` at the exact merge/converge
+                // park and nulls it on gate success/leave/timeout (fix round
+                // 4, Critical 1). Historical/broad keys (`_merge_*`,
+                // `_converge_arrivals_*`, `_join_wait_start_*`) are written
+                // by labeled/conditional ROUTING for the routed target —
+                // including plain manual-wait states — so they are not
+                // authoritative park evidence and must never demote a
+                // genuine manual/nested wait to `paused`. Re-classifying
+                // only on the current task's live gate marker keeps
+                // scheduler joins tokenless (rule 4 cannot later
+                // misclassify a park as a human wait) while manual waits
+                // reached through labeled/conditional paths keep their
+                // fresh retained A4 token.
                 if matches!(status, SessionStatus::WaitingForInput)
                     && serde_json::to_value(&root.context)
                         .ok()
                         .as_ref()
                         .and_then(crate::resume_rules::context_data)
-                        .is_some_and(crate::resume_rules::is_converge_merge_chain)
+                        .is_some_and(|data| {
+                            crate::resume_rules::gate_park_live(data, &root.current_task_id)
+                        })
                 {
                     status = SessionStatus::Paused;
                 }
 
-                let next_state = build_step_state(&result, &status, &root.current_task_id);
+                let next_state = build_step_state(&result, &status, &root.current_task_id, &root.context);
                 // Pass the real child checkpoints recorded by
                 // `spawn_child_session` so nested child rows are persisted
                 // atomically and reconstructible after restart (Important 2).
@@ -1134,13 +1167,21 @@ impl EngineSharedState {
 /// A **human** wait (`WaitingForInput` that is NOT a scheduler converge/merge
 /// park — the caller has already re-mapped join parks to `Paused`) produces
 /// a **fresh** durable [`WaitRecord`] with a new UUID token per arrival (A4),
-/// retained through restart until a successful CAS consumes it. Scheduler
-/// converge/merge parks arrive here as `SessionStatus::Paused` and persist
-/// tokenless (A2) — the join keys in the context are the wait evidence.
+/// retained through restart until a successful CAS consumes it. When the
+/// wait belongs to a nested inner-graph child, `root_context` carries the
+/// `_child_wait_session` / `_child_wait_task` markers written by
+/// `InnerGraphTask` and the root WaitRecord names the exact waiting
+/// descendant (`child_session_id` / `child_task_id`, A4 nested path).
+/// Scheduler converge/merge parks arrive here as `SessionStatus::Paused` and
+/// persist tokenless (A2) — the join keys in the context are the wait
+/// evidence. Manual waits reached through labeled/conditional routing with
+/// stale/broad join keys are not re-mapped (no current-gate park marker) and
+/// keep the waiting_for_input + fresh token shape.
 fn build_step_state(
     result: &graph_flow::ExecutionResult,
     status: &SessionStatus,
     current_task_id: &str,
+    root_context: &graph_flow::Context,
 ) -> RunStateV1 {
     let failure = match (&result.status, status) {
         (ExecutionStatus::Error(msg), SessionStatus::Failed) => Some(crate::run_state::RunFailure {
@@ -1149,12 +1190,26 @@ fn build_step_state(
         }),
         _ => None,
     };
+    // Round-4 Critical 2 (A4): when THIS step parked because a nested child
+    // is waiting for human input, the root WaitRecord names the exact
+    // waiting descendant (`child_session_id` / `child_task_id`) so restart
+    // reconstruction and explicit continue target the right child cursor.
+    // `InnerGraphTask` writes `_child_wait_session` / `_child_wait_task` on
+    // the parent context in exactly that case.
+    let (child_session_id, child_task_id) = if matches!(status, SessionStatus::WaitingForInput) {
+        (
+            root_context.get_sync("_child_wait_session"),
+            root_context.get_sync("_child_wait_task"),
+        )
+    } else {
+        (None, None)
+    };
     let wait = if matches!(status, SessionStatus::WaitingForInput) {
         Some(crate::run_state::WaitRecord {
             wait_id: uuid::Uuid::new_v4().to_string(),
             task_id: current_task_id.to_string(),
-            child_session_id: None,
-            child_task_id: None,
+            child_session_id,
+            child_task_id,
             kind: crate::run_state::WaitKind::Manual,
         })
     } else {
@@ -1310,6 +1365,13 @@ impl OrchestrationEngine for EngineProxy {
         self.state
             .attach_existing_child_session_internal(parent_session_id, inner_graph)
             .await
+    }
+
+    async fn get_current_task_id(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<String>, EngineError> {
+        EngineSharedState::current_task_id(&self.state, session_id).await
     }
 
     async fn get_context(
@@ -2082,6 +2144,13 @@ impl OrchestrationEngine for GraphFlowEngine {
             .map_err(EngineError::GraphFlow)?
             .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
         Ok(session.context)
+    }
+
+    async fn get_current_task_id(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<String>, EngineError> {
+        EngineSharedState::current_task_id(&self.state, session_id).await
     }
 
     async fn has_runner(&self, session_id: &SessionId) -> bool {
