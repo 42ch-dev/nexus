@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE characters SET display_name = ?, image_uri = ?, persona_json = ?, updated_at = ?, revision = ?\n               WHERE character_id = ? AND owner_creator_id = ? AND revision = ? AND status = 'active'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "f5b60c5cbdc5f09343096feb185b686b00d4bfc34e8b10dceeabbea3f3e8a46e"
+}

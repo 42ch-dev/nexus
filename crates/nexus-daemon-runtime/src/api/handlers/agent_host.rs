@@ -9,6 +9,7 @@
 //! - GET    /v1/daemon/agent-host/sessions/{session_id}            — Get session detail
 //! - DELETE /v1/daemon/agent-host/sessions/{session_id}            — Shutdown a single session
 //! - POST   /v1/daemon/agent-host/sessions/{session_id}/operations — Execute a host operation
+//! - GET    /v1/daemon/agent-host/operations/{operation_id}            — Character operation outcome
 //! - POST   /v1/daemon/agent-host/operations/{operation_id}:cancel — Cancel in-flight operation
 //! - GET    /v1/daemon/agent-host/sessions/{session_id}/events     — SSE event stream
 
@@ -20,16 +21,19 @@ use crate::actor_admission::{
     ActorAdmissionService, ActorPairMode, ActorViewpoint, AdmittedActorContext,
 };
 use crate::actor_knowledge_view::AdmittedActor;
+use crate::actor_run_capture::{drain_and_finalize_character_operation, initial_capture_outcome};
 use crate::api::handlers::world_kb_guards::require_creator;
-use crate::workspace::actor_sessions::{echo_actor_pair, ActorSessionRegistry};
+use crate::workspace::actor_sessions::{
+    echo_actor_pair, ActorSessionRegistry, CharacterOperationSnapshot,
+};
 use axum::extract::{Path, Query, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::Json;
 use futures_util::StreamExt;
 use nexus_contracts::generated::daemon_api::agent_host::{
-    AgentHostListSessionsQuery, AgentScanEntry, CancelOperationResponse, CreateSessionRequest,
-    ExecuteOperationRequest, OperationResponse, ScanRequest, ScanResponse, SessionListResponse,
-    SessionResponse, ShutdownSessionResponse,
+    AgentHostListSessionsQuery, AgentScanEntry, CancelOperationResponse, CharacterOperationResult,
+    CreateSessionRequest, ExecuteOperationRequest, OperationResponse, ScanRequest, ScanResponse,
+    SessionListResponse, SessionResponse, ShutdownSessionResponse,
 };
 use nexus_local_db::narrative_gateway::SqliteNarrativeGateway;
 use nexus_local_db::SqliteKnowledgeStore;
@@ -42,7 +46,7 @@ use serde::Serialize;
 use tokio_stream::Stream;
 use uuid::Uuid;
 
-use crate::api::errors::NexusApiError;
+use crate::api::errors::{actor_session_stale, NexusApiError};
 use crate::workspace::WorkspaceState;
 
 // ---------------------------------------------------------------------------
@@ -109,23 +113,48 @@ fn map_host_error(e: &nexus_agent_host::HostError) -> NexusApiError {
 
 /// Parse a session ID path parameter as UUID.
 ///
-/// Returns 400 Bad Request for malformed IDs.
+/// Returns 400 Bad Request for malformed IDs (agent-host spec boundary rule:
+/// 400 invalid id, 404 unknown session).
 fn parse_session_id(raw: &str) -> Result<Uuid, NexusApiError> {
     raw.parse::<Uuid>()
         .map_err(|_| NexusApiError::InvalidInput {
             field: "session_id".into(),
-            reason: format!("session_id must be a valid UUID, got: {raw}"),
+            reason: format!("must be a valid UUID, got: {raw}"),
         })
+}
+
+/// Authorize a Character-indexed (or retired) session against the active
+/// Creator **before** Host interaction (durable §11.3.4). A foreign id is
+/// `404 not_found` with no Host effect. Never-indexed legacy/Creator-direct
+/// sessions keep existing behavior (no gate). Owner safety/observation
+/// operations (cancel/shutdown/events) are allowed for the owning Creator;
+/// they are not authored writes.
+fn authorize_actor_session(
+    state: &WorkspaceState,
+    session_id: &nexus_agent_host::HostSessionId,
+) -> Result<(), NexusApiError> {
+    let Some((owner_creator_id, _kind, _retired)) =
+        state.actor_sessions().stored_session_owner(session_id)
+    else {
+        // Never-indexed legacy path: unchanged behavior.
+        return Ok(());
+    };
+    let active_creator = require_creator(state)?;
+    if owner_creator_id == active_creator {
+        Ok(())
+    } else {
+        Err(NexusApiError::NotFound(format!("session {session_id}")))
+    }
 }
 
 /// Parse an operation ID path parameter as UUID.
 ///
-/// Returns 400 Bad Request for malformed IDs.
+/// Returns 400 Bad Request for malformed IDs (agent-host spec boundary rule).
 fn parse_operation_id(raw: &str) -> Result<Uuid, NexusApiError> {
     raw.parse::<Uuid>()
         .map_err(|_| NexusApiError::InvalidInput {
             field: "operation_id".into(),
-            reason: format!("operation_id must be a valid UUID, got: {raw}"),
+            reason: format!("must be a valid UUID, got: {raw}"),
         })
 }
 
@@ -208,6 +237,19 @@ pub async fn create_session(
                 AdmittedActor::Character { character_id: character_id.to_string() }
             }
         };
+        // For a Character create, admit one per-Character activity fence and
+        // hold it through Host creation AND registry insertion, so an archive
+        // cannot race an in-flight create into a reusable old-epoch session
+        // (durable §11.3.4). The guard is dropped after the registry insert.
+        let creation_guard = match &actor {
+            AdmittedActor::Character { character_id } => Some(
+                state
+                    .actor_sessions()
+                    .admit_character_activity(state.pool_or_uninit()?, &creator_id, character_id)
+                    .await?,
+            ),
+            AdmittedActor::Creator { .. } => None,
+        };
         let ctx = admission
             .admit(
                 &creator_id,
@@ -244,6 +286,7 @@ pub async fn create_session(
                 }
             })
             .await?;
+        drop(creation_guard);
         let (actor_ref, viewpoint) = echo_actor_pair(&ctx)?;
         return Ok(Json(session_wire(
             session.id.to_string(),
@@ -337,8 +380,16 @@ fn overlay_actor_pair(
 >{
     state
         .actor_sessions()
-        .context_for(session_id)
-        .map_or_else(|| Ok((None, None)), |ctx| echo_actor_pair(&ctx))
+        .echo_actor_pair_for_session(session_id)
+}
+
+fn session_for_operation<'a>(
+    sessions: &'a [nexus_agent_host::HostSession],
+    op_id: &nexus_agent_host::HostOperationId,
+) -> Option<&'a nexus_agent_host::HostSession> {
+    sessions
+        .iter()
+        .find(|s| s.active_op_id.as_ref() == Some(op_id) || s.state.active_op_id() == Some(op_id))
 }
 
 /// GET /v1/daemon/agent-host/sessions
@@ -354,11 +405,21 @@ pub async fn list_sessions(
     let limit = params.limit.unwrap_or(50).clamp(1, 250);
     let limit_us = usize::try_from(limit).unwrap_or(250);
 
+    // Filter foreign Character/indexed sessions BEFORE pagination: the active
+    // Creator only observes its own Actor sessions; a never-indexed legacy /
+    // Creator-direct session is unchanged (durable §11.3.4).
+    let active_creator = require_creator(&state).ok();
     // Cursor-based pagination: cursor is a session ID (UUID string).
     // If cursor is provided, skip entries until we find the cursor,
     // then return up to `limit` entries after it.
     let items: Vec<SessionResponse> = sessions
         .into_iter()
+        .filter(
+            |s| match state.actor_sessions().stored_session_owner(&s.id) {
+                Some((owner, _kind, _retired)) => active_creator.as_deref() == Some(owner.as_str()),
+                None => true, // never-indexed legacy path
+            },
+        )
         .skip_while(|s| {
             params
                 .cursor
@@ -404,6 +465,10 @@ pub async fn get_session(
     let uuid = parse_session_id(&session_id)?;
     let host = get_host(&state)?;
 
+    // Foreign/never-owned Character session id is a 404 before Host access.
+    let sid = nexus_agent_host::HostSessionId(uuid);
+    authorize_actor_session(&state, &sid)?;
+
     let sessions = host.list_sessions().await.map_err(|e| map_host_error(&e))?;
     let session = sessions
         .into_iter()
@@ -434,6 +499,9 @@ pub async fn shutdown_session(
     let host = get_host(&state)?;
 
     let sid = nexus_agent_host::HostSessionId(uuid);
+    // Foreign id is 404 before any Host shutdown effect; owner may shut down
+    // (resource cleanup is not an authored Character write).
+    authorize_actor_session(&state, &sid)?;
     state
         .actor_sessions()
         .shutdown_session(sid, host.as_ref())
@@ -460,23 +528,66 @@ fn actor_model_mode_rejected() -> NexusApiError {
 
 /// Rebuild prompt text for an Actor session: re-admit, then one `assemble_moment`.
 ///
-/// Legacy sessions (never indexed) keep the raw user prompt bytes.
-async fn assemble_prompt_content(
+/// For a Character session this also admits one per-Character activity fence
+/// and verifies the indexed session epoch against the current stored epoch
+/// after admission (mismatch → `actor_session_stale`); the guard is returned
+/// so the caller moves it into the server-owned drain and holds it through
+/// terminal finalization. Legacy/Creator sessions (never indexed) return no
+/// guard.
+///
+/// A retired Actor id (tombstoned by a material transition) is never treated
+/// as legacy: it fails with `actor_session_stale` unless the daemon is
+/// shutting down, in which case it is `service_unavailable`.
+async fn prepare_prompt(
     state: &WorkspaceState,
     session_id: &nexus_agent_host::HostSessionId,
     content: String,
-) -> Result<String, NexusApiError> {
-    if state.shutdown_requested()
-        || (state.actor_sessions().is_actor_session(session_id)
-            && state.actor_sessions().context_for(session_id).is_none())
-    {
+) -> Result<
+    (
+        String,
+        Option<crate::workspace::actor_sessions::CharacterActivityGuard>,
+    ),
+    NexusApiError,
+> {
+    if state.shutdown_requested() {
         return Err(actor_shutting_down());
     }
-    let Some(stored) = state.actor_sessions().context_for(session_id) else {
-        return Ok(content);
+    let registry = state.actor_sessions();
+    let Some(stored) = registry.context_for(session_id) else {
+        if registry.is_actor_session(session_id) {
+            // Retired (or closed) Actor id: never legacy fallback, never a
+            // reused history. A closed registry reports shutdown.
+            if registry.is_closed() {
+                return Err(actor_shutting_down());
+            }
+            return Err(actor_session_stale(&session_id.to_string()));
+        }
+        // Never-indexed legacy/Creator path: unchanged raw prompt bytes.
+        return Ok((content, None));
     };
+
     let creator_id = require_creator(state)?;
+    if stored.owner_creator_id != creator_id {
+        // Foreign Actor session id: 404 before any Host/MCA/provider access.
+        return Err(NexusApiError::NotFound(format!("session {session_id}")));
+    }
+
     let admission = ActorAdmissionService::new(state.pool_or_uninit()?.clone());
+    // For a Character session, admit activity BEFORE MCA/Host so an archive
+    // cannot race the prompt into a stale session (§11.3.1, §11.3.4).
+    let activity_guard = match &stored.actor {
+        AdmittedActor::Character { character_id } => {
+            let guard = registry
+                .admit_character_activity(state.pool_or_uninit()?, &creator_id, character_id)
+                .await?;
+            if stored.character_epoch != Some(guard.epoch()) {
+                return Err(actor_session_stale(&session_id.to_string()));
+            }
+            Some(guard)
+        }
+        AdmittedActor::Creator { .. } => None,
+    };
+
     let ctx = admission
         .admit(
             &creator_id,
@@ -489,7 +600,8 @@ async fn assemble_prompt_content(
             },
         )
         .await?;
-    assemble_admitted_prompt(state, &ctx, content).await
+    let content = assemble_admitted_prompt(state, &ctx, content).await?;
+    Ok((content, activity_guard))
 }
 
 async fn assemble_admitted_prompt(
@@ -554,6 +666,7 @@ async fn assemble_admitted_prompt(
 ///
 /// Execute a normalized host operation (prompt, `set_model`, `set_mode`).
 /// Returns the operation ID for tracking.
+#[allow(clippy::too_many_lines, clippy::missing_panics_doc)]
 pub async fn execute_operation(
     State(state): State<WorkspaceState>,
     Path(session_id): Path<String>,
@@ -576,15 +689,86 @@ pub async fn execute_operation(
     }
     let op_id = nexus_agent_host::HostOperationId::new();
 
+    // Activity guard is admitted (for a Character Prompt) before MCA/Host; it
+    // is MOVED into the server-owned drain and held through terminal
+    // finalization, NOT dropped at HTTP return or Host Ready (durable
+    // §11.3.1/§11.6). No SSE subscriber is required for the guard's lifetime.
     let host_op = match req {
-        ExecuteOperationRequest::Prompt { content } => {
-            let content = assemble_prompt_content(&state, &sid, content).await?;
-            nexus_agent_host::capability::model::HostOperation::Prompt {
+        ExecuteOperationRequest::Prompt { content, remember } => {
+            let remember = remember.unwrap_or(false);
+            let raw_prompt = content.clone();
+            let is_character = match state.actor_sessions().context_for(&sid) {
+                // Retired tombstones still identify Character sessions: let
+                // prepare_prompt report 409 actor_session_stale instead of
+                // misclassifying them as legacy/Creator sessions.
+                Some(ctx) => matches!(ctx.actor, AdmittedActor::Character { .. }),
+                None => state.actor_sessions().is_actor_session(&sid),
+            };
+            if remember && !is_character {
+                return Err(NexusApiError::BadRequest {
+                    code: "invalid_input".into(),
+                    message: "remember requires an admitted stored Character session with an active binding".into(),
+                });
+            }
+            let (content, guard) = prepare_prompt(&state, &sid, content).await?;
+            let capture = if is_character {
+                Some(initial_capture_outcome(remember))
+            } else {
+                None
+            };
+            let snapshot = if is_character {
+                let ctx = state
+                    .actor_sessions()
+                    .context_for(&sid)
+                    .expect("character session context");
+                let creator_id = require_creator(&state)?;
+                let snapshot = CharacterOperationSnapshot {
+                    owner_creator_id: creator_id,
+                    ctx,
+                    session_id: sid.clone(),
+                    operation_id: op_id.clone(),
+                    remember,
+                    raw_prompt: raw_prompt.clone(),
+                };
+                state
+                    .actor_sessions()
+                    .reserve_character_operation(snapshot.clone())?;
+                state
+                    .actor_sessions()
+                    .register_indexed_operation(op_id.clone(), sid.clone());
+                Some(snapshot)
+            } else {
+                None
+            };
+            let host_op = nexus_agent_host::capability::model::HostOperation::Prompt {
                 op_id: op_id.clone(),
                 content: vec![
                     nexus_agent_host::capability::model::HostContentBlock::Text { text: content },
                 ],
+            };
+            let stream = host.exec(sid.clone(), host_op).await.map_err(|e| {
+                if snapshot.is_some() {
+                    state.actor_sessions().remove_operation_reservation(&op_id);
+                    state.actor_sessions().clear_indexed_operation(&op_id);
+                }
+                map_host_error(&e)
+            })?;
+            if let Some(snapshot) = snapshot {
+                let pool = state.pool_or_uninit()?.clone();
+                let registry = state.actor_sessions().clone();
+                tokio::spawn(async move {
+                    drain_and_finalize_character_operation(pool, registry, stream, guard, snapshot)
+                        .await;
+                });
+            } else {
+                tokio::spawn(drive_operation_stream(stream, guard));
             }
+            return Ok(Json(OperationResponse {
+                operation_id: op_id.to_string(),
+                session_id: sid.to_string(),
+                status: "started".to_string(),
+                capture,
+            }));
         }
         ExecuteOperationRequest::SetModel { model } => {
             nexus_agent_host::capability::model::HostOperation::SetModel { model }
@@ -594,16 +778,13 @@ pub async fn execute_operation(
         }
     };
 
-    // Execute the operation and return immediately (QC3 W-003: fire-and-forget).
-    // The wrapped stream in HostManager handles Busy→Ready state transitions.
-    // SSE subscribers receive events via the broadcast channel.
+    // Non-Prompt operations (SetModel/SetMode) are not Character side-effecting
+    // captures; execute fire-and-forget as before, no activity guard needed.
     let stream = host
         .exec(sid.clone(), host_op)
         .await
         .map_err(|e| map_host_error(&e))?;
 
-    // Spawn background task to drain the event stream and drive the state machine.
-    // This prevents blocking the HTTP handler for the duration of long-running operations.
     tokio::spawn(async move {
         let mut s = stream;
         while let Some(_result) = s.next().await {
@@ -615,7 +796,47 @@ pub async fn execute_operation(
         operation_id: op_id.to_string(),
         session_id: sid.to_string(),
         status: "started".to_string(),
+        capture: None,
     }))
+}
+
+/// Drain an operation event stream to completion, releasing the optional
+/// per-Character activity guard only after the stream terminates (terminal
+/// finalization) — never at HTTP return or when the Host transitions Ready.
+async fn drive_operation_stream(
+    mut stream: impl futures_util::Stream<
+            Item = Result<
+                nexus_agent_host::capability::model::HostEvent,
+                nexus_agent_host::HostError,
+            >,
+        > + Unpin,
+    _activity_guard: Option<crate::workspace::actor_sessions::CharacterActivityGuard>,
+) {
+    while let Some(_result) = stream.next().await {
+        // Events are broadcast by HostManager; draining drives the state machine.
+    }
+    // `_activity_guard` drops here, after terminal finalization.
+}
+
+/// GET /v1/daemon/agent-host/operations/{operation_id}
+///
+/// Returns the authoritative Character operation outcome for the active owner.
+pub async fn get_operation_result(
+    State(state): State<WorkspaceState>,
+    Path(operation_id): Path<String>,
+) -> Result<Json<CharacterOperationResult>, NexusApiError> {
+    if operation_id.ends_with(":cancel") {
+        return Err(NexusApiError::NotFound(format!(
+            "Operation route '{operation_id}' not found"
+        )));
+    }
+    let uuid = parse_operation_id(&operation_id)?;
+    let creator_id = require_creator(&state)?;
+    let op_id = nexus_agent_host::HostOperationId(uuid);
+    let result = state
+        .actor_sessions()
+        .character_operation_result(&creator_id, &op_id)?;
+    Ok(Json(result))
 }
 
 /// `POST /v1/daemon/agent-host/operations/{operation_id}:cancel` — cancel in-flight operation.
@@ -638,9 +859,39 @@ pub async fn cancel_operation(
         .to_string();
 
     let uuid = parse_operation_id(&operation_id)?;
-    let host = get_host(&state)?;
 
     let op_id = nexus_agent_host::HostOperationId(uuid);
+    let creator_id = require_creator(&state)?;
+    let host = get_host(&state)?;
+
+    if state.actor_sessions().operation_owner(&op_id).is_some() {
+        state
+            .actor_sessions()
+            .request_operation_cancel(&creator_id, &op_id)?;
+        let session_id = state
+            .actor_sessions()
+            .operation_session_id(&op_id)
+            .or_else(|| {
+                state
+                    .actor_sessions()
+                    .resolve_indexed_operation_session(&op_id)
+            })
+            .ok_or_else(|| NexusApiError::NotFound(format!("operation {operation_id}")))?;
+        authorize_actor_session(&state, &session_id)?;
+    } else {
+        let sessions = host.list_sessions().await.map_err(|e| map_host_error(&e))?;
+        let indexed_session = session_for_operation(&sessions, &op_id)
+            .map(|s| s.id.clone())
+            .or_else(|| {
+                state
+                    .actor_sessions()
+                    .resolve_indexed_operation_session(&op_id)
+            });
+        if let Some(session_id) = indexed_session {
+            authorize_actor_session(&state, &session_id)?;
+            state.actor_sessions().clear_indexed_operation(&op_id);
+        }
+    }
     host.cancel(op_id).await.map_err(|e| map_host_error(&e))?;
 
     Ok(Json(CancelOperationResponse {
@@ -664,6 +915,7 @@ pub async fn session_events(
     let host = get_host(&state)?;
 
     let sid = nexus_agent_host::HostSessionId(uuid);
+    authorize_actor_session(&state, &sid)?;
     let rx = host.subscribe_events(sid.clone());
 
     // Convert the broadcast receiver into a filtered SSE stream using unfold.
@@ -1082,6 +1334,7 @@ mod tests {
         let state = state_with_host().await;
         let req = ExecuteOperationRequest::Prompt {
             content: "hello".to_string(),
+            remember: None,
         };
         let result = execute_operation(State(state), Path("bad-uuid".to_string()), Json(req)).await;
         assert!(result.is_err());
@@ -1143,10 +1396,13 @@ mod tests {
 
     #[tokio::test]
     async fn parse_session_id_rejects_invalid() {
-        assert!(parse_session_id("garbage").is_err());
-        assert!(parse_session_id("").is_err());
-        assert!(parse_session_id("12345").is_err());
-        assert!(parse_session_id("../../etc/passwd").is_err());
+        // agent-host spec boundary rule: malformed id -> 400 InvalidInput.
+        for raw in ["garbage", "", "12345", "../../etc/passwd"] {
+            match parse_session_id(raw) {
+                Err(NexusApiError::InvalidInput { .. }) => {}
+                other => panic!("session_id {raw:?}: expected 400 InvalidInput, got {other:?}"),
+            }
+        }
     }
 
     #[tokio::test]
@@ -1159,8 +1415,13 @@ mod tests {
 
     #[tokio::test]
     async fn parse_operation_id_rejects_invalid() {
-        assert!(parse_operation_id("garbage").is_err());
-        assert!(parse_operation_id("").is_err());
+        // agent-host spec boundary rule: malformed id -> 400 InvalidInput.
+        for raw in ["garbage", ""] {
+            match parse_operation_id(raw) {
+                Err(NexusApiError::InvalidInput { .. }) => {}
+                other => panic!("operation_id {raw:?}: expected 400 InvalidInput, got {other:?}"),
+            }
+        }
     }
 
     // ── Agent scan integration tests ────────────────────────────────────────
@@ -2109,6 +2370,78 @@ mod tests {
         assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
+    fn rebind_host_event(
+        event: nexus_agent_host::capability::model::HostEvent,
+        session_id: nexus_agent_host::HostSessionId,
+        op_id: nexus_agent_host::HostOperationId,
+    ) -> nexus_agent_host::capability::model::HostEvent {
+        use nexus_agent_host::capability::model::{
+            HostEvent, OperationFailedEvent, OperationFinishedEvent, PlanUpdateEvent,
+            TextDeltaEvent, ToolCallEvent, ToolCallUpdateEvent,
+        };
+        match event {
+            HostEvent::MessageDelta(TextDeltaEvent { text, .. }) => {
+                HostEvent::MessageDelta(TextDeltaEvent {
+                    session_id,
+                    op_id,
+                    text,
+                })
+            }
+            HostEvent::ThoughtDelta(TextDeltaEvent { text, .. }) => {
+                HostEvent::ThoughtDelta(TextDeltaEvent {
+                    session_id,
+                    op_id,
+                    text,
+                })
+            }
+            HostEvent::OpFinished(OperationFinishedEvent { reason, .. }) => {
+                HostEvent::OpFinished(OperationFinishedEvent {
+                    session_id,
+                    op_id,
+                    reason,
+                })
+            }
+            HostEvent::OpFailed(OperationFailedEvent {
+                error_category,
+                error_message,
+                ..
+            }) => HostEvent::OpFailed(OperationFailedEvent {
+                session_id,
+                op_id,
+                error_category,
+                error_message,
+            }),
+            HostEvent::ToolCall(ToolCallEvent {
+                tool_call_id,
+                tool_name,
+                ..
+            }) => HostEvent::ToolCall(ToolCallEvent {
+                session_id,
+                op_id,
+                tool_call_id,
+                tool_name,
+            }),
+            HostEvent::ToolCallUpdate(ToolCallUpdateEvent {
+                tool_call_id,
+                content,
+                ..
+            }) => HostEvent::ToolCallUpdate(ToolCallUpdateEvent {
+                session_id,
+                op_id,
+                tool_call_id,
+                content,
+            }),
+            HostEvent::PlanUpdate(PlanUpdateEvent { content, .. }) => {
+                HostEvent::PlanUpdate(PlanUpdateEvent {
+                    session_id,
+                    op_id,
+                    content,
+                })
+            }
+            other => other,
+        }
+    }
+
     struct PromptHost {
         sessions: std::sync::Mutex<
             std::collections::HashMap<
@@ -2117,7 +2450,13 @@ mod tests {
             >,
         >,
         ops: std::sync::Mutex<Vec<nexus_agent_host::capability::model::HostOperation>>,
+        stream_scripts: std::sync::Mutex<
+            std::collections::VecDeque<Vec<nexus_agent_host::capability::model::HostEvent>>,
+        >,
+        // When true, queued stream events get rebound to the exec session/op.
         execs: std::sync::atomic::AtomicU64,
+        cancels: std::sync::atomic::AtomicU64,
+        shutdowns: std::sync::atomic::AtomicU64,
         events: tokio::sync::broadcast::Sender<nexus_agent_host::capability::model::HostEvent>,
     }
 
@@ -2127,7 +2466,10 @@ mod tests {
             Arc::new(Self {
                 sessions: std::sync::Mutex::new(std::collections::HashMap::new()),
                 ops: std::sync::Mutex::new(Vec::new()),
+                stream_scripts: std::sync::Mutex::new(std::collections::VecDeque::new()),
                 execs: std::sync::atomic::AtomicU64::new(0),
+                cancels: std::sync::atomic::AtomicU64::new(0),
+                shutdowns: std::sync::atomic::AtomicU64::new(0),
                 events,
             })
         }
@@ -2145,6 +2487,13 @@ mod tests {
                 },
                 other => panic!("expected prompt, got {other:?}"),
             }
+        }
+
+        fn queue_stream(&self, events: Vec<nexus_agent_host::capability::model::HostEvent>) {
+            self.stream_scripts
+                .lock()
+                .expect("stream_scripts")
+                .push_back(events);
         }
     }
 
@@ -2179,19 +2528,36 @@ mod tests {
 
         async fn exec(
             &self,
-            _session_id: nexus_agent_host::HostSessionId,
+            session_id: nexus_agent_host::HostSessionId,
             op: nexus_agent_host::capability::model::HostOperation,
         ) -> nexus_agent_host::HostResult<nexus_agent_host::capability::model::HostEventStream>
         {
             self.execs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            self.ops.lock().expect("ops").push(op);
-            Ok(Box::pin(futures_util::stream::empty()))
+            self.ops.lock().expect("ops").push(op.clone());
+            let script = self
+                .stream_scripts
+                .lock()
+                .expect("stream_scripts")
+                .pop_front()
+                .unwrap_or_default();
+            let rebound = match &op {
+                nexus_agent_host::capability::model::HostOperation::Prompt { op_id, .. } => script
+                    .into_iter()
+                    .map(|event| rebind_host_event(event, session_id.clone(), op_id.clone()))
+                    .collect::<Vec<_>>(),
+                _ => script,
+            };
+            Ok(Box::pin(futures_util::stream::iter(
+                rebound.into_iter().map(Ok),
+            )))
         }
 
         async fn cancel(
             &self,
             _op_id: nexus_agent_host::HostOperationId,
         ) -> nexus_agent_host::HostResult<()> {
+            self.cancels
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         }
 
@@ -2213,6 +2579,8 @@ mod tests {
             &self,
             session_id: nexus_agent_host::HostSessionId,
         ) -> nexus_agent_host::HostResult<()> {
+            self.shutdowns
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             self.sessions
                 .lock()
                 .expect("sessions")
@@ -2294,6 +2662,7 @@ mod tests {
             Path(created.session_id.clone()),
             Json(ExecuteOperationRequest::Prompt {
                 content: "hello".to_string(),
+                remember: None,
             }),
         )
         .await
@@ -2327,6 +2696,7 @@ mod tests {
             Path(created.session_id.clone()),
             Json(ExecuteOperationRequest::Prompt {
                 content: "Act now.".to_string(),
+                remember: None,
             }),
         )
         .await
@@ -2376,6 +2746,7 @@ mod tests {
             Path(created.session_id.clone()),
             Json(ExecuteOperationRequest::Prompt {
                 content: "Act now.".to_string(),
+                remember: None,
             }),
         )
         .await
@@ -2408,6 +2779,7 @@ mod tests {
             Path(created.session_id.clone()),
             Json(ExecuteOperationRequest::Prompt {
                 content: "Act now.".to_string(),
+                remember: None,
             }),
         )
         .await
@@ -2454,6 +2826,625 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.error_code(), "actor_session_immutable");
+        assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    // ── v1.185 P0 Task 2: session authorization + retired execute stale ──
+
+    /// Create a Character-indexed Actor session through the public create
+    /// handler (requires an owned active Character + active binding + World).
+    async fn create_actor_session(state: &WorkspaceState) -> (String, String, String) {
+        let (character_id, binding_id) = seed_owned_character(state).await;
+        let created = create_session(
+            State(state.clone()),
+            Json(character_session_req(
+                &character_id,
+                "wld_worldA",
+                &binding_id,
+            )),
+        )
+        .await
+        .expect("create actor session");
+        (created.session_id.clone(), character_id, binding_id)
+    }
+
+    /// A foreign (different active creator) Character session id is a 404 for
+    /// get/shutdown/cancel with NO Host effect; the owning creator can still
+    /// observe it.
+    #[tokio::test]
+    async fn foreign_character_session_read_and_shutdown_404_without_host_effect() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let (session_id, character_id, _binding_id) = create_actor_session(&state).await;
+
+        // Point the active creator at a DIFFERENT creator (foreign owner).
+        std::fs::write(
+            state.nexus_home().join("config.toml"),
+            "active_creator_id = \"ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n\n[active_workspace_slug_by_creator]\n\"ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\" = \"default\"\n",
+        )
+        .unwrap();
+
+        // Foreign read → 404, no list/host effect.
+        let err = get_session(State(state.clone()), Path(session_id.clone()))
+            .await
+            .expect_err("foreign get");
+        assert_eq!(err.error_code(), "not_found");
+
+        // Foreign shutdown → 404, host session untouched.
+        let err = shutdown_session(State(state.clone()), Path(session_id.clone()))
+            .await
+            .expect_err("foreign shutdown");
+        assert_eq!(err.error_code(), "not_found");
+        assert_eq!(
+            host.shutdowns.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "foreign shutdown must not reach Host"
+        );
+
+        // Switch back to the owning creator: owned observation retained.
+        std::fs::write(
+            state.nexus_home().join("config.toml"),
+            "active_creator_id = \"ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\n[active_workspace_slug_by_creator]\n\"ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" = \"default\"\n",
+        )
+        .unwrap();
+        let ok = get_session(State(state.clone()), Path(session_id))
+            .await
+            .expect("owned get");
+        assert_eq!(ok.state, "Ready");
+        assert_eq!(character_id.len(), 36); // sanity: seeded character id shape
+    }
+
+    /// A retired-session execute (post-lifecycle-transition id) is a `409
+    /// actor_session_stale` and never falls back to legacy/Creator bytes.
+    #[tokio::test]
+    async fn retired_actor_session_execute_is_stale_not_legacy() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let (session_id, character_id, _binding_id) = create_actor_session(&state).await;
+        let _ = state
+            .actor_sessions()
+            .retire_character_sessions(&character_id);
+
+        let err = execute_operation(
+            State(state.clone()),
+            Path(session_id),
+            Json(ExecuteOperationRequest::Prompt {
+                content: "do a thing".into(),
+                remember: None,
+            }),
+        )
+        .await
+        .expect_err("retired execute must be stale");
+        assert_eq!(err.error_code(), "actor_session_stale");
+        assert_eq!(
+            host.execs.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "retired prompt must be rejected before Host exec"
+        );
+    }
+
+    /// A foreign cancel of an operation mapped to an indexed Character
+    /// session is a 404 with no Host cancel effect.
+    #[tokio::test]
+    async fn foreign_cancel_resolves_operation_to_session_and_404s() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let (session_id, _character_id, _binding_id) = create_actor_session(&state).await;
+
+        // Simulate an in-flight operation bound to that session.
+        let op_uuid = nexus_agent_host::HostOperationId::new();
+        if let Some(session) =
+            host.sessions
+                .lock()
+                .expect("sessions")
+                .get_mut(&nexus_agent_host::HostSessionId(
+                    session_id.parse().expect("uuid"),
+                ))
+        {
+            session.active_op_id = Some(op_uuid.clone());
+        }
+
+        // Foreign creator cancels → 404, host cancel not called.
+        std::fs::write(
+            state.nexus_home().join("config.toml"),
+            "active_creator_id = \"ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n\n[active_workspace_slug_by_creator]\n\"ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\" = \"default\"\n",
+        )
+        .unwrap();
+        let err = cancel_operation(State(state.clone()), Path(format!("{op_uuid}:cancel")))
+            .await
+            .expect_err("foreign cancel");
+        assert_eq!(err.error_code(), "not_found");
+        assert_eq!(
+            host.cancels.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "foreign cancel must not reach Host"
+        );
+    }
+
+    /// The session list filters foreign Character-indexed rows before
+    /// pagination: a foreign Character session never appears in another
+    /// Cancel of an indexed Character operation is fail-closed when Host has
+    /// not yet surfaced `active_op_id`: foreign caller → 404, zero Host cancels.
+    #[tokio::test]
+    async fn foreign_cancel_without_host_active_op_id_404s_with_zero_host_cancels() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let (session_id, _character_id, _binding_id) = create_actor_session(&state).await;
+        let started = execute_operation(
+            State(state.clone()),
+            Path(session_id.clone()),
+            Json(ExecuteOperationRequest::Prompt {
+                content: "do a thing".into(),
+                remember: None,
+            }),
+        )
+        .await
+        .expect("start prompt");
+        let op_uuid =
+            nexus_agent_host::HostOperationId(started.operation_id.parse().expect("uuid"));
+        assert!(
+            host.sessions
+                .lock()
+                .expect("sessions")
+                .get(&nexus_agent_host::HostSessionId(
+                    session_id.parse().expect("uuid")
+                ))
+                .expect("session")
+                .active_op_id
+                .is_none(),
+            "test models Host before active_op_id is indexed"
+        );
+
+        std::fs::write(
+            state.nexus_home().join("config.toml"),
+            "active_creator_id = \"ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"
+
+[active_workspace_slug_by_creator]
+\"ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\" = \"default\"
+",
+        )
+        .unwrap();
+        let err = cancel_operation(State(state.clone()), Path(format!("{op_uuid}:cancel")))
+            .await
+            .expect_err("foreign cancel");
+        assert_eq!(err.error_code(), "not_found");
+        assert_eq!(
+            host.cancels.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "foreign cancel must not reach Host"
+        );
+    }
+
+    /// Retired Character sessions still overlay `actor_ref/viewpoint` on list/get.
+    #[tokio::test]
+    async fn retired_session_overlay_keeps_actor_ref_on_list_and_get() {
+        let (_tmp, state, _host) = state_with_prompt_host().await;
+        let (session_id, character_id, _binding_id) = create_actor_session(&state).await;
+        let _ = state
+            .actor_sessions()
+            .retire_character_sessions(&character_id);
+
+        let listed = list_sessions(
+            State(state.clone()),
+            Query(AgentHostListSessionsQuery {
+                limit: None,
+                cursor: None,
+            }),
+        )
+        .await
+        .expect("list");
+        let row = listed
+            .items
+            .iter()
+            .find(|s| s.session_id == session_id)
+            .expect("retired host row still listed");
+        assert!(
+            row.actor_ref.is_some(),
+            "retired row keeps actor_ref overlay"
+        );
+        assert!(
+            row.viewpoint.is_some(),
+            "retired row keeps viewpoint overlay"
+        );
+
+        let got = get_session(State(state.clone()), Path(session_id.clone()))
+            .await
+            .expect("get retired session");
+        assert!(got.actor_ref.is_some());
+        assert!(got.viewpoint.is_some());
+    }
+
+    /// The session list filters foreign Character-indexed rows before
+    /// pagination: a foreign Character session never appears in another
+    /// creator's list, while the owning creator's own indexed session does.
+    #[tokio::test]
+    async fn session_list_filters_foreign_character_rows_before_pagination() {
+        let (_tmp, state, _host) = state_with_prompt_host().await;
+        let (_own_session, _own_char, _own_bind) = create_actor_session(&state).await;
+
+        // Seed an OTHER-owned World + Character so a foreign Character session
+        // can be indexed under a different owner.
+        let pool = state.pool().unwrap();
+        nexus_local_db::ensure_creator_row(pool, "ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "Other")
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO narrative_worlds \
+             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+              time_policy, metadata_json, created_at) \
+             VALUES ('wld_worldB', 'ws', 'ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'b', 'b', 'active', 'private', 'manual', '{}', datetime('now'))",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        let other_created = nexus_local_db::create_character_with_initial_binding(
+            pool,
+            nexus_local_db::CreateCharacterParams {
+                owner_creator_id: "ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                display_name: "OtherChar",
+                image_uri: None,
+                persona_json: "{}",
+                world_id: "wld_worldB",
+                world_sheet_entry_id: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Index the OTHER-owned session via the OTHER active creator.
+        std::fs::write(
+            state.nexus_home().join("config.toml"),
+            "active_creator_id = \"ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n\n[active_workspace_slug_by_creator]\n\"ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\" = \"default\"\n",
+        )
+        .unwrap();
+        let _ = create_session(
+            State(state.clone()),
+            Json(character_session_req(
+                &other_created.character.character_id,
+                "wld_worldB",
+                &other_created.binding.binding_id,
+            )),
+        )
+        .await
+        .expect("other creator session");
+
+        // Back to the first creator: the OTHER-owned Character session must
+        // be filtered out of the list (only the own indexed session remains).
+        std::fs::write(
+            state.nexus_home().join("config.toml"),
+            "active_creator_id = \"ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\n[active_workspace_slug_by_creator]\n\"ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" = \"default\"\n",
+        )
+        .unwrap();
+        let listed = list_sessions(
+            State(state.clone()),
+            Query(AgentHostListSessionsQuery {
+                limit: Some(50),
+                cursor: None,
+            }),
+        )
+        .await
+        .expect("list ok");
+        assert_eq!(listed.items.len(), 1, "foreign Character session filtered");
+    }
+
+    async fn wait_for_terminal_operation(state: &WorkspaceState, operation_id: &str) {
+        use nexus_contracts::generated::daemon_api::agent_host::character_operation_result::CharacterOperationResultRunStatus;
+        let op = nexus_agent_host::HostOperationId(
+            uuid::Uuid::parse_str(operation_id).expect("op uuid"),
+        );
+        for _ in 0..100 {
+            if let Ok(result) = state
+                .actor_sessions()
+                .character_operation_result("ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &op)
+            {
+                if !matches!(
+                    result.run_status,
+                    CharacterOperationResultRunStatus::Running
+                ) {
+                    return;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("operation {operation_id} did not reach terminal state");
+    }
+
+    fn capture_script(
+        session_id: &nexus_agent_host::HostSessionId,
+        op_id: &nexus_agent_host::HostOperationId,
+        text: &str,
+        reason: nexus_agent_host::capability::model::FinishReason,
+    ) -> Vec<nexus_agent_host::capability::model::HostEvent> {
+        use nexus_agent_host::capability::model::{
+            HostEvent, OperationFinishedEvent, TextDeltaEvent,
+        };
+        vec![
+            HostEvent::MessageDelta(TextDeltaEvent {
+                session_id: session_id.clone(),
+                op_id: op_id.clone(),
+                text: text.into(),
+            }),
+            HostEvent::OpFinished(OperationFinishedEvent {
+                session_id: session_id.clone(),
+                op_id: op_id.clone(),
+                reason,
+            }),
+        ]
+    }
+
+    /// remember:true on a RETIRED Character session is not `invalid_input`:
+    /// it reaches `prepare_prompt` and reports 409 `actor_session_stale`.
+    #[tokio::test]
+    async fn remember_on_retired_character_session_reports_stale() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let (character_id, binding_id) = seed_owned_character(&state).await;
+        let created = create_session(
+            State(state.clone()),
+            Json(character_session_req(
+                &character_id,
+                "wld_worldA",
+                &binding_id,
+            )),
+        )
+        .await
+        .expect("create");
+        // Retire the session (simulates a material archive).
+        let _ = state
+            .actor_sessions()
+            .retire_character_sessions(&character_id);
+        let err = execute_operation(
+            State(state.clone()),
+            Path(created.session_id.clone()),
+            Json(ExecuteOperationRequest::Prompt {
+                content: "hello".into(),
+                remember: Some(true),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status_code(), axum::http::StatusCode::CONFLICT);
+        assert_eq!(err.error_code(), "actor_session_stale");
+        assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    /// remember:true on legacy/Creator sessions is rejected before exec.
+    #[tokio::test]
+    async fn remember_rejects_legacy_prompt_before_exec() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let created = create_session(
+            State(state.clone()),
+            Json(
+                serde_json::from_value(serde_json::json!({
+                    "provider_id": "prov",
+                    "cwd": "/tmp"
+                }))
+                .unwrap(),
+            ),
+        )
+        .await
+        .expect("legacy create");
+        let err = execute_operation(
+            State(state),
+            Path(created.session_id.clone()),
+            Json(ExecuteOperationRequest::Prompt {
+                content: "hello".into(),
+                remember: Some(true),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            err.status_code(),
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert_eq!(err.error_code(), "invalid_input");
+        assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    /// Character prompt with remember returns pending capture immediately.
+    #[tokio::test]
+    async fn character_remember_returns_pending_capture() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let (character_id, binding_id) = seed_owned_character(&state).await;
+        let created = create_session(
+            State(state.clone()),
+            Json(character_session_req(
+                &character_id,
+                "wld_worldA",
+                &binding_id,
+            )),
+        )
+        .await
+        .expect("create");
+        host.queue_stream(vec![]);
+        let resp = execute_operation(
+            State(state.clone()),
+            Path(created.session_id.clone()),
+            Json(ExecuteOperationRequest::Prompt {
+                content: "Act now.".into(),
+                remember: Some(true),
+            }),
+        )
+        .await
+        .expect("prompt");
+        assert_eq!(resp.0.status, "started");
+        let capture = resp.0.capture.expect("capture");
+        assert_eq!(capture.status.to_string(), "pending");
+    }
+
+    /// Drain-finalized `end_turn` with remember persists capture candidate.
+    #[tokio::test]
+    async fn character_end_turn_capture_persists_pending_row() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let (character_id, binding_id) = seed_owned_character(&state).await;
+        let created = create_session(
+            State(state.clone()),
+            Json(character_session_req(
+                &character_id,
+                "wld_worldA",
+                &binding_id,
+            )),
+        )
+        .await
+        .expect("create");
+        let sid = nexus_agent_host::HostSessionId::new();
+        let op_id = nexus_agent_host::HostOperationId::new();
+        host.queue_stream(capture_script(
+            &sid,
+            &op_id,
+            "visible answer",
+            nexus_agent_host::capability::model::FinishReason::EndTurn,
+        ));
+        let resp = execute_operation(
+            State(state.clone()),
+            Path(created.session_id.clone()),
+            Json(ExecuteOperationRequest::Prompt {
+                content: "user prompt".into(),
+                remember: Some(true),
+            }),
+        )
+        .await
+        .expect("prompt");
+        // Wait for server-owned drain to finalize.
+        wait_for_terminal_operation(&state, &resp.0.operation_id).await;
+        let Json(outcome) =
+            get_operation_result(State(state.clone()), Path(resp.0.operation_id.clone()))
+                .await
+                .expect("get outcome");
+        assert_eq!(outcome.run_status.to_string(), "succeeded");
+        assert_eq!(outcome.capture.status.to_string(), "captured");
+        assert!(outcome.capture.pending_id.is_some());
+        let operation_id = resp.0.operation_id.clone();
+        let pending_id = outcome.capture.pending_id.unwrap().to_string();
+        let row: (String, Option<String>) = sqlx::query_as(
+            "SELECT pending_id, source_operation_id FROM character_memory_pending_review WHERE pending_id = ?",
+        )
+        .bind(&pending_id)
+        .fetch_one(state.pool().unwrap())
+        .await
+        .expect("pending row");
+        assert_eq!(row.1.as_deref(), Some(operation_id.as_str()));
+    }
+
+    /// Cancel after terminal finalization returns `actor_operation_finished`.
+    #[tokio::test]
+    async fn cancel_after_terminal_returns_finished_conflict() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let (character_id, binding_id) = seed_owned_character(&state).await;
+        let created = create_session(
+            State(state.clone()),
+            Json(character_session_req(
+                &character_id,
+                "wld_worldA",
+                &binding_id,
+            )),
+        )
+        .await
+        .expect("create");
+        host.queue_stream(vec![]);
+        let resp = execute_operation(
+            State(state.clone()),
+            Path(created.session_id.clone()),
+            Json(ExecuteOperationRequest::Prompt {
+                content: "q".into(),
+                remember: Some(false),
+            }),
+        )
+        .await
+        .expect("prompt");
+        wait_for_terminal_operation(&state, &resp.0.operation_id).await;
+        let err = cancel_operation(
+            State(state),
+            Path(format!("{}:cancel", resp.0.operation_id)),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.error_code(), "actor_operation_finished");
+        assert_eq!(host.cancels.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    /// Foreign owner cannot read operation outcome.
+    #[tokio::test]
+    async fn get_operation_outcome_hides_foreign_owner() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let (character_id, binding_id) = seed_owned_character(&state).await;
+        let created = create_session(
+            State(state.clone()),
+            Json(character_session_req(
+                &character_id,
+                "wld_worldA",
+                &binding_id,
+            )),
+        )
+        .await
+        .expect("create");
+        host.queue_stream(vec![]);
+        let resp = execute_operation(
+            State(state.clone()),
+            Path(created.session_id.clone()),
+            Json(ExecuteOperationRequest::Prompt {
+                content: "q".into(),
+                remember: Some(false),
+            }),
+        )
+        .await
+        .expect("prompt");
+        wait_for_terminal_operation(&state, &resp.0.operation_id).await;
+        std::fs::write(
+            state.nexus_home().join("config.toml"),
+            "active_creator_id = \"ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n\n[active_workspace_slug_by_creator]\n\"ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\" = \"default\"\n",
+        )
+        .unwrap();
+        let err = get_operation_result(State(state), Path(resp.0.operation_id.clone()))
+            .await
+            .unwrap_err();
+        assert_eq!(err.error_code(), "not_found");
+    }
+
+    /// Nonterminal operation capacity is bounded at 128 before provider exec.
+    #[tokio::test]
+    async fn character_operation_capacity_refuses_before_exec() {
+        let (_tmp, state, host) = state_with_prompt_host().await;
+        let (character_id, binding_id) = seed_owned_character(&state).await;
+        let created = create_session(
+            State(state.clone()),
+            Json(character_session_req(
+                &character_id,
+                "wld_worldA",
+                &binding_id,
+            )),
+        )
+        .await
+        .expect("create");
+        let ctx = state
+            .actor_sessions()
+            .context_for(&nexus_agent_host::HostSessionId(
+                uuid::Uuid::parse_str(&created.session_id).unwrap(),
+            ))
+            .expect("ctx");
+        for _ in 0..128 {
+            let snapshot = CharacterOperationSnapshot {
+                owner_creator_id: "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                ctx: ctx.clone(),
+                session_id: nexus_agent_host::HostSessionId(
+                    uuid::Uuid::parse_str(&created.session_id).unwrap(),
+                ),
+                operation_id: nexus_agent_host::HostOperationId::new(),
+                remember: false,
+                raw_prompt: "x".into(),
+            };
+            state
+                .actor_sessions()
+                .reserve_character_operation(snapshot)
+                .expect("reserve");
+        }
+        let err = execute_operation(
+            State(state),
+            Path(created.session_id.clone()),
+            Json(ExecuteOperationRequest::Prompt {
+                content: "blocked".into(),
+                remember: Some(false),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.error_code(), "actor_operation_capacity");
         assert_eq!(host.execs.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 }

@@ -4,6 +4,8 @@
 pub mod agent_host_list_sessions_query;
 pub mod agent_scan_entry;
 pub mod cancel_operation_response;
+pub mod character_operation_result;
+pub mod character_run_capture_outcome;
 pub mod create_session_request;
 pub mod execute_operation_request;
 pub mod operation_response;
@@ -17,6 +19,8 @@ pub mod shutdown_session_response;
 pub use agent_host_list_sessions_query::*;
 pub use agent_scan_entry::*;
 pub use cancel_operation_response::*;
+pub use character_operation_result::*;
+pub use character_run_capture_outcome::*;
 pub use create_session_request::*;
 pub use execute_operation_request::*;
 pub use operation_response::*;

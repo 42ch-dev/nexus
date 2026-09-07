@@ -7,6 +7,8 @@
 export type { AgentHostListSessionsQuery } from './agent-host-list-sessions-query';
 export type { AgentScanEntry } from './agent-scan-entry';
 export type { CancelOperationResponse } from './cancel-operation-response';
+export type { CharacterOperationResult } from './character-operation-result';
+export type { CharacterRunCaptureOutcome } from './character-run-capture-outcome';
 export type { CreateSessionRequest } from './create-session-request';
 export type { ExecuteOperationRequest } from './execute-operation-request';
 export type { OperationResponse } from './operation-response';

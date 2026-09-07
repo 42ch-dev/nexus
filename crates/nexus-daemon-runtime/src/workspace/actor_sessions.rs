@@ -3,16 +3,22 @@
 //! Indexes only Actor-mode sessions. Legacy creates never enter these maps.
 //! Concurrent creates for one exact key serialize on a per-key lock.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use nexus_agent_host::{HostFacade, HostSession, HostSessionId, SessionState};
+use nexus_agent_host::{HostFacade, HostOperationId, HostSession, HostSessionId, SessionState};
 use nexus_contracts::generated::daemon_api::agent_host::session_response::{
     NexusActorRef, NexusSessionViewpoint,
 };
-use tokio::sync::Mutex as AsyncMutex;
+use sqlx::SqlitePool;
+use tokio::sync::{Mutex as AsyncMutex, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
+
+use nexus_contracts::generated::daemon_api::agent_host::character_operation_result::{
+    CharacterOperationResult, CharacterOperationResultRunStatus, NexusCharacterRunCaptureOutcome,
+    NexusCharacterRunCaptureOutcomeStatus,
+};
 
 use crate::actor_admission::AdmittedActorContext;
 use crate::actor_knowledge_view::AdmittedActor;
@@ -38,6 +44,10 @@ pub struct ActorSessionKey {
     pub binding_id: Option<String>,
     pub branch_id: Option<String>,
     pub event_id: Option<String>,
+    /// Stored Character lifecycle epoch at admission (`None` for Creator).
+    /// A material archive/restore bumps the epoch, so a post-transition admit
+    /// can never reuse a pre-transition session (v1.185 P0 Task 2).
+    pub character_epoch: Option<i64>,
 }
 
 struct IndexedActorSession {
@@ -45,14 +55,90 @@ struct IndexedActorSession {
     ctx: AdmittedActorContext,
 }
 
+/// Retired-session tombstone: retains owner + Actor identity so retired ids
+/// stay recognizably Actor-mode (never legacy) and authorize owner-only
+/// safety/observation operations (v1.185 P0 Task 2).
+#[derive(Debug, Clone)]
+struct RetiredActorSession {
+    owner_creator_id: String,
+    actor_kind: ActorSessionKind,
+    actor_id: String,
+    world_id: String,
+    binding_id: Option<String>,
+    branch_id: Option<String>,
+    event_id: Option<String>,
+}
+
+/// Internal phase for per-operation cancel/finalize ordering (§11.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OperationPhase {
+    Running,
+    CancelRequested,
+    Finalizing,
+    Terminal,
+}
+
+/// Immutable admission snapshot for one Character Host operation.
+#[derive(Debug, Clone)]
+pub struct CharacterOperationSnapshot {
+    pub owner_creator_id: String,
+    pub ctx: AdmittedActorContext,
+    pub session_id: HostSessionId,
+    pub operation_id: HostOperationId,
+    pub remember: bool,
+    pub raw_prompt: String,
+}
+
+struct CharacterOperationRecord {
+    owner_creator_id: String,
+    session_id: HostSessionId,
+    phase: OperationPhase,
+    outcome: CharacterOperationResult,
+    _seq: u64,
+}
+
+const MAX_NONTERMINAL_OPERATIONS: usize = 128;
+const MAX_TERMINAL_OPERATIONS: usize = 1024;
+
+fn running_outcome(snapshot: &CharacterOperationSnapshot) -> CharacterOperationResult {
+    let capture = if snapshot.remember {
+        NexusCharacterRunCaptureOutcome {
+            status: NexusCharacterRunCaptureOutcomeStatus::Pending,
+            pending_id: None,
+            code: None,
+        }
+    } else {
+        NexusCharacterRunCaptureOutcome {
+            status: NexusCharacterRunCaptureOutcomeStatus::Disabled,
+            pending_id: None,
+            code: None,
+        }
+    };
+    CharacterOperationResult {
+        operation_id: snapshot.operation_id.to_string(),
+        session_id: snapshot.session_id.to_string(),
+        run_status: CharacterOperationResultRunStatus::Running,
+        finish_reason: None,
+        capture,
+    }
+}
+
 struct RegistryMaps {
     by_key: HashMap<ActorSessionKey, HostSessionId>,
     by_session: HashMap<HostSessionId, IndexedActorSession>,
     key_locks: HashMap<ActorSessionKey, Arc<AsyncMutex<()>>>,
-    retired: HashSet<HostSessionId>,
+    retired: HashMap<HostSessionId, RetiredActorSession>,
+    /// Indexed Actor operations whose Host session may not yet expose
+    /// `active_op_id` (fail-closed cancel authorization, durable §11.3.4).
+    indexed_operations: HashMap<HostOperationId, HostSessionId>,
+    /// Reclaimable per-Character activity fences (durable §11.3). An entry
+    /// with no live guard (`Arc::strong_count == 1`) is swept on admission.
+    character_fences: HashMap<String, Arc<RwLock<()>>>,
+    character_operations: HashMap<HostOperationId, CharacterOperationRecord>,
+    terminal_fifo: VecDeque<HostOperationId>,
+    operation_seq: u64,
     closed: bool,
 }
-
 /// Test-only hook invoked after a session lock is reclaimed.
 #[cfg(test)]
 type AfterReclaimHook = Arc<Mutex<Option<Arc<dyn Fn() + Send + Sync>>>>;
@@ -77,6 +163,86 @@ fn shutting_down() -> NexusApiError {
     }
 }
 
+/// Owned per-Character activity fence (durable §11.3).
+///
+/// Private, owned, non-Copy: obtain only via [`ActorSessionRegistry::admit_character_activity`], which owner-checks and re-reads status/epoch under the fence. Hold through every DB/file/provider/terminal-capture effect; drop releases the fence (and for a Prompt, only after terminal finalization in the server-owned drain).
+pub struct CharacterActivityGuard {
+    _read: OwnedRwLockReadGuard<()>,
+    owner_creator_id: String,
+    character_id: String,
+    epoch: i64,
+}
+
+impl CharacterActivityGuard {
+    /// Trusted owner (active Creator) admitted with this activity.
+    #[must_use]
+    pub fn owner_creator_id(&self) -> &str {
+        &self.owner_creator_id
+    }
+
+    /// Character this activity fence covers.
+    #[must_use]
+    pub fn character_id(&self) -> &str {
+        &self.character_id
+    }
+
+    /// Stored lifecycle epoch re-read under the fence at admission.
+    #[must_use]
+    pub const fn epoch(&self) -> i64 {
+        self.epoch
+    }
+}
+
+impl std::fmt::Debug for CharacterActivityGuard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CharacterActivityGuard")
+            .field("owner_creator_id", &self.owner_creator_id)
+            .field("character_id", &self.character_id)
+            .field("epoch", &self.epoch)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Exclusive per-Character lifecycle fence for archive/restore (durable §11.3.2).
+///
+/// Obtained only via [`ActorSessionRegistry::try_character_transition`] (busy refusal). Stores the lifecycle epoch re-read under the exclusive fence: retire session reuse keys only when the committed transition returns a different epoch (a same-state CAS no-op retires nothing).
+pub struct CharacterTransitionGuard {
+    _write: OwnedRwLockWriteGuard<()>,
+    owner_creator_id: String,
+    character_id: String,
+    epoch: i64,
+}
+
+impl CharacterTransitionGuard {
+    /// Trusted owner (active Creator) admitted for the transition.
+    #[must_use]
+    pub fn owner_creator_id(&self) -> &str {
+        &self.owner_creator_id
+    }
+
+    /// Character this transition fence covers.
+    #[must_use]
+    pub fn character_id(&self) -> &str {
+        &self.character_id
+    }
+
+    /// Stored lifecycle epoch re-read under the exclusive fence at transition start.
+    #[must_use]
+    pub const fn epoch(&self) -> i64 {
+        self.epoch
+    }
+}
+
+impl std::fmt::Debug for CharacterTransitionGuard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CharacterTransitionGuard")
+            .field("owner_creator_id", &self.owner_creator_id)
+            .field("character_id", &self.character_id)
+            .field("epoch", &self.epoch)
+            .finish_non_exhaustive()
+    }
+}
+
 impl ActorSessionRegistry {
     /// Empty process-lifetime registry.
     #[must_use]
@@ -86,7 +252,12 @@ impl ActorSessionRegistry {
                 by_key: HashMap::new(),
                 by_session: HashMap::new(),
                 key_locks: HashMap::new(),
-                retired: HashSet::new(),
+                retired: HashMap::new(),
+                indexed_operations: HashMap::new(),
+                character_fences: HashMap::new(),
+                character_operations: HashMap::new(),
+                terminal_fifo: VecDeque::new(),
+                operation_seq: 0,
                 closed: false,
             })),
             #[cfg(test)]
@@ -142,6 +313,7 @@ impl ActorSessionRegistry {
             binding_id: ctx.binding_id.clone(),
             branch_id: ctx.branch_id.clone(),
             event_id: ctx.event_id.clone(),
+            character_epoch: ctx.character_epoch,
         })
     }
 
@@ -158,7 +330,353 @@ impl ActorSessionRegistry {
     #[must_use]
     pub fn is_actor_session(&self, session_id: &HostSessionId) -> bool {
         let maps = self.maps();
-        maps.by_session.contains_key(session_id) || maps.retired.contains(session_id)
+        maps.by_session.contains_key(session_id) || maps.retired.contains_key(session_id)
+    }
+
+    /// Stored owner + retirement state of an indexed or retired Actor session.
+    ///
+    /// `None` means never indexed (legacy/Creator-direct path, unchanged
+    /// behavior). Retired tombstones retain owner identity so a foreign id is
+    /// a 404 before any Host access.
+    #[must_use]
+    pub fn stored_session_owner(
+        &self,
+        session_id: &HostSessionId,
+    ) -> Option<(String, ActorSessionKind, bool)> {
+        let maps = self.maps();
+        if let Some(row) = maps.by_session.get(session_id) {
+            return Some((row.ctx.owner_creator_id.clone(), row.key.actor_kind, false));
+        }
+        maps.retired
+            .get(session_id)
+            .map(|t| (t.owner_creator_id.clone(), t.actor_kind, true))
+    }
+
+    /// Tombstone retained after a material transition for overlay/authorization.
+    #[must_use]
+    fn retired_tombstone(&self, session_id: &HostSessionId) -> Option<RetiredActorSession> {
+        self.maps().retired.get(session_id).cloned()
+    }
+
+    /// Record an indexed Actor operation for fail-closed cancel authorization
+    /// when the Host has not yet surfaced `active_op_id`.
+    pub fn register_indexed_operation(&self, op_id: HostOperationId, session_id: HostSessionId) {
+        if self.is_actor_session(&session_id) {
+            self.maps().indexed_operations.insert(op_id, session_id);
+        }
+    }
+
+    /// Resolve a cancel target to its indexed Actor session when Host listing
+    /// has not yet bound `active_op_id`.
+    #[must_use]
+    pub fn resolve_indexed_operation_session(
+        &self,
+        op_id: &HostOperationId,
+    ) -> Option<HostSessionId> {
+        self.maps().indexed_operations.get(op_id).cloned()
+    }
+
+    /// Reserve a Character operation outcome before Host exec (§11.6).
+    ///
+    /// # Errors
+    ///
+    /// Returns capacity or shutdown conflicts.
+    #[allow(clippy::needless_pass_by_value)] // snapshot is stored by value in the operation map
+    pub fn reserve_character_operation(
+        &self,
+        snapshot: CharacterOperationSnapshot,
+    ) -> Result<(), NexusApiError> {
+        let mut maps = self.maps();
+        Self::reject_if_closed(&maps)?;
+        let nonterminal = maps
+            .character_operations
+            .values()
+            .filter(|r| !matches!(r.phase, OperationPhase::Terminal))
+            .count();
+        if nonterminal >= MAX_NONTERMINAL_OPERATIONS {
+            return Err(crate::api::errors::actor_operation_capacity());
+        }
+        maps.operation_seq += 1;
+        let seq = maps.operation_seq;
+        maps.character_operations.insert(
+            snapshot.operation_id.clone(),
+            CharacterOperationRecord {
+                owner_creator_id: snapshot.owner_creator_id.clone(),
+                session_id: snapshot.session_id.clone(),
+                phase: OperationPhase::Running,
+                outcome: running_outcome(&snapshot),
+                _seq: seq,
+            },
+        );
+        drop(maps);
+        Ok(())
+    }
+
+    /// Owner-scoped authoritative operation outcome.
+    ///
+    /// # Errors
+    ///
+    /// Returns `NotFound` when the operation is missing or foreign.
+    pub fn character_operation_result(
+        &self,
+        owner_creator_id: &str,
+        operation_id: &HostOperationId,
+    ) -> Result<CharacterOperationResult, NexusApiError> {
+        let maps = self.maps();
+        let record = maps
+            .character_operations
+            .get(operation_id)
+            .ok_or_else(|| NexusApiError::NotFound(format!("operation {operation_id}")))?;
+        if record.owner_creator_id != owner_creator_id {
+            drop(maps);
+            return Err(NexusApiError::NotFound(format!("operation {operation_id}")));
+        }
+        let outcome = record.outcome.clone();
+        drop(maps);
+        Ok(outcome)
+    }
+
+    /// Remove an unstarted reservation after exec admission failure.
+    pub fn remove_operation_reservation(&self, operation_id: &HostOperationId) {
+        self.maps().character_operations.remove(operation_id);
+    }
+
+    /// Latch cancel intent before awaiting Host.cancel.
+    ///
+    /// # Errors
+    ///
+    /// Returns `NotFound` or `actor_operation_finished` when cancel is invalid.
+    pub fn request_operation_cancel(
+        &self,
+        owner_creator_id: &str,
+        operation_id: &HostOperationId,
+    ) -> Result<(), NexusApiError> {
+        let mut maps = self.maps();
+        let record = maps
+            .character_operations
+            .get_mut(operation_id)
+            .ok_or_else(|| NexusApiError::NotFound(format!("operation {operation_id}")))?;
+        if record.owner_creator_id != owner_creator_id {
+            return Err(NexusApiError::NotFound(format!("operation {operation_id}")));
+        }
+        let result = match record.phase {
+            OperationPhase::Running => {
+                record.phase = OperationPhase::CancelRequested;
+                Ok(())
+            }
+            OperationPhase::CancelRequested => Ok(()),
+            OperationPhase::Finalizing | OperationPhase::Terminal => {
+                Err(crate::api::errors::actor_operation_finished())
+            }
+        };
+        drop(maps);
+        result
+    }
+
+    /// Move a draining operation into finalization and return whether cancel
+    /// intent was latched. The cancel read and phase transition are atomic
+    /// under the registry lock so no window can observe stale cancel state.
+    #[must_use]
+    pub fn begin_operation_finalizing(&self, operation_id: &HostOperationId) -> bool {
+        let mut maps = self.maps();
+        if let Some(record) = maps.character_operations.get_mut(operation_id) {
+            let cancel_requested = matches!(record.phase, OperationPhase::CancelRequested);
+            if matches!(
+                record.phase,
+                OperationPhase::Running | OperationPhase::CancelRequested
+            ) {
+                record.phase = OperationPhase::Finalizing;
+            }
+            cancel_requested
+        } else {
+            false
+        }
+    }
+
+    /// Commit terminal outcome and enforce terminal FIFO retention.
+    pub fn commit_operation_terminal(
+        &self,
+        operation_id: &HostOperationId,
+        outcome: CharacterOperationResult,
+    ) {
+        let mut maps = self.maps();
+        if let Some(record) = maps.character_operations.get_mut(operation_id) {
+            record.phase = OperationPhase::Terminal;
+            record.outcome = outcome;
+            maps.terminal_fifo.push_back(operation_id.clone());
+            while maps.terminal_fifo.len() > MAX_TERMINAL_OPERATIONS {
+                if let Some(evicted) = maps.terminal_fifo.pop_front() {
+                    maps.character_operations.remove(&evicted);
+                }
+            }
+        }
+        drop(maps);
+    }
+
+    #[must_use]
+    pub fn operation_owner(&self, operation_id: &HostOperationId) -> Option<String> {
+        self.maps()
+            .character_operations
+            .get(operation_id)
+            .map(|r| r.owner_creator_id.clone())
+    }
+
+    #[must_use]
+    pub fn operation_session_id(&self, operation_id: &HostOperationId) -> Option<HostSessionId> {
+        self.maps()
+            .character_operations
+            .get(operation_id)
+            .map(|r| r.session_id.clone())
+    }
+
+    /// Drop a registered indexed operation after cancel or terminal completion.
+    pub fn clear_indexed_operation(&self, op_id: &HostOperationId) {
+        self.maps().indexed_operations.remove(op_id);
+    }
+    /// Overlay `actor_ref/viewpoint` for list/get: live indexed context first,
+    /// then retired tombstones so leftover Host rows stay Actor-shaped.
+    ///
+    /// # Errors
+    ///
+    /// Returns `internal` when stored ids fail generated pattern checks.
+    pub fn echo_actor_pair_for_session(
+        &self,
+        session_id: &HostSessionId,
+    ) -> Result<(Option<NexusActorRef>, Option<NexusSessionViewpoint>), NexusApiError> {
+        if let Some(ctx) = self.context_for(session_id) {
+            return echo_actor_pair(&ctx);
+        }
+        if let Some(tombstone) = self.retired_tombstone(session_id) {
+            return echo_retired_pair(&tombstone);
+        }
+        Ok((None, None))
+    }
+
+    /// True once the process-lifetime maps are closed (daemon shutdown).
+    #[must_use]
+    pub fn is_closed(&self) -> bool {
+        self.maps().closed
+    }
+
+    /// Sweep fence entries with no live guard (live-Arc reclaim, §11.3.6).
+    fn sweep_fences(maps: &mut RegistryMaps) {
+        maps.character_fences
+            .retain(|_, fence| Arc::strong_count(fence) > 1);
+    }
+
+    /// Fetch or create the per-Character fence. Callers owner-check first.
+    fn fence_for(&self, character_id: &str) -> Result<Arc<RwLock<()>>, NexusApiError> {
+        let mut maps = self.maps();
+        Self::reject_if_closed(&maps)?;
+        Self::sweep_fences(&mut maps);
+        Ok(Arc::clone(
+            maps.character_fences
+                .entry(character_id.to_string())
+                .or_insert_with(|| Arc::new(RwLock::new(()))),
+        ))
+    }
+
+    /// Admit one side-effecting Character activity (mutation, memory pipeline,
+    /// session create/Prompt): owner-check before allocating a fence, hold an
+    /// owned read guard, then re-read status/epoch under the fence (durable
+    /// §11.3.1). The caller holds the guard through every DB/file/provider/
+    /// terminal-capture effect.
+    ///
+    /// # Errors
+    ///
+    /// 404 for a missing/foreign Character; 409 `character_inactive` for an
+    /// owned archived Character; 503 once the registry is closed.
+    pub async fn admit_character_activity(
+        &self,
+        pool: &SqlitePool,
+        owner_creator_id: &str,
+        character_id: &str,
+    ) -> Result<CharacterActivityGuard, NexusApiError> {
+        // Owner-check before allocating a fence (no fence state leaks existence).
+        nexus_local_db::get_character(pool, owner_creator_id, character_id)
+            .await?
+            .ok_or_else(|| NexusApiError::NotFound(format!("character {character_id}")))?;
+        let fence = self.fence_for(character_id)?;
+        let read = fence.read_owned().await;
+        // Re-read under the fence: a transition holds the exclusive write
+        // guard, so this status/epoch pair is exact for the guard's lifetime.
+        let stored = nexus_local_db::get_character(pool, owner_creator_id, character_id)
+            .await?
+            .ok_or_else(|| NexusApiError::NotFound(format!("character {character_id}")))?;
+        if stored.status != "active" {
+            return Err(NexusApiError::ConflictCoded {
+                code: "character_inactive".into(),
+                message: format!("character {character_id} is {}", stored.status),
+            });
+        }
+        Ok(CharacterActivityGuard {
+            _read: read,
+            owner_creator_id: owner_creator_id.to_string(),
+            character_id: character_id.to_string(),
+            epoch: stored.lifecycle_epoch,
+        })
+    }
+
+    /// Try to take the exclusive lifecycle fence for archive/restore
+    /// (durable §11.3.2): busy refusal, never forced cancellation or waiting
+    /// on a provider. Allows an already-archived Character (restore).
+    ///
+    /// # Errors
+    ///
+    /// 404 for a missing/foreign Character; 409 `character_busy` when any
+    /// Character activity is outstanding; 503 once the registry is closed.
+    pub async fn try_character_transition(
+        &self,
+        pool: &SqlitePool,
+        owner_creator_id: &str,
+        character_id: &str,
+    ) -> Result<CharacterTransitionGuard, NexusApiError> {
+        // Owner-check before allocating a fence (no fence state leaks existence).
+        nexus_local_db::get_character(pool, owner_creator_id, character_id)
+            .await?
+            .ok_or_else(|| NexusApiError::NotFound(format!("character {character_id}")))?;
+        let fence = self.fence_for(character_id)?;
+        let write = fence
+            .try_write_owned()
+            .map_err(|_| crate::api::errors::character_busy(character_id))?;
+        // Re-read under the exclusive fence so pre-transition epoch is exact for
+        // material-vs-no-op session retirement (durable §11.3.2–§11.3.3).
+        let stored = nexus_local_db::get_character(pool, owner_creator_id, character_id)
+            .await?
+            .ok_or_else(|| NexusApiError::NotFound(format!("character {character_id}")))?;
+        Ok(CharacterTransitionGuard {
+            _write: write,
+            owner_creator_id: owner_creator_id.to_string(),
+            character_id: character_id.to_string(),
+            epoch: stored.lifecycle_epoch,
+        })
+    }
+
+    /// Retire every indexed session of a Character after a **material**
+    /// committed transition, while the exclusive fence is still held
+    /// (durable §11.3.3): remove old-epoch reuse keys and move their ids to
+    /// owner-retaining tombstones. Returns the retired ids for one physical
+    /// Host shutdown attempt each, outside DB/registry locks.
+    #[must_use]
+    pub fn retire_character_sessions(&self, character_id: &str) -> Vec<HostSessionId> {
+        let mut maps = self.maps();
+        let keys: Vec<ActorSessionKey> = maps
+            .by_key
+            .keys()
+            .filter(|k| k.actor_kind == ActorSessionKind::Character && k.actor_id == character_id)
+            .cloned()
+            .collect();
+        let mut retired_ids = Vec::new();
+        for key in keys {
+            if let Some(id) = maps.by_key.remove(&key) {
+                if let Some(row) = maps.by_session.remove(&id) {
+                    maps.retired.insert(id.clone(), Self::tombstone_of(&row));
+                    retired_ids.push(id.clone());
+                    maps.indexed_operations.retain(|_, sid| sid != &id);
+                }
+            }
+        }
+        retired_ids
     }
 
     /// Close the process-lifetime maps (daemon shutdown). In-flight creates cannot repopulate.
@@ -170,11 +688,15 @@ impl ActorSessionRegistry {
         maps.closed = true;
         let ids: Vec<_> = maps.by_session.keys().cloned().collect();
         for id in ids {
-            maps.retired.insert(id);
+            if let Some(row) = maps.by_session.remove(&id) {
+                maps.retired.insert(id.clone(), Self::tombstone_of(&row));
+            }
         }
         maps.by_key.clear();
         maps.by_session.clear();
         maps.key_locks.clear();
+        maps.character_fences.clear();
+        maps.indexed_operations.clear();
     }
 
     /// Shut down every retired Actor host session (daemon drain).
@@ -185,7 +707,7 @@ impl ActorSessionRegistry {
     pub async fn drain_host_sessions(&self, host: &dyn HostFacade) -> Result<(), NexusApiError> {
         let ids = {
             let maps = self.maps();
-            maps.retired.iter().cloned().collect::<Vec<_>>()
+            maps.retired.keys().cloned().collect::<Vec<_>>()
         };
         let mut first_err = None;
         for id in ids {
@@ -235,10 +757,24 @@ impl ActorSessionRegistry {
         )
     }
 
+    fn tombstone_of(row: &IndexedActorSession) -> RetiredActorSession {
+        RetiredActorSession {
+            owner_creator_id: row.ctx.owner_creator_id.clone(),
+            actor_kind: row.key.actor_kind,
+            actor_id: row.key.actor_id.clone(),
+            world_id: row.key.world_id.clone(),
+            binding_id: row.key.binding_id.clone(),
+            branch_id: row.key.branch_id.clone(),
+            event_id: row.key.event_id.clone(),
+        }
+    }
+
     fn evict_locked(maps: &mut RegistryMaps, key: &ActorSessionKey, session_id: &HostSessionId) {
         maps.by_key.remove(key);
-        maps.by_session.remove(session_id);
-        maps.retired.insert(session_id.clone());
+        if let Some(row) = maps.by_session.remove(session_id) {
+            maps.retired
+                .insert(session_id.clone(), Self::tombstone_of(&row));
+        }
     }
 
     fn reclaim(&self, key: &ActorSessionKey, held: &Arc<AsyncMutex<()>>) {
@@ -352,15 +888,6 @@ impl ActorSessionRegistry {
         }
         let lock = self.lock_for_key(&key);
         let guard = lock.lock().await;
-        {
-            let maps = self.maps();
-            if let Err(err) = Self::reject_if_closed(&maps) {
-                drop(maps);
-                drop(guard);
-                self.reclaim(&key, &lock);
-                return Err(err);
-            }
-        }
 
         let existing = {
             let maps = self.maps();
@@ -468,11 +995,102 @@ impl ActorSessionRegistry {
     }
 }
 
-/// Map admitted context onto generated session response optionals.
+/// Map a retired-session tombstone onto generated session response optionals
+/// so leftover Host rows stay recognizably Actor-mode (durable §11.3.3).
 ///
 /// # Errors
 ///
 /// Returns `internal` if stored ids fail generated pattern checks (should not happen).
+fn echo_retired_pair(
+    tombstone: &RetiredActorSession,
+) -> Result<(Option<NexusActorRef>, Option<NexusSessionViewpoint>), NexusApiError> {
+    let actor_ref = match tombstone.actor_kind {
+        ActorSessionKind::Creator => NexusActorRef::CreatorActorRef {
+            actor_kind: "creator"
+                .parse()
+                .map_err(|e: nexus_contracts::generated::daemon_api::agent_host::session_response::error::ConversionError| {
+                    NexusApiError::Internal {
+                        code: "ACTOR_REF_ECHO".into(),
+                        message: e.to_string(),
+                    }
+                })?,
+            creator_id: tombstone.actor_id.parse().map_err(
+                |e: nexus_contracts::generated::daemon_api::agent_host::session_response::error::ConversionError| {
+                    NexusApiError::Internal {
+                        code: "ACTOR_REF_ECHO".into(),
+                        message: e.to_string(),
+                    }
+                },
+            )?,
+        },
+        ActorSessionKind::Character => NexusActorRef::CharacterActorRef {
+            actor_kind: "character"
+                .parse()
+                .map_err(|e: nexus_contracts::generated::daemon_api::agent_host::session_response::error::ConversionError| {
+                    NexusApiError::Internal {
+                        code: "ACTOR_REF_ECHO".into(),
+                        message: e.to_string(),
+                    }
+                })?,
+            character_id: tombstone.actor_id.parse().map_err(
+                |e: nexus_contracts::generated::daemon_api::agent_host::session_response::error::ConversionError| {
+                    NexusApiError::Internal {
+                        code: "ACTOR_REF_ECHO".into(),
+                        message: e.to_string(),
+                    }
+                },
+            )?,
+        },
+    };
+    let viewpoint = NexusSessionViewpoint {
+        world_id: tombstone.world_id.parse().map_err(
+            |e: nexus_contracts::generated::daemon_api::agent_host::session_response::error::ConversionError| {
+                NexusApiError::Internal {
+                    code: "VIEWPOINT_ECHO".into(),
+                    message: e.to_string(),
+                }
+            },
+        )?,
+        binding_id: match &tombstone.binding_id {
+            Some(id) => Some(id.parse().map_err(
+                |e: nexus_contracts::generated::daemon_api::agent_host::session_response::error::ConversionError| {
+                    NexusApiError::Internal {
+                        code: "VIEWPOINT_ECHO".into(),
+                        message: e.to_string(),
+                    }
+                },
+            )?),
+            None => None,
+        },
+        branch_id: match &tombstone.branch_id {
+            Some(id) => Some(id.parse().map_err(
+                |e: nexus_contracts::generated::daemon_api::agent_host::session_response::error::ConversionError| {
+                    NexusApiError::Internal {
+                        code: "VIEWPOINT_ECHO".into(),
+                        message: e.to_string(),
+                    }
+                },
+            )?),
+            None => None,
+        },
+        event_id: match &tombstone.event_id {
+            Some(id) => Some(id.parse().map_err(
+                |e: nexus_contracts::generated::daemon_api::agent_host::session_response::error::ConversionError| {
+                    NexusApiError::Internal {
+                        code: "VIEWPOINT_ECHO".into(),
+                        message: e.to_string(),
+                    }
+                },
+            )?),
+            None => None,
+        },
+    };
+    Ok((Some(actor_ref), Some(viewpoint)))
+}
+
+/// # Errors
+///
+/// Returns `internal` if stored ids fail generated pattern checks.
 pub fn echo_actor_pair(
     ctx: &AdmittedActorContext,
 ) -> Result<(Option<NexusActorRef>, Option<NexusSessionViewpoint>), NexusApiError> {
@@ -613,12 +1231,22 @@ mod tests {
         world: &str,
         binding: Option<&str>,
     ) -> AdmittedActorContext {
+        let owner_creator_id = match &actor {
+            AdmittedActor::Creator { creator_id } => creator_id.clone(),
+            AdmittedActor::Character { .. } => "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+        };
+        let character_epoch = match &actor {
+            AdmittedActor::Creator { .. } => None,
+            AdmittedActor::Character { .. } => Some(0),
+        };
         AdmittedActorContext {
             actor,
+            owner_creator_id,
             world_id: world.to_string(),
             binding_id: binding.map(str::to_string),
             branch_id: None,
             event_id: None,
+            character_epoch,
             view: empty_view(),
         }
     }
@@ -1537,5 +2165,304 @@ mod tests {
         let registry = ActorSessionRegistry::new();
         assert!(registry.context_for(&HostSessionId::new()).is_none());
         assert!(registry.is_empty());
+    }
+
+    // ── v1.185 P0 Task 2: per-Character activity fences + retired tombstones ──
+
+    const DB_OWNER: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const DB_WORLD: &str = "wld_worldA";
+
+    /// Seed an owned active Character (with one active binding to an owned
+    /// active World) behind a fresh registry; returns (registry, pool, tmp,
+    /// `character_id`, `binding_id`).
+    async fn seeded_character() -> (
+        ActorSessionRegistry,
+        sqlx::SqlitePool,
+        crate::test_utils::TestTempRoot,
+        String,
+        String,
+    ) {
+        let (tmp, home, db_path) = crate::test_utils::create_test_workspace().await;
+        let state = crate::workspace::WorkspaceState::new_for_testing(home, db_path, None).await;
+        let pool = state.pool().unwrap().clone();
+        nexus_local_db::ensure_creator_row(&pool, DB_OWNER, "Owner")
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO narrative_worlds \
+             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+              time_policy, metadata_json, created_at) \
+             VALUES (?, 'ws', ?, ?, ?, 'active', 'private', 'manual', '{}', datetime('now'))",
+        )
+        .bind(DB_WORLD)
+        .bind(DB_OWNER)
+        .bind(DB_WORLD)
+        .bind(DB_WORLD)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let created = nexus_local_db::create_character_with_initial_binding(
+            &pool,
+            nexus_local_db::CreateCharacterParams {
+                owner_creator_id: DB_OWNER,
+                display_name: "Ada",
+                image_uri: None,
+                persona_json: "{}",
+                world_id: DB_WORLD,
+                world_sheet_entry_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        (
+            ActorSessionRegistry::new(),
+            pool,
+            tmp,
+            created.character.character_id,
+            created.binding.binding_id,
+        )
+    }
+
+    /// An outstanding activity (admitted read guard) makes the lifecycle
+    /// exclusive `try_character_transition` refuse `character_busy`; dropping
+    /// the guard admits it again (durable §11.3.1/§11.3.2).
+    #[tokio::test]
+    async fn archive_try_refuses_while_activity_outstanding() {
+        let (registry, pool, tmp, character_id, _binding) = seeded_character().await;
+        let guard = registry
+            .admit_character_activity(&pool, DB_OWNER, &character_id)
+            .await
+            .expect("admit active activity");
+
+        let busy = registry
+            .try_character_transition(&pool, DB_OWNER, &character_id)
+            .await
+            .expect_err("busy while activity in flight");
+        assert_eq!(busy.error_code(), "character_busy");
+        assert_eq!(busy.status_code(), axum::http::StatusCode::CONFLICT);
+        assert_eq!(guard.epoch(), 0);
+
+        drop(guard);
+        let transition = registry
+            .try_character_transition(&pool, DB_OWNER, &character_id)
+            .await
+            .expect("transition admits after activity drains");
+        assert_eq!(transition.character_id(), character_id);
+        assert_eq!(transition.epoch(), 0);
+
+        drop(tmp);
+    }
+
+    /// `admit_character_activity` re-checks the lifecycle under the fence: an
+    /// owned-but-archived Character refuses `character_inactive`, and a
+    /// foreign/missing Character is 404 (existence hidden).
+    #[tokio::test]
+    async fn admit_activity_rejects_archived_and_foreign() {
+        let (registry, pool, tmp, character_id, _binding) = seeded_character().await;
+
+        sqlx::query("UPDATE characters SET status = 'archived' WHERE character_id = ?")
+            .bind(&character_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let err = registry
+            .admit_character_activity(&pool, DB_OWNER, &character_id)
+            .await
+            .expect_err("archived");
+        assert_eq!(err.error_code(), "character_inactive");
+        assert_eq!(err.status_code(), axum::http::StatusCode::CONFLICT);
+
+        let foreign = registry
+            .admit_character_activity(&pool, "ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", &character_id)
+            .await
+            .expect_err("foreign owner");
+        assert_eq!(foreign.error_code(), "not_found");
+
+        let missing = registry
+            .admit_character_activity(&pool, DB_OWNER, "chr_ffffffffffffffffffffffffffffffff")
+            .await
+            .expect_err("missing");
+        assert_eq!(missing.error_code(), "not_found");
+
+        drop(tmp);
+    }
+
+    /// A material transition retires the Character's indexed sessions into
+    /// owner-retaining tombstones: reuse keys are gone, the retired id stays
+    /// recognizably Actor-mode (never legacy) with its owner identity, and a
+    /// fresh epoch key is distinct (no reuse of old history).
+    #[tokio::test]
+    async fn retire_character_sessions_tombstones_owner_and_fresh_epoch_reuses_nothing() {
+        let (registry, _pool, tmp, character_id, binding_id) = seeded_character().await;
+        let host = ScriptedHost::new();
+        let cwd = tempfile::tempdir().expect("cwd");
+
+        let mut ctx = sample_ctx(
+            AdmittedActor::Character {
+                character_id: character_id.clone(),
+            },
+            DB_WORLD,
+            Some(&binding_id),
+        );
+        ctx.character_epoch = Some(0);
+        ctx.owner_creator_id = DB_OWNER.to_string();
+
+        let epoch0 = key_with(&ctx, "prov", cwd.path(), None, None);
+        let old_session = mint(&registry, &host, epoch0.clone(), ctx.clone()).await;
+        assert_eq!(registry.len(), 1);
+
+        // A fresh (post-restore) epoch key must be distinct → resolve_or_create
+        // mints a NEW host session rather than reusing the pre-transition one.
+        ctx.character_epoch = Some(1);
+        let epoch1 = key_with(&ctx, "prov", cwd.path(), None, None);
+        assert_ne!(epoch0, epoch1);
+        let new_session = mint(&registry, &host, epoch1.clone(), ctx.clone()).await;
+        assert_ne!(new_session.id, old_session.id);
+        assert_eq!(registry.len(), 2);
+
+        // Retire the Character's sessions after a material transition: every
+        // indexed key for this Character is removed and its ids tombstoned
+        // (owner retained, Actor mode — never legacy). The fresh-epoch session
+        // is also retired, because a committed transition invalidates all the
+        // Character's reusable sessions; a later restore mints a brand-new one.
+        let mut retired_ids = registry.retire_character_sessions(&character_id);
+        retired_ids.sort_by_key(std::string::ToString::to_string);
+        let mut expected = vec![old_session.id.clone(), new_session.id.clone()];
+        expected.sort_by_key(std::string::ToString::to_string);
+        assert_eq!(retired_ids, expected);
+        assert_eq!(registry.len(), 0);
+        for id in [&old_session.id, &new_session.id] {
+            assert!(registry.is_actor_session(id));
+            assert!(registry.context_for(id).is_none());
+            let (owner, kind, retired) = registry.stored_session_owner(id).unwrap();
+            assert_eq!(owner, DB_OWNER);
+            assert_eq!(kind, ActorSessionKind::Character);
+            assert!(retired);
+        }
+
+        // The old epoch key is gone: re-resolving the same ctx mints a NEW
+        // host session rather than reusing a retired id.
+        let after_retire = registry
+            .resolve_or_create(epoch0.clone(), ctx.clone(), host.as_ref(), || async {
+                host.create_session(host_req())
+                    .await
+                    .map_err(|e| map_host(&e))
+            })
+            .await
+            .expect("mint after retire");
+        assert_ne!(after_retire.id, old_session.id);
+        assert_ne!(after_retire.id, new_session.id);
+        assert_eq!(registry.len(), 1);
+
+        drop(tmp);
+    }
+    /// Regression: lifecycle epoch used for material-vs-no-op decisions is
+    /// re-read under the exclusive fence after any interleaved transition.
+    #[tokio::test]
+    async fn transition_guard_rereads_epoch_under_exclusive_fence() {
+        let (registry, pool, tmp, character_id, _) = seeded_character().await;
+        {
+            let guard = registry
+                .try_character_transition(&pool, DB_OWNER, &character_id)
+                .await
+                .expect("first material archive");
+            assert_eq!(guard.epoch(), 0);
+            nexus_local_db::transition_character(
+                &pool,
+                DB_OWNER,
+                &character_id,
+                0,
+                nexus_local_db::CharacterStatus::Archived,
+            )
+            .await
+            .expect("archive");
+        }
+        let guard = registry
+            .try_character_transition(&pool, DB_OWNER, &character_id)
+            .await
+            .expect("same-state archive acquires fence");
+        assert_eq!(
+            guard.epoch(),
+            1,
+            "epoch must be re-read under fence, not a stale pre-fence snapshot"
+        );
+        let row = nexus_local_db::transition_character(
+            &pool,
+            DB_OWNER,
+            &character_id,
+            1,
+            nexus_local_db::CharacterStatus::Archived,
+        )
+        .await
+        .expect("same-state archive no-op");
+        assert_eq!(guard.epoch(), row.lifecycle_epoch);
+        drop(tmp);
+    }
+
+    /// Terminal operation FIFO evicts the oldest committed outcome after 1024 rows.
+    #[test]
+    fn terminal_operation_fifo_evicts_oldest() {
+        let registry = ActorSessionRegistry::new();
+        let ctx = base_character_ctx();
+        let session_id = HostSessionId::new();
+        let mut first_op = None;
+        let mut last_op = None;
+        for i in 0..1025 {
+            let op_id = HostOperationId::new();
+            if i == 0 {
+                first_op = Some(op_id.clone());
+            }
+            if i == 1024 {
+                last_op = Some(op_id.clone());
+            }
+            let snapshot = CharacterOperationSnapshot {
+                owner_creator_id: DB_OWNER.to_string(),
+                ctx: ctx.clone(),
+                session_id: session_id.clone(),
+                operation_id: op_id.clone(),
+                remember: false,
+                raw_prompt: "x".into(),
+            };
+            registry
+                .reserve_character_operation(snapshot)
+                .expect("reserve");
+            registry.commit_operation_terminal(
+                &op_id,
+                CharacterOperationResult {
+                    operation_id: op_id.to_string(),
+                    session_id: session_id.to_string(),
+                    run_status: CharacterOperationResultRunStatus::Succeeded,
+                    finish_reason: None,
+                    capture: NexusCharacterRunCaptureOutcome {
+                        status: NexusCharacterRunCaptureOutcomeStatus::Disabled,
+                        pending_id: None,
+                        code: None,
+                    },
+                },
+            );
+        }
+        let first = first_op.expect("first");
+        assert!(registry
+            .character_operation_result(DB_OWNER, &first)
+            .is_err());
+        let last = last_op.expect("last");
+        assert!(registry.character_operation_result(DB_OWNER, &last).is_ok());
+    }
+
+    /// Archive refuses while a Character prompt activity guard is still held.
+    #[tokio::test]
+    async fn archive_refuses_while_prompt_activity_outstanding() {
+        let (registry, pool, tmp, character_id, _binding) = seeded_character().await;
+        let guard = registry
+            .admit_character_activity(&pool, DB_OWNER, &character_id)
+            .await
+            .expect("admit prompt activity");
+        let busy = registry
+            .try_character_transition(&pool, DB_OWNER, &character_id)
+            .await
+            .expect_err("archive blocked during capture drain");
+        assert_eq!(busy.error_code(), "character_busy");
+        drop(guard);
+        drop(tmp);
     }
 }

@@ -97,6 +97,28 @@ pub enum ActorContractConflict {
     BindingHasOwnedKnowledge,
     BindingHasLocalMemory,
     CharacterFragmentAlreadyShared,
+    /// v1.185 P0: mutation targets an owned but archived Character.
+    CharacterInactive,
+    /// v1.185 P0: `expected_revision` does not match stored Character revision.
+    CharacterRevisionConflict,
+    /// v1.185 P1: `expected_revision` does not match stored binding revision.
+    BindingRevisionConflict,
+    /// v1.185 P0: restore lacks a retained active binding into an owned active World.
+    CharacterRestoreRequiresActiveBinding,
+    /// v1.185 P2: duplicate `canonical_name` for the same owner scope.
+    DuplicateActorKnowledge,
+    /// v1.185 P2: `expected_revision` does not match stored knowledge entry revision.
+    KnowledgeRevisionConflict,
+    /// v1.185 P2: delete refused because a protected referent still exists.
+    KnowledgeEntryInUse,
+    /// v1.185 P2: malformed JSON in a reference-bearing column.
+    KnowledgeReferenceStateInvalid,
+    /// v1.185 P2: mutation targets a non-live or malformed writable knowledge row.
+    KnowledgeEntryNotMutable,
+    /// v1.185 P3: run capture receipt provenance conflicts with an existing row.
+    RunCaptureProvenanceConflict,
+    /// v1.185 P3: run capture scope changed (epoch/binding/Character) before commit.
+    RunCaptureScopeChanged,
 }
 
 impl ActorContractConflict {
@@ -111,6 +133,19 @@ impl ActorContractConflict {
             Self::BindingHasOwnedKnowledge => "binding_has_owned_knowledge",
             Self::BindingHasLocalMemory => "binding_has_local_memory",
             Self::CharacterFragmentAlreadyShared => "character_fragment_already_shared",
+            Self::CharacterInactive => "character_inactive",
+            Self::CharacterRevisionConflict => "character_revision_conflict",
+            Self::BindingRevisionConflict => "binding_revision_conflict",
+            Self::CharacterRestoreRequiresActiveBinding => {
+                "character_restore_requires_active_binding"
+            }
+            Self::DuplicateActorKnowledge => "duplicate_actor_knowledge",
+            Self::KnowledgeRevisionConflict => "knowledge_revision_conflict",
+            Self::KnowledgeEntryInUse => "knowledge_entry_in_use",
+            Self::KnowledgeReferenceStateInvalid => "knowledge_reference_state_invalid",
+            Self::KnowledgeEntryNotMutable => "knowledge_entry_not_mutable",
+            Self::RunCaptureProvenanceConflict => "run_capture_provenance_conflict",
+            Self::RunCaptureScopeChanged => "run_capture_scope_changed",
         }
     }
 
@@ -139,6 +174,39 @@ impl ActorContractConflict {
             }
             Self::CharacterFragmentAlreadyShared => {
                 "Character memory fragment is already shared (no binding provenance to clear)"
+            }
+            Self::CharacterInactive => {
+                "Character is archived; this mutation requires an active Character"
+            }
+            Self::CharacterRevisionConflict => {
+                "Character revision no longer matches; re-read and retry with the current revision"
+            }
+            Self::BindingRevisionConflict => {
+                "Binding revision no longer matches; re-read and retry with the current revision"
+            }
+            Self::CharacterRestoreRequiresActiveBinding => {
+                "Restore requires at least one retained active binding into an owned active World"
+            }
+            Self::DuplicateActorKnowledge => {
+                "An active knowledge entry with this canonical name already exists for this owner"
+            }
+            Self::KnowledgeRevisionConflict => {
+                "Knowledge entry revision no longer matches; re-read and retry with the current revision"
+            }
+            Self::KnowledgeEntryInUse => {
+                "Knowledge entry is still referenced and cannot be deleted"
+            }
+            Self::KnowledgeReferenceStateInvalid => {
+                "A reference-bearing column contains invalid JSON"
+            }
+            Self::KnowledgeEntryNotMutable => {
+                "Knowledge entry is not live or its stored body cannot be edited"
+            }
+            Self::RunCaptureProvenanceConflict => {
+                "Run capture receipt provenance conflicts with an existing operation record"
+            }
+            Self::RunCaptureScopeChanged => {
+                "Run capture scope changed before the capture transaction could commit"
             }
         }
     }

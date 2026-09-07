@@ -12,6 +12,7 @@
     "display_name",
     "status",
     "persona",
+    "revision",
     "created_at",
     "updated_at"
   ],
@@ -46,6 +47,12 @@
       "additionalProperties": true,
       "default": {},
       "description": "Character-owned persona metadata object. Not a Canvas asset system. Serialized JSON at most 16384 bytes."
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9223372036854775806,
+      "description": "Optimistic-concurrency token, initially 0. Every successful material edit increments it once; mutations require `expected_revision` equal to the stored value. `lifecycle_epoch` is internal and never exposed on the wire."
     },
     "created_at": {
       "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"

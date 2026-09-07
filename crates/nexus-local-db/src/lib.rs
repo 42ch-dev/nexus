@@ -13,6 +13,7 @@
 // V1.153 P2 T2: cas is pure SQL (OCC helpers — no unix APIs); the former
 // `#[cfg(unix)]` gate was wrong and broke `kb_relationships` (which imports
 // `crate::cas`) on the Windows x64 build.
+pub mod actor_knowledge_store;
 pub mod actor_world_binding;
 pub mod cas;
 pub mod character;
@@ -71,13 +72,19 @@ pub use version::{DB_SCHEMA_VERSION, SCHEMA_VERSION};
 // Re-export error types
 pub use error::{ActorContractConflict, LocalDbError};
 
+pub use actor_knowledge_store::{
+    delete_actor_knowledge_entry, get_actor_knowledge_entry, update_actor_knowledge_entry,
+    ActorKnowledgePatch, ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES,
+};
 pub use actor_world_binding::{
-    add_actor_world_binding, count_bindings_for_world_tx, list_bindings_for_character,
-    mint_binding_id, remove_binding, ActorWorldBindingRecord, CreateBindingParams,
+    add_actor_world_binding, count_bindings_for_world_tx, get_actor_world_binding,
+    list_bindings_for_character, mint_binding_id, remove_binding, update_actor_world_binding,
+    ActorWorldBindingRecord, CreateBindingParams,
 };
 pub use character::{
     create_character_with_initial_binding, get_character, list_characters, mint_character_id,
-    CharacterRecord, CreateCharacterParams, CreateCharacterResult,
+    require_active_owned_character_tx, transition_character, update_character, CharacterPatch,
+    CharacterRecord, CharacterStatus, CreateCharacterParams, CreateCharacterResult, FieldPatch,
 };
 
 // Re-export sqlx pool type for consumers
@@ -123,9 +130,10 @@ pub use character_memory_fragment::{
     CharacterMemoryFragmentRecord, NewCharacterMemoryFragment,
 };
 pub use character_pending_review::{
-    count_character_pending_reviews, create_character_pending_review,
+    capture_character_run, count_character_pending_reviews, create_character_pending_review,
     delete_character_pending_review, delete_character_pending_review_in_tx,
     get_character_pending_review, list_character_pending_reviews, CharacterPendingReviewRecord,
+    RunCaptureInput, RunCaptureReceipt, RUN_PENDING_ID_PREFIX,
 };
 pub use character_soul_meta::{
     delete_character_soul_meta, get_character_soul_meta, upsert_character_soul_meta,

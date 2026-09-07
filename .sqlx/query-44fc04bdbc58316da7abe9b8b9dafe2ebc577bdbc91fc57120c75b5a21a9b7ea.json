@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT character_id as \"character_id!\",\n                  owner_creator_id as \"owner_creator_id!\",\n                  display_name as \"display_name!\",\n                  status as \"status!\",\n                  image_uri,\n                  persona_json as \"persona_json!\",\n                  created_at as \"created_at!\",\n                  updated_at as \"updated_at!\",\n                  revision as \"revision!\",\n                  lifecycle_epoch as \"lifecycle_epoch!\"\n           FROM characters\n           WHERE character_id = ? AND owner_creator_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "character_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "owner_creator_id!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "display_name!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "status!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "image_uri",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "persona_json!",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at!",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "revision!",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "lifecycle_epoch!",
+        "ordinal": 9,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "44fc04bdbc58316da7abe9b8b9dafe2ebc577bdbc91fc57120c75b5a21a9b7ea"
+}

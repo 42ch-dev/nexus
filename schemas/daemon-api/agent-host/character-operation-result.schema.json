@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/agent-host/character-operation-result.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CharacterOperationResult",
+  "description": "Authoritative per-operation run and capture outcome for owner-authorized Character Host operations.",
+  "type": "object",
+  "required": [
+    "operation_id",
+    "session_id",
+    "run_status",
+    "finish_reason",
+    "capture"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "operation_id": { "type": "string" },
+    "session_id": { "type": "string" },
+    "run_status": {
+      "type": "string",
+      "enum": ["running", "succeeded", "incomplete", "failed", "cancelled"]
+    },
+    "finish_reason": {
+      "type": ["string", "null"],
+      "enum": ["end_turn", "max_tokens", "max_turn_requests", "refusal", null]
+    },
+    "capture": {
+      "$ref": "https://nexus42.invalid/schemas/daemon-api/agent-host/character-run-capture-outcome.schema.json"
+    }
+  }
+}

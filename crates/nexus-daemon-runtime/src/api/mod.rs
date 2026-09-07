@@ -68,7 +68,8 @@ fn agent_host_tier2_routes() -> Router<WorkspaceState> {
         )
         .route(
             "/v1/daemon/agent-host/operations/:operation_id",
-            post(handlers::agent_host::cancel_operation),
+            get(handlers::agent_host::get_operation_result)
+                .post(handlers::agent_host::cancel_operation),
         )
         .route(
             "/v1/daemon/agent-host/sessions/:session_id/events",
@@ -661,7 +662,15 @@ fn character_routes() -> Router<WorkspaceState> {
         )
         .route(
             "/v1/daemon/characters/:character_id",
-            get(handlers::characters::get_character),
+            get(handlers::characters::get_character).patch(handlers::characters::patch_character),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/archive",
+            post(handlers::characters::archive_character),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/restore",
+            post(handlers::characters::restore_character),
         )
         .route(
             "/v1/daemon/characters/:character_id/bindings",
@@ -669,11 +678,19 @@ fn character_routes() -> Router<WorkspaceState> {
         )
         .route(
             "/v1/daemon/characters/:character_id/bindings/:binding_id",
-            delete(handlers::characters::remove_binding),
+            get(handlers::characters::get_binding)
+                .patch(handlers::characters::patch_binding)
+                .delete(handlers::characters::remove_binding),
         )
         .route(
             "/v1/daemon/characters/:character_id/knowledge",
             get(handlers::actor_knowledge::list_character_knowledge),
+        )
+        .route(
+            "/v1/daemon/characters/:character_id/knowledge/:entry_id",
+            get(handlers::actor_knowledge::get_knowledge_entry)
+                .patch(handlers::actor_knowledge::patch_knowledge_entry)
+                .delete(handlers::actor_knowledge::delete_knowledge_entry),
         )
         .route(
             "/v1/daemon/characters/:character_id/memory/pending-review",

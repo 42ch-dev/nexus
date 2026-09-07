@@ -19,7 +19,11 @@ use nexus_contracts::daemon_api::characters::{
     add_character_binding_response::{
         AddCharacterBindingResponse, NexusActorWorldBinding as AddedBindingWire,
     },
+    character_binding_detail::{
+        CharacterBindingDetail, NexusActorWorldBinding as DetailBindingWire,
+    },
     character_detail::{CharacterDetail, NexusCharacter as DetailCharacterWire},
+    character_lifecycle_request::CharacterLifecycleRequest,
     create_character_request::CreateCharacterRequest,
     create_character_response::{
         CreateCharacterResponse, NexusActorWorldBinding as CreatedBindingWire,
@@ -34,11 +38,13 @@ use nexus_contracts::daemon_api::characters::{
     list_characters_response::{
         ListCharactersResponse, NexusCharacter as ListedCharacterWire, NexusPaginationInfo,
     },
+    update_character_binding_request::UpdateCharacterBindingRequest,
+    update_character_request::UpdateCharacterRequest,
 };
 use nexus_contracts::{ActorWorldBinding, Character};
 use nexus_local_db::{
-    actor_world_binding::ActorWorldBindingRecord, character::CharacterRecord, CreateBindingParams,
-    CreateCharacterParams,
+    actor_world_binding::ActorWorldBindingRecord, character::CharacterRecord, CharacterPatch,
+    CharacterStatus, CreateBindingParams, CreateCharacterParams, FieldPatch,
 };
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -102,6 +108,7 @@ fn character_from_record(record: &CharacterRecord) -> Result<Character, NexusApi
             .owner_creator_id(record.owner_creator_id.as_str())
             .display_name(record.display_name.as_str())
             .status(record.status.as_str())
+            .revision(record.revision)
             .persona(persona)
             .image_uri(parse_optional(record.image_uri.as_deref())?)
             .created_at(parse_rfc3339(&record.created_at)?)
@@ -120,6 +127,7 @@ fn binding_from_record(
             .character_id(record.character_id.as_str())
             .world_id(record.world_id.as_str())
             .status(record.status.as_str())
+            .revision(record.revision)
             .world_sheet_entry_id(parse_optional(record.world_sheet_entry_id.as_deref())?)
             .created_at(parse_rfc3339(&record.created_at)?)
             .updated_at(parse_rfc3339(&record.updated_at)?)
@@ -168,6 +176,189 @@ fn parse_canonical_json<T: DeserializeOwned>(bytes: &Bytes) -> Result<T, NexusAp
 
 fn optional_str(value: Option<&impl std::ops::Deref<Target = String>>) -> Option<&str> {
     value.map(|s| s.as_str())
+}
+
+fn character_detail_from_record(
+    record: &CharacterRecord,
+) -> Result<CharacterDetail, NexusApiError> {
+    finish_builder(
+        CharacterDetail::builder()
+            .character(map_wire::<DetailCharacterWire>(character_from_record(
+                record,
+            )?)?)
+            .try_into(),
+    )
+}
+
+fn parse_request_object(
+    bytes: &Bytes,
+) -> Result<serde_json::Map<String, serde_json::Value>, NexusApiError> {
+    let value: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(|err| NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: err.to_string(),
+        })?;
+    value
+        .as_object()
+        .cloned()
+        .ok_or_else(|| NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: "request body must be a JSON object".into(),
+        })
+}
+
+fn build_character_patch<'a>(
+    raw: &'a serde_json::Map<String, serde_json::Value>,
+    req: &'a UpdateCharacterRequest,
+    persona_buf: &'a mut Option<String>,
+) -> Result<CharacterPatch<'a>, NexusApiError> {
+    let display_name = if raw.contains_key("display_name") {
+        Some(
+            req.display_name
+                .as_ref()
+                .ok_or_else(|| NexusApiError::BadRequest {
+                    code: "invalid_input".into(),
+                    message: "display_name must be a non-null string when present".into(),
+                })?
+                .as_str(),
+        )
+    } else {
+        None
+    };
+    let image_uri = if !raw.contains_key("image_uri") {
+        FieldPatch::Keep
+    } else if req.image_uri.is_none() {
+        FieldPatch::Clear
+    } else {
+        FieldPatch::Set(
+            req.image_uri
+                .as_ref()
+                .expect("image_uri member present implies Some")
+                .as_str(),
+        )
+    };
+    let persona_json = if !raw.contains_key("persona") {
+        FieldPatch::Keep
+    } else if req.persona.is_none() {
+        FieldPatch::Clear
+    } else {
+        let encoded = serde_json::Value::Object(
+            req.persona
+                .clone()
+                .expect("persona member present implies Some"),
+        )
+        .to_string();
+        *persona_buf = Some(encoded);
+        FieldPatch::Set(persona_buf.as_deref().expect("persona buffer set"))
+    };
+    Ok(CharacterPatch {
+        display_name,
+        image_uri,
+        persona_json,
+    })
+}
+
+const fn character_patch_is_empty(patch: &CharacterPatch<'_>) -> bool {
+    patch.is_empty()
+}
+
+fn binding_detail_from_record(
+    record: &ActorWorldBindingRecord,
+) -> Result<CharacterBindingDetail, NexusApiError> {
+    finish_builder(
+        CharacterBindingDetail::builder()
+            .binding(map_wire::<DetailBindingWire>(binding_from_record(record)?)?)
+            .try_into(),
+    )
+}
+
+fn binding_patch_is_empty(raw: &serde_json::Map<String, serde_json::Value>) -> bool {
+    !raw.contains_key("world_sheet_entry_id")
+}
+
+fn build_binding_sheet_patch<'a>(
+    raw: &'a serde_json::Map<String, serde_json::Value>,
+    req: &'a UpdateCharacterBindingRequest,
+) -> Result<FieldPatch<&'a str>, NexusApiError> {
+    match raw.get("world_sheet_entry_id") {
+        None => Err(NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: "patch must include at least one mutable field".into(),
+        }),
+        Some(serde_json::Value::Null) => Ok(FieldPatch::Clear),
+        Some(_) => Ok(FieldPatch::Set(
+            req.world_sheet_entry_id
+                .as_ref()
+                .ok_or_else(|| NexusApiError::BadRequest {
+                    code: "invalid_input".into(),
+                    message: "world_sheet_entry_id must be a non-null string when present".into(),
+                })?
+                .as_str(),
+        )),
+    }
+}
+
+/// Material lifecycle transition ordering (durable §11.3.2–§11.3.3):
+/// 1. `try_character_transition` exclusive fence (busy refusal before DB),
+/// 2. `transition_character` `BEGIN IMMEDIATE` commit (revision/epoch increment),
+/// 3. while the fence is still held, `retire_character_sessions` only when the
+///    returned epoch differs from the guard's pre-transition epoch,
+/// 4. release the exclusive fence, then one Host shutdown attempt per retired id
+///    outside registry locks (failures are logged and cannot undo the commit),
+/// 5. return the committed record.
+async fn execute_character_lifecycle(
+    state: &WorkspaceState,
+    owner: &str,
+    character_id: &str,
+    expected_revision: i64,
+    target: CharacterStatus,
+) -> Result<CharacterRecord, NexusApiError> {
+    let registry = state.actor_sessions();
+    let (record, retired_ids) = {
+        let guard = registry
+            .try_character_transition(state.pool_or_uninit()?, owner, character_id)
+            .await?;
+        let pre_epoch = guard.epoch();
+
+        let record = nexus_local_db::transition_character(
+            state.pool_or_uninit()?,
+            owner,
+            character_id,
+            expected_revision,
+            target,
+        )
+        .await?;
+
+        // §11.3.3: retire old session keys while the exclusive fence is
+        // still held — no new session can be admitted at the new epoch in
+        // this window, so the blanket retire cannot hit a fresh session.
+        // The guard is released before the (fallible, one-attempt) Host
+        // shutdown loop below.
+        let retired_ids = if record.lifecycle_epoch == pre_epoch {
+            Vec::new()
+        } else {
+            registry.retire_character_sessions(character_id)
+        };
+        drop(guard);
+        (record, retired_ids)
+    };
+
+    if !retired_ids.is_empty() {
+        if let Some(host) = state.agent_host() {
+            for session_id in retired_ids {
+                if let Err(err) = host.shutdown_session(session_id.clone()).await {
+                    tracing::warn!(
+                        character_id = %character_id,
+                        session_id = %session_id,
+                        error = %err,
+                        "lifecycle host shutdown attempt failed (transition already committed)"
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(record)
 }
 
 /// `POST /v1/daemon/characters`
@@ -261,6 +452,10 @@ pub async fn add_binding(
 ) -> Result<(StatusCode, Json<AddCharacterBindingResponse>), NexusApiError> {
     let req: AddCharacterBindingRequest = parse_canonical_json(&body)?;
     let owner = require_creator(&state)?;
+    let _guard = state
+        .actor_sessions()
+        .admit_character_activity(state.pool_or_uninit()?, &owner, &character_id)
+        .await?;
     let binding = nexus_local_db::add_actor_world_binding(
         state.pool_or_uninit()?,
         CreateBindingParams {
@@ -315,15 +510,152 @@ pub async fn list_bindings(
     )?))
 }
 
+/// `GET /v1/daemon/characters/{character_id}/bindings/{binding_id}`
+pub async fn get_binding(
+    State(state): State<WorkspaceState>,
+    Path((character_id, binding_id)): Path<(String, String)>,
+) -> Result<Json<CharacterBindingDetail>, NexusApiError> {
+    let owner = require_creator(&state)?;
+    let row = nexus_local_db::get_actor_world_binding(
+        state.pool_or_uninit()?,
+        &owner,
+        &character_id,
+        &binding_id,
+    )
+    .await?
+    .ok_or_else(|| NexusApiError::NotFound(format!("binding {binding_id}")))?;
+    Ok(Json(binding_detail_from_record(&row)?))
+}
+
+/// `PATCH /v1/daemon/characters/{character_id}/bindings/{binding_id}`
+pub async fn patch_binding(
+    State(state): State<WorkspaceState>,
+    Path((character_id, binding_id)): Path<(String, String)>,
+    body: Bytes,
+) -> Result<Json<CharacterBindingDetail>, NexusApiError> {
+    let raw = parse_request_object(&body)?;
+    let req: UpdateCharacterBindingRequest =
+        serde_json::from_value(serde_json::Value::Object(raw.clone())).map_err(|err| {
+            NexusApiError::BadRequest {
+                code: "invalid_input".into(),
+                message: err.to_string(),
+            }
+        })?;
+    if binding_patch_is_empty(&raw) {
+        return Err(NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: "patch must include at least one mutable field".into(),
+        });
+    }
+    let sheet_patch = build_binding_sheet_patch(&raw, &req)?;
+    let owner = require_creator(&state)?;
+    let _guard = state
+        .actor_sessions()
+        .admit_character_activity(state.pool_or_uninit()?, &owner, &character_id)
+        .await?;
+    let record = nexus_local_db::update_actor_world_binding(
+        state.pool_or_uninit()?,
+        &owner,
+        &character_id,
+        &binding_id,
+        req.expected_revision,
+        sheet_patch,
+    )
+    .await?;
+    Ok(Json(binding_detail_from_record(&record)?))
+}
+
 /// `DELETE /v1/daemon/characters/{character_id}/bindings/{binding_id}`
 pub async fn remove_binding(
     State(state): State<WorkspaceState>,
     Path((character_id, binding_id)): Path<(String, String)>,
 ) -> Result<StatusCode, NexusApiError> {
     let owner = require_creator(&state)?;
+    let _guard = state
+        .actor_sessions()
+        .admit_character_activity(state.pool_or_uninit()?, &owner, &character_id)
+        .await?;
     nexus_local_db::remove_binding(state.pool_or_uninit()?, &owner, &character_id, &binding_id)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// `PATCH /v1/daemon/characters/{character_id}`
+pub async fn patch_character(
+    State(state): State<WorkspaceState>,
+    Path(character_id): Path<String>,
+    body: Bytes,
+) -> Result<Json<CharacterDetail>, NexusApiError> {
+    let raw = parse_request_object(&body)?;
+    let mut persona_buf = None;
+    let req: UpdateCharacterRequest =
+        serde_json::from_value(serde_json::Value::Object(raw.clone())).map_err(|err| {
+            NexusApiError::BadRequest {
+                code: "invalid_input".into(),
+                message: err.to_string(),
+            }
+        })?;
+    let patch = build_character_patch(&raw, &req, &mut persona_buf)?;
+    // Wire-shape validation intentionally precedes owner/404 admission so an
+    // empty patch on a foreign/missing Character returns 400, not 404.
+    if character_patch_is_empty(&patch) {
+        return Err(NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: "patch must include at least one mutable field".into(),
+        });
+    }
+    let owner = require_creator(&state)?;
+    let _guard = state
+        .actor_sessions()
+        .admit_character_activity(state.pool_or_uninit()?, &owner, &character_id)
+        .await?;
+    let record = nexus_local_db::update_character(
+        state.pool_or_uninit()?,
+        &owner,
+        &character_id,
+        req.expected_revision,
+        patch,
+    )
+    .await?;
+    Ok(Json(character_detail_from_record(&record)?))
+}
+
+/// `POST /v1/daemon/characters/{character_id}/archive`
+pub async fn archive_character(
+    State(state): State<WorkspaceState>,
+    Path(character_id): Path<String>,
+    body: Bytes,
+) -> Result<Json<CharacterDetail>, NexusApiError> {
+    let req: CharacterLifecycleRequest = parse_canonical_json(&body)?;
+    let owner = require_creator(&state)?;
+    let record = execute_character_lifecycle(
+        &state,
+        &owner,
+        &character_id,
+        req.expected_revision,
+        CharacterStatus::Archived,
+    )
+    .await?;
+    Ok(Json(character_detail_from_record(&record)?))
+}
+
+/// `POST /v1/daemon/characters/{character_id}/restore`
+pub async fn restore_character(
+    State(state): State<WorkspaceState>,
+    Path(character_id): Path<String>,
+    body: Bytes,
+) -> Result<Json<CharacterDetail>, NexusApiError> {
+    let req: CharacterLifecycleRequest = parse_canonical_json(&body)?;
+    let owner = require_creator(&state)?;
+    let record = execute_character_lifecycle(
+        &state,
+        &owner,
+        &character_id,
+        req.expected_revision,
+        CharacterStatus::Active,
+    )
+    .await?;
+    Ok(Json(character_detail_from_record(&record)?))
 }
 
 #[cfg(test)]
@@ -340,6 +672,8 @@ mod conversion_tests {
             persona_json: r#"{"tone":"calm"}"#.into(),
             created_at: "2026-09-05T00:00:00Z".into(),
             updated_at: "2026-09-05T00:00:01Z".into(),
+            revision: 0,
+            lifecycle_epoch: 0,
         }
     }
 
@@ -350,6 +684,7 @@ mod conversion_tests {
             world_id: "wld_worldA".into(),
             status: "active".into(),
             world_sheet_entry_id: Some("sheet-1".into()),
+            revision: 0,
             created_at: "2026-09-05T00:00:00Z".into(),
             updated_at: "2026-09-05T00:00:01Z".into(),
         }

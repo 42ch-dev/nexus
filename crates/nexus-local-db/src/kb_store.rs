@@ -588,44 +588,141 @@ impl SqliteKbStore {
             created_at,
         })
     }
+
+    /// Insert a Character- or ActorWorldBinding-owned KE with in-transaction
+    /// active-owner revalidation (v1.185 P0 Task 2, durable §11.3.5): a KE
+    /// insert must not rely only on an earlier route check — the stored owner
+    /// + provenance tuple is re-verified inside the same `BEGIN IMMEDIATE`
+    ///   transaction as the row.
+    ///
+    /// `binding_id` is `None` for a Character-owned KE and the admitted
+    /// binding id for a binding-owned KE. The supplying `character_id` is the
+    /// admitted owner Character. A World-owned KE is a no-op wrapper here
+    /// (World maintenance is out of scope) and just delegates to the checked
+    /// insert.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LocalDbError::ActorContractConflict::CharacterInactive` for an
+    /// archived Character, `ActorNotFound` for a foreign/missing Character,
+    /// a foreign/missing/inactive binding, or a foreign/missing/non-active
+    /// World; `ActorContractConflict` duplicate mappings and `LocalDbError`
+    /// on database failure are preserved.
+    pub async fn insert_actor_owned_key_block(
+        &self,
+        owner_creator_id: &str,
+        character_id: &str,
+        binding_id: Option<&str>,
+        kb: KnowledgeEntryRecord,
+    ) -> Result<KbInsertResult, LocalDbError> {
+        let mut tx = crate::begin_immediate(&self.pool).await?;
+        let result = async {
+            // Stored live revalidation in the same write transaction as the
+            // INSERT (Task 1's canonical active gate).
+            crate::character::require_active_owned_character_tx(
+                &mut tx,
+                owner_creator_id,
+                character_id,
+            )
+            .await?;
+            if let Some(binding_id) = binding_id {
+                crate::actor_world_binding::require_valid_provenance_tx(
+                    &mut tx,
+                    owner_creator_id,
+                    character_id,
+                    Some(binding_id),
+                )
+                .await?;
+            }
+            validate_actor_owned_create_summary(&kb)?;
+            self.insert_key_block_in_tx(&mut tx, kb)
+                .await
+                .map_err(|err| match err {
+                    KbStoreError::Duplicate { .. } => LocalDbError::ActorContractConflict {
+                        code: crate::error::ActorContractConflict::DuplicateActorKnowledge,
+                    },
+                    other => map_kb_store_to_local_db(other),
+                })
+        }
+        .await;
+        match result {
+            Ok(inserted) => {
+                tx.commit().await?;
+                Ok(inserted)
+            }
+            Err(err) => {
+                let _ = tx.rollback().await;
+                Err(err)
+            }
+        }
+    }
+}
+
+fn validate_actor_owned_create_summary(kb: &KnowledgeEntryRecord) -> Result<(), LocalDbError> {
+    const MAX_SUMMARY_UTF8_BYTES: usize = 65_536;
+    if let Some(body) = &kb.body {
+        if let Some(summary) = &body.summary {
+            if summary.len() > MAX_SUMMARY_UTF8_BYTES {
+                return Err(LocalDbError::ValidationError(format!(
+                    "summary must be at most {MAX_SUMMARY_UTF8_BYTES} UTF-8 bytes"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Map a `KbStoreError` to the canonical local-db error so the daemon can
+/// surface stable contract codes (duplicate → constraint; validation →
+/// validation).
+pub(crate) fn map_kb_store_to_local_db(err: KbStoreError) -> LocalDbError {
+    match err {
+        KbStoreError::Duplicate { name, .. } => LocalDbError::ConstraintViolation {
+            table: "kb_key_blocks".to_string(),
+            constraint: format!("duplicate canonical_name '{name}'"),
+        },
+        KbStoreError::Validation(e) => LocalDbError::ValidationError(e.to_string()),
+        KbStoreError::ValidationLegacy(e) => LocalDbError::ValidationError(e),
+        other => LocalDbError::Sqlx(sqlx::Error::Protocol(format!("kb store error: {other}"))),
+    }
 }
 
 // Row type matching the kb_key_blocks DDL.
 #[derive(Debug, Clone, sqlx::FromRow)]
-struct KeyBlockRow {
-    key_block_id: String,
+pub(crate) struct KeyBlockRow {
+    pub(crate) key_block_id: String,
     // v1.184 P1 owner union — `world_id` is nullable now (non-World owners).
-    owner_kind: String,
-    world_id: Option<String>,
-    character_id: Option<String>,
-    actor_world_binding_id: Option<String>,
-    creator_only: i64,
-    block_type: String,
-    canonical_name: String,
-    status: String,
-    revision: Option<i64>,
-    body_json: Option<String>,
-    source_anchor_json: Option<String>,
-    created_from_command_id: Option<String>,
-    created_at: String,
-    updated_at: Option<String>,
+    pub(crate) owner_kind: String,
+    pub(crate) world_id: Option<String>,
+    pub(crate) character_id: Option<String>,
+    pub(crate) actor_world_binding_id: Option<String>,
+    pub(crate) creator_only: i64,
+    pub(crate) block_type: String,
+    pub(crate) canonical_name: String,
+    pub(crate) status: String,
+    pub(crate) revision: Option<i64>,
+    pub(crate) body_json: Option<String>,
+    pub(crate) source_anchor_json: Option<String>,
+    pub(crate) created_from_command_id: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: Option<String>,
     // V1.52 T-A P2: Work→KnowledgeEntryRecord provenance columns
-    source_work_id: Option<String>,
-    source_chapter: Option<i64>,
-    source_provenance_kind: Option<String>,
+    pub(crate) source_work_id: Option<String>,
+    pub(crate) source_chapter: Option<i64>,
+    pub(crate) source_provenance_kind: Option<String>,
     // V1.139 P1 T4: full serialized `extensions.nexus` namespace (Q7 round-trip).
     // Known identity/owner fields stay authoritative in their typed columns
     // above; this column preserves unknown keys when a spoke KnowledgeEntry
     // transits SQLite.
-    extensions_nexus_json: Option<String>,
+    pub(crate) extensions_nexus_json: Option<String>,
     // V1.146 P4 T1: full serialized `modules` namespace (modules durability).
     // Carries per-entry functional dialects (activation, pack, etc.) as a JSON
     // object. NULL for legacy rows; backfilled on next write cycle.
-    modules_json: Option<String>,
+    pub(crate) modules_json: Option<String>,
 }
 
 impl KeyBlockRow {
-    fn to_record(&self) -> Result<KnowledgeEntryRecord, KbStoreError> {
+    pub(crate) fn to_record(&self) -> Result<KnowledgeEntryRecord, KbStoreError> {
         let block_type = parse_block_type(&self.block_type)?;
         let body = self
             .body_json
@@ -3160,5 +3257,76 @@ mod tests {
             matches!(err, LocalDbError::VersionMismatch { .. }),
             "same-world stale revision keeps VersionMismatch: {err:?}"
         );
+    }
+
+    /// v1.185 P0 Task 2: a Character/binding-owned KE insert revalidates the
+    /// active owned Character inside the write transaction (durable §11.3.5),
+    /// not just the route check. An archived Character refuses
+    /// `character_inactive` with zero mutation; an active one inserts.
+    #[tokio::test]
+    async fn insert_actor_owned_key_block_revalidates_active_owner_in_tx() {
+        let (pool, _dir) = fresh_pool().await;
+        crate::ensure_creator_row(&pool, "ctr_a", "A")
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO characters \
+             (character_id, owner_creator_id, display_name, status, image_uri, persona_json, \
+              created_at, updated_at) \
+             VALUES ('chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab', 'ctr_a', 'AOwner', 'active', NULL, '{}', \
+              '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let store = SqliteKbStore::new(pool.clone());
+        let kb = KnowledgeEntryRecord::for_character(
+            "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab",
+            BlockType::Character,
+            "GuardKe",
+        );
+        let inserted = store
+            .insert_actor_owned_key_block("ctr_a", "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab", None, kb)
+            .await
+            .expect("active owned Character inserts");
+        assert!(!inserted.entry_id.is_empty());
+        assert!(inserted.entry_id.starts_with("kb_"));
+
+        // Archive the Character: the guarded insert now refuses character_inactive
+        // and leaves the KB untouched.
+        sqlx::query("UPDATE characters SET status = 'archived' WHERE character_id = ?")
+            .bind("chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let kb2 = KnowledgeEntryRecord::for_character(
+            "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab",
+            BlockType::Character,
+            "GuardKe2",
+        );
+        let err = store
+            .insert_actor_owned_key_block(
+                "ctr_a",
+                "chr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab",
+                None,
+                kb2,
+            )
+            .await
+            .expect_err("archived Character must refuse");
+        assert!(
+            matches!(
+                err,
+                LocalDbError::ActorContractConflict {
+                    code: crate::ActorContractConflict::CharacterInactive
+                }
+            ),
+            "expected CharacterInactive: {err:?}"
+        );
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1, "archived insert must not create a row");
     }
 }

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT EXISTS(\n             SELECT 1 FROM actor_world_bindings b\n             JOIN narrative_worlds w ON w.world_id = b.world_id\n             WHERE b.character_id = ? AND b.status = 'active'\n               AND w.owner_creator_id = ? AND w.status = 'active'\n           ) as \"exists!: i64\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "exists!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e6d5c0a937d931c6adcdc7be4976f0226f4133c27476fcc218cb1830cd059caa"
+}

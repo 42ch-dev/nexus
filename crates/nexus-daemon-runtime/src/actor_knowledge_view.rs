@@ -165,6 +165,9 @@ impl ActorKnowledgeViewService {
                 if creator_id != caller_creator_id {
                     return Err(not_found("actor_ref", creator_id));
                 }
+                // Creator World-selected view is a retained read: it includes
+                // owned archived Character/binding scopes and does not drop
+                // the World's owned retained history when archived (§11.2).
                 self.require_owned_world(caller_creator_id, &query.world_id)
                     .await?;
                 let parts = self
@@ -184,11 +187,15 @@ impl ActorKnowledgeViewService {
                         message: "binding_id is required for Character KnowledgeView".into(),
                     });
                 };
+                // Retained read (durable §11.2): authorize by owner + stored
+                // binding tuple, not liveness. A foreign/missing Character,
+                // a cross-Character binding, or a missing/foreign World still
+                // fails closed.
                 self.require_owned_character(caller_creator_id, character_id)
                     .await?;
                 self.require_owned_world(caller_creator_id, &query.world_id)
                     .await?;
-                self.require_active_binding(character_id, binding_id, &query.world_id)
+                self.require_stored_binding_tuple(character_id, binding_id, &query.world_id)
                     .await?;
                 let parts = self
                     .character_union(
@@ -240,14 +247,14 @@ impl ActorKnowledgeViewService {
         let mut items = self
             .component(KnowledgeOwnerRef::world(world_id), cursor, limit, false)
             .await?;
+        // Retained read (durable §11.2): include owned archived Character and
+        // binding scopes — never silently drop them with `status = 'active'`.
         let bindings = sqlx::query!(
             r#"SELECT b.character_id AS "character_id!", b.binding_id AS "binding_id!"
               FROM actor_world_bindings b
               INNER JOIN characters c ON c.character_id = b.character_id
               WHERE b.world_id = ?
-                AND b.status = 'active'
-                AND c.owner_creator_id = ?
-                AND c.status = 'active'"#,
+                AND c.owner_creator_id = ?"#,
             world_id,
             creator_id
         )
@@ -260,7 +267,8 @@ impl ActorKnowledgeViewService {
 
         let mut seen_characters = std::collections::BTreeSet::new();
         for row in bindings {
-            let (character_id, binding_id) = (row.character_id, row.binding_id);
+            let character_id = row.character_id;
+            let binding_id = row.binding_id;
             if seen_characters.insert(character_id.clone()) {
                 items.extend(
                     self.component(
@@ -335,11 +343,32 @@ impl ActorKnowledgeViewService {
             .map_err(|e| component_err(&e))
     }
 
-    /// Owned **and active** World admission (PR #240 finding 1): public
-    /// actor-knowledge operations reject foreign/missing Worlds (404) and
-    /// owned-but-inactive Worlds (409 `world_inactive`), matching Host
-    /// admission lifecycle parity.
+    /// Owned World with no status requirement (retained reads, durable §11.2):
+    /// a World still owned but paused/archived keeps its retained history
+    /// readable. Missing/foreign Worlds fail closed.
     pub(crate) async fn require_owned_world(
+        &self,
+        creator_id: &str,
+        world_id: &str,
+    ) -> Result<(), NexusApiError> {
+        let row = sqlx::query!(
+            r#"SELECT owner_creator_id AS "owner_creator_id!"
+               FROM narrative_worlds WHERE world_id = ?"#,
+            world_id
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(NexusApiError::from)?;
+        match row {
+            Some(stored) if stored.owner_creator_id == creator_id => Ok(()),
+            Some(_) | None => Err(not_found("world", world_id)),
+        }
+    }
+
+    /// Owned **and active** World admission (PR #240 finding 1): write paths
+    /// reject foreign/missing Worlds (404) and owned-but-inactive Worlds (409
+    /// `world_inactive`), matching Host admission lifecycle parity.
+    pub(crate) async fn require_active_owned_world(
         &self,
         creator_id: &str,
         world_id: &str,
@@ -366,10 +395,24 @@ impl ActorKnowledgeViewService {
         }
     }
 
-    /// Owned **and active** Character admission (PR #240 finding 1): foreign
-    /// or missing Characters are 404; owned-but-archived Characters are 409
-    /// `character_inactive`.
+    /// Owned Character with no status requirement (retained reads): an
+    /// archived Character's authorized data stays readable, never filtered
+    /// out. Foreign/missing Characters are 404.
     pub(crate) async fn require_owned_character(
+        &self,
+        creator_id: &str,
+        character_id: &str,
+    ) -> Result<(), NexusApiError> {
+        match nexus_local_db::get_character(&self.pool, creator_id, character_id).await? {
+            Some(_) => Ok(()),
+            None => Err(not_found("character", character_id)),
+        }
+    }
+
+    /// Owned **and active** Character admission (PR #240 finding 1): write
+    /// paths reject foreign/missing (404) and owned-but-archived (409
+    /// `character_inactive`).
+    pub(crate) async fn require_active_owned_character(
         &self,
         creator_id: &str,
         character_id: &str,
@@ -381,6 +424,32 @@ impl ActorKnowledgeViewService {
                 message: format!("character {character_id} is {}", stored.status),
             }),
             None => Err(not_found("character", character_id)),
+        }
+    }
+
+    /// Stored binding tuple with no status requirement (retained reads): the
+    /// binding exists, belongs to `character_id`, and targets `world_id`
+    /// (durable §11.2). A cross-Character binding or missing binding fails
+    /// closed; binding status is not a liveness gate for reads.
+    pub(crate) async fn require_stored_binding_tuple(
+        &self,
+        character_id: &str,
+        binding_id: &str,
+        world_id: &str,
+    ) -> Result<(), NexusApiError> {
+        let row = sqlx::query!(
+            r#"SELECT character_id AS "character_id!", world_id AS "world_id!"
+               FROM actor_world_bindings WHERE binding_id = ?"#,
+            binding_id
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(NexusApiError::from)?;
+        match row {
+            Some(stored) if stored.character_id == character_id && stored.world_id == world_id => {
+                Ok(())
+            }
+            _ => Err(not_found("actor_world_binding", binding_id)),
         }
     }
 

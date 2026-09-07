@@ -60,6 +60,8 @@ fn main() {
             // V1.170 P0 (AR-9): the compute group owns its exit-code
             // vocabulary (1 build, 2 validation, 3 sha mismatch, 4 daemon).
             code
+        } else if let nexus42::errors::CliError::CharacterRunExit { code, .. } = e {
+            code
         } else {
             1
         };

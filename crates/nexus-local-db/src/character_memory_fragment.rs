@@ -13,10 +13,10 @@
 use sqlx::SqlitePool;
 
 use crate::actor_world_binding::{
-    require_active_owned_provenance_pool, require_valid_provenance_tx,
+    require_owned_binding_provenance_pool, require_valid_provenance_tx,
 };
 use crate::cas::cas_check_with_version_column;
-use crate::character::{require_active_owned_character, require_owned_character_pool};
+use crate::character::{require_active_owned_character_tx, require_owned_character_pool};
 use crate::error::{ActorContractConflict, LocalDbError};
 use crate::MAX_CHARACTER_MEMORY_LIST_LIMIT;
 
@@ -97,7 +97,7 @@ pub async fn create_character_fragment(
 ) -> Result<(), LocalDbError> {
     let mut tx = crate::begin_immediate(pool).await?;
     let result = async {
-        require_active_owned_character(&mut tx, owner_creator_id, &fragment.character_id).await?;
+        require_active_owned_character_tx(&mut tx, owner_creator_id, &fragment.character_id).await?;
         require_valid_provenance_tx(
             &mut tx,
             owner_creator_id,
@@ -151,7 +151,7 @@ pub async fn create_character_fragment_in_tx(
     owner_creator_id: &str,
     fragment: &NewCharacterMemoryFragment,
 ) -> Result<(), LocalDbError> {
-    require_active_owned_character(&mut *tx, owner_creator_id, &fragment.character_id).await?;
+    require_active_owned_character_tx(&mut *tx, owner_creator_id, &fragment.character_id).await?;
     require_valid_provenance_tx(
         &mut *tx,
         owner_creator_id,
@@ -179,12 +179,15 @@ pub async fn create_character_fragment_in_tx(
 
 /// Get a Character fragment by ID, scoped to the owning Character.
 ///
-/// Returns None if the fragment does not exist within this Character.
+/// Returns None if the fragment does not exist within this Character. A
+/// binding-scoped read requires the stored binding tuple plus an existing
+/// owned World (liveness not required).
 ///
 /// # Errors
 ///
-/// Returns `LocalDbError::ActorNotFound` when the Character is missing or
-/// owned by another Creator; `LocalDbError` on database failure.
+/// Returns `LocalDbError::ActorNotFound` when the Character (or, for a
+/// binding-scoped read, the binding/World) is missing or foreign;
+/// `LocalDbError` on database failure.
 pub async fn get_character_fragment(
     pool: &SqlitePool,
     owner_creator_id: &str,
@@ -194,7 +197,7 @@ pub async fn get_character_fragment(
 ) -> Result<Option<CharacterMemoryFragmentRecord>, LocalDbError> {
     require_owned_character_pool(pool, owner_creator_id, character_id).await?;
     if let Some(binding_id) = binding_id {
-        require_active_owned_provenance_pool(pool, owner_creator_id, character_id, binding_id)
+        require_owned_binding_provenance_pool(pool, owner_creator_id, character_id, binding_id)
             .await?;
     }
     load_fragment(pool, character_id, binding_id, fragment_id).await
@@ -239,7 +242,9 @@ async fn load_fragment(
 ///
 /// `binding_id = None` reads the shared Character scope (`actor_world_binding_id
 /// IS NULL`); `Some(b)` reads only that binding-local scope. Binding-local
-/// reads require the exact active binding for the Character.
+/// reads require the stored binding tuple plus an existing owned World
+/// (liveness not required: retained reads succeed while the Character,
+/// binding, or World is archived).
 ///
 /// Results are ordered `created_at DESC, fragment_id DESC` (a total order, so
 /// offset pagination is deterministic); `offset` skips that many rows of the
@@ -248,7 +253,7 @@ async fn load_fragment(
 /// # Errors
 ///
 /// Returns `LocalDbError::ActorNotFound` when the Character (or, for a
-/// binding-scoped read, the binding) is missing, foreign, or inactive;
+/// binding-scoped read, the binding/World) is missing or foreign;
 /// `LocalDbError` on database failure.
 pub async fn list_character_fragments(
     pool: &SqlitePool,
@@ -260,7 +265,7 @@ pub async fn list_character_fragments(
 ) -> Result<Vec<CharacterMemoryFragmentRecord>, LocalDbError> {
     require_owned_character_pool(pool, owner_creator_id, character_id).await?;
     if let Some(binding_id) = binding_id {
-        require_active_owned_provenance_pool(pool, owner_creator_id, character_id, binding_id)
+        require_owned_binding_provenance_pool(pool, owner_creator_id, character_id, binding_id)
             .await?;
     }
     let limit = limit.clamp(1, MAX_CHARACTER_MEMORY_LIST_LIMIT);
@@ -347,15 +352,31 @@ pub async fn delete_character_fragment(
     character_id: &str,
     fragment_id: &str,
 ) -> Result<bool, LocalDbError> {
-    require_owned_character_pool(pool, owner_creator_id, character_id).await?;
-    let result = sqlx::query!(
-        "DELETE FROM character_memory_fragments WHERE fragment_id = ? AND character_id = ?",
-        fragment_id,
-        character_id
-    )
-    .execute(pool)
-    .await?;
-    Ok(result.rows_affected() > 0)
+    let mut tx = crate::begin_immediate(pool).await?;
+    let result = async {
+        require_active_owned_character_tx(&mut tx, owner_creator_id, character_id).await?;
+        let deleted = sqlx::query!(
+            "DELETE FROM character_memory_fragments WHERE fragment_id = ? AND character_id = ?",
+            fragment_id,
+            character_id
+        )
+        .execute(&mut *tx)
+        .await?
+        .rows_affected()
+            > 0;
+        Ok(deleted)
+    }
+    .await;
+    match result {
+        Ok(deleted) => {
+            tx.commit().await?;
+            Ok(deleted)
+        }
+        Err(err) => {
+            let _ = tx.rollback().await;
+            Err(err)
+        }
+    }
 }
 
 /// Promote a binding-local Character fragment to shared Character memory.
@@ -385,7 +406,7 @@ pub async fn promote_character_fragment_to_shared(
 ) -> Result<CharacterMemoryFragmentRecord, LocalDbError> {
     let mut tx = crate::begin_immediate(pool).await?;
     let result = async {
-        require_active_owned_character(&mut tx, owner_creator_id, character_id).await?;
+        require_active_owned_character_tx(&mut tx, owner_creator_id, character_id).await?;
         let current = load_fragment_tx(&mut tx, character_id, fragment_id).await?;
         let Some(current) = current else {
             return Err(LocalDbError::ActorNotFound {

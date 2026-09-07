@@ -96,6 +96,12 @@ pub async fn record_tom(
             message: "expected_revision is out of range".into(),
         })?;
     let input = record_input_from_request(&req, expected_revision)?;
+    // ToM record is a mutation: hold the per-Character activity fence across
+    // the CAS transaction (404 foreign/missing, 409 archived `character_inactive`).
+    let _activity = state
+        .actor_sessions()
+        .admit_character_activity(state.pool_or_uninit()?, &owner, &character_id)
+        .await?;
     let service = CharacterTomService::new(state.pool_or_uninit()?.clone());
     let (carrier_entry_id, revision, mind_state_id) =
         service.record(&owner, &character_id, input).await?;

@@ -68,6 +68,7 @@ fn session_response_optional_host_fields_keep_legacy_key_order() {
 fn prompt_operation_kind_is_snake_case() {
     let req = ExecuteOperationRequest::Prompt {
         content: "hello".into(),
+        remember: None,
     };
     assert_eq!(
         serde_json::to_value(req).unwrap(),
@@ -181,4 +182,41 @@ fn session_list_response_pins_nested_viewpoint_bytes() {
     .expect("list");
     let dumped = serde_json::to_string(&list).unwrap();
     assert!(dumped.contains(VIEWPOINT_FULL), "{dumped}");
+}
+
+#[test]
+fn legacy_prompt_json_omits_remember() {
+    let req: ExecuteOperationRequest =
+        serde_json::from_str(r#"{"kind":"prompt","content":"hello"}"#).expect("legacy prompt");
+    match req {
+        ExecuteOperationRequest::Prompt { content, remember } => {
+            assert_eq!(content, "hello");
+            assert!(remember.is_none());
+        }
+        _ => panic!("expected prompt"),
+    }
+}
+
+#[test]
+fn prompt_remember_roundtrip() {
+    let req = ExecuteOperationRequest::Prompt {
+        content: "remember me".into(),
+        remember: Some(true),
+    };
+    assert_eq!(
+        serde_json::to_value(req).unwrap(),
+        serde_json::json!({"kind":"prompt","content":"remember me","remember":true})
+    );
+}
+
+#[test]
+fn set_model_rejects_remember_field() {
+    assert!(
+        serde_json::from_value::<ExecuteOperationRequest>(serde_json::json!({
+            "kind": "set_model",
+            "model": "opus",
+            "remember": true
+        }))
+        .is_err()
+    );
 }

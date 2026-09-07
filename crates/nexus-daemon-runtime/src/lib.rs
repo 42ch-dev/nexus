@@ -12,6 +12,7 @@
 
 pub mod actor_admission;
 pub mod actor_knowledge_view;
+pub mod actor_run_capture;
 pub mod api;
 pub mod auth;
 pub mod auto_chronology;
@@ -60,8 +61,10 @@ pub mod test_support;
 mod architecture_assertions;
 
 /// Dual-bearer memory-pipeline semantic suite. Lives outside
-/// `memory_pipeline` so it cannot fabricate a `BearerPipelineCtx` (whose
-/// fields are private); every Character context goes through the validated
-/// `BearerPipelineCtx::character` constructor.
+/// `api::handlers::memory_pipeline` so it cannot fabricate a
+/// [`BearerPipelineCtx`] (fields are private). Character contexts use
+/// [`BearerPipelineCtx::character_read`] (retained reads) or
+/// [`BearerPipelineCtx::character_write`] (writable; wraps an admitted
+/// [`ActorSessionRegistry::admit_character_activity`] guard).
 #[cfg(test)]
 mod memory_pipeline_semantic_tests;

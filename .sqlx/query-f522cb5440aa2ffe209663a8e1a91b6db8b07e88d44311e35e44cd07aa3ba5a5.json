@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE characters SET status = ?, updated_at = ?, revision = ?, lifecycle_epoch = ?\n               WHERE character_id = ? AND owner_creator_id = ? AND revision = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "f522cb5440aa2ffe209663a8e1a91b6db8b07e88d44311e35e44cd07aa3ba5a5"
+}

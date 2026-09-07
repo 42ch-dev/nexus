@@ -1245,6 +1245,31 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ListCharacterBindingsResponse
         ),
+        entry!(
+            "schemas/daemon-api/characters/update-character-request.schema.json",
+            Strict,
+            UpdateCharacterRequest
+        ),
+        entry!(
+            "schemas/daemon-api/characters/character-lifecycle-request.schema.json",
+            Strict,
+            CharacterLifecycleRequest
+        ),
+        entry!(
+            "schemas/daemon-api/characters/memory/character-pending-review-info.schema.json",
+            Strict,
+            CharacterPendingReviewInfo
+        ),
+        entry!(
+            "schemas/daemon-api/characters/character-binding-detail.schema.json",
+            Strict,
+            CharacterBindingDetail
+        ),
+        entry!(
+            "schemas/daemon-api/characters/update-character-binding-request.schema.json",
+            Strict,
+            UpdateCharacterBindingRequest
+        ),
         // v1.184 P1 Task 3 / fix1 — Actor KnowledgeView contracts.
         entry!(
             "schemas/domain/knowledge-owner-ref.schema.json",
@@ -1286,6 +1311,21 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ViewResponse
         ),
+        entry!(
+            "schemas/daemon-api/actor-knowledge/knowledge-entry-detail.schema.json",
+            Strict,
+            KnowledgeEntryDetail
+        ),
+        entry!(
+            "schemas/daemon-api/actor-knowledge/update-knowledge-entry-request.schema.json",
+            Strict,
+            UpdateKnowledgeEntryRequest
+        ),
+        entry!(
+            "schemas/daemon-api/actor-knowledge/delete-knowledge-entry-query.schema.json",
+            Strict,
+            DeleteKnowledgeEntryQuery
+        ),
         // v1.184 P2 Task 1 — agent-host session/operation/scan contracts.
         entry!(
             "schemas/daemon-api/agent-host/agent-host-list-sessions-query.schema.json",
@@ -1296,6 +1336,16 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             "schemas/daemon-api/agent-host/agent-scan-entry.schema.json",
             Strict,
             AgentScanEntry
+        ),
+        entry!(
+            "schemas/daemon-api/agent-host/character-operation-result.schema.json",
+            Strict,
+            CharacterOperationResult
+        ),
+        entry!(
+            "schemas/daemon-api/agent-host/character-run-capture-outcome.schema.json",
+            Strict,
+            CharacterRunCaptureOutcome
         ),
         entry!(
             "schemas/daemon-api/agent-host/cancel-operation-response.schema.json",

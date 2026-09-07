@@ -46,6 +46,10 @@ export interface NexusCharacter {
     [k: string]: unknown | undefined;
   };
   /**
+   * Optimistic-concurrency token, initially 0. Every successful material edit increments it once; mutations require `expected_revision` equal to the stored value. `lifecycle_epoch` is internal and never exposed on the wire.
+   */
+  revision: number;
+  /**
    * ISO 8601 / RFC 3339 UTC datetime string
    */
   created_at: string;
@@ -78,6 +82,10 @@ export interface NexusActorWorldBinding {
    * ActorWorldBinding status. v1.184 APIs create active rows only; inactive is reserved storage vocabulary.
    */
   status: "active" | "inactive";
+  /**
+   * Optimistic-concurrency token, initially 0. Independent of Character revision/epoch.
+   */
+  revision: number;
   /**
    * Optional WorldSheet KnowledgeEntry id (block_type=character lore). Absent when unbound. At most 128 bytes.
    */

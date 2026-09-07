@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT EXISTS(\n            SELECT 1 FROM kb_relationships\n            WHERE source_entity_id = ? OR target_entity_id = ?\n        ) as \"exists!\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "exists!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "fc95a94aa8bda8aa156d057233b4ad05e92e97bd9fde123d4ab343182177f01c"
+}

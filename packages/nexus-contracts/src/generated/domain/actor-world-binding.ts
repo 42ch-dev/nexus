@@ -29,6 +29,10 @@ export interface ActorWorldBinding {
    */
   status: "active" | "inactive";
   /**
+   * Optimistic-concurrency token, initially 0. Independent of Character revision/epoch.
+   */
+  revision: number;
+  /**
    * Optional WorldSheet KnowledgeEntry id (block_type=character lore). Absent when unbound. At most 128 bytes.
    */
   world_sheet_entry_id?: string;

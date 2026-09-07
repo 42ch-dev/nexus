@@ -11,7 +11,8 @@
     "character_id",
     "task_kind",
     "raw_digest",
-    "created_at"
+    "created_at",
+    "source_operation_id"
   ],
   "additionalProperties": false,
   "properties": {
@@ -28,6 +29,12 @@
     "raw_digest": { "type": "string", "minLength": 1, "maxLength": 65536 },
     "created_at": {
       "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
+    },
+    "source_operation_id": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Host operation id for run capture provenance; null for manual capture rows."
     }
   }
 }

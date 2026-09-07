@@ -6,7 +6,7 @@
 
 use sqlx::SqlitePool;
 
-use crate::character::{require_active_owned_character, require_owned_character_pool};
+use crate::character::{require_active_owned_character_tx, require_owned_character_pool};
 use crate::error::LocalDbError;
 
 /// Character SOUL metadata record.
@@ -37,7 +37,7 @@ pub async fn upsert_character_soul_meta(
 ) -> Result<(), LocalDbError> {
     let mut tx = crate::begin_immediate(pool).await?;
     let result = async {
-        require_active_owned_character(&mut tx, owner_creator_id, &meta.character_id).await?;
+        require_active_owned_character_tx(&mut tx, owner_creator_id, &meta.character_id).await?;
         sqlx::query!(
             "INSERT INTO character_soul_meta
              (character_id, file_path, schema_version, personality_hash, experience_hash, created_at, updated_at)
@@ -118,12 +118,28 @@ pub async fn delete_character_soul_meta(
     owner_creator_id: &str,
     character_id: &str,
 ) -> Result<bool, LocalDbError> {
-    require_owned_character_pool(pool, owner_creator_id, character_id).await?;
-    let result = sqlx::query!(
-        "DELETE FROM character_soul_meta WHERE character_id = ?",
-        character_id
-    )
-    .execute(pool)
-    .await?;
-    Ok(result.rows_affected() > 0)
+    let mut tx = crate::begin_immediate(pool).await?;
+    let result = async {
+        require_active_owned_character_tx(&mut tx, owner_creator_id, character_id).await?;
+        let deleted = sqlx::query!(
+            "DELETE FROM character_soul_meta WHERE character_id = ?",
+            character_id
+        )
+        .execute(&mut *tx)
+        .await?
+        .rows_affected()
+            > 0;
+        Ok(deleted)
+    }
+    .await;
+    match result {
+        Ok(deleted) => {
+            tx.commit().await?;
+            Ok(deleted)
+        }
+        Err(err) => {
+            let _ = tx.rollback().await;
+            Err(err)
+        }
+    }
 }

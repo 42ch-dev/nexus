@@ -537,7 +537,7 @@ async fn character_memory_fail_closed_no_mutation() {
         .await;
     assert!(!out.status.success(), "cross-character binding accepted");
 
-    // Inactive character: archive B, then every verb denies.
+    // Inactive character: archive B, then write verbs deny (reads may retain).
     sqlx::query("UPDATE characters SET status = 'archived' WHERE character_id = ?")
         .bind(&g.character_b)
         .execute(&d.pool)
@@ -548,12 +548,18 @@ async fn character_memory_fail_closed_no_mutation() {
             "creator",
             "character",
             "memory",
-            "pending-count",
+            "capture",
             "--character-id",
             &g.character_b,
+            "--pending-id",
+            "pend_archived",
+            "--session-id",
+            "sess_archived",
+            "--digest",
+            "irrelevant digest text that is long enough to matter",
         ])
         .await;
-    assert!(!out.status.success(), "inactive character must deny");
+    assert!(!out.status.success(), "inactive character write must deny");
 
     // Zero mutation proof: A's queues stay empty, B has no rows at all.
     let out = cli_ok(
@@ -749,4 +755,170 @@ async fn character_run_projects_only_admitted_soul_and_memory() {
     assert!(!out.status.success(), "inactive run must fail");
     assert_eq!(host.create_sessions.load(Ordering::SeqCst), before_create);
     assert_eq!(host.execs.load(Ordering::SeqCst), before_exec);
+}
+
+// ─── v1.185 P3 run capture → review → promote journey ───────────────────────
+
+async fn run_remember_json(d: &LiveDaemon, g: &common::rn_act4::RnAct4Graph, chr: &str) -> Value {
+    let out = tokio::process::Command::new(env!("CARGO_BIN_EXE_nexus42"))
+        .args([
+            "creator",
+            "character",
+            "run",
+            "--character-id",
+            chr,
+            "--world-id",
+            &g.world_w1,
+            "--binding-id",
+            &g.bind_a_w1,
+            "--prompt",
+            "Remember this harbor detail.",
+            "--remember",
+            "--json",
+        ])
+        .env("HOME", d.home.path())
+        .env("RUST_LOG", "off")
+        .output()
+        .await
+        .expect("spawn");
+    assert!(out.status.success(), "run: {}", stderr(&out));
+    json_out(&out)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[allow(clippy::too_many_lines)]
+async fn character_run_remember_review_promote_journey() {
+    let host = MockHost::new();
+    let d = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let g = seed(&d).await;
+    let chr = g.character_a.as_str();
+
+    let first = run_remember_json(&d, &g, chr).await;
+    let second = run_remember_json(&d, &g, chr).await;
+    assert_eq!(first["outcome"]["capture"]["status"], "captured");
+    assert_eq!(second["outcome"]["capture"]["status"], "captured");
+    let pid1 = first["outcome"]["capture"]["pending_id"].as_str().unwrap();
+    let pid2 = second["outcome"]["capture"]["pending_id"].as_str().unwrap();
+    assert_ne!(pid1, pid2);
+    assert!(pid1.starts_with("run_"));
+    assert!(pid2.starts_with("run_"));
+
+    let pending = cli_ok(
+        &d,
+        &[
+            "creator",
+            "character",
+            "memory",
+            "pending-list",
+            "--character-id",
+            chr,
+            "--binding-id",
+            &g.bind_a_w1,
+            "--json",
+        ],
+    )
+    .await;
+    let pending_json = json_out(&pending);
+    let items = pending_json["items"].as_array().unwrap();
+    assert!(items.iter().any(|row| row["pending_id"] == pid1));
+    assert!(items.iter().any(|row| row["pending_id"] == pid2));
+
+    let review = cli_ok(
+        &d,
+        &[
+            "creator",
+            "character",
+            "memory",
+            "review",
+            "--character-id",
+            chr,
+            "--binding-id",
+            &g.bind_a_w1,
+            "--json",
+        ],
+    )
+    .await;
+    let review_json = json_out(&review);
+    assert!(
+        review_json["fragmented"].as_u64().unwrap_or(0) >= 1,
+        "review should fragment local pending rows: {review_json}"
+    );
+
+    let fragments_out = cli_ok(
+        &d,
+        &[
+            "creator",
+            "character",
+            "memory",
+            "fragments",
+            "--character-id",
+            chr,
+            "--binding-id",
+            &g.bind_a_w1,
+            "--json",
+        ],
+    )
+    .await;
+    let fragments_json = json_out(&fragments_out);
+    let fragments = fragments_json["fragments"].as_array().unwrap();
+    assert!(
+        !fragments.is_empty(),
+        "fragments list should include local rows"
+    );
+    let fragment_id = fragments[0]["fragment_id"].as_str().unwrap();
+
+    let promote = cli_ok(
+        &d,
+        &[
+            "creator",
+            "character",
+            "memory",
+            "promote",
+            "--character-id",
+            chr,
+            "--fragment-id",
+            fragment_id,
+            "--expected-revision",
+            "0",
+            "--json",
+        ],
+    )
+    .await;
+    assert_eq!(json_out(&promote)["fragment"]["fragment_id"], fragment_id);
+
+    let third = cli_ok(
+        &d,
+        &[
+            "creator",
+            "character",
+            "run",
+            "--character-id",
+            chr,
+            "--world-id",
+            &g.world_w1,
+            "--binding-id",
+            &g.bind_a_w1,
+            "--prompt",
+            "Act after promote.",
+        ],
+    )
+    .await;
+    assert!(
+        third.status.success(),
+        "post-promote run: {}",
+        stderr(&third)
+    );
+    let prompt = host.last_prompt();
+    assert!(prompt.contains("## Character Memory"), "{prompt}");
+    assert!(
+        prompt.contains(MOCK_RESULT) || prompt.contains("harbor detail"),
+        "promoted run capture should project into admitted mind: {prompt}"
+    );
+
+    // Creator memory tables remain untouched (no run capture writes there).
+    let creator_pending: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM memory_pending_review")
+        .fetch_one(&d.pool)
+        .await
+        .unwrap();
+    assert_eq!(creator_pending.0, 0);
 }

@@ -13,7 +13,7 @@ use crate::api::handlers::world_kb_guards::require_creator;
 use crate::workspace::WorkspaceState;
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, Uri};
 use axum::Json;
 use chrono::{DateTime, Utc};
 use nexus_contracts::daemon_api::actor_knowledge::{
@@ -21,12 +21,14 @@ use nexus_contracts::daemon_api::actor_knowledge::{
     add_knowledge_entry_response::{
         AddKnowledgeEntryResponse, NexusActorKnowledgeViewItem as CreatedItem,
     },
+    knowledge_entry_detail::{KnowledgeEntryDetail, NexusActorKnowledgeViewItem as DetailItem},
     knowledge_view_item::KnowledgeViewItem,
     list_character_knowledge_query::ListCharacterKnowledgeQuery,
     list_character_knowledge_response::{
         ListCharacterKnowledgeResponse, NexusActorKnowledgeViewItem as ListedItem,
         NexusPaginationInfo as ListedPagination,
     },
+    update_knowledge_entry_request::UpdateKnowledgeEntryRequest,
     view_request::{NexusActorRef, ViewRequest},
     view_response::{
         NexusActorKnowledgeViewItem as ViewItem, NexusPaginationInfo as ViewPagination,
@@ -35,10 +37,10 @@ use nexus_contracts::daemon_api::actor_knowledge::{
 };
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::{
-    parse_stored_created_at, KnowledgeEntryRecord, KnowledgeOwnerRef,
+    parse_stored_created_at, KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef,
 };
 use nexus_knowledge::world_kb::store::{KbStore, KbStoreError};
-use nexus_local_db::kb_store::SqliteKbStore;
+use nexus_local_db::{kb_store::SqliteKbStore, ActorKnowledgePatch, FieldPatch, LocalDbError};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -73,6 +75,145 @@ fn parse_rfc3339(raw: &str) -> Result<DateTime<Utc>, NexusApiError> {
     parse_stored_created_at(raw).map_err(wire_err)
 }
 
+fn parse_request_object(
+    bytes: &Bytes,
+) -> Result<serde_json::Map<String, serde_json::Value>, NexusApiError> {
+    let value: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(|err| NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: err.to_string(),
+        })?;
+    value
+        .as_object()
+        .cloned()
+        .ok_or_else(|| NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: "request body must be a JSON object".into(),
+        })
+}
+
+fn summary_wire_value(record: &KnowledgeEntryRecord) -> Option<&str> {
+    record
+        .body
+        .as_ref()
+        .and_then(|body| body.summary.as_deref())
+}
+
+fn detail_from_record(
+    record: &KnowledgeEntryRecord,
+) -> Result<KnowledgeEntryDetail, NexusApiError> {
+    let item = item_from_record(record)?;
+    let summary = summary_wire_value(record);
+    let value = serde_json::json!({
+        "item": map_wire::<DetailItem>(item)?,
+        "summary": summary,
+    });
+    serde_json::from_value(value).map_err(wire_err)
+}
+
+const KNOWLEDGE_DELETE_MAX_EXPECTED_REVISION: i64 = 9_223_372_036_854_775_806;
+
+fn knowledge_delete_invalid_input(message: impl Into<String>) -> NexusApiError {
+    NexusApiError::BadRequest {
+        code: "invalid_input".into(),
+        message: message.into(),
+    }
+}
+
+fn parse_delete_expected_revision(uri: &Uri) -> Result<i64, NexusApiError> {
+    let query = uri
+        .query()
+        .ok_or_else(|| knowledge_delete_invalid_input("expected_revision is required"))?;
+    let mut expected_revision: Option<&str> = None;
+    for pair in query.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        let (key, value) = match pair.split_once('=') {
+            Some((k, v)) => (k, v),
+            None => (pair, ""),
+        };
+        if key == "expected_revision" {
+            if expected_revision.is_some() {
+                return Err(knowledge_delete_invalid_input(
+                    "duplicate expected_revision query parameter",
+                ));
+            }
+            expected_revision = Some(value);
+        } else {
+            return Err(knowledge_delete_invalid_input(format!(
+                "unexpected query parameter '{key}'"
+            )));
+        }
+    }
+    let raw = expected_revision
+        .ok_or_else(|| knowledge_delete_invalid_input("expected_revision is required"))?;
+    let parsed = raw
+        .parse::<i64>()
+        .map_err(|_| knowledge_delete_invalid_input("expected_revision must be an integer"))?;
+    if !(0..=KNOWLEDGE_DELETE_MAX_EXPECTED_REVISION).contains(&parsed) {
+        return Err(knowledge_delete_invalid_input(
+            "expected_revision is out of range",
+        ));
+    }
+    Ok(parsed)
+}
+
+fn knowledge_patch_is_empty(raw: &serde_json::Map<String, serde_json::Value>) -> bool {
+    !raw.contains_key("canonical_name") && !raw.contains_key("summary")
+}
+
+fn build_knowledge_summary_patch<'a>(
+    raw: &'a serde_json::Map<String, serde_json::Value>,
+    req: &'a UpdateKnowledgeEntryRequest,
+) -> Result<FieldPatch<&'a str>, NexusApiError> {
+    match raw.get("summary") {
+        None => Ok(FieldPatch::Keep),
+        Some(serde_json::Value::Null) => Ok(FieldPatch::Clear),
+        Some(_) => Ok(FieldPatch::Set(
+            req.summary
+                .as_ref()
+                .ok_or_else(|| NexusApiError::BadRequest {
+                    code: "invalid_input".into(),
+                    message: "summary must be a string or null when present".into(),
+                })?
+                .as_str(),
+        )),
+    }
+}
+
+fn build_actor_knowledge_patch<'a>(
+    raw: &'a serde_json::Map<String, serde_json::Value>,
+    req: &'a UpdateKnowledgeEntryRequest,
+) -> Result<ActorKnowledgePatch<'a>, NexusApiError> {
+    let canonical_name = if raw.contains_key("canonical_name") {
+        Some(
+            req.canonical_name
+                .as_ref()
+                .ok_or_else(|| NexusApiError::BadRequest {
+                    code: "invalid_input".into(),
+                    message: "canonical_name must be a non-null string when present".into(),
+                })?
+                .as_str(),
+        )
+    } else {
+        None
+    };
+    Ok(ActorKnowledgePatch {
+        canonical_name,
+        summary: build_knowledge_summary_patch(raw, req)?,
+    })
+}
+
+fn apply_create_summary(record: &mut KnowledgeEntryRecord, summary: Option<&str>) {
+    if let Some(text) = summary {
+        record.body = Some(KnowledgeEntryBody {
+            summary: Some(text.to_string()),
+            ..KnowledgeEntryBody::default()
+        });
+    }
+}
+
 fn item_from_record(record: &KnowledgeEntryRecord) -> Result<KnowledgeViewItem, NexusApiError> {
     let owner = serde_json::json!({
         "kind": record.owner.kind(),
@@ -85,6 +226,7 @@ fn item_from_record(record: &KnowledgeEntryRecord) -> Result<KnowledgeViewItem, 
         "block_type": serde_json::to_value(record.block_type).map_err(wire_err)?,
         "canonical_name": record.canonical_name,
         "status": record.status,
+        "revision": record.revision.unwrap_or(0),
         "created_at": parse_rfc3339(&record.created_at)?,
     });
     serde_json::from_value(value).map_err(wire_err)
@@ -175,19 +317,34 @@ pub async fn add_entry(
     State(state): State<WorkspaceState>,
     body: Bytes,
 ) -> Result<(StatusCode, Json<AddKnowledgeEntryResponse>), NexusApiError> {
-    let req: AddKnowledgeEntryRequest = parse_canonical_json(&body)?;
+    let raw = parse_request_object(&body)?;
+    let req: AddKnowledgeEntryRequest =
+        serde_json::from_value(serde_json::Value::Object(raw.clone())).map_err(|err| {
+            NexusApiError::BadRequest {
+                code: "invalid_input".into(),
+                message: err.to_string(),
+            }
+        })?;
     let creator_id = require_creator(&state)?;
     let pool = state.pool_or_uninit()?.clone();
     let service = ActorKnowledgeViewService::new(pool.clone());
     let creator_only = req.creator_only.unwrap_or(false);
     let owner = match req.owner_kind {
         AddKnowledgeEntryRequestOwnerKind::World => {
+            if raw.contains_key("summary") {
+                return Err(NexusApiError::BadRequest {
+                    code: "invalid_input".into(),
+                    message: "summary is not accepted on world-owned knowledge create".into(),
+                });
+            }
             let world_id =
                 optional_str(req.world_id.as_ref()).ok_or_else(|| NexusApiError::BadRequest {
                     code: "invalid_input".into(),
                     message: "world_id is required for world-owned knowledge".into(),
                 })?;
-            service.require_owned_world(&creator_id, world_id).await?;
+            service
+                .require_active_owned_world(&creator_id, world_id)
+                .await?;
             KnowledgeOwnerRef::world(world_id)
         }
         AddKnowledgeEntryRequestOwnerKind::Character => {
@@ -204,7 +361,7 @@ pub async fn add_entry(
                 }
             })?;
             service
-                .require_owned_character(&creator_id, character_id)
+                .require_active_owned_character(&creator_id, character_id)
                 .await?;
             KnowledgeOwnerRef::character(character_id)
         }
@@ -232,9 +389,11 @@ pub async fn add_entry(
                     message: "world_id is required for binding-owned knowledge".into(),
                 })?;
             service
-                .require_owned_character(&creator_id, character_id)
+                .require_active_owned_character(&creator_id, character_id)
                 .await?;
-            service.require_owned_world(&creator_id, world_id).await?;
+            service
+                .require_active_owned_world(&creator_id, world_id)
+                .await?;
             service
                 .require_active_binding(character_id, binding_id, world_id)
                 .await?;
@@ -254,13 +413,63 @@ pub async fn add_entry(
         }
     };
     record.creator_only = creator_only;
-    let store = SqliteKbStore::new(pool);
-    store
-        .insert_knowledge_entry(record.clone())
-        .await
-        .map_err(map_insert_err)?;
+    let create_summary = optional_str(req.summary.as_ref());
+    if matches!(
+        &owner,
+        KnowledgeOwnerRef::Character(_) | KnowledgeOwnerRef::ActorWorldBinding(_)
+    ) {
+        apply_create_summary(&mut record, create_summary);
+    }
+    let store = SqliteKbStore::new(pool.clone());
+    // Character/binding-owned KE inserts revalidate the stored active owner
+    // inside the write transaction (durable §11.3.5) — a route check alone is
+    // not sufficient. World-owned inserts keep the existing behavior/texture.
+    let inserted = match &owner {
+        KnowledgeOwnerRef::World(_) => store
+            .insert_knowledge_entry(record.clone())
+            .await
+            .map_err(map_insert_err)
+            .map(|r| r.entry_id),
+        KnowledgeOwnerRef::Character(id) => {
+            // Side-effecting Character activity: hold the activity fence across
+            // the guarded INSERT (durable §11.3.1).
+            let _activity = state
+                .actor_sessions()
+                .admit_character_activity(&pool, &creator_id, id.as_str())
+                .await?;
+            store
+                .insert_actor_owned_key_block(&creator_id, id, None, record.clone())
+                .await
+                .map_err(map_local_db_insert_err)
+                .map(|r| r.entry_id)
+        }
+        KnowledgeOwnerRef::ActorWorldBinding(id) => {
+            let admitted_character = admitted_character_id(&req);
+            let admitted_character =
+                admitted_character
+                    .as_deref()
+                    .ok_or_else(|| NexusApiError::Internal {
+                        code: "ACTOR_KNOWLEDGE_INSERT_FAILED".into(),
+                        message: "binding-owned KE insert must carry the admitted Character".into(),
+                    })?;
+            let _activity = state
+                .actor_sessions()
+                .admit_character_activity(&pool, &creator_id, admitted_character)
+                .await?;
+            store
+                .insert_actor_owned_key_block(
+                    &creator_id,
+                    admitted_character,
+                    Some(id),
+                    record.clone(),
+                )
+                .await
+                .map_err(map_local_db_insert_err)
+                .map(|r| r.entry_id)
+        }
+    }?;
     let stored = store
-        .get_knowledge_entry(&record.entry_id)
+        .get_knowledge_entry(&inserted)
         .await
         .map_err(map_insert_err)?;
     Ok((
@@ -271,6 +480,39 @@ pub async fn add_entry(
                 .try_into(),
         )?),
     ))
+}
+
+/// Admitted Character for a binding-owned KE insert (already validated above
+/// by `require_active_owned_character` / `require_active_binding`).
+fn admitted_character_id(req: &AddKnowledgeEntryRequest) -> Option<String> {
+    optional_str(req.character_id.as_ref()).map(str::to_string)
+}
+
+/// Map a guarded-create `LocalDbError` to the canonical daemon envelope: a
+/// contract conflict maps to its stable 409 code; an actor row we failed to
+/// create maps to 404 (existence hidden); everything else is internal.
+fn map_local_db_insert_err(err: LocalDbError) -> NexusApiError {
+    match err {
+        LocalDbError::ActorContractConflict { code } => NexusApiError::ConflictCoded {
+            code: code.as_str().to_string(),
+            message: code.message().to_string(),
+        },
+        LocalDbError::ActorNotFound { resource, id } => {
+            NexusApiError::NotFound(format!("{resource} {id}"))
+        }
+        LocalDbError::ConstraintViolation { .. } => NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: err.to_string(),
+        },
+        LocalDbError::ValidationError(msg) => NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: msg,
+        },
+        other => NexusApiError::Internal {
+            code: "ACTOR_KNOWLEDGE_INSERT_FAILED".into(),
+            message: other.to_string(),
+        },
+    }
 }
 
 /// `GET /v1/daemon/characters/{character_id}/knowledge`
@@ -300,4 +542,84 @@ pub async fn list_character_knowledge(
             .pagination(listed_pagination(&page)?)
             .try_into(),
     )?))
+}
+
+/// `GET /v1/daemon/characters/{character_id}/knowledge/{entry_id}`
+pub async fn get_knowledge_entry(
+    State(state): State<WorkspaceState>,
+    Path((character_id, entry_id)): Path<(String, String)>,
+) -> Result<Json<KnowledgeEntryDetail>, NexusApiError> {
+    let owner = require_creator(&state)?;
+    let record = nexus_local_db::get_actor_knowledge_entry(
+        state.pool_or_uninit()?,
+        &owner,
+        &character_id,
+        &entry_id,
+    )
+    .await?
+    .ok_or_else(|| NexusApiError::NotFound(format!("knowledge_entry {entry_id}")))?;
+    Ok(Json(detail_from_record(&record)?))
+}
+
+/// `PATCH /v1/daemon/characters/{character_id}/knowledge/{entry_id}`
+pub async fn patch_knowledge_entry(
+    State(state): State<WorkspaceState>,
+    Path((character_id, entry_id)): Path<(String, String)>,
+    body: Bytes,
+) -> Result<Json<KnowledgeEntryDetail>, NexusApiError> {
+    let raw = parse_request_object(&body)?;
+    let req: UpdateKnowledgeEntryRequest =
+        serde_json::from_value(serde_json::Value::Object(raw.clone())).map_err(|err| {
+            NexusApiError::BadRequest {
+                code: "invalid_input".into(),
+                message: err.to_string(),
+            }
+        })?;
+    if knowledge_patch_is_empty(&raw) {
+        return Err(NexusApiError::BadRequest {
+            code: "invalid_input".into(),
+            message: "patch must include at least one mutable field".into(),
+        });
+    }
+    let owner = require_creator(&state)?;
+    let pool = state.pool_or_uninit()?;
+    let _activity = state
+        .actor_sessions()
+        .admit_character_activity(pool, &owner, &character_id)
+        .await?;
+    let patch = build_actor_knowledge_patch(&raw, &req)?;
+    let record = nexus_local_db::update_actor_knowledge_entry(
+        pool,
+        &owner,
+        &character_id,
+        &entry_id,
+        req.expected_revision,
+        patch,
+    )
+    .await?;
+    Ok(Json(detail_from_record(&record)?))
+}
+
+/// `DELETE /v1/daemon/characters/{character_id}/knowledge/{entry_id}`
+pub async fn delete_knowledge_entry(
+    State(state): State<WorkspaceState>,
+    Path((character_id, entry_id)): Path<(String, String)>,
+    uri: Uri,
+) -> Result<StatusCode, NexusApiError> {
+    let expected_revision = parse_delete_expected_revision(&uri)?;
+    let owner = require_creator(&state)?;
+    let pool = state.pool_or_uninit()?;
+    let _activity = state
+        .actor_sessions()
+        .admit_character_activity(pool, &owner, &character_id)
+        .await?;
+    nexus_local_db::delete_actor_knowledge_entry(
+        pool,
+        &owner,
+        &character_id,
+        &entry_id,
+        expected_revision,
+    )
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
 }

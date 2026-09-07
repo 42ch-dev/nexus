@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT EXISTS(\n            SELECT 1 FROM narrative_timeline_events\n            WHERE modules_json IS NOT NULL\n              AND json_valid(modules_json) = 1\n              AND EXISTS (\n                SELECT 1 FROM json_tree(modules_json)\n                WHERE type = 'text' AND value = ?\n              )\n        ) as \"exists!\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "exists!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c934c426b7b4ccf060edc6c6f55c75cff7817c5abe5e561c47420232e6fa290b"
+}

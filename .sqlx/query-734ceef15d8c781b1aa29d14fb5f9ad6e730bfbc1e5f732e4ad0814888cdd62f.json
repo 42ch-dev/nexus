@@ -1,20 +1,20 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT character_id as \"character_id!\",\n                  owner_creator_id as \"owner_creator_id!\",\n                  display_name as \"display_name!\",\n                  status as \"status!\",\n                  image_uri,\n                  persona_json as \"persona_json!\",\n                  created_at as \"created_at!\",\n                  updated_at as \"updated_at!\"\n           FROM characters\n           WHERE owner_creator_id = ?\n           ORDER BY created_at ASC, character_id ASC\n           LIMIT ? OFFSET ?",
+  "query": "SELECT binding_id as \"binding_id!\",\n                  character_id as \"character_id!\",\n                  world_id as \"world_id!\",\n                  status as \"status!\",\n                  world_sheet_entry_id,\n                  revision as \"revision!\",\n                  created_at as \"created_at!\",\n                  updated_at as \"updated_at!\"\n           FROM actor_world_bindings\n           WHERE character_id = ?\n           ORDER BY created_at ASC, binding_id ASC\n           LIMIT ? OFFSET ?",
   "describe": {
     "columns": [
       {
-        "name": "character_id!",
+        "name": "binding_id!",
         "ordinal": 0,
         "type_info": "Text"
       },
       {
-        "name": "owner_creator_id!",
+        "name": "character_id!",
         "ordinal": 1,
         "type_info": "Text"
       },
       {
-        "name": "display_name!",
+        "name": "world_id!",
         "ordinal": 2,
         "type_info": "Text"
       },
@@ -24,14 +24,14 @@
         "type_info": "Text"
       },
       {
-        "name": "image_uri",
+        "name": "world_sheet_entry_id",
         "ordinal": 4,
         "type_info": "Text"
       },
       {
-        "name": "persona_json!",
+        "name": "revision!",
         "ordinal": 5,
-        "type_info": "Text"
+        "type_info": "Integer"
       },
       {
         "name": "created_at!",
@@ -58,5 +58,5 @@
       false
     ]
   },
-  "hash": "f3f98aca04213af6ae1a38a7eb244fe3d45dd5fc8a49ffaa789302d54a2750ff"
+  "hash": "734ceef15d8c781b1aa29d14fb5f9ad6e730bfbc1e5f732e4ad0814888cdd62f"
 }

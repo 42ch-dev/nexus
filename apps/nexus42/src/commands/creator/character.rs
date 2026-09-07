@@ -1,20 +1,19 @@
 //! `creator character` — thin `DaemonClient` surface for Character identity and bindings.
 
+#[path = "character_run.rs"]
+mod character_run;
+
 use crate::api::DaemonClient;
-use crate::commands::creator::work_utils::query_path;
+use crate::commands::creator::work_utils::{query_path, read_file_bounded};
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
 use nexus_contracts::daemon_api::actor_knowledge::{
     add_knowledge_entry_request::AddKnowledgeEntryRequest,
     add_knowledge_entry_response::AddKnowledgeEntryResponse,
+    knowledge_entry_detail::KnowledgeEntryDetail,
     list_character_knowledge_response::ListCharacterKnowledgeResponse, view_request::ViewRequest,
     view_response::ViewResponse,
-};
-use nexus_contracts::daemon_api::agent_host::{
-    create_session_request::CreateSessionRequest,
-    execute_operation_request::ExecuteOperationRequest, operation_response::OperationResponse,
-    session_response::SessionResponse,
 };
 use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_request::CaptureCharacterPendingReviewRequest;
 use nexus_contracts::daemon_api::characters::memory::capture_character_pending_review_response::CaptureCharacterPendingReviewResponse;
@@ -34,12 +33,16 @@ use nexus_contracts::daemon_api::characters::tom::record_character_tom_request::
 use nexus_contracts::daemon_api::characters::tom::record_character_tom_response::RecordCharacterTomResponse;
 use nexus_contracts::daemon_api::characters::{
     add_character_binding_request::AddCharacterBindingRequest,
-    add_character_binding_response::AddCharacterBindingResponse, character_detail::CharacterDetail,
+    add_character_binding_response::AddCharacterBindingResponse,
+    character_binding_detail::CharacterBindingDetail, character_detail::CharacterDetail,
+    character_lifecycle_request::CharacterLifecycleRequest,
     create_character_request::CreateCharacterRequest,
     create_character_response::CreateCharacterResponse,
     list_character_bindings_response::ListCharacterBindingsResponse,
     list_characters_response::ListCharactersResponse,
 };
+use nexus_local_db::ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES;
+use std::path::PathBuf;
 
 /// `creator character` subcommands.
 #[derive(Debug, Subcommand)]
@@ -105,6 +108,40 @@ pub enum CharacterCommand {
         #[command(subcommand)]
         command: CharacterTomCommand,
     },
+    /// Edit Character identity metadata (explicit revision CAS)
+    Edit {
+        character_id: String,
+        #[arg(long)]
+        expected_revision: u64,
+        #[arg(long)]
+        display_name: Option<String>,
+        #[arg(long)]
+        image_uri: Option<String>,
+        #[arg(long)]
+        clear_image_uri: bool,
+        #[arg(long)]
+        persona: Option<String>,
+        #[arg(long)]
+        clear_persona: bool,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Archive (freeze) a Character
+    Archive {
+        character_id: String,
+        #[arg(long)]
+        expected_revision: u64,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Restore an archived Character to active
+    Restore {
+        character_id: String,
+        #[arg(long)]
+        expected_revision: u64,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
     /// Run a Character prompt through the existing Agent Host
     Run {
         #[arg(long)]
@@ -131,6 +168,9 @@ pub enum CharacterCommand {
         event_id: Option<String>,
         #[arg(long, default_value_t = false)]
         json: bool,
+        /// Opt into explicit run-to-memory capture after a successful `end_turn`
+        #[arg(long, default_value_t = false)]
+        remember: bool,
     },
 }
 
@@ -156,6 +196,30 @@ pub enum BindingCommand {
         limit: Option<i64>,
         #[arg(long)]
         cursor: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Show one binding detail
+    Show {
+        #[arg(long)]
+        character_id: String,
+        #[arg(long)]
+        binding_id: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Patch a binding `WorldSheet` link
+    Edit {
+        #[arg(long)]
+        character_id: String,
+        #[arg(long)]
+        binding_id: String,
+        #[arg(long)]
+        expected_revision: u64,
+        #[arg(long)]
+        world_sheet_entry_id: Option<String>,
+        #[arg(long, default_value_t = false)]
+        clear_world_sheet: bool,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -190,6 +254,10 @@ pub enum KnowledgeCommand {
         block_type: String,
         #[arg(long)]
         canonical_name: String,
+        #[arg(long)]
+        summary: Option<String>,
+        #[arg(long)]
+        summary_file: Option<PathBuf>,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -221,6 +289,45 @@ pub enum KnowledgeCommand {
         limit: Option<i64>,
         #[arg(long)]
         cursor: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Show one Character-scoped `KnowledgeEntry` detail (summary + metadata)
+    Show {
+        #[arg(long)]
+        character_id: String,
+        #[arg(long)]
+        entry_id: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Edit `canonical_name` and/or summary with revision CAS
+    Edit {
+        #[arg(long)]
+        character_id: String,
+        #[arg(long)]
+        entry_id: String,
+        #[arg(long)]
+        expected_revision: u64,
+        #[arg(long)]
+        canonical_name: Option<String>,
+        #[arg(long)]
+        summary: Option<String>,
+        #[arg(long)]
+        summary_file: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        clear_summary: bool,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Delete an unreferenced `KnowledgeEntry` with revision CAS
+    Remove {
+        #[arg(long)]
+        character_id: String,
+        #[arg(long)]
+        entry_id: String,
+        #[arg(long)]
+        expected_revision: u64,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -439,6 +546,30 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                 cursor,
                 json,
             } => list_bindings(&client, &character_id, limit, cursor, json).await,
+            BindingCommand::Show {
+                character_id,
+                binding_id,
+                json,
+            } => show_binding(&client, &character_id, &binding_id, json).await,
+            BindingCommand::Edit {
+                character_id,
+                binding_id,
+                expected_revision,
+                world_sheet_entry_id,
+                clear_world_sheet,
+                json,
+            } => {
+                edit_binding(
+                    &client,
+                    &character_id,
+                    &binding_id,
+                    expected_revision,
+                    world_sheet_entry_id,
+                    clear_world_sheet,
+                    json,
+                )
+                .await
+            }
             BindingCommand::Remove {
                 character_id,
                 binding_id,
@@ -454,6 +585,8 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                 creator_only,
                 block_type,
                 canonical_name,
+                summary,
+                summary_file,
                 json,
             } => {
                 add_knowledge(
@@ -465,10 +598,46 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                     creator_only,
                     block_type,
                     canonical_name,
+                    summary,
+                    summary_file,
                     json,
                 )
                 .await
             }
+            KnowledgeCommand::Show {
+                character_id,
+                entry_id,
+                json,
+            } => show_knowledge(&client, &character_id, &entry_id, json).await,
+            KnowledgeCommand::Edit {
+                character_id,
+                entry_id,
+                expected_revision,
+                canonical_name,
+                summary,
+                summary_file,
+                clear_summary,
+                json,
+            } => {
+                edit_knowledge(
+                    &client,
+                    &character_id,
+                    &entry_id,
+                    expected_revision,
+                    canonical_name,
+                    summary,
+                    summary_file,
+                    clear_summary,
+                    json,
+                )
+                .await
+            }
+            KnowledgeCommand::Remove {
+                character_id,
+                entry_id,
+                expected_revision,
+                json,
+            } => remove_knowledge(&client, &character_id, &entry_id, expected_revision, json).await,
             KnowledgeCommand::List {
                 character_id,
                 limit,
@@ -640,6 +809,39 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                 .await
             }
         },
+        CharacterCommand::Edit {
+            character_id,
+            expected_revision,
+            display_name,
+            image_uri,
+            clear_image_uri,
+            persona,
+            clear_persona,
+            json,
+        } => {
+            edit_character(
+                &client,
+                &character_id,
+                expected_revision,
+                display_name,
+                image_uri,
+                clear_image_uri,
+                persona,
+                clear_persona,
+                json,
+            )
+            .await
+        }
+        CharacterCommand::Archive {
+            character_id,
+            expected_revision,
+            json,
+        } => archive_character(&client, &character_id, expected_revision, json).await,
+        CharacterCommand::Restore {
+            character_id,
+            expected_revision,
+            json,
+        } => restore_character(&client, &character_id, expected_revision, json).await,
         CharacterCommand::Run {
             character_id,
             world_id,
@@ -652,8 +854,9 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
             branch_id,
             event_id,
             json,
+            remember,
         } => {
-            run_character(
+            character_run::run_character_with_observation(
                 &client,
                 character_id,
                 world_id,
@@ -665,6 +868,7 @@ pub async fn run(cmd: CharacterCommand, config: &CliConfig) -> Result<()> {
                 mode,
                 branch_id,
                 event_id,
+                remember,
                 json,
             )
             .await
@@ -769,6 +973,191 @@ async fn show(client: &DaemonClient, character_id: &str, json: bool) -> Result<(
     Ok(())
 }
 
+fn print_character_detail(resp: &CharacterDetail, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(resp)?);
+    } else {
+        let c = &resp.character;
+        println!("character_id: {}", *c.character_id);
+        println!("display_name: {}", *c.display_name);
+        println!("status:       {}", c.status);
+        println!("revision:     {}", c.revision);
+        println!("owner:        {}", *c.owner_creator_id);
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn edit_character(
+    client: &DaemonClient,
+    character_id: &str,
+    expected_revision: u64,
+    display_name: Option<String>,
+    image_uri: Option<String>,
+    clear_image_uri: bool,
+    persona: Option<String>,
+    clear_persona: bool,
+    json: bool,
+) -> Result<()> {
+    if clear_image_uri && image_uri.is_some() {
+        return Err(CliError::Other(
+            "use either --image-uri or --clear-image-uri, not both".into(),
+        ));
+    }
+    if clear_persona && persona.is_some() {
+        return Err(CliError::Other(
+            "use either --persona or --clear-persona, not both".into(),
+        ));
+    }
+    if display_name.is_none()
+        && image_uri.is_none()
+        && !clear_image_uri
+        && persona.is_none()
+        && !clear_persona
+    {
+        return Err(CliError::Other(
+            "edit requires at least one mutable field (--display-name, --image-uri, --clear-image-uri, --persona, or --clear-persona)".into(),
+        ));
+    }
+    // Unlike archive/restore (generated `CharacterLifecycleRequest`), edit
+    // hand-rolls the PATCH body so explicit JSON null clears (`--clear-*`) are
+    // expressible; the generated `UpdateCharacterRequest` skips absent members.
+    let mut body = serde_json::json!({ "expected_revision": expected_revision });
+    if let Some(name) = display_name {
+        body["display_name"] = serde_json::Value::String(name);
+    }
+    if clear_image_uri {
+        body["image_uri"] = serde_json::Value::Null;
+    } else if let Some(uri) = image_uri {
+        body["image_uri"] = serde_json::Value::String(uri);
+    }
+    if clear_persona {
+        body["persona"] = serde_json::Value::Null;
+    } else if let Some(raw) = persona {
+        body["persona"] = serde_json::Value::Object(parse_persona(Some(raw))?);
+    }
+    let resp: CharacterDetail = client
+        .patch(&format!("/v1/daemon/characters/{character_id}"), &body)
+        .await?;
+    print_character_detail(&resp, json)
+}
+
+async fn archive_character(
+    client: &DaemonClient,
+    character_id: &str,
+    expected_revision: u64,
+    json: bool,
+) -> Result<()> {
+    let req: CharacterLifecycleRequest = CharacterLifecycleRequest::builder()
+        .expected_revision(i64::try_from(expected_revision).map_err(|_| {
+            CliError::Other("expected_revision is out of range for i64".into())
+        })?)
+        .try_into()
+        .map_err(
+            |e: nexus_contracts::daemon_api::characters::character_lifecycle_request::error::ConversionError| {
+                CliError::Other(e.to_string())
+            },
+        )?;
+    let resp: CharacterDetail = client
+        .post(
+            &format!("/v1/daemon/characters/{character_id}/archive"),
+            &req,
+        )
+        .await?;
+    print_character_detail(&resp, json)
+}
+
+async fn restore_character(
+    client: &DaemonClient,
+    character_id: &str,
+    expected_revision: u64,
+    json: bool,
+) -> Result<()> {
+    let req: CharacterLifecycleRequest = CharacterLifecycleRequest::builder()
+        .expected_revision(i64::try_from(expected_revision).map_err(|_| {
+            CliError::Other("expected_revision is out of range for i64".into())
+        })?)
+        .try_into()
+        .map_err(
+            |e: nexus_contracts::daemon_api::characters::character_lifecycle_request::error::ConversionError| {
+                CliError::Other(e.to_string())
+            },
+        )?;
+    let resp: CharacterDetail = client
+        .post(
+            &format!("/v1/daemon/characters/{character_id}/restore"),
+            &req,
+        )
+        .await?;
+    print_character_detail(&resp, json)
+}
+
+fn print_binding_detail(resp: &CharacterBindingDetail, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(resp)?);
+    } else {
+        let b = &resp.binding;
+        println!(
+            "{}  {}  rev={}  sheet={}",
+            *b.binding_id,
+            *b.world_id,
+            b.revision,
+            b.world_sheet_entry_id
+                .as_ref()
+                .map_or("-", |id| id.as_str())
+        );
+    }
+    Ok(())
+}
+
+async fn show_binding(
+    client: &DaemonClient,
+    character_id: &str,
+    binding_id: &str,
+    json: bool,
+) -> Result<()> {
+    let resp: CharacterBindingDetail = client
+        .get(&format!(
+            "/v1/daemon/characters/{character_id}/bindings/{binding_id}"
+        ))
+        .await?;
+    print_binding_detail(&resp, json)
+}
+
+async fn edit_binding(
+    client: &DaemonClient,
+    character_id: &str,
+    binding_id: &str,
+    expected_revision: u64,
+    world_sheet_entry_id: Option<String>,
+    clear_world_sheet: bool,
+    json: bool,
+) -> Result<()> {
+    if clear_world_sheet && world_sheet_entry_id.is_some() {
+        return Err(CliError::Other(
+            "use either --world-sheet-entry-id or --clear-world-sheet, not both".into(),
+        ));
+    }
+    if !clear_world_sheet && world_sheet_entry_id.is_none() {
+        return Err(CliError::Other(
+            "edit requires --world-sheet-entry-id or --clear-world-sheet".into(),
+        ));
+    }
+    let mut body = serde_json::json!({ "expected_revision": expected_revision });
+    if clear_world_sheet {
+        body["world_sheet_entry_id"] = serde_json::Value::Null;
+    } else if let Some(id) = world_sheet_entry_id {
+        body["world_sheet_entry_id"] = serde_json::Value::String(id);
+    }
+    let resp: CharacterBindingDetail = client
+        .patch(
+            &format!("/v1/daemon/characters/{character_id}/bindings/{binding_id}"),
+            &body,
+        )
+        .await?;
+    print_binding_detail(&resp, json)
+}
+
 async fn add_binding(
     client: &DaemonClient,
     character_id: &str,
@@ -847,8 +1236,44 @@ async fn remove_binding(
         .await?;
     if json {
         println!("{{}}");
+    }
+    Ok(())
+}
+
+fn load_bounded_summary_text(
+    summary: Option<String>,
+    summary_file: Option<PathBuf>,
+) -> Result<Option<String>> {
+    if summary.is_some() && summary_file.is_some() {
+        return Err(CliError::Other(
+            "use either --summary or --summary-file, not both".into(),
+        ));
+    }
+    if let Some(path) = summary_file {
+        let text = read_file_bounded(
+            &path.to_string_lossy(),
+            ACTOR_KNOWLEDGE_SUMMARY_MAX_UTF8_BYTES,
+            "--summary-file",
+        )?;
+        return Ok(Some(text));
+    }
+    Ok(summary)
+}
+
+fn print_knowledge_detail(resp: &KnowledgeEntryDetail, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(resp)?);
     } else {
-        println!("Binding {binding_id} removed.");
+        println!("entry_id: {}", *resp.item.entry_id);
+        println!("canonical_name: {}", *resp.item.canonical_name);
+        println!("revision: {}", resp.item.revision);
+        match resp.summary.as_ref() {
+            Some(text) => {
+                println!("summary:");
+                println!("{}", text.as_str());
+            }
+            None => println!("summary: (none)"),
+        }
     }
     Ok(())
 }
@@ -874,6 +1299,8 @@ async fn add_knowledge(
     creator_only: bool,
     block_type: String,
     canonical_name: String,
+    summary: Option<String>,
+    summary_file: Option<PathBuf>,
     json: bool,
 ) -> Result<()> {
     let mut body = serde_json::json!({
@@ -891,6 +1318,9 @@ async fn add_knowledge(
     if let Some(id) = binding_id {
         body["binding_id"] = serde_json::Value::String(id);
     }
+    if let Some(text) = load_bounded_summary_text(summary, summary_file)? {
+        body["summary"] = serde_json::Value::String(text);
+    }
     let req: AddKnowledgeEntryRequest = serde_json::from_value(body)?;
     let resp: AddKnowledgeEntryResponse = client
         .post("/v1/daemon/actor-knowledge/entries", &req)
@@ -901,6 +1331,77 @@ async fn add_knowledge(
         println!("KnowledgeEntry added:");
         println!("  entry_id: {}", *resp.item.entry_id);
         println!("  owner:    {}", serde_json::to_string(&resp.item.owner)?);
+    }
+    Ok(())
+}
+
+async fn show_knowledge(
+    client: &DaemonClient,
+    character_id: &str,
+    entry_id: &str,
+    json: bool,
+) -> Result<()> {
+    let resp: KnowledgeEntryDetail = client
+        .get(&format!(
+            "/v1/daemon/characters/{character_id}/knowledge/{entry_id}"
+        ))
+        .await?;
+    print_knowledge_detail(&resp, json)
+}
+
+#[allow(clippy::too_many_arguments)] // CLI arg mapping
+async fn edit_knowledge(
+    client: &DaemonClient,
+    character_id: &str,
+    entry_id: &str,
+    expected_revision: u64,
+    canonical_name: Option<String>,
+    summary: Option<String>,
+    summary_file: Option<PathBuf>,
+    clear_summary: bool,
+    json: bool,
+) -> Result<()> {
+    if clear_summary && (summary.is_some() || summary_file.is_some()) {
+        return Err(CliError::Other(
+            "use either --clear-summary or --summary/--summary-file, not both".into(),
+        ));
+    }
+    if canonical_name.is_none() && !clear_summary && summary.is_none() && summary_file.is_none() {
+        return Err(CliError::Other(
+            "edit requires --canonical-name, --summary, --summary-file, or --clear-summary".into(),
+        ));
+    }
+    let mut body = serde_json::json!({ "expected_revision": expected_revision });
+    if let Some(name) = canonical_name {
+        body["canonical_name"] = serde_json::Value::String(name);
+    }
+    if clear_summary {
+        body["summary"] = serde_json::Value::Null;
+    } else if let Some(text) = load_bounded_summary_text(summary, summary_file)? {
+        body["summary"] = serde_json::Value::String(text);
+    }
+    let resp: KnowledgeEntryDetail = client
+        .patch(
+            &format!("/v1/daemon/characters/{character_id}/knowledge/{entry_id}"),
+            &body,
+        )
+        .await?;
+    print_knowledge_detail(&resp, json)
+}
+
+async fn remove_knowledge(
+    client: &DaemonClient,
+    character_id: &str,
+    entry_id: &str,
+    expected_revision: u64,
+    json: bool,
+) -> Result<()> {
+    let path = format!(
+        "/v1/daemon/characters/{character_id}/knowledge/{entry_id}?expected_revision={expected_revision}"
+    );
+    client.delete_no_content(&path).await?;
+    if json {
+        println!("{{}}");
     }
     Ok(())
 }
@@ -1012,101 +1513,6 @@ async fn view_knowledge(
                 println!("next_cursor: {next}");
             }
         }
-    }
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)] // CLI arg mapping
-async fn run_character(
-    client: &DaemonClient,
-    character_id: String,
-    world_id: String,
-    binding_id: String,
-    prompt: String,
-    provider_id: String,
-    cwd: Option<String>,
-    model: Option<String>,
-    mode: Option<String>,
-    branch_id: Option<String>,
-    event_id: Option<String>,
-    json: bool,
-) -> Result<()> {
-    let mut body = serde_json::json!({
-        "provider_id": provider_id,
-        "actor_ref": {
-            "actor_kind": "character",
-            "character_id": character_id,
-        },
-        "viewpoint": {
-            "world_id": world_id,
-            "binding_id": binding_id,
-        },
-    });
-    if let Some(cwd) = cwd {
-        body["cwd"] = serde_json::Value::String(cwd);
-    }
-    if let Some(model) = model {
-        body["model"] = serde_json::Value::String(model);
-    }
-    if let Some(mode) = mode {
-        body["mode"] = serde_json::Value::String(mode);
-    }
-    if let Some(branch_id) = branch_id {
-        body["viewpoint"]["branch_id"] = serde_json::Value::String(branch_id);
-    }
-    if let Some(event_id) = event_id {
-        body["viewpoint"]["event_id"] = serde_json::Value::String(event_id);
-    }
-    let req: CreateSessionRequest = serde_json::from_value(body)?;
-    let session: SessionResponse = client.post("/v1/daemon/agent-host/sessions", &req).await?;
-
-    let mut events = client
-        .stream_get(&format!(
-            "/v1/daemon/agent-host/sessions/{}/events",
-            session.session_id
-        ))
-        .await?;
-
-    let op_req = ExecuteOperationRequest::Prompt { content: prompt };
-    let operation: OperationResponse = client
-        .post(
-            &format!(
-                "/v1/daemon/agent-host/sessions/{}/operations",
-                session.session_id
-            ),
-            &op_req,
-        )
-        .await?;
-
-    let (result, event_values) = consume_terminal_events(&mut events).await?;
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "session": session,
-                "operation": operation,
-                "result": result,
-                "events": event_values,
-            }))?
-        );
-    } else {
-        println!("session_id:   {}", session.session_id);
-        println!("provider_id:  {}", session.provider_id);
-        if let Some(actor) = session.actor_ref.as_ref() {
-            println!(
-                "actor_ref:    {}",
-                serde_json::to_string(actor).unwrap_or_default()
-            );
-        }
-        if let Some(viewpoint) = session.viewpoint.as_ref() {
-            println!(
-                "viewpoint:    {}",
-                serde_json::to_string(viewpoint).unwrap_or_default()
-            );
-        }
-        println!("operation_id: {}", operation.operation_id);
-        println!("result:");
-        println!("{result}");
     }
     Ok(())
 }
@@ -1593,54 +1999,4 @@ fn format_tom_item_human(row: &NexusCharacterTomBeliefItem) -> String {
         "- [{}] holder={} truth={} {} (carrier={})",
         row.order, holder, truth, proposition, &*row.carrier_entry_id
     )
-}
-
-async fn consume_terminal_events(
-    resp: &mut reqwest::Response,
-) -> Result<(String, Vec<serde_json::Value>)> {
-    let mut buf = String::new();
-    let mut result = String::new();
-    let mut events = Vec::new();
-    loop {
-        let chunk = resp.chunk().await?.ok_or_else(|| {
-            CliError::Other("agent-host event stream closed before a terminal event".into())
-        })?;
-        buf.push_str(&String::from_utf8_lossy(&chunk));
-        while let Some(idx) = buf.find("\n\n") {
-            let frame = buf[..idx].to_string();
-            buf = buf[idx + 2..].to_string();
-            let mut data = String::new();
-            for line in frame.lines() {
-                if let Some(rest) = line.strip_prefix("data:") {
-                    data.push_str(rest.trim_start());
-                }
-            }
-            if data.is_empty() {
-                continue;
-            }
-            let value: serde_json::Value = serde_json::from_str(&data)?;
-            if let Some(text) = value
-                .get("MessageDelta")
-                .and_then(|v| v.get("text"))
-                .and_then(serde_json::Value::as_str)
-            {
-                result.push_str(text);
-            }
-            let terminal_fail = value.get("OpFailed").cloned();
-            let finished = value.get("OpFinished").is_some();
-            events.push(value);
-            if let Some(fail) = terminal_fail {
-                let message = fail
-                    .get("error_message")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("operation failed");
-                return Err(CliError::Other(format!(
-                    "agent-host operation failed: {message}"
-                )));
-            }
-            if finished {
-                return Ok((result, events));
-            }
-        }
-    }
 }

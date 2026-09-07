@@ -83,6 +83,11 @@ impl HostFacade for MockHost {
         Ok(session)
     }
 
+    #[allow(
+        clippy::redundant_clone,
+        clippy::if_not_else,
+        clippy::branches_sharing_code
+    )]
     async fn exec(
         &self,
         session_id: HostSessionId,
@@ -873,4 +878,403 @@ async fn character_tom_full_mind_p0_p4_dogfood() {
         !b_prompt.contains(TOM_L1_MARKER),
         "B prompt must not include A ToM"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn restored_character_run_mints_fresh_session_after_archive() {
+    let host = MockHost::new();
+    let d = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let g = seed(&d).await;
+
+    let pre = json_out(
+        &d.cli(&run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &[]))
+            .await,
+    );
+    assert!(pre.get("session").is_some());
+    let pre_session = pre["session"]["session_id"].as_str().unwrap().to_string();
+
+    let show = json_out(
+        &d.cli(&["creator", "character", "show", &g.character_a, "--json"])
+            .await,
+    );
+    let revision = show["character"]["revision"].as_i64().unwrap();
+
+    assert!(d
+        .cli(&[
+            "creator",
+            "character",
+            "archive",
+            &g.character_a,
+            "--expected-revision",
+            &revision.to_string(),
+            "--json",
+        ])
+        .await
+        .status
+        .success());
+
+    let archived_show = json_out(
+        &d.cli(&["creator", "character", "show", &g.character_a, "--json"])
+            .await,
+    );
+    let archived_revision = archived_show["character"]["revision"].as_i64().unwrap();
+
+    let denied = d
+        .cli(&run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &[]))
+        .await;
+    assert!(!denied.status.success(), "archived run must fail");
+    assert!(stderr(&denied).contains("character_inactive"));
+
+    assert!(d
+        .cli(&[
+            "creator",
+            "character",
+            "restore",
+            &g.character_a,
+            "--expected-revision",
+            &archived_revision.to_string(),
+            "--json",
+        ])
+        .await
+        .status
+        .success());
+
+    let post = json_out(
+        &d.cli(&run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &[]))
+            .await,
+    );
+    let post_session = post["session"]["session_id"].as_str().unwrap();
+    assert_ne!(
+        pre_session, post_session,
+        "restore must mint a fresh session"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn character_run_includes_edited_summary_and_shared_ke_across_worlds() {
+    let host = MockHost::new();
+    let d = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let g = seed(&d).await;
+
+    let edited = d
+        .cli(&[
+            "creator",
+            "character",
+            "knowledge",
+            "edit",
+            "--character-id",
+            &g.character_a,
+            "--entry-id",
+            &g.ke_a_share,
+            "--expected-revision",
+            "0",
+            "--summary",
+            "AShare edited summary for MCA",
+            "--json",
+        ])
+        .await;
+    assert!(edited.status.success(), "edit share: {}", stderr(&edited));
+
+    let w1 = d
+        .cli(&run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &[]))
+        .await;
+    assert!(w1.status.success(), "w1 run: {}", stderr(&w1));
+    let prompt_w1 = host.last_prompt();
+    assert!(prompt_w1.contains("AShare edited summary for MCA"));
+    assert!(prompt_w1.contains(NAME_A_SHARE));
+    assert!(!prompt_w1.contains(NAME_B_SHARE));
+
+    let w2 = d
+        .cli(&run_args(&g.character_a, &g.world_w2, &g.bind_a_w2, &[]))
+        .await;
+    assert!(w2.status.success(), "w2 run: {}", stderr(&w2));
+    let prompt_w2 = host.last_prompt();
+    assert!(prompt_w2.contains("AShare edited summary for MCA"));
+    assert!(prompt_w2.contains(NAME_A_SHARE));
+    assert!(!prompt_w2.contains(NAME_B_SHARE));
+
+    let shown = d
+        .cli(&[
+            "creator",
+            "character",
+            "knowledge",
+            "show",
+            "--character-id",
+            &g.character_a,
+            "--entry-id",
+            &g.ke_a_share,
+            "--json",
+        ])
+        .await;
+    assert!(shown.status.success(), "show shared ke: {}", stderr(&shown));
+    let detail: Value = json_out(&shown);
+    assert_eq!(detail["item"]["entry_id"], g.ke_a_share);
+    assert_eq!(detail["summary"], "AShare edited summary for MCA");
+}
+
+// ─── v1.185 P3 run observation + --remember ─────────────────────────────────
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum P3RunScript {
+    Standard = 0,
+    WrongOpTerminalFirst = 1,
+    MaxTokens = 2,
+    MissedSseTerminal = 3,
+}
+
+struct P3MockHost {
+    inner: MockHost,
+    script: std::sync::atomic::AtomicU8,
+}
+
+impl P3MockHost {
+    fn new(script: P3RunScript) -> Arc<Self> {
+        Arc::new(Self {
+            inner: MockHost {
+                sessions: Mutex::new(HashMap::new()),
+                prompts: Mutex::new(Vec::new()),
+                last_create_metadata: Mutex::new(None),
+                create_sessions: AtomicU64::new(0),
+                execs: AtomicU64::new(0),
+                events: tokio::sync::broadcast::channel(64).0,
+            },
+            script: std::sync::atomic::AtomicU8::new(script as u8),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl HostFacade for P3MockHost {
+    async fn start(&self, config: HostStartConfig) -> HostResult<()> {
+        self.inner.start(config).await
+    }
+
+    async fn create_session(
+        &self,
+        request: nexus_agent_host::capability::CreateSessionRequest,
+    ) -> HostResult<HostSession> {
+        self.inner.create_session(request).await
+    }
+
+    #[allow(
+        clippy::redundant_clone,
+        clippy::if_not_else,
+        clippy::branches_sharing_code
+    )]
+    async fn exec(
+        &self,
+        session_id: HostSessionId,
+        op: HostOperation,
+    ) -> HostResult<HostEventStream> {
+        self.inner.execs.fetch_add(1, Ordering::SeqCst);
+        let script = self.script.load(Ordering::SeqCst);
+        let op_id = match op {
+            HostOperation::Prompt { op_id, content } => {
+                let text = match content.as_slice() {
+                    [HostContentBlock::Text { text }] => text.clone(),
+                    other => format!("unexpected content {other:?}"),
+                };
+                self.inner.prompts.lock().expect("prompts").push(text);
+                op_id
+            }
+            HostOperation::SetModel { model } => {
+                self.inner
+                    .prompts
+                    .lock()
+                    .expect("prompts")
+                    .push(format!("set-model:{model}"));
+                HostOperationId::new()
+            }
+            HostOperation::SetMode { mode } => {
+                self.inner
+                    .prompts
+                    .lock()
+                    .expect("prompts")
+                    .push(format!("set-mode:{mode}"));
+                HostOperationId::new()
+            }
+        };
+        let reason = if script == P3RunScript::MaxTokens as u8 {
+            FinishReason::MaxTokens
+        } else {
+            FinishReason::EndTurn
+        };
+        let started = HostEvent::OpStarted(OperationStartedEvent {
+            op_id: op_id.clone(),
+            session_id: session_id.clone(),
+        });
+        let delta = HostEvent::MessageDelta(TextDeltaEvent {
+            session_id: session_id.clone(),
+            op_id: op_id.clone(),
+            text: MOCK_RESULT.to_string(),
+        });
+        let finished = HostEvent::OpFinished(OperationFinishedEvent {
+            session_id: session_id.clone(),
+            op_id: op_id.clone(),
+            reason,
+        });
+        let mut stream_events = vec![Ok(started.clone()), Ok(delta.clone())];
+        if script == P3RunScript::WrongOpTerminalFirst as u8 {
+            let wrong = HostOperationId::new();
+            let wrong_finished = HostEvent::OpFinished(OperationFinishedEvent {
+                session_id: session_id.clone(),
+                op_id: wrong,
+                reason: FinishReason::EndTurn,
+            });
+            let _ = self.inner.events.send(wrong_finished.clone());
+            stream_events.push(Ok(wrong_finished));
+        }
+        stream_events.push(Ok(finished.clone()));
+        let _ = self.inner.events.send(started.clone());
+        let _ = self.inner.events.send(delta.clone());
+        if script != P3RunScript::MissedSseTerminal as u8 {
+            let _ = self.inner.events.send(finished);
+        }
+        Ok(Box::pin(futures_util::stream::iter(stream_events)))
+    }
+
+    async fn cancel(&self, op_id: HostOperationId) -> HostResult<()> {
+        self.inner.cancel(op_id).await
+    }
+
+    async fn health(&self) -> HostResult<HostHealth> {
+        self.inner.health().await
+    }
+
+    async fn shutdown(&self) -> HostResult<()> {
+        self.inner.shutdown().await
+    }
+
+    async fn shutdown_session(&self, session_id: HostSessionId) -> HostResult<()> {
+        self.inner.shutdown_session(session_id).await
+    }
+
+    async fn list_sessions(&self) -> HostResult<Vec<HostSession>> {
+        self.inner.list_sessions().await
+    }
+
+    async fn provider_catalog(&self) -> HostResult<ProviderCatalog> {
+        self.inner.provider_catalog().await
+    }
+
+    fn subscribe_events(
+        &self,
+        session_id: HostSessionId,
+    ) -> tokio::sync::broadcast::Receiver<HostEvent> {
+        self.inner.subscribe_events(session_id)
+    }
+}
+
+async fn cli_run_fast_grace(d: &LiveDaemon, args: &[&str]) -> Output {
+    tokio::process::Command::new(env!("CARGO_BIN_EXE_nexus42"))
+        .args(args)
+        .env("HOME", d.home.path())
+        .env("RUST_LOG", "off")
+        .env("NEXUS42_RUN_OBSERVATION_GRACE_SECS", "1")
+        .output()
+        .await
+        .expect("spawn nexus42")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn character_run_remember_captures_pending_json() {
+    let host = P3MockHost::new(P3RunScript::Standard);
+    let d = LiveDaemon::start_with_agent_host(host).await;
+    let g = seed(&d).await;
+
+    let out = cli_run_fast_grace(
+        &d,
+        &run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &["--remember"]),
+    )
+    .await;
+    assert!(out.status.success(), "remember run: {}", stderr(&out));
+    let payload = json_out(&out);
+    assert_eq!(payload["result"], MOCK_RESULT);
+    assert_eq!(payload["outcome"]["run_status"], "succeeded");
+    assert_eq!(payload["outcome"]["capture"]["status"], "captured");
+    assert!(payload["outcome"]["capture"]["pending_id"]
+        .as_str()
+        .unwrap()
+        .starts_with("run_"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn character_run_opt_out_capture_disabled() {
+    let host = P3MockHost::new(P3RunScript::Standard);
+    let d = LiveDaemon::start_with_agent_host(host).await;
+    let g = seed(&d).await;
+
+    let out = d
+        .cli(&run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &[]))
+        .await;
+    assert!(out.status.success(), "default run: {}", stderr(&out));
+    let payload = json_out(&out);
+    assert_eq!(payload["outcome"]["capture"]["status"], "disabled");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn character_run_wrong_op_terminal_ignored() {
+    let host = P3MockHost::new(P3RunScript::WrongOpTerminalFirst);
+    let d = LiveDaemon::start_with_agent_host(host).await;
+    let g = seed(&d).await;
+
+    let out = d
+        .cli(&run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &[]))
+        .await;
+    assert!(out.status.success(), "wrong-op run: {}", stderr(&out));
+    let payload = json_out(&out);
+    assert_eq!(payload["result"], MOCK_RESULT);
+    assert_eq!(payload["outcome"]["run_status"], "succeeded");
+    let op_id = payload["operation"]["operation_id"].as_str().unwrap();
+    let session_id = payload["session"]["session_id"].as_str().unwrap();
+    for event in payload["events"].as_array().unwrap() {
+        let sid = event
+            .as_object()
+            .and_then(|o| o.values().next())
+            .and_then(|v| v.get("session_id"))
+            .and_then(|v| v.as_str());
+        let oid = event
+            .as_object()
+            .and_then(|o| o.values().next())
+            .and_then(|v| v.get("op_id"))
+            .and_then(|v| v.as_str());
+        assert_eq!(sid, Some(session_id));
+        assert_eq!(oid, Some(op_id));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn character_run_max_tokens_remember_nonzero() {
+    let host = P3MockHost::new(P3RunScript::MaxTokens);
+    let d = LiveDaemon::start_with_agent_host(host).await;
+    let g = seed(&d).await;
+
+    let out = cli_run_fast_grace(
+        &d,
+        &run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &["--remember"]),
+    )
+    .await;
+    assert!(!out.status.success(), "max_tokens remember must fail exit");
+    let payload = json_out(&out);
+    assert_eq!(payload["result"], MOCK_RESULT);
+    assert_eq!(payload["outcome"]["run_status"], "incomplete");
+    assert_eq!(payload["outcome"]["capture"]["status"], "skipped");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn character_run_missed_sse_preserves_outcome() {
+    let host = P3MockHost::new(P3RunScript::MissedSseTerminal);
+    let d = LiveDaemon::start_with_agent_host(host).await;
+    let g = seed(&d).await;
+
+    let out = cli_run_fast_grace(
+        &d,
+        &run_args(&g.character_a, &g.world_w1, &g.bind_a_w1, &["--remember"]),
+    )
+    .await;
+    assert!(!out.status.success(), "missed sse: {}", stderr(&out));
+    let payload = json_out(&out);
+    assert_eq!(payload["result"], MOCK_RESULT);
+    assert_eq!(payload["outcome"]["capture"]["status"], "captured");
+    assert_eq!(payload["output_observation"], "incomplete");
 }

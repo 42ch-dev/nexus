@@ -15,6 +15,10 @@
 **V1.65 Prepare amendment:** outline and chapter-structure editing becomes UI-first through the bundled Web UI chapter-content Daemon API. CLI parity for existing creator/run/chapter workflows is retained; no shipped CLI command is removed or renamed by this UI-first slice.
 **V1.175 P1 amendment:** §6.2G.3-6 — reading / fork / inspector leaves (groups 3, 5, 6), strategy patch leaves (group 1), outline/timeline/chapter leaves (group 2), KB entity patch + memory closure + findings triage (groups 4, 7, 8). Thin daemon-HTTP leaves over existing routes (AR-83); no daemon route changes.
 **V1.182 P1 amendment:** §6.3B — hidden `nexus42 ops inspect [SESSION_ID] [--json]` operator group (BL-04): daemon-free read-only checkpoint projection with shared `resume_rules`; never triggers resume.
+**V1.185 P0 amendment:** §6.2I — `nexus42 creator character edit|archive|restore` identity lifecycle (explicit revision CAS; thin daemon-HTTP leaves).
+**V1.185 P1 amendment:** §6.2I — `nexus42 creator character binding show|edit` WorldSheet maintenance (binding revision CAS; thin daemon-HTTP leaves).
+**V1.185 P3 amendment:** §6.2I.3 — `nexus42 creator character run --remember` + owner outcome observation (thin daemon-HTTP leaves).
+**V1.185 P2 amendment:** §6.2I.2 — `nexus42 creator character knowledge show|edit|remove` authored-content maintenance (knowledge revision CAS; thin daemon-HTTP leaves; `--summary`/`--summary-file` on add/edit).
 
 ## 0. 文档定位
 
@@ -865,6 +869,129 @@ Rules:
   journeys: rule-suggestion adoption; retention).
 - **World findings are read-only (AR-87 #1).** `creator world findings`
   is a GET-only read; any world-findings write route is a P1 non-goal.
+
+### 6.2I V1.185 P0 amendment — `nexus42 creator character` identity lifecycle (Normative)
+
+Normative: [actor-product-model.md](./actor-product-model.md) §11 (developer maintenance contract).
+
+Thin daemon-HTTP leaves over generated DTOs (`UpdateCharacterRequest`,
+`CharacterLifecycleRequest`, `CharacterDetail`). All mutations require an
+explicit `--expected-revision`; the CLI never performs a hidden GET-and-retry
+overwrite. `--json` emits the daemon DTO verbatim; human output prints the
+returned revision and status. Owner-wide `list`/`show` include archived
+Characters; run and identity writes on archived rows return **409
+`character_inactive`**.
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 creator character edit <character_id> --expected-revision <n> [--display-name <text>] [--image-uri <uri> \| --clear-image-uri] [--persona <json-object> \| --clear-persona] [--json]` | Patch Character identity metadata (`PATCH /v1/daemon/characters/:character_id`). Only flags present on the CLI are sent in the JSON body; `--clear-image-uri` / `--clear-persona` map to JSON `null` clears. |
+| `nexus42 creator character archive <character_id> --expected-revision <n> [--json]` | Archive (freeze) a Character (`POST /v1/daemon/characters/:character_id/archive`). Same-state CAS is a no-op and keeps current sessions. |
+| `nexus42 creator character restore <character_id> --expected-revision <n> [--json]` | Restore an archived Character to active with the same `character_id` (`POST /v1/daemon/characters/:character_id/restore`). Requires at least one owned active World binding; name collision returns **409 `duplicate_character_display_name`**. |
+
+Rules:
+
+- **Revision CAS (PL-5).** Stale `--expected-revision` returns **409
+  `character_revision_conflict`** with the current revision echoed; the CLI
+  surfaces the named code and exits non-zero without retrying.
+- **Lifecycle busy gate.** Archive/restore while another Character activity is
+  in flight returns **409 `character_busy`**.
+- **No CLI-side lifecycle logic.** The CLI maps flags to generated request
+  bodies and prints responses; fences, epoch retirement, and Host cleanup run
+  only in the daemon handlers.
+
+### 6.2I.1 V1.185 P1 amendment — `nexus42 creator character binding` WorldSheet maintenance (Normative)
+
+Normative: [actor-product-model.md](./actor-product-model.md) §11.4.
+
+Thin daemon-HTTP leaves over generated `CharacterBindingDetail` and
+`UpdateCharacterBindingRequest`. Only `world_sheet_entry_id` is mutable via
+`binding edit`; `--clear-world-sheet` maps to JSON `null`. The CLI never
+performs a hidden GET-and-retry overwrite. `binding show` and successful edits
+support `--json` for verbatim DTO output.
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 creator character binding show --character-id <id> --binding-id <id> [--json]` | Fetch one binding (`GET /v1/daemon/characters/:character_id/bindings/:binding_id`). Retained reads survive Character archive. |
+| `nexus42 creator character binding edit --character-id <id> --binding-id <id> --expected-revision <n> (--world-sheet-entry-id <kb_id> \| --clear-world-sheet) [--json]` | Link, relink, or clear the optional WorldSheet (`PATCH` on the same path). Requires exactly one of `--world-sheet-entry-id` or `--clear-world-sheet`. |
+
+Rules:
+
+- **Binding revision CAS.** Stale `--expected-revision` returns **409
+  `binding_revision_conflict`**; invalid WorldSheet targets return **409
+  `invalid_world_sheet`** without leaking target facts.
+- **Archived Character writes.** `binding edit` on an archived Character returns
+  **409 `character_inactive`**; retained `binding show` still succeeds.
+- **Remove unchanged.** `binding remove` success emits empty stdout (non-JSON);
+  last-binding and dependency refusals keep stable 409 codes with zero mutation.
+
+
+### 6.2I.2 V1.185 P2 amendment — `nexus42 creator character knowledge` authored-content maintenance (Normative)
+
+Normative: [actor-product-model.md](./actor-product-model.md) §11.5.
+
+Thin daemon-HTTP leaves over generated `KnowledgeEntryDetail`,
+`UpdateKnowledgeEntryRequest`, and `DeleteKnowledgeEntryQuery`. Character-scoped
+`show`/`edit`/`remove` pin `--character-id` and `--entry-id`; mutations require
+`--expected-revision`. Summary is the existing `body.summary` contract surface
+only — no second content field or owner rewrite in the CLI.
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 creator character knowledge add ... [--summary <text> \| --summary-file <path>]` | Create Character/binding-owned KE with optional summary (`POST /v1/daemon/actor-knowledge/entries`). World-owned create rejects `summary` with **422 `invalid_input`**. |
+| `nexus42 creator character knowledge show --character-id <id> --entry-id <id> [--json]` | Fetch one KE detail (`GET /v1/daemon/characters/:character_id/knowledge/:entry_id`). Retained reads survive Character archive. |
+| `nexus42 creator character knowledge edit --character-id <id> --entry-id <id> --expected-revision <n> [--canonical-name <text>] [--summary <text> \| --summary-file <path> \| --clear-summary] [--json]` | Patch canonical name and/or summary with revision CAS (`PATCH` on the same path). `--clear-summary` maps to JSON `null`. |
+| `nexus42 creator character knowledge remove --character-id <id> --entry-id <id> --expected-revision <n> [--json]` | Delete an unreferenced KE (`DELETE` on the same path; **204**). |
+
+Rules:
+
+- **Knowledge revision CAS.** Stale `--expected-revision` returns **409
+  `knowledge_revision_conflict`**; referenced rows return **409
+  `knowledge_entry_in_use`**; wrong Character/entry scope returns **404** before
+  revision/referrer disclosure.
+- **Summary file bounds.** `--summary-file` reads at most **65536 UTF-8 bytes**
+  without trim/truncate; invalid UTF-8 is a CLI validation error.
+- **Archived Character writes.** `knowledge edit`/`remove` on an archived Character
+  returns **409 `character_inactive`**; retained `knowledge show` still succeeds.
+- **No CLI-side storage logic.** The CLI maps flags to generated request bodies
+  and prints responses; CAS, referent inventory, and activity guards run only in
+  daemon handlers / local-db.
+
+
+### 6.2I.3 V1.185 P3 amendment — `nexus42 creator character run` observation + `--remember` (Normative)
+
+Normative: [actor-product-model.md](./actor-product-model.md) §11.6.
+
+Thin daemon-HTTP leaves over generated Agent Host session/operation DTOs plus the
+owner-only `CharacterOperationResult` outcome surface. Run output observation
+uses the existing session SSE stream; capture observation uses
+`GET /v1/daemon/agent-host/operations/:operation_id` polled concurrently (100ms)
+with a ≤30s grace window after the first terminal observation. The CLI never
+reruns provider execution for capture or outcome recovery.
+
+| Flag / output | Purpose |
+| --- | --- |
+| `--remember` (default **false**) | Opt into explicit run-to-memory capture after a successful `end_turn`. Maps to `ExecuteOperationRequest.Prompt.remember`. |
+| `--json` | Emits `session`, `operation`, `result`, `events`, and when available `outcome` (`CharacterOperationResult`). Adds `output_observation: incomplete` and/or `capture_outcome_observation: unavailable` when grace expires without the peer observation. |
+| Human output | Prints `run_status` and `capture_status` / `capture_pending_id` / `capture_code` on separate lines from `result`. |
+
+Rules:
+
+- **Run vs capture exit codes.** Opt-out succeeded runs exit **0** when SSE
+  terminal observation is complete. `remember` + `captured` exits **0** only
+  when both the matching SSE `end_turn` terminal and the terminal GET outcome
+  are observed. Missed SSE terminal with a successful GET outcome exits
+  **nonzero** while preserving streamed `result` and `outcome`. `remember`
+  with terminal `skipped`/`failed` capture, incomplete/failed/cancelled runs,
+  or unavailable capture outcome after grace exits **nonzero** while preserving
+  streamed `result` text when received.
+- **Correlation.** SSE terminal handling ignores foreign `session_id` / `op_id`
+  pairs; only the launched operation's `MessageDelta` text contributes to
+  `result`.
+- **Outcome authority.** `outcome.capture` from the GET route is authoritative
+  for terminal capture status; initial `operation.capture` on POST remains
+  `pending`/`disabled` only.
+- **No CLI digest.** The CLI does not accept digests, `source_operation_id`, or
+  capture bodies; daemon drain + storage own capture content.
 
 ### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
 

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO character_memory_pending_review\n         (pending_id, session_id, character_id, actor_world_binding_id, task_kind,\n          raw_digest, created_at, source_operation_id)\n         VALUES (?, ?, ?, ?, 'unknown', ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "bb73ae29cf12943559914b0579750a7183871d0a741ded82c8206b49708c604d"
+}

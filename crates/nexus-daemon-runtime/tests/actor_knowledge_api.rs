@@ -22,6 +22,7 @@ struct Ctx {
     _tmp: TestTempRoot,
     server: TestServer,
     pool: sqlx::SqlitePool,
+    state: WorkspaceState,
 }
 
 async fn ctx() -> Ctx {
@@ -36,12 +37,16 @@ async fn ctx() -> Ctx {
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
     let pool = state.pool().unwrap().clone();
     seed_actor_fixture(&pool).await;
-    let server = TestServer::new(api::create_router(state, DaemonApiConfig::keyless()))
-        .expect("test server");
+    let server = TestServer::new(api::create_router(
+        state.clone(),
+        DaemonApiConfig::keyless(),
+    ))
+    .expect("test server");
     Ctx {
         _tmp: tmp,
         server,
         pool,
+        state,
     }
 }
 
@@ -905,7 +910,9 @@ async fn inactive_world_and_character_fail_closed_on_view_and_add() {
         .await;
     assert_eq!(ok.status_code(), 200, "control: {}", ok.text());
 
-    // Archive the Character: view + character-owned add fail closed.
+    // Archive the Character: the KnowledgeView is a retained read and still
+    // 200 (owned Character + stored binding tuple); the character-owned add
+    // fails closed with character_inactive.
     sqlx::query("UPDATE characters SET status = 'archived' WHERE character_id = ?")
         .bind(&chr)
         .execute(&ctx.pool)
@@ -922,13 +929,12 @@ async fn inactive_world_and_character_fail_closed_on_view_and_add() {
         .await;
     assert_eq!(
         view_archived_chr.status_code(),
-        409,
-        "{}",
+        200,
+        "archived Character view is retained: {}",
         view_archived_chr.text()
     );
     let body: Value = view_archived_chr.json();
-    assert_eq!(body["error"]["code"], "character_inactive");
-    assert!(body.get("items").is_none());
+    assert!(body.get("items").is_some());
 
     let add_archived_chr = ctx
         .server
@@ -949,7 +955,9 @@ async fn inactive_world_and_character_fail_closed_on_view_and_add() {
     let body: Value = add_archived_chr.json();
     assert_eq!(body["error"]["code"], "character_inactive");
 
-    // Archive the World: even the Creator component of a view fails closed.
+    // Archive the World: the Creator view is a retained read (an owned
+    // archived World keeps its retained history visible); the World-owned add
+    // still fails closed with world_inactive.
     sqlx::query("UPDATE narrative_worlds SET status = 'archived' WHERE world_id = ?")
         .bind(WORLD_A)
         .execute(&ctx.pool)
@@ -965,12 +973,12 @@ async fn inactive_world_and_character_fail_closed_on_view_and_add() {
         .await;
     assert_eq!(
         view_archived_world.status_code(),
-        409,
-        "{}",
+        200,
+        "archived World Creator view is retained: {}",
         view_archived_world.text()
     );
     let body: Value = view_archived_world.json();
-    assert_eq!(body["error"]["code"], "world_inactive");
+    assert!(body.get("items").is_some());
 
     let add_archived_world = ctx
         .server
@@ -990,4 +998,432 @@ async fn inactive_world_and_character_fail_closed_on_view_and_add() {
     );
     let body: Value = add_archived_world.json();
     assert_eq!(body["error"]["code"], "world_inactive");
+}
+/// Fix round 1 (L2): character-owned KB add admits and holds the per-Character
+/// activity fence so a concurrent lifecycle transition refuses `character_busy`
+/// (durable §11.3.1/§11.3.2).
+#[tokio::test]
+async fn kb_character_add_holds_activity_fence() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "FenceKb", WORLD_A).await;
+    let chr = created["character"]["character_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let guard = ctx
+        .state
+        .actor_sessions()
+        .admit_character_activity(&ctx.pool, OWNER, &chr)
+        .await
+        .expect("admit activity as add_entry does before insert");
+    let busy = ctx
+        .state
+        .actor_sessions()
+        .try_character_transition(&ctx.pool, OWNER, &chr)
+        .await
+        .expect_err("archive blocked while KB-add activity fence held");
+    assert_eq!(busy.error_code(), "character_busy");
+    assert_eq!(busy.status_code(), axum::http::StatusCode::CONFLICT);
+
+    drop(guard);
+    add_entry(
+        &ctx.server,
+        json!({
+            "owner_kind": "character",
+            "character_id": chr,
+            "block_type": "item",
+            "canonical_name": "HeldFence"
+        }),
+    )
+    .await;
+}
+
+// --- P2 Task 3: knowledge detail / summary CAS / delete routes ---
+
+// axum-test `AutoFuture` is not `Send` by design; helpers only on single-threaded runtime.
+#[allow(clippy::future_not_send)]
+async fn detail(
+    server: &TestServer,
+    character_id: &str,
+    entry_id: &str,
+) -> axum_test::TestResponse {
+    server
+        .get(&format!(
+            "/v1/daemon/characters/{character_id}/knowledge/{entry_id}"
+        ))
+        .await
+}
+
+#[allow(clippy::future_not_send)]
+async fn patch_detail(
+    server: &TestServer,
+    character_id: &str,
+    entry_id: &str,
+    body: Value,
+) -> axum_test::TestResponse {
+    server
+        .patch(&format!(
+            "/v1/daemon/characters/{character_id}/knowledge/{entry_id}"
+        ))
+        .json(&body)
+        .await
+}
+
+#[allow(clippy::future_not_send)]
+async fn delete_detail_query(
+    server: &TestServer,
+    character_id: &str,
+    entry_id: &str,
+    query: &str,
+) -> axum_test::TestResponse {
+    let path = if query.is_empty() {
+        format!("/v1/daemon/characters/{character_id}/knowledge/{entry_id}")
+    } else {
+        format!("/v1/daemon/characters/{character_id}/knowledge/{entry_id}?{query}")
+    };
+    server.delete(&path).await
+}
+
+#[allow(clippy::future_not_send)]
+async fn delete_detail(
+    server: &TestServer,
+    character_id: &str,
+    entry_id: &str,
+    expected_revision: u64,
+) -> axum_test::TestResponse {
+    server
+        .delete(&format!(
+            "/v1/daemon/characters/{character_id}/knowledge/{entry_id}?expected_revision={expected_revision}"
+        ))
+        .await
+}
+
+#[tokio::test]
+async fn knowledge_detail_summary_lifecycle_and_preserves_body_keys() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr = created["character"]["character_id"].as_str().unwrap();
+
+    let added = add_entry(
+        &ctx.server,
+        json!({
+            "owner_kind": "character",
+            "character_id": chr,
+            "block_type": "item",
+            "canonical_name": "Fact",
+            "summary": "initial summary"
+        }),
+    )
+    .await;
+    let entry_id = added["item"]["entry_id"].as_str().unwrap();
+    assert_eq!(added["item"]["revision"], 0);
+
+    sqlx::query("UPDATE kb_key_blocks SET body_json = ? WHERE key_block_id = ?")
+        .bind(r#"{"summary":"initial summary","custom_flag":true}"#)
+        .bind(entry_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+
+    let got = detail(&ctx.server, chr, entry_id).await;
+    assert_eq!(got.status_code(), 200, "{}", got.text());
+    let body: Value = got.json();
+    assert_eq!(body["summary"], "initial summary");
+    assert_eq!(body["item"]["canonical_name"], "Fact");
+    assert_eq!(body["item"]["revision"], 0);
+
+    let patched = patch_detail(
+        &ctx.server,
+        chr,
+        entry_id,
+        json!({ "expected_revision": 0, "summary": "edited summary" }),
+    )
+    .await;
+    assert_eq!(patched.status_code(), 200, "{}", patched.text());
+    let body: Value = patched.json();
+    assert_eq!(body["summary"], "edited summary");
+    assert_eq!(body["item"]["revision"], 1);
+
+    let row: (String,) =
+        sqlx::query_as("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(entry_id)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+    let stored: Value = serde_json::from_str(&row.0).unwrap();
+    assert_eq!(stored["custom_flag"], true);
+
+    let rename_only = patch_detail(
+        &ctx.server,
+        chr,
+        entry_id,
+        json!({ "expected_revision": 1, "canonical_name": "FactRenamed" }),
+    )
+    .await;
+    assert_eq!(rename_only.status_code(), 200, "{}", rename_only.text());
+    let body: Value = rename_only.json();
+    assert_eq!(body["item"]["canonical_name"], "FactRenamed");
+    assert_eq!(body["summary"], "edited summary");
+    assert_eq!(body["item"]["revision"], 2);
+
+    let cleared = patch_detail(
+        &ctx.server,
+        chr,
+        entry_id,
+        json!({ "expected_revision": 2, "summary": null }),
+    )
+    .await;
+    assert_eq!(cleared.status_code(), 200, "{}", cleared.text());
+    let body: Value = cleared.json();
+    assert!(body["summary"].is_null());
+    assert_eq!(body["item"]["revision"], 3);
+
+    let deleted = delete_detail(&ctx.server, chr, entry_id, 3).await;
+    assert_eq!(deleted.status_code(), 204, "{}", deleted.text());
+    let missing = detail(&ctx.server, chr, entry_id).await;
+    assert_eq!(missing.status_code(), 404, "{}", missing.text());
+}
+
+#[tokio::test]
+async fn knowledge_patch_omitted_summary_preserves_value() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr = created["character"]["character_id"].as_str().unwrap();
+    let added = add_entry(
+        &ctx.server,
+        json!({
+            "owner_kind": "character",
+            "character_id": chr,
+            "block_type": "item",
+            "canonical_name": "KeepSummary",
+            "summary": "stay"
+        }),
+    )
+    .await;
+    let entry_id = added["item"]["entry_id"].as_str().unwrap();
+
+    let patched = patch_detail(
+        &ctx.server,
+        chr,
+        entry_id,
+        json!({ "expected_revision": 0, "canonical_name": "Renamed" }),
+    )
+    .await;
+    assert_eq!(patched.status_code(), 200, "{}", patched.text());
+    let body: Value = patched.json();
+    assert_eq!(body["summary"], "stay");
+}
+
+#[tokio::test]
+async fn world_create_with_summary_is_invalid_input() {
+    let ctx = ctx().await;
+    let resp = ctx
+        .server
+        .post("/v1/daemon/actor-knowledge/entries")
+        .json(&json!({
+            "owner_kind": "world",
+            "world_id": WORLD_A,
+            "block_type": "item",
+            "canonical_name": "Nope",
+            "summary": "forbidden"
+        }))
+        .await;
+    assert_eq!(resp.status_code(), 422, "{}", resp.text());
+    let body: Value = resp.json();
+    assert_eq!(body["error"]["code"], "invalid_input");
+}
+
+#[tokio::test]
+async fn knowledge_detail_wrong_scope_is_404_without_revision_leak() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr = created["character"]["character_id"].as_str().unwrap();
+    let added = add_entry(
+        &ctx.server,
+        json!({
+            "owner_kind": "character",
+            "character_id": chr,
+            "block_type": "item",
+            "canonical_name": "Secret",
+            "summary": "hidden"
+        }),
+    )
+    .await;
+    let entry_id = added["item"]["entry_id"].as_str().unwrap();
+
+    let foreign_chr = detail(&ctx.server, MISSING_CHR, entry_id).await;
+    assert_eq!(foreign_chr.status_code(), 404, "{}", foreign_chr.text());
+    assert!(!foreign_chr.text().contains("revision"));
+
+    let foreign_entry = detail(&ctx.server, chr, "kb_missingentry").await;
+    assert_eq!(foreign_entry.status_code(), 404, "{}", foreign_entry.text());
+    assert!(!foreign_entry.text().contains("revision"));
+}
+
+#[tokio::test]
+async fn knowledge_stale_revision_and_in_use_delete_errors() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr = created["character"]["character_id"].as_str().unwrap();
+    let added = add_entry(
+        &ctx.server,
+        json!({
+            "owner_kind": "character",
+            "character_id": chr,
+            "block_type": "item",
+            "canonical_name": "Anchored",
+            "summary": "text"
+        }),
+    )
+    .await;
+    let entry_id = added["item"]["entry_id"].as_str().unwrap();
+
+    let stale = patch_detail(
+        &ctx.server,
+        chr,
+        entry_id,
+        json!({ "expected_revision": 9, "summary": "nope" }),
+    )
+    .await;
+    assert_eq!(stale.status_code(), 409, "{}", stale.text());
+    let body: Value = stale.json();
+    assert_eq!(body["error"]["code"], "knowledge_revision_conflict");
+
+    sqlx::query(
+        "INSERT INTO kb_source_anchors (key_block_id, anchor_ordinal, source_anchor_json) VALUES (?, 0, '{}')",
+    )
+    .bind(entry_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+
+    let in_use = delete_detail(&ctx.server, chr, entry_id, 0).await;
+    assert_eq!(in_use.status_code(), 409, "{}", in_use.text());
+    let body: Value = in_use.json();
+    assert_eq!(body["error"]["code"], "knowledge_entry_in_use");
+}
+
+#[tokio::test]
+async fn knowledge_empty_patch_is_invalid_input() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr = created["character"]["character_id"].as_str().unwrap();
+    let added = add_entry(
+        &ctx.server,
+        json!({
+            "owner_kind": "character",
+            "character_id": chr,
+            "block_type": "item",
+            "canonical_name": "Noop"
+        }),
+    )
+    .await;
+    let entry_id = added["item"]["entry_id"].as_str().unwrap();
+
+    let resp = patch_detail(
+        &ctx.server,
+        chr,
+        entry_id,
+        json!({ "expected_revision": 0 }),
+    )
+    .await;
+    assert_eq!(resp.status_code(), 422, "{}", resp.text());
+    let body: Value = resp.json();
+    assert_eq!(body["error"]["code"], "invalid_input");
+}
+
+#[tokio::test]
+async fn knowledge_archived_character_detail_read_write_split() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr = created["character"]["character_id"].as_str().unwrap();
+    let added = add_entry(
+        &ctx.server,
+        json!({
+            "owner_kind": "character",
+            "character_id": chr,
+            "block_type": "item",
+            "canonical_name": "ArchiveMe",
+            "summary": "retained"
+        }),
+    )
+    .await;
+    let entry_id = added["item"]["entry_id"].as_str().unwrap();
+
+    sqlx::query("UPDATE characters SET status = 'archived' WHERE character_id = ?")
+        .bind(chr)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+
+    let read = detail(&ctx.server, chr, entry_id).await;
+    assert_eq!(read.status_code(), 200, "{}", read.text());
+    let body: Value = read.json();
+    assert_eq!(body["summary"], "retained");
+
+    let write = patch_detail(
+        &ctx.server,
+        chr,
+        entry_id,
+        json!({ "expected_revision": 0, "summary": "nope" }),
+    )
+    .await;
+    assert_eq!(write.status_code(), 409, "{}", write.text());
+    let body: Value = write.json();
+    assert_eq!(body["error"]["code"], "character_inactive");
+}
+
+#[tokio::test]
+async fn knowledge_delete_malformed_expected_revision_is_invalid_input() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr = created["character"]["character_id"].as_str().unwrap();
+    let added = add_entry(
+        &ctx.server,
+        json!({
+            "owner_kind": "character",
+            "character_id": chr,
+            "block_type": "item",
+            "canonical_name": "DeleteQuery"
+        }),
+    )
+    .await;
+    let entry_id = added["item"]["entry_id"].as_str().unwrap();
+
+    for (query, label) in [
+        ("", "missing"),
+        ("expected_revision=abc", "non-integer"),
+        ("expected_revision=9223372036854775807", "overflow"),
+    ] {
+        let resp = delete_detail_query(&ctx.server, chr, entry_id, query).await;
+        assert_eq!(resp.status_code(), 422, "{label}: {}", resp.text());
+        let body: Value = resp.json();
+        assert_eq!(body["error"]["code"], "invalid_input", "{label}");
+    }
+}
+
+#[tokio::test]
+async fn character_create_oversize_multibyte_summary_is_invalid_input() {
+    let ctx = ctx().await;
+    let created = create_character(&ctx.server, "Ava", WORLD_A).await;
+    let chr = created["character"]["character_id"].as_str().unwrap();
+    let at_limit = "字".repeat(21845) + "a";
+    assert_eq!(at_limit.len(), 65536);
+    let over = format!("{at_limit}b");
+    assert!(over.len() > 65536);
+    let resp = ctx
+        .server
+        .post("/v1/daemon/actor-knowledge/entries")
+        .json(&json!({
+            "owner_kind": "character",
+            "character_id": chr,
+            "block_type": "item",
+            "canonical_name": "OversizeSummary",
+            "summary": over
+        }))
+        .await;
+    assert_eq!(resp.status_code(), 422, "{}", resp.text());
+    let body: Value = resp.json();
+    assert_eq!(body["error"]["code"], "invalid_input");
 }
