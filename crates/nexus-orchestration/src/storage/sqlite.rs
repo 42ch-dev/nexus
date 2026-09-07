@@ -1062,7 +1062,20 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 ));
             }
             let execution_version = row.execution_version as u32;
-            let state_revision = u64::try_from(row.state_revision).unwrap_or(0);
+            // A negative child `state_revision` is corrupt/non-replayable
+            // (A7) — never coerce it to zero. Preserve the row verbatim
+            // (Important 1), exactly as `load_run` does for the root row.
+            let state_revision_i64 = row.state_revision;
+            if state_revision_i64 < 0 {
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "load_children '{}': child '{}' has negative state_revision \
+                         {state_revision_i64} (non-replayable)",
+                        parent_session_id.0, row.session_id
+                    )),
+                ));
+            }
+            let state_revision = u64::try_from(state_revision_i64).unwrap_or(0);
             if execution_version >= 1 {
                 let status = SessionStatus::from_db_str(&row.status).ok_or_else(|| {
                     EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
@@ -1144,17 +1157,20 @@ impl WorkflowStateStore for SqliteSessionStorage {
         let state_bytes = serialize_blob(&cleared_state)?;
 
         // ONE atomic operation: restore only when the persisted revision still
-        // matches AND the row is non-terminal (running or paused — a paused
-        // row is re-stepped by the drive loop and its position must restore
-        // too). A concurrent transition that won between a check and a
-        // separate save is left untouched.
+        // matches AND the row is a status that may actually be stepped
+        // (explicit running/paused intent — a paused row is re-stepped by the
+        // drive loop and its position must restore too). `waiting_for_input`
+        // (and unknown statuses) are excluded so a stale step invocation can
+        // never clear or overwrite a durable human-wait row, including its
+        // WaitRecord token (A4). A concurrent transition that won between a
+        // check and a separate save is left untouched.
         let expected_revision_i64 = expected_revision as i64;
         let result = sqlx::query!(
             r#"
             UPDATE orchestration_sessions
             SET current_task_id = ?, context_json = ?, updated_at = ?, run_state_json = ?
             WHERE session_id = ? AND state_revision = ?
-              AND status NOT IN ('completed', 'failed', 'cancelled', 'interrupted')
+              AND status IN ('running', 'paused')
             "#,
             current_task_id,
             context_bytes,
@@ -1220,9 +1236,12 @@ impl WorkflowStateStore for SqliteSessionStorage {
         })?;
         let state_bytes = serialize_blob(step_state)?;
 
-        // Fence to a non-terminal row (`status` running or paused — a paused
-        // session is re-stepped by the drive loop) AND `state_revision =
-        // expected`. Deliberately does NOT advance the revision (a subsequent
+        // Fence to the statuses that may actually be stepped (`status`
+        // running or paused — a paused session is re-stepped by the drive
+        // loop) AND `state_revision = expected`. `waiting_for_input` (and
+        // unknown statuses) are excluded so a stale step invocation can never
+        // overwrite a durable human-wait row, including its WaitRecord token
+        // (A4). Deliberately does NOT advance the revision (a subsequent
         // `commit_transition` still CAS-anchors to the same pre-step
         // revision); it only marks the durable in-flight intent.
         let expected_revision_i64 = expected_revision as i64;
@@ -1230,8 +1249,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
             r#"
             UPDATE orchestration_sessions
             SET current_task_id = ?, context_json = ?, updated_at = ?, run_state_json = ?
-            WHERE session_id = ? AND status NOT IN
-                  ('completed', 'failed', 'cancelled', 'interrupted')
+            WHERE session_id = ? AND status IN ('running', 'paused')
               AND state_revision = ?
             "#,
             current_task_id,

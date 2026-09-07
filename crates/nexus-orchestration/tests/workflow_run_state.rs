@@ -3933,3 +3933,410 @@ async fn external_effect_marker_cleared_per_step() {
         "deterministic failure restored to pre-step position (marker correctly cleared)"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Fix round 6 (task re-review): regression tests for each fixed contract
+// ---------------------------------------------------------------------------
+
+/// A graph-flow task that records a context marker proving the task's `run`
+/// was actually dispatched (used by the engine-path Minor 1 test to assert an
+/// effectful task never dispatches before `mark_step_in_flight` succeeds).
+struct MarkerEffectTask;
+#[async_trait::async_trait]
+impl graph_flow::Task for MarkerEffectTask {
+    fn id(&self) -> &str {
+        "marker_effect_task"
+    }
+    async fn run(
+        &self,
+        ctx: graph_flow::Context,
+    ) -> graph_flow::Result<graph_flow::TaskResult> {
+        // Set both the engine effect marker AND a test-only dispatch marker so
+        // the test can observe whether the task actually ran.
+        ctx.set(nexus_orchestration::engine::EXTERNAL_EFFECT_MARKER, true)
+            .await;
+        ctx.set("dispatched", true).await;
+        Ok(graph_flow::TaskResult::new(
+            None,
+            graph_flow::NextAction::Continue,
+        ))
+    }
+}
+
+// Important 1: `load_children` must reject a child whose `state_revision` is
+// negative (corrupt) as non-replayable — never coerced to zero. The child row
+// and its blobs are preserved verbatim, exactly as `load_run` does for the
+// root row (round-2/4 contract extended to child rows).
+#[tokio::test]
+async fn negative_child_revision_is_non_replayable() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, engine) = fresh_engine(pool.clone()).await;
+    let parent_sid = SessionId("par-neg-child-rev".to_string());
+
+    // Start a parent run.
+    let descriptor = test_descriptor(&parent_sid.0);
+    let root = root_session(&parent_sid.0, "parent_task").await;
+    let checkpoint = RunCheckpoint {
+        root: &root,
+        children: &[],
+    };
+    storage
+        .start_run(&parent_sid, &descriptor, checkpoint, &RunStateV1::default())
+        .await
+        .expect("start parent");
+
+    // Seed a v1 child row with state_revision = -4 (corrupt).
+    let child_id = "par-neg-child-rev:child:1";
+    let child_descriptor = test_descriptor(child_id);
+    // The child descriptor must name this parent so `load_children` finds it.
+    let mut child_descriptor = child_descriptor;
+    child_descriptor.parent_session_id = Some(parent_sid.clone());
+    child_descriptor.graph_name = Some("inner_graph".to_string());
+    let state = RunStateV1::default();
+    sqlx::query(
+        "INSERT INTO orchestration_sessions
+            (session_id, creator_id, preset_id, preset_version, parent_session_id,
+             current_task_id, status, context_json, created_at, updated_at,
+             execution_version, state_revision, run_state_json, run_descriptor_json)
+         VALUES (?, 'ctr', 'test-preset', 3, ?, 'child_task', 'running',
+                 '{\"data\":{}}', 1756990000, 1756990300,
+                 1, -4, ?, ?)",
+    )
+    .bind(child_id)
+    .bind(&parent_sid.0)
+    .bind(serde_json::to_vec(&state).expect("serialize state"))
+    .bind(serde_json::to_vec(&child_descriptor).expect("serialize child descriptor"))
+    .execute(&*pool)
+    .await
+    .expect("seed negative-revision child row");
+
+    // `load_children` must treat the negative child revision as corrupt
+    // (non-replayable) rather than coerce it to zero and hydrate a valid
+    // checkpoint.
+    let err = storage
+        .load_children(&parent_sid)
+        .await
+        .expect_err("negative child state_revision must be non-replayable");
+    assert!(
+        matches!(
+            err,
+            nexus_orchestration::engine::EngineError::GraphFlow(_)
+        ),
+        "expected GraphFlow error for negative child revision, got {err:?}"
+    );
+
+    // The child row is preserved verbatim (state_revision still -4).
+    let raw: i64 = sqlx::query_scalar(
+        "SELECT state_revision FROM orchestration_sessions WHERE session_id = ?",
+    )
+    .bind(child_id)
+    .fetch_one(&*pool)
+    .await
+    .expect("read raw child state_revision");
+    assert_eq!(raw, -4, "child row preserved verbatim");
+
+    // `hydrate_children` must also propagate the error (recovery refuses to
+    // reconstruct a parent over a corrupt child) — no stale checkpoint.
+    let err = engine
+        .shared_state()
+        .hydrate_children(&parent_sid)
+        .await
+        .expect_err("hydrate_children must propagate the negative child revision");
+    assert!(
+        matches!(
+            err,
+            nexus_orchestration::engine::EngineError::GraphFlow(_)
+        ),
+        "expected GraphFlow error from hydrate_children, got {err:?}"
+    );
+    let shared = engine.shared_state();
+    let map = shared.children.read().await;
+    assert!(
+        !map.contains_key(&parent_sid.0),
+        "negative child revision must not populate the children map"
+    );
+}
+
+// Important 2: a stale `mark_step_in_flight` against a `waiting_for_input`
+// row must NOT overwrite/clear the durable WaitRecord. The fence admits only
+// statuses that may actually be stepped (running/paused); waiting_for_input
+// (and unknown statuses) are excluded (A4 token retention).
+#[tokio::test]
+async fn stale_mark_step_in_flight_against_waiting_row_leaves_wait_untouched() {
+    let (pool, _db) = fresh_pool().await;
+    let storage = SqliteSessionStorage::new(pool);
+    let session_id = SessionId("sess-wait-mark".to_string());
+
+    let descriptor = test_descriptor(&session_id.0);
+    let root = root_session(&session_id.0, "wait_task").await;
+    let checkpoint = RunCheckpoint {
+        root: &root,
+        children: &[],
+    };
+    storage
+        .start_run(&session_id, &descriptor, checkpoint, &RunStateV1::default())
+        .await
+        .expect("start_run");
+
+    // Commit a human-wait transition with a durable WaitRecord (revision 1 → 2).
+    let wait_state = RunStateV1 {
+        wait: Some(nexus_orchestration::run_state::WaitRecord {
+            wait_id: "wait-mark-token".to_string(),
+            task_id: "wait_task".to_string(),
+            child_session_id: None,
+            child_task_id: None,
+            kind: nexus_orchestration::run_state::WaitKind::Manual,
+        }),
+        ..RunStateV1::default()
+    };
+    let root = root_session(&session_id.0, "wait_task").await;
+    let checkpoint = RunCheckpoint {
+        root: &root,
+        children: &[],
+    };
+    storage
+        .commit_transition(
+            &session_id,
+            1,
+            checkpoint,
+            SessionStatus::WaitingForInput,
+            &wait_state,
+        )
+        .await
+        .expect("commit wait (revision 2)");
+
+    // A stale step invocation at expected_revision = 2 (matching, so the CAS
+    // fence passes) but on a waiting_for_input row must be refused — never
+    // overwrite the WaitRecord.
+    let pre = root_session(&session_id.0, "stale_effect_start").await;
+    let in_flight_state = RunStateV1 {
+        step_in_flight: Some("stale_effect_start".to_string()),
+        ..RunStateV1::default()
+    };
+    let _err = storage
+        .mark_step_in_flight(
+            &session_id,
+            2, // matches persisted revision
+            RunCheckpoint {
+                root: &pre,
+                children: &[],
+            },
+            &in_flight_state,
+        )
+        .await
+        .expect_err("mark_step_in_flight must refuse a human-wait row");
+
+    // The row stayed waiting_for_input; the WaitRecord (with its token) and
+    // revision must be untouched.
+    let record = storage
+        .load_run(&session_id)
+        .await
+        .expect("load_run")
+        .expect("run present");
+    assert_eq!(
+        record.status,
+        SessionStatus::WaitingForInput,
+        "stale mark must not change the wait row's status"
+    );
+    assert_eq!(record.state_revision, 2, "stale mark must not advance revision");
+    let state = record.state.expect("v1 state present");
+    let wait = state.wait.expect("WaitRecord retained");
+    assert_eq!(
+        wait.wait_id, "wait-mark-token",
+        "WaitRecord token must survive a stale mark_step_in_flight"
+    );
+    assert_eq!(wait.task_id, "wait_task");
+    assert!(
+        state.step_in_flight.is_none(),
+        "stale mark must not persist an in-flight marker on the wait row"
+    );
+}
+
+// Important 2: a stale `restore_pre_step` against a `waiting_for_input` row
+// must NOT clear the durable WaitRecord. The fence admits only statuses that
+// may actually be stepped (running/paused); waiting_for_input is excluded
+// (A4 token retention until an authorized successful CAS).
+#[tokio::test]
+async fn stale_restore_pre_step_against_waiting_row_leaves_wait_untouched() {
+    let (pool, _db) = fresh_pool().await;
+    let storage = SqliteSessionStorage::new(pool);
+    let session_id = SessionId("sess-wait-restore".to_string());
+
+    let descriptor = test_descriptor(&session_id.0);
+    let root = root_session(&session_id.0, "wait_task").await;
+    let checkpoint = RunCheckpoint {
+        root: &root,
+        children: &[],
+    };
+    storage
+        .start_run(&session_id, &descriptor, checkpoint, &RunStateV1::default())
+        .await
+        .expect("start_run");
+
+    // Commit a human-wait transition with a durable WaitRecord (revision 1 → 2).
+    let wait_state = RunStateV1 {
+        wait: Some(nexus_orchestration::run_state::WaitRecord {
+            wait_id: "wait-restore-token".to_string(),
+            task_id: "wait_task".to_string(),
+            child_session_id: None,
+            child_task_id: None,
+            kind: nexus_orchestration::run_state::WaitKind::Manual,
+        }),
+        ..RunStateV1::default()
+    };
+    let root = root_session(&session_id.0, "wait_task").await;
+    let checkpoint = RunCheckpoint {
+        root: &root,
+        children: &[],
+    };
+    storage
+        .commit_transition(
+            &session_id,
+            1,
+            checkpoint,
+            SessionStatus::WaitingForInput,
+            &wait_state,
+        )
+        .await
+        .expect("commit wait (revision 2)");
+
+    // A stale restore anchored at the matching revision must be refused on a
+    // waiting_for_input row — never clear its WaitRecord.
+    let pre = root_session(&session_id.0, "pre_wait_boundary").await;
+    let err = storage
+        .restore_pre_step(&session_id, 2, &pre)
+        .await
+        .expect_err("restore_pre_step must refuse a human-wait row");
+    // Revision matches, so the refusal is TerminalState (waiting is excluded).
+    assert!(
+        matches!(
+            err,
+            nexus_orchestration::engine::EngineError::TerminalState(_)
+        ),
+        "expected TerminalState for a waiting_for_input restore, got {err:?}"
+    );
+
+    // The row stayed waiting_for_input; the WaitRecord (with its token) and
+    // the run_state_json (position) must be untouched.
+    let record = storage
+        .load_run(&session_id)
+        .await
+        .expect("load_run")
+        .expect("run present");
+    assert_eq!(
+        record.status,
+        SessionStatus::WaitingForInput,
+        "stale restore must not change the wait row's status"
+    );
+    assert_eq!(record.state_revision, 2, "stale restore must not advance revision");
+    let state = record.state.expect("v1 state present");
+    let wait = state.wait.expect("WaitRecord retained through stale restore");
+    assert_eq!(
+        wait.wait_id, "wait-restore-token",
+        "WaitRecord token must survive a stale restore_pre_step"
+    );
+    assert_eq!(wait.task_id, "wait_task");
+}
+
+// Minor 1 (engine path): the engine must NOT dispatch an effectful task
+// before `mark_step_in_flight` is persisted. When the pre-step row is in a
+// human-wait state (not re-steppable), the engine refuses the step before
+// `runner.run` executes the task — the effect task's `run` never fires.
+#[tokio::test]
+async fn engine_effectful_task_does_not_dispatch_before_in_flight_mark() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, engine) = fresh_engine(pool.clone()).await;
+
+    // Parent graph: marker-effect task (external effect) → end.
+    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
+    parent_graph.add_task(Arc::new(MarkerEffectTask));
+    parent_graph.add_task(Arc::new(EndTask));
+    parent_graph.add_edge("marker_effect_task", "end_task");
+    let parent_sid = engine
+        .start_session("novel-writing", parent_graph)
+        .await
+        .expect("start parent");
+
+    // Manually put the parent into a human-wait state (durable WaitRecord,
+    // revision 1 → 2). A waiting_for_input row must NEVER be re-stepped.
+    let root = storage
+        .get(&parent_sid.0)
+        .await
+        .expect("get pre-wait root")
+        .expect("root present");
+    let wait_state = RunStateV1 {
+        wait: Some(nexus_orchestration::run_state::WaitRecord {
+            wait_id: "wait-engine-gate".to_string(),
+            task_id: root.current_task_id.clone(),
+            child_session_id: None,
+            child_task_id: None,
+            kind: nexus_orchestration::run_state::WaitKind::Manual,
+        }),
+        ..RunStateV1::default()
+    };
+    storage
+        .commit_transition(
+            &parent_sid,
+            1,
+            RunCheckpoint {
+                root: &root,
+                children: &[],
+            },
+            SessionStatus::WaitingForInput,
+            &wait_state,
+        )
+        .await
+        .expect("commit wait");
+
+    // The engine's run_step must fail BEFORE dispatching the effectful task:
+    // run_step_internal calls mark_step_in_flight, which is fenced to
+    // running/paused and refuses the waiting row, so `runner.run` (which
+    // fires MarkerEffectTask.run) is never reached.
+    let err = engine
+        .run_step(&parent_sid)
+        .await
+        .expect_err("engine must refuse to step a human-wait row");
+    assert!(
+        matches!(
+            err,
+            nexus_orchestration::engine::EngineError::TerminalState(_)
+        ),
+        "expected TerminalState for stepping a waiting row, got {err:?}"
+    );
+
+    // Prove the effect task did NOT dispatch: the "dispatched" marker and the
+    // external-effect marker must both be absent from the persisted context.
+    let post = storage
+        .get(&parent_sid.0)
+        .await
+        .expect("get post-refused root")
+        .expect("root present");
+    let dispatched: Option<bool> = post.context.get("dispatched").await;
+    assert_eq!(
+        dispatched, None,
+        "the effectful task must NOT dispatch before the in-flight mark persists"
+    );
+    let effect: Option<bool> = post
+        .context
+        .get(nexus_orchestration::engine::EXTERNAL_EFFECT_MARKER)
+        .await;
+    assert_eq!(
+        effect, None,
+        "no external-effect marker — no effect task ran before the mark gate"
+    );
+
+    // The durable WaitRecord and token survive untouched.
+    let record = storage
+        .load_run(&parent_sid)
+        .await
+        .expect("load_run")
+        .expect("run present");
+    assert_eq!(record.status, SessionStatus::WaitingForInput);
+    let state = record.state.expect("v1 state present");
+    let wait = state.wait.expect("WaitRecord retained");
+    assert_eq!(
+        wait.wait_id, "wait-engine-gate",
+        "WaitRecord token retained when the engine refuses a stale step"
+    );
+    assert_eq!(record.state_revision, 2, "revision unchanged");
+}
