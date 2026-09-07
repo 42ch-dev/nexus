@@ -762,8 +762,14 @@ impl EngineSharedState {
         // Execute one step using the Arc<FlowRunner>.
         let result = runner.run(&session_id.0).await?;
 
-        // Map graph-flow ExecutionStatus → SessionStatus.
-        let status = match &result.status {
+        // Map graph-flow ExecutionStatus → SessionStatus. A `WaitingForInput`
+        // outcome is EITHER a scheduler converge/merge gate park (live join
+        // keys in the post-step context — persisted `paused`, tokenless per
+        // A2) OR a genuine manual/nested human wait (no live join keys —
+        // persisted `waiting_for_input` with a fresh A4 token). Both classes
+        // surface to the caller as `StepOutcome::WaitingForInput` (the drive
+        // loop stops at the same boundary); only the durable shape differs.
+        let mut status = match &result.status {
             ExecutionStatus::Completed => SessionStatus::Completed,
             ExecutionStatus::Error(_) => SessionStatus::Failed,
             ExecutionStatus::WaitingForInput => SessionStatus::WaitingForInput,
@@ -788,6 +794,31 @@ impl EngineSharedState {
                     .await
                     .map_err(EngineError::GraphFlow)?
                     .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
+
+                // A `WaitingForInput` outcome at a scheduler converge/merge
+                // join persists as `paused` with NO human-wait token (A2:
+                // "Distinguish persisted scheduler joins (paused + existing
+                // join keys) from human waits (waiting_for_input + A4 wait
+                // record)"). The join gates write their tracker keys
+                // (`_merge_*` / `_converge_arrivals_*` / `_join_wait_start_*`)
+                // into the post-step root context BEFORE returning
+                // `WaitForInput`; genuine manual/nested human waits never
+                // carry live join keys. Re-classifying the engine-written
+                // status to `paused` for those rows is the writer-side
+                // counterpart of the canonical A7 classifier — scheduler
+                // joins must be represented WITHOUT a human wait token, so
+                // rule 4 (token beats old join keys) can never misclassify a
+                // park as a human wait on a later boot. The bounded join
+                // deadline re-check (DR-06) keeps firing on every restart.
+                if matches!(status, SessionStatus::WaitingForInput)
+                    && serde_json::to_value(&root.context)
+                        .ok()
+                        .as_ref()
+                        .and_then(crate::resume_rules::context_data)
+                        .is_some_and(crate::resume_rules::is_converge_merge_chain)
+                {
+                    status = SessionStatus::Paused;
+                }
 
                 let next_state = build_step_state(&result, &status, &root.current_task_id);
                 // Pass the real child checkpoints recorded by
@@ -1100,9 +1131,12 @@ impl EngineSharedState {
 ///
 /// On a terminal/wait/paused transition the step is no longer in flight; the
 /// failure record is populated from a graph-flow error when the step failed.
-/// A human wait (`WaitingForInput`) produces a **fresh** durable
-/// [`WaitRecord`] with a new UUID token per arrival (A4) — retained through
-/// restart until a successful CAS consumes it.
+/// A **human** wait (`WaitingForInput` that is NOT a scheduler converge/merge
+/// park — the caller has already re-mapped join parks to `Paused`) produces
+/// a **fresh** durable [`WaitRecord`] with a new UUID token per arrival (A4),
+/// retained through restart until a successful CAS consumes it. Scheduler
+/// converge/merge parks arrive here as `SessionStatus::Paused` and persist
+/// tokenless (A2) — the join keys in the context are the wait evidence.
 fn build_step_state(
     result: &graph_flow::ExecutionResult,
     status: &SessionStatus,

@@ -4340,3 +4340,281 @@ async fn engine_effectful_task_does_not_dispatch_before_in_flight_mark() {
     );
     assert_eq!(record.state_revision, 2, "revision unchanged");
 }
+
+// ---------------------------------------------------------------------------
+// Fix round 7 (writer × classifier contract, P0 Task 3 blocker): scheduler
+// converge/merge parks must persist the A2 shape — `paused` + join keys and
+// NO human-wait token — while genuine manual human waits keep persisting
+// `waiting_for_input` + a fresh A4 token.
+// ---------------------------------------------------------------------------
+
+/// A converge/merge parked-join run used to prove the engine writer's
+/// durable output shape (A2: scheduler joins = paused + join keys, tokenless).
+/// `branch_b` is the hanging upstream (never walked, never arrives), so the
+/// join deterministically parks at 1/2 arrivals with a 300s deadline.
+fn converge_preset_yaml() -> &'static str {
+    r#"preset:
+  id: e2e-engine-converge
+  version: 1
+  kind: creator
+  description: "v1.186 P0 T3 fix — engine converge-join park writer shape"
+  requires_capabilities: []
+  initial: start
+  terminal: done
+states:
+    - id: start
+      next: branch_a
+    - id: branch_a
+      next:
+        branches: []
+        default: join
+    - id: branch_b
+      description: "Hanging upstream edge — never walked, never arrives"
+      next: join
+    - id: join
+      converge: { strategy: wait_for_all }
+      timeout_ms: 300000
+      on_timeout: fallback
+      next: done
+    - id: fallback
+      next: done
+    - id: done
+      terminal: true
+"#
+}
+
+// Writer shape (a): a real engine step that parks at a converge/merge join
+// (live join keys in the post-step context, arrivals 1/2, deadline not
+// elapsed) must persist `paused` with NO `WaitRecord` — the bounded join
+// re-drive keeps the deadline re-check alive on every restart. Reopening the
+// same DB and classifying the row through the canonical A7 classifier yields
+// `ConvergeMerge` (rule 5), never `HumanWait` (tokenless join).
+#[tokio::test]
+async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
+    let (pool, db) = fresh_pool().await;
+    let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
+    let storage_arc: Arc<dyn SessionStorage> = storage.clone();
+    let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
+    let caps = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
+    let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+        storage_arc.clone(),
+        workflow_store.clone(),
+        nexus_orchestration::CapabilityRegistryHolder::with_registry(caps.clone()),
+    );
+
+    let mut loaded =
+        nexus_orchestration::preset::load_preset_from_str(converge_preset_yaml(), &caps)
+            .expect("converge preset loads");
+    // Raw-YAML loads carry no source identity (the loader cannot know the
+    // origin); a v1 run requires one, so freeze the embedded identity over
+    // the manifest exactly as `load_embedded_preset` does (A2/A7).
+    loaded.source_identity = Some(
+        nexus_orchestration::preset::loader::preset_source_identity(
+            &loaded.manifest,
+            None,
+            Some("e2e-engine-converge"),
+        )
+        .expect("embedded source identity"),
+    );
+    let sid = engine
+        .start_session_with_preset_for_creator(&loaded, "ctr_test")
+        .await
+        .expect("start converge run");
+
+    // Position the run exactly as the production park does before its next
+    // boot: `current_task_id = join` with one predecessor arrival already
+    // recorded (`branch_a` walked in the prior process; `branch_b` is the
+    // hanging upstream — never arrives). The wire (same YAML shape as the
+    // committed T3 restart fixture) arms the join gate with
+    // converge_predecessors {branch_a, branch_b}, so the NEXT real engine
+    // step at the join gate parks at 1/2 arrivals (deadline 300s not fired).
+    let mut session = storage
+        .get(&sid.0)
+        .await
+        .expect("get pre-step session")
+        .expect("session present");
+    session.current_task_id = "join".to_string();
+    session
+        .context
+        .set("_converge_arrivals_join", vec!["branch_a".to_string()])
+        .await;
+    storage.save(session).await.expect("save parked position");
+
+    // One real engine step at the parked join → graph-flow `WaitForInput`;
+    // the store-wired engine must persist the SCHEDULER shape.
+    let outcome = engine.run_step(&sid).await.expect("run_step parks the join");
+    assert!(
+        matches!(
+            outcome,
+            nexus_orchestration::engine::StepOutcome::WaitingForInput { .. }
+        ),
+        "the engine surfaces the join park as WaitingForInput, got {outcome:?}"
+    );
+
+    let record = storage
+        .load_run(&sid)
+        .await
+        .expect("load_run")
+        .expect("run present");
+    assert_eq!(
+        record.status,
+        SessionStatus::Paused,
+        "a scheduler converge/merge park persists as `paused`, not `waiting_for_input` (A2)"
+    );
+    let state = record.state.expect("v1 state present");
+    assert!(
+        state.wait.is_none(),
+        "a scheduler join park must NOT carry a human-wait token (A2/A4)"
+    );
+
+    // The join keys are live on the PERSISTED row (the bounded deadline
+    // re-check evidence — never a manual-wait token). Re-read the post-step
+    // row: the pre-step snapshot predates `join_timeout_tick` writing the
+    // wait-start key.
+    let persisted = storage
+        .get(&sid.0)
+        .await
+        .expect("get post-step session")
+        .expect("session present");
+    let context_value = serde_json::to_value(&persisted.context).expect("context json");
+    let map = nexus_orchestration::resume_rules::context_data(&context_value).expect("data map");
+    assert_eq!(
+        nexus_orchestration::resume_rules::live_join_keys(map),
+        vec![
+            "_converge_arrivals_join".to_string(),
+            "_join_wait_start_join".to_string()
+        ],
+        "the parked join must retain its live join keys"
+    );
+    drop(context_value);
+
+    // Reopen the SAME DB file (daemon restart boundary) — the canonical A7
+    // classifier must see the engine-parked row as a converge/merge chain,
+    // never a human wait (no token to trip rule 4).
+    pool.close().await;
+    let pool_b = nexus_local_db::open_pool(db.path()).await.expect("reopen pool");
+    let storage_b = Arc::new(SqliteSessionStorage::new(pool_b.clone().into()));
+    let record_after_reopen = storage_b
+        .load_run(&sid)
+        .await
+        .expect("load_run after reopen")
+        .expect("run present");
+    let context_b = storage_b
+        .get(&sid.0)
+        .await
+        .expect("get after reopen")
+        .expect("session present");
+    let context_value_b = serde_json::to_value(&context_b.context).expect("context json");
+    let chain_class = nexus_orchestration::resume_rules::context_data(&context_value_b)
+        .is_some_and(nexus_orchestration::resume_rules::is_converge_merge_chain);
+    assert_eq!(
+        nexus_orchestration::resume_rules::classify_recovery(
+            &record_after_reopen.status,
+            record_after_reopen.state.as_ref(),
+            chain_class,
+        ),
+        nexus_orchestration::resume_rules::RecoveryClass::ConvergeMerge,
+        "an engine-parked join reopens as ConvergeMerge (rule 5), not HumanWait"
+    );
+}
+
+// Writer shape (b): a genuine manual human wait (ManualWaitTask →
+// `WaitForInput`, no live join keys) must STILL persist `waiting_for_input`
+// with a FRESH durable A4 token (one per arrival), retained byte-identical
+// across reopen until a successful CAS consumes it. The writer fix must not
+// weaken the human-wait token path (A4 precedence in `classify_recovery`
+// rule 4 keeps working unchanged).
+#[tokio::test]
+async fn engine_manual_wait_persists_waiting_for_input_fresh_retained_token() {
+    let (pool, db) = fresh_pool().await;
+    let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
+    let storage_arc: Arc<dyn SessionStorage> = storage.clone();
+    let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
+    let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_orchestration::CapabilityRegistry::with_builtins(),
+    ));
+    let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+        storage_arc,
+        workflow_store,
+        caps,
+    );
+
+    let graph = Arc::new(graph_flow::Graph::new("test-graph-manual"));
+    graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+    let sid = engine
+        .start_session("novel-writing", graph)
+        .await
+        .expect("start_session");
+
+    // One step at the manual wait → WaitingForInput; the store-wired engine
+    // must persist the HUMAN shape: waiting_for_input + fresh token.
+    let outcome = engine.run_step(&sid).await.expect("run_step");
+    assert!(
+        matches!(
+            outcome,
+            nexus_orchestration::engine::StepOutcome::WaitingForInput { .. }
+        ),
+        "expected WaitingForInput, got {outcome:?}"
+    );
+
+    let record = storage
+        .load_run(&sid)
+        .await
+        .expect("load_run")
+        .expect("run present");
+    assert_eq!(
+        record.status,
+        SessionStatus::WaitingForInput,
+        "a genuine human wait persists as `waiting_for_input` (A2)"
+    );
+    let state = record.state.expect("v1 state present");
+    let wait = state.wait.expect("human wait must carry a durable WaitRecord (A4)");
+    assert!(
+        !wait.wait_id.is_empty(),
+        "the wait token must be a fresh UUID, not empty"
+    );
+    assert_eq!(wait.kind, nexus_orchestration::run_state::WaitKind::Manual);
+    let token = wait.wait_id.clone();
+
+    // Reopen the SAME DB file (daemon restart boundary): the token must
+    // survive byte-identical (A4 retention until a successful CAS consumes
+    // it) and the status must remain waiting_for_input.
+    pool.close().await;
+    let pool_b = nexus_local_db::open_pool(db.path()).await.expect("reopen pool");
+    let storage_b = Arc::new(SqliteSessionStorage::new(pool_b.into()));
+    let record_after = storage_b
+        .load_run(&sid)
+        .await
+        .expect("load_run after reopen")
+        .expect("run present");
+    assert_eq!(record_after.status, SessionStatus::WaitingForInput);
+    let wait_after = record_after.state.clone().expect("state present").wait.expect("token retained");
+    assert_eq!(
+        wait_after.wait_id, token,
+        "the A4 wait token must be retained unchanged across reopen"
+    );
+
+    // The canonical A7 classifier still sees the HUMAN wait (rule 4),
+    // never a scheduler join.
+    let context = storage_b
+        .get(&sid.0)
+        .await
+        .expect("get after reopen")
+        .expect("session present");
+    let context_value = serde_json::to_value(&context.context).expect("context json");
+    let chain_class = nexus_orchestration::resume_rules::context_data(&context_value)
+        .is_some_and(nexus_orchestration::resume_rules::is_converge_merge_chain);
+    assert!(
+        !chain_class,
+        "a manual human wait carries no live join keys"
+    );
+    assert_eq!(
+        nexus_orchestration::resume_rules::classify_recovery(
+            &record_after.status,
+            record_after.state.as_ref(),
+            chain_class,
+        ),
+        nexus_orchestration::resume_rules::RecoveryClass::HumanWait,
+        "token-bearing human wait classifies HumanWait (rule 4), unchanged"
+    );
+}

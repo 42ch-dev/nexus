@@ -734,22 +734,21 @@ async fn restart_durable_status_converge_merge_redrives_after_reopen() {
         0,
         "completed edges must not re-execute across kill/reopen"
     );
-    // The session stayed non-terminal (parked at the join, not done).
+    // The session stayed non-terminal (parked at the join, not done). With
+    // the writer fix the engine's in-memory status for a scheduler join park
+    // is `Paused` — the same shape it persisted durably (A2; previously it
+    // mirrored the graph-flow WaitingForInput outcome).
     assert_eq!(
         engine_ref.get_status(&SessionId(sid.to_string())).await.expect("status"),
-        SessionStatus::WaitingForInput,
+        SessionStatus::Paused,
         "the resumed converge chain must remain parked, not terminal"
     );
 
-    // Scoped public evidence on the reopened file. Finding (engine-write ×
-    // classifier interaction): the production re-drive re-parked the join,
-    // and `build_step_state` wrote a FRESH durable Manual wait token for
-    // that WaitingForInput outcome. `classify_recovery` rule 4 (durable
-    // human-wait token beats old join keys) therefore classifies the row
-    // `human_wait` — NOT `converge_merge` — even though the row is a
-    // scheduler converge park with live join keys and the A4 contract says
-    // scheduler joins must be represented WITHOUT a human wait token. The
-    // row is NOT rewritten and the join keys survive.
+    // Scoped public evidence on the reopened file. The production re-drive
+    // re-parked the join; the engine writer now persists the A2 scheduler
+    // shape — `paused` + live join keys and NO human-wait token — so the
+    // canonical A7 classifier reports `converge_merge` (rule 5), never
+    // `human_wait` (a scheduler join is represented without a wait token).
     let output = nexus42(user_home)
         .args(["ops", "inspect", sid, "--json"])
         .assert()
@@ -759,14 +758,12 @@ async fn restart_durable_status_converge_merge_redrives_after_reopen() {
         .clone();
     let parsed: Value = serde_json::from_slice(&output).expect("valid inspect json");
     assert_eq!(parsed["session_id"], json!(sid));
-    // The DTO is truthful about the persisted row: the engine's own
-    // re-park wrote the token, so the honest class IS human_wait.
-    assert_eq!(parsed["recovery_class"], json!("human_wait"));
-    assert_eq!(parsed["resumable"]["verdict"], json!("no"));
-    assert_eq!(parsed["resumable"]["rule"], json!("human_wait"));
+    assert_eq!(parsed["recovery_class"], json!("converge_merge"));
+    assert_eq!(parsed["resumable"]["verdict"], json!("yes"));
+    assert_eq!(parsed["resumable"]["rule"], json!("chain_class_no_failure"));
     assert!(
-        parsed["wait_id"].as_str().map(str::len).unwrap_or(0) >= 1,
-        "the re-park must carry a fresh durable wait token: {parsed}"
+        parsed.get("wait_id").is_none(),
+        "a scheduler join park must not advertise a wait token: {parsed}"
     );
     assert_eq!(
         parsed["live_join_keys"],
@@ -775,28 +772,49 @@ async fn restart_durable_status_converge_merge_redrives_after_reopen() {
     );
 
     // "Second restart": a fresh process reopens the SAME file. Because the
-    // row now carries the engine-written wait token, rule 4 wins and the
-    // daemon classifies the parked converge join as a HUMAN WAIT — the
-    // bounded join re-drive is skipped, so a deadline that has long elapsed
-    // is NEVER re-checked on any later boot (the fallback cannot fire).
-    // This is the shipped converge/merge resume contract breaking after the
-    // FIRST restart; pinned here as failing evidence for the acceptance
-    // criterion "converge/merge resume still works".
+    // re-park is now `paused` + tokenless (A2), rule 4 cannot fire — the
+    // parked converge join classifies `ConvergeMerge` (rule 5) again and
+    // the bounded join re-drive re-checks its deadline on EVERY later boot
+    // (the shipped converge_timeout fallback stays reachable). This pins
+    // the acceptance criterion "converge/merge resume still works" across
+    // arbitrary restarts.
     let (pool_c, dyn_storage_c, store_c) = reopen(&db_path).await;
-    let engine_c = GraphFlowEngine::new_with_storage_and_workflow_store(
+    let caps_c = Arc::new(CapabilityRegistry::with_builtins());
+    let loaded_c = load_preset_from_str(CONVERGE_YAML, &caps_c).expect("test preset loads");
+    let mut engine_c = GraphFlowEngine::new_with_storage_and_workflow_store(
         dyn_storage_c.clone(),
         store_c.clone(),
-        CapabilityRegistryHolder::with_registry(Arc::new(CapabilityRegistry::with_builtins())),
+        CapabilityRegistryHolder::with_registry(caps_c.clone()),
     );
+    engine_c.set_daemon_tool_dispatch(dispatch.clone());
+    let engine_c = Arc::new(engine_c);
+    let engine_c_ref: Arc<dyn OrchestrationEngine> = engine_c.clone();
+    let wired_c = build_wired_outer_graph(&loaded_c, &engine_c_ref, &caps_c, Some(dispatch.clone()));
+    let runner_c = Arc::new(graph_flow::FlowRunner::new(
+        Arc::new(wired_c),
+        dyn_storage_c.clone(),
+    ));
+    engine_c
+        .shared_state()
+        .runners
+        .write()
+        .await
+        .insert(sid.to_string(), runner_c);
     let summary_c = SessionSummary {
         session_id: SessionId(sid.to_string()),
         creator_id: "test_creator".to_string(),
-        preset_id: loaded.id.clone(),
-        status: SessionStatus::WaitingForInput,
+        preset_id: loaded_c.id.clone(),
+        status: SessionStatus::Paused,
         current_task_id: Some("join".to_string()),
     };
+    engine_c
+        .shared_state()
+        .sessions
+        .write()
+        .await
+        .push(summary_c.clone());
     let decisions_c = resume_driven_sessions(
-        &engine_c,
+        engine_c_ref.as_ref(),
         &dyn_storage_c,
         Some(&store_c),
         &[summary_c],
@@ -806,23 +824,24 @@ async fn restart_durable_status_converge_merge_redrives_after_reopen() {
     .await;
     assert_eq!(
         decisions_c,
-        vec![ResumeDecision::SkippedHumanWait {
-            session_id: SessionId(sid.to_string())
+        vec![ResumeDecision::ReDriven {
+            session_id: SessionId(sid.to_string()),
+            outcome: PresetRunOutcome::WaitingForInput { steps: 1 },
         }],
-        "DEFECT: the second restart skips the parked converge join as a human \
-         wait — the join deadline is never re-checked again"
+        "the second restart must re-check the parked converge join (deadline \
+         re-check); actual decisions: {decisions_c:?}"
     );
-    // Row truth after the second restart: still a token-bearing wait with
-    // live join keys — never rewritten, never advanced.
+    // Row truth after the second restart: still a tokenless paused park with
+    // live join keys — the join deadline stays re-checkable on every boot.
     let record_c = store_c
         .load_run(&SessionId(sid.to_string()))
         .await
         .expect("load_run")
         .expect("row exists");
-    assert_eq!(record_c.status, SessionStatus::WaitingForInput);
+    assert_eq!(record_c.status, SessionStatus::Paused);
     assert!(
-        record_c.state.clone().and_then(|s| s.wait).is_some(),
-        "the engine-written wait token must survive the second restart"
+        record_c.state.clone().and_then(|s| s.wait).is_none(),
+        "an engine re-park must never write a human-wait token (A2)"
     );
     let context_c = dyn_storage_c
         .get(sid)
@@ -845,26 +864,26 @@ async fn restart_durable_status_converge_merge_redrives_after_reopen() {
     drop(tmp);
 }
 
-/// CONTRACT test (expected to FAIL today — BLOCKED evidence): a converge-
-/// join park state that the ENGINE itself wrote (waiting_for_input + durable
-/// A4 token + live join keys — exactly what `build_step_state` +
-/// `commit_transition` persist for a real park, proven by
-/// [`restart_durable_status_converge_merge_redrives_after_reopen`]) must
-/// still be re-checked on a later boot so the bounded join deadline can
-/// fire ("converge/merge resume still works"). `classify_recovery` rule 4
-/// (durable token beats old join keys) instead classifies the scheduler
-/// park as a human wait and the daemon skips it forever — the shipped
-/// converge_timeout fallback never re-fires after any restart.
+/// CONTRACT test (was the BLOCKED pin — now GREEN with the writer-side fix):
+/// a converge-join park state that the ENGINE itself writes (`paused` + live
+/// join keys + NO human-wait token — the corrected `run_step_internal` /
+/// `build_step_state` shape per A2, cross-checked by the reopen flow in
+/// [`restart_durable_status_converge_merge_redrives_after_reopen`]) must be
+/// re-checked on every later boot so the bounded join deadline can fire
+/// ("converge/merge resume still works"). Because the engine no longer
+/// mints a Manual wait token for scheduler parks, `classify_recovery`
+/// rule 4 cannot misclassify the park as a human wait — rule 5
+/// (`ConvergeMerge`) governs and the daemon re-drives the join.
 #[tokio::test]
 async fn restart_durable_status_converge_join_token_row_still_redrives() {
     let (tmp, _nexus_home, db_path) = test_utils::create_test_workspace().await;
     let user_home = tmp.path();
     let sid = "conv:engine-parked";
 
-    // "Process A" (real engine parking): waiting_for_input at the converge
-    // join, a durable Manual wait token written by `build_step_state`, and
-    // live join keys (1/2 arrivals, deadline not yet elapsed). This is the
-    // exact row shape the store-wired engine produces on every park.
+    // "Process A" (real engine parking — the FIXED durable shape): `paused`
+    // at the converge join, live join keys (1/2 arrivals, deadline not yet
+    // elapsed), and NO human-wait token. This is exactly what the
+    // store-wired engine now persists on every park (A2).
     {
         let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
         let context = serde_json::json!({"data": {
@@ -873,8 +892,8 @@ async fn restart_durable_status_converge_join_token_row_still_redrives() {
         }, "chat_history": {"messages": [], "max_messages": 1000}})
         .to_string()
         .into_bytes();
-        let state = run_state_v1(true, None, false, false);
-        seed_v1_row(&pool, sid, "waiting_for_input", Some("join"), &context, &state, 6).await;
+        let state = run_state_v1(false, None, false, false);
+        seed_v1_row(&pool, sid, "paused", Some("join"), &context, &state, 6).await;
         pool.close().await;
     }
 
@@ -883,24 +902,46 @@ async fn restart_durable_status_converge_join_token_row_still_redrives() {
     let (pool_b, dyn_storage, store) = reopen(&db_path).await;
     let caps = Arc::new(CapabilityRegistry::with_builtins());
     let loaded = load_preset_from_str(CONVERGE_YAML, &caps).expect("test preset loads");
-    let engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+    let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
         dyn_storage.clone(),
         store.clone(),
         CapabilityRegistryHolder::with_registry(caps.clone()),
     );
+    engine.set_daemon_tool_dispatch(Arc::new(CountingDispatch {
+        calls: Arc::new(AtomicUsize::new(0)),
+    }));
+    let engine = Arc::new(engine);
+    let engine_ref: Arc<dyn OrchestrationEngine> = engine.clone();
+    let wired = build_wired_outer_graph(&loaded, &engine_ref, &caps, None);
+    let runner = Arc::new(graph_flow::FlowRunner::new(
+        Arc::new(wired),
+        dyn_storage.clone(),
+    ));
+    engine
+        .shared_state()
+        .runners
+        .write()
+        .await
+        .insert(sid.to_string(), runner);
     let summary = SessionSummary {
         session_id: SessionId(sid.to_string()),
         creator_id: "test_creator".to_string(),
         preset_id: loaded.id.clone(),
-        status: SessionStatus::WaitingForInput,
+        status: SessionStatus::Paused,
         current_task_id: Some("join".to_string()),
     };
+    engine
+        .shared_state()
+        .sessions
+        .write()
+        .await
+        .push(summary.clone());
     let config = PresetRunConfig {
         resume_waiting: true,
         ..PresetRunConfig::default()
     };
     let decisions = resume_driven_sessions(
-        &engine,
+        engine_ref.as_ref(),
         &dyn_storage,
         Some(&store),
         &[summary],
@@ -909,23 +950,20 @@ async fn restart_durable_status_converge_join_token_row_still_redrives() {
     )
     .await;
     // CONTRACT: the parked converge join re-checks its deadline on this
-    // boot (ReDriven with a single re-step that re-parks, or fires the
-    // deadline once it has elapsed). Today the engine-written wait token
-    // wins (rule 4) and the daemon emits SkippedHumanWait — the deadline
-    // is never re-checked again.
-    assert!(
-        decisions.iter().any(|d| matches!(
-            d,
-            ResumeDecision::ReDriven {
-                session_id,
-                outcome: PresetRunOutcome::WaitingForInput { steps: 1 }
-            } if session_id.0 == sid
-        )),
+    // boot (ReDriven with a single re-step that re-parks — the tokenless
+    // `paused` shape routes rule 5, never `SkippedHumanWait`).
+    assert_eq!(
+        decisions,
+        vec![ResumeDecision::ReDriven {
+            session_id: SessionId(sid.to_string()),
+            outcome: PresetRunOutcome::WaitingForInput { steps: 1 },
+        }],
         "converge/merge resume must survive restart for an engine-parked \
          join (deadline re-check); actual decisions: {decisions:?}"
     );
 
-    // Scoped public evidence on the reopened file (truthful DTO).
+    // Scoped public evidence on the reopened file (truthful DTO): the row
+    // stays a tokenless converge/merge park with live join keys.
     let output = nexus42(user_home)
         .args(["ops", "inspect", sid, "--json"])
         .assert()
@@ -934,7 +972,12 @@ async fn restart_durable_status_converge_join_token_row_still_redrives() {
         .stdout
         .clone();
     let parsed: Value = serde_json::from_slice(&output).expect("valid inspect json");
+    assert_eq!(parsed["recovery_class"], json!("converge_merge"));
     assert_eq!(parsed["live_join_keys"], json!(["_converge_arrivals_join", "_join_wait_start_join"]));
+    assert!(
+        parsed.get("wait_id").is_none(),
+        "an engine-parked join must never advertise a wait token: {parsed}"
+    );
 
     pool_b.close().await;
     drop(tmp);
