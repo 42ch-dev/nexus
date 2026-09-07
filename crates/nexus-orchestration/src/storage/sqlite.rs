@@ -249,7 +249,20 @@ impl SessionStorage for SqliteSessionStorage {
         let session_id = session.id;
         let current_task_id = session.current_task_id;
 
-        sqlx::query!(
+        // Atomic position/context-only upsert + zero-row classification under
+        // one `BEGIN IMMEDIATE` write lock (the same convention as
+        // `commit_transition` / `restore_pre_step`). The write and the
+        // classification read are one atomic observation — no check-then-write
+        // race that could re-open overwrite risk.
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(|e| {
+                graph_flow::GraphError::StorageError(format!(
+                    "save session '{session_id}': begin tx: {e}"
+                ))
+            })?;
+
+        let result = sqlx::query!(
             r#"
             INSERT INTO orchestration_sessions
                 (session_id, creator_id, preset_id, preset_version,
@@ -272,9 +285,63 @@ impl SessionStorage for SqliteSessionStorage {
             now,
             now
         )
-        .execute(&*self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| {
+            graph_flow::GraphError::StorageError(format!("save session '{session_id}': {e}"))
+        })?;
+
+        // A missing row inserts (rows_affected = 1). Zero rows means the row
+        // already exists with a status outside the re-stepable set: SQLite
+        // `changes()` reports 0 for a WHERE-skipped upsert and 1 for any
+        // matched update (even identical values). Classify the outcome
+        // instead of silently reporting success: protected durable state is
+        // an expected no-op (A4); unknown/corrupt status and an unexpected
+        // zero-row on a still-running/paused row must surface explicitly.
+        if result.rows_affected() == 0 {
+            let current_status: Option<String> = sqlx::query_scalar(
+                "SELECT status FROM orchestration_sessions WHERE session_id = ?",
+            )
+            .bind(&session_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| {
+                graph_flow::GraphError::StorageError(format!(
+                    "save session '{session_id}': read status: {e}"
+                ))
+            })?;
+            let Some(status) = current_status else {
+                return Err(graph_flow::GraphError::StorageError(format!(
+                    "save session '{session_id}': row absent after upsert (non-replayable)"
+                )));
+            };
+            match SessionStatus::from_db_str(&status) {
+                // Defensive contradiction: the write lock and fence make a
+                // zero-row with a running/paused status unreachable through
+                // this path, but if it ever happens the save did NOT apply —
+                // report a revision/status conflict, never success.
+                Some(SessionStatus::Running | SessionStatus::Paused) => {
+                    return Err(graph_flow::GraphError::StorageError(format!(
+                        "save session '{session_id}': unexpected zero-row on a {status:?} row \
+                         (revision/status conflict; save not applied)"
+                    )));
+                }
+                // Unknown/corrupt status: non-replayable (A7) — never a
+                // silent success.
+                None => {
+                    return Err(graph_flow::GraphError::StorageError(format!(
+                        "save session '{session_id}': unknown/corrupt status {status:?} \
+                         (non-replayable; save not applied)"
+                    )));
+                }
+                // Protected durable state (waiting_for_input / terminal /
+                // interrupted / cancelled): expected no-op — a late graph
+                // save must not move or overwrite it (A4).
+                Some(_) => {}
+            }
+        }
+
+        tx.commit().await.map_err(|e| {
             graph_flow::GraphError::StorageError(format!("save session '{session_id}': {e}"))
         })?;
 
@@ -1482,6 +1549,102 @@ mod tests {
                 .is_none(),
             "the save seam must not write context onto a waiting_for_input row"
         );
+    }
+
+    #[tokio::test]
+    async fn save_reports_unknown_status_zero_row_as_error() {
+        let (pool, _db) = fresh_pool().await;
+        let storage = SqliteSessionStorage::new(pool.clone());
+
+        // A corrupt/unknown status is non-replayable (A7): a zero-row save
+        // (WHERE fence skipped) against it must be an explicit error, never
+        // a silent `Ok(())` that masks the broken row.
+        let session = Session::new_from_task("sess-unknown-status".into(), "task_a");
+        seed_row(
+            &pool,
+            "sess-unknown-status",
+            "corrupted_status",
+            Some("task_a"),
+            &serde_json::to_vec(&session.context).expect("serialize seed context"),
+        )
+        .await;
+        let err = storage
+            .save(session)
+            .await
+            .expect_err("unknown status zero-row must not silently succeed");
+        match &err {
+            graph_flow::GraphError::StorageError(msg) => {
+                assert!(
+                    msg.contains("unknown/corrupt status"),
+                    "unexpected error: {msg}"
+                );
+                assert!(msg.contains("sess-unknown-status"), "unexpected error: {msg}");
+            }
+            other => panic!("expected StorageError, got {other:?}"),
+        }
+
+        // The row must be untouched (the save never applied).
+        let persisted = storage
+            .get("sess-unknown-status")
+            .await
+            .expect("reload after rejected save")
+            .expect("row exists");
+        assert_eq!(persisted.current_task_id, "task_a", "row must be unchanged");
+    }
+
+    #[tokio::test]
+    async fn save_reports_unexpected_zero_row_race_on_running() {
+        let (pool, _db) = fresh_pool().await;
+        let storage = SqliteSessionStorage::new(pool.clone());
+
+        // A zero-row save against a still-running row means the write was
+        // skipped by something other than the status fence (the BEGIN
+        // IMMEDIATE write lock makes the check-then-write race unreachable
+        // through this path). A regression trigger reproduces the skip; the
+        // save must surface a revision/status conflict, never success.
+        let session = Session::new_from_task("sess-zero-row-race".into(), "task_a");
+        seed_row(
+            &pool,
+            "sess-zero-row-race",
+            "running",
+            Some("task_a"),
+            &serde_json::to_vec(&session.context).expect("serialize seed context"),
+        )
+        .await;
+        sqlx::query(
+            "CREATE TRIGGER sess_zero_row_race_skip
+             BEFORE UPDATE ON orchestration_sessions
+             WHEN NEW.session_id = 'sess-zero-row-race'
+             BEGIN SELECT RAISE(IGNORE); END",
+        )
+        .execute(&*pool)
+        .await
+        .expect("install regression trigger");
+
+        let err = storage
+            .save(session)
+            .await
+            .expect_err("unexpected zero-row on a running row must not succeed");
+        match &err {
+            graph_flow::GraphError::StorageError(msg) => {
+                assert!(msg.contains("unexpected zero-row"), "unexpected error: {msg}");
+                assert!(msg.contains("sess-zero-row-race"), "unexpected error: {msg}");
+            }
+            other => panic!("expected StorageError, got {other:?}"),
+        }
+
+        // The row must be untouched.
+        let persisted = storage
+            .get("sess-zero-row-race")
+            .await
+            .expect("reload after rejected save")
+            .expect("row exists");
+        assert_eq!(persisted.current_task_id, "task_a", "row must be unchanged");
+
+        sqlx::query("DROP TRIGGER sess_zero_row_race_skip")
+            .execute(&*pool)
+            .await
+            .expect("drop regression trigger");
     }
 
     /// Seed a raw `orchestration_sessions` row (test-only DML).

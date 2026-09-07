@@ -754,10 +754,12 @@ impl EngineSharedState {
         // the pre-step task id (plus position/context) so a crash after an
         // effect but before the result commit leaves an interrupted (never
         // replayable) run — never an unmarked running row. The write is
-        // fenced to `status='running'` AND the pre-step revision and does NOT
-        // advance the revision (a subsequent `commit_transition` still
-        // CAS-anchors to the same pre-step revision). A FlowRunner/storage
-        // save failure after this point cannot leave an unmarked running row.
+        // fenced to the re-stepable statuses `status IN ('running', 'paused')`
+        // (a paused row is re-stepped by the drive loop) AND the pre-step
+        // revision and does NOT advance the revision (a subsequent
+        // `commit_transition` still CAS-anchors to the same pre-step
+        // revision). A FlowRunner/storage save failure after this point
+        // cannot leave an unmarked running row.
         // The marker is cleared on a completed checkpoint (Minor 2).
         if let Some(store) = &self.workflow_store {
             if let Some(pre) = &pre_step_root {
