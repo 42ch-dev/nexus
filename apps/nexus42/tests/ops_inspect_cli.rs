@@ -15,6 +15,8 @@
 
 use assert_cmd::Command;
 use serde_json::{json, Value};
+use nexus_orchestration::run_state::{PresetSourceIdentity, RunDescriptorV1};
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 
@@ -90,12 +92,13 @@ impl<'a> SeedRow<'a> {
 }
 
 async fn seed_session(pool: &sqlx::SqlitePool, row: &SeedRow<'_>) {
+    let descriptor = (row.execution_version == 1).then(|| run_descriptor(row.preset_id));
     sqlx::query(
         "INSERT INTO orchestration_sessions
             (session_id, creator_id, preset_id, preset_version, status,
              current_task_id, context_json, created_at, updated_at,
-             execution_version, state_revision, run_state_json)
-         VALUES (?, ?, ?, 3, ?, ?, ?, 1_756_990_000, ?, ?, ?, ?)",
+             execution_version, state_revision, run_state_json, run_descriptor_json)
+         VALUES (?, ?, ?, 3, ?, ?, ?, 1_756_990_000, ?, ?, ?, ?, ?)",
     )
     .bind(row.session_id)
     .bind(CREATOR)
@@ -107,6 +110,7 @@ async fn seed_session(pool: &sqlx::SqlitePool, row: &SeedRow<'_>) {
     .bind(row.execution_version)
     .bind(row.state_revision)
     .bind(row.run_state_json.clone())
+    .bind(descriptor)
     .execute(pool)
     .await
     .expect("seed session");
@@ -131,6 +135,25 @@ fn run_state(step_in_flight: Option<&str>, cancel_requested: bool, wait: bool) -
     .into_bytes()
 }
 
+fn run_descriptor(preset_id: &str) -> Vec<u8> {
+    serde_json::to_vec(&RunDescriptorV1 {
+        creator_id: CREATOR.to_string(),
+        work_id: None,
+        workspace_root: PathBuf::from("/tmp/nexus42-inspect"),
+        preset_id: preset_id.to_string(),
+        preset_version: 3,
+        source: PresetSourceIdentity::Embedded {
+            preset_id: preset_id.to_string(),
+            content_hash: [0; 32],
+        },
+        input: serde_json::Map::new(),
+        agent_bindings: HashMap::new(),
+        parent_session_id: None,
+        graph_name: None,
+    })
+    .expect("serialize descriptor")
+}
+
 fn run_async<F: Future>(fut: F) -> F::Output {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -143,7 +166,8 @@ fn run_async<F: Future>(fut: F) -> F::Output {
 fn chain_context() -> Vec<u8> {
     json!({"data": {
         "_converge_arrivals_j1": ["src-a"],
-        "_join_wait_start_j1": 1_756_990_100
+        "_join_wait_start_j1": 1_756_990_100,
+        "_gate_park_task_9": true
     }})
     .to_string()
     .into_bytes()
@@ -970,7 +994,6 @@ fn inspect_list_shape_anomaly_and_corrupt_pin_context_readable_flag() {
 // ---------------------------------------------------------------------------
 // v1.186 P0 Task 2 — canonical A7 recovery class on the real binary.
 // ---------------------------------------------------------------------------
-
 #[test]
 fn inspect_v1_interrupted_wins_over_old_join_keys_and_never_retries() {
     let home = tempfile::TempDir::new().unwrap();
@@ -993,7 +1016,7 @@ fn inspect_v1_interrupted_wins_over_old_join_keys_and_never_retries() {
               WHERE session_id = 'ses_crash'",
         )
         .bind(run_state(Some("task_9"), false, false))
-        .bind(br#"{"preset_id":"preset_chain"}"#.as_slice())
+        .bind(run_descriptor("preset_chain"))
         .execute(&pool)
         .await
         .expect("promote to v1");
@@ -1022,6 +1045,21 @@ fn inspect_v1_interrupted_wins_over_old_join_keys_and_never_retries() {
     assert_eq!(parsed["resumable"]["verdict"], json!("no"));
     assert_eq!(parsed["resumable"]["rule"], json!("interrupted"));
     assert_eq!(parsed["resumable"]["runner_check"], json!("not_applicable"));
+    let list_output = nexus42(home.path())
+        .args(["ops", "inspect", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let list: Value = serde_json::from_slice(&list_output).expect("valid list json");
+    let listed = list["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .find(|row| row["session_id"] == "ses_crash")
+        .expect("interrupted run remains visible in list mode");
+    assert_eq!(listed["recovery_class"], "interrupted");
 }
 
 #[test]
@@ -1064,6 +1102,106 @@ fn inspect_v1_human_wait_stays_distinct_and_preserves_wait_token() {
     assert_eq!(parsed["db_status"], json!("waiting_for_input"));
     // Legacy resumable verdict stays a hard no for the human wait.
     assert_eq!(parsed["resumable"]["verdict"], json!("no"));
+}
+
+#[test]
+fn inspect_v1_tokenless_wait_with_old_join_keys_stays_human_wait() {
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    let old_join = json!({"data": {
+        "_converge_arrivals_old": ["a"],
+        "_join_wait_start_old": 1
+    }})
+    .to_string()
+    .into_bytes();
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        seed_session(
+            &pool,
+            &SeedRow {
+                session_id: "ses_tokenless_wait",
+                preset_id: "preset_x",
+                status: "waiting_for_input",
+                current_task_id: Some("manual_wait"),
+                context: &old_join,
+                updated_at: 1_756_990_300,
+                execution_version: 1,
+                state_revision: 4,
+                run_state_json: Some(run_state(None, false, false)),
+            },
+        )
+        .await;
+        pool.close().await;
+    });
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "ses_tokenless_wait", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    assert_eq!(parsed["recovery_class"], "human_wait");
+    assert_eq!(parsed["resumable"]["verdict"], "no");
+}
+
+#[test]
+fn inspect_v1_corrupt_descriptor_is_unreadable_in_detail_and_list() {
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        seed_session(
+            &pool,
+            &SeedRow {
+                session_id: "ses_bad_descriptor",
+                preset_id: "preset_x",
+                status: "running",
+                current_task_id: Some("task_9"),
+                context: &chain_context(),
+                updated_at: 1_756_990_300,
+                execution_version: 1,
+                state_revision: 4,
+                run_state_json: Some(run_state(None, false, false)),
+            },
+        )
+        .await;
+        sqlx::query(
+            "UPDATE orchestration_sessions SET run_descriptor_json = ? WHERE session_id = ?",
+        )
+        .bind(b"not-json".as_slice())
+        .bind("ses_bad_descriptor")
+        .execute(&pool)
+        .await
+        .expect("corrupt descriptor");
+        pool.close().await;
+    });
+
+    let detail = nexus42(home.path())
+        .args(["ops", "inspect", "ses_bad_descriptor", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let detail: Value = serde_json::from_slice(&detail).expect("detail json");
+    assert_eq!(detail["recovery_class"], "unreadable");
+
+    let list = nexus42(home.path())
+        .args(["ops", "inspect", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let list: Value = serde_json::from_slice(&list).expect("list json");
+    let row = list["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .find(|row| row["session_id"] == "ses_bad_descriptor")
+        .expect("corrupt descriptor row listed");
+    assert_eq!(row["recovery_class"], "unreadable");
 }
 
 #[test]
@@ -1313,6 +1451,7 @@ async fn set_v1_metadata(
     execution_version: i64,
     run_state_json: Option<&[u8]>,
 ) {
+    let descriptor = run_descriptor("p");
     sqlx::query::<sqlx::Sqlite>(
         "UPDATE orchestration_sessions
             SET execution_version = ?, state_revision = 5,
@@ -1321,7 +1460,7 @@ async fn set_v1_metadata(
     )
     .bind(execution_version)
     .bind(run_state_json)
-    .bind(br#"{"preset_id":"p"}"#.as_slice())
+    .bind(descriptor)
     .bind(session_id)
     .execute(pool)
     .await

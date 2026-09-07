@@ -422,11 +422,16 @@ pub async fn resume_driven_sessions(
         if let Some(store) = workflow_store {
             match store.load_run(&session_id).await {
                 Ok(Some(record)) if record.execution_version >= 1 => {
-                    let chain_class = data.is_some_and(resume_rules::is_converge_merge_chain);
+                    let gate_park = data.is_some_and(|data| {
+                        resume_rules::gate_park_live(
+                            data,
+                            summary.current_task_id.as_deref().unwrap_or_default(),
+                        )
+                    });
                     let class = resume_rules::classify_recovery(
                         &record.status,
                         record.state.as_ref(),
-                        chain_class,
+                        gate_park,
                     );
                     match class {
                         resume_rules::RecoveryClass::ConvergeMerge => {
@@ -1590,6 +1595,7 @@ mod tests {
             // join keys.
             let context = br#"{"data": {
                 "_converge_arrivals_j1": ["a"], "_join_wait_start_j1": 1,
+                "_gate_park_join": true,
                 "_run_status": "failed", "_run_error": "converge_timeout: gate=converge"
             }, "chat_history": {"messages": [], "max_messages": 1000}}"#
                 .to_vec();

@@ -17,6 +17,8 @@ use nexus_contracts::local::orchestration::http::{
 };
 use nexus_contracts::PaginationInfo;
 use nexus_orchestration::engine::{EngineSignal, SessionStatus};
+use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
+use std::sync::Arc;
 
 /// `POST /v1/daemon/orchestration/sessions` — create a new session from a preset.
 pub async fn create_session(
@@ -152,20 +154,35 @@ pub async fn get_session(
             message: e.to_string(),
         })?;
 
-    let session = sessions
-        .into_iter()
-        .find(|s| s.session_id == sid)
-        .ok_or_else(|| NexusApiError::NotFound(format!("session {session_id}")))?;
-
-    Ok(Json(GetSessionResponse {
-        session: SessionSummary {
+    let session = if let Some(session) = sessions.into_iter().find(|s| s.session_id == sid) {
+        SessionSummary {
             session_id: session.session_id.0,
             creator_id: session.creator_id,
             preset_id: session.preset_id,
             status: session_status_to_str(&session.status),
             current_task_id: session.current_task_id,
-        },
-    }))
+        }
+    } else {
+        let pool = state.pool_or_uninit()?;
+        let storage = SqliteSessionStorage::new(Arc::new(pool.clone()));
+        let row = storage
+            .get_checkpoint_row(&session_id)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "STORAGE_ERROR".into(),
+                message: e.to_string(),
+            })?
+            .ok_or_else(|| NexusApiError::NotFound(format!("session {session_id}")))?;
+        SessionSummary {
+            session_id: row.session_id,
+            creator_id: row.creator_id,
+            preset_id: row.preset_id,
+            status: row.status,
+            current_task_id: row.current_task_id,
+        }
+    };
+
+    Ok(Json(GetSessionResponse { session }))
 }
 
 /// `POST /v1/daemon/orchestration/sessions/{session_id}/signal`

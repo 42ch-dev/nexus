@@ -307,6 +307,12 @@ fn parse_run_state(bytes: Option<&[u8]>) -> Option<nexus_orchestration::run_stat
     serde_json::from_slice(bytes).ok()
 }
 
+fn descriptor_is_valid(bytes: Option<&[u8]>) -> bool {
+    bytes.is_some_and(|bytes| {
+        serde_json::from_slice::<nexus_orchestration::run_state::RunDescriptorV1>(bytes).is_ok()
+    })
+}
+
 /// Compute the canonical A7 recovery class from the authoritative status +
 /// durable state (shared by detail and list projection).
 ///
@@ -321,18 +327,22 @@ fn recovery_class_for(
     execution_version: i64,
     status: &str,
     state: Option<&nexus_orchestration::run_state::RunStateV1>,
-    chain_class: bool,
+    descriptor_valid: bool,
+    gate_park_live: bool,
 ) -> RecoveryClass {
     match execution_version {
         0 => RecoveryClass::LegacyUnverified,
         1 => {
+            if !descriptor_valid {
+                return RecoveryClass::Unreadable;
+            }
             // A v1 row's status must be a known A2 status; anything else is
             // corrupt/ambiguous and non-replayable (mirrors `load_run`).
             let Some(status) = nexus_orchestration::engine::SessionStatus::from_db_str(status)
             else {
                 return RecoveryClass::Unreadable;
             };
-            resume_rules::classify_recovery(&status, state, chain_class)
+            resume_rules::classify_recovery(&status, state, gate_park_live)
         }
         // Negative or forward (>= 2) execution versions are unsupported.
         _ => RecoveryClass::Unreadable,
@@ -386,11 +396,15 @@ fn project(row: &CheckpointRow) -> InspectDto {
     // interpreted through v1 wait semantics (Important 4), and unsupported
     // negative/forward versions surface as `Unreadable` (Important 2).
     let run_state = parse_run_state(row.run_state_json.as_deref());
+    let gate_park = shape.as_ref().is_ok_and(|data| {
+        resume_rules::gate_park_live(data, row.current_task_id.as_deref().unwrap_or_default())
+    });
     let recovery_class = recovery_class_for(
         row.execution_version,
         &row.status,
         run_state.as_ref(),
-        !live_join_keys.is_empty(),
+        descriptor_is_valid(row.run_descriptor_json.as_deref()),
+        gate_park,
     );
     // Durable human-wait token (A4): exposed ONLY when the canonical class
     // is `HumanWait`. A terminal/interrupted/unreadable row carrying stale
@@ -477,7 +491,8 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
         row.execution_version,
         &row.status,
         run_state.as_ref(),
-        has_live_join_keys,
+        descriptor_is_valid(row.run_descriptor_json.as_deref()),
+        row.gate_park_live,
     );
     // Durable human-wait token (A4): exposed ONLY when the canonical class
     // is `HumanWait` (round-2 Minor — list must agree with detail).
@@ -772,6 +787,7 @@ mod tests {
             execution_version: 0,
             state_revision: 0,
             run_state_json: None,
+            run_descriptor_json: None,
             created_at: 1_756_990_000,
             updated_at: 1_756_990_300,
         }
@@ -958,6 +974,8 @@ mod tests {
             run_status: None,
             run_error: None,
             live_join_keys: None,
+            run_descriptor_json: None,
+            gate_park_live: false,
         };
         let dto = project_summary(&summary);
         assert_eq!(dto.context_readable, Some(true));
@@ -995,6 +1013,8 @@ mod tests {
             run_status: None,
             run_error: None,
             live_join_keys: None,
+            run_descriptor_json: None,
+            gate_park_live: false,
         };
         let dto = project_summary(&summary);
         assert_eq!(dto.context_readable, Some(false));

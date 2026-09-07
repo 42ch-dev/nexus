@@ -54,6 +54,8 @@ pub struct CheckpointRow {
     pub state_revision: i64,
     /// Serialized [`crate::run_state::RunStateV1`] for v1 rows (`None` = corrupt/absent).
     pub run_state_json: Option<Vec<u8>>,
+    /// Serialized [`crate::run_state::RunDescriptorV1`] for v1 rows.
+    pub run_descriptor_json: Option<Vec<u8>>,
     /// First-save timestamp (unix epoch seconds).
     pub created_at: i64,
     /// Last-save timestamp (unix epoch seconds).
@@ -71,15 +73,12 @@ pub struct CheckpointRow {
 /// - `run_status` / `run_error` — the typed failure record, extracted as
 ///   text scalars (string-typed values only; `None` otherwise, mirroring
 ///   `graph_flow::Context::get` semantics).
-/// - `live_join_keys` — non-null join-tracker key names, comma-joined,
-///   in JSON-object order (`None` when none live).
+/// - `live_join_keys` — legacy non-null join-tracker key names.
+/// - `gate_park_live` — the current task's exact scheduler-park marker.
 ///
-/// The v1 durable state is projected RAW (`run_state_json`, A2) — NOT
-/// digested in SQL. Structural validation equivalent to `RunStateV1`
-/// deserialization happens in Rust ([`crate::resume_rules::classify_recovery`]
-/// via the CLI's `parse_run_state`), so list and detail agree on
-/// syntactically-valid-but-structurally-corrupt blobs: `json_valid` alone
-/// must never label corrupt evidence as readable.
+/// The v1 durable state and descriptor are projected raw. Rust structurally
+/// deserializes both before assigning a replayable recovery class, so list,
+/// detail, and boot fail closed on the same malformed metadata.
 ///
 /// The daemon-side rules 1–4 (legacy v0 cascade) are exactly reproduced by
 /// [`crate::resume_rules::classify_resumability_extracted`].
@@ -105,6 +104,8 @@ pub struct CheckpointSummary {
     /// Serialized [`crate::run_state::RunStateV1`] for v1 rows, raw
     /// (`None` = absent on v0 rows or corrupt/absent blob on v1 rows).
     pub run_state_json: Option<Vec<u8>>,
+    /// Serialized [`crate::run_state::RunDescriptorV1`] for v1 rows.
+    pub run_descriptor_json: Option<Vec<u8>>,
     /// First-save timestamp (unix epoch seconds).
     pub created_at: i64,
     /// Last-save timestamp (unix epoch seconds).
@@ -119,4 +120,6 @@ pub struct CheckpointSummary {
     pub run_error: Option<String>,
     /// Comma-joined live join-key names (`None` when none live).
     pub live_join_keys: Option<String>,
+    /// True only when the current task's `_gate_park_<task>` marker is live.
+    pub gate_park_live: bool,
 }

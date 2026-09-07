@@ -132,7 +132,7 @@ impl SqliteSessionStorage {
         sqlx::query_as::<_, CheckpointRow>(
             "SELECT session_id, creator_id, preset_id, preset_version, current_task_id,
                     status, context_json, execution_version, state_revision, run_state_json,
-                    created_at, updated_at
+                    run_descriptor_json, created_at, updated_at
              FROM orchestration_sessions
              WHERE session_id = ?",
         )
@@ -144,24 +144,18 @@ impl SqliteSessionStorage {
     /// Read-only, bounded checkpoint list for `nexus42 ops inspect` (V1.182
     /// P1 BL-04, QC wave item 2).
     ///
-    /// Bounded to the 200 most recently updated non-terminal rows
-    /// (recovery-filter status set) — the list never grows unbounded over
-    /// the store's lifetime, and `context_json` (which embeds chat history)
-    /// is **not** loaded: the legacy resume-rule predicates are projected in
-    /// SQL (JSON1: `json_valid` / `json_type` / `json_extract` /
-    /// `json_each`) into [`CheckpointSummary`] verdict inputs. `json_each`
-    /// is guarded by a `json_type($.data) = 'object'` CASE so a corrupt or
-    /// non-object blob can never raise; corrupt rows surface as
-    /// `context_valid_json = false`.
+    /// Bounded to the 200 most recently updated recovery-relevant rows,
+    /// including `interrupted` operator evidence. The list never grows
+    /// unbounded, and `context_json` (which embeds chat history) is not
+    /// loaded: legacy predicates and the exact current-task gate-park marker
+    /// are projected in SQL. `json_each` is guarded by a
+    /// `json_type($.data) = 'object'` check, so corrupt or non-object context
+    /// cannot raise.
     ///
-    /// The durable v1 state (`run_state_json`) is projected RAW — SQL only
-    /// checks `json_valid` so a corrupt blob cannot raise, but structural
-    /// validation (type checking equivalent to `RunStateV1`
-    /// deserialization, plus the exact execution-version contract 0/1) is
-    /// done in Rust by the CLI consumer. `json_valid` alone must never
-    /// label structurally corrupt evidence as readable; list and detail
-    /// agree because both deserialize the same blob through the canonical
-    /// classifier.
+    /// The durable v1 state and descriptor blobs are projected raw and
+    /// structurally validated in Rust by the CLI consumer. `json_valid`
+    /// alone never labels corrupt evidence as readable; list, detail, and
+    /// boot agree on malformed v1 metadata.
     ///
     /// Ordering is `updated_at DESC`; a secondary `session_id DESC` tie-break
     /// keeps order deterministic for identical timestamps (bulk seeds).
@@ -172,7 +166,7 @@ impl SqliteSessionStorage {
         sqlx::query_as::<_, CheckpointSummary>(
             "SELECT session_id, creator_id, preset_id, preset_version, current_task_id,
                     status, execution_version, state_revision, run_state_json,
-                    created_at, updated_at,
+                    run_descriptor_json, created_at, updated_at,
                     json_valid(context_json) AS context_valid_json,
                     CASE
                         WHEN json_valid(context_json)
@@ -201,9 +195,20 @@ impl SqliteSessionStorage {
                                      OR key LIKE '\\_merge\\_%' ESCAPE '\\'
                                      OR key LIKE '\\_join\\_wait\\_start\\_%' ESCAPE '\\'))
                         ELSE NULL
-                    END AS live_join_keys
+                    END AS live_join_keys,
+                    CASE
+                        WHEN json_valid(context_json)
+                             AND json_type(context_json, '$.data') = 'object'
+                        THEN EXISTS(
+                            SELECT 1
+                            FROM json_each(json_extract(context_json, '$.data'))
+                            WHERE key = '_gate_park_' || COALESCE(current_task_id, '')
+                              AND value IS NOT NULL
+                        )
+                        ELSE 0
+                    END AS gate_park_live
              FROM orchestration_sessions
-             WHERE status IN ('running', 'paused', 'waiting_for_input')
+             WHERE status IN ('running', 'paused', 'waiting_for_input', 'interrupted')
              ORDER BY updated_at DESC, session_id DESC
              LIMIT 200",
         )
