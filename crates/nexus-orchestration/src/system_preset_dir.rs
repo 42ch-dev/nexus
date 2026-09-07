@@ -206,6 +206,17 @@ pub fn load_system_preset_from_dir(
     // The qualified ID uses `_system.<dir_name>` convention.
     let qualified_id = format!("{SYSTEM_PREFIX}{dir_name}");
 
+    // A system preset is a directory bundle: it knows its source identity
+    // (A2/A7) — content hash over the manifest + every referenced asset.
+    let mut loaded = loaded;
+    loaded.source_identity = Some(
+        crate::preset::loader::preset_source_identity(&loaded.manifest, Some(bundle_dir), None)
+            .map_err(|e| SystemPresetWarning {
+                dir_name: dir_name.to_string(),
+                message: format!("failed to compute source identity: {e}"),
+            })?,
+    );
+
     Ok(SystemPresetEntry {
         qualified_id,
         bundle_dir: bundle_dir.to_path_buf(),

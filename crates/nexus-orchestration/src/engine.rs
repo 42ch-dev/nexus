@@ -16,12 +16,15 @@
 
 use async_trait::async_trait;
 use graph_flow::{ExecutionStatus, FlowRunner, Graph, SessionStorage};
+use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 
 // Re-export for internal use.
 use crate::capability::CapabilityRegistry;
-use crate::run_state::{RunCheckpoint, RunStateV1, WorkflowStateStore};
+use crate::run_state::{
+    PresetSourceIdentity, RunCheckpoint, RunDescriptorV1, RunStateV1, WorkflowStateStore,
+};
 
 // ---------------------------------------------------------------------------
 // Helper types
@@ -114,19 +117,21 @@ impl SessionStatus {
 
     /// Parse a DB `status` string back into a [`SessionStatus`].
     ///
-    /// Unknown values map to [`SessionStatus::Running`] (the historical
-    /// fallback for non-terminal rows); callers that need strict parsing
-    /// should match on the string directly.
+    /// Returns `None` for unknown/unsupported values (A7): a corrupt or
+    /// ambiguous status must never be silently reinterpreted as `Running`.
+    /// Callers that need strict parsing should treat `None` as
+    /// unknown/non-replayable.
     #[must_use]
-    pub fn from_db_str(status: &str) -> Self {
+    pub fn from_db_str(status: &str) -> Option<Self> {
         match status {
-            "paused" => Self::Paused,
-            "waiting_for_input" => Self::WaitingForInput,
-            "completed" => Self::Completed,
-            "failed" => Self::Failed,
-            "cancelled" => Self::Cancelled,
-            "interrupted" => Self::Interrupted,
-            _ => Self::Running,
+            "running" => Some(Self::Running),
+            "paused" => Some(Self::Paused),
+            "waiting_for_input" => Some(Self::WaitingForInput),
+            "completed" => Some(Self::Completed),
+            "failed" => Some(Self::Failed),
+            "cancelled" => Some(Self::Cancelled),
+            "interrupted" => Some(Self::Interrupted),
+            _ => None,
         }
     }
 }
@@ -229,6 +234,20 @@ pub enum EngineError {
     /// cancelled — late graph saves must not overwrite newer checkpoint state.
     #[error("session {0} is already terminal/cancelled; refusing transition")]
     TerminalState(String),
+    /// A new v1 run was requested for a session id that already has a row.
+    ///
+    /// A real explicit new start creates a **new** v1 run (new session id);
+    /// it never launders an existing uncertain legacy row in place (A2).
+    #[error(
+        "session {session_id} already exists (execution_version={execution_version}); \
+         a new run must use a new session id"
+    )]
+    RunAlreadyExists {
+        /// Session id.
+        session_id: String,
+        /// Persisted execution version of the existing row.
+        execution_version: u32,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -363,6 +382,78 @@ impl EngineSharedState {
         }
     }
 
+    /// Persist a control-signal transition authoritatively (A2/A5) when a
+    /// workflow store is present.
+    ///
+    /// - `Cancel` → `Cancelled` with `cancel_requested = true`.
+    /// - `Pause` → `Paused`.
+    /// - `Resume`/`Advance` → `Running`, **fenced against terminal states**
+    ///   (Critical 3): a terminal session must never be flipped back to
+    ///   `Running` by a resume signal.
+    ///
+    /// Returns the target status on success. When the store is absent
+    /// (in-memory test storage) this is a no-op returning the target status.
+    async fn persist_signal_transition(
+        &self,
+        session_id: &SessionId,
+        signal: &EngineSignal,
+    ) -> Result<SessionStatus, EngineError> {
+        let target_status = match signal {
+            EngineSignal::Pause => SessionStatus::Paused,
+            EngineSignal::Resume | EngineSignal::Advance => SessionStatus::Running,
+            EngineSignal::Cancel => SessionStatus::Cancelled,
+        };
+
+        let Some(store) = &self.workflow_store else {
+            return Ok(target_status);
+        };
+
+        let expected_revision = store
+            .load_run(session_id)
+            .await?
+            .map(|r| r.state_revision)
+            .unwrap_or(0);
+
+        // Resume/Advance must not revive a terminal session (Critical 3).
+        if matches!(target_status, SessionStatus::Running) {
+            if let Some(record) = store.load_run(session_id).await? {
+                if record.status.is_terminal() {
+                    return Err(EngineError::TerminalState(session_id.0.clone()));
+                }
+            }
+        }
+
+        let root = self
+            .storage
+            .get(&session_id.0)
+            .await
+            .map_err(EngineError::GraphFlow)?
+            .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
+
+        let next_state = if matches!(target_status, SessionStatus::Cancelled) {
+            RunStateV1 {
+                cancel_requested: true,
+                ..RunStateV1::default()
+            }
+        } else {
+            RunStateV1::default()
+        };
+        let checkpoint = RunCheckpoint {
+            root: &root,
+            children: &[],
+        };
+        store
+            .commit_transition(
+                session_id,
+                expected_revision,
+                checkpoint,
+                target_status.clone(),
+                &next_state,
+            )
+            .await?;
+        Ok(target_status)
+    }
+
     /// Run a single step for a session, updating status after execution.
     ///
     /// Common logic shared between `GraphFlowEngine` and `EngineProxy`.
@@ -412,10 +503,16 @@ impl EngineSharedState {
         };
 
         // Persist the authoritative status transition (A2) when a workflow
-        // store is present. Terminal/wait statuses must survive restart and
-        // not be disguised as `running`.
+        // store is present. Terminal/wait/paused statuses must survive
+        // restart and not be disguised as `running` (Critical 1: paused is
+        // authoritative; Critical 4: a human wait carries a durable token).
         if let Some(store) = &self.workflow_store {
-            if status.is_terminal() || matches!(status, SessionStatus::WaitingForInput) {
+            if status.is_terminal()
+                || matches!(
+                    status,
+                    SessionStatus::WaitingForInput | SessionStatus::Paused
+                )
+            {
                 // Re-fetch the root session (the step already saved position).
                 let root = self
                     .storage
@@ -424,7 +521,7 @@ impl EngineSharedState {
                     .map_err(EngineError::GraphFlow)?
                     .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
 
-                let next_state = build_step_state(&result, &status);
+                let next_state = build_step_state(&result, &status, &root.current_task_id);
                 let checkpoint = RunCheckpoint {
                     root: &root,
                     children: &[],
@@ -450,13 +547,17 @@ impl EngineSharedState {
     }
 }
 
-/// Build the durable [`RunStateV1`] for a step outcome (A2).
+/// Build the durable [`RunStateV1`] for a step outcome (A2/A4).
 ///
-/// On a terminal/wait transition the step is no longer in flight; the
+/// On a terminal/wait/paused transition the step is no longer in flight; the
 /// failure record is populated from a graph-flow error when the step failed.
+/// A human wait (`WaitingForInput`) produces a **fresh** durable
+/// [`WaitRecord`] with a new UUID token per arrival (A4) — retained through
+/// restart until a successful CAS consumes it.
 fn build_step_state(
     result: &graph_flow::ExecutionResult,
     status: &SessionStatus,
+    current_task_id: &str,
 ) -> RunStateV1 {
     let failure = match (&result.status, status) {
         (ExecutionStatus::Error(msg), SessionStatus::Failed) => Some(crate::run_state::RunFailure {
@@ -465,8 +566,19 @@ fn build_step_state(
         }),
         _ => None,
     };
+    let wait = if matches!(status, SessionStatus::WaitingForInput) {
+        Some(crate::run_state::WaitRecord {
+            wait_id: uuid::Uuid::new_v4().to_string(),
+            task_id: current_task_id.to_string(),
+            child_session_id: None,
+            child_task_id: None,
+            kind: crate::run_state::WaitKind::Manual,
+        })
+    } else {
+        None
+    };
     RunStateV1 {
-        wait: None,
+        wait,
         step_in_flight: None,
         in_flight: None,
         failure,
@@ -562,48 +674,14 @@ impl OrchestrationEngine for EngineProxy {
         session_id: &SessionId,
         signal: EngineSignal,
     ) -> Result<(), EngineError> {
-        let target_status = match signal {
-            EngineSignal::Pause => SessionStatus::Paused,
-            EngineSignal::Resume | EngineSignal::Advance => SessionStatus::Running,
-            EngineSignal::Cancel => SessionStatus::Cancelled,
-        };
-
-        // Persist a terminal cancel transition authoritatively (A2) when a
-        // workflow store is present. Cancellation must not claim rollback of
-        // completed effects; it only records the terminal class.
-        if matches!(target_status, SessionStatus::Cancelled) {
-            if let Some(store) = &self.state.workflow_store {
-                let expected_revision = store
-                    .load_run(session_id)
-                    .await?
-                    .map(|r| r.state_revision)
-                    .unwrap_or(0);
-                let root = self
-                    .state
-                    .storage
-                    .get(&session_id.0)
-                    .await
-                    .map_err(EngineError::GraphFlow)?
-                    .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
-                let next_state = RunStateV1 {
-                    cancel_requested: true,
-                    ..RunStateV1::default()
-                };
-                let checkpoint = RunCheckpoint {
-                    root: &root,
-                    children: &[],
-                };
-                store
-                    .commit_transition(
-                        session_id,
-                        expected_revision,
-                        checkpoint,
-                        target_status.clone(),
-                        &next_state,
-                    )
-                    .await?;
-            }
-        }
+        // Persist the transition authoritatively (A2/A5) when a workflow
+        // store is present: Cancel → Cancelled, Pause → Paused, Resume →
+        // Running (fenced against terminal states). Memory-only status
+        // flips are no longer the SSOT (Critical 3).
+        let target_status = self
+            .state
+            .persist_signal_transition(session_id, &signal)
+            .await?;
 
         let mut sessions = self.state.sessions.write().await;
         if let Some(s) = sessions.iter_mut().find(|s| s.session_id == *session_id) {
@@ -723,6 +801,12 @@ pub struct GraphFlowEngine {
     caps: crate::capability::CapabilityRegistryHolder,
     /// Daemon-side tool dispatch for `nexus.*` host tool actions (DF-47, V1.42 P3).
     daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
+    /// Resolved workspace root the engine's runs execute in (A2). `None`
+    /// for in-memory/test engines that do not persist v1 descriptors.
+    workspace_root: Option<std::path::PathBuf>,
+    /// Nexus home (`~/.nexus42`) used to resolve directory presets for
+    /// source identity (A2/A7). `None` for in-memory/test engines.
+    nexus_home: Option<std::path::PathBuf>,
 }
 
 impl Clone for GraphFlowEngine {
@@ -731,6 +815,8 @@ impl Clone for GraphFlowEngine {
             state: self.state.clone(),
             caps: self.caps.clone(),
             daemon_tool_dispatch: self.daemon_tool_dispatch.clone(),
+            workspace_root: self.workspace_root.clone(),
+            nexus_home: self.nexus_home.clone(),
         }
     }
 }
@@ -754,6 +840,8 @@ impl GraphFlowEngine {
             state: Arc::new(EngineSharedState::new(storage)),
             caps,
             daemon_tool_dispatch: None,
+            workspace_root: None,
+            nexus_home: None,
         }
     }
 
@@ -772,7 +860,33 @@ impl GraphFlowEngine {
             state: Arc::new(EngineSharedState::with_workflow_store(storage, workflow_store)),
             caps,
             daemon_tool_dispatch: None,
+            workspace_root: None,
+            nexus_home: None,
         }
+    }
+
+    /// Create a new engine with a transactional workflow store and a resolved
+    /// workspace root (A2). The workspace root is frozen into every v1 run
+    /// descriptor the engine starts.
+    pub fn new_with_storage_and_workflow_store_and_workspace(
+        storage: Arc<dyn SessionStorage>,
+        workflow_store: Arc<dyn WorkflowStateStore>,
+        caps: crate::capability::CapabilityRegistryHolder,
+        workspace_root: std::path::PathBuf,
+    ) -> Self {
+        Self {
+            state: Arc::new(EngineSharedState::with_workflow_store(storage, workflow_store)),
+            caps,
+            daemon_tool_dispatch: None,
+            workspace_root: Some(workspace_root),
+            nexus_home: None,
+        }
+    }
+
+    /// Set the nexus home (`~/.nexus42`) used to resolve directory presets
+    /// for source identity (A2/A7). Called by the daemon boot.
+    pub fn set_nexus_home(&mut self, nexus_home: std::path::PathBuf) {
+        self.nexus_home = Some(nexus_home);
     }
 
     /// Set the daemon-side tool dispatch adapter (DF-47, V1.42 P3).
@@ -891,6 +1005,87 @@ impl GraphFlowEngine {
         self.state.clone()
     }
 
+    /// Build a frozen [`RunDescriptorV1`] from a loaded preset (A2).
+    ///
+    /// The source identity comes from the loaded preset (embedded or
+    /// directory bundle); the workspace root from the engine. `input` and
+    /// `agent_bindings` are empty at this seam — the schedule/creator
+    /// admission layer freezes them before driving (P2 owns that).
+    fn build_descriptor(
+        &self,
+        loaded: &crate::preset::LoadedPreset,
+        creator_id: &str,
+    ) -> Result<RunDescriptorV1, EngineError> {
+        let source = loaded.source_identity.clone().ok_or_else(|| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "preset '{}' has no source identity; cannot start a v1 run",
+                loaded.id
+            )))
+        })?;
+        let workspace_root = self.workspace_root.clone().unwrap_or_default();
+        Ok(RunDescriptorV1 {
+            creator_id: creator_id.to_string(),
+            work_id: None,
+            workspace_root,
+            preset_id: loaded.id.clone(),
+            preset_version: loaded.version,
+            source,
+            input: serde_json::Map::new(),
+            agent_bindings: HashMap::new(),
+            parent_session_id: None,
+            graph_name: None,
+        })
+    }
+
+    /// Start a v1 run for a loaded preset when a workflow store is present
+    /// (Critical 2). Falls back to the raw-graph path when no store exists.
+    async fn start_preset_run(
+        &self,
+        loaded: &crate::preset::LoadedPreset,
+        creator_id: &str,
+        graph: Arc<Graph>,
+    ) -> Result<SessionId, EngineError> {
+        if let Some(store) = &self.state.workflow_store {
+            let descriptor = self.build_descriptor(loaded, creator_id)?;
+            let session_id = format!("{}:{}", loaded.id, chrono::Utc::now().timestamp_millis());
+            let start_task_id = graph.start_task_id().unwrap_or_default();
+            let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
+            session.context.set("_session_id", session_id.clone()).await;
+            if !creator_id.is_empty() {
+                session.context.set("_creator_id", creator_id.to_string()).await;
+            }
+            let checkpoint = RunCheckpoint {
+                root: &session,
+                children: &[],
+            };
+            store
+                .start_run(
+                    &SessionId(session_id.clone()),
+                    &descriptor,
+                    checkpoint,
+                    &RunStateV1::default(),
+                )
+                .await?;
+            let runner = Arc::new(FlowRunner::new(graph, self.state.storage.clone()));
+            self.state
+                .runners
+                .write()
+                .await
+                .insert(session_id.clone(), runner);
+            self.state.sessions.write().await.push(SessionSummary {
+                session_id: SessionId(session_id.clone()),
+                creator_id: creator_id.to_string(),
+                preset_id: loaded.id.clone(),
+                status: SessionStatus::Running,
+                current_task_id: Some(start_task_id),
+            });
+            Ok(SessionId(session_id))
+        } else {
+            self.start_session_with_creator(&loaded.id, graph, Some(creator_id))
+                .await
+        }
+    }
+
     /// Start a session on a specific graph.
     ///
     /// Creates a [`graph_flow::Session`] seeded at the graph's start task,
@@ -930,7 +1125,40 @@ impl GraphFlowEngine {
                 .set("_creator_id", creator_id.to_string())
                 .await;
         }
-        self.state.storage.save(session).await?;
+
+        // Critical 2: when a workflow store is present, a normal start creates
+        // a v1 run (authoritative descriptor + state) via start_run — never a
+        // bare SessionStorage::save. The source identity is resolved from the
+        // preset (embedded or directory bundle).
+        if let Some(store) = &self.state.workflow_store {
+            let source = self.resolve_source_identity(preset_id)?;
+            let descriptor = RunDescriptorV1 {
+                creator_id: creator_id.unwrap_or_default().to_string(),
+                work_id: None,
+                workspace_root: self.workspace_root.clone().unwrap_or_default(),
+                preset_id: preset_id.to_string(),
+                preset_version: 0,
+                source,
+                input: serde_json::Map::new(),
+                agent_bindings: HashMap::new(),
+                parent_session_id: None,
+                graph_name: None,
+            };
+            let checkpoint = RunCheckpoint {
+                root: &session,
+                children: &[],
+            };
+            store
+                .start_run(
+                    &SessionId(session_id.clone()),
+                    &descriptor,
+                    checkpoint,
+                    &RunStateV1::default(),
+                )
+                .await?;
+        } else {
+            self.state.storage.save(session).await?;
+        }
 
         // WS2 R3: Create and store Arc<FlowRunner>.
         let runner = Arc::new(FlowRunner::new(graph, self.state.storage.clone()));
@@ -952,6 +1180,37 @@ impl GraphFlowEngine {
         self.state.sessions.write().await.push(summary);
 
         Ok(SessionId(session_id))
+    }
+
+    /// Resolve the content-addressed source identity for a preset (A2/A7).
+    ///
+    /// Tries the embedded preset first; falls back to a directory bundle
+    /// under `nexus_home` (user or system). Returns an error when the preset
+    /// cannot be resolved to a known source.
+    fn resolve_source_identity(
+        &self,
+        preset_id: &str,
+    ) -> Result<PresetSourceIdentity, EngineError> {
+        let caps = self.current_caps();
+        // Embedded preset.
+        if let Ok(loaded) = crate::preset::load_embedded_preset(preset_id, &caps) {
+            if let Some(identity) = loaded.source_identity {
+                return Ok(identity);
+            }
+        }
+        // Directory bundle under nexus_home.
+        if let Some(home) = &self.nexus_home {
+            if let Ok(loaded) = crate::preset::resolve_preset(preset_id, home, &caps) {
+                if let Some(identity) = loaded.source_identity {
+                    return Ok(identity);
+                }
+            }
+        }
+        Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+            format!(
+                "cannot resolve source identity for preset '{preset_id}' (not embedded and no directory bundle)"
+            ),
+        )))
     }
 }
 
@@ -1024,48 +1283,14 @@ impl OrchestrationEngine for GraphFlowEngine {
         session_id: &SessionId,
         signal: EngineSignal,
     ) -> Result<(), EngineError> {
-        let target_status = match signal {
-            EngineSignal::Pause => SessionStatus::Paused,
-            EngineSignal::Resume | EngineSignal::Advance => SessionStatus::Running,
-            EngineSignal::Cancel => SessionStatus::Cancelled,
-        };
-
-        // Persist a terminal cancel transition authoritatively (A2) when a
-        // workflow store is present. Cancellation must not claim rollback of
-        // completed effects; it only records the terminal class.
-        if matches!(target_status, SessionStatus::Cancelled) {
-            if let Some(store) = &self.state.workflow_store {
-                let expected_revision = store
-                    .load_run(session_id)
-                    .await?
-                    .map(|r| r.state_revision)
-                    .unwrap_or(0);
-                let root = self
-                    .state
-                    .storage
-                    .get(&session_id.0)
-                    .await
-                    .map_err(EngineError::GraphFlow)?
-                    .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
-                let next_state = RunStateV1 {
-                    cancel_requested: true,
-                    ..RunStateV1::default()
-                };
-                let checkpoint = RunCheckpoint {
-                    root: &root,
-                    children: &[],
-                };
-                store
-                    .commit_transition(
-                        session_id,
-                        expected_revision,
-                        checkpoint,
-                        target_status.clone(),
-                        &next_state,
-                    )
-                    .await?;
-            }
-        }
+        // Persist the transition authoritatively (A2/A5) when a workflow
+        // store is present: Cancel → Cancelled, Pause → Paused, Resume →
+        // Running (fenced against terminal states). Memory-only status
+        // flips are no longer the SSOT (Critical 3).
+        let target_status = self
+            .state
+            .persist_signal_transition(session_id, &signal)
+            .await?;
 
         let mut sessions = self.state.sessions.write().await;
         if let Some(s) = sessions.iter_mut().find(|s| s.session_id == *session_id) {
@@ -1171,7 +1396,7 @@ impl OrchestrationEngine for GraphFlowEngine {
             &caps,
             self.daemon_tool_dispatch.clone(),
         );
-        self.start_session(&loaded.id, Arc::new(wired)).await
+        self.start_preset_run(loaded, "", Arc::new(wired)).await
     }
 
     async fn start_session_with_preset_for_creator(
@@ -1189,7 +1414,7 @@ impl OrchestrationEngine for GraphFlowEngine {
             &caps,
             self.daemon_tool_dispatch.clone(),
         );
-        self.start_session_with_creator(&loaded.id, Arc::new(wired), Some(creator_id))
+        self.start_preset_run(loaded, creator_id, Arc::new(wired))
             .await
     }
 }

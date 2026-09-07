@@ -97,6 +97,7 @@ pub struct WaitRecord {
 
 /// Wait kind.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum WaitKind {
     /// Human approval wait.
     Manual,
@@ -125,6 +126,7 @@ pub struct PromptAttempt {
 
 /// Prompt dispatch phase.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum PromptPhase {
     /// Persisted before the external Host effect.
     Dispatching,
@@ -199,6 +201,10 @@ pub struct ChildCheckpoint {
     pub status: SessionStatus,
     /// Child durable run state.
     pub state: RunStateV1,
+    /// Child state revision (CAS anchor for the child row).
+    pub state_revision: u64,
+    /// Named inner graph this child executes (A2 child identity).
+    pub graph_name: Option<String>,
 }
 
 /// Batched root/child checkpoint (A2).

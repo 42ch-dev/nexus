@@ -33,7 +33,7 @@ use std::sync::Arc;
 use super::inspect::{CheckpointRow, CheckpointSummary};
 use crate::engine::{EngineError, SessionId, SessionStatus, SessionSummary};
 use crate::run_state::{
-    RunCheckpoint, RunDescriptorV1, RunRecord, RunStateV1, WorkflowStateStore,
+    ChildCheckpoint, RunCheckpoint, RunDescriptorV1, RunRecord, RunStateV1, WorkflowStateStore,
 };
 
 /// SQLite-backed session storage sharing `nexus-local-db`'s pool.
@@ -249,8 +249,7 @@ impl SessionStorage for SqliteSessionStorage {
                 current_task_id = excluded.current_task_id,
                 context_json     = excluded.context_json,
                 updated_at       = excluded.updated_at
-            WHERE orchestration_sessions.status NOT IN
-                ('completed', 'failed', 'cancelled', 'interrupted')
+            WHERE orchestration_sessions.status = 'running'
             "#,
             session_id,
             creator_id,
@@ -354,6 +353,56 @@ fn deserialize_blob<T: serde::de::DeserializeOwned>(
     })
 }
 
+/// Build the frozen child [`RunDescriptorV1`] for a child checkpoint (A2/A4).
+///
+/// A child run inherits the trusted root identity (creator, preset, source,
+/// workspace, bindings) and names its parent session and inner graph. This is
+/// the reconstructible child identity — never `"unknown"`/`"default"`.
+fn child_descriptor(
+    root: &RunDescriptorV1,
+    root_session_id: &str,
+    child: &ChildCheckpoint,
+) -> RunDescriptorV1 {
+    RunDescriptorV1 {
+        creator_id: root.creator_id.clone(),
+        work_id: root.work_id.clone(),
+        workspace_root: root.workspace_root.clone(),
+        preset_id: root.preset_id.clone(),
+        preset_version: root.preset_version,
+        source: root.source.clone(),
+        input: root.input.clone(),
+        agent_bindings: root.agent_bindings.clone(),
+        parent_session_id: Some(SessionId(root_session_id.to_string())),
+        graph_name: child.graph_name.clone(),
+    }
+}
+
+/// Read the persisted root descriptor for a session within a transaction.
+///
+/// Returns `None` when the row has no descriptor (v0 legacy row).
+async fn read_root_descriptor(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    session_id: &str,
+) -> Result<Option<RunDescriptorV1>, EngineError> {
+    let bytes: Option<Option<Vec<u8>>> = sqlx::query_scalar(
+        "SELECT run_descriptor_json FROM orchestration_sessions WHERE session_id = ?",
+    )
+    .bind(session_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|e| {
+        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            "read root descriptor '{session_id}': {e}"
+        )))
+    })?;
+    match bytes {
+        Some(Some(b)) if !b.is_empty() => {
+            deserialize_blob::<RunDescriptorV1>(&b, "run_descriptor_json").map(Some)
+        }
+        _ => Ok(None),
+    }
+}
+
 #[async_trait]
 impl WorkflowStateStore for SqliteSessionStorage {
     async fn load_run(&self, session_id: &SessionId) -> Result<Option<RunRecord>, EngineError> {
@@ -378,36 +427,58 @@ impl WorkflowStateStore for SqliteSessionStorage {
             return Ok(None);
         };
 
-        let status = SessionStatus::from_db_str(&row.status);
         let execution_version = u32::try_from(row.execution_version).unwrap_or(0);
         let state_revision = u64::try_from(row.state_revision).unwrap_or(0);
 
         // v0 rows are legacy/unverified: no descriptor/state, status is
         // diagnostic only. v1 rows carry the authoritative descriptor/state.
-        let (descriptor, state) = if execution_version >= 1 {
-            let descriptor = row
-                .run_descriptor_json
-                .as_deref()
-                .map(|b| deserialize_blob::<RunDescriptorV1>(b, "run_descriptor_json"))
-                .transpose()?;
-            let state = row
-                .run_state_json
-                .as_deref()
-                .map(|b| deserialize_blob::<RunStateV1>(b, "run_state_json"))
-                .transpose()?;
-            (descriptor, state)
+        if execution_version >= 1 {
+            // A v1 row's status is authoritative (A2). An unknown/unsupported
+            // status value is corrupt/ambiguous and must be surfaced as
+            // non-replayable (A7), never silently reinterpreted as Running.
+            let status = SessionStatus::from_db_str(&row.status).ok_or_else(|| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "load_run '{}': unknown/unsupported v1 status {:?} (non-replayable)",
+                    session_id.0, row.status
+                )))
+            })?;
+            // A v1 row must carry both descriptor and state; a missing blob
+            // is corrupt/unsupported and non-replayable (A7).
+            let descriptor_bytes = row.run_descriptor_json.as_deref().ok_or_else(|| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "load_run '{}': v1 row missing run_descriptor_json (non-replayable)",
+                    session_id.0
+                )))
+            })?;
+            let state_bytes = row.run_state_json.as_deref().ok_or_else(|| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "load_run '{}': v1 row missing run_state_json (non-replayable)",
+                    session_id.0
+                )))
+            })?;
+            let descriptor = deserialize_blob::<RunDescriptorV1>(descriptor_bytes, "run_descriptor_json")?;
+            let state = deserialize_blob::<RunStateV1>(state_bytes, "run_state_json")?;
+            Ok(Some(RunRecord {
+                session_id: SessionId(row.session_id),
+                status,
+                state_revision,
+                execution_version,
+                descriptor: Some(descriptor),
+                state: Some(state),
+            }))
         } else {
-            (None, None)
-        };
-
-        Ok(Some(RunRecord {
-            session_id: SessionId(row.session_id),
-            status,
-            state_revision,
-            execution_version,
-            descriptor,
-            state,
-        }))
+            // v0 legacy row: status is diagnostic only; unknown values are
+            // tolerated (the row is already legacy/unverified).
+            let status = SessionStatus::from_db_str(&row.status).unwrap_or(SessionStatus::Running);
+            Ok(Some(RunRecord {
+                session_id: SessionId(row.session_id),
+                status,
+                state_revision,
+                execution_version,
+                descriptor: None,
+                state: None,
+            }))
+        }
     }
 
     async fn start_run(
@@ -443,9 +514,31 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 )))
             })?;
 
-        // CAS: only start a v1 run on a fresh (v0 or absent) row. A real
-        // explicit new start never launders an uncertain old run.
-        let result = sqlx::query!(
+        // A2: a real explicit new start creates a NEW v1 run. It never
+        // launders an existing uncertain legacy row in place — an existing
+        // row (any execution_version, including a v0 legacy row) must be
+        // left untouched and the caller must mint a new session id.
+        let existing_version: Option<i64> = sqlx::query_scalar(
+            "SELECT execution_version FROM orchestration_sessions WHERE session_id = ?",
+        )
+        .bind(&id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "start_run '{}': {e}", session_id.0
+            )))
+        })?;
+
+        if let Some(version) = existing_version {
+            return Err(EngineError::RunAlreadyExists {
+                session_id: session_id.0.clone(),
+                execution_version: u32::try_from(version).unwrap_or(0),
+            });
+        }
+
+        // Fresh row: insert the authoritative v1 record.
+        sqlx::query!(
             r#"
             INSERT INTO orchestration_sessions
                 (session_id, creator_id, preset_id, preset_version,
@@ -453,16 +546,6 @@ impl WorkflowStateStore for SqliteSessionStorage {
                  context_json, chat_history_json, created_at, updated_at,
                  execution_version, state_revision, run_state_json, run_descriptor_json)
             VALUES (?, ?, ?, ?, ?, ?, 'running', ?, NULL, ?, ?, 1, 1, ?, ?)
-            ON CONFLICT(session_id) DO UPDATE SET
-                status = 'running',
-                current_task_id = excluded.current_task_id,
-                context_json = excluded.context_json,
-                updated_at = excluded.updated_at,
-                execution_version = 1,
-                state_revision = 1,
-                run_state_json = excluded.run_state_json,
-                run_descriptor_json = excluded.run_descriptor_json
-            WHERE orchestration_sessions.execution_version = 0
             "#,
             id,
             creator_id,
@@ -484,11 +567,9 @@ impl WorkflowStateStore for SqliteSessionStorage {
             )))
         })?;
 
-        if result.rows_affected() == 0 {
-            return Err(EngineError::TerminalState(session_id.0.clone()));
-        }
-
-        // Persist child checkpoints atomically under the root start.
+        // Persist child checkpoints atomically under the root start. Each
+        // child inherits the trusted root identity (A2/A4) and is
+        // revision-fenced + terminal-fenced (Important 2).
         for child in checkpoint.children {
             let child_ctx = serde_json::to_vec(&child.session.context).map_err(|e| {
                 EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
@@ -496,36 +577,54 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 )))
             })?;
             let child_state = serialize_blob(&child.state)?;
+            let child_descriptor = child_descriptor(descriptor, &session_id.0, child);
+            let child_descriptor_bytes = serialize_blob(&child_descriptor)?;
             let child_status = child.status.as_db_str();
             let child_id = child.session.id.clone();
             let child_task = child.session.current_task_id.clone();
-            let child_creator = "unknown".to_string();
-            let child_preset = "default".to_string();
+            let child_creator = child_descriptor.creator_id.clone();
+            let child_preset = child_descriptor.preset_id.clone();
+            let child_preset_version = i64::from(child_descriptor.preset_version);
+            let child_parent = child_descriptor
+                .parent_session_id
+                .as_ref()
+                .map(|s| s.0.clone());
+            let child_revision = child.state_revision as i64;
             sqlx::query!(
                 r#"
                 INSERT INTO orchestration_sessions
                     (session_id, creator_id, preset_id, preset_version,
                      parent_session_id, current_task_id, status,
                      context_json, chat_history_json, created_at, updated_at,
-                     execution_version, state_revision, run_state_json)
-                VALUES (?, ?, ?, 0, ?, ?, ?, ?, NULL, ?, ?, 1, 1, ?)
+                     execution_version, state_revision, run_state_json, run_descriptor_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 1, ?, ?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET
                     status = excluded.status,
                     current_task_id = excluded.current_task_id,
                     context_json = excluded.context_json,
                     updated_at = excluded.updated_at,
-                    run_state_json = excluded.run_state_json
+                    execution_version = 1,
+                    state_revision = state_revision + 1,
+                    run_state_json = excluded.run_state_json,
+                    run_descriptor_json = excluded.run_descriptor_json
+                WHERE orchestration_sessions.state_revision = ?
+                  AND orchestration_sessions.status NOT IN
+                      ('completed', 'failed', 'cancelled', 'interrupted')
                 "#,
                 child_id,
                 child_creator,
                 child_preset,
-                checkpoint.root.id,
+                child_preset_version,
+                child_parent,
                 child_task,
                 child_status,
                 child_ctx,
                 now,
                 now,
-                child_state
+                child_revision,
+                child_state,
+                child_descriptor_bytes,
+                child_revision
             )
             .execute(&mut *tx)
             .await
@@ -589,7 +688,10 @@ impl WorkflowStateStore for SqliteSessionStorage {
             UPDATE orchestration_sessions
             SET status = ?, current_task_id = ?, context_json = ?,
                 updated_at = ?, state_revision = state_revision + 1,
-                run_state_json = ?
+                run_state_json = ?,
+                execution_version = CASE
+                    WHEN execution_version = 0 AND run_descriptor_json IS NOT NULL THEN 1
+                    ELSE execution_version END
             WHERE session_id = ? AND state_revision = ?
               AND status NOT IN ('completed', 'failed', 'cancelled', 'interrupted')
             "#,
@@ -635,7 +737,28 @@ impl WorkflowStateStore for SqliteSessionStorage {
             };
         }
 
+        // Read the root descriptor (promoted to v1 if it was a v0 row) so
+        // the returned record is authoritative and reconstructible (Important 4).
+        let root_descriptor = read_root_descriptor(&mut tx, &session_id.0).await?;
+
+        // Read the actual persisted execution_version (a descriptorless v0
+        // row stays legacy; a v0 row with a descriptor is promoted to v1).
+        let persisted_version: i64 = sqlx::query_scalar(
+            "SELECT execution_version FROM orchestration_sessions WHERE session_id = ?",
+        )
+        .bind(&session_id.0)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "commit_transition read execution_version: {e}"
+            )))
+        })?;
+        let execution_version = u32::try_from(persisted_version).unwrap_or(0);
+
         // Persist child checkpoints atomically under the root transition.
+        // Each child inherits the trusted root identity (A2/A4) and is
+        // revision-fenced + terminal-fenced (Important 2).
         for child in checkpoint.children {
             let child_ctx = serde_json::to_vec(&child.session.context).map_err(|e| {
                 EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
@@ -643,37 +766,68 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 )))
             })?;
             let child_state = serialize_blob(&child.state)?;
+            let child_descriptor = match &root_descriptor {
+                Some(root) => child_descriptor(root, &session_id.0, child),
+                None => {
+                    // No root descriptor (v0 root): the child cannot inherit
+                    // a trusted identity. Refuse rather than write
+                    // "unknown"/"default" (A2/A4).
+                    return Err(EngineError::GraphFlow(
+                        graph_flow::GraphError::StorageError(format!(
+                            "commit_transition '{}': root has no descriptor; \
+                             cannot persist child identity",
+                            session_id.0
+                        )),
+                    ));
+                }
+            };
+            let child_descriptor_bytes = serialize_blob(&child_descriptor)?;
             let child_status = child.status.as_db_str();
             let child_id = child.session.id.clone();
             let child_task = child.session.current_task_id.clone();
-            let child_creator = "unknown".to_string();
-            let child_preset = "default".to_string();
+            let child_creator = child_descriptor.creator_id.clone();
+            let child_preset = child_descriptor.preset_id.clone();
+            let child_preset_version = i64::from(child_descriptor.preset_version);
+            let child_parent = child_descriptor
+                .parent_session_id
+                .as_ref()
+                .map(|s| s.0.clone());
+            let child_revision = child.state_revision as i64;
             sqlx::query!(
                 r#"
                 INSERT INTO orchestration_sessions
                     (session_id, creator_id, preset_id, preset_version,
                      parent_session_id, current_task_id, status,
                      context_json, chat_history_json, created_at, updated_at,
-                     execution_version, state_revision, run_state_json)
-                VALUES (?, ?, ?, 0, ?, ?, ?, ?, NULL, ?, ?, 1, 1, ?)
+                     execution_version, state_revision, run_state_json, run_descriptor_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 1, ?, ?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET
                     status = excluded.status,
                     current_task_id = excluded.current_task_id,
                     context_json = excluded.context_json,
                     updated_at = excluded.updated_at,
                     execution_version = 1,
-                    run_state_json = excluded.run_state_json
+                    state_revision = state_revision + 1,
+                    run_state_json = excluded.run_state_json,
+                    run_descriptor_json = excluded.run_descriptor_json
+                WHERE orchestration_sessions.state_revision = ?
+                  AND orchestration_sessions.status NOT IN
+                      ('completed', 'failed', 'cancelled', 'interrupted')
                 "#,
                 child_id,
                 child_creator,
                 child_preset,
-                checkpoint.root.id,
+                child_preset_version,
+                child_parent,
                 child_task,
                 child_status,
                 child_ctx,
                 now,
                 now,
-                child_state
+                child_revision,
+                child_state,
+                child_descriptor_bytes,
+                child_revision
             )
             .execute(&mut *tx)
             .await
@@ -694,8 +848,8 @@ impl WorkflowStateStore for SqliteSessionStorage {
             session_id: SessionId(session_id.0.clone()),
             status: next_status,
             state_revision: expected_revision + 1,
-            execution_version: 1,
-            descriptor: None,
+            execution_version,
+            descriptor: root_descriptor,
             state: Some(next_state.clone()),
         })
     }
