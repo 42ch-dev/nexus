@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE orchestration_sessions\n            SET current_task_id = ?, context_json = ?, updated_at = ?, run_state_json = ?\n            WHERE session_id = ? AND state_revision = ?\n              AND status NOT IN ('completed', 'failed', 'cancelled', 'interrupted')\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "6fb2d1e9e06165e511f134efd64a9f9cf71082957c56e149f5dab753e2710465"
+}

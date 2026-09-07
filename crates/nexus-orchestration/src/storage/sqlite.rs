@@ -502,7 +502,31 @@ impl WorkflowStateStore for SqliteSessionStorage {
             return Ok(None);
         };
 
-        let execution_version = u32::try_from(row.execution_version).unwrap_or(0);
+        // A corrupt/unsupported execution_version is non-replayable under A7:
+        // negative values and any forward version (>=2) with no written
+        // forward-version policy must be surfaced as errors, never coerced to
+        // 0 (legacy) or 1 (v1). The row/blobs are preserved verbatim — the
+        // caller does not rewrite them (Important 4).
+        let execution_version_raw = row.execution_version;
+        if execution_version_raw < 0 {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "load_run '{}': negative execution_version {execution_version_raw} \
+                     (non-replayable)",
+                    session_id.0
+                )),
+            ));
+        }
+        if execution_version_raw > 1 {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "load_run '{}': unsupported execution_version {execution_version_raw} \
+                     (non-replayable, no forward-version policy)",
+                    session_id.0
+                )),
+            ));
+        }
+        let execution_version = execution_version_raw as u32;
 
         // A negative/out-of-range integer revision on a v0 OR v1 row is
         // corrupt and non-replayable (A2/A7): it must be surfaced as an
@@ -865,7 +889,21 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 "commit_transition read execution_version: {e}"
             )))
         })?;
-        let execution_version = u32::try_from(persisted_version).unwrap_or(0);
+        // A corrupt/unsupported execution_version is non-replayable (A7) —
+        // never coerce negative values to 0 or forward versions to 1. The
+        // root update already committed inside this transaction; returning a
+        // GraphFlow error rolls it back, preserving the row verbatim
+        // (Important 4).
+        if persisted_version < 0 || persisted_version > 1 {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "commit_transition '{}': unsupported execution_version {persisted_version} \
+                     (non-replayable)",
+                    session_id.0
+                )),
+            ));
+        }
+        let execution_version = persisted_version as u32;
 
         // Persist child checkpoints atomically under the root transition.
         // Each child inherits the trusted root identity (A2/A4) and is
@@ -1002,7 +1040,28 @@ impl WorkflowStateStore for SqliteSessionStorage {
 
         let mut children = Vec::with_capacity(rows.len());
         for row in rows {
-            let execution_version = u32::try_from(row.execution_version).unwrap_or(0);
+            // A corrupt/unsupported execution_version is non-replayable (A7):
+            // never coerce negative values to 0 or forward versions (>=2) to
+            // v1. Preserve the row verbatim (Important 4).
+            if row.execution_version < 0 {
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "load_children '{}': child '{}' has negative execution_version {} \
+                         (non-replayable)",
+                        parent_session_id.0, row.session_id, row.execution_version
+                    )),
+                ));
+            }
+            if row.execution_version > 1 {
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "load_children '{}': child '{}' has unsupported execution_version {} \
+                         (non-replayable)",
+                        parent_session_id.0, row.session_id, row.execution_version
+                    )),
+                ));
+            }
+            let execution_version = row.execution_version as u32;
             let state_revision = u64::try_from(row.state_revision).unwrap_or(0);
             if execution_version >= 1 {
                 let status = SessionStatus::from_db_str(&row.status).ok_or_else(|| {
@@ -1046,6 +1105,177 @@ impl WorkflowStateStore for SqliteSessionStorage {
             }
         }
         Ok(children)
+    }
+
+    /// Atomically restore a pre-step root snapshot via ONE revision-fenced
+    /// storage operation (Important 3).
+    ///
+    /// This replaces the round-4 check-then-save race: the restore writes the
+    /// pre-step position/context inside a single `state_revision = expected`
+    /// AND non-terminal-fenced UPDATE. A concurrent transition that advanced
+    /// the revision (or moved the row terminal) between a check and a separate
+    /// save is never overwritten — the row is left untouched and a
+    /// `RevisionMismatch`/`TerminalState` is returned.
+    async fn restore_pre_step(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        pre_step: &graph_flow::Session,
+    ) -> Result<(), EngineError> {
+        let now = chrono::Utc::now().timestamp();
+        let id = session_id.0.clone();
+        let context_bytes = serde_json::to_vec(&pre_step.context).map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "restore_pre_step '{}': serialize context: {e}",
+                session_id.0
+            )))
+        })?;
+        let current_task_id = pre_step.current_task_id.clone();
+
+        // The restored position is a safe pre-step boundary: clear any
+        // in-flight markers the aborted step's `mark_step_in_flight` wrote so
+        // the restored row is not left pretending a step is dispatching
+        // (A2/A7 Important 3 + 5).
+        let cleared_state = RunStateV1 {
+            step_in_flight: None,
+            in_flight: None,
+            ..RunStateV1::default()
+        };
+        let state_bytes = serialize_blob(&cleared_state)?;
+
+        // ONE atomic operation: restore only when the persisted revision still
+        // matches AND the row is non-terminal (running or paused — a paused
+        // row is re-stepped by the drive loop and its position must restore
+        // too). A concurrent transition that won between a check and a
+        // separate save is left untouched.
+        let expected_revision_i64 = expected_revision as i64;
+        let result = sqlx::query!(
+            r#"
+            UPDATE orchestration_sessions
+            SET current_task_id = ?, context_json = ?, updated_at = ?, run_state_json = ?
+            WHERE session_id = ? AND state_revision = ?
+              AND status NOT IN ('completed', 'failed', 'cancelled', 'interrupted')
+            "#,
+            current_task_id,
+            context_bytes,
+            now,
+            state_bytes,
+            id,
+            expected_revision_i64
+        )
+        .execute(&*self.pool)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "restore_pre_step '{}': {e}", session_id.0
+            )))
+        })?;
+
+        if result.rows_affected() == 0 {
+            // Distinguish a revision mismatch from a non-running row.
+            let current = sqlx::query_scalar::<_, i64>(
+                "SELECT state_revision FROM orchestration_sessions WHERE session_id = ?",
+            )
+            .bind(&session_id.0)
+            .fetch_optional(&*self.pool)
+            .await
+            .map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "restore_pre_step read revision: {e}"
+                )))
+            })?;
+            return match current {
+                Some(found) if found != expected_revision as i64 => {
+                    Err(EngineError::RevisionMismatch {
+                        session_id: session_id.0.clone(),
+                        expected: expected_revision,
+                        found: u64::try_from(found).unwrap_or(0),
+                    })
+                }
+                _ => Err(EngineError::TerminalState(session_id.0.clone())),
+            };
+        }
+        Ok(())
+    }
+
+    /// Persist the in-flight (current-position safety) intent BEFORE an
+    /// external effect dispatch (A2/A7 Important 5), so a crash after an
+    /// effect but before the result checkpoint leaves an interrupted (never
+    /// replayable) run.
+    async fn mark_step_in_flight(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: RunCheckpoint<'_>,
+        step_state: &RunStateV1,
+    ) -> Result<(), EngineError> {
+        let now = chrono::Utc::now().timestamp();
+        let id = session_id.0.clone();
+        let current_task_id = checkpoint.root.current_task_id.clone();
+        let context_bytes = serde_json::to_vec(&checkpoint.root.context).map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "mark_step_in_flight '{}': serialize context: {e}",
+                session_id.0
+            )))
+        })?;
+        let state_bytes = serialize_blob(step_state)?;
+
+        // Fence to a non-terminal row (`status` running or paused — a paused
+        // session is re-stepped by the drive loop) AND `state_revision =
+        // expected`. Deliberately does NOT advance the revision (a subsequent
+        // `commit_transition` still CAS-anchors to the same pre-step
+        // revision); it only marks the durable in-flight intent.
+        let expected_revision_i64 = expected_revision as i64;
+        let result = sqlx::query!(
+            r#"
+            UPDATE orchestration_sessions
+            SET current_task_id = ?, context_json = ?, updated_at = ?, run_state_json = ?
+            WHERE session_id = ? AND status NOT IN
+                  ('completed', 'failed', 'cancelled', 'interrupted')
+              AND state_revision = ?
+            "#,
+            current_task_id,
+            context_bytes,
+            now,
+            state_bytes,
+            id,
+            expected_revision_i64
+        )
+        .execute(&*self.pool)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "mark_step_in_flight '{}': {e}", session_id.0
+            )))
+        })?;
+
+        if result.rows_affected() == 0 {
+            // The pre-step row is no longer running or its revision moved —
+            // the external effect must not run on an unmarked row.
+            let current: Option<(String, i64)> = sqlx::query_as(
+                "SELECT status, state_revision FROM orchestration_sessions WHERE session_id = ?",
+            )
+            .bind(&session_id.0)
+            .fetch_optional(&*self.pool)
+            .await
+            .map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "mark_step_in_flight read row: {e}"
+                )))
+            })?;
+            return Err(match current {
+                Some((_status, rev)) if rev != expected_revision as i64 => {
+                    EngineError::RevisionMismatch {
+                        session_id: session_id.0.clone(),
+                        expected: expected_revision,
+                        found: u64::try_from(rev).unwrap_or(0),
+                    }
+                }
+                Some(_) => EngineError::TerminalState(session_id.0.clone()),
+                None => EngineError::SessionNotFound(session_id.0.clone()),
+            });
+        }
+        Ok(())
     }
 }
 

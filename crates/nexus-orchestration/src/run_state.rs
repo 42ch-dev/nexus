@@ -268,6 +268,51 @@ pub trait WorkflowStateStore: Send + Sync {
         next_state: &RunStateV1,
     ) -> Result<RunRecord, EngineError>;
 
+    /// Atomically restore a pre-step root snapshot via ONE revision-fenced
+    /// storage operation (Important 3).
+    ///
+    /// Unlike a separate check-then-save (which races concurrent transitions),
+    /// this restores `pre_step` (position/context) only when the persisted
+    /// `state_revision` still equals `expected_revision` AND the row is still
+    /// non-terminal (running or paused). A concurrent transition that wins
+    /// between a check and a save is never overwritten — this leaves the row
+    /// untouched and returns [`EngineError::RevisionMismatch`].
+    ///
+    /// # Errors
+    /// Returns [`EngineError::RevisionMismatch`] when the persisted revision no
+    /// longer equals `expected_revision`; [`EngineError::TerminalState`] when
+    /// the row is no longer non-terminal.
+    async fn restore_pre_step(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        pre_step: &graph_flow::Session,
+    ) -> Result<(), EngineError>;
+
+    /// Persist the in-flight (current-position safety) intent BEFORE an
+    /// external effect dispatch (A2/A7 Important 5), so a crash after an
+    /// effect but before the result checkpoint leaves an interrupted (never
+    /// replayable) run.
+    ///
+    /// Writes `step_state` (with `step_in_flight` set) plus the current step
+    /// position/context, fenced to `status = 'running'` AND
+    /// `state_revision = expected_revision`, WITHOUT advancing the revision
+    /// (so the subsequent `commit_transition` still CAS-anchors to the same
+    /// pre-step revision). Fails when the pre-step row is no longer running or
+    /// its revision moved — the external effect must not run on an unmarked
+    /// row.
+    ///
+    /// # Errors
+    /// Returns [`EngineError`] on storage failure or when the fence does not
+    /// match.
+    async fn mark_step_in_flight(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: RunCheckpoint<'_>,
+        step_state: &RunStateV1,
+    ) -> Result<(), EngineError>;
+
     /// Load all persisted child runs whose `parent_session_id` matches.
     ///
     /// Used to hydrate the engine's in-memory children map during recovery

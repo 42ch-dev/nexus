@@ -299,8 +299,34 @@ impl Task for InnerGraphTask {
             })?
         };
 
-        // 4. Poll child session to completion.
+        // Driving an inner graph session is itself an external effect: the
+        // child may run capability/prompt/host-tool effects (or have run them
+        // pre-crash — the persisted child carries a completed effect that must
+        // not be replayed). Propagate the effect marker to the parent so a
+        // failed post-child-effect parent `commit_transition` (e.g. stale child
+        // CAS) is classified Interrupted, never deterministically restored and
+        // replayed on restart (Important 2). Scoped to this parent step: the
+        // engine clears the marker after a successful parent checkpoint.
+        context.set(crate::engine::EXTERNAL_EFFECT_MARKER, true).await;
+
+        // A reattached child that is already terminal (its durable checkpoint
+        // was persisted before the parent committed past this inner graph)
+        // must NOT be re-stepped — its completed prompt/effect work would be
+        // replayed. Consume it directly: read its terminal output below and
+        // record an empty run (no extra step). We detect terminal status via
+        // the engine's in-memory tracker (registered by attach).
+        let child_terminal = self
+            .engine
+            .get_status(&child_sid)
+            .await
+            .map(|s| s.is_terminal())
+            .unwrap_or(false);
+
+        // 4. Poll child session to completion (only for a non-terminal child —
+        //    a terminal reattached child is consumed, never re-stepped,
+        //    Round-5 Important 1).
         let mut last_error = None;
+        if !child_terminal {
         for _ in 0..256 {
             let outcome = self.engine.run_step(&child_sid).await.map_err(|e| {
                 graph_flow::GraphError::TaskExecutionFailed(format!(
@@ -339,6 +365,7 @@ impl Task for InnerGraphTask {
                     break;
                 }
             }
+        }
         }
 
         // 5. Read output_binding from child final context.

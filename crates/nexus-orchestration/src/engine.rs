@@ -46,6 +46,19 @@ async fn step_had_external_effect(root: &graph_flow::Session) -> bool {
         .unwrap_or(false)
 }
 
+/// Clear the [`EXTERNAL_EFFECT_MARKER`] from a root context (Minor 2): the
+/// marker must reflect current-step intent only, not history. A prior step's
+/// effect must not make a later unrelated deterministic commit failure
+/// over-classified Interrupted.
+///
+/// Called before `commit_transition` persists the step's context, so the
+/// durable context written by the next checkpoint stops carrying the stale
+/// marker. The marker is captured into a local `had_effect` binding first so a
+/// failed post-effect commit can still classify as Interrupted (Important 3).
+async fn clear_step_effect_marker(root: &graph_flow::Session) {
+    root.context.remove(EXTERNAL_EFFECT_MARKER).await;
+}
+
 // ---------------------------------------------------------------------------
 // Helper types
 // ---------------------------------------------------------------------------
@@ -453,23 +466,41 @@ impl EngineSharedState {
         };
         // Propagate a load failure (corrupt/unsupported child rows) instead
         // of silently continuing with an empty children map (Important 1).
-        let children = store.load_children(parent_session_id).await?;
+        let children = match store.load_children(parent_session_id).await {
+            Ok(children) => children,
+            Err(e) => {
+                // Clear any prior (stale) children-map entry for this parent
+                // so a checkpoint from before the error never lingers
+                // (Minor 1: hydrate_children must not leave a stale entry on
+                // a load/child-snapshot error).
+                self.children.write().await.remove(&parent_session_id.0);
+                return Err(e);
+            }
+        };
         let mut checkpoints = Vec::with_capacity(children.len());
         for child in &children {
             // A child whose session snapshot cannot be read from storage is
             // corrupt: propagate rather than silently skip it (Important 1).
-            let child_session = self
+            let child_session = match self
                 .storage
                 .get(&child.session_id.0)
                 .await
-                .map_err(EngineError::GraphFlow)?
-                .ok_or_else(|| {
-                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                        "hydrate_children '{}': persisted child '{}' has no session row \
-                         (non-replayable)",
-                        parent_session_id.0, child.session_id.0
-                    )))
-                })?;
+                .map_err(EngineError::GraphFlow)
+            {
+                Ok(Some(s)) => s,
+                Ok(None) | Err(_) => {
+                    // On child-snapshot error, clear the parent's stale
+                    // children-map entry before propagating (Minor 1).
+                    self.children.write().await.remove(&parent_session_id.0);
+                    return Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+                        format!(
+                            "hydrate_children '{}': persisted child '{}' has no readable \
+                             session snapshot (non-replayable)",
+                            parent_session_id.0, child.session_id.0
+                        ),
+                    )));
+                }
+            };
             let graph_name = child
                 .descriptor
                 .as_ref()
@@ -691,6 +722,43 @@ impl EngineSharedState {
             .await
             .map_err(EngineError::GraphFlow)?;
 
+        // Persist the current-position safety intent BEFORE any external
+        // effect in the step (A2/A7 Important 5): mark `step_in_flight` with
+        // the pre-step task id (plus position/context) so a crash after an
+        // effect but before the result commit leaves an interrupted (never
+        // replayable) run — never an unmarked running row. The write is
+        // fenced to `status='running'` AND the pre-step revision and does NOT
+        // advance the revision (a subsequent `commit_transition` still
+        // CAS-anchors to the same pre-step revision). A FlowRunner/storage
+        // save failure after this point cannot leave an unmarked running row.
+        // The marker is cleared on a completed checkpoint (Minor 2).
+        if let Some(store) = &self.workflow_store {
+            if let Some(pre) = &pre_step_root {
+                let in_flight_state = RunStateV1 {
+                    step_in_flight: Some(pre.current_task_id.clone()),
+                    ..RunStateV1::default()
+                };
+                let in_flight_checkpoint = RunCheckpoint {
+                    root: pre,
+                    children: &[],
+                };
+                if let Err(e) = store
+                    .mark_step_in_flight(
+                        session_id,
+                        expected_revision,
+                        in_flight_checkpoint,
+                        &in_flight_state,
+                    )
+                    .await
+                {
+                    // The pre-step row is no longer running/fenced: refuse to
+                    // execute a step that could perform an external effect on
+                    // an unmarked row (A2/A7).
+                    return Err(e);
+                }
+            }
+        }
+
         // Execute one step using the Arc<FlowRunner>.
         let result = runner.run(&session_id.0).await?;
 
@@ -736,90 +804,94 @@ impl EngineSharedState {
                     root: &root,
                     children: &children,
                 };
-                if let Err(commit_err) = store
+                // Capture whether the step performed an external effect BEFORE
+                // clearing the marker, so a failed commit can still classify as
+                // Interrupted (Important 3). The marker is then removed from the
+                // context that `commit_transition` persists so it reflects
+                // current-step intent only, not history (Minor 2).
+                let had_effect = step_had_external_effect(&root).await;
+                if had_effect {
+                    clear_step_effect_marker(&root).await;
+                }
+                let commit_result = store
                     .commit_transition(session_id, expected_revision, checkpoint, status.clone(), &next_state)
-                    .await
-                {
-                    // Determine whether the step performed an external effect
-                    // (capability call / prompt dispatch / host tool / child
-                    // spawn). The post-step root context carries the marker
-                    // that effectful tasks set (Important 3).
-                    let had_effect = step_had_external_effect(&root).await;
+                    .await;
+                match commit_result {
+                    Ok(_) => {
+                        // The step checkpoint committed successfully. For an
+                        // intermediate Paused/WaitingForInput boundary the
+                        // marker was cleared from the persisted context above
+                        // (the terminal/Completed/Failed outcome ends the run,
+                        // so no leak is possible). No further marker cleanup is
+                        // needed — the context persisted by commit_transition
+                        // no longer carries the stale marker.
+                    }
+                    Err(commit_err) => {
+                        if had_effect {
+                            // A failed post-effect commit must NOT blindly rewind
+                            // to a seemingly safe boundary — a retry could execute
+                            // the external effect again. Persist an
+                            // interrupted/uncertain disposition instead (A2/A7):
+                            // the run becomes terminal `interrupted`, never
+                            // auto-replayed. The interrupted write is itself
+                            // revision-fenced (F2): if a concurrent transition
+                            // already won, it is left as the truthful state and we
+                            // surface the original error.
+                            let interrupted_state = RunStateV1 {
+                                step_in_flight: Some(root.current_task_id.clone()),
+                                ..RunStateV1::default()
+                            };
+                            // Persist the root interruption WITHOUT child checkpoints:
+                            // the child rows remain as-is and the interrupted root is
+                            // terminal/non-replayable. Requiring a child CAS here would
+                            // block the interruption write on the same stale child that
+                            // caused the original failure, leaving the run non-terminal
+                            // and unknowingly replayable — exactly what must not happen
+                            // (Important 3).
+                            let interrupted_checkpoint = RunCheckpoint {
+                                root: &root,
+                                children: &[],
+                            };
+                            let interrupted = store
+                                .commit_transition(
+                                    session_id,
+                                    expected_revision,
+                                    interrupted_checkpoint,
+                                    SessionStatus::Interrupted,
+                                    &interrupted_state,
+                                )
+                                .await;
 
-                    if had_effect {
-                        // A failed post-effect commit must NOT blindly rewind
-                        // to a seemingly safe boundary — a retry could execute
-                        // the external effect again. Persist an
-                        // interrupted/uncertain disposition instead (A2/A7):
-                        // the run becomes terminal `interrupted`, never
-                        // auto-replayed. The interrupted write is itself
-                        // revision-fenced (F2): if a concurrent transition
-                        // already won, it is left as the truthful state and we
-                        // surface the original error.
-                        let interrupted_state = RunStateV1 {
-                            step_in_flight: Some(root.current_task_id.clone()),
-                            ..RunStateV1::default()
-                        };
-                        // Persist the root interruption WITHOUT child checkpoints:
-                        // the child rows remain as-is and the interrupted root is
-                        // terminal/non-replayable. Requiring a child CAS here would
-                        // block the interruption write on the same stale child that
-                        // caused the original failure, leaving the run non-terminal
-                        // and unknowingly replayable — exactly what must not happen
-                        // (Important 3).
-                        let interrupted_checkpoint = RunCheckpoint {
-                            root: &root,
-                            children: &[],
-                        };
-                        let interrupted = store
-                            .commit_transition(
-                                session_id,
-                                expected_revision,
-                                interrupted_checkpoint,
-                                SessionStatus::Interrupted,
-                                &interrupted_state,
-                            )
-                            .await;
-
-                        // Update in-memory status to reflect the interrupted
-                        // disposition when the interrupted CAS succeeded.
-                        if interrupted.is_ok() {
-                            if let Some(s) = self
-                                .sessions
-                                .write()
-                                .await
-                                .iter_mut()
-                                .find(|s| s.session_id == *session_id)
-                            {
-                                s.status = SessionStatus::Interrupted;
+                            // Update in-memory status to reflect the interrupted
+                            // disposition when the interrupted CAS succeeded.
+                            if interrupted.is_ok() {
+                                if let Some(s) = self
+                                    .sessions
+                                    .write()
+                                    .await
+                                    .iter_mut()
+                                    .find(|s| s.session_id == *session_id)
+                                {
+                                    s.status = SessionStatus::Interrupted;
+                                }
                             }
+                            return Err(commit_err);
+                        }
+
+                        // Deterministic step (no external effect): restore the
+                        // pre-step root via ONE atomic revision-fenced storage
+                        // operation (Important 3) — never a separate check-then-
+                        // save. A concurrent successful root transition (revision
+                        // advanced) is never overwritten by the older pre-step
+                        // position, and the restore clears the in-flight markers
+                        // the pre-step mark wrote (a safe boundary).
+                        if let Some(pre) = &pre_step_root {
+                            let _ = store
+                                .restore_pre_step(session_id, expected_revision, pre)
+                                .await;
                         }
                         return Err(commit_err);
                     }
-
-                    // Deterministic step (no external effect): a CAS-fenced
-                    // restore of the pre-step root position/context is
-                    // acceptable. The restore must be conditional on the same
-                    // root revision (F2) so a concurrent successful root
-                    // transition is never overwritten by the older pre-step
-                    // position. Reload the authoritative record and only
-                    // restore when the persisted revision is unchanged and the
-                    // row is still non-terminal.
-                    if let Some(pre) = &pre_step_root {
-                        let current = store.load_run(session_id).await?;
-                        let same_revision = current
-                            .as_ref()
-                            .map(|r| r.state_revision == expected_revision)
-                            .unwrap_or(false);
-                        let non_terminal = current
-                            .as_ref()
-                            .map(|r| !r.status.is_terminal())
-                            .unwrap_or(false);
-                        if same_revision && non_terminal {
-                            let _ = self.storage.save(pre.clone()).await;
-                        }
-                    }
-                    return Err(commit_err);
                 }
             }
         }
@@ -967,13 +1039,17 @@ impl EngineSharedState {
     /// when one already exists (recovery attach, Important 4).
     ///
     /// The children map is keyed by parent id and each child carries its
-    /// `graph_name`. We return the first **non-terminal** child whose
-    /// `graph_name` matches and reconstruct a `FlowRunner` for it so the
-    /// caller (InnerGraphTask) can poll it to completion rather than
-    /// spawning a duplicate. A terminal child is not reattached (its work
-    /// already completed). The reconstructed runner points at the same
-    /// storage, resuming from the persisted position. When the store is
-    /// absent or no matching non-terminal child exists, returns `None`.
+    /// `graph_name`. We return the first matching child whose `graph_name`
+    /// matches — **terminal children included** — and reconstruct a
+    /// `FlowRunner` for it so the caller (`InnerGraphTask`) can consume it
+    /// rather than spawning a duplicate. When a durable child row exists for
+    /// the current inner-graph position, recovery must consume/reattach it
+    /// (terminal included) and only spawn when NO persisted child exists; a
+    /// terminal child's completed prompt/effect work must never be replayed
+    /// (A2/A7 no-replay guarantee, Round-5 Important 1). The reconstructed
+    /// runner points at the same storage, resuming from the persisted
+    /// position. When the store is absent or no matching child exists,
+    /// returns `None`.
     pub async fn attach_existing_child_session_internal(
         &self,
         parent_session_id: &str,
@@ -984,12 +1060,13 @@ impl EngineSharedState {
             let parent_children = children.get(parent_session_id)?;
             parent_children
                 .iter()
-                .find(|c| c.graph_name.as_deref() == Some(inner_graph.id.as_str()) && !c.status.is_terminal())
-                .map(|c| c.session.id.clone())
+                .find(|c| c.graph_name.as_deref() == Some(inner_graph.id.as_str()))
+                .map(|c| (c.session.id.clone(), c.session.current_task_id.clone(), c.status.clone()))
         };
-        let child_id = target?;
+        let (child_id, child_task, child_status) = target?;
         // Reconstruct a FlowRunner for the reattached child so it can be
-        // stepped from its persisted position.
+        // stepped from its persisted position (and so the caller can query
+        // its durable status via `get_status`).
         if !self
             .runners
             .read()
@@ -998,6 +1075,22 @@ impl EngineSharedState {
         {
             let runner = Arc::new(FlowRunner::new(inner_graph, self.storage.clone()));
             self.runners.write().await.insert(child_id.clone(), runner);
+        }
+        // Register the reattached child in the in-memory session tracker so
+        // `get_status`/`InnerGraphTask` can observe its durable status
+        // (terminal children are attached and consumed, never re-stepped —
+        // Round-5 Important 1).
+        {
+            let mut sessions = self.sessions.write().await;
+            if !sessions.iter().any(|s| s.session_id.0 == child_id) {
+                sessions.push(SessionSummary {
+                    session_id: SessionId(child_id.clone()),
+                    creator_id: String::new(),
+                    preset_id: parent_session_id.to_string(),
+                    status: child_status,
+                    current_task_id: Some(child_task),
+                });
+            }
         }
         Some(SessionId(child_id))
     }
