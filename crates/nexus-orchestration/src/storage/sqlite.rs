@@ -476,25 +476,29 @@ fn child_descriptor(
 /// revision), the confirmation is rejected and a [`EngineError::GraphFlow`]
 /// mismatch is returned — a stale Running checkpoint must never let a parent
 /// commit Completed over a child that is Failed/Cancelled at that revision
-/// (Important 6). Returns `Some(EngineError)` when the child CAS genuinely
+/// (Important 6). Returns `Ok(Some(EngineError))` when the child CAS genuinely
 /// failed: a stale revision (child moved on) or a terminal child at a stale
-/// revision.
+/// revision. SQL read failures are propagated so callers never mistake an
+/// unreadable row for an absent row.
 async fn child_cas_outcome(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     child_id: &str,
     expected_revision: u64,
     submitted_status: SessionStatus,
-) -> Option<EngineError> {
+) -> Result<Option<EngineError>, EngineError> {
     let row: Option<(i64, String)> = sqlx::query_as(
         "SELECT state_revision, status FROM orchestration_sessions WHERE session_id = ?",
     )
     .bind(child_id)
     .fetch_optional(&mut **tx)
     .await
-    .ok()
-    .flatten();
+    .map_err(|e| {
+        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            "read child CAS outcome for '{child_id}': {e}"
+        )))
+    })?;
 
-    match row {
+    Ok(match row {
         Some((found_rev, status)) => {
             let terminal = matches!(
                 status.as_str(),
@@ -536,7 +540,7 @@ async fn child_cas_outcome(
         None => Some(EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "child CAS failed for '{child_id}': row absent"
         )))),
-    }
+    })
 }
 
 /// Read the persisted root descriptor for a session within a transaction.
@@ -850,7 +854,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
             // overwrite needed) and does not fail the root start.
             if child_result.rows_affected() == 0 {
                 if let Some(err) =
-                    child_cas_outcome(&mut tx, &child_id, child.state_revision, child.status.clone()).await
+                    child_cas_outcome(&mut tx, &child_id, child.state_revision, child.status.clone()).await?
                 {
                     return Err(err);
                 }
@@ -900,31 +904,28 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 )))
             })?;
 
-        // Revision CAS + terminal/cancelled fence: only advance when the
-        // persisted revision still matches AND the row is not already
-        // terminal/cancelled. A late graph save cannot overwrite newer
-        // checkpoint state.
+        // Revision CAS + terminal/cancelled + execution-version fence: only
+        // authoritative v1 rows may advance. Legacy v0 rows are inspectable,
+        // but cannot be mutated into partially reconstructed v1 runs.
         let expected_revision_i64 = expected_revision as i64;
-        let result = sqlx::query!(
+        let result = sqlx::query(
             r#"
             UPDATE orchestration_sessions
             SET status = ?, current_task_id = ?, context_json = ?,
                 updated_at = ?, state_revision = state_revision + 1,
-                run_state_json = ?,
-                execution_version = CASE
-                    WHEN execution_version = 0 AND run_descriptor_json IS NOT NULL THEN 1
-                    ELSE execution_version END
+                run_state_json = ?
             WHERE session_id = ? AND state_revision = ?
+              AND execution_version = 1
               AND status NOT IN ('completed', 'failed', 'cancelled', 'interrupted')
             "#,
-            status_str,
-            current_task_id,
-            context_bytes,
-            now,
-            state_bytes,
-            id,
-            expected_revision_i64
         )
+        .bind(status_str)
+        .bind(&current_task_id)
+        .bind(&context_bytes)
+        .bind(now)
+        .bind(&state_bytes)
+        .bind(&id)
+        .bind(expected_revision_i64)
         .execute(&mut *tx)
         .await
         .map_err(|e| {
@@ -934,21 +935,32 @@ impl WorkflowStateStore for SqliteSessionStorage {
         })?;
 
         if result.rows_affected() == 0 {
-            // Distinguish a revision mismatch from a terminal/cancelled fence.
-            let current = sqlx::query_scalar::<_, i64>(
-                "SELECT state_revision FROM orchestration_sessions WHERE session_id = ?",
+            // Distinguish an unsupported legacy row, a revision mismatch, and
+            // a terminal/cancelled fence without mutating any of them.
+            let current: Option<(i64, i64)> = sqlx::query_as(
+                "SELECT state_revision, execution_version \
+                 FROM orchestration_sessions WHERE session_id = ?",
             )
             .bind(&session_id.0)
             .fetch_optional(&mut *tx)
             .await
             .map_err(|e| {
                 EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                    "commit_transition read revision: {e}"
+                    "commit_transition read revision/version: {e}"
                 )))
             })?;
 
             return match current {
-                Some(found) if found != expected_revision as i64 => {
+                Some((_revision, version)) if version != 1 => {
+                    Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+                        format!(
+                            "commit_transition '{}': execution_version {version} is non-replayable; \
+                             legacy runs cannot transition",
+                            session_id.0
+                        ),
+                    )))
+                }
+                Some((found, _)) if found != expected_revision as i64 => {
                     Err(EngineError::RevisionMismatch {
                         session_id: session_id.0.clone(),
                         expected: expected_revision,
@@ -959,12 +971,12 @@ impl WorkflowStateStore for SqliteSessionStorage {
             };
         }
 
-        // Read the root descriptor (promoted to v1 if it was a v0 row) so
-        // the returned record is authoritative and reconstructible (Important 4).
+        // Read the root descriptor for the authoritative v1 record.
         let root_descriptor = read_root_descriptor(&mut tx, &session_id.0).await?;
 
-        // Read the actual persisted execution_version (a descriptorless v0
-        // row stays legacy; a v0 row with a descriptor is promoted to v1).
+        // The update fence admits only execution_version=1. Re-read it inside
+        // the transaction so a corrupt storage invariant rolls back rather
+        // than returning a misleading reconstructible record.
         let persisted_version: i64 = sqlx::query_scalar(
             "SELECT execution_version FROM orchestration_sessions WHERE session_id = ?",
         )
@@ -976,12 +988,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 "commit_transition read execution_version: {e}"
             )))
         })?;
-        // A corrupt/unsupported execution_version is non-replayable (A7) —
-        // never coerce negative values to 0 or forward versions to 1. The
-        // root update already committed inside this transaction; returning a
-        // GraphFlow error rolls it back, preserving the row verbatim
-        // (Important 4).
-        if persisted_version < 0 || persisted_version > 1 {
+        if persisted_version != 1 {
             return Err(EngineError::GraphFlow(
                 graph_flow::GraphError::StorageError(format!(
                     "commit_transition '{}': unsupported execution_version {persisted_version} \
@@ -1081,7 +1088,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
             // (no overwrite needed) and does not fail the root transition.
             if child_result.rows_affected() == 0 {
                 if let Some(err) =
-                    child_cas_outcome(&mut tx, &child_id, child.state_revision, child.status.clone()).await
+                    child_cas_outcome(&mut tx, &child_id, child.state_revision, child.status.clone()).await?
                 {
                     return Err(err);
                 }

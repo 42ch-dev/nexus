@@ -1323,10 +1323,16 @@ impl OrchestrationEngine for EngineProxy {
         id_prefix: &str,
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
-        let session_id = format!("{}:{}", id_prefix, chrono::Utc::now().timestamp_millis());
+        let session_id = format!("{}:{}", id_prefix, uuid::Uuid::new_v4());
         let start_task_id = graph.start_task_id().unwrap_or_default();
         let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
         session.context.set("_session_id", session_id.clone()).await;
+        if self.state.workflow_store.is_some() {
+            return Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+                "start_session_with_graph cannot create a recoverable run without a preset descriptor"
+                    .to_string(),
+            )));
+        }
         self.state.storage.save(session).await?;
         // WS2 R3: Store Arc<FlowRunner> instead of FlowRunner.
         let runner = Arc::new(graph_flow::FlowRunner::new(
@@ -1880,7 +1886,7 @@ impl GraphFlowEngine {
     ) -> Result<SessionId, EngineError> {
         if let Some(store) = &self.state.workflow_store {
             let descriptor = self.build_descriptor(loaded, creator_id)?;
-            let session_id = format!("{}:{}", loaded.id, chrono::Utc::now().timestamp_millis());
+            let session_id = format!("{}:{}", loaded.id, uuid::Uuid::new_v4());
             let start_task_id = graph.start_task_id().unwrap_or_default();
             let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
             session.context.set("_session_id", session_id.clone()).await;
@@ -1943,7 +1949,7 @@ impl GraphFlowEngine {
         graph: Arc<Graph>,
         creator_id: Option<&str>,
     ) -> Result<SessionId, EngineError> {
-        let session_id = format!("{}:{}", preset_id, chrono::Utc::now().timestamp_millis());
+        let session_id = format!("{}:{}", preset_id, uuid::Uuid::new_v4());
 
         // Determine the start task from the graph.
         let start_task_id = graph.start_task_id().unwrap_or_default();
@@ -2029,6 +2035,11 @@ impl GraphFlowEngine {
     /// Returns the source identity **and** the resolved preset's version so
     /// the frozen descriptor carries the real version, not a hard-coded 0
     /// (Important 3).
+    /// Recovery requires this exact frozen identity. Replacing an embedded
+    /// preset's bytes or changing a directory bundle after admission changes
+    /// its content hash and intentionally makes the stored run
+    /// reconstruction-unavailable; recovery never substitutes current preset
+    /// content for the admitted source.
     fn resolve_source_identity(
         &self,
         preset_id: &str,
@@ -2090,7 +2101,39 @@ impl OrchestrationEngine for GraphFlowEngine {
 
         // Persist a session stub into the graph-flow storage.
         let session = graph_flow::Session::new_from_task(session_id.clone(), "");
-        self.state.storage.save(session).await?;
+        session.context.set("_session_id", session_id.clone()).await;
+        session
+            .context
+            .set("_creator_id", key.creator_id.clone())
+            .await;
+        if let Some(store) = &self.state.workflow_store {
+            let (source, preset_version) = self.resolve_source_identity(&key.preset_id)?;
+            let descriptor = RunDescriptorV1 {
+                creator_id: key.creator_id.clone(),
+                work_id: None,
+                workspace_root: self.workspace_root.clone().unwrap_or_default(),
+                preset_id: key.preset_id.clone(),
+                preset_version,
+                source,
+                input: serde_json::Map::new(),
+                agent_bindings: HashMap::new(),
+                parent_session_id: None,
+                graph_name: None,
+            };
+            store
+                .start_run(
+                    &SessionId(session_id.clone()),
+                    &descriptor,
+                    RunCheckpoint {
+                        root: &session,
+                        children: &[],
+                    },
+                    &RunStateV1::default(),
+                )
+                .await?;
+        } else {
+            self.state.storage.save(session).await?;
+        }
 
         let summary = SessionSummary {
             session_id: SessionId(session_id.clone()),

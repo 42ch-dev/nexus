@@ -595,7 +595,7 @@ mod tests {
         ) -> Result<(), EngineError> {
             self.signals.lock().push(signal.clone());
             if matches!(signal, EngineSignal::Cancel) {
-                *self.status.lock() = SessionStatus::Failed;
+                *self.status.lock() = SessionStatus::Cancelled;
             }
             Ok(())
         }
@@ -751,7 +751,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn step_error_returns_typed_failure_and_marks_session_failed() {
+    async fn step_error_returns_typed_failure_and_cancels_session() {
         let engine = ScriptedEngine::with_script(vec![Err(EngineError::GraphFlow(
             graph_flow::GraphError::TaskExecutionFailed(
                 "converge_timeout: gate=converge, state_id=join, arrived=1, expected=2, \
@@ -771,14 +771,14 @@ mod tests {
             }
             other => panic!("expected Failed, got {other:?}"),
         }
-        assert_eq!(*engine.status.lock(), SessionStatus::Failed);
+        assert_eq!(*engine.status.lock(), SessionStatus::Cancelled);
         assert!(
             engine
                 .signals
                 .lock()
                 .iter()
                 .any(|s| matches!(s, EngineSignal::Cancel)),
-            "driver must flip the tracker status to Failed via Cancel"
+            "driver must mark the tracker Cancelled via Cancel"
         );
     }
 

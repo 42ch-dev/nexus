@@ -718,6 +718,11 @@ async fn engine_start_creates_v1_run() {
         .start_session("novel-writing", graph)
         .await
         .expect("start_session");
+    let suffix = sid
+        .0
+        .strip_prefix("novel-writing:")
+        .expect("session id keeps the preset prefix");
+    uuid::Uuid::parse_str(suffix).expect("root session id uses a collision-resistant UUID");
 
     // The run must be a v1 authoritative record, not a bare save.
     let record = storage
@@ -732,6 +737,35 @@ async fn engine_start_creates_v1_run() {
         "v1 run must carry a frozen descriptor"
     );
     assert_eq!(record.descriptor.as_ref().unwrap().preset_id, "novel-writing");
+}
+
+// Critical 2: the trait-level session constructor also uses start_run when a
+// workflow store is configured; it must not leave a bare v0 storage row.
+#[tokio::test]
+async fn engine_new_session_creates_v1_run() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, engine) = fresh_engine(pool).await;
+    let sid = engine
+        .new_session(
+            nexus_orchestration::engine::SessionKey {
+                creator_id: "ctr-new-session".to_string(),
+                preset_id: "novel-writing".to_string(),
+                instance_id: uuid::Uuid::new_v4().to_string(),
+            },
+            nexus_orchestration::engine::Context::new(),
+        )
+        .await
+        .expect("new_session");
+
+    let record = storage
+        .load_run(&sid)
+        .await
+        .expect("load_run")
+        .expect("run present");
+    assert_eq!(record.execution_version, 1);
+    let descriptor = record.descriptor.expect("v1 descriptor");
+    assert_eq!(descriptor.creator_id, "ctr-new-session");
+    assert_eq!(descriptor.preset_id, "novel-writing");
 }
 
 // Critical 3: resume must be fenced against terminal states.
@@ -1107,123 +1141,69 @@ async fn stale_save_cannot_overwrite_wait_or_paused() {
     }
 }
 
-// Important 4: commit_transition promotes a v0 row WITH a descriptor to v1
-// and returns the authoritative descriptor; a v0 row WITHOUT a descriptor
-// stays legacy (cannot be laundered into a valid v1).
+// Important 4: commit_transition refuses every v0 row. A descriptor does not
+// prove that the legacy row has a complete v1 state contract, so transition
+// cannot silently promote or otherwise mutate it (A2/A7).
 #[tokio::test]
-async fn commit_transition_promotes_v0_with_descriptor() {
-    let (pool, _db) = fresh_pool().await;
-    let storage = SqliteSessionStorage::new(pool.clone());
-
-    // Seed a v0 row WITH a descriptor (execution_version=0 but descriptor
-    // present — a row that was started before the v1 migration but carries
-    // enough identity to be promoted).
-    let descriptor = test_descriptor("sess-v0-promote");
-    let descriptor_bytes = serde_json::to_vec(&descriptor).expect("serialize descriptor");
-    sqlx::query(
-        "INSERT INTO orchestration_sessions
-            (session_id, creator_id, preset_id, preset_version, status,
-             current_task_id, context_json, created_at, updated_at,
-             execution_version, state_revision, run_descriptor_json)
-         VALUES ('sess-v0-promote', 'ctr_t', 'preset_t', 7, 'running', 'task_a',
-                 '{\"data\":{}}', 1756990000, 1756990300,
-                 0, 0, ?)",
-    )
-    .bind(descriptor_bytes)
-    .execute(&*pool)
-    .await
-    .expect("seed v0 row with descriptor");
-
-    // Commit a transition on the v0 row.
-    let root = root_session("sess-v0-promote", "task_z").await;
-    let checkpoint = RunCheckpoint {
-        root: &root,
-        children: &[],
-    };
-    let record = storage
-        .commit_transition(
-            &SessionId("sess-v0-promote".to_string()),
-            0,
-            checkpoint,
-            SessionStatus::Completed,
-            &RunStateV1::default(),
+async fn commit_transition_refuses_v0_rows_without_mutation() {
+    for (session_id, descriptor) in [
+        ("sess-v0-with-desc", Some(test_descriptor("sess-v0-with-desc"))),
+        ("sess-v0-no-desc", None),
+    ] {
+        let (pool, _db) = fresh_pool().await;
+        let storage = SqliteSessionStorage::new(pool.clone());
+        let descriptor_bytes = descriptor
+            .as_ref()
+            .map(|value| serde_json::to_vec(value).expect("serialize descriptor"));
+        sqlx::query(
+            "INSERT INTO orchestration_sessions
+                (session_id, creator_id, preset_id, preset_version, status,
+                 current_task_id, context_json, created_at, updated_at,
+                 execution_version, state_revision, run_descriptor_json)
+             VALUES (?, 'ctr_t', 'preset_t', 7, 'running', 'task_a',
+                     '{\"data\":{}}', 1756990000, 1756990300, 0, 0, ?)",
         )
+        .bind(session_id)
+        .bind(descriptor_bytes)
+        .execute(&*pool)
         .await
-        .expect("commit on v0 row");
+        .expect("seed v0 row");
 
-    // The returned record must be authoritative and reconstructible.
-    assert_eq!(record.execution_version, 1, "v0 row with descriptor promoted to v1");
-    assert_eq!(record.status, SessionStatus::Completed);
-    assert_eq!(record.state_revision, 1);
-    assert!(
-        record.descriptor.is_some(),
-        "promoted v1 row must return its descriptor"
-    );
+        let root = root_session(session_id, "task_z").await;
+        let err = storage
+            .commit_transition(
+                &SessionId(session_id.to_string()),
+                0,
+                RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                SessionStatus::Completed,
+                &RunStateV1::default(),
+            )
+            .await
+            .expect_err("legacy v0 transition must be refused");
+        assert!(
+            err.to_string().contains("execution_version 0 is non-replayable"),
+            "unexpected error: {err}"
+        );
 
-    // The persisted row must now be v1 and reloadable.
-    let reloaded = storage
-        .load_run(&SessionId("sess-v0-promote".to_string()))
-        .await
-        .expect("load_run")
-        .expect("run present");
-    assert_eq!(reloaded.execution_version, 1, "row promoted to v1");
-    assert_eq!(reloaded.status, SessionStatus::Completed);
-    assert!(
-        reloaded.descriptor.is_some(),
-        "promoted v1 row must be reconstructible"
-    );
-}
-
-// Important 4: a v0 row WITHOUT a descriptor stays legacy on transition —
-// it cannot be laundered into a valid v1 (A2/A7).
-#[tokio::test]
-async fn commit_transition_keeps_descriptorless_v0_legacy() {
-    let (pool, _db) = fresh_pool().await;
-    let storage = SqliteSessionStorage::new(pool.clone());
-
-    // Seed a v0 row with NO descriptor.
-    sqlx::query(
-        "INSERT INTO orchestration_sessions
-            (session_id, creator_id, preset_id, preset_version, status,
-             current_task_id, context_json, created_at, updated_at)
-         VALUES ('sess-v0-nodesc', 'ctr_t', 'preset_t', 7, 'running', 'task_a',
-                 '{\"data\":{}}', 1756990000, 1756990300)",
-    )
-    .execute(&*pool)
-    .await
-    .expect("seed v0 row without descriptor");
-
-    // Commit a transition on the v0 row.
-    let root = root_session("sess-v0-nodesc", "task_z").await;
-    let checkpoint = RunCheckpoint {
-        root: &root,
-        children: &[],
-    };
-    let record = storage
-        .commit_transition(
-            &SessionId("sess-v0-nodesc".to_string()),
-            0,
-            checkpoint,
-            SessionStatus::Completed,
-            &RunStateV1::default(),
+        let persisted: (i64, String, Option<Vec<u8>>) = sqlx::query_as(
+            "SELECT state_revision, status, run_descriptor_json
+             FROM orchestration_sessions WHERE session_id = ?",
         )
+        .bind(session_id)
+        .fetch_one(&*pool)
         .await
-        .expect("commit on v0 row");
-
-    // Without a descriptor the row cannot be promoted to a valid v1; it
-    // stays legacy (execution_version=0) with the terminal status written.
-    assert_eq!(record.execution_version, 0, "descriptorless v0 row stays legacy");
-    assert_eq!(record.status, SessionStatus::Completed);
-    assert!(record.descriptor.is_none());
-
-    // The persisted row stays v0 (legacy evidence preserved, not laundered).
-    let reloaded = storage
-        .load_run(&SessionId("sess-v0-nodesc".to_string()))
-        .await
-        .expect("load_run")
-        .expect("run present");
-    assert_eq!(reloaded.execution_version, 0, "row stays legacy");
-    assert_eq!(reloaded.status, SessionStatus::Completed);
+        .expect("read preserved legacy row");
+        assert_eq!(persisted.0, 0, "legacy revision must remain unchanged");
+        assert_eq!(persisted.1, "running", "legacy status must remain unchanged");
+        assert_eq!(
+            persisted.2.is_some(),
+            descriptor.is_some(),
+            "legacy descriptor evidence must remain unchanged"
+        );
+    }
 }
 
 // Important 5: unknown/corrupt v1 status is non-replayable, never Running.
@@ -4105,6 +4085,63 @@ impl graph_flow::Task for MarkerEffectTask {
             graph_flow::NextAction::Continue,
         ))
     }
+}
+
+// Important 1: a legacy v0 child has no complete child descriptor/state
+// contract. Recovery must reject the parent rather than omit or reinterpret
+// the child, while preserving the legacy evidence for inspection.
+#[tokio::test]
+async fn v0_child_is_non_replayable_and_preserved() {
+    let (pool, _db) = fresh_pool().await;
+    let storage = SqliteSessionStorage::new(pool.clone());
+    let parent_sid = SessionId("par-v0-child".to_string());
+    let child_id = "par-v0-child:child:1";
+    let parent = root_session(&parent_sid.0, "parent_task").await;
+    storage
+        .start_run(
+            &parent_sid,
+            &test_descriptor(&parent_sid.0),
+            RunCheckpoint {
+                root: &parent,
+                children: &[],
+            },
+            &RunStateV1::default(),
+        )
+        .await
+        .expect("start parent");
+
+    sqlx::query(
+        "INSERT INTO orchestration_sessions
+            (session_id, creator_id, preset_id, preset_version, parent_session_id,
+             current_task_id, status, context_json, created_at, updated_at,
+             execution_version, state_revision)
+         VALUES (?, 'ctr', 'test-preset', 3, ?, 'child_task', 'running',
+                 '{\"data\":{}}', 1756990000, 1756990300, 0, 4)",
+    )
+    .bind(child_id)
+    .bind(&parent_sid.0)
+    .execute(&*pool)
+    .await
+    .expect("seed v0 child row");
+
+    let err = storage
+        .load_children(&parent_sid)
+        .await
+        .expect_err("legacy child must make parent recovery non-replayable");
+    assert!(
+        err.to_string().contains("v0 legacy child row (non-replayable)"),
+        "unexpected error: {err}"
+    );
+
+    let persisted: (i64, i64, String) = sqlx::query_as(
+        "SELECT execution_version, state_revision, status
+         FROM orchestration_sessions WHERE session_id = ?",
+    )
+    .bind(child_id)
+    .fetch_one(&*pool)
+    .await
+    .expect("read preserved v0 child");
+    assert_eq!(persisted, (0, 4, "running".to_string()));
 }
 
 // Important 1: `load_children` must reject a child whose `state_revision` is
