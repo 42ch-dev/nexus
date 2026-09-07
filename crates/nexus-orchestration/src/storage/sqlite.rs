@@ -377,6 +377,54 @@ fn child_descriptor(
     }
 }
 
+/// Determine the error for a failed child CAS (0 rows affected).
+///
+/// Distinguishes a revision mismatch from a terminal/cancelled fence by
+/// reading the child's current row within the transaction (A2/A4). A child
+/// upsert that matches zero rows means the child's persisted revision no
+/// longer equals the expected value, or the child is already terminal — the
+/// root transition must roll back rather than silently drop the child
+/// checkpoint (Important 1).
+async fn child_cas_error(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    child_id: &str,
+    expected_revision: u64,
+) -> EngineError {
+    let row: Option<(i64, String)> = sqlx::query_as(
+        "SELECT state_revision, status FROM orchestration_sessions WHERE session_id = ?",
+    )
+    .bind(child_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .ok()
+    .flatten();
+
+    match row {
+        Some((found_rev, status)) => {
+            let terminal = matches!(
+                status.as_str(),
+                "completed" | "failed" | "cancelled" | "interrupted"
+            );
+            if terminal {
+                EngineError::TerminalState(child_id.to_string())
+            } else if found_rev != expected_revision as i64 {
+                EngineError::RevisionMismatch {
+                    session_id: child_id.to_string(),
+                    expected: expected_revision,
+                    found: u64::try_from(found_rev).unwrap_or(0),
+                }
+            } else {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "child CAS failed for '{child_id}' (revision {expected_revision}, status {status})"
+                )))
+            }
+        }
+        None => EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            "child CAS failed for '{child_id}': row absent"
+        ))),
+    }
+}
+
 /// Read the persisted root descriptor for a session within a transaction.
 ///
 /// Returns `None` when the row has no descriptor (v0 legacy row).
@@ -467,9 +515,25 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 state: Some(state),
             }))
         } else {
-            // v0 legacy row: status is diagnostic only; unknown values are
-            // tolerated (the row is already legacy/unverified).
-            let status = SessionStatus::from_db_str(&row.status).unwrap_or(SessionStatus::Running);
+            // v0 legacy row: status is diagnostic only. A corrupt/ambiguous
+            // status must remain distinct and non-replayable (A7) — never
+            // silently reinterpreted as `running`. A negative or out-of-range
+            // integer revision is also corrupt and must not be coerced to
+            // zero (A2/A7): preserve the row but surface it as unknown.
+            let status = SessionStatus::from_db_str(&row.status).ok_or_else(|| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "load_run '{}': unknown/unsupported v0 status {:?} (non-replayable)",
+                    session_id.0, row.status
+                )))
+            })?;
+            if row.state_revision < 0 {
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "load_run '{}': negative v0 state_revision {} (non-replayable)",
+                        session_id.0, row.state_revision
+                    )),
+                ));
+            }
             Ok(Some(RunRecord {
                 session_id: SessionId(row.session_id),
                 status,
@@ -590,7 +654,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 .as_ref()
                 .map(|s| s.0.clone());
             let child_revision = child.state_revision as i64;
-            sqlx::query!(
+            let child_result = sqlx::query!(
                 r#"
                 INSERT INTO orchestration_sessions
                     (session_id, creator_id, preset_id, preset_version,
@@ -633,6 +697,14 @@ impl WorkflowStateStore for SqliteSessionStorage {
                     "start_run child '{child_id}': {e}"
                 )))
             })?;
+
+            // A child CAS that matches zero rows means the child's persisted
+            // revision no longer equals the expected value, or the child is
+            // already terminal. The root start must roll back rather than
+            // silently drop the child checkpoint (Important 1).
+            if child_result.rows_affected() == 0 {
+                return Err(child_cas_error(&mut tx, &child_id, child.state_revision).await);
+            }
         }
 
         tx.commit().await.map_err(|e| {
@@ -793,7 +865,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 .as_ref()
                 .map(|s| s.0.clone());
             let child_revision = child.state_revision as i64;
-            sqlx::query!(
+            let child_result = sqlx::query!(
                 r#"
                 INSERT INTO orchestration_sessions
                     (session_id, creator_id, preset_id, preset_version,
@@ -836,6 +908,14 @@ impl WorkflowStateStore for SqliteSessionStorage {
                     "commit_transition child '{child_id}': {e}"
                 )))
             })?;
+
+            // A child CAS that matches zero rows means the child's persisted
+            // revision no longer equals the expected value, or the child is
+            // already terminal. The root transition must roll back rather
+            // than silently drop the child checkpoint (Important 1).
+            if child_result.rows_affected() == 0 {
+                return Err(child_cas_error(&mut tx, &child_id, child.state_revision).await);
+            }
         }
 
         tx.commit().await.map_err(|e| {

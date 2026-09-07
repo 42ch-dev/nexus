@@ -1355,3 +1355,426 @@ async fn engine_start_with_loaded_preset_builds_source_identity() {
         "descriptor source identity must match the loaded preset's"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Fix round 2 (task re-review): regression tests for each fixed contract
+// ---------------------------------------------------------------------------
+
+// Important 1: a child CAS that matches zero rows (stale child revision)
+// must roll back the root transition — never silently drop the child
+// checkpoint while the root commits.
+#[tokio::test]
+async fn child_cas_stale_revision_rolls_back_root() {
+    let (pool, _db) = fresh_pool().await;
+    let storage = SqliteSessionStorage::new(pool.clone());
+    let session_id = SessionId("sess-child-stale".to_string());
+
+    // Start a root run with a child at revision 0.
+    let descriptor = test_descriptor(&session_id.0);
+    let root = root_session(&session_id.0, "parent_task").await;
+    let child = child_checkpoint("sess-child-stale:child:1", "child_task").await;
+    let checkpoint = RunCheckpoint {
+        root: &root,
+        children: &[child],
+    };
+    storage
+        .start_run(&session_id, &descriptor, checkpoint, &RunStateV1::default())
+        .await
+        .expect("start_run with child");
+
+    // Advance the child row to revision 1 (simulating a concurrent child
+    // transition that the root does not know about).
+    sqlx::query(
+        "UPDATE orchestration_sessions SET state_revision = 1
+         WHERE session_id = 'sess-child-stale:child:1'",
+    )
+    .execute(&*pool)
+    .await
+    .expect("advance child revision");
+
+    // Commit a root transition with a child checkpoint still anchored at
+    // revision 0 — the child CAS must fail and roll back the root.
+    let root2 = root_session(&session_id.0, "parent_task2").await;
+    let child2 = child_checkpoint("sess-child-stale:child:1", "child_task2").await;
+    let checkpoint2 = RunCheckpoint {
+        root: &root2,
+        children: &[child2],
+    };
+    let err = storage
+        .commit_transition(
+            &session_id,
+            1,
+            checkpoint2,
+            SessionStatus::Running,
+            &RunStateV1::default(),
+        )
+        .await
+        .expect_err("stale child revision must fail the root transition");
+
+    assert!(
+        matches!(
+            err,
+            nexus_orchestration::engine::EngineError::RevisionMismatch { .. }
+        ),
+        "expected RevisionMismatch for stale child, got {err:?}"
+    );
+
+    // The root row must be unchanged (rollback): still revision 1, running.
+    let root_after = storage
+        .load_run(&session_id)
+        .await
+        .expect("load_run")
+        .expect("root present");
+    assert_eq!(
+        root_after.state_revision, 1,
+        "root transition must roll back on stale child CAS"
+    );
+    assert_eq!(root_after.status, SessionStatus::Running);
+
+    // The child row must be unchanged (still revision 1, not overwritten).
+    let child_after = storage
+        .load_run(&SessionId("sess-child-stale:child:1".to_string()))
+        .await
+        .expect("load_run")
+        .expect("child present");
+    assert_eq!(child_after.state_revision, 1, "child row not overwritten");
+}
+
+// Important 1: a child CAS that matches zero rows because the child is
+// already terminal must roll back the root transition with TerminalState.
+#[tokio::test]
+async fn child_cas_terminal_child_rolls_back_root() {
+    let (pool, _db) = fresh_pool().await;
+    let storage = SqliteSessionStorage::new(pool.clone());
+    let session_id = SessionId("sess-child-term".to_string());
+
+    // Start a root run with a child at revision 0.
+    let descriptor = test_descriptor(&session_id.0);
+    let root = root_session(&session_id.0, "parent_task").await;
+    let child = child_checkpoint("sess-child-term:child:1", "child_task").await;
+    let checkpoint = RunCheckpoint {
+        root: &root,
+        children: &[child],
+    };
+    storage
+        .start_run(&session_id, &descriptor, checkpoint, &RunStateV1::default())
+        .await
+        .expect("start_run with child");
+
+    // Mark the child terminal (completed) — a late root transition must not
+    // overwrite a terminal child.
+    sqlx::query(
+        "UPDATE orchestration_sessions SET status = 'completed'
+         WHERE session_id = 'sess-child-term:child:1'",
+    )
+    .execute(&*pool)
+    .await
+    .expect("mark child terminal");
+
+    // Commit a root transition with a child checkpoint — the child CAS must
+    // fail (terminal fence) and roll back the root.
+    let root2 = root_session(&session_id.0, "parent_task2").await;
+    let child2 = child_checkpoint("sess-child-term:child:1", "child_task2").await;
+    let checkpoint2 = RunCheckpoint {
+        root: &root2,
+        children: &[child2],
+    };
+    let err = storage
+        .commit_transition(
+            &session_id,
+            1,
+            checkpoint2,
+            SessionStatus::Running,
+            &RunStateV1::default(),
+        )
+        .await
+        .expect_err("terminal child must fail the root transition");
+
+    assert!(
+        matches!(
+            err,
+            nexus_orchestration::engine::EngineError::TerminalState(_)
+        ),
+        "expected TerminalState for terminal child, got {err:?}"
+    );
+
+    // The root row must be unchanged (rollback).
+    let root_after = storage
+        .load_run(&session_id)
+        .await
+        .expect("load_run")
+        .expect("root present");
+    assert_eq!(
+        root_after.state_revision, 1,
+        "root transition must roll back on terminal child CAS"
+    );
+    assert_eq!(root_after.status, SessionStatus::Running);
+
+    // The child row must remain terminal.
+    let child_after = storage
+        .load_run(&SessionId("sess-child-term:child:1".to_string()))
+        .await
+        .expect("load_run")
+        .expect("child present");
+    assert_eq!(child_after.status, SessionStatus::Completed);
+}
+
+// Important 2: the production child-session path (EngineProxy/GraphFlowEngine
+// spawn_child_session) creates a v1 child run with inherited trusted root
+// identity, and run_step_internal persists the nested child checkpoint.
+#[tokio::test]
+async fn engine_nested_child_creates_v1_run() {
+    let (pool, _db) = fresh_pool().await;
+    let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
+    let storage_arc: Arc<dyn SessionStorage> = storage.clone();
+    let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
+    let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_orchestration::CapabilityRegistry::with_builtins(),
+    ));
+    let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+        storage_arc,
+        workflow_store,
+        caps,
+    );
+
+    // Start a parent session (v1 run).
+    let graph = Arc::new(graph_flow::Graph::new("test-graph"));
+    graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+    let parent_sid = engine
+        .start_session("novel-writing", graph)
+        .await
+        .expect("start parent session");
+
+    // Spawn a child session via the production path.
+    let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
+    inner_graph.add_task(Arc::new(nexus_orchestration::tasks::InnerGraphNodeTask::new("n1")));
+    let params = nexus_orchestration::ChildSessionParams {
+        parent_session_id: parent_sid.0.clone(),
+        inner_graph,
+        initial_context: graph_flow::Context::new(),
+    };
+    let child_sid = engine
+        .spawn_child_session(params)
+        .await
+        .expect("spawn child session");
+
+    // The child must be a v1 run with inherited trusted root identity.
+    let child_record = storage
+        .load_run(&child_sid)
+        .await
+        .expect("load_run")
+        .expect("child run present");
+    assert_eq!(
+        child_record.execution_version, 1,
+        "production child path must create a v1 run, not a bare save"
+    );
+    let child_descriptor = child_record.descriptor.expect("child descriptor present");
+    assert_eq!(
+        child_descriptor.creator_id, "",
+        "child must inherit the root creator identity (empty for a no-creator start)"
+    );
+    assert_eq!(
+        child_descriptor.preset_id, "novel-writing",
+        "child must inherit trusted root preset identity"
+    );
+    assert_eq!(
+        child_descriptor.parent_session_id.as_ref().map(|s| s.0.as_str()),
+        Some(parent_sid.0.as_str()),
+        "child must name its parent session"
+    );
+    assert_eq!(
+        child_descriptor.graph_name.as_deref(),
+        Some("inner_graph"),
+        "child must name its inner graph"
+    );
+    assert!(
+        matches!(
+            child_descriptor.source,
+            PresetSourceIdentity::Embedded { .. }
+        ),
+        "child must inherit the root source identity"
+    );
+
+    // run_step on the parent must persist the nested child checkpoint
+    // atomically (the child row is reconstructible after restart).
+    let outcome = engine.run_step(&parent_sid).await.expect("run_step parent");
+    assert!(
+        matches!(
+            outcome,
+            nexus_orchestration::engine::StepOutcome::WaitingForInput { .. }
+        ),
+        "expected WaitingForInput, got {outcome:?}"
+    );
+
+    // The child row must still be present and reconstructible.
+    let child_after = storage
+        .load_run(&child_sid)
+        .await
+        .expect("load_run")
+        .expect("child present after parent step");
+    assert_eq!(child_after.execution_version, 1);
+    assert_eq!(
+        child_after.descriptor.as_ref().unwrap().graph_name.as_deref(),
+        Some("inner_graph")
+    );
+}
+
+// Important 3: a directory preset that shadows an embedded preset with the
+// same id must resolve to the directory source identity and carry the real
+// directory preset version (A7 precedence: user → system → embedded).
+#[tokio::test]
+async fn shadowed_directory_preset_resolves_directory_source_and_version() {
+    use std::fs;
+
+    let (pool, _db) = fresh_pool().await;
+    let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
+    let storage_arc: Arc<dyn SessionStorage> = storage.clone();
+    let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
+    let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_orchestration::CapabilityRegistry::with_builtins(),
+    ));
+    let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+        storage_arc,
+        workflow_store,
+        caps,
+    );
+
+    // Create a user directory preset that shadows the embedded novel-writing
+    // preset (same id, different version).
+    let nexus_home = tempfile::tempdir().unwrap();
+    let bundle_dir = nexus_home.path().join("presets").join("novel-writing");
+    fs::create_dir_all(&bundle_dir).unwrap();
+    let override_yaml = r#"
+preset:
+  id: novel-writing
+  version: 99
+  kind: creator
+  description: "user override of novel-writing"
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+"#;
+    fs::write(bundle_dir.join("preset.yaml"), override_yaml).unwrap();
+    engine.set_nexus_home(nexus_home.path().to_path_buf());
+
+    // Start a session for the shadowed preset id.
+    let graph = Arc::new(graph_flow::Graph::new("test-graph"));
+    graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+    let sid = engine
+        .start_session("novel-writing", graph)
+        .await
+        .expect("start_session with shadowed preset");
+
+    // The descriptor must resolve to the DIRECTORY source (not embedded) and
+    // carry the real directory preset version (99, not 0 and not embedded).
+    let record = storage
+        .load_run(&sid)
+        .await
+        .expect("load_run")
+        .expect("run present");
+    let descriptor = record.descriptor.expect("descriptor present");
+    assert_eq!(
+        descriptor.preset_version, 99,
+        "descriptor must carry the real directory preset version, not 0"
+    );
+    assert!(
+        matches!(descriptor.source, PresetSourceIdentity::Directory { .. }),
+        "shadowed directory preset must resolve to Directory source, got {:?}",
+        descriptor.source
+    );
+}
+
+// Important 4: a corrupt/ambiguous v0 status must remain distinct and
+// non-replayable — never silently reinterpreted as `running`.
+#[tokio::test]
+async fn unknown_v0_status_is_non_replayable() {
+    let (pool, _db) = fresh_pool().await;
+    let storage = SqliteSessionStorage::new(pool.clone());
+
+    // Seed a v0 row with an unknown status value.
+    sqlx::query(
+        "INSERT INTO orchestration_sessions
+            (session_id, creator_id, preset_id, preset_version, status,
+             current_task_id, context_json, created_at, updated_at)
+         VALUES ('sess-v0-unknown', 'ctr_t', 'preset_t', 7, 'bogus_status', 'task_a',
+                 '{\"data\":{}}', 1756990000, 1756990300)",
+    )
+    .execute(&*pool)
+    .await
+    .expect("seed v0 row with unknown status");
+
+    // load_run must surface the unknown v0 status as an error (non-replayable),
+    // not silently reinterpret it as Running.
+    let err = storage
+        .load_run(&SessionId("sess-v0-unknown".to_string()))
+        .await
+        .expect_err("unknown v0 status must be non-replayable");
+    assert!(
+        matches!(
+            err,
+            nexus_orchestration::engine::EngineError::GraphFlow(_)
+        ),
+        "expected GraphFlow error for unknown v0 status, got {err:?}"
+    );
+
+    // The row must be preserved (not rewritten).
+    let raw: Option<String> = sqlx::query_scalar(
+        "SELECT status FROM orchestration_sessions WHERE session_id = 'sess-v0-unknown'",
+    )
+    .fetch_one(&*pool)
+    .await
+    .expect("read raw status");
+    assert_eq!(raw.as_deref(), Some("bogus_status"), "row preserved verbatim");
+}
+
+// Important 4: a negative/out-of-range integer revision on a v0 row must
+// remain non-replayable — never coerced to zero.
+#[tokio::test]
+async fn negative_v0_revision_is_non_replayable() {
+    let (pool, _db) = fresh_pool().await;
+    let storage = SqliteSessionStorage::new(pool.clone());
+
+    // Seed a v0 row with a negative state_revision.
+    sqlx::query(
+        "INSERT INTO orchestration_sessions
+            (session_id, creator_id, preset_id, preset_version, status,
+             current_task_id, context_json, created_at, updated_at,
+             execution_version, state_revision)
+         VALUES ('sess-v0-negrev', 'ctr_t', 'preset_t', 7, 'running', 'task_a',
+                 '{\"data\":{}}', 1756990000, 1756990300,
+                 0, -5)",
+    )
+    .execute(&*pool)
+    .await
+    .expect("seed v0 row with negative revision");
+
+    // load_run must surface the negative revision as an error (non-replayable),
+    // not coerce it to zero.
+    let err = storage
+        .load_run(&SessionId("sess-v0-negrev".to_string()))
+        .await
+        .expect_err("negative v0 revision must be non-replayable");
+    assert!(
+        matches!(
+            err,
+            nexus_orchestration::engine::EngineError::GraphFlow(_)
+        ),
+        "expected GraphFlow error for negative revision, got {err:?}"
+    );
+
+    // The row must be preserved (not rewritten).
+    let raw: i64 = sqlx::query_scalar(
+        "SELECT state_revision FROM orchestration_sessions WHERE session_id = 'sess-v0-negrev'",
+    )
+    .fetch_one(&*pool)
+    .await
+    .expect("read raw revision");
+    assert_eq!(raw, -5, "row preserved verbatim");
+}

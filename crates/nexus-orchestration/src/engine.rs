@@ -23,7 +23,8 @@ use thiserror::Error;
 // Re-export for internal use.
 use crate::capability::CapabilityRegistry;
 use crate::run_state::{
-    PresetSourceIdentity, RunCheckpoint, RunDescriptorV1, RunStateV1, WorkflowStateStore,
+    ChildCheckpoint, PresetSourceIdentity, RunCheckpoint, RunDescriptorV1, RunStateV1,
+    WorkflowStateStore,
 };
 
 // ---------------------------------------------------------------------------
@@ -339,6 +340,13 @@ pub struct EngineSharedState {
     /// `None` for in-memory test storage). When present, terminal/wait
     /// transitions are persisted authoritatively via `commit_transition`.
     pub workflow_store: Option<Arc<dyn WorkflowStateStore>>,
+    /// Child checkpoints for each root session (A2/A4).
+    ///
+    /// `spawn_child_session` records the child's durable checkpoint here so
+    /// `run_step_internal` can pass real `ChildCheckpoint` data to
+    /// `commit_transition` — making nested child rows reconstructible after
+    /// restart (Important 2). Keyed by root session id.
+    pub children: Arc<tokio::sync::RwLock<std::collections::HashMap<String, Vec<ChildCheckpoint>>>>,
 }
 
 impl EngineSharedState {
@@ -349,6 +357,7 @@ impl EngineSharedState {
             runners: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             sessions: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             workflow_store: None,
+            children: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         }
     }
 
@@ -362,6 +371,7 @@ impl EngineSharedState {
             runners: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             sessions: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             workflow_store: Some(workflow_store),
+            children: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         }
     }
 
@@ -522,9 +532,19 @@ impl EngineSharedState {
                     .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
 
                 let next_state = build_step_state(&result, &status, &root.current_task_id);
+                // Pass the real child checkpoints recorded by
+                // `spawn_child_session` so nested child rows are persisted
+                // atomically and reconstructible after restart (Important 2).
+                let children: Vec<ChildCheckpoint> = self
+                    .children
+                    .read()
+                    .await
+                    .get(&session_id.0)
+                    .cloned()
+                    .unwrap_or_default();
                 let checkpoint = RunCheckpoint {
                     root: &root,
-                    children: &[],
+                    children: &children,
                 };
                 store
                     .commit_transition(session_id, expected_revision, checkpoint, status.clone(), &next_state)
@@ -544,6 +564,111 @@ impl EngineSharedState {
         }
 
         Ok(result)
+    }
+
+    /// Spawn a child session (inner graph) with durable v1 identity (A2/A4).
+    ///
+    /// When a workflow store is present, the child is created as a v1 run
+    /// that inherits the trusted root descriptor (creator, preset, source,
+    /// workspace, bindings) and names its parent session and inner graph —
+    /// never a bare `SessionStorage::save` with empty identity (Important 2).
+    /// The child checkpoint is recorded so `run_step_internal` can persist
+    /// nested child rows atomically under the root transition.
+    pub async fn spawn_child_session_internal(
+        &self,
+        params: ChildSessionParams,
+    ) -> Result<SessionId, EngineError> {
+        let child_session_id = format!(
+            "{}:child:{}",
+            params.parent_session_id,
+            chrono::Utc::now().timestamp_millis()
+        );
+        let start_task_id = params.inner_graph.start_task_id().unwrap_or_default();
+        let mut session_mut =
+            graph_flow::Session::new_from_task(child_session_id.clone(), &start_task_id);
+        session_mut.context = params.initial_context;
+
+        // When a workflow store is present, create a v1 child run that
+        // inherits the trusted root descriptor (A2/A4). The child's
+        // `graph_name` is the inner graph's id.
+        if let Some(store) = &self.workflow_store {
+            let root_record = store
+                .load_run(&SessionId(params.parent_session_id.clone()))
+                .await?
+                .ok_or_else(|| EngineError::SessionNotFound(params.parent_session_id.clone()))?;
+            let root_descriptor = root_record.descriptor.ok_or_else(|| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "spawn_child_session '{}': parent has no v1 descriptor; \
+                     cannot inherit trusted child identity",
+                    params.parent_session_id
+                )))
+            })?;
+            let child_descriptor = RunDescriptorV1 {
+                creator_id: root_descriptor.creator_id.clone(),
+                work_id: root_descriptor.work_id.clone(),
+                workspace_root: root_descriptor.workspace_root.clone(),
+                preset_id: root_descriptor.preset_id.clone(),
+                preset_version: root_descriptor.preset_version,
+                source: root_descriptor.source.clone(),
+                input: root_descriptor.input.clone(),
+                agent_bindings: root_descriptor.agent_bindings.clone(),
+                parent_session_id: Some(SessionId(params.parent_session_id.clone())),
+                graph_name: Some(params.inner_graph.id.clone()),
+            };
+            let checkpoint = RunCheckpoint {
+                root: &session_mut,
+                children: &[],
+            };
+            store
+                .start_run(
+                    &SessionId(child_session_id.clone()),
+                    &child_descriptor,
+                    checkpoint,
+                    &RunStateV1::default(),
+                )
+                .await?;
+        } else {
+            self.storage.save(session_mut.clone()).await?;
+        }
+
+        // Record the child checkpoint so the root transition persists the
+        // nested child row atomically (Important 2). The CAS anchor is the
+        // child's actual persisted revision: a v1 child created via
+        // `start_run` is at revision 1; a bare-save child (no store) is at 0.
+        let child_revision = if self.workflow_store.is_some() { 1 } else { 0 };
+        let child_checkpoint = ChildCheckpoint {
+            session: session_mut.clone(),
+            status: SessionStatus::Running,
+            state: RunStateV1::default(),
+            state_revision: child_revision,
+            graph_name: Some(params.inner_graph.id.clone()),
+        };
+        self.children
+            .write()
+            .await
+            .entry(params.parent_session_id.clone())
+            .or_default()
+            .push(child_checkpoint);
+
+        // WS2 R3: Store Arc<FlowRunner> instead of FlowRunner.
+        let runner = Arc::new(FlowRunner::new(
+            params.inner_graph,
+            self.storage.clone(),
+        ));
+        self.runners
+            .write()
+            .await
+            .insert(child_session_id.clone(), runner);
+
+        self.sessions.write().await.push(SessionSummary {
+            session_id: SessionId(child_session_id.clone()),
+            creator_id: String::new(),
+            preset_id: String::new(),
+            status: SessionStatus::Running,
+            current_task_id: Some(start_task_id),
+        });
+
+        Ok(SessionId(child_session_id))
     }
 }
 
@@ -716,34 +841,7 @@ impl OrchestrationEngine for EngineProxy {
         &self,
         params: ChildSessionParams,
     ) -> Result<SessionId, EngineError> {
-        let child_session_id = format!(
-            "{}:child:{}",
-            params.parent_session_id,
-            chrono::Utc::now().timestamp_millis()
-        );
-        let start_task_id = params.inner_graph.start_task_id().unwrap_or_default();
-        let mut session_mut =
-            graph_flow::Session::new_from_task(child_session_id.clone(), &start_task_id);
-        session_mut.context = params.initial_context;
-        self.state.storage.save(session_mut).await?;
-        // WS2 R3: Store Arc<FlowRunner> instead of FlowRunner.
-        let runner = Arc::new(graph_flow::FlowRunner::new(
-            params.inner_graph,
-            self.state.storage.clone(),
-        ));
-        self.state
-            .runners
-            .write()
-            .await
-            .insert(child_session_id.clone(), runner);
-        self.state.sessions.write().await.push(SessionSummary {
-            session_id: SessionId(child_session_id.clone()),
-            creator_id: String::new(),
-            preset_id: String::new(),
-            status: SessionStatus::Running,
-            current_task_id: Some(start_task_id),
-        });
-        Ok(SessionId(child_session_id))
+        self.state.spawn_child_session_internal(params).await
     }
 
     async fn get_context(
@@ -1131,13 +1229,13 @@ impl GraphFlowEngine {
         // bare SessionStorage::save. The source identity is resolved from the
         // preset (embedded or directory bundle).
         if let Some(store) = &self.state.workflow_store {
-            let source = self.resolve_source_identity(preset_id)?;
+            let (source, preset_version) = self.resolve_source_identity(preset_id)?;
             let descriptor = RunDescriptorV1 {
                 creator_id: creator_id.unwrap_or_default().to_string(),
                 work_id: None,
                 workspace_root: self.workspace_root.clone().unwrap_or_default(),
                 preset_id: preset_id.to_string(),
-                preset_version: 0,
+                preset_version,
                 source,
                 input: serde_json::Map::new(),
                 agent_bindings: HashMap::new(),
@@ -1182,28 +1280,39 @@ impl GraphFlowEngine {
         Ok(SessionId(session_id))
     }
 
-    /// Resolve the content-addressed source identity for a preset (A2/A7).
+    /// Resolve the content-addressed source identity and version for a preset
+    /// (A2/A7).
     ///
-    /// Tries the embedded preset first; falls back to a directory bundle
-    /// under `nexus_home` (user or system). Returns an error when the preset
-    /// cannot be resolved to a known source.
+    /// Follows the A7 initial-admission precedence: user directory → system
+    /// directory → embedded. When `nexus_home` is set, `resolve_preset` is
+    /// tried first (it already applies user → system → embedded order), so a
+    /// directory preset that shadows an embedded preset with the same id is
+    /// resolved to the directory bundle — never the embedded source. Only
+    /// when no `nexus_home` is configured (in-memory/test engines) does this
+    /// fall back to the embedded preset directly.
+    ///
+    /// Returns the source identity **and** the resolved preset's version so
+    /// the frozen descriptor carries the real version, not a hard-coded 0
+    /// (Important 3).
     fn resolve_source_identity(
         &self,
         preset_id: &str,
-    ) -> Result<PresetSourceIdentity, EngineError> {
+    ) -> Result<(PresetSourceIdentity, u32), EngineError> {
         let caps = self.current_caps();
-        // Embedded preset.
-        if let Ok(loaded) = crate::preset::load_embedded_preset(preset_id, &caps) {
-            if let Some(identity) = loaded.source_identity {
-                return Ok(identity);
-            }
-        }
-        // Directory bundle under nexus_home.
+        // Directory bundle under nexus_home (user → system → embedded via
+        // resolve_preset's own precedence). A directory preset shadows an
+        // embedded preset with the same id (A7).
         if let Some(home) = &self.nexus_home {
             if let Ok(loaded) = crate::preset::resolve_preset(preset_id, home, &caps) {
                 if let Some(identity) = loaded.source_identity {
-                    return Ok(identity);
+                    return Ok((identity, loaded.version));
                 }
+            }
+        }
+        // No nexus_home (or resolve_preset failed): fall back to embedded.
+        if let Ok(loaded) = crate::preset::load_embedded_preset(preset_id, &caps) {
+            if let Some(identity) = loaded.source_identity {
+                return Ok((identity, loaded.version));
             }
         }
         Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
@@ -1325,42 +1434,7 @@ impl OrchestrationEngine for GraphFlowEngine {
         &self,
         params: ChildSessionParams,
     ) -> Result<SessionId, EngineError> {
-        let child_session_id = format!(
-            "{}:child:{}",
-            params.parent_session_id,
-            chrono::Utc::now().timestamp_millis()
-        );
-
-        let start_task_id = params.inner_graph.start_task_id().unwrap_or_default();
-
-        // Create a child session with the provided initial context.
-        let mut session_mut =
-            graph_flow::Session::new_from_task(child_session_id.clone(), &start_task_id);
-        session_mut.context = params.initial_context;
-        self.state.storage.save(session_mut).await?;
-
-        // WS2 R3: Store Arc<FlowRunner> instead of FlowRunner.
-        let runner = Arc::new(FlowRunner::new(
-            params.inner_graph,
-            self.state.storage.clone(),
-        ));
-        self.state
-            .runners
-            .write()
-            .await
-            .insert(child_session_id.clone(), runner);
-
-        let summary = SessionSummary {
-            session_id: SessionId(child_session_id.clone()),
-            creator_id: String::new(),
-            preset_id: String::new(),
-            status: SessionStatus::Running,
-            current_task_id: Some(start_task_id),
-        };
-
-        self.state.sessions.write().await.push(summary);
-
-        Ok(SessionId(child_session_id))
+        self.state.spawn_child_session_internal(params).await
     }
 
     async fn get_context(
