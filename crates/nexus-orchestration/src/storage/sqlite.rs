@@ -15,7 +15,12 @@
 //!   When these keys are absent the columns default to `"unknown"` / `"default"` / `0`.
 //! - `parent_session_id` — from context key `_parent_session_id`.
 //! - `current_task_id` ← `Session.current_task_id`
-//! - `status` ← `"running"` always on save (engine manages lifecycle).
+//! - `status` — new rows insert as `"running"`; existing rows are never
+//!   rewritten. The position/context-only save seam updates
+//!   `current_task_id` / `context_json` / `updated_at` only when the row is
+//!   in the re-stepable set `status IN ('running', 'paused')`; protected
+//!   durable state (`waiting_for_input`, terminal, `cancelled`,
+//!   `interrupted`) is fenced out and stays an expected no-op (A4).
 //! - `context_json` ← `serde_json::to_vec(&session.context)`
 //!
 //! ## Session recovery (WS2 R1)

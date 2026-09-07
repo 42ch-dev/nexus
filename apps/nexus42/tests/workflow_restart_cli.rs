@@ -46,7 +46,7 @@ use nexus_orchestration::run_state::WorkflowStateStore;
 use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 use nexus_orchestration::{
     CapabilityError, CapabilityRegistry, CapabilityRegistryHolder, GraphFlowEngine,
-    OrchestrationEngine,
+    OrchestrationEngine, PresetSourceIdentity,
 };
 use serde_json::{json, Value};
 use std::path::Path;
@@ -67,6 +67,16 @@ const V1_DESCRIPTOR: &[u8] = br#"{"creator_id":"test_creator","work_id":null,"wo
      "preset_id":"e2e-converge","preset_version":3,
      "source":{"Embedded":{"preset_id":"e2e-converge","content_hash":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}},
      "input":{},"agent_bindings":{},"parent_session_id":null,"graph_name":null}"#;
+
+/// Frozen child `RunDescriptorV1` (A2/A4) — the shape the production
+/// `spawn_child_session_internal` writes: the child inherits the trusted
+/// root identity (creator, preset, version, source) and names its parent
+/// session and inner graph. The nested-child restart fixture must seed this
+/// exact shape so descriptor identity preservation is actually proven.
+const CHILD_DESCRIPTOR: &[u8] = br#"{"creator_id":"test_creator","work_id":null,"workspace_root":"/tmp/ws",
+     "preset_id":"e2e-converge","preset_version":3,
+     "source":{"Embedded":{"preset_id":"e2e-converge","content_hash":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}},
+     "input":{},"agent_bindings":{},"parent_session_id":"nested:parent","graph_name":"manual_wait_graph"}"#;
 
 /// Seed an authoritative v1 row (A2 columns) directly into the real SQLite
 /// file — the "previous process" checkpoint state. `run_state` is the
@@ -490,11 +500,7 @@ async fn restart_durable_status_human_wait_token_survives_not_approved() {
     // Scoped public evidence: inspect agrees on the reopened file for all
     // three human-wait rows (including the one with a stale gate marker for
     // a different task plus broad join keys).
-    for (id, waits) in [
-        ("wait:plain", true),
-        ("wait:old-joins", true),
-        ("wait:stale-marker", true),
-    ] {
+    for id in ["wait:plain", "wait:old-joins", "wait:stale-marker"] {
         let output = nexus42(user_home)
             .args(["ops", "inspect", id, "--json"])
             .assert()
@@ -508,11 +514,6 @@ async fn restart_durable_status_human_wait_token_survives_not_approved() {
         assert_eq!(parsed["wait_id"], json!("wait-tok-1"), "{id}");
         assert_eq!(parsed["resumable"]["verdict"], json!("no"), "{id}");
         assert_eq!(parsed["resumable"]["rule"], json!("human_wait"), "{id}");
-        assert_eq!(
-            waits,
-            true,
-            "{id} — human wait must never be silently advanced to a join re-drive"
-        );
     }
     // Human view names the class and the preserved token context.
     let human = nexus42(user_home)
@@ -710,7 +711,7 @@ async fn restart_durable_status_converge_merge_redrives_after_reopen() {
         .runners
         .write()
         .await
-        .insert(sid.to_string(), runner);
+        .insert(sid.to_string(), runner.clone());
     let summary = SessionSummary {
         session_id: SessionId(sid.to_string()),
         creator_id: "test_creator".to_string(),
@@ -795,6 +796,20 @@ async fn restart_durable_status_converge_merge_redrives_after_reopen() {
         json!(["_converge_arrivals_join", "_join_wait_start_join"]),
         "the live join keys must persist on the reopened row"
     );
+
+    // Real process-equivalent boundary: finish the first restart's proof,
+    // drop the first engine/storage/runner references, and close pool_b
+    // BEFORE the second restart opens the same file — a genuine shutdown
+    // followed by a fresh process-equivalent startup (a live pool must not
+    // mask connection-lifetime or SQLite-locking bugs).
+    drop(runner);
+    drop(engine_ref);
+    drop(engine);
+    drop(caps);
+    drop(loaded);
+    drop(dyn_storage);
+    drop(store);
+    pool_b.close().await;
 
     // "Second restart": a fresh process reopens the SAME file. Because the
     // re-park is now `paused` + tokenless (A2), rule 4 cannot fire — the
@@ -885,7 +900,6 @@ async fn restart_durable_status_converge_merge_redrives_after_reopen() {
     );
 
     pool_c.close().await;
-    pool_b.close().await;
     drop(tmp);
 }
 
@@ -1073,7 +1087,7 @@ async fn restart_durable_status_nested_child_wait_preserved_and_never_auto_resum
         .bind("nested:parent")
         .bind(&ctx)
         .bind(&child_state)
-        .bind(V1_DESCRIPTOR)
+        .bind(CHILD_DESCRIPTOR)
         .execute(&pool)
         .await
         .expect("seed nested child row");
@@ -1145,6 +1159,46 @@ async fn restart_durable_status_nested_child_wait_preserved_and_never_auto_resum
         child.state.as_ref().and_then(|s| s.wait.as_ref()).map(|w| w.wait_id.as_str()),
         Some("child-tok-9"),
         "the nested child wait token survives restart untouched — no auto-resume"
+    );
+
+    // The child's persisted `RunDescriptorV1` survives reopen through the
+    // real storage load path with its inherited identity intact (A2/A4):
+    // creator, preset id/version, embedded source, parent session, and the
+    // named inner graph — the reconstructible child identity the production
+    // `spawn_child_session_internal` writes.
+    let child_descriptor = child
+        .descriptor
+        .as_ref()
+        .expect("v1 child row must carry a frozen descriptor");
+    assert_eq!(
+        child_descriptor.creator_id, "test_creator",
+        "child must inherit the root creator identity"
+    );
+    assert_eq!(
+        child_descriptor.preset_id, "e2e-converge",
+        "child must inherit the root preset identity"
+    );
+    assert_eq!(
+        child_descriptor.preset_version, 3,
+        "child must inherit the root preset version"
+    );
+    assert_eq!(
+        child_descriptor.source,
+        PresetSourceIdentity::Embedded {
+            preset_id: "e2e-converge".to_string(),
+            content_hash: [0u8; 32],
+        },
+        "child must inherit the root embedded source identity"
+    );
+    assert_eq!(
+        child_descriptor.parent_session_id.as_ref().map(|s| s.0.as_str()),
+        Some("nested:parent"),
+        "child must name its parent session"
+    );
+    assert_eq!(
+        child_descriptor.graph_name.as_deref(),
+        Some("manual_wait_graph"),
+        "child must name its inner graph"
     );
 
     // Scoped public evidence: inspect reports human_wait with the preserved
