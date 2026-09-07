@@ -264,7 +264,7 @@ async fn restart_mid_chain_resumes_without_re_executing_completed_edges() {
         ..PresetRunConfig::default()
     };
     let decisions =
-        resume_driven_sessions(engine2.as_ref(), &storage2, &[summary], &config, None).await;
+        resume_driven_sessions(engine2.as_ref(), &storage2, None, &[summary], &config, None).await;
     assert_eq!(decisions.len(), 1, "exactly one recovered session");
     match &decisions[0] {
         ResumeDecision::ReDriven {
@@ -592,7 +592,7 @@ async fn inspect_after_interrupt_is_side_effect_free_and_resume_matches_baseline
         ..PresetRunConfig::default()
     };
     let decisions =
-        resume_driven_sessions(engine2.as_ref(), &storage2, &[summary], &config, None).await;
+        resume_driven_sessions(engine2.as_ref(), &storage2, None, &[summary], &config, None).await;
     assert_eq!(decisions.len(), 1, "exactly one recovered session");
     match &decisions[0] {
         ResumeDecision::ReDriven {
@@ -701,6 +701,7 @@ async fn resume_skips_typed_failed_and_non_class_sessions() {
     let decisions = resume_driven_sessions(
         engine.as_ref(),
         &storage,
+        None,
         &summaries,
         &PresetRunConfig::default(),
         None,

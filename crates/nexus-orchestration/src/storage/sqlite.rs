@@ -126,7 +126,8 @@ impl SqliteSessionStorage {
     ) -> Result<Option<CheckpointRow>, sqlx::Error> {
         sqlx::query_as::<_, CheckpointRow>(
             "SELECT session_id, creator_id, preset_id, preset_version, current_task_id,
-                    status, context_json, created_at, updated_at
+                    status, context_json, execution_version, state_revision, run_state_json,
+                    created_at, updated_at
              FROM orchestration_sessions
              WHERE session_id = ?",
         )
@@ -156,7 +157,33 @@ impl SqliteSessionStorage {
     pub async fn list_checkpoint_rows(&self) -> Result<Vec<CheckpointSummary>, sqlx::Error> {
         sqlx::query_as::<_, CheckpointSummary>(
             "SELECT session_id, creator_id, preset_id, preset_version, current_task_id,
-                    status, created_at, updated_at,
+                    status, execution_version, state_revision, created_at, updated_at,
+                    CASE
+                        WHEN execution_version >= 1
+                             AND json_valid(run_state_json) THEN 1
+                        ELSE NULL
+                    END AS run_state_valid_json,
+                    CASE
+                        WHEN execution_version >= 1
+                             AND json_valid(run_state_json)
+                        THEN json_extract(run_state_json, '$.wait.wait_id')
+                        ELSE NULL
+                    END AS wait_id,
+                    CASE
+                        WHEN execution_version >= 1
+                             AND json_valid(run_state_json)
+                             AND json_type(run_state_json, '$.step_in_flight') = 'text'
+                        THEN json_extract(run_state_json, '$.step_in_flight')
+                        ELSE NULL
+                    END AS step_in_flight,
+                    CASE
+                        WHEN execution_version >= 1
+                             AND json_valid(run_state_json)
+                             AND (json_extract(run_state_json, '$.in_flight') IS NOT NULL
+                                  OR json_extract(run_state_json, '$.cancel_requested') = 1)
+                        THEN 1
+                        ELSE 0
+                    END AS in_flight_or_cancel_requested,
                     json_valid(context_json) AS context_valid_json,
                     CASE
                         WHEN json_valid(context_json)

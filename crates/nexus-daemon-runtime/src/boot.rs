@@ -724,9 +724,17 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                                 resume_waiting: true,
                                 ..PresetRunConfig::default()
                             };
+                            // A7 (v1.186 P0 T2): the durable workflow store
+                            // (same SQLite adapter) governs the recovery
+                            // class — interrupted work is never re-driven,
+                            // human waits are never stepped at boot, and only
+                            // the converge/merge chain class reaches the
+                            // bounded join re-drive.
+                            let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();
                             let decisions = resume_driven_sessions(
                                 &resume_engine,
                                 &resume_storage,
+                                Some(&workflow_store),
                                 &drivable,
                                 &config,
                                 Some(&resume_cancel),

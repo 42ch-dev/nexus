@@ -49,6 +49,7 @@ use nexus_orchestration::engine::{
     EngineSignal, OrchestrationEngine, SessionId, SessionStatus, SessionSummary, StepOutcome,
 };
 use nexus_orchestration::resume_rules;
+use nexus_orchestration::run_state::WorkflowStateStore;
 use tokio_util::sync::CancellationToken;
 
 /// Bounds and posture for one [`drive_preset_run`] call.
@@ -267,6 +268,18 @@ pub enum ResumeDecision {
         session_id: SessionId,
         error: String,
     },
+    /// Skipped: the v1 durable record classifies as interrupted/uncertain
+    /// in-flight work (A7 rule 3) — never auto-retried, even when old
+    /// converge/merge join keys exist.
+    SkippedInterrupted { session_id: SessionId },
+    /// Skipped: the v1 durable record is `waiting_for_input` outside a
+    /// converge/merge chain (A7 rule 4 — human wait). The A4 wait token is
+    /// preserved; never stepped or approved at boot.
+    SkippedHumanWait { session_id: SessionId },
+    /// Skipped: the v1 durable record sits at a fully committed boundary
+    /// with no in-flight work (A7 rule 6 — safe boundary, reconstructable).
+    /// Boot does not auto-drive outside the converge/merge chain class.
+    SkippedSafeBoundary { session_id: SessionId },
 }
 
 /// Resume re-drive for recovered non-terminal sessions (BL-04 slice, T2).
@@ -285,7 +298,10 @@ pub enum ResumeDecision {
 ///    output — boot already filters).
 /// 2. Its persisted context carries NO typed-failure record
 ///    (`_run_status` / `_run_error`).
-/// 3. Its persisted context carries a LIVE join-tracking key
+/// 3. It is not a human wait: `waiting_for_input` without a live
+///    converge/merge join key is never stepped at boot (A7 rule 4 — the
+///    A4 wait token is preserved, not auto-advanced).
+/// 4. Its persisted context carries a LIVE join-tracking key
 ///    (`_converge_arrivals_*`, `_merge_*`, or `_join_wait_start_*`) with a
 ///    non-Null value — written ONLY by merge/converge gate states. The
 ///    gates clear their keys by writing `Value::Null` (deadline exceeded /
@@ -294,7 +310,7 @@ pub enum ResumeDecision {
 ///    class: a `manual`/`llm_judge` wait (no live join keys) is never
 ///    auto-advanced, and sessions without the class behave
 ///    byte-identically to pre-T2 boot.
-/// 4. A `FlowRunner` exists for the session (`engine.has_runner`) — the
+/// 5. A `FlowRunner` exists for the session (`engine.has_runner`) — the
 ///    caller must have reconstructed it (boot does via `recover_sessions`).
 ///
 /// # `_join_wait_start_*` across downtime (pinned)
@@ -320,6 +336,7 @@ pub enum ResumeDecision {
 pub async fn resume_driven_sessions(
     engine: &dyn OrchestrationEngine,
     storage: &Arc<dyn SessionStorage>,
+    workflow_store: Option<&Arc<dyn WorkflowStateStore>>,
     summaries: &[SessionSummary],
     config: &PresetRunConfig,
     cancel: Option<&CancellationToken>,
@@ -348,21 +365,87 @@ pub async fn resume_driven_sessions(
         };
 
         // 1. Typed-failure filter (T1 review constraint): never re-tick a
-        //    typed-failed join. The DB `status` column stays `running`
-        //    after a typed failure (save ON CONFLICT does not update it),
-        //    so the context keys are the only reliable failure record.
-        //    Projected via the shared `resume_rules` module — the same
-        //    predicates `nexus42 ops inspect` uses, over the same persisted
-        //    data (single source of truth, qc1 W1; string-typed values only,
-        //    mirroring `Context::get`).
+        //    typed-failed join. v1 typed failures are already excluded by the
+        //    boot recovery filter (status `failed` is terminal); this context-
+        //    key check is the conservative legacy (v0) projection — the DB
+        //    status column stays `running` after a typed v0 failure, so the
+        //    context keys are the only reliable failure record. Shared with
+        //    `nexus42 ops inspect` (single source of truth, qc1 W1).
         let context_value = serde_json::to_value(&session.context).ok();
         let data = context_value.as_ref().and_then(resume_rules::context_data);
+
+        // A7 v1 gate (v1.186 P0, Task 2): when the durable workflow store is
+        // present, the authoritative v1 status/state govern the recovery
+        // class. Interrupted/uncertain in-flight work is never re-driven
+        // (even with old join keys — rule 3); human waits are never stepped
+        // at boot (rule 4); a fully committed safe boundary is
+        // reconstructable but not auto-driven outside the chain class
+        // (rule 6); corrupt/unsupported v1 metadata is unreadable/
+        // non-replayable (rule 2). Only the converge/merge class proceeds to
+        // the bounded join re-drive below. v0 rows and in-memory engines
+        // (no store) fall through to the conservative legacy cascade.
+        if let Some(store) = workflow_store {
+            match store.load_run(&session_id).await {
+                Ok(Some(record)) if record.execution_version >= 1 => {
+                    let chain_class = data.is_some_and(resume_rules::is_converge_merge_chain);
+                    let class = resume_rules::classify_recovery(
+                        &record.status,
+                        record.state.as_ref(),
+                        chain_class,
+                    );
+                    match class {
+                        resume_rules::RecoveryClass::ConvergeMerge => {}
+                        resume_rules::RecoveryClass::Interrupted => {
+                            decisions.push(ResumeDecision::SkippedInterrupted { session_id });
+                            continue;
+                        }
+                        resume_rules::RecoveryClass::HumanWait => {
+                            decisions.push(ResumeDecision::SkippedHumanWait { session_id });
+                            continue;
+                        }
+                        resume_rules::RecoveryClass::SafeBoundary => {
+                            decisions.push(ResumeDecision::SkippedSafeBoundary { session_id });
+                            continue;
+                        }
+                        resume_rules::RecoveryClass::Terminal
+                        | resume_rules::RecoveryClass::Unreadable
+                        | resume_rules::RecoveryClass::LegacyUnverified => {
+                            // Terminal/unreadable v1 rows are excluded by the
+                            // boot recovery filter (non-terminal statuses
+                            // only); a v1 row that classifies otherwise
+                            // cannot reach a chain re-drive. Fall through so
+                            // the legacy cascade below also declines it.
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    decisions.push(ResumeDecision::SkippedUnreadable {
+                        session_id,
+                        error: e.to_string(),
+                    });
+                    continue;
+                }
+            }
+        }
+
+        // 2. Legacy (v0 / no-store) typed-failure filter: never re-tick a
+        //    typed-failed join.
         if data.is_some_and(resume_rules::typed_failure_keys_present) {
             decisions.push(ResumeDecision::SkippedTypedFailed { session_id });
             continue;
         }
 
-        // 2. Converge/merge chain class filter (no-checkpoint default
+        // 3. Human wait (v0 / no-store): a non-chain wait is never stepped at
+        //    boot; the A4 wait token is preserved, not auto-advanced.
+        if matches!(summary.status, SessionStatus::WaitingForInput)
+            && !data.is_some_and(resume_rules::is_converge_merge_chain)
+        {
+            decisions.push(ResumeDecision::SkippedNotConvergeMergeClass { session_id });
+            continue;
+        }
+
+        // 4. Converge/merge chain class filter (no-checkpoint default
         //    equivalence): only sessions provably inside a converge/merge
         //    chain are re-driven.
         if !data.is_some_and(resume_rules::is_converge_merge_chain) {
@@ -370,14 +453,14 @@ pub async fn resume_driven_sessions(
             continue;
         }
 
-        // 3. Runner-existence filter: a session whose runner failed
+        // 5. Runner-existence filter: a session whose runner failed
         //    reconstruction stays tracked-but-not-driven.
         if !engine.has_runner(&session_id).await {
             decisions.push(ResumeDecision::SkippedNoRunner { session_id });
             continue;
         }
 
-        // 4. Re-drive from the persisted position.
+        // 6. Re-drive from the persisted position.
         let outcome = drive_preset_run(engine, Some(storage), &session_id, config, cancel).await;
         decisions.push(ResumeDecision::ReDriven {
             session_id,
@@ -396,6 +479,7 @@ mod tests {
     use nexus_orchestration::engine::{
         ChildSessionParams, Context, EngineError, SessionFilter, SessionKey, SessionSummary,
     };
+    use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 
     /// Scripted engine: `run_step` pops from a queue; `get_status` reads a
     /// settable status; `signal` records signals (Cancel flips status to
@@ -750,6 +834,7 @@ mod tests {
         let decisions = resume_driven_sessions(
             &engine,
             &storage,
+            None,
             &[summary("test:typed-failed")],
             &PresetRunConfig::default(),
             None,
@@ -779,6 +864,7 @@ mod tests {
         let decisions = resume_driven_sessions(
             &engine,
             &storage,
+            None,
             &[summary("test:linear")],
             &PresetRunConfig::default(),
             None,
@@ -813,6 +899,7 @@ mod tests {
         let decisions = resume_driven_sessions(
             &engine,
             &storage,
+            None,
             &[summary("test:no-runner")],
             &PresetRunConfig::default(),
             None,
@@ -839,6 +926,7 @@ mod tests {
         let decisions = resume_driven_sessions(
             &engine,
             &storage,
+            None,
             &[summary("test:missing")],
             &PresetRunConfig::default(),
             None,
@@ -882,6 +970,7 @@ mod tests {
         let decisions = resume_driven_sessions(
             &engine,
             &storage,
+            None,
             &[summary("test:parked-join")],
             &config,
             None,
@@ -930,6 +1019,7 @@ mod tests {
         let decisions = resume_driven_sessions(
             &engine,
             &storage,
+            None,
             &[summary("test:completed")],
             &config,
             None,
@@ -971,6 +1061,7 @@ mod tests {
         let decisions = resume_driven_sessions(
             &engine,
             &storage,
+            None,
             &[summary("test:post-join-wait")],
             &config,
             None,
@@ -1021,6 +1112,7 @@ mod tests {
             resume_driven_sessions(
                 &*engine_for_task,
                 &storage,
+                None,
                 &[summary("test:cancel")],
                 &config,
                 Some(&cancel_for_task),
@@ -1044,6 +1136,227 @@ mod tests {
         assert!(
             !engine.script.lock().is_empty(),
             "the drive must stop stepping after cancel, not exhaust the script"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // v1.186 P0 Task 2 — A7 canonical recovery gate (durable store path)
+    // ------------------------------------------------------------------
+
+    /// Seed a v1 durable row through the SQLite workflow store. `skip_state`
+    /// leaves the state blob NULL (corrupt/unsupported metadata).
+    async fn seed_v1_row(
+        pool: &sqlx::SqlitePool,
+        session_id: &str,
+        status: &str,
+        step_in_flight: Option<&str>,
+        cancel_requested: bool,
+        wait: bool,
+        chain_context: bool,
+    ) {
+        let context = if chain_context {
+            br#"{"data": {"_converge_arrivals_j1": ["a"], "_join_wait_start_j1": 1}, "chat_history": {"messages": [], "max_messages": 1000}}"#
+                .to_vec()
+        } else {
+            br#"{"data": {"_creator_id": "ctr"}, "chat_history": {"messages": [], "max_messages": 1000}}"#
+                .to_vec()
+        };
+        let run_state = serde_json::json!({
+            "wait": wait.then(|| serde_json::json!({
+                "wait_id": "wait-tok-1", "task_id": "task_7",
+                "child_session_id": null, "child_task_id": null, "kind": "manual"
+            })),
+            "step_in_flight": step_in_flight,
+            "in_flight": null,
+            "failure": null,
+            "cancel_requested": cancel_requested,
+        })
+        .to_string()
+        .into_bytes();
+        sqlx::query(
+            "INSERT INTO orchestration_sessions
+                (session_id, creator_id, preset_id, preset_version, status,
+                 current_task_id, context_json, created_at, updated_at,
+                 execution_version, state_revision, run_state_json, run_descriptor_json)
+             VALUES (?, 'ctr', 'e2e-converge', 3, ?, ?, ?, 1_756_990_000, 1_756_990_300,
+                     1, 5, ?, ?)",
+        )
+        .bind(session_id)
+        .bind(status)
+        .bind(if wait { Some("task_7") } else { None })
+        .bind(context)
+        .bind(run_state)
+        .bind(
+            // A v1 row must carry a valid frozen RunDescriptorV1 (A2).
+            br#"{"creator_id":"ctr","work_id":null,"workspace_root":"/tmp/ws",
+                 "preset_id":"e2e-converge","preset_version":3,
+                 "source":{"Embedded":{"preset_id":"e2e-converge","content_hash":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}},
+                 "input":{},"agent_bindings":{},"parent_session_id":null,"graph_name":null}"#
+                .as_slice(),
+        )
+        .execute(pool)
+        .await
+        .expect("seed v1 row");
+    }
+
+    async fn a7_storage(
+        db_path: &std::path::Path,
+    ) -> (Arc<dyn SessionStorage>, Arc<SqliteSessionStorage>) {
+        let pool = nexus_local_db::open_pool(db_path)
+            .await
+            .expect("open pool");
+        // The create_test_workspace fixture already ran migrations; opening
+        // the pool again is idempotent. The same adapter implements both
+        // SessionStorage and WorkflowStateStore (A2).
+        let sqlite: Arc<SqliteSessionStorage> =
+            Arc::new(SqliteSessionStorage::new(Arc::new(pool)));
+        let dyn_storage: Arc<dyn SessionStorage> = sqlite.clone();
+        (dyn_storage, sqlite)
+    }
+
+    #[tokio::test]
+    async fn resume_a7_never_redrives_v1_interrupted_even_with_old_join_keys() {
+        let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let _ = &tmp;
+        {
+            let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
+            seed_v1_row(&pool, "v1:crashed", "running", Some("task_3"), false, false, true)
+                .await;
+            pool.close().await;
+        }
+        let (storage, sqlite) = a7_storage(&db_path).await;
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let engine =
+            ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
+        // The summary status the boot recovery filter produced.
+        let sum = SessionSummary {
+            session_id: SessionId("v1:crashed".to_string()),
+            creator_id: "ctr".to_string(),
+            preset_id: "e2e-converge".to_string(),
+            status: SessionStatus::Running,
+            current_task_id: Some("task_3".to_string()),
+        };
+        let decisions = resume_driven_sessions(
+            &engine,
+            &storage,
+            Some(&store),
+            &[sum],
+            &PresetRunConfig::default(),
+            None,
+        )
+        .await;
+        assert_eq!(
+            decisions,
+            vec![ResumeDecision::SkippedInterrupted {
+                session_id: SessionId("v1:crashed".to_string())
+            }],
+            "v1 interrupted in-flight work wins over old join keys and never auto-retries"
+        );
+        assert!(
+            engine.script.lock().len() == 1,
+            "no run_step may be consumed for v1 interrupted work"
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_a7_human_wait_is_not_stepped_at_boot_and_token_survives() {
+        let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let _ = &tmp;
+        {
+            let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
+            seed_v1_row(&pool, "v1:wait", "waiting_for_input", None, false, true, false).await;
+            pool.close().await;
+        }
+        let (storage, sqlite) = a7_storage(&db_path).await;
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let engine =
+            ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
+        let sum = SessionSummary {
+            session_id: SessionId("v1:wait".to_string()),
+            creator_id: "ctr".to_string(),
+            preset_id: "e2e-converge".to_string(),
+            status: SessionStatus::WaitingForInput,
+            current_task_id: Some("task_7".to_string()),
+        };
+        let decisions = resume_driven_sessions(
+            &engine,
+            &storage,
+            Some(&store),
+            &[sum],
+            &PresetRunConfig::default(),
+            None,
+        )
+        .await;
+        assert_eq!(
+            decisions,
+            vec![ResumeDecision::SkippedHumanWait {
+                session_id: SessionId("v1:wait".to_string())
+            }],
+            "a v1 human wait is never stepped or approved at boot"
+        );
+        // The A4 wait token is preserved in the durable state.
+        let record = sqlite
+            .load_run(&SessionId("v1:wait".to_string()))
+            .await
+            .expect("load_run")
+            .expect("row exists");
+        assert_eq!(
+            record.state.and_then(|s| s.wait).map(|w| w.wait_id),
+            Some("wait-tok-1".to_string()),
+            "the durable wait token must survive boot untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_a7_v1_corrupt_state_is_unreadable_non_replayable() {
+        let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let _ = &tmp;
+        {
+            let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
+            // v1 row with a corrupt state blob — non-replayable, never
+            // silently reinterpreted (A7 rule 2).
+            sqlx::query(
+                "INSERT INTO orchestration_sessions
+                    (session_id, creator_id, preset_id, preset_version, status,
+                     current_task_id, context_json, created_at, updated_at,
+                     execution_version, state_revision, run_state_json, run_descriptor_json)
+                 VALUES ('v1:corrupt', 'ctr', 'e2e-converge', 3, 'running', 'task_1',
+                         '{}', 1_756_990_000, 1_756_990_300, 1, 5, 'not-json', '{}')",
+            )
+            .execute(&pool)
+            .await
+            .expect("seed corrupt v1 row");
+            pool.close().await;
+        }
+        let (storage, sqlite) = a7_storage(&db_path).await;
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let engine =
+            ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
+        let sum = SessionSummary {
+            session_id: SessionId("v1:corrupt".to_string()),
+            creator_id: "ctr".to_string(),
+            preset_id: "e2e-converge".to_string(),
+            status: SessionStatus::Running,
+            current_task_id: Some("task_1".to_string()),
+        };
+        let decisions = resume_driven_sessions(
+            &engine,
+            &storage,
+            Some(&store),
+            &[sum],
+            &PresetRunConfig::default(),
+            None,
+        )
+        .await;
+        assert!(
+            matches!(&decisions[0], ResumeDecision::SkippedUnreadable { session_id, .. }
+                if session_id.0 == "v1:corrupt"),
+            "corrupt v1 metadata must be surfaced as unreadable/non-replayable: {:?}",
+            decisions
+        );
+        assert!(
+            engine.script.lock().len() == 1,
+            "no run_step may be consumed for a corrupt v1 row"
         );
     }
 }

@@ -13,14 +13,18 @@
 //! Contract: `.mstar/sdd/2026-09-03-v1.182-p1-bl04-checkpoint-resume-ux/inspect-contract.md`.
 //!
 //! Honesty discipline:
-//! - `db_status` is the raw DB column and is never presented as
-//!   authoritative run state (every save writes `'running'`; ON CONFLICT
-//!   never updates it).
+//! - `db_status` is the raw DB column. For **v1 rows** (`execution_version >= 1`)
+//!   it is the authoritative status (A2 — written by `commit_transition`); for
+//!   **v0 legacy rows** it stays diagnostic only (every legacy save writes
+//!   `'running'`; ON CONFLICT never updated it). The v0/v1 split is surfaced via
+//!   `execution_version` plus the canonical A7 `recovery_class`.
 //! - Corrupt `context_json` → `verdict: "unknown"` / `context_unreadable`;
 //!   no verdict is fabricated from unreadable data. `context_readable` is a
 //!   two-class flag: `false` ONLY for corrupt bytes; valid-JSON-unexpected-
 //!   shape is byte-readable → `true`, with the shape anomaly carried in the
-//!   classification/explanation.
+//!   classification/explanation. A v1 row whose durable `run_state_json`
+//!   blob is missing/unparseable is `recovery_class: unreadable`
+//!   (corrupt/unsupported, non-replayable under A7).
 //! - The checkpoint stores POSITION ONLY — there is no completed-stages
 //!   ledger, so the output never claims one.
 //! - Slice boundary: read-only inspect; the CLI never implies resume can be
@@ -29,7 +33,7 @@
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
-use nexus_orchestration::resume_rules::{self, ResumeClass};
+use nexus_orchestration::resume_rules::{self, RecoveryClass, ResumeClass};
 use nexus_orchestration::storage::{CheckpointRow, CheckpointSummary, SqliteSessionStorage};
 use serde::Serialize;
 use serde_json::Value;
@@ -57,8 +61,18 @@ struct InspectDto {
     creator_id: String,
     preset_id: String,
     preset_version: i64,
-    /// Raw DB status column — NOT authoritative.
+    /// Raw DB status column — authoritative for v1 rows, diagnostic for v0.
     db_status: String,
+    /// Execution version: `0` = legacy/unverified, `>=1` = v1 authoritative (A2).
+    execution_version: i64,
+    /// State revision (CAS anchor; `0` on v0 rows).
+    state_revision: i64,
+    /// Canonical A7 recovery class (v1.186 P0, Task 2) — shared with daemon
+    /// boot/resume; `null` when the row's durable state cannot be read.
+    recovery_class: Option<RecoveryClass>,
+    /// Durable human-wait token (A4) for v1 `waiting_for_input` rows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    wait_id: Option<String>,
     current_task_id: Option<String>,
     created_at: i64,
     updated_at: i64,
@@ -111,7 +125,9 @@ impl std::fmt::Display for Verdict {
 }
 
 /// Stable verdict rule (contract `rule` field) — the shared
-/// [`ResumeClass`] projected into the DTO.
+/// [`ResumeClass`] projected into the DTO ([`From<ResumeClass>`]); v1.186
+/// adds the A7 recovery-class rules used when the row's durable v1 state is
+/// authoritative.
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum ResumeRule {
@@ -120,6 +136,12 @@ enum ResumeRule {
     TypedFailure,
     NotConvergeMergeClass,
     ChainClassNoFailure,
+    /// A7: interrupted/uncertain in-flight work; never auto-retried.
+    Interrupted,
+    /// A7: human wait; token preserved, never stepped at boot.
+    HumanWait,
+    /// A7: fully committed step boundary; may reconstruct, not auto-driven.
+    SafeBoundary,
 }
 
 impl From<ResumeClass> for ResumeRule {
@@ -250,6 +272,40 @@ async fn inspect_inner(session_id: Option<String>, config: &CliConfig) -> Result
     Ok(InspectOutcome::List { rows: dtos, total })
 }
 
+/// Parse the durable v1 run state blob from a checkpoint row.
+///
+/// `None` for v0 rows (no blob, legacy/unverified) and for corrupt/absent
+/// blobs on v1 rows (non-replayable under A7 — surfaced as
+/// `recovery_class: null` with the `Unreadable` cascade below, never
+/// fabricated).
+fn parse_run_state(bytes: Option<&[u8]>) -> Option<nexus_orchestration::run_state::RunStateV1> {
+    let bytes = bytes?;
+    serde_json::from_slice(bytes).ok()
+}
+
+/// Compute the canonical A7 recovery class for a v1 row (authoritative
+/// status + durable state). `legacy` v0 rows stay `LegacyUnverified`.
+fn recovery_class_for(
+    execution_version: i64,
+    status: &str,
+    state: Option<&nexus_orchestration::run_state::RunStateV1>,
+    chain_class: bool,
+) -> Option<RecoveryClass> {
+    if execution_version < 1 {
+        return Some(RecoveryClass::LegacyUnverified);
+    }
+    let status = nexus_orchestration::engine::SessionStatus::from_db_str(status)?;
+    let Some(class) = (|| {
+        let state = state?;
+        Some(resume_rules::classify_recovery(&status, Some(state), chain_class))
+    })() else {
+        // v1 row with missing/corrupt state blob — corrupt/unsupported,
+        // non-replayable (A7 rule 2).
+        return Some(RecoveryClass::Unreadable);
+    };
+    Some(class)
+}
+
 /// Project a raw checkpoint row into the inspect DTO (contract §3–§4).
 fn project(row: &CheckpointRow) -> InspectDto {
     let context: std::result::Result<Value, _> = serde_json::from_slice(&row.context_json);
@@ -288,12 +344,38 @@ fn project(row: &CheckpointRow) -> InspectDto {
         ),
     };
 
+    // Canonical A7 recovery class (v1.186 P0, Task 2): the durable v1
+    // status/state are the authority for v1 rows; v0 rows are legacy.
+    let run_state = parse_run_state(row.run_state_json.as_deref());
+    let recovery_class = recovery_class_for(
+        row.execution_version,
+        &row.status,
+        run_state.as_ref(),
+        !live_join_keys.is_empty(),
+    );
+    let wait_id = run_state
+        .as_ref()
+        .and_then(|s| s.wait.as_ref().map(|w| w.wait_id.clone()));
+
+    // For v1 rows the resumable verdict is projected from the canonical A7
+    // class (authoritative status/state) — the legacy context-key cascade
+    // stays the v0 projection only, so durable interrupted evidence is never
+    // hidden. `LegacyUnverified` routes through the legacy `resumable` above.
+    let resumable = match recovery_class {
+        Some(RecoveryClass::LegacyUnverified) | None => resumable,
+        Some(class) => verdict_for_recovery(class, &row.status, None),
+    };
+
     InspectDto {
         session_id: row.session_id.clone(),
         creator_id: row.creator_id.clone(),
         preset_id: row.preset_id.clone(),
         preset_version: row.preset_version,
         db_status: row.status.clone(),
+        execution_version: row.execution_version,
+        state_revision: row.state_revision,
+        recovery_class,
+        wait_id,
         current_task_id: row.current_task_id.clone(),
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -307,7 +389,9 @@ fn project(row: &CheckpointRow) -> InspectDto {
 /// Project a lean list row into the inspect DTO. The storage layer already
 /// evaluated the resume-rule predicates in SQL (no `context_json` loaded),
 /// so the verdict comes from the shared extraction cascade — identical
-/// rule order and wording to detail mode.
+/// rule order and wording to detail mode. The v1 durable columns are
+/// projected in SQL too, so the canonical A7 recovery class is computed
+/// daemon-free without loading the state blob into the CLI.
 fn project_summary(row: &CheckpointSummary) -> InspectDto {
     let run_failure = (row.run_status.is_some() || row.run_error.is_some()).then(|| RunFailure {
         run_status: row.run_status.clone(),
@@ -334,28 +418,119 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
     let context_readable =
         unreadable_kind.map(|kind| matches!(kind, UnreadableKind::UnexpectedShape));
 
+    // Canonical A7 recovery class from the SQL-projected durable state
+    // inputs (v1.186 P0, Task 2). A v1 row whose state blob is missing or
+    // unparseable (`run_state_valid_json: None/false`) is corrupt/
+    // unsupported and non-replayable.
+    let recovery_class = if row.execution_version < 1 {
+        Some(RecoveryClass::LegacyUnverified)
+    } else if row.run_state_valid_json != Some(true) {
+        Some(RecoveryClass::Unreadable)
+    } else {
+        let chain_class = has_live_join_keys;
+        let interrupted = row.in_flight_or_cancel_requested
+            || row.step_in_flight.is_some();
+        let class = if matches!(row.status.as_str(), "completed" | "failed" | "cancelled") {
+            RecoveryClass::Terminal
+        } else if matches!(row.status.as_str(), "interrupted") || interrupted {
+            RecoveryClass::Interrupted
+        } else if matches!(row.status.as_str(), "waiting_for_input") {
+            if chain_class {
+                RecoveryClass::ConvergeMerge
+            } else {
+                RecoveryClass::HumanWait
+            }
+        } else if chain_class {
+            RecoveryClass::ConvergeMerge
+        } else {
+            RecoveryClass::SafeBoundary
+        };
+        Some(class)
+    };
+
+    let legacy_resumable = verdict_for(
+        row.status.as_str(),
+        resume_rules::classify_resumability_extracted(
+            row.status.as_str(),
+            context_unreadable,
+            row.run_status.is_some() || row.run_error.is_some(),
+            has_live_join_keys,
+        ),
+        unreadable_kind,
+    );
+    // For v1 rows the verdict is projected from the canonical A7 class
+    // (authoritative status/state) — the legacy context-key cascade stays
+    // the v0 projection only, so durable interrupted evidence is never
+    // hidden. `LegacyUnverified`/missing class routes through the legacy
+    // cascade above.
+    let resumable = match recovery_class {
+        Some(RecoveryClass::LegacyUnverified) | None => legacy_resumable,
+        Some(class) => verdict_for_recovery(class, &row.status, unreadable_kind),
+    };
+
     InspectDto {
         session_id: row.session_id.clone(),
         creator_id: row.creator_id.clone(),
         preset_id: row.preset_id.clone(),
         preset_version: row.preset_version,
         db_status: row.status.clone(),
+        execution_version: row.execution_version,
+        state_revision: row.state_revision,
+        recovery_class,
+        wait_id: row.wait_id.clone(),
         current_task_id: row.current_task_id.clone(),
         created_at: row.created_at,
         updated_at: row.updated_at,
         run_failure,
         live_join_keys,
-        resumable: verdict_for(
-            row.status.as_str(),
-            resume_rules::classify_resumability_extracted(
-                row.status.as_str(),
-                context_unreadable,
-                row.run_status.is_some() || row.run_error.is_some(),
-                has_live_join_keys,
-            ),
-            unreadable_kind,
-        ),
+        resumable,
         context_readable,
+    }
+}
+
+/// Build the resumable verdict for a canonical A7 recovery class (v1.186
+/// P0, Task 2). v1 rows carry authoritative status/state, so the verdict
+/// comes from [`RecoveryClass`], never from the legacy context-key cascade.
+/// For `LegacyUnverified` (v0) the caller falls back to `verdict_for`.
+fn verdict_for_recovery(
+    class: RecoveryClass,
+    row_status: &str,
+    unreadable_kind: Option<UnreadableKind>,
+) -> ResumableVerdict {
+    match class {
+        RecoveryClass::Terminal => verdict_for(row_status, ResumeClass::TerminalStatus, None),
+        RecoveryClass::Unreadable => verdict_for(row_status, ResumeClass::ContextUnreadable, unreadable_kind),
+        RecoveryClass::ConvergeMerge => verdict_for(
+            row_status,
+            ResumeClass::ChainClassNoFailure,
+            None,
+        ),
+        RecoveryClass::Interrupted => ResumableVerdict {
+            verdict: Verdict::No,
+            rule: ResumeRule::Interrupted,
+            runner_check: RunnerCheck::NotApplicable,
+            explanation: "interrupted/uncertain in-flight work — stopped and never auto-retried; \
+                          an operator may cancel after ownership-safe cleanup"
+                .to_string(),
+        },
+        RecoveryClass::HumanWait => ResumableVerdict {
+            verdict: Verdict::No,
+            rule: ResumeRule::HumanWait,
+            runner_check: RunnerCheck::NotApplicable,
+            explanation: "human wait (A4) — wait token preserved; never stepped or approved at boot"
+                .to_string(),
+        },
+        RecoveryClass::SafeBoundary => ResumableVerdict {
+            verdict: Verdict::No,
+            rule: ResumeRule::SafeBoundary,
+            runner_check: RunnerCheck::NotApplicable,
+            explanation: "fully committed step boundary with no in-flight work — reconstructable, \
+                          but boot does not auto-drive outside the converge/merge chain class"
+                .to_string(),
+        },
+        RecoveryClass::LegacyUnverified => {
+            unreachable!("LegacyUnverified routes through the legacy cascade, not verdict_for_recovery")
+        }
     }
 }
 
@@ -437,6 +612,18 @@ fn render_detail(dto: &InspectDto) -> String {
     let _ = writeln!(out, "preset:         {}", dto.preset_id);
     let _ = writeln!(out, "preset_version: {}", dto.preset_version);
     let _ = writeln!(out, "status:         {}", dto.db_status);
+    if let Some(class) = dto.recovery_class {
+        let class_str: &str = match class {
+            RecoveryClass::Terminal => "terminal",
+            RecoveryClass::Unreadable => "unreadable",
+            RecoveryClass::Interrupted => "interrupted",
+            RecoveryClass::HumanWait => "human_wait",
+            RecoveryClass::ConvergeMerge => "converge_merge",
+            RecoveryClass::SafeBoundary => "safe_boundary",
+            RecoveryClass::LegacyUnverified => "legacy_unverified",
+        };
+        let _ = writeln!(out, "recovery_class: {class_str}");
+    }
     let position = dto.current_task_id.as_deref().unwrap_or("(none recorded)");
     let _ = writeln!(out, "position:       {position}");
     let _ = writeln!(out, "created_at:     {}", render_ts(dto.created_at));
@@ -476,6 +663,9 @@ fn render_detail(dto: &InspectDto) -> String {
         ResumeRule::TypedFailure => "no — typed failure record present (boot never re-drives; see caveat)".to_string(),
         ResumeRule::NotConvergeMergeClass => "no — no live converge/merge join state (boot skips: not in chain class)".to_string(),
         ResumeRule::TerminalStatus => "no — terminal status (boot never re-drives; see caveat)".to_string(),
+        ResumeRule::Interrupted => "no — interrupted/uncertain in-flight work (never auto-retried; cancel after ownership-safe cleanup)".to_string(),
+        ResumeRule::HumanWait => "no — human wait (A4) token preserved; never stepped or approved at boot".to_string(),
+        ResumeRule::SafeBoundary => "no — fully committed boundary with no in-flight work; boot does not auto-drive outside the chain class".to_string(),
         // Contract §5 wording split (qc3 S1): corrupt bytes vs parseable-but-
         // unexpected shape — the DTO explanation already distinguishes the two
         // honest wordings, so the human line mirrors the JSON explanation
@@ -526,6 +716,9 @@ mod tests {
             current_task_id: Some("task_9".to_string()),
             status: "running".to_string(),
             context_json: context.to_vec(),
+            execution_version: 0,
+            state_revision: 0,
+            run_state_json: None,
             created_at: 1_756_990_000,
             updated_at: 1_756_990_300,
         }
@@ -702,6 +895,12 @@ mod tests {
             preset_version: 3,
             current_task_id: Some("task_9".to_string()),
             status: "running".to_string(),
+            execution_version: 0,
+            state_revision: 0,
+            run_state_valid_json: None,
+            wait_id: None,
+            step_in_flight: None,
+            in_flight_or_cancel_requested: false,
             created_at: 1_756_990_000,
             updated_at: 1_756_990_300,
             context_valid_json: true,
@@ -736,6 +935,12 @@ mod tests {
             preset_version: 3,
             current_task_id: Some("task_9".to_string()),
             status: "running".to_string(),
+            execution_version: 0,
+            state_revision: 0,
+            run_state_valid_json: None,
+            wait_id: None,
+            step_in_flight: None,
+            in_flight_or_cancel_requested: false,
             created_at: 1_756_990_000,
             updated_at: 1_756_990_300,
             context_valid_json: false,

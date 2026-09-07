@@ -28,7 +28,96 @@
 //! NOT derivable from persisted data and is never part of a verdict here —
 //! consumers carry it as the separate `runner_check` caveat.
 
+use crate::engine::SessionStatus;
+use crate::run_state::RunStateV1;
 use serde_json::{Map, Value};
+
+/// Canonical A7 recovery classification (v1.186 P0, Task 2).
+///
+/// Single precedence shared by daemon boot/resume ([`resume_driven_sessions`])
+/// and daemon-free `nexus42 ops inspect` (`.mstar/iterations/v1.186/guides/architecture-decisions.md`
+/// A7). The v1 durable status is authoritative; v0 rows are legacy/unverified.
+///
+/// Precedence (first rule that fires):
+/// 1. Authoritative v1 terminal status (`completed`/`failed`/`cancelled`) — never re-driven.
+/// 2. Unreadable row — a v1 row without a parseable state blob is corrupt/unsupported
+///    and non-replayable; `load_run`/row projection surface it before this cascade too.
+/// 3. Interrupted evidence **wins over old join keys** and never auto-retries: v1 status
+///    `interrupted`, unresolved `cancel_requested`, a dispatching/active `in_flight`
+///    prompt, or an unfinished `step_in_flight` mark are all `Interrupted` even when live
+///    converge/merge join keys exist.
+/// 4. Human wait (`waiting_for_input` outside a converge/merge chain) stays distinct and
+///    preserves its A4 wait token; never stepped at boot.
+/// 5. Shipped converge/merge parked checkpoints: non-terminal, no interrupted evidence,
+///    live join keys → bounded join resume.
+/// 6. Safe boundary: v1 running/paused with no in-flight markers/wait/chain keys — may
+///    reconstruct; boot does not auto-drive outside the chain class today.
+/// 7. v0 rows stay `LegacyUnverified` (status diagnostic only) — the conservative legacy
+///    classifier below continues to project their resumability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveryClass {
+    /// Authoritative completed/failed/cancelled (v1).
+    Terminal,
+    /// Corrupt/unsupported metadata; non-replayable, never silently reinterpreted.
+    Unreadable,
+    /// In-flight/uncertain work; stopped, never auto-retried.
+    Interrupted,
+    /// `waiting_for_input` outside a chain — token preserved, not stepped at boot.
+    HumanWait,
+    /// Parked converge/merge chain with live join keys — bounded join resume only.
+    ConvergeMerge,
+    /// v1 running/paused at a fully committed step boundary — may reconstruct.
+    SafeBoundary,
+    /// v0 legacy row: status diagnostic only.
+    LegacyUnverified,
+}
+
+/// Classify a v1 run record (authoritative status + durable state) against the
+/// A7 precedence. `chain_class` is the persisted converge/merge evidence
+/// ([`is_converge_merge_chain`]) — the only input not carried by `RunStateV1`.
+///
+/// `state: None` means the v1 row's state blob is missing/unparseable
+/// (corrupt/unsupported) — non-replayable `Unreadable`, never fabricated.
+#[must_use]
+pub fn classify_recovery(
+    status: &SessionStatus,
+    state: Option<&RunStateV1>,
+    chain_class: bool,
+) -> RecoveryClass {
+    // 1. Authoritative v1 status wins (A2: status is the SSOT for v1 rows).
+    match status {
+        SessionStatus::Completed | SessionStatus::Failed | SessionStatus::Cancelled => {
+            return RecoveryClass::Terminal;
+        }
+        SessionStatus::Interrupted => return RecoveryClass::Interrupted,
+        SessionStatus::Running | SessionStatus::Paused | SessionStatus::WaitingForInput => {}
+    }
+    // 2. A v1 row without a parseable state blob is corrupt/unsupported.
+    let Some(state) = state else {
+        return RecoveryClass::Unreadable;
+    };
+    // 3. In-flight/cancel evidence wins over old join keys; never retried.
+    if state.cancel_requested || state.in_flight.is_some() || state.step_in_flight.is_some() {
+        return RecoveryClass::Interrupted;
+    }
+    // 4/5. Waiting: a live join key names a parked converge/merge chain (bounded
+    // join resume); otherwise it is a human wait — token preserved, never stepped
+    // at boot. Conservative: a wait without chain evidence is never advanced.
+    if matches!(status, SessionStatus::WaitingForInput) {
+        return if chain_class {
+            RecoveryClass::ConvergeMerge
+        } else {
+            RecoveryClass::HumanWait
+        };
+    }
+    // 6. Running/paused at a committed boundary.
+    if chain_class {
+        RecoveryClass::ConvergeMerge
+    } else {
+        RecoveryClass::SafeBoundary
+    }
+}
 
 /// Non-terminal status set — the recovery filter at
 /// `storage/sqlite.rs::list_non_terminal_sessions` (rule 1).
@@ -309,5 +398,100 @@ mod tests {
         assert!(context_data(&json!({"data": "not-an-object"})).is_none());
         assert!(context_data(&json!({"data": []})).is_none());
         assert!(context_data(&json!({})).is_none());
+    }
+
+    // ------------------------------------------------------------------
+    // v1.186 P0 Task 2 — canonical A7 recovery classification
+    // ------------------------------------------------------------------
+
+    fn state(step_in_flight: Option<&str>, cancel_requested: bool, wait: bool) -> RunStateV1 {
+        RunStateV1 {
+            wait: wait.then(|| crate::run_state::WaitRecord {
+                wait_id: "w1".to_string(),
+                task_id: "t1".to_string(),
+                child_session_id: None,
+                child_task_id: None,
+                kind: crate::run_state::WaitKind::Manual,
+            }),
+            step_in_flight: step_in_flight.map(str::to_string),
+            in_flight: None,
+            failure: None,
+            cancel_requested,
+        }
+    }
+
+    #[test]
+    fn a7_terminal_status_wins_over_all_evidence() {
+        use crate::engine::SessionStatus::*;
+        for status in [Completed, Failed, Cancelled] {
+            // Even with interrupted evidence + chain keys, terminal wins.
+            let s = state(Some("t"), true, false);
+            assert_eq!(
+                classify_recovery(&status, Some(&s), true),
+                RecoveryClass::Terminal
+            );
+        }
+    }
+
+    #[test]
+    fn a7_missing_state_blob_is_unreadable_non_replayable() {
+        use crate::engine::SessionStatus::Running;
+        assert_eq!(
+            classify_recovery(&Running, None, true),
+            RecoveryClass::Unreadable
+        );
+    }
+
+    #[test]
+    fn a7_interrupted_wins_over_old_join_keys_and_never_retries() {
+        use crate::engine::SessionStatus::*;
+        // In-flight mark + live chain keys → Interrupted, not ConvergeMerge.
+        assert_eq!(
+            classify_recovery(&Running, Some(&state(Some("t3"), false, false)), true),
+            RecoveryClass::Interrupted
+        );
+        // Unresolved cancel + chain keys → Interrupted.
+        assert_eq!(
+            classify_recovery(&Running, Some(&state(None, true, false)), true),
+            RecoveryClass::Interrupted
+        );
+        // Explicit interrupted status → Interrupted even with chain keys.
+        assert_eq!(
+            classify_recovery(&Interrupted, Some(&state(None, false, false)), true),
+            RecoveryClass::Interrupted
+        );
+    }
+
+    #[test]
+    fn a7_human_wait_stays_distinct_and_is_never_stepped_at_boot() {
+        use crate::engine::SessionStatus::WaitingForInput;
+        // No live join keys → HumanWait (A4 token preserved, not advanced).
+        assert_eq!(
+            classify_recovery(&WaitingForInput, Some(&state(None, false, true)), false),
+            RecoveryClass::HumanWait
+        );
+        // Live chain keys at a wait → parked converge/merge join resume.
+        assert_eq!(
+            classify_recovery(&WaitingForInput, Some(&state(None, false, true)), true),
+            RecoveryClass::ConvergeMerge
+        );
+    }
+
+    #[test]
+    fn a7_safe_boundary_and_converge_merge_running() {
+        use crate::engine::SessionStatus::{Paused, Running};
+        assert_eq!(
+            classify_recovery(&Running, Some(&RunStateV1::default()), false),
+            RecoveryClass::SafeBoundary
+        );
+        assert_eq!(
+            classify_recovery(&Paused, Some(&RunStateV1::default()), false),
+            RecoveryClass::SafeBoundary
+        );
+        // Running with live chain keys → converge/merge (existing re-drive).
+        assert_eq!(
+            classify_recovery(&Running, Some(&RunStateV1::default()), true),
+            RecoveryClass::ConvergeMerge
+        );
     }
 }

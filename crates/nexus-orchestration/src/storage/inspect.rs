@@ -21,11 +21,14 @@
 
 /// Detail-mode row: the full checkpoint projection of
 /// `orchestration_sessions` (identity columns + persisted position +
-/// timestamps + the raw context blob).
+/// timestamps + the raw context blob + the durable v1 execution metadata).
 ///
 /// `context_json` is deliberately raw: detail mode parses it itself so it
 /// can distinguish corrupt bytes from unexpected shapes and report
-/// `_run_status`/`_run_error` verbatim.
+/// `_run_status`/`_run_error` verbatim. `execution_version` /
+/// `state_revision` / `run_state_json` are the A2 durable columns; v1 rows
+/// (`execution_version >= 1`) carry the authoritative status/state, v0 rows
+/// (`execution_version = 0`) stay legacy/unverified.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct CheckpointRow {
     /// Run id (PRIMARY KEY).
@@ -38,10 +41,16 @@ pub struct CheckpointRow {
     pub preset_version: i64,
     /// Persisted position (`None` = no position recorded yet).
     pub current_task_id: Option<String>,
-    /// Raw DB status column — NOT authoritative.
+    /// Raw DB status column — authoritative for v1 rows, diagnostic for v0.
     pub status: String,
     /// Raw serialized session context blob.
     pub context_json: Vec<u8>,
+    /// Execution version: `0` = legacy/unverified, `>=1` = v1 authoritative (A2).
+    pub execution_version: i64,
+    /// State revision (CAS anchor; `0` on v0 rows).
+    pub state_revision: i64,
+    /// Serialized [`crate::run_state::RunStateV1`] for v1 rows (`None` = corrupt/absent).
+    pub run_state_json: Option<Vec<u8>>,
     /// First-save timestamp (unix epoch seconds).
     pub created_at: i64,
     /// Last-save timestamp (unix epoch seconds).
@@ -76,8 +85,22 @@ pub struct CheckpointSummary {
     pub preset_version: i64,
     /// Persisted position (`None` = no position recorded yet).
     pub current_task_id: Option<String>,
-    /// Raw DB status column — NOT authoritative.
+    /// Raw DB status column — authoritative for v1 rows, diagnostic for v0.
     pub status: String,
+    /// Execution version: `0` = legacy/unverified, `>=1` = v1 authoritative (A2).
+    pub execution_version: i64,
+    /// State revision (CAS anchor; `0` on v0 rows).
+    pub state_revision: i64,
+    /// `run_state_json` parses as JSON (v1 rows only; `None` when corrupt).
+    pub run_state_valid_json: Option<bool>,
+    /// `wait.wait_id` when the persisted v1 state carries a human wait (A4).
+    pub wait_id: Option<String>,
+    /// `step_in_flight` task id when the persisted v1 state carries an
+    /// unfinished step mark (A2/A7 interrupted evidence).
+    pub step_in_flight: Option<String>,
+    /// `true` when the persisted v1 state carries an in_flight prompt attempt
+    /// or an unresolved cancel request (A2/A7 interrupted evidence).
+    pub in_flight_or_cancel_requested: bool,
     /// First-save timestamp (unix epoch seconds).
     pub created_at: i64,
     /// Last-save timestamp (unix epoch seconds).
