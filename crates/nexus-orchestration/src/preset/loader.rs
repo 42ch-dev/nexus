@@ -1853,6 +1853,13 @@ states:
         ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
             unimplemented!()
         }
+        async fn attach_existing_child_session(
+            &self,
+            _: &str,
+            _: std::sync::Arc<graph_flow::Graph>,
+        ) -> Option<crate::engine::SessionId> {
+            unimplemented!("wiring test must not execute engine steps")
+        }
         async fn start_session_with_preset(
             &self,
             _: &LoadedPreset,

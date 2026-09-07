@@ -380,15 +380,23 @@ fn child_descriptor(
 /// Determine the outcome of a failed child CAS (0 rows affected).
 ///
 /// Returns `None` when the child is already terminal at the expected
-/// revision — the parent's checkpoint confirms the child's final state and
-/// no overwrite is needed (Important 1: a legitimately-completed child must
-/// not fail the parent's transition). Returns `Some(EngineError)` when the
-/// child CAS genuinely failed: a stale revision (child moved on) or a
-/// terminal child at a stale revision.
+/// revision **and** the DB terminal status matches the parent's submitted
+/// checkpoint status — the parent's checkpoint confirms the child's final
+/// state and no overwrite is needed (Important 1: a legitimately-completed
+/// child must not fail the parent's transition). When the DB terminal
+/// status differs from the submitted child status (e.g. the parent thinks
+/// the child is Running/completed but the DB is Failed/Cancelled at that
+/// revision), the confirmation is rejected and a [`EngineError::GraphFlow`]
+/// mismatch is returned — a stale Running checkpoint must never let a parent
+/// commit Completed over a child that is Failed/Cancelled at that revision
+/// (Important 6). Returns `Some(EngineError)` when the child CAS genuinely
+/// failed: a stale revision (child moved on) or a terminal child at a stale
+/// revision.
 async fn child_cas_outcome(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     child_id: &str,
     expected_revision: u64,
+    submitted_status: SessionStatus,
 ) -> Option<EngineError> {
     let row: Option<(i64, String)> = sqlx::query_as(
         "SELECT state_revision, status FROM orchestration_sessions WHERE session_id = ?",
@@ -406,9 +414,24 @@ async fn child_cas_outcome(
                 "completed" | "failed" | "cancelled" | "interrupted"
             );
             if terminal && found_rev == expected_revision as i64 {
-                // Child already terminal at the expected revision — the
-                // parent's checkpoint confirms it; no overwrite needed.
-                None
+                // Child already terminal at the expected revision. The
+                // parent's checkpoint confirms it **only** when the DB
+                // terminal status matches the submitted child status. A
+                // stale Running/completed checkpoint submitted against a
+                // Failed/Cancelled child must not confirm the parent's
+                // transition (Important 6).
+                if status == submitted_status.as_db_str() {
+                    None
+                } else {
+                    Some(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+                        format!(
+                            "child '{child_id}' is terminal '{status}' at revision {expected_revision} \
+                             but the parent submitted '{}' (ChildCheckpoint status/state \
+                             mismatch, non-replayable confirmation)",
+                            submitted_status.as_db_str()
+                        ),
+                    )))
+                }
             } else if terminal {
                 Some(EngineError::TerminalState(child_id.to_string()))
             } else if found_rev != expected_revision as i64 {
@@ -480,6 +503,20 @@ impl WorkflowStateStore for SqliteSessionStorage {
         };
 
         let execution_version = u32::try_from(row.execution_version).unwrap_or(0);
+
+        // A negative/out-of-range integer revision on a v0 OR v1 row is
+        // corrupt and non-replayable (A2/A7): it must be surfaced as an
+        // error, never silently coerced to zero. The original row bytes are
+        // preserved verbatim (the caller does not rewrite them).
+        if row.state_revision < 0 {
+            let rev = row.state_revision;
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "load_run '{}': negative state_revision {rev} (non-replayable)",
+                    session_id.0
+                )),
+            ));
+        }
         let state_revision = u64::try_from(row.state_revision).unwrap_or(0);
 
         // v0 rows are legacy/unverified: no descriptor/state, status is
@@ -530,14 +567,6 @@ impl WorkflowStateStore for SqliteSessionStorage {
                     session_id.0, row.status
                 )))
             })?;
-            if row.state_revision < 0 {
-                return Err(EngineError::GraphFlow(
-                    graph_flow::GraphError::StorageError(format!(
-                        "load_run '{}': negative v0 state_revision {} (non-replayable)",
-                        session_id.0, row.state_revision
-                    )),
-                ));
-            }
             Ok(Some(RunRecord {
                 session_id: SessionId(row.session_id),
                 status,
@@ -710,7 +739,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
             // overwrite needed) and does not fail the root start.
             if child_result.rows_affected() == 0 {
                 if let Some(err) =
-                    child_cas_outcome(&mut tx, &child_id, child.state_revision).await
+                    child_cas_outcome(&mut tx, &child_id, child.state_revision, child.status.clone()).await
                 {
                     return Err(err);
                 }
@@ -927,7 +956,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
             // (no overwrite needed) and does not fail the root transition.
             if child_result.rows_affected() == 0 {
                 if let Some(err) =
-                    child_cas_outcome(&mut tx, &child_id, child.state_revision).await
+                    child_cas_outcome(&mut tx, &child_id, child.state_revision, child.status.clone()).await
                 {
                     return Err(err);
                 }

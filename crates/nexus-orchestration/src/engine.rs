@@ -27,6 +27,25 @@ use crate::run_state::{
     WorkflowStateStore,
 };
 
+/// Context key that effectful tasks set when they perform an external effect
+/// (capability call, ACP/Host prompt dispatch, HostTool call, child spawn).
+///
+/// `run_step_internal` inspects the post-step root context for this marker to
+/// decide the disposition of a failed post-effect `commit_transition`: if an
+/// external effect may have executed, the run is **interrupted** (never a
+/// blind rewind to a seemingly safe boundary — A2/A7); if the step was
+/// deterministic (no marker), a CAS-fenced restore is acceptable (Important 3).
+pub const EXTERNAL_EFFECT_MARKER: &str = "__external_effect_ran";
+
+/// Whether the post-step root context carries the [`EXTERNAL_EFFECT_MARKER`],
+/// indicating that one or more external effects executed during the step.
+async fn step_had_external_effect(root: &graph_flow::Session) -> bool {
+    root.context
+        .get::<bool>(EXTERNAL_EFFECT_MARKER)
+        .await
+        .unwrap_or(false)
+}
+
 // ---------------------------------------------------------------------------
 // Helper types
 // ---------------------------------------------------------------------------
@@ -294,6 +313,23 @@ pub trait OrchestrationEngine: Send + Sync {
         params: ChildSessionParams,
     ) -> Result<SessionId, EngineError>;
 
+    /// Return a persisted child session id for the given parent and inner
+    /// graph when one already exists (recovery attach, Important 4).
+    ///
+    /// After a parent restarts with its cursor still at an inner-graph task,
+    /// recovery hydrates the persisted child rows into the engine's children
+    /// map. `InnerGraphTask` must reattach that child (resume its remaining
+    /// steps, preserving cursor/context) instead of spawning a fresh one,
+    /// which would create a duplicate child row and potentially replay
+    /// completed child work. The engine also reconstructs a `FlowRunner` for
+    /// the reattached child. Returns `None` when no matching non-terminal
+    /// child row exists — the caller should then `spawn_child_session`.
+    async fn attach_existing_child_session(
+        &self,
+        parent_session_id: &str,
+        inner_graph: Arc<Graph>,
+    ) -> Option<SessionId>;
+
     /// Retrieve the context for a session.
     async fn get_context(&self, session_id: &SessionId)
         -> Result<graph_flow::Context, EngineError>;
@@ -401,40 +437,60 @@ impl EngineSharedState {
     /// `RevisionMismatch`. This reads the persisted child rows via
     /// `WorkflowStateStore::load_children` and rebuilds the `ChildCheckpoint`
     /// entries keyed by the parent session id.
-    pub async fn hydrate_children(&self, parent_session_id: &SessionId) {
+    ///
+    /// Any persisted child that is corrupt/unsupported (a failed child row
+    /// load, a missing/invalid child session snapshot) is **non-replayable**:
+    /// this method propagates the error (A7) so the caller marks the parent
+    /// non-replayable rather than reconstructing a runner over an incomplete
+    /// children map. An empty result **replaces/clears** any prior map entry
+    /// so a stale checkpoint never lingers (Important 1).
+    pub async fn hydrate_children(
+        &self,
+        parent_session_id: &SessionId,
+    ) -> Result<(), EngineError> {
         let Some(store) = &self.workflow_store else {
-            return;
+            return Ok(());
         };
-        let Ok(children) = store.load_children(parent_session_id).await else {
-            return;
-        };
-        if children.is_empty() {
-            return;
-        }
+        // Propagate a load failure (corrupt/unsupported child rows) instead
+        // of silently continuing with an empty children map (Important 1).
+        let children = store.load_children(parent_session_id).await?;
         let mut checkpoints = Vec::with_capacity(children.len());
-        for child in children {
-            let child_session = match self.storage.get(&child.session_id.0).await {
-                Ok(Some(s)) => s,
-                _ => continue,
-            };
+        for child in &children {
+            // A child whose session snapshot cannot be read from storage is
+            // corrupt: propagate rather than silently skip it (Important 1).
+            let child_session = self
+                .storage
+                .get(&child.session_id.0)
+                .await
+                .map_err(EngineError::GraphFlow)?
+                .ok_or_else(|| {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                        "hydrate_children '{}': persisted child '{}' has no session row \
+                         (non-replayable)",
+                        parent_session_id.0, child.session_id.0
+                    )))
+                })?;
             let graph_name = child
                 .descriptor
                 .as_ref()
                 .and_then(|d| d.graph_name.clone());
             checkpoints.push(ChildCheckpoint {
                 session: child_session,
-                status: child.status,
+                status: child.status.clone(),
                 state: child.state.clone().unwrap_or_default(),
                 state_revision: child.state_revision,
                 graph_name,
             });
         }
-        if !checkpoints.is_empty() {
-            self.children
-                .write()
-                .await
-                .insert(parent_session_id.0.clone(), checkpoints);
+        // Replace any prior map entry — an empty result must also clear a
+        // stale entry so it never lingers as if hydrated (Important 1).
+        let mut map = self.children.write().await;
+        if checkpoints.is_empty() {
+            map.remove(&parent_session_id.0);
+        } else {
+            map.insert(parent_session_id.0.clone(), checkpoints);
         }
+        Ok(())
     }
 
     /// Persist a control-signal transition authoritatively (A2/A5) when a
@@ -519,34 +575,59 @@ impl EngineSharedState {
     /// with `RevisionMismatch`. This method reads the child's current
     /// persisted record and updates the parent's map entry so the parent
     /// submits the correct child revision.
-    async fn sync_child_checkpoint_after_step(&self, session_id: &SessionId) {
+    ///
+    /// Any storage/load failure here is propagated (A7): a child whose
+    /// persisted record cannot be read or whose session snapshot is missing
+    /// is corrupt, and the caller must surface it rather than let the parent
+    /// continue with a stale/missing child checkpoint.
+    async fn sync_child_checkpoint_after_step(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), EngineError> {
         // Only children carry a `_parent_session_id` in context.
         let parent_id: Option<String> = match self.storage.get(&session_id.0).await {
             Ok(Some(session)) => session.context.get("_parent_session_id").await,
-            _ => None,
+            Ok(None) => None,
+            Err(e) => return Err(EngineError::GraphFlow(e)),
         };
         let Some(parent_id) = parent_id else {
-            return;
+            return Ok(());
         };
         let Some(store) = &self.workflow_store else {
-            return;
+            return Ok(());
         };
         // Load the child's current persisted record (revision/status/state).
-        let Ok(Some(child_record)) = store.load_run(session_id).await else {
-            return;
+        // A missing/erroneous record is non-replayable — propagate (A7).
+        let child_record = store.load_run(session_id).await?;
+        let Some(child_record) = child_record else {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "sync_child_checkpoint_after_step '{}': child has no persisted run record \
+                     (non-replayable)",
+                    session_id.0
+                )),
+            ));
         };
         // Rebuild the child checkpoint from the persisted record.
-        let child_session = match self.storage.get(&session_id.0).await {
-            Ok(Some(s)) => s,
-            _ => return,
-        };
+        let child_session = self
+            .storage
+            .get(&session_id.0)
+            .await
+            .map_err(EngineError::GraphFlow)?
+            .ok_or_else(|| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "sync_child_checkpoint_after_step '{}': child has no session row \
+                     (non-replayable)",
+                    session_id.0
+                )))
+            })?;
         let graph_name = child_record
             .descriptor
             .as_ref()
             .and_then(|d| d.graph_name.clone());
         let child_checkpoint = ChildCheckpoint {
             session: child_session,
-            status: child_record.status,
+            status: child_record.status.clone(),
             state: child_record.state.clone().unwrap_or_default(),
             state_revision: child_record.state_revision,
             graph_name,
@@ -559,6 +640,7 @@ impl EngineSharedState {
         } else {
             entry.push(child_checkpoint);
         }
+        Ok(())
     }
 
     /// Run a single step for a session, updating status after execution.
@@ -654,20 +736,90 @@ impl EngineSharedState {
                     root: &root,
                     children: &children,
                 };
-                if let Err(e) = store
+                if let Err(commit_err) = store
                     .commit_transition(session_id, expected_revision, checkpoint, status.clone(), &next_state)
                     .await
                 {
-                    // The transition failed (e.g. stale-child CAS). Restore
-                    // the root position/context to its pre-step state so a
-                    // failed child CAS cannot leave a partially advanced root
-                    // checkpoint (Important 2). The restore is a position-only
-                    // save (only updates current_task_id/context_json where
-                    // status='running'), so it never flips status/metadata.
-                    if let Some(pre) = &pre_step_root {
-                        let _ = self.storage.save(pre.clone()).await;
+                    // Determine whether the step performed an external effect
+                    // (capability call / prompt dispatch / host tool / child
+                    // spawn). The post-step root context carries the marker
+                    // that effectful tasks set (Important 3).
+                    let had_effect = step_had_external_effect(&root).await;
+
+                    if had_effect {
+                        // A failed post-effect commit must NOT blindly rewind
+                        // to a seemingly safe boundary — a retry could execute
+                        // the external effect again. Persist an
+                        // interrupted/uncertain disposition instead (A2/A7):
+                        // the run becomes terminal `interrupted`, never
+                        // auto-replayed. The interrupted write is itself
+                        // revision-fenced (F2): if a concurrent transition
+                        // already won, it is left as the truthful state and we
+                        // surface the original error.
+                        let interrupted_state = RunStateV1 {
+                            step_in_flight: Some(root.current_task_id.clone()),
+                            ..RunStateV1::default()
+                        };
+                        // Persist the root interruption WITHOUT child checkpoints:
+                        // the child rows remain as-is and the interrupted root is
+                        // terminal/non-replayable. Requiring a child CAS here would
+                        // block the interruption write on the same stale child that
+                        // caused the original failure, leaving the run non-terminal
+                        // and unknowingly replayable — exactly what must not happen
+                        // (Important 3).
+                        let interrupted_checkpoint = RunCheckpoint {
+                            root: &root,
+                            children: &[],
+                        };
+                        let interrupted = store
+                            .commit_transition(
+                                session_id,
+                                expected_revision,
+                                interrupted_checkpoint,
+                                SessionStatus::Interrupted,
+                                &interrupted_state,
+                            )
+                            .await;
+
+                        // Update in-memory status to reflect the interrupted
+                        // disposition when the interrupted CAS succeeded.
+                        if interrupted.is_ok() {
+                            if let Some(s) = self
+                                .sessions
+                                .write()
+                                .await
+                                .iter_mut()
+                                .find(|s| s.session_id == *session_id)
+                            {
+                                s.status = SessionStatus::Interrupted;
+                            }
+                        }
+                        return Err(commit_err);
                     }
-                    return Err(e);
+
+                    // Deterministic step (no external effect): a CAS-fenced
+                    // restore of the pre-step root position/context is
+                    // acceptable. The restore must be conditional on the same
+                    // root revision (F2) so a concurrent successful root
+                    // transition is never overwritten by the older pre-step
+                    // position. Reload the authoritative record and only
+                    // restore when the persisted revision is unchanged and the
+                    // row is still non-terminal.
+                    if let Some(pre) = &pre_step_root {
+                        let current = store.load_run(session_id).await?;
+                        let same_revision = current
+                            .as_ref()
+                            .map(|r| r.state_revision == expected_revision)
+                            .unwrap_or(false);
+                        let non_terminal = current
+                            .as_ref()
+                            .map(|r| !r.status.is_terminal())
+                            .unwrap_or(false);
+                        if same_revision && non_terminal {
+                            let _ = self.storage.save(pre.clone()).await;
+                        }
+                    }
+                    return Err(commit_err);
                 }
             }
         }
@@ -677,7 +829,10 @@ impl EngineSharedState {
         // `commit_transition` submits the correct child revision (Important 1).
         // This runs AFTER the child's own `commit_transition` (above) so the
         // parent's map reflects the child's post-transition revision.
-        self.sync_child_checkpoint_after_step(session_id).await;
+        // A storage/load failure here is propagated (A7): a child whose
+        // persisted record cannot be read is non-replayable and must not
+        // let the parent continue with a stale/missing checkpoint.
+        self.sync_child_checkpoint_after_step(session_id).await?;
 
         // Update in-memory status.
         if let Some(s) = self
@@ -806,6 +961,45 @@ impl EngineSharedState {
         });
 
         Ok(SessionId(child_session_id))
+    }
+
+    /// Return a persisted child session id for the given parent + inner graph
+    /// when one already exists (recovery attach, Important 4).
+    ///
+    /// The children map is keyed by parent id and each child carries its
+    /// `graph_name`. We return the first **non-terminal** child whose
+    /// `graph_name` matches and reconstruct a `FlowRunner` for it so the
+    /// caller (InnerGraphTask) can poll it to completion rather than
+    /// spawning a duplicate. A terminal child is not reattached (its work
+    /// already completed). The reconstructed runner points at the same
+    /// storage, resuming from the persisted position. When the store is
+    /// absent or no matching non-terminal child exists, returns `None`.
+    pub async fn attach_existing_child_session_internal(
+        &self,
+        parent_session_id: &str,
+        inner_graph: Arc<Graph>,
+    ) -> Option<SessionId> {
+        let target = {
+            let children = self.children.read().await;
+            let parent_children = children.get(parent_session_id)?;
+            parent_children
+                .iter()
+                .find(|c| c.graph_name.as_deref() == Some(inner_graph.id.as_str()) && !c.status.is_terminal())
+                .map(|c| c.session.id.clone())
+        };
+        let child_id = target?;
+        // Reconstruct a FlowRunner for the reattached child so it can be
+        // stepped from its persisted position.
+        if !self
+            .runners
+            .read()
+            .await
+            .contains_key(&child_id)
+        {
+            let runner = Arc::new(FlowRunner::new(inner_graph, self.storage.clone()));
+            self.runners.write().await.insert(child_id.clone(), runner);
+        }
+        Some(SessionId(child_id))
     }
 }
 
@@ -981,6 +1175,16 @@ impl OrchestrationEngine for EngineProxy {
         self.state.spawn_child_session_internal(params).await
     }
 
+    async fn attach_existing_child_session(
+        &self,
+        parent_session_id: &str,
+        inner_graph: Arc<Graph>,
+    ) -> Option<SessionId> {
+        self.state
+            .attach_existing_child_session_internal(parent_session_id, inner_graph)
+            .await
+    }
+
     async fn get_context(
         &self,
         session_id: &SessionId,
@@ -1154,7 +1358,21 @@ impl GraphFlowEngine {
             // Important 1: hydrate the in-memory children map from persisted
             // child rows so a restarted parent knows its child checkpoints
             // (with current revisions) for its next commit_transition.
-            self.state.hydrate_children(&summary.session_id).await;
+            //
+            // A corrupt/unsupported child (load_children failure, missing
+            // child session snapshot) must propagate: the parent cannot be
+            // reconstructed over an incomplete children map (A7). We surface
+            // it as a warning and skip runner reconstruction — the session
+            // stays tracked but not driven (non-replayable).
+            if let Err(e) = self.state.hydrate_children(&summary.session_id).await {
+                tracing::warn!(
+                    "recovery: failed to hydrate children for session {}: {}; \
+                     session marked non-replayable (no runner)",
+                    summary.session_id.0,
+                    e
+                );
+                continue;
+            }
 
             // R6: Try to reconstruct the FlowRunner from the embedded preset.
             // The preset_id in the summary corresponds to the preset that was
@@ -1195,18 +1413,110 @@ impl GraphFlowEngine {
     }
 
     async fn reconstruct_runner(&self, summary: &SessionSummary) -> Result<(), EngineError> {
-        // Step 1: Load the embedded preset by preset_id (against the
-        // CURRENT registry snapshot).
-        let caps = self.current_caps();
-        let loaded =
-            crate::preset::load_embedded_preset(&summary.preset_id, &caps).map_err(|e| {
-                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                    "R6: failed to load embedded preset '{}' for session {}: {}",
-                    summary.preset_id, summary.session_id.0, e
-                )))
-            })?;
+        // Load the durable descriptor (frozen at admission) so we honour the
+        // persisted source identity and preset version (Important 5). A run
+        // that has no v1 descriptor is a legacy/unverified row — its runner
+        // cannot be reconstructed over a frozen source (A2/A7).
+        let descriptor = match &self.state.workflow_store {
+            Some(store) => {
+                let record = store
+                    .load_run(&summary.session_id)
+                    .await?
+                    .ok_or_else(|| {
+                        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                            "R6: session '{}' has no persisted run record; cannot reconstruct runner \
+                             (non-replayable)",
+                            summary.session_id.0
+                        )))
+                    })?;
+                record.descriptor.ok_or_else(|| {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                        "R6: session '{}' has no v1 descriptor; cannot reconstruct runner over a \
+                         frozen source (non-replayable)",
+                        summary.session_id.0
+                    )))
+                })?
+            }
+            None => {
+                // No workflow store (in-memory/test engine): fall back to the
+                // legacy embedded-preset path (no durable descriptor).
+                return self
+                    .reconstruct_runner_legacy(summary)
+                    .await;
+            }
+        };
 
-        // Step 2: Build the wired outer graph using EngineProxy + capabilities.
+        // Resolve and reload the preset from the FROZEN source identity —
+        // never the current higher-precedence embedded/current bytes (A7).
+        // A directory source is reloaded from its persisted root; an
+        // embedded source from the compiled-in preset id.
+        let caps = self.current_caps();
+        let loaded = match &descriptor.source {
+            PresetSourceIdentity::Embedded { preset_id, .. } => {
+                match crate::preset::load_embedded_preset(preset_id, &caps) {
+                    Ok(loaded) => loaded,
+                    Err(e) => {
+                        return Err(EngineError::GraphFlow(
+                            graph_flow::GraphError::StorageError(format!(
+                                "R6: embedded preset '{preset_id}' is missing for session {}: {} \
+                                 (reconstruction_unavailable, non-replayable)",
+                                summary.session_id.0, e
+                            )),
+                        ));
+                    }
+                }
+            }
+            PresetSourceIdentity::Directory { root, .. } => {
+                match crate::preset::load_preset(root, &caps) {
+                    Ok(loaded) => loaded,
+                    Err(e) => {
+                        return Err(EngineError::GraphFlow(
+                            graph_flow::GraphError::StorageError(format!(
+                                "R6: directory preset at '{:?}' is missing/invalid for session {}: {} \
+                                 (reconstruction_unavailable, non-replayable)",
+                                root, summary.session_id.0, e
+                            )),
+                        ));
+                    }
+                }
+            }
+        };
+
+        // Verify the frozen manifest/template content hash matches the
+        // reloaded preset's source identity — a changed template or manifest
+        // must refuse reconstruction rather than fall back to current bytes
+        // (A7). `loaded.source_identity` reflects the actual resolved bytes.
+        let reloaded_identity = loaded.source_identity.as_ref().ok_or_else(|| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "R6: reloaded preset '{}' for session {} has no source identity \
+                 (reconstruction_unavailable, non-replayable)",
+                loaded.id, summary.session_id.0
+            )))
+        })?;
+        if reloaded_identity != &descriptor.source {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "R6: preset source identity mismatch for session {} (frozen {:?} != reloaded {:?}) \
+                     — source changed or moved; reconstruction_unavailable (non-replayable)",
+                    summary.session_id.0, descriptor.source, reloaded_identity
+                )),
+            ));
+        }
+
+        // Take the preset version from the persisted descriptor (the frozen
+        // version, not the current embed) — Important 5.
+        let version = descriptor.preset_version;
+        if version != loaded.version {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "R6: preset version mismatch for session {} (frozen {} != current {}) \
+                     — reconstruction_unavailable (non-replayable)",
+                    summary.session_id.0, version, loaded.version
+                )),
+            ));
+        }
+
+        // Build the wired outer graph using EngineProxy + capabilities.
         let proxy = Arc::new(EngineProxy {
             state: self.state.clone(),
         });
@@ -1218,12 +1528,12 @@ impl GraphFlowEngine {
             self.daemon_tool_dispatch.clone(),
         );
 
-        // Step 3: Create FlowRunner with the wired graph and existing storage.
+        // Create FlowRunner with the wired graph and existing storage.
         // The storage already contains the persisted session data, so the
         // runner will resume from the correct execution position.
         let runner = Arc::new(FlowRunner::new(Arc::new(wired), self.state.storage.clone()));
 
-        // Step 4: Store the runner in the shared state.
+        // Store the runner in the shared state.
         self.state
             .runners
             .write()
@@ -1231,7 +1541,51 @@ impl GraphFlowEngine {
             .insert(summary.session_id.0.clone(), runner);
 
         tracing::info!(
-            "R6: reconstructed runner for session {} (preset: {})",
+            "R6: reconstructed runner for session {} (preset: {}, version: {})",
+            summary.session_id.0,
+            summary.preset_id,
+            version
+        );
+
+        Ok(())
+    }
+
+    /// Legacy reconstruction against the current embedded preset (no workflow
+    /// store). Used only by in-memory/test engines that never persisted a v1
+    /// descriptor. This path is intentionally NOT frozen-source aware.
+    async fn reconstruct_runner_legacy(
+        &self,
+        summary: &SessionSummary,
+    ) -> Result<(), EngineError> {
+        let caps = self.current_caps();
+        let loaded =
+            crate::preset::load_embedded_preset(&summary.preset_id, &caps).map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "R6: failed to load embedded preset '{}' for session {}: {}",
+                    summary.preset_id, summary.session_id.0, e
+                )))
+            })?;
+
+        let proxy = Arc::new(EngineProxy {
+            state: self.state.clone(),
+        });
+        let engine_proxy: Arc<dyn OrchestrationEngine> = proxy;
+        let wired = crate::preset::loader::build_wired_outer_graph(
+            &loaded,
+            &engine_proxy,
+            &caps,
+            self.daemon_tool_dispatch.clone(),
+        );
+
+        let runner = Arc::new(FlowRunner::new(Arc::new(wired), self.state.storage.clone()));
+        self.state
+            .runners
+            .write()
+            .await
+            .insert(summary.session_id.0.clone(), runner);
+
+        tracing::info!(
+            "R6: reconstructed runner (legacy) for session {} (preset: {})",
             summary.session_id.0,
             summary.preset_id
         );
@@ -1577,6 +1931,16 @@ impl OrchestrationEngine for GraphFlowEngine {
         params: ChildSessionParams,
     ) -> Result<SessionId, EngineError> {
         self.state.spawn_child_session_internal(params).await
+    }
+
+    async fn attach_existing_child_session(
+        &self,
+        parent_session_id: &str,
+        inner_graph: Arc<Graph>,
+    ) -> Option<SessionId> {
+        self.state
+            .attach_existing_child_session_internal(parent_session_id, inner_graph)
+            .await
     }
 
     async fn get_context(

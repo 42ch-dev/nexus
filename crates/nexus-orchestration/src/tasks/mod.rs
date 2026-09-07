@@ -75,6 +75,18 @@ impl Task for CapabilityTask {
             graph_flow::GraphError::TaskExecutionFailed(format!("capability not found: {name}"))
         })?;
 
+        // A capability invocation may perform an external effect (capability
+        // calls can trigger provider/prompt/host activity). Mark the step as
+        // having performed a potentially-external effect so a failed
+        // post-effect `commit_transition` can persist an interrupted
+        // disposition rather than blindly rewinding (Important 3).
+        context
+            .set(
+                crate::engine::EXTERNAL_EFFECT_MARKER,
+                true,
+            )
+            .await;
+
         match cap.run(input).await {
             Ok(output) => {
                 context.set("_capability_output", output).await;
@@ -259,18 +271,33 @@ impl Task for InnerGraphTask {
             }
         }
 
-        // 3. Spawn the child session.
-        let params = crate::engine::ChildSessionParams {
-            parent_session_id: parent_session_id.clone(),
-            inner_graph: self.inner_graph.clone(),
-            initial_context: child_ctx,
-        };
+        // 3. Attach an existing persisted child session (recovery, Important 4)
+        //    or spawn a new one. After a parent restarts with its cursor
+        //    still at this inner-graph task, recovery hydrates the persisted
+        //    child rows into the engine's children map; we reattach the
+        //    matching non-terminal child and resume it (preserving
+        //    cursor/context) rather than creating a duplicate child row and
+        //    potentially replaying completed child work. We only spawn a new
+        //    child when no matching child row exists.
+        let child_sid = if let Some(existing) = self
+            .engine
+            .attach_existing_child_session(&parent_session_id, self.inner_graph.clone())
+            .await
+        {
+            existing
+        } else {
+            let params = crate::engine::ChildSessionParams {
+                parent_session_id: parent_session_id.clone(),
+                inner_graph: self.inner_graph.clone(),
+                initial_context: child_ctx,
+            };
 
-        let child_sid = self.engine.spawn_child_session(params).await.map_err(|e| {
-            graph_flow::GraphError::TaskExecutionFailed(format!(
-                "InnerGraphTask: failed to spawn child session: {e}"
-            ))
-        })?;
+            self.engine.spawn_child_session(params).await.map_err(|e| {
+                graph_flow::GraphError::TaskExecutionFailed(format!(
+                    "InnerGraphTask: failed to spawn child session: {e}"
+                ))
+            })?
+        };
 
         // 4. Poll child session to completion.
         let mut last_error = None;
@@ -2353,6 +2380,17 @@ impl Task for AcpPromptTask {
                 "session_id": self.session_id,
             });
 
+            // Dispatching a prompt to an external ACP worker is an external
+            // effect — mark the step so a failed post-effect commit persists
+            // an interrupted disposition rather than blindly rewinding
+            // (Important 3).
+            context
+                .set(
+                    crate::engine::EXTERNAL_EFFECT_MARKER,
+                    true,
+                )
+                .await;
+
             let ipc_result = handle.call_json_rpc("worker/acp_prompt", params).await;
 
             // Put the handle back (even if IPC failed, the pipes may still be usable).
@@ -2682,6 +2720,15 @@ impl Task for HostToolCallTask {
 
         let result_value = if let Some(ref dispatch_ref) = self.direct_dispatch {
             // Production path (direct): call through injected dispatch.
+            // A host-tool dispatch is an external effect — mark the step so a
+            // failed post-effect commit persists an interrupted disposition
+            // rather than blindly rewinding (Important 3).
+            context
+                .set(
+                    crate::engine::EXTERNAL_EFFECT_MARKER,
+                    true,
+                )
+                .await;
             dispatch_ref
                 .dispatch_tool(&self.tool_name, &rendered_args, &request_id)
                 .await
@@ -2693,6 +2740,13 @@ impl Task for HostToolCallTask {
                 })?
         } else if let Some(ref dispatch_arc) = self.dispatch {
             // Test-oriented path: call through Mutex-wrapped dispatch slot.
+            // A host-tool dispatch is an external effect (Important 3).
+            context
+                .set(
+                    crate::engine::EXTERNAL_EFFECT_MARKER,
+                    true,
+                )
+                .await;
             let dispatch = {
                 let guard = dispatch_arc.lock().map_err(|e| {
                     graph_flow::GraphError::TaskExecutionFailed(format!(

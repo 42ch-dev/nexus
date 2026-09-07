@@ -1555,10 +1555,13 @@ async fn child_cas_terminal_at_expected_revision_is_confirmed() {
     .expect("mark child terminal");
 
     // Commit a root transition with a child checkpoint anchored at revision
-    // 0 — the terminal child at the expected revision is confirmed, so the
-    // root transition succeeds.
+    // 0 AND carrying a matching terminal status (Completed) — the terminal
+    // child at the expected revision is confirmed, so the root transition
+    // succeeds (Important 6: confirmation requires a matching terminal
+    // checkpoint, not just any terminal DB status at the expected revision).
     let root2 = root_session(&session_id.0, "parent_task2").await;
-    let child2 = child_checkpoint("sess-child-term-confirm:child:1", "child_task2").await;
+    let mut child2 = child_checkpoint("sess-child-term-confirm:child:1", "child_task2").await;
+    child2.status = SessionStatus::Completed;
     let checkpoint2 = RunCheckpoint {
         root: &root2,
         children: &[child2],
@@ -2215,4 +2218,979 @@ async fn child_ids_are_collision_resistant() {
         child1.0, child2.0,
         "child IDs must be collision-resistant (two admissions in one millisecond)"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Fix round 4 (task re-review): regression tests for each fixed contract
+// ---------------------------------------------------------------------------
+
+/// A graph-flow task that sets the external-effect marker (Important 3) and
+/// advances to the next task. Simulates a step that may have performed an
+/// external effect before a failed commit.
+struct EffectTask;
+#[async_trait::async_trait]
+impl graph_flow::Task for EffectTask {
+    fn id(&self) -> &str {
+        "effect_task"
+    }
+    async fn run(
+        &self,
+        ctx: graph_flow::Context,
+    ) -> graph_flow::Result<graph_flow::TaskResult> {
+        ctx.set(
+            nexus_orchestration::engine::EXTERNAL_EFFECT_MARKER,
+            true,
+        )
+        .await;
+        Ok(graph_flow::TaskResult::new(
+            None,
+            graph_flow::NextAction::Continue,
+        ))
+    }
+}
+
+/// A graph-flow task that does NOT set the external-effect marker and advances
+/// (deterministic step, Important 3).
+struct DeterministicContinueTask;
+#[async_trait::async_trait]
+impl graph_flow::Task for DeterministicContinueTask {
+    fn id(&self) -> &str {
+        "deterministic_continue_task"
+    }
+    async fn run(
+        &self,
+        ctx: graph_flow::Context,
+    ) -> graph_flow::Result<graph_flow::TaskResult> {
+        ctx.set("advanced", true).await;
+        Ok(graph_flow::TaskResult::new(
+            None,
+            graph_flow::NextAction::Continue,
+        ))
+    }
+}
+
+// Important 1: recovery propagates the error when load_children fails
+// (corrupt/unsupported child) — the parent is marked non-replayable, never
+// reconstructed over an incomplete children map, and no stale checkpoint
+// lingers.
+#[tokio::test]
+async fn corrupt_child_is_non_replayable_during_recovery() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, engine) = fresh_engine(pool.clone()).await;
+    let parent_sid = SessionId("par-corrupt-child".to_string());
+
+    // Start a parent run.
+    let descriptor = test_descriptor(&parent_sid.0);
+    let root = root_session(&parent_sid.0, "parent_state").await;
+    let checkpoint = RunCheckpoint {
+        root: &root,
+        children: &[],
+    };
+    storage
+        .start_run(&parent_sid, &descriptor, checkpoint, &RunStateV1::default())
+        .await
+        .expect("start parent");
+
+    // Seed a child row whose run_descriptor_json is corrupt (invalid JSON).
+    // load_children must fail on it, and hydrate_children must propagate.
+    let child_sid = "par-corrupt-child:child:1";
+    sqlx::query(
+        "INSERT INTO orchestration_sessions
+            (session_id, creator_id, preset_id, preset_version, parent_session_id,
+             current_task_id, status, context_json, created_at, updated_at,
+             execution_version, state_revision, run_state_json, run_descriptor_json)
+         VALUES (?, 'ctr', 'test-preset', 3, ?, 'child_task', 'running',
+                 '{\"data\":{}}', 1756990000, 1756990300,
+                 1, 1, '{\"wait\":null,\"step_in_flight\":null,\"in_flight\":null,\"failure\":null,\"cancel_requested\":false}',
+                 'NOT VALID JSON{')",
+    )
+    .bind(child_sid)
+    .bind(&parent_sid.0)
+    .execute(&*pool)
+    .await
+    .expect("seed corrupt child row");
+
+    // hydrate_children must return Err (corrupt child is non-replayable),
+    // not silently continue with an empty children map (Important 1).
+    let err = engine
+        .shared_state()
+        .hydrate_children(&parent_sid)
+        .await
+        .expect_err("corrupt child must be non-replayable");
+    assert!(
+        matches!(
+            err,
+            nexus_orchestration::engine::EngineError::GraphFlow(_)
+        ),
+        "expected GraphFlow error for corrupt child, got {err:?}"
+    );
+
+    // The children map must NOT be populated (no stale checkpoint).
+    let shared = engine.shared_state();
+    let map = shared.children.read().await;
+    assert!(
+        !map.contains_key(&parent_sid.0),
+        "corrupt child must not populate the children map"
+    );
+    drop(map);
+
+    // Recovery must skip runner reconstruction for this parent (non-replayable)
+    // and there must be no runner.
+    let summary = nexus_orchestration::engine::SessionSummary {
+        session_id: parent_sid.clone(),
+        creator_id: String::new(),
+        preset_id: "test-preset".to_string(),
+        status: SessionStatus::Running,
+        current_task_id: Some("parent_state".to_string()),
+    };
+    engine.recover_sessions(vec![summary]).await;
+    assert!(
+        !engine.has_runner(&parent_sid).await,
+        "corrupt child parent must be non-replayable (no runner)"
+    );
+}
+
+// Important 1: a child whose session snapshot is missing from storage is also
+// non-replayable during recovery (hydrate_children propagates).
+#[tokio::test]
+async fn child_missing_session_snapshot_is_non_replayable() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, engine) = fresh_engine(pool.clone()).await;
+    let parent_sid = SessionId("par-missing-child".to_string());
+
+    let descriptor = test_descriptor(&parent_sid.0);
+    let root = root_session(&parent_sid.0, "parent_state").await;
+    let checkpoint = RunCheckpoint {
+        root: &root,
+        children: &[],
+    };
+    storage
+        .start_run(&parent_sid, &descriptor, checkpoint, &RunStateV1::default())
+        .await
+        .expect("start parent");
+
+    // Seed a VALID child row but do NOT create its session row in storage.
+    let child_sid = "par-missing-child:child:1";
+    sqlx::query(
+        "INSERT INTO orchestration_sessions
+            (session_id, creator_id, preset_id, preset_version, parent_session_id,
+             current_task_id, status, context_json, created_at, updated_at,
+             execution_version, state_revision, run_state_json, run_descriptor_json)
+         VALUES (?, 'ctr', 'test-preset', 3, ?, 'child_task', 'running',
+                 '{\"data\":{}}', 1756990000, 1756990300,
+                 1, 1,
+                 '{\"wait\":null,\"step_in_flight\":null,\"in_flight\":null,\"failure\":null,\"cancel_requested\":false}',
+                 ?)",
+    )
+    .bind(&child_sid)
+    .bind(&parent_sid.0)
+    .bind(
+        serde_json::to_vec(&test_descriptor(child_sid))
+            .expect("serialize child descriptor"),
+    )
+    .execute(&*pool)
+    .await
+    .expect("seed child row");
+
+    // hydrate_children must fail because the child's session row is missing.
+    let err = engine
+        .shared_state()
+        .hydrate_children(&parent_sid)
+        .await
+        .expect_err("missing child session must be non-replayable");
+    assert!(
+        matches!(
+            err,
+            nexus_orchestration::engine::EngineError::GraphFlow(_)
+        ),
+        "expected GraphFlow error for missing child session, got {err:?}"
+    );
+}
+
+/// A graph-flow task that bumps the parent's root state_revision mid-step to
+/// simulate a concurrent transition that wins before the outer
+/// `commit_transition` (used to prove the restore is revision-fenced).
+struct ConcurrentBumpRootTask {
+    pool: Arc<sqlx::SqlitePool>,
+    parent_sid: String,
+}
+#[async_trait::async_trait]
+impl graph_flow::Task for ConcurrentBumpRootTask {
+    fn id(&self) -> &str {
+        "concurrent_bump_task"
+    }
+    async fn run(
+        &self,
+        _ctx: graph_flow::Context,
+    ) -> graph_flow::Result<graph_flow::TaskResult> {
+        sqlx::query(
+            "UPDATE orchestration_sessions SET state_revision = state_revision + 1,
+                    current_task_id = 'deterministic_continue_task'
+             WHERE session_id = ?",
+        )
+        .bind(&self.parent_sid)
+        .execute(&*self.pool)
+        .await
+        .map_err(|e| {
+            graph_flow::GraphError::TaskExecutionFailed(format!("concurrent bump failed: {e}"))
+        })?;
+        Ok(graph_flow::TaskResult::new(
+            None,
+            graph_flow::NextAction::Continue,
+        ))
+    }
+}
+
+// Important 2: failed-child-CAS restore is revision-fenced — a concurrent
+// root transition (revision advanced mid-step) is never overwritten by the
+// older pre-step position.
+#[tokio::test]
+async fn failed_cas_restore_is_revision_fenced() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, engine) = fresh_engine(pool.clone()).await;
+
+    // Parent graph: concurrent-bump → deterministic-continue → end.
+    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
+    parent_graph.add_task(Arc::new(ConcurrentBumpRootTask {
+        pool: pool.clone(),
+        parent_sid: "placeholder".to_string(),
+    }));
+    parent_graph.add_task(Arc::new(DeterministicContinueTask));
+    parent_graph.add_task(Arc::new(EndTask));
+    parent_graph.add_edge("concurrent_bump_task", "deterministic_continue_task");
+    parent_graph.add_edge("deterministic_continue_task", "end_task");
+    let parent_sid = engine
+        .start_session("novel-writing", parent_graph)
+        .await
+        .expect("start parent");
+
+    // Insert a stale child checkpoint into the parent's children map at
+    // revision 1.
+    let child_id = "parent:child:fence";
+    let child_session = Session::new_from_task(child_id.to_string(), "child_task");
+    let child_cp = ChildCheckpoint {
+        session: child_session,
+        status: SessionStatus::Running,
+        state: RunStateV1::default(),
+        state_revision: 1,
+        graph_name: Some("inner_graph".to_string()),
+    };
+    engine
+        .shared_state()
+        .children
+        .write()
+        .await
+        .insert(parent_sid.0.clone(), vec![child_cp]);
+
+    // Create the child row, then advance the child revision to 2 so the
+    // child CAS fails (stale) below.
+    let child_descriptor = test_descriptor(&parent_sid.0);
+    let child_root = root_session(child_id, "child_task").await;
+    storage
+        .start_run(
+            &SessionId(child_id.to_string()),
+            &child_descriptor,
+            RunCheckpoint {
+                root: &child_root,
+                children: &[],
+            },
+            &RunStateV1::default(),
+        )
+        .await
+        .expect("start child");
+    sqlx::query("UPDATE orchestration_sessions SET state_revision = 2 WHERE session_id = ?")
+        .bind(child_id)
+        .execute(&*pool)
+        .await
+        .expect("advance child revision");
+
+    // The engine step: it will first capture expected_revision = 1, run the
+    // concurrent-bump task which advances the root to revision 2, then run
+    // deterministic-continue, then commit_transition(expected=1) fails with
+    // RevisionMismatch. The restore must be SKIPPED because the persisted
+    // revision (2) no longer matches the expected (1) — proving the restore
+    // is revision-fenced (F2).
+    let parent_graph2 = Arc::new(graph_flow::Graph::new("parent_graph"));
+    parent_graph2.add_task(Arc::new(ConcurrentBumpRootTask {
+        pool: pool.clone(),
+        parent_sid: parent_sid.0.clone(),
+    }));
+    parent_graph2.add_task(Arc::new(DeterministicContinueTask));
+    parent_graph2.add_task(Arc::new(EndTask));
+    parent_graph2.add_edge("concurrent_bump_task", "deterministic_continue_task");
+    parent_graph2.add_edge("deterministic_continue_task", "end_task");
+    let shared_state = engine.shared_state();
+    let stored_runner = shared_state.runners.read().await;
+    let _runner = stored_runner
+        .get(&parent_sid.0)
+        .expect("runner present")
+        .clone();
+    drop(stored_runner);
+    engine
+        .shared_state()
+        .runners
+        .write()
+        .await
+        .insert(
+            parent_sid.0.clone(),
+            std::sync::Arc::new(graph_flow::FlowRunner::new(
+                parent_graph2,
+                storage.clone() as Arc<dyn SessionStorage>,
+            )),
+        );
+
+    // Capture the pre-step root position at the pre-step task.
+    let pre_step_root = storage
+        .get(&parent_sid.0)
+        .await
+        .expect("get pre-step root")
+        .expect("root present");
+    let pre_task = pre_step_root.current_task_id;
+
+    // Run the parent step. The concurrent bump advances the root revision, so
+    // the outer commit fails with RevisionMismatch AND, because the persisted
+    // revision no longer equals expected, the restore is skipped.
+    let err = engine
+        .run_step(&parent_sid)
+        .await
+        .expect_err("concurrent revision bump must fail the parent step");
+    assert!(
+        matches!(
+            err,
+            nexus_orchestration::engine::EngineError::RevisionMismatch { .. }
+        ),
+        "expected RevisionMismatch, got {err:?}"
+    );
+
+    // The root must NOT be restored to the pre-step (old) position, proving
+    // the restore is revision-fenced.
+    let after = storage
+        .get(&parent_sid.0)
+        .await
+        .expect("get post-failure root")
+        .expect("root present");
+    let root_record = storage
+        .load_run(&parent_sid)
+        .await
+        .expect("load_run")
+        .expect("root present");
+    assert_eq!(
+        root_record.state_revision, 2,
+        "the concurrent bump (revision 2) must survive the failed step"
+    );
+    assert_ne!(
+        after.current_task_id, pre_task,
+        "revision-fenced restore must NOT overwrite the concurrent root position with the older pre-step position"
+    );
+}
+
+// Important 3: a failed post-effect commit persists an interrupted
+// disposition (never a blind rewind), and the interrupted write is itself
+// revision-fenced.
+#[tokio::test]
+async fn post_effect_failure_persists_interrupted() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, engine) = fresh_engine(pool.clone()).await;
+
+    // Parent graph whose start is an EffectTask (sets the external-effect
+    // marker) → end.
+    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
+    parent_graph.add_task(Arc::new(EffectTask));
+    parent_graph.add_task(Arc::new(EndTask));
+    parent_graph.add_edge("effect_task", "end_task");
+    let parent_sid = engine
+        .start_session("novel-writing", parent_graph)
+        .await
+        .expect("start parent");
+
+    // Stale child so the post-effect commit fails.
+    let child_id = "parent:child:interrupt";
+    let child_session = Session::new_from_task(child_id.to_string(), "child_task");
+    let child_cp = ChildCheckpoint {
+        session: child_session,
+        status: SessionStatus::Running,
+        state: RunStateV1::default(),
+        state_revision: 1,
+        graph_name: Some("inner_graph".to_string()),
+    };
+    engine
+        .shared_state()
+        .children
+        .write()
+        .await
+        .insert(parent_sid.0.clone(), vec![child_cp]);
+    let child_descriptor = test_descriptor(&parent_sid.0);
+    let child_root = root_session(child_id, "child_task").await;
+    storage
+        .start_run(
+            &SessionId(child_id.to_string()),
+            &child_descriptor,
+            RunCheckpoint {
+                root: &child_root,
+                children: &[],
+            },
+            &RunStateV1::default(),
+        )
+        .await
+        .expect("start child");
+    sqlx::query("UPDATE orchestration_sessions SET state_revision = 2 WHERE session_id = ?")
+        .bind(child_id)
+        .execute(&*pool)
+        .await
+        .expect("advance child revision");
+
+    let pre_task = storage
+        .get(&parent_sid.0)
+        .await
+        .expect("get pre-step root")
+        .expect("root present")
+        .current_task_id;
+
+    // Run the parent step: EffectTask executes an external effect, then the
+    // commit fails. The engine must persist an interrupted disposition, NOT
+    // rewind to the pre-step boundary.
+    let err = engine
+        .run_step(&parent_sid)
+        .await
+        .expect_err("post-effect failure must surface the commit error");
+    assert!(
+        matches!(
+            err,
+            nexus_orchestration::engine::EngineError::RevisionMismatch { .. }
+        ),
+        "expected RevisionMismatch, got {err:?}"
+    );
+
+    // The root must now be terminal Interrupted with an in-flight marker.
+    let record = storage
+        .load_run(&parent_sid)
+        .await
+        .expect("load_run")
+        .expect("parent present");
+    assert_eq!(
+        record.status,
+        SessionStatus::Interrupted,
+        "post-effect failure must persist interrupted, not rewind"
+    );
+    let state = record.state.expect("interrupted state present");
+    assert!(
+        state.step_in_flight.is_some(),
+        "interrupted disposition must carry a step_in_flight marker"
+    );
+
+    // The root must NOT be rewound to the pre-step boundary: the interrupted
+    // disposition keeps the post-step position (here "end_task"), not the
+    // pre-step "effect_task" safe boundary (Import 3 — no rewind).
+    let after = storage
+        .get(&parent_sid.0)
+        .await
+        .expect("get post-failure root")
+        .expect("root present");
+    assert_ne!(
+        after.current_task_id, pre_task,
+        "interrupted run keeps the step position (no rewind to a seemingly safe boundary)"
+    );
+}
+
+// Important 4: a deterministic step (no external effect) with a failed commit
+// is CAS-fenced restored to the pre-step position (acceptable rewind).
+#[tokio::test]
+async fn deterministic_failure_restores_pre_step_position() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, engine) = fresh_engine(pool.clone()).await;
+
+    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
+    parent_graph.add_task(Arc::new(DeterministicContinueTask));
+    parent_graph.add_task(Arc::new(EndTask));
+    parent_graph.add_edge("deterministic_continue_task", "end_task");
+    let parent_sid = engine
+        .start_session("novel-writing", parent_graph)
+        .await
+        .expect("start parent");
+
+    let child_id = "parent:child:det";
+    let child_session = Session::new_from_task(child_id.to_string(), "child_task");
+    let child_cp = ChildCheckpoint {
+        session: child_session,
+        status: SessionStatus::Running,
+        state: RunStateV1::default(),
+        state_revision: 1,
+        graph_name: Some("inner_graph".to_string()),
+    };
+    engine
+        .shared_state()
+        .children
+        .write()
+        .await
+        .insert(parent_sid.0.clone(), vec![child_cp]);
+    let child_descriptor = test_descriptor(&parent_sid.0);
+    let child_root = root_session(child_id, "child_task").await;
+    storage
+        .start_run(
+            &SessionId(child_id.to_string()),
+            &child_descriptor,
+            RunCheckpoint {
+                root: &child_root,
+                children: &[],
+            },
+            &RunStateV1::default(),
+        )
+        .await
+        .expect("start child");
+    sqlx::query("UPDATE orchestration_sessions SET state_revision = 2 WHERE session_id = ?")
+        .bind(child_id)
+        .execute(&*pool)
+        .await
+        .expect("advance child revision");
+
+    let pre_task = storage
+        .get(&parent_sid.0)
+        .await
+        .expect("get pre-step root")
+        .expect("root present")
+        .current_task_id;
+    let pre_ctx = serde_json::to_vec(
+        &storage
+            .get(&parent_sid.0)
+            .await
+            .expect("get pre-step root")
+            .expect("root present")
+            .context,
+    )
+    .expect("serialize pre-step context");
+
+    let err = engine
+        .run_step(&parent_sid)
+        .await
+        .expect_err("stale child must fail the deterministic step");
+    assert!(
+        matches!(
+            err,
+            nexus_orchestration::engine::EngineError::RevisionMismatch { .. }
+        ),
+        "expected RevisionMismatch, got {err:?}"
+    );
+
+    // Deterministic (no external effect): the root is restored to the
+    // pre-step position (root revision unchanged → CAS-fenced restore).
+    let after = storage
+        .get(&parent_sid.0)
+        .await
+        .expect("get post-failure root")
+        .expect("root present");
+    assert_eq!(
+        after.current_task_id, pre_task,
+        "deterministic step restored to pre-step position"
+    );
+    let after_ctx = serde_json::to_vec(&after.context).expect("serialize post-failure context");
+    assert_eq!(pre_ctx, after_ctx, "deterministic step context restored");
+    let advanced: Option<bool> = after.context.get("advanced").await;
+    assert_eq!(
+        advanced, None,
+        "context marker set during the failed deterministic step restored away"
+    );
+}
+
+// Important 4: a recovered parent drives its existing inner child — the
+// InnerGraphTask reattaches the persisted child (no duplicate row, cursor
+// intact) and resumes it to completion.
+#[tokio::test]
+async fn recovered_parent_drives_existing_inner_child() {
+    let db = tempfile::NamedTempFile::new().unwrap();
+    let parent_sid;
+    let existing_child_sid;
+
+    {
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool (first)");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations (first)");
+        let (_storage, engine) = fresh_engine(Arc::new(pool)).await;
+
+        let inner_graph = Arc::new(graph_flow::Graph::new("ig"));
+        inner_graph.add_task(Arc::new(EndTask));
+        let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
+        let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
+            Arc::new(engine.clone()),
+            inner_graph,
+            "parent_state",
+            "_session_id",
+            None,
+        );
+        parent_graph.add_task(Arc::new(inner_task));
+
+        parent_sid = engine
+            .start_session("novel-writing", parent_graph)
+            .await
+            .expect("start parent");
+
+        // Spawn the child and leave it Running (non-terminal) so recovery can
+        // attach it. Do NOT step it yet.
+        let ig = Arc::new(graph_flow::Graph::new("ig"));
+        ig.add_task(Arc::new(EndTask));
+        let params = nexus_orchestration::ChildSessionParams {
+            parent_session_id: parent_sid.0.clone(),
+            inner_graph: ig,
+            initial_context: graph_flow::Context::new(),
+        };
+        existing_child_sid = engine
+            .spawn_child_session(params)
+            .await
+            .expect("spawn child");
+
+        // Leave the child Running (never stepped). The in-memory children map
+        // holds it, but we discard the engine below (restart).
+    } // pool drops — simulates daemon shutdown
+
+    {
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool (second)");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations (second)");
+        let (storage, engine) = fresh_engine(Arc::new(pool)).await;
+
+        // Hydrate the children map from persisted child rows (the recovery
+        // step that finding 4 relies on) for the Running parent.
+        engine
+            .shared_state()
+            .hydrate_children(&parent_sid)
+            .await
+            .expect("hydrate children map");
+
+        // Install the parent's FlowRunner over the custom InnerGraphTask graph
+        // (mirroring what a restarting daemon does for this supported parent).
+        let inner_graph = Arc::new(graph_flow::Graph::new("ig"));
+        inner_graph.add_task(Arc::new(EndTask));
+        let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
+        let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
+            Arc::new(engine.clone()),
+            inner_graph,
+            "parent_state",
+            "_session_id",
+            None,
+        );
+        parent_graph.add_task(Arc::new(inner_task));
+        let shared_state = engine.shared_state();
+        shared_state.runners.write().await.insert(
+            parent_sid.0.clone(),
+            std::sync::Arc::new(graph_flow::FlowRunner::new(
+                parent_graph,
+                storage.clone() as Arc<dyn SessionStorage>,
+            )),
+        );
+
+        // Run the parent step — the InnerGraphTask must REATTACH the existing
+        // Running child (not spawn a duplicate) and drive it to completion.
+        let outcome = engine
+            .run_step(&parent_sid)
+            .await
+            .expect("run_step parent drives existing child");
+        assert!(
+            matches!(
+                outcome,
+                nexus_orchestration::engine::StepOutcome::Paused { .. }
+            ),
+            "expected Paused, got {outcome:?}"
+        );
+
+        // Exactly ONE child row must exist, and it must be the SAME child we
+        // spawned before restart (no duplicate row created).
+        let children = storage
+            .load_children(&parent_sid)
+            .await
+            .expect("load_children");
+        assert_eq!(children.len(), 1, "no duplicate child row");
+        assert_eq!(
+            children[0].session_id.0, existing_child_sid.0,
+            "recovered parent must drive the existing child, not a new one"
+        );
+        assert_eq!(
+            children[0].status,
+            SessionStatus::Completed,
+            "existing child driven to completion"
+        );
+    }
+}
+
+// Important 5: directory-preset frozen-source reconstruction — a run admitted
+// from a directory preset reconstructs against the persisted root and version
+// (not the current embedded bytes), and a changed source is
+// reconstruction_unavailable (non-replayable).
+#[tokio::test]
+async fn directory_preset_frozen_source_reconstruction() {
+    use std::fs;
+
+    let db = tempfile::NamedTempFile::new().unwrap();
+    let parent_sid;
+    let nexus_home_dir = tempfile::tempdir().unwrap();
+    let bundle_dir = nexus_home_dir.path().join("presets").join("dir-preset");
+
+    // Build the directory preset bundle.
+    fs::create_dir_all(&bundle_dir).unwrap();
+    let initial_yaml = r#"
+preset:
+  id: dir-preset
+  version: 11
+  kind: creator
+  description: "directory frozen source"
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+"#;
+    fs::write(bundle_dir.join("preset.yaml"), initial_yaml).unwrap();
+
+    {
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool (first)");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations (first)");
+        let storage = Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
+        let storage_arc: Arc<dyn SessionStorage> = storage.clone();
+        let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage_arc,
+            workflow_store,
+            caps,
+        );
+        engine.set_nexus_home(nexus_home_dir.path().to_path_buf());
+
+        // Start a session for the directory preset — the descriptor freezes
+        // the Directory source + version 11.
+        let graph = Arc::new(graph_flow::Graph::new("test-graph"));
+        graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        parent_sid = engine
+            .start_session("dir-preset", graph)
+            .await
+            .expect("start directory-preset session");
+
+        let record = storage
+            .load_run(&parent_sid)
+            .await
+            .expect("load_run")
+            .expect("run present");
+        let descriptor = record.descriptor.expect("descriptor present");
+        assert_eq!(descriptor.preset_version, 11);
+        assert!(
+            matches!(descriptor.source, PresetSourceIdentity::Directory { .. }),
+            "descriptor must freeze Directory source"
+        );
+    }
+
+    {
+        // Second engine: recover the parent. Frozen-source reconstruction must
+        // resolve the directory preset at the persisted root, verify the
+        // hash/version, and reconstruct a runner.
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool (second)");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations (second)");
+        let storage = Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
+        let storage_arc: Arc<dyn SessionStorage> = storage.clone();
+        let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage_arc,
+            workflow_store,
+            caps,
+        );
+        engine.set_nexus_home(nexus_home_dir.path().to_path_buf());
+
+        let summary = nexus_orchestration::engine::SessionSummary {
+            session_id: parent_sid.clone(),
+            creator_id: String::new(),
+            preset_id: "dir-preset".to_string(),
+            status: SessionStatus::Paused,
+            current_task_id: Some("a".to_string()),
+        };
+        // Reset the runner map so reconstruction actually runs.
+        engine
+            .shared_state()
+            .runners
+            .write()
+            .await
+            .clear();
+        engine.recover_sessions(vec![summary]).await;
+
+        assert!(
+            engine.has_runner(&parent_sid).await,
+            "directory preset must reconstruct a runner from the frozen source"
+        );
+    }
+
+    {
+        // Third engine: change the directory preset content (version bump)
+        // → the frozen source hash/version no longer matches → reconstruction
+        // is unavailable (non-replayable), not a fallback to current bytes.
+        let changed_yaml = initial_yaml.replace("version: 11", "version: 99");
+        fs::write(bundle_dir.join("preset.yaml"), changed_yaml).unwrap();
+
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool (third)");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations (third)");
+        let storage = Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
+        let storage_arc: Arc<dyn SessionStorage> = storage.clone();
+        let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage_arc,
+            workflow_store,
+            caps,
+        );
+        engine.set_nexus_home(nexus_home_dir.path().to_path_buf());
+
+        let summary = nexus_orchestration::engine::SessionSummary {
+            session_id: parent_sid.clone(),
+            creator_id: String::new(),
+            preset_id: "dir-preset".to_string(),
+            status: SessionStatus::Paused,
+            current_task_id: Some("a".to_string()),
+        };
+        engine.recover_sessions(vec![summary]).await;
+
+        assert!(
+            !engine.has_runner(&parent_sid).await,
+            "changed directory preset source must be reconstruction_unavailable (non-replayable)"
+        );
+    }
+}
+
+// Important 6: a negative/unknown v1 state_revision is non-replayable —
+// never silently coerced to zero.
+#[tokio::test]
+async fn negative_v1_revision_is_non_replayable() {
+    let (pool, _db) = fresh_pool().await;
+    let storage = SqliteSessionStorage::new(pool.clone());
+
+    // Seed a v1 row with a negative state_revision.
+    let descriptor = test_descriptor("sess-v1-negrev");
+    let descriptor_bytes = serde_json::to_vec(&descriptor).expect("serialize descriptor");
+    let state_bytes = serde_json::to_vec(&RunStateV1::default()).expect("serialize state");
+    sqlx::query(
+        "INSERT INTO orchestration_sessions
+            (session_id, creator_id, preset_id, preset_version, status,
+             current_task_id, context_json, created_at, updated_at,
+             execution_version, state_revision, run_state_json, run_descriptor_json)
+         VALUES ('sess-v1-negrev', 'ctr_t', 'test-preset', 3, 'running', 'task_a',
+                 '{\"data\":{}}', 1756990000, 1756990300,
+                 1, -9, ?, ?)",
+    )
+    .bind(state_bytes)
+    .bind(descriptor_bytes)
+    .execute(&*pool)
+    .await
+    .expect("seed v1 row with negative revision");
+
+    let err = storage
+        .load_run(&SessionId("sess-v1-negrev".to_string()))
+        .await
+        .expect_err("negative v1 revision must be non-replayable");
+    assert!(
+        matches!(
+            err,
+            nexus_orchestration::engine::EngineError::GraphFlow(_)
+        ),
+        "expected GraphFlow error for negative v1 revision, got {err:?}"
+    );
+
+    // The row must be preserved verbatim.
+    let raw: i64 = sqlx::query_scalar(
+        "SELECT state_revision FROM orchestration_sessions WHERE session_id = 'sess-v1-negrev'",
+    )
+    .fetch_one(&*pool)
+    .await
+    .expect("read raw revision");
+    assert_eq!(raw, -9, "row preserved verbatim");
+}
+
+// Important 6: child terminal-at-expected CAS compares the submitted child
+// checkpoint status — a stale Running checkpoint must NOT let a parent commit
+// Completed when the child is Failed/Cancelled at that revision.
+#[tokio::test]
+async fn child_terminal_status_mismatch_rejects_confirmation() {
+    let (pool, _db) = fresh_pool().await;
+    let storage = SqliteSessionStorage::new(pool.clone());
+    let session_id = SessionId("sess-child-mismatch".to_string());
+
+    // Start a root run with a child at revision 0.
+    let descriptor = test_descriptor(&session_id.0);
+    let root = root_session(&session_id.0, "parent_task").await;
+    let child = child_checkpoint("sess-child-mismatch:child:1", "child_task").await;
+    let checkpoint = RunCheckpoint {
+        root: &root,
+        children: &[child],
+    };
+    storage
+        .start_run(&session_id, &descriptor, checkpoint, &RunStateV1::default())
+        .await
+        .expect("start_run with child");
+
+    // Mark the child FAILED at the SAME revision 0. The parent submits a
+    // Running checkpoint — confirmation must FAIL (mismatch), never let the
+    // parent commit as if the child completed.
+    sqlx::query(
+        "UPDATE orchestration_sessions SET status = 'failed'
+         WHERE session_id = 'sess-child-mismatch:child:1'",
+    )
+    .execute(&*pool)
+    .await
+    .expect("mark child failed");
+
+    let root2 = root_session(&session_id.0, "parent_task2").await;
+    let child2 = child_checkpoint("sess-child-mismatch:child:1", "child_task2").await;
+    let checkpoint2 = RunCheckpoint {
+        root: &root2,
+        children: &[child2],
+    };
+    let err = storage
+        .commit_transition(
+            &session_id,
+            1,
+            checkpoint2,
+            SessionStatus::Completed,
+            &RunStateV1::default(),
+        )
+        .await
+        .expect_err("terminal child status mismatch must reject the parent's Completed commit");
+
+    assert!(
+        matches!(
+            err,
+            nexus_orchestration::engine::EngineError::GraphFlow(_)
+        ),
+        "expected GraphFlow mismatch error, got {err:?}"
+    );
+
+    // The parent must NOT have committed Completed (root unchanged).
+    let root_after = storage
+        .load_run(&session_id)
+        .await
+        .expect("load_run")
+        .expect("root present");
+    assert_ne!(root_after.status, SessionStatus::Completed);
+    assert_eq!(root_after.state_revision, 1, "root not advanced");
 }

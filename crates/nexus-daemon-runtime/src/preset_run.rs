@@ -478,6 +478,14 @@ mod tests {
             unreachable!("not used by driver unit tests")
         }
 
+        async fn attach_existing_child_session(
+            &self,
+            _: &str,
+            _: Arc<graph_flow::Graph>,
+        ) -> Option<SessionId> {
+            unreachable!("not used by driver unit tests")
+        }
+
         async fn get_context(
             &self,
             _session_id: &SessionId,
