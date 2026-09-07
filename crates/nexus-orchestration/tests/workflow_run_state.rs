@@ -977,6 +977,19 @@ async fn child_identity_and_revision_fence() {
         .await
         .expect("start_run with child");
 
+    let boot_roots = storage
+        .list_non_terminal_sessions()
+        .await
+        .expect("list boot roots");
+    assert_eq!(
+        boot_roots
+            .iter()
+            .map(|summary| summary.session_id.0.as_str())
+            .collect::<Vec<_>>(),
+        vec!["sess-child-fix"],
+        "boot reconstruction lists parents only; child rows attach through their parent"
+    );
+
     // Child identity must be reconstructible (not "unknown"/"default").
     let child_record = storage
         .load_run(&SessionId("sess-child-fix:child:1".to_string()))
@@ -2042,12 +2055,14 @@ async fn engine_nested_child_runs_to_completion_then_parent_commits() {
     let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
     let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
         Arc::new(engine.clone()),
-        inner_graph,
+        inner_graph.clone(),
         "parent_state",
         "_session_id",
         None,
     );
     parent_graph.add_task(Arc::new(inner_task));
+    parent_graph.add_task(Arc::new(EndTask));
+    parent_graph.add_edge("parent_state", "end_task");
 
     let parent_sid = engine
         .start_session("novel-writing", parent_graph)
@@ -2096,6 +2111,20 @@ async fn engine_nested_child_runs_to_completion_then_parent_commits() {
     assert!(
         children[0].state_revision >= 2,
         "child revision advanced past the initial 1"
+    );
+
+    engine
+        .shared_state()
+        .hydrate_children(&parent_sid)
+        .await
+        .expect("rehydrate after parent advanced");
+    assert!(
+        engine
+            .shared_state()
+            .attach_existing_child_session_internal(&parent_sid.0, inner_graph)
+            .await
+            .is_none(),
+        "a later entry into the same inner graph must not reuse the retired terminal child"
     );
 }
 

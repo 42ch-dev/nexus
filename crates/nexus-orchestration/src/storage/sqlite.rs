@@ -77,12 +77,11 @@ impl SqliteSessionStorage {
             current_task_id: Option<String>,
         }
 
-        let rows = sqlx::query_as!(
-            SummaryRow,
-            r#"SELECT session_id as "session_id!", creator_id as "creator_id!",
-                      preset_id as "preset_id!", status as "status!", current_task_id
-               FROM orchestration_sessions
-               WHERE status IN ('running', 'paused', 'waiting_for_input')"#
+        let rows = sqlx::query_as::<_, SummaryRow>(
+            "SELECT session_id, creator_id, preset_id, status, current_task_id
+             FROM orchestration_sessions
+             WHERE parent_session_id IS NULL
+               AND status IN ('running', 'paused', 'waiting_for_input')",
         )
         .fetch_all(&*self.pool)
         .await

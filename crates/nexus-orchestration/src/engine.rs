@@ -487,8 +487,32 @@ impl EngineSharedState {
                 return Err(e);
             }
         };
+        let parent = self
+            .storage
+            .get(&parent_session_id.0)
+            .await
+            .map_err(EngineError::GraphFlow)?
+            .ok_or_else(|| EngineError::SessionNotFound(parent_session_id.0.clone()))?;
+        let active_terminal_children: Vec<String> = serde_json::to_value(&parent.context)
+            .ok()
+            .as_ref()
+            .and_then(crate::resume_rules::context_data)
+            .map(|data| {
+                data.iter()
+                    .filter(|(key, _)| key.starts_with("_inner_child_session_"))
+                    .filter_map(|(_, value)| value.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default();
         let mut checkpoints = Vec::with_capacity(children.len());
         for child in &children {
+            if child.status.is_terminal()
+                && !active_terminal_children
+                    .iter()
+                    .any(|id| id == &child.session_id.0)
+            {
+                continue;
+            }
             // A child whose session snapshot cannot be read from storage is
             // corrupt: propagate rather than silently skip it (Important 1).
             let child_session = match self
@@ -865,6 +889,19 @@ impl EngineSharedState {
                     .get(&session_id.0)
                     .cloned()
                     .unwrap_or_default();
+                let parent_advanced = pre_step_root.as_ref().is_some_and(|pre| {
+                    pre.current_task_id != root.current_task_id
+                });
+                if parent_advanced && children.iter().any(|child| child.status.is_terminal()) {
+                    if let Some(pre) = &pre_step_root {
+                        root.context
+                            .set(
+                                format!("_inner_child_session_{}", pre.current_task_id),
+                                serde_json::Value::Null,
+                            )
+                            .await;
+                    }
+                }
                 let checkpoint = RunCheckpoint {
                     root: &root,
                     children: &children,
@@ -883,13 +920,17 @@ impl EngineSharedState {
                     .await;
                 match commit_result {
                     Ok(_) => {
-                        // The step checkpoint committed successfully. For an
-                        // intermediate Paused/WaitingForInput boundary the
-                        // marker was cleared from the persisted context above
-                        // (the terminal/Completed/Failed outcome ends the run,
-                        // so no leak is possible). No further marker cleanup is
-                        // needed — the context persisted by commit_transition
-                        // no longer carries the stale marker.
+                        if parent_advanced
+                            && children.iter().any(|child| child.status.is_terminal())
+                        {
+                            let mut child_map = self.children.write().await;
+                            if let Some(entries) = child_map.get_mut(&session_id.0) {
+                                entries.retain(|child| !child.status.is_terminal());
+                                if entries.is_empty() {
+                                    child_map.remove(&session_id.0);
+                                }
+                            }
+                        }
                     }
                     Err(commit_err) => {
                         if had_effect {
@@ -1141,6 +1182,14 @@ impl EngineSharedState {
             let runner = Arc::new(FlowRunner::new(inner_graph, self.storage.clone()));
             self.runners.write().await.insert(child_id.clone(), runner);
         }
+        let (parent_creator_id, parent_preset_id) = self
+            .sessions
+            .read()
+            .await
+            .iter()
+            .find(|summary| summary.session_id.0 == parent_session_id)
+            .map(|summary| (summary.creator_id.clone(), summary.preset_id.clone()))
+            .unwrap_or_default();
         // Register the reattached child in the in-memory session tracker so
         // `get_status`/`InnerGraphTask` can observe its durable status
         // (terminal children are attached and consumed, never re-stepped —
@@ -1150,8 +1199,8 @@ impl EngineSharedState {
             if !sessions.iter().any(|s| s.session_id.0 == child_id) {
                 sessions.push(SessionSummary {
                     session_id: SessionId(child_id.clone()),
-                    creator_id: String::new(),
-                    preset_id: parent_session_id.to_string(),
+                    creator_id: parent_creator_id,
+                    preset_id: parent_preset_id,
                     status: child_status,
                     current_task_id: Some(child_task),
                 });
