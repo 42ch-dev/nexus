@@ -260,7 +260,7 @@ impl SessionStorage for SqliteSessionStorage {
                 current_task_id = excluded.current_task_id,
                 context_json     = excluded.context_json,
                 updated_at       = excluded.updated_at
-            WHERE orchestration_sessions.status = 'running'
+            WHERE orchestration_sessions.status IN ('running', 'paused')
             "#,
             session_id,
             creator_id,
@@ -1390,6 +1390,98 @@ mod tests {
 
         let loaded = storage.get("sess-upsert").await.unwrap().unwrap();
         assert_eq!(loaded.current_task_id, "task-b");
+    }
+
+    #[tokio::test]
+    async fn save_persists_task_context_on_paused_row() {
+        let (pool, _db) = fresh_pool().await;
+        let storage = SqliteSessionStorage::new(pool.clone());
+
+        // A paused row is the A2 scheduler-park shape that the reopen
+        // resume re-drive re-steps. The graph-flow post-step `save` seam
+        // must persist the task's in-memory context mutations (the
+        // `_gate_park_*` marker) for a paused row too — otherwise the
+        // engine's post-step re-fetch reads a marker-less stale context and
+        // misclassifies the re-park as a human wait.
+        let session = Session::new_from_task("sess-paused-save".into(), "join");
+        seed_row(
+            &pool,
+            "sess-paused-save",
+            "paused",
+            Some("join"),
+            &serde_json::to_vec(&session.context).expect("serialize seed context"),
+        )
+        .await;
+        storage.save(session.clone()).await.expect("insert paused row");
+        let mut session = storage
+            .get("sess-paused-save")
+            .await
+            .expect("load paused row")
+            .expect("row exists");
+        session.context.set_sync("_gate_park_join", true);
+        session.current_task_id = "join".to_string();
+        storage.save(session).await.expect("save mutated paused row");
+
+        let persisted = storage
+            .get("sess-paused-save")
+            .await
+            .expect("reload after save")
+            .expect("row exists");
+        assert_eq!(
+            persisted.current_task_id, "join",
+            "position update must persist on a paused row"
+        );
+        assert_eq!(
+            persisted.context.get_sync::<bool>("_gate_park_join"),
+            Some(true),
+            "task context mutations must persist on a paused row (the \
+             reopen-resume post-step save seam)"
+        );
+    }
+
+    #[tokio::test]
+    async fn save_fence_still_excludes_waiting_for_input() {
+        let (pool, _db) = fresh_pool().await;
+        let storage = SqliteSessionStorage::new(pool.clone());
+
+        // A4: a durable human-wait row (waiting_for_input + token) must
+        // never be overwritten by the graph-flow post-step save seam — a
+        // stale step invocation cannot clear or replace the WaitRecord.
+        let session = Session::new_from_task("sess-wait-fence".into(), "wait_state");
+        seed_row(
+            &pool,
+            "sess-wait-fence",
+            "waiting_for_input",
+            Some("wait_state"),
+            &serde_json::to_vec(&session.context).expect("serialize seed context"),
+        )
+        .await;
+        storage.save(session.clone()).await.expect("insert wait row");
+        let mut session = storage
+            .get("sess-wait-fence")
+            .await
+            .expect("load wait row")
+            .expect("row exists");
+        session.context.set_sync("_gate_park_wait_state", true);
+        session.current_task_id = "other_state".to_string();
+        storage.save(session).await.expect("save must not error");
+
+        let persisted = storage
+            .get("sess-wait-fence")
+            .await
+            .expect("reload after save")
+            .expect("row exists");
+        assert_eq!(
+            persisted.current_task_id, "wait_state",
+            "the save seam must not move a waiting_for_input row (A4)"
+        );
+        assert!(
+            persisted
+                .context
+                .get_sync::<bool>("_gate_park_wait_state")
+                .is_none(),
+            "the save seam must not write context onto a waiting_for_input row"
+        );
     }
 
     /// Seed a raw `orchestration_sessions` row (test-only DML).
