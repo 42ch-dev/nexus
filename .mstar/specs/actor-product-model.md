@@ -1,8 +1,8 @@
 # Actor Product Model
 
-> **Status:** Draft overlay (2026-09-04 user product lock; **honesty amended 2026-09-06**). **v1.184 shipped** the Character bearer, ActorWorldBinding, three KE owner scopes, Character KnowledgeView, one-host Character execution, Character SOUL/Memory, and ToM L1/L2 (PR [#240](https://github.com/42ch-dev/nexus/pull/240)). **v1.185 maintenance is not shipped:** identity edit, reversible archive/restore, post-create WorldSheet maintenance, KE content/detail/edit/delete, and run-connected `--remember`. Product vocabulary herein remains authoritative. This file is **not** a second wire/API SSOT for local implementation snapshots.
+> **Status:** Draft overlay (2026-09-04 user product lock; **honesty amended 2026-09-06**). **v1.184 shipped** the Character bearer, ActorWorldBinding, three KE owner scopes, Character KnowledgeView, one-host Character execution, Character SOUL/Memory, and ToM L1/L2 (PR [#240](https://github.com/42ch-dev/nexus/pull/240)). **v1.185 shipped** (PR [#241](https://github.com/42ch-dev/nexus/pull/241)): identity edit, reversible archive/restore, post-create WorldSheet maintenance, KE content/detail/edit/delete, and run-connected `--remember`. Product vocabulary herein remains authoritative. This file is **not** a second wire/API SSOT for local implementation snapshots.
 > **Document class:** Draft overlay (product-model SSOT; user-locked product semantics, authoritative for planning)
-> **Scope:** `ActorRef` (`Creator | Character`) with per-kind bearers; Creator operational ownership; Character SOUL/Memory/ToM/image; ActorWorldBinding (1..n per active Character, atomic initial binding); WorldSheet distinction; KnowledgeEntry canonical ownership and read views (Creator omniscient read, Character KnowledgeView); one-Agent-Host execution with session isolation; Viewpoint; current-vs-planned migration contract; proposed v1.185 developer maintenance (§11); non-goals.
+> **Scope:** `ActorRef` (`Creator | Character`) with per-kind bearers; Creator operational ownership; Character SOUL/Memory/ToM/image; ActorWorldBinding (1..n per active Character, atomic initial binding); WorldSheet distinction; KnowledgeEntry canonical ownership and read views (Creator omniscient read, Character KnowledgeView); one-Agent-Host execution with session isolation; Viewpoint; current-vs-planned migration contract; shipped v1.185 developer maintenance (§11); non-goals.
 > **Coordinates with:** [entity-scope-model.md](entity-scope-model.md) (shipped KE taxonomy + scope hierarchy), [agent-host.md](agent-host.md) and [acp-client-tech-spec.md](acp-client-tech-spec.md) (the one host plane; ACP sessions), [creator-workflow.md](creator-workflow.md) and [creator-memory-soul-lifecycle.md](creator-memory-soul-lifecycle.md) (shipped Creator SOUL/Memory bearer), [spoke-adapter-architecture.md](spoke-adapter-architecture.md) (V1.164–V1.166 l5 MindState/belief/observation carriers; moment context assembly), [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md), [world-membership.schema.json](../../schemas/domain/world-membership.schema.json) (shipped Creator↔World aggregate), repo-root [STRATEGY.md](../../STRATEGY.md) + [CONCEPTS.md](../../CONCEPTS.md).
 
 ## 0. Document position
@@ -11,7 +11,7 @@ This file is the **durable trackable spec-path authority (SSOT) for the Actor mo
 
 **Supersession.** This lock supersedes the same-day (2026-09-04) Viewpoint-as-identity direction, which encoded Viewpoint as identity and Character as an existing World-scoped `KnowledgeEntry(block_type=character)`. That direction was rejected: a Character is a durable first-class identity, not lore. Viewpoint is demoted to subordinate execution context (§7).
 
-**Honesty invariant.** Product vocabulary in this file is accepted direction. **v1.184 shipped** stages 1–6 of §10 (identity, binding, view, execution, memory, ToM). Cite generated schemas and Daemon API for wire facts; do not treat this overlay as a dump of local handlers. **v1.185** behavior in §11 is proposed and **not shipped**. Missing edit/archive/content/`--remember` verbs are maintenance gaps, not proof that no Actor storage exists.
+**Honesty invariant.** Product vocabulary in this file is accepted direction. **v1.184 shipped** stages 1–6 of §10 (identity, binding, view, execution, memory, ToM). Cite generated schemas and Daemon API for wire facts; do not treat this overlay as a dump of local handlers. **v1.185** behavior in §11 (identity edit, reversible freeze, WorldSheet maintenance, KE content maintenance, run-connected `--remember`) is **shipped** (PR #241). The pre-v1.185 absence of edit/archive/content/`--remember` verbs was a maintenance gap, not proof that no Actor storage exists.
 
 ## 1. Product thesis
 
@@ -30,7 +30,7 @@ Each Actor kind has its **own bearer** — the storage/identity aggregate that c
 | Actor kind | Bearer | Status |
 | --- | --- | --- |
 | `Creator` | The shipped `creator_id` identity aggregate — author profile, preferences, SOUL + Memory stores | Shipped; unchanged (not re-keyed) |
-| `Character` | A durable, Creator-owned Character record carrying its own SOUL, Memory, ToM, and image/persona assets — **not** a World KB row | **Shipped v1.184** (create/list/detail, memory, ToM, run). Identity edit and reversible archive/restore are **v1.185, not shipped** |
+| `Character` | A durable, Creator-owned Character record carrying its own SOUL, Memory, ToM, and image/persona assets — **not** a World KB row | **Shipped v1.184** (create/list/detail, memory, ToM, run). Identity edit and reversible archive/restore are **shipped v1.185** |
 
 ### 2.1 Identity axes — keep these separate
 
@@ -69,7 +69,7 @@ The second Actor kind: a durable, **Creator-owned** narrative identity that **li
 A Character associates with Worlds **only** through explicit **ActorWorldBinding** records.
 
 - Cardinality is exactly **one-or-more**: an active Character has **1..n** bindings, each to exactly one World.
-- **Character creation establishes an initial ActorWorldBinding atomically.** An active Character never has zero active bindings. **Removing the last active binding fails** (no mutation). Transitioning a Character out of active state is the **v1.185 reversible freeze** (§11) — never an implicit effect of last-binding removal, and never an active orphan. That freeze is **not shipped**.
+- **Character creation establishes an initial ActorWorldBinding atomically.** An active Character never has zero active bindings. **Removing the last active binding fails** (no mutation). Transitioning a Character out of active state is the **v1.185 reversible freeze** (§11) — never an implicit effect of last-binding removal, and never an active orphan. That freeze is **shipped v1.185**.
 - A binding carries the **binding-local isolated** Character KE scope (§5.1) and may link optional WorldSheets (§4.3).
 - **Naming:** `WorldMembership` is reserved for the shipped Creator↔World aggregate and MUST NOT name Character↔World — ActorWorldBinding is the only Character↔World term.
 
@@ -90,8 +90,8 @@ KnowledgeEntry stays **one primitive**, and each entry has **exactly one canonic
 | Owner scope | Semantics | Status |
 | --- | --- | --- |
 | **World-owned** | World-local truth | Shipped — pre-Actor default; every World KB entry is World-owned |
-| **Character-owned** | Lives in the Character knowledge space; **explicitly shared** by owner scope — visible in every active binding of that Character **without copying** (no separate mount join) | **Shipped v1.184** (owner-scoped add without content body, Character list, composed view). Content/detail/edit/delete are **v1.185, not shipped** |
-| **ActorWorldBinding-owned** (binding-local) | Belongs to one binding; **isolated** from the Character's other Worlds — private to that World life | **Shipped v1.184** as an owner scope; content maintenance is **v1.185, not shipped** |
+| **Character-owned** | Lives in the Character knowledge space; **explicitly shared** by owner scope — visible in every active binding of that Character **without copying** (no separate mount join) | **Shipped v1.184** (owner-scoped add without content body, Character list, composed view). Content/detail/edit/delete are **shipped v1.185** |
+| **ActorWorldBinding-owned** (binding-local) | Belongs to one binding; **isolated** from the Character's other Worlds — private to that World life | **Shipped v1.184** as an owner scope; content maintenance is **shipped v1.185** |
 
 Cross-World sharing is always explicit — it never implicitly copies all World facts or memories.
 
@@ -124,13 +124,13 @@ KnowledgeView(Character, Binding) =
 
 **Viewpoint** is subordinate **execution context** paired with an `ActorRef` — logically `{world_id, optional binding_id/branch_id/event_id}` — describing *from where* that Actor acts or reads within a session. Character execution requires the binding id; Creator execution omits it. Viewpoint does not repeat an actor id, is **not** identity, is **not** an Actor kind, and is **not** the name of any Character↔World association. The earlier Viewpoint-as-identity direction is superseded (§0).
 
-## 8. Current vs planned (migration contract)
+## 8. Current vs shipped (migration contract)
 
-| Area | Shipped today (current) | Planned under this model (target) | Migration rule |
+| Area | Shipped today (current) | Shipped v1.185 (§11) | Migration rule |
 | --- | --- | --- | --- |
 | Creator identity & storage | `creator_id` aggregate; SOUL/Memory stores; `WorldMembership` (Creator↔World) | Unchanged; the aggregate is the Creator kind's bearer | Existing tables and `creator_id` FKs are **not re-keyed**; no unified actors table |
 | Creator execution | Runs with no Character concept | Unchanged when no Character is bound | Byte-stable Creator-only path |
-| Character identity | Durable Character bearer: create/list/detail; SOUL/Memory/ToM; image/persona metadata on create (v1.184) | Identity edit + reversible archive/restore (v1.185, §11) | Additive public verbs on the existing bearer; same `character_id`; **not shipped** |
+| Character identity | Durable Character bearer: create/list/detail; SOUL/Memory/ToM; image/persona metadata on create (v1.184) | Identity edit + reversible archive/restore (shipped v1.185, §11) | Additive public verbs on the existing bearer; same `character_id`; **shipped v1.185** |
 | Character↔World association | ActorWorldBinding add/list/remove; atomic initial binding; last-active-binding `409`; optional WorldSheet at create/add (v1.184) | Post-create WorldSheet set/change/clear (v1.185) | `WorldMembership` stays Creator↔World only; relink does not reparent |
 | World character lore | `KnowledgeEntry(block_type=character)` rows, World-owned WorldSheets, optionally linked from bindings | Unchanged lore axis | Existing rows stay WorldSheets; binding links are explicit; **no silent migration** |
 | KE ownership | Three owner scopes on one primitive: World \| Character \| ActorWorldBinding (v1.184). Add currently has no content body | Content/detail/edit/explicit delete with immutable owners (v1.185) | Existing World-owned rows remain World-owned; no owner transfer |
@@ -147,7 +147,7 @@ KnowledgeView(Character, Binding) =
 - An active Character stored with zero active bindings; last-active-binding removal that mutates state or implicitly archives/deletes the Character; any fallback to the Creator/god context or a default ACP session when a binding or view is missing/invalid.
 - ToM L3, or replacing the V1.164–V1.166 l5 carriers with a new ToM engine.
 - A first-party player (PD-09 unchanged) or any new consumption end.
-- Treating missing v1.185 maintenance verbs (edit, archive, KE content, `--remember`) as proof that the v1.184 public Actor API does not exist.
+- Treating the **pre-v1.185** absence of maintenance verbs (edit, archive, KE content, `--remember`) as proof that the v1.184 public Actor API does not exist.
 
 ## 10. Staged roadmap (durable direction)
 
@@ -161,11 +161,11 @@ Dependency-ordered stages; each stage lands only on top of a working product. Ex
 6. **Character ToM L1+L2** on the V1.164–V1.166 l5 carriers — **shipped v1.184.**
 7. **Canvas persona surface** — image, SOUL summary, bindings; after stage 1 plus observed need. (Dep: 1.) **Not scheduled in v1.185.**
 8. **Visibility/interoperability dialect evaluation** — trigger-gated and spec-only. **Not scheduled in v1.185.**
-9. **Developer maintenance loop (v1.185, not shipped)** — identity edit; reversible freeze; WorldSheet maintenance; KE content maintenance; explicit `--remember`. See §11.
+9. **Developer maintenance loop (shipped v1.185)** — identity edit; reversible freeze; WorldSheet maintenance; KE content maintenance; explicit `--remember`. See §11.
 
-## 11. Developer maintenance contract (v1.185; not shipped)
+## 11. Developer maintenance contract (shipped v1.185)
 
-**Planning authority, not delivery status.** The user selected a four-plan developer API/CLI loop, reversible freeze and explicit `--remember`; no UI. The following architecture decisions resolve that scope against the shipped bearer, SQLite store and HostFacade. They require the normal specialist chain and PM implementation lock. JSON Schemas remain the executable wire SSOT; names below designate the schemas to implement, not already available endpoints.
+**Delivery status, not planning authority.** The user selected a four-plan developer API/CLI loop, reversible freeze and explicit `--remember`; no UI. The following architecture decisions resolve that scope against the shipped bearer, SQLite store and HostFacade; they shipped in v1.185 (PR #241). JSON Schemas remain the executable wire SSOT; names below designate the shipped v1.185 schemas and endpoints, not placeholder proposals.
 
 ### 11.1 Common authority, concurrency and errors
 

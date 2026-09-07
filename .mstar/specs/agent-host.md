@@ -4,7 +4,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — current route, provider, worker, and ACP boundaries reconciled through V1.183 |
+| **Status** | Normative — current route, provider, worker, and ACP boundaries reconciled through V1.183; **V1.186 product lock (Prepare, not shipped)** — orchestration uses HostFacade; config ACP providers are production registrations |
 | **Document class** | Master |
 | **Normative scope** | Host boundaries, provider model, capability contract, security/supervision invariants |
 | **Related** | [daemon-runtime.md](./daemon-runtime.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [acp-client-tech-spec.md](./acp-client-tech-spec.md) |
@@ -62,6 +62,40 @@ native CLI adapters, but daemon boot currently registers only installed
 `nexus42 acp-worker` children. Registry discovery or the presence of
 `providers::acp` must therefore not be presented as an in-process daemon ACP
 session that boot has registered.
+
+**V1.186 product/architecture lock (Prepare; not shipped):** orchestration uses
+the in-process `PromptExecutor` → daemon adapter → existing `HostFacade` plane
+specified in [orchestration-engine.md](orchestration-engine.md) §15. All graph
+and capability prompt consumers migrate off worker echo-success together;
+standalone Character execution stays on the same Host without new Actor IR.
+
+Configured generic ACP entries (`ProviderConfig` protocol/command/args/env)
+register **launch recipes**, not connected clients, at boot. Catalog reads
+report actual configured command/args and sanitized env keys, never secret
+values or a successful launch that did not occur. Disabled/missing providers
+refuse; registry discovery alone is not runtime availability. omp is one ACP
+agent (`omp acp`), not a native RPC protocol.
+
+Each lazy Host session owns its own SDK client, ACP session and managed child
+process. Verified typed owner metadata binds Creator, canonical workspace cwd
+and optional orchestration run ID. Same run+role may reuse a session serially;
+different runs/Creators MUST NOT share a subprocess. Launch uses the admitted
+Creator workspace, never daemon cwd or a newly selected Creator's workspace.
+A boot-global shared ACP child is forbidden. Public Host/Character admission
+must populate this owner from existing verified scope, not request assertions.
+
+Use existing `HostFacade::exec(session_id, HostOperation::Prompt { op_id,
+content })`, `cancel(op_id)` and `shutdown_session(session_id)`. Collect only
+MessageDelta output and require OpFinished/EndTurn; OpFailed, refusal, limits
+and unexpected EOF are typed failures. Cancellation reaches ACP session/cancel,
+then bounded owned process-tree termination/reap when needed; dropping a
+future or deleting a session-map entry is not teardown. Cleanup unconfirmed
+must remain visibly interrupted, not successful cancelled. Host owns transport
+handles and process identity; the daemon must not implement a second SDK client.
+Existing non-interactive permission denial remains; no new Ask UI is implied.
+
+Nexus remains ACP Client and the daemon is not an ACP Server. CLI-only
+`nexus42 acp run` remains separate from workflow execution and recovery.
 
 **Runtime rule**: `nexus-daemon-runtime` depends only on **`HostFacade` traits**, never on provider-specific crates.
 

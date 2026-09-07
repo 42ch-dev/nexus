@@ -4,7 +4,7 @@
 **Document class**: Master  
 **Pillar (V1.122)**: **Harness** — this spec is the control-strategy engine contract for the [Harness](../../STRATEGY.md) pillar (orchestration engine + agent host + capability registry + presets). Harness is the "how an author harnesses AI agents to execute creative work" pillar; the user-visible Strategy/Strategies → **Harness** product rename shipped V1.156 P3; internal identifiers remain `strategy`/`preset` (architect LOCKED).
 **Author**: @project-manager (brainstorm consolidation) / to be co-authored by @architect before first implement
-**Date**: 2026-04-17; **Last updated**: 2026-09-04 — V1.179 P2 DR-06 bounded joins reconciled (see status line)
+**Date**: 2026-04-17; **Last updated**: 2026-09-07 — V1.186 product lock (Prepare, not shipped): §15 execution completeness overlay
 **Scope**: daemon runtime (daemon), new `crates/nexus-acp-host`, new `crates/nexus-orchestration`, `nexus42` CLI additions, preset bundle format.
 **Supersedes**: — (new topic)
 **Coordinates with**:
@@ -41,6 +41,7 @@
 12. [Coordinated Work Tracks and Knowledge Doc Revisions](#12-coordinated-work-tracks-and-knowledge-doc-revisions)
 13. [Risks and Mitigations](#13-risks-and-mitigations)
 14. [References](#14-references)
+15. [V1.186 execution completeness (product lock)](#15-v1186-execution-completeness-product-lock)
 
 ---
 
@@ -56,7 +57,7 @@ Users need to express creator workflows as configurable, prompt-driven strategie
 
 - **Daemon becomes `orchestration engine + capability registry`**: existing HTTP-era capabilities (sync, workspace ops, outbox flush, registry refresh) are **reclassified as first-class capabilities** invokable as graph nodes; HTTP API retreats to a *trigger/query surface* over the same engine.
 - **Strategy shape is hierarchical**: an outer **state machine** (long-lived, cross-session) containing inner **DAG graphs** (short, in-memory prompt/tool call chains) — *graph-of-graphs*.
-- **ACP remains external, but its *execution locus* moves**: the CLI retains interactive `agent run/list/show/probe`; *orchestration-driven* ACP sessions move to **per-creator long-lived CLI worker subprocesses**. daemon runtime never links the ACP SDK directly.
+- **ACP remains external, but its *execution locus* moves**: the CLI retains interactive `agent run/list/show/probe`; *orchestration-driven* ACP sessions were originally specified as **per-creator long-lived CLI worker subprocesses**. daemon runtime never links the ACP SDK directly (SDK stays in `nexus-acp-host`). **V1.186:** production orchestration prompts use the existing HostFacade / provider plane; echoed worker prompts are not success. See §15.
 - **Runtime is `graph-flow` (outer + inner) + custom SQLite `SessionStorage`**: adapted behind a thin trait layer so the upstream `0.2.x` crate is swappable.
 - **Daemon lifecycle is `statig` HSM**: 6-state process lifecycle (`Stopped`/`Starting`/`Running`/`Degraded`/`Stopping`/`Failed`) — closes TD-9.
 - **Presets are filesystem bundles**: YAML manifest + companion Markdown prompt templates; loaded dynamically by name; decoupled from compiled Rust code.
@@ -260,6 +261,8 @@ CREATE INDEX orchestration_sessions_by_status  ON orchestration_sessions(status)
 
 **Migration path**: additive — new tables do not touch existing domain tables.
 
+**V1.186 product lock:** the `status` column is the operator-authoritative run state for terminal and wait classes, not a write-only `'running'` bookkeeping field. Preserve shipped migration bytes; any column/codegen change MUST land together. See §15.
+
 ### 4.4 Standard `Task` impls (the runtime vocabulary)
 
 Every preset node compiles into one of these Rust `Task` impls:
@@ -297,7 +300,7 @@ All impls live in `crates/nexus-orchestration/src/tasks/`. Task implementations 
 
 - **Pause** (user or Schedule): `engine.signal(session, Pause)` — flips status to `paused`; `FlowRunner` refuses to advance until `Resume`.
 - **Manual advance**: `engine.signal(session, Resume)` — returns a `NextAction::Continue` on next `run_step`.
-- **Cancel**: `engine.signal(session, Cancel)` — cascades to any child inner-graph sessions; each `Task` impl must be *cancellation-safe* (stop after the current await point; no half-committed writes).
+- **Cancel**: `engine.signal(session, Cancel)` — cascades to any child inner-graph sessions; each `Task` impl must be *cancellation-safe* (stop after the current await point; no half-committed writes). **V1.186:** cancel MUST reach active Host/ACP work; it MUST NOT advertise rollback of already committed external effects.
 - **Kill** (daemon stop): lifecycle HSM `Stopping` state sends `Cancel` to every active session before shutting the engine down.
 
 ---
@@ -408,6 +411,7 @@ The dual-outbox architecture identified in TD-8 (`dual-outbox-architecture.md`) 
 - **Supervise**: Worker Manager monitors exit status and writes to `tracing`; on unexpected exit during an active Session, the corresponding engine signal is `AcpSessionLost` — preset may have a retry path; if none, Session flips to `failed`.
 - **Graceful stop**: lifecycle HSM `Stopping` state sends a terminal IPC `shutdown` frame; worker finalises current prompt if any, closes ACP session via `cancel`, exits within 5 s; otherwise `SIGTERM` → `SIGKILL` path per `acp-client-tech-spec.md` §2.3.
 - **Crash recovery**: `daemon` restart reads `orchestration_sessions` table, finds sessions in `running` / `waiting_for_input` state that were owned by a now-dead worker, marks them `paused` with reason `worker_crash`, and exposes them to the user for manual resume (B-track may auto-resume on configured strategies).
+- **V1.186 recovery classes (supersede blanket pause-and-hope for the supported path):** (1) terminal `completed`/`failed`/`cancelled` — persist, never re-drive; (2) human `waiting_for_input` — persist, still waiting, **not** implicit approval; (3) shipped converge/merge join-key resume — keep; (4) in-flight ACP/Host — interrupted/ambiguous, **no blind retry**. Never-started schedules MUST NOT be started as a crash-recovery side effect.
 - **Boot schedule policy (V1.39 — DF-68)**: Today, boot calls `resume_running_as_paused("daemon_restart")` for all running schedules. V1.39 replaces this for **auto-chain driver schedules** tied to a Work continuation checkpoint: those schedules auto-resume when `auto_chain_enabled` and checkpoint `auto_chain_interrupted` is set. Schedules without a checkpoint remain paused. Work checkpoint fields live on `works` or an adjunct table per [creator-workflow.md](creator-workflow.md) §5.4.
 - **on_complete auto-chain (V1.39 — DF-53)**: When a stage driver schedule completes and Work `auto_chain_enabled`, the supervisor enqueues the next FL-E stage preset (or next chapter `produce` after `persist`) without a manual `creator run <preset_id>` dispatch. At most one active stage driver per Work remains enforced.
 
@@ -1247,3 +1251,16 @@ External (stable, public):
 
 **Superseded by**: [creator-run-preset-entry.md](creator-run-preset-entry.md) (Shipped Master V1.45). The `run_intents` dispatch via generic `creator run <preset_id>` and `--force-gates --reason` semantics are now part of the canonical Master body.
 
+
+
+## 15. V1.186 execution completeness (product lock)
+
+**Status:** Prepare product lock; not shipped. Durable overlay for user-selected direction **A** (real workflow execution completeness). Durable terminal/wait truth and real Host/ACP execution are **in this lock**, not deferred kernel work. Implementation lives in iteration v1.186 plans P0–P3; this section is the Master product overlay (no iteration-path links).
+
+1. **Authoritative status.** Reuse `orchestration_sessions.status TEXT` for `running` | `paused` | `waiting_for_input` | `completed` | `failed` | `cancelled` | `interrupted`. Add versioned execution metadata, a revision fence and a frozen run descriptor with a new append-only migration. Transition checkpoint/context/status/metadata atomically; graph position saves MUST NOT overwrite terminal/wait status or a newer revision. Legacy rows without authoritative metadata remain explicitly legacy/unverified unless existing evidence supports conservative reconciliation; do not fabricate historical completion. Public inspect after daemon restart MUST agree, including terminals without a live runner.
+2. **One Host plane.** Choose in-process graph/capability execution through an injected Host-independent `PromptExecutor`, implemented in the daemon over existing `HostFacade`. Migrate graph `acp_prompt` and **all** echo-capable consumers: `acp.prompt`, `judge.llm`, `context.summarize`, `nexus.llm.extract`; remove obsolete worker prompt-success branches after all callers migrate. Success requires normalized agent output and `HostEvent::OpFinished` with `FinishReason::EndTurn`; refusal, limits, stream EOF and partial output are not successful completion. Host session/process ownership and generic ACP configuration are defined in [agent-host.md](agent-host.md) §4. No second LLM runtime or native RPC adapter.
+3. **Public driver.** One daemon coordinator owns single-flight bounded driving for session POST, creator run and schedule admission; the graph-flow engine and existing step loop remain the execution backend. Schedule admission atomically associates a durable session before enqueue; seed/input/preset/provider bindings are frozen before eligibility. Explicit `execution_policy` distinguishes `legacy_inert`, `driven_v1`, and `system_inert`; dates or a Running label are not opt-in. Historical never-started rows MUST NOT execute on boot/tick/cron; only an explicit authorized public start opts that row in. Schedule terminal settlement and existing auto-chain insertion are idempotent by the owned terminal run.
+4. **Human wait.** A fresh UUID `wait_id` identifies each manual-wait arrival and persists through restart with the root/child task cursor. Authorized matching continuation consumes it by revision CAS; missing token is `422 invalid_input`, stale/consumed token `409 workflow_wait_conflict`, incompatible state `409 workflow_state_conflict` in the existing error envelope. Other advance/resume/force-transition routes MUST NOT bypass the same human gate. Supported child waits inherit trusted creator/root-preset/parent/graph identity and durable checkpoints; parent-only status without a reconstructible child cursor is insufficient. Never auto-resume WaitingForInput children; multiple waits are exposed one at a time without approving siblings.
+5. **Cancel.** Persist a cancel fence before new steps, deliver cancellation out-of-band to the actual Host operation, then bounded session cleanup/reap. Persist cancelled only when owned work has stopped; unconfirmed cleanup is interrupted with an actionable reason, never false successful cancellation. Terminal-v-cancel and continue-v-cancel races are revision-linearized. Cancel MUST NOT claim rollback of effects already committed outside Nexus.
+6. **Bounded recovery.** Persist dispatch intent before external work and clear it only with its successful result checkpoint. In-flight/uncertain work is interrupted and MUST NOT be blindly retried, even if old join keys exist. Terminals are never re-driven; human waits wait; shipped converge/merge joins retain bounded resume. Newly admitted presets freeze embedded/directory source identity and a content hash including referenced templates; recovery reattaches existing root/child IDs/cursors from matching source bytes. Missing/changed source refuses rather than loading a current shadow or resetting the run. Checkpoints remain position snapshots, not an effects ledger; arbitrary historical child repair and exactly-once external effects remain non-goals.
+7. **Actor / Character and CLI.** Standalone Character Host execution MUST NOT regress. Actor/Viewpoint preset IR is out of scope. `nexus42 acp run` remains a CLI-owned one-shot, not another workflow driver or acceptable substitute for public-workflow QA.

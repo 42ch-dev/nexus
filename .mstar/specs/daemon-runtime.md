@@ -8,7 +8,7 @@
 | **Document class** | Master |
 | **Normative scope** | Architecture boundaries, process model, subsystem responsibilities, pre-release constraints |
 | **Related** | [cli-spec.md](./cli-spec.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [agent-host.md](./agent-host.md) |
-| **Last reconciled** | 2026-09-04 — current Daemon API/runtime facts through V1.183, including V1.180–V1.182 checkpoint inspection and boot re-drive |
+| **Last reconciled** | 2026-09-07 — V1.183 facts plus **V1.186 product lock (Prepare, not shipped)** §20 (authoritative terminal/wait status; no surprise drive of never-started schedules) |
 
 ---
 
@@ -1177,3 +1177,18 @@ Implementation authorities:
 `crates/nexus-daemon-runtime/src/preset_run.rs`,
 `crates/nexus-daemon-runtime/src/boot.rs`, and
 `apps/nexus42/src/commands/ops.rs`.
+
+## 20. V1.186 product lock — truthful runs and bounded boot recovery
+
+**Status:** Prepare product lock; not shipped. Complements §19 (V1.180–V1.182 inspect/re-drive as implemented today).
+
+§19 remains an accurate description of **shipped** behavior: the persisted status column is diagnostic, checkpoint upserts do not advance it, and boot re-drive is converge/merge join-key class only.
+
+V1.186 runtime responsibilities (target behavior, not shipped):
+
+1. **Durable store and inspect.** `orchestration_sessions.status` is authoritative for versioned new-run records, with revision-fenced atomic status/checkpoint/metadata transitions; position saves never force running over newer terminal/wait state. Legacy/unreadable records are distinguished, not silently upgraded to success. Existing daemon-free `ops inspect` remains read-only and shares the recovery classifier with boot; public session lookup reads persisted terminals even without a live runner.
+2. **One coordinator, including lazy attach.** Public session creation and schedule admission enqueue the same bounded drive owner. Boot and lazy Creator-DB attach publish a matching storage/engine/coordinator bundle before readiness. User runs require a durable Creator DB; do not fall back to an in-memory user workflow. Descriptor/input/core seed and schedule→session association commit before enqueue. Repeated admission returns the same owned run, and terminal reconciliation does not duplicate auto-chain children.
+3. **Explicit cutover.** An additive schedule execution_policy defaults historical rows to legacy_inert; new user/cron/auto-chain admissions explicitly select driven_v1. Boot/tick/cron exclude legacy never-started pending/running/paused rows; missing session ID or creation time is not automatic opt-in. Explicit public schedule start revalidates and opts only that row in. `_system.maintenance` is system_inert, never queued for user Host work, and generic public start cannot opt it in.
+4. **Wait and cancellation.** Human wait_id and root/child checkpoint survive restart with no implicit approval. Token consumption and terminal/cancel races use one durable revision fence. Cancel reaches the actual Host operation independently of a long-running step lock, fences subsequent work and performs bounded owned-child cleanup. Only confirmed stop yields cancelled; unconfirmed cleanup stays interrupted. Wire errors and wait semantics are owned by [orchestration-engine.md](orchestration-engine.md) §15; Host process ownership by [agent-host.md](agent-host.md) §4.
+5. **Recovery before drive.** In-flight dispatch intent/uncertain effects take precedence over old join keys and are not replayed. Terminal rows do not run; waits stay waiting; shipped converge/merge deadlines retain downtime-aware bounded resume. Supported new embedded/user/system presets reconstruct existing IDs/cursors from frozen matching source/template identity with production dependencies. Changed/missing source or unsupported child identity refuses with an actionable reason, not an embedded fallback or fresh run. Checkpoint position is not an effects ledger; exactly-once arbitrary effects remain a non-goal.
+6. **Honest isolated live QA.** Nexus CLI home resolves through `HOME/.nexus42`; `NEXUS_HOME` in a recipe denotes that path, not a newly supported CLI environment override. All Nexus processes in QA must resolve the same temp config/DB tree; any runtime NEXUS42_HOME override must equal it. External omp gets a separate temporary HOME/XDG/profile and the admitted Creator workspace cwd through generic ProviderConfig `omp acp` argv. No user-global config/auth reads or writes; use auth already in the isolated profile or injected by the harness. Only installed live-provider output through public workflow admission proves live success; deterministic protocol processes prove races/failures/restarts.

@@ -74,13 +74,13 @@
 72:| [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md) | Master | Active — current external daemon contracts use the Daemon API namespace; V1.64 originally established the bundled Web UI as an external API consumer (moved from knowledge root 2026-08-17) |
 73:| [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md) | Master | Normative — World KB implementation SSOT (crate responsibilities, loops, taxonomy; V1.139 SPOKE alignment); moved from knowledge root 2026-08-17 |
 | [embedding-readiness.md](embedding-readiness.md) | Master | Normative — V1.181 P0 (RN-OGA-3 readiness-contract form): platform-provided embeddings, OSS ships no execution; `EmbeddingIdentity` tuple + fail-closed derived-index protocol + explicit lexical fallback; governs `crates/nexus-embedding/` |
-| [actor-product-model.md](actor-product-model.md) | Draft overlay | **Draft (2026-09-04 product lock; honesty amended 2026-09-06)** — **v1.184 shipped** Character bearer, bindings, three KE owner scopes, KnowledgeView, one-host execution, SOUL/Memory, ToM L1/L2 (PR #240); **v1.185 maintenance not shipped**; §11 is the reviewed planning contract for exact maintenance APIs, revision CAS, freeze/session epochs, canonical summary and explicit operation-scoped `--remember`. Schemas remain executable wire SSOT; PM lock still required. |
+| [actor-product-model.md](actor-product-model.md) | Draft overlay | **Draft (2026-09-04 product lock; honesty amended 2026-09-06)** — **v1.184 shipped** Character bearer, bindings, three KE owner scopes, KnowledgeView, one-host execution, SOUL/Memory, ToM L1/L2 (PR #240); **v1.185 shipped** (§11 developer maintenance: identity edit, reversible archive/restore, WorldSheet binding maintenance, KE content maintenance, run-connected `--remember`; PR #241). §11 is the shipped contract, not a planning-only proposal; Schemas remain executable wire SSOT |
 74:
 75:### Runtime and persistence
 76:
 77:| Document | Class | Status |
 78:| --- | --- | --- |
-79:| [daemon-runtime.md](daemon-runtime.md) | Master | Normative — V1.65 Prepare (bundled Web UI serving + chapter-content route family); **V1.90 amendment** (§14 surface renamed Local API → **Daemon API** with `/v1/daemon/` prefix); **V1.118 amendment** (§17 no-Profile boot + lazy `state.db` open); **V1.153 amendment** (§4.6 headless `nexus-runtime` profile); **V1.180–V1.182** (§19 checkpoint inspection + boot re-drive semantics; reconciled through V1.183) |
+79:| [daemon-runtime.md](daemon-runtime.md) | Master | Normative — V1.65 Prepare (bundled Web UI serving + chapter-content route family); **V1.90 amendment** (§14 surface renamed Local API → **Daemon API** with `/v1/daemon/` prefix); **V1.118 amendment** (§17 no-Profile boot + lazy `state.db` open); **V1.153 amendment** (§4.6 headless `nexus-runtime` profile); **V1.180–V1.182** (§19 checkpoint inspection + boot re-drive semantics; reconciled through V1.183); **V1.186 product lock (Prepare, not shipped)** §20 truthful terminals/waits + no surprise drive |
 80:| [local-db-schema.md](local-db-schema.md) | Master | Normative — V1.40 Shipped §4.1.2 (KB validation + narrative_worlds + kb_extract_jobs artifact locator) |
 81:| [concurrency.md](concurrency.md) | Master | **Normative — V1.51 Shipped (T-B P0/P1)** — advisory lock + heartbeat + OCC + zombie detection |
 82:| [canvas-strategy-surface.md](canvas-strategy-surface.md) | Draft overlay | **Shipped β (V1.74)** — Strategy α (V1.70) + Strategy write-boundary (V1.71) + Outline+Timeline β (V1.72) + World KB β (V1.73) + World KB relationships β (V1.74) shipped; **V1.122/V1.123 Draft overlays** (Timeline peer surface = default World entry; three-layer Brief/Narrative/Moment + Work Timeline) + **V1.156** 3×2 matrix completion + **V1.159** era taxonomy + **V1.162** fork authoring chrome, and **V1.163** event-level cross-surface binding — each additive and frontend-only (`wire_contracts_changed: false`); see the promotion blockquote chain in the doc |
@@ -108,7 +108,7 @@
 104:
 105:| Document | Class | Status |
 106:| --- | --- | --- |
-107:| [orchestration-engine.md](orchestration-engine.md) | Master | Shipped; **V1.62 Shipped** §5.2 narrative.compute + §8.4 combat-engine; **V1.179 P2 Shipped** §7.5 DR-06 bounded joins (`timeout_ms`/`on_timeout`) |
+107:| [orchestration-engine.md](orchestration-engine.md) | Master | Shipped; **V1.62 Shipped** §5.2 narrative.compute + §8.4 combat-engine; **V1.179 P2 Shipped** §7.5 DR-06 bounded joins (`timeout_ms`/`on_timeout`); **V1.186 product lock (Prepare, not shipped)** §15 execution completeness |
 108:| [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) | Master | Shipped (V1.4 WS7 → V1.34 agent-host + schedule wiring); canonical SSOT for ongoing schedule work |
 109:| [preset-conditional-routing.md](preset-conditional-routing.md) | Feature line | **Shipped (V1.42 P2)** — DF-56 `llm_judge` GO/NOGO minimal slice; V1.52/V1.56 overlays promoted (V1.158); **V1.179 P2** DR-06 bounded joins (§3.3.3, Normative) |
 110:| [llm-extract.md](llm-extract.md) | Master | **Normative — V1.51 Shipped (T-A P0)** — `nexus.llm.extract` capability + `LlmExtractTask` + `kb_extract_jobs` LLM payload extension (closes R-V150KBED-01) |
@@ -136,7 +136,7 @@
 132:| --- | --- | --- |
 133:| [acp-client-tech-spec.md](acp-client-tech-spec.md) | Master | **Shipped** — official `agent-client-protocol = "=0.11.1"` behind Nexus-owned DTOs; daemon-orchestrated ACP sessions in per-creator `nexus42 acp-worker` children; route-facing HostManager registers installed native CLI providers; reconciled through V1.183 |
 134:| [acp-capability-set.md](acp-capability-set.md) | Master | Normative |
-135:| [agent-host.md](agent-host.md) | Master | Normative — current route, provider, worker, and ACP boundaries reconciled through V1.183 |
+135:| [agent-host.md](agent-host.md) | Master | Normative — current route, provider, worker, and ACP boundaries reconciled through V1.183; **V1.186 product lock (Prepare, not shipped)** — HostFacade production prompts; lazy session-scoped generic ACP; all prompt consumers off echo |
 136:| [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) | Master | Master (V1.57 P-last promote — bridge Master promotion; shipped V1.34) |
 137:| [capability-registry.md](capability-registry.md) | Master | Master (V1.57 P-last promote — bridge Master promotion + P0/P1/P3 spec changes folded in; runtime SSOT for `nexus.*` dispatch) |
 138:| [registry-integration.md](registry-integration.md) | Master | Normative |
