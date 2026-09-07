@@ -1461,18 +1461,20 @@ async fn child_cas_terminal_child_rolls_back_root() {
         .await
         .expect("start_run with child");
 
-    // Mark the child terminal (completed) — a late root transition must not
-    // overwrite a terminal child.
+    // Mark the child terminal (completed) AND advance its revision to 1 —
+    // a late root transition anchored at the stale revision 0 must not
+    // overwrite a terminal child that has moved on.
     sqlx::query(
-        "UPDATE orchestration_sessions SET status = 'completed'
+        "UPDATE orchestration_sessions SET status = 'completed', state_revision = 1
          WHERE session_id = 'sess-child-term:child:1'",
     )
     .execute(&*pool)
     .await
-    .expect("mark child terminal");
+    .expect("mark child terminal + advance revision");
 
-    // Commit a root transition with a child checkpoint — the child CAS must
-    // fail (terminal fence) and roll back the root.
+    // Commit a root transition with a child checkpoint anchored at revision
+    // 0 — the child CAS must fail (terminal at a stale revision) and roll
+    // back the root.
     let root2 = root_session(&session_id.0, "parent_task2").await;
     let child2 = child_checkpoint("sess-child-term:child:1", "child_task2").await;
     let checkpoint2 = RunCheckpoint {
@@ -1488,14 +1490,14 @@ async fn child_cas_terminal_child_rolls_back_root() {
             &RunStateV1::default(),
         )
         .await
-        .expect_err("terminal child must fail the root transition");
+        .expect_err("terminal child at a stale revision must fail the root transition");
 
     assert!(
         matches!(
             err,
             nexus_orchestration::engine::EngineError::TerminalState(_)
         ),
-        "expected TerminalState for terminal child, got {err:?}"
+        "expected TerminalState for terminal child at stale revision, got {err:?}"
     );
 
     // The root row must be unchanged (rollback).
@@ -1510,13 +1512,78 @@ async fn child_cas_terminal_child_rolls_back_root() {
     );
     assert_eq!(root_after.status, SessionStatus::Running);
 
-    // The child row must remain terminal.
+    // The child row must remain terminal at revision 1.
     let child_after = storage
         .load_run(&SessionId("sess-child-term:child:1".to_string()))
         .await
         .expect("load_run")
         .expect("child present");
     assert_eq!(child_after.status, SessionStatus::Completed);
+    assert_eq!(child_after.state_revision, 1);
+}
+
+// Important 1: a child that is already terminal at the EXPECTED revision is
+// confirmed by the parent's checkpoint (no overwrite needed) — the parent's
+// transition succeeds rather than failing the child CAS.
+#[tokio::test]
+async fn child_cas_terminal_at_expected_revision_is_confirmed() {
+    let (pool, _db) = fresh_pool().await;
+    let storage = SqliteSessionStorage::new(pool.clone());
+    let session_id = SessionId("sess-child-term-confirm".to_string());
+
+    // Start a root run with a child at revision 0.
+    let descriptor = test_descriptor(&session_id.0);
+    let root = root_session(&session_id.0, "parent_task").await;
+    let child = child_checkpoint("sess-child-term-confirm:child:1", "child_task").await;
+    let checkpoint = RunCheckpoint {
+        root: &root,
+        children: &[child],
+    };
+    storage
+        .start_run(&session_id, &descriptor, checkpoint, &RunStateV1::default())
+        .await
+        .expect("start_run with child");
+
+    // Mark the child terminal (completed) at the SAME revision 0 — the
+    // parent's checkpoint confirms the child's final state.
+    sqlx::query(
+        "UPDATE orchestration_sessions SET status = 'completed'
+         WHERE session_id = 'sess-child-term-confirm:child:1'",
+    )
+    .execute(&*pool)
+    .await
+    .expect("mark child terminal");
+
+    // Commit a root transition with a child checkpoint anchored at revision
+    // 0 — the terminal child at the expected revision is confirmed, so the
+    // root transition succeeds.
+    let root2 = root_session(&session_id.0, "parent_task2").await;
+    let child2 = child_checkpoint("sess-child-term-confirm:child:1", "child_task2").await;
+    let checkpoint2 = RunCheckpoint {
+        root: &root2,
+        children: &[child2],
+    };
+    let record = storage
+        .commit_transition(
+            &session_id,
+            1,
+            checkpoint2,
+            SessionStatus::Running,
+            &RunStateV1::default(),
+        )
+        .await
+        .expect("terminal child at expected revision is confirmed, root transition succeeds");
+
+    assert_eq!(record.state_revision, 2, "root transition advanced");
+
+    // The child row must remain terminal (not overwritten).
+    let child_after = storage
+        .load_run(&SessionId("sess-child-term-confirm:child:1".to_string()))
+        .await
+        .expect("load_run")
+        .expect("child present");
+    assert_eq!(child_after.status, SessionStatus::Completed);
+    assert_eq!(child_after.state_revision, 0, "child row not overwritten");
 }
 
 // Important 2: the production child-session path (EngineProxy/GraphFlowEngine
@@ -1777,4 +1844,375 @@ async fn negative_v0_revision_is_non_replayable() {
     .await
     .expect("read raw revision");
     assert_eq!(raw, -5, "row preserved verbatim");
+}
+
+// ---------------------------------------------------------------------------
+// Fix round 3 (task re-review): regression tests for each fixed contract
+// ---------------------------------------------------------------------------
+
+/// A graph-flow task that completes immediately (returns `NextAction::End`).
+struct EndTask;
+#[async_trait::async_trait]
+impl graph_flow::Task for EndTask {
+    fn id(&self) -> &str {
+        "end_task"
+    }
+    async fn run(
+        &self,
+        _ctx: graph_flow::Context,
+    ) -> graph_flow::Result<graph_flow::TaskResult> {
+        Ok(graph_flow::TaskResult::new(
+            None,
+            graph_flow::NextAction::End,
+        ))
+    }
+}
+
+/// A graph-flow task that advances to the next task and records a context
+/// marker (used to verify root position/context restoration on failure).
+struct ContinueTask;
+#[async_trait::async_trait]
+impl graph_flow::Task for ContinueTask {
+    fn id(&self) -> &str {
+        "continue_task"
+    }
+    async fn run(
+        &self,
+        ctx: graph_flow::Context,
+    ) -> graph_flow::Result<graph_flow::TaskResult> {
+        ctx.set("advanced", true).await;
+        Ok(graph_flow::TaskResult::new(
+            None,
+            graph_flow::NextAction::Continue,
+        ))
+    }
+}
+
+/// Build a fresh engine over a temp SQLite pool (helper for round-3 tests).
+async fn fresh_engine(
+    pool: Arc<sqlx::SqlitePool>,
+) -> (
+    Arc<SqliteSessionStorage>,
+    nexus_orchestration::GraphFlowEngine,
+) {
+    let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
+    let storage_arc: Arc<dyn SessionStorage> = storage.clone();
+    let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
+    let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_orchestration::CapabilityRegistry::with_builtins(),
+    ));
+    let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+        storage_arc,
+        workflow_store,
+        caps,
+    );
+    (storage, engine)
+}
+
+// Important 1: an InnerGraphTask child actually runs to completion, and the
+// parent's commit_transition succeeds (the child checkpoint revision is
+// synchronized from each child transition).
+#[tokio::test]
+async fn engine_nested_child_runs_to_completion_then_parent_commits() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, engine) = fresh_engine(pool).await;
+
+    // Build a child graph that completes in one step (EndTask).
+    let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
+    inner_graph.add_task(Arc::new(EndTask));
+
+    // Build a parent graph whose start task is an InnerGraphTask that spawns
+    // the child and polls it to completion.
+    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
+    let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
+        Arc::new(engine.clone()),
+        inner_graph,
+        "parent_state",
+        "_session_id",
+        None,
+    );
+    parent_graph.add_task(Arc::new(inner_task));
+
+    let parent_sid = engine
+        .start_session("novel-writing", parent_graph)
+        .await
+        .expect("start parent session");
+
+    // Run the parent step — the InnerGraphTask spawns the child, polls it to
+    // completion, and the parent's commit_transition must succeed (the child
+    // checkpoint revision is synchronized).
+    let outcome = engine
+        .run_step(&parent_sid)
+        .await
+        .expect("run_step parent");
+    // The parent graph has no outgoing edge from the InnerGraphTask, so it
+    // returns Paused.
+    assert!(
+        matches!(
+            outcome,
+            nexus_orchestration::engine::StepOutcome::Paused { .. }
+        ),
+        "expected Paused, got {outcome:?}"
+    );
+
+    // The parent's commit_transition must have succeeded (revision advanced).
+    let parent_record = storage
+        .load_run(&parent_sid)
+        .await
+        .expect("load_run")
+        .expect("parent present");
+    assert_eq!(
+        parent_record.state_revision, 2,
+        "parent transition committed after child completion"
+    );
+
+    // The child must be terminal (completed) and reconstructible.
+    let children = storage
+        .load_children(&parent_sid)
+        .await
+        .expect("load_children");
+    assert_eq!(children.len(), 1, "one child persisted");
+    assert_eq!(
+        children[0].status,
+        SessionStatus::Completed,
+        "child completed"
+    );
+    assert!(
+        children[0].state_revision >= 2,
+        "child revision advanced past the initial 1"
+    );
+}
+
+// Important 1: a restarted parent hydrates its children map from persisted
+// child rows so its next commit_transition submits the correct child revision.
+#[tokio::test]
+async fn restart_hydrates_child_checkpoints() {
+    let db = tempfile::NamedTempFile::new().unwrap();
+    let parent_sid;
+    let child_sid;
+
+    {
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool (first)");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations (first)");
+        let (storage, engine) = fresh_engine(Arc::new(pool)).await;
+
+        let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
+        inner_graph.add_task(Arc::new(EndTask));
+        let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
+        let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
+            Arc::new(engine.clone()),
+            inner_graph,
+            "parent_state",
+            "_session_id",
+            None,
+        );
+        parent_graph.add_task(Arc::new(inner_task));
+
+        parent_sid = engine
+            .start_session("novel-writing", parent_graph)
+            .await
+            .expect("start parent session");
+        engine
+            .run_step(&parent_sid)
+            .await
+            .expect("run_step parent");
+
+        let children = storage
+            .load_children(&parent_sid)
+            .await
+            .expect("load_children");
+        assert_eq!(children.len(), 1);
+        child_sid = children[0].session_id.clone();
+    } // pool drops — simulates daemon shutdown
+
+    {
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool (second)");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations (second)");
+        let (_storage, engine) = fresh_engine(Arc::new(pool)).await;
+
+        // Recover the parent session — this must hydrate the children map.
+        let summary = nexus_orchestration::engine::SessionSummary {
+            session_id: parent_sid.clone(),
+            creator_id: String::new(),
+            preset_id: "novel-writing".to_string(),
+            status: SessionStatus::Paused,
+            current_task_id: Some("parent_state".to_string()),
+        };
+        engine.recover_sessions(vec![summary]).await;
+
+        // The children map must be hydrated with the child at its current
+        // persisted revision.
+        let shared = engine.shared_state();
+        let children_map = shared.children.read().await;
+        let parent_children = children_map
+            .get(&parent_sid.0)
+            .expect("children hydrated for recovered parent");
+        assert_eq!(parent_children.len(), 1, "one child hydrated");
+        assert_eq!(parent_children[0].session.id, child_sid.0);
+        assert_eq!(
+            parent_children[0].status,
+            SessionStatus::Completed,
+            "child status hydrated"
+        );
+        assert!(
+            parent_children[0].state_revision >= 2,
+            "child revision hydrated from persisted row"
+        );
+    }
+}
+
+// Important 2: a failed child CAS (stale child revision) must not leave a
+// partially advanced root checkpoint — current_task_id/context_json are
+// restored to their pre-step values.
+#[tokio::test]
+async fn failed_child_cas_restores_root_position() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, engine) = fresh_engine(pool.clone()).await;
+
+    // Build a parent graph: task "continue_task" → task "end_task".
+    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
+    parent_graph.add_task(Arc::new(ContinueTask));
+    parent_graph.add_task(Arc::new(EndTask));
+    parent_graph.add_edge("continue_task", "end_task");
+
+    let parent_sid = engine
+        .start_session("novel-writing", parent_graph)
+        .await
+        .expect("start parent session");
+
+    // Manually insert a child checkpoint into the parent's children map at
+    // revision 1 (simulating a child the parent believes is at revision 1).
+    let child_id = "parent:child:stale";
+    let child_session = Session::new_from_task(child_id.to_string(), "child_task");
+    let child_cp = ChildCheckpoint {
+        session: child_session,
+        status: SessionStatus::Running,
+        state: RunStateV1::default(),
+        state_revision: 1,
+        graph_name: Some("inner_graph".to_string()),
+    };
+    engine
+        .shared_state()
+        .children
+        .write()
+        .await
+        .insert(parent_sid.0.clone(), vec![child_cp]);
+
+    // Create the child row in DB at revision 1, then advance it to 2
+    // (simulating a concurrent child transition the parent does not know about).
+    let child_descriptor = test_descriptor(&parent_sid.0);
+    let child_root = root_session(child_id, "child_task").await;
+    let child_checkpoint = RunCheckpoint {
+        root: &child_root,
+        children: &[],
+    };
+    storage
+        .start_run(
+            &SessionId(child_id.to_string()),
+            &child_descriptor,
+            child_checkpoint,
+            &RunStateV1::default(),
+        )
+        .await
+        .expect("start child run");
+    sqlx::query("UPDATE orchestration_sessions SET state_revision = 2 WHERE session_id = ?")
+        .bind(child_id)
+        .execute(&*pool)
+        .await
+        .expect("advance child revision");
+
+    // Capture the pre-step root position/context.
+    let pre_step = storage
+        .get(&parent_sid.0)
+        .await
+        .expect("get pre-step root")
+        .expect("root present");
+    let pre_task = pre_step.current_task_id.clone();
+    let pre_ctx = serde_json::to_vec(&pre_step.context).expect("serialize pre-step context");
+
+    // Run the parent step — task "continue_task" runs, advances to
+    // "end_task", returns Paused. commit_transition fails (stale child
+    // revision), and the root must be restored to its pre-step position.
+    let err = engine
+        .run_step(&parent_sid)
+        .await
+        .expect_err("stale child revision must fail the parent step");
+    assert!(
+        matches!(
+            err,
+            nexus_orchestration::engine::EngineError::RevisionMismatch { .. }
+        ),
+        "expected RevisionMismatch, got {err:?}"
+    );
+
+    // The root position/context must be restored to pre-step.
+    let after = storage
+        .get(&parent_sid.0)
+        .await
+        .expect("get post-failure root")
+        .expect("root present");
+    assert_eq!(
+        after.current_task_id, pre_task,
+        "root current_task_id must not advance on failed child CAS"
+    );
+    let after_ctx = serde_json::to_vec(&after.context).expect("serialize post-failure context");
+    assert_eq!(
+        pre_ctx, after_ctx,
+        "root context_json must not advance on failed child CAS"
+    );
+    // The "advanced" marker set by ContinueTask must be gone (restored).
+    let advanced: Option<bool> = after.context.get("advanced").await;
+    assert_eq!(
+        advanced, None,
+        "context marker set during the failed step must be restored away"
+    );
+}
+
+// Minor 1: child IDs are collision-resistant — two child admissions in the
+// same millisecond must not collide with start_run's existing-row rejection.
+#[tokio::test]
+async fn child_ids_are_collision_resistant() {
+    let (pool, _db) = fresh_pool().await;
+    let (_storage, engine) = fresh_engine(pool).await;
+
+    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
+    parent_graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+    let parent_sid = engine
+        .start_session("novel-writing", parent_graph)
+        .await
+        .expect("start parent session");
+
+    // Spawn two children rapidly (same millisecond) — their IDs must differ.
+    let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
+    inner_graph.add_task(Arc::new(EndTask));
+    let params1 = nexus_orchestration::ChildSessionParams {
+        parent_session_id: parent_sid.0.clone(),
+        inner_graph: inner_graph.clone(),
+        initial_context: graph_flow::Context::new(),
+    };
+    let params2 = nexus_orchestration::ChildSessionParams {
+        parent_session_id: parent_sid.0.clone(),
+        inner_graph: inner_graph.clone(),
+        initial_context: graph_flow::Context::new(),
+    };
+    let child1 = engine
+        .spawn_child_session(params1)
+        .await
+        .expect("spawn child 1");
+    let child2 = engine
+        .spawn_child_session(params2)
+        .await
+        .expect("spawn child 2");
+    assert_ne!(
+        child1.0, child2.0,
+        "child IDs must be collision-resistant (two admissions in one millisecond)"
+    );
 }

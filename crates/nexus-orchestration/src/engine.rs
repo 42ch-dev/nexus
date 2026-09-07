@@ -392,6 +392,51 @@ impl EngineSharedState {
         }
     }
 
+    /// Hydrate the in-memory children map from persisted child rows for a
+    /// recovered parent session (Important 1).
+    ///
+    /// A restarted parent must know its child checkpoints (with their current
+    /// persisted revisions) so its next `commit_transition` submits the
+    /// correct child revisions — otherwise the child CAS fails with
+    /// `RevisionMismatch`. This reads the persisted child rows via
+    /// `WorkflowStateStore::load_children` and rebuilds the `ChildCheckpoint`
+    /// entries keyed by the parent session id.
+    pub async fn hydrate_children(&self, parent_session_id: &SessionId) {
+        let Some(store) = &self.workflow_store else {
+            return;
+        };
+        let Ok(children) = store.load_children(parent_session_id).await else {
+            return;
+        };
+        if children.is_empty() {
+            return;
+        }
+        let mut checkpoints = Vec::with_capacity(children.len());
+        for child in children {
+            let child_session = match self.storage.get(&child.session_id.0).await {
+                Ok(Some(s)) => s,
+                _ => continue,
+            };
+            let graph_name = child
+                .descriptor
+                .as_ref()
+                .and_then(|d| d.graph_name.clone());
+            checkpoints.push(ChildCheckpoint {
+                session: child_session,
+                status: child.status,
+                state: child.state.clone().unwrap_or_default(),
+                state_revision: child.state_revision,
+                graph_name,
+            });
+        }
+        if !checkpoints.is_empty() {
+            self.children
+                .write()
+                .await
+                .insert(parent_session_id.0.clone(), checkpoints);
+        }
+    }
+
     /// Persist a control-signal transition authoritatively (A2/A5) when a
     /// workflow store is present.
     ///
@@ -464,6 +509,58 @@ impl EngineSharedState {
         Ok(target_status)
     }
 
+    /// Synchronize a child's persisted checkpoint back into the parent's
+    /// children map after the child has been stepped (Important 1).
+    ///
+    /// `InnerGraphTask` polls a child via `engine.run_step(&child_sid)`, which
+    /// advances the child's persisted `state_revision`/status/state. Without
+    /// this sync, the parent's children map would keep the original revision
+    /// and the parent's later `commit_transition` would fail the child CAS
+    /// with `RevisionMismatch`. This method reads the child's current
+    /// persisted record and updates the parent's map entry so the parent
+    /// submits the correct child revision.
+    async fn sync_child_checkpoint_after_step(&self, session_id: &SessionId) {
+        // Only children carry a `_parent_session_id` in context.
+        let parent_id: Option<String> = match self.storage.get(&session_id.0).await {
+            Ok(Some(session)) => session.context.get("_parent_session_id").await,
+            _ => None,
+        };
+        let Some(parent_id) = parent_id else {
+            return;
+        };
+        let Some(store) = &self.workflow_store else {
+            return;
+        };
+        // Load the child's current persisted record (revision/status/state).
+        let Ok(Some(child_record)) = store.load_run(session_id).await else {
+            return;
+        };
+        // Rebuild the child checkpoint from the persisted record.
+        let child_session = match self.storage.get(&session_id.0).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+        let graph_name = child_record
+            .descriptor
+            .as_ref()
+            .and_then(|d| d.graph_name.clone());
+        let child_checkpoint = ChildCheckpoint {
+            session: child_session,
+            status: child_record.status,
+            state: child_record.state.clone().unwrap_or_default(),
+            state_revision: child_record.state_revision,
+            graph_name,
+        };
+        // Update the parent's children map entry for this child.
+        let mut children = self.children.write().await;
+        let entry = children.entry(parent_id).or_default();
+        if let Some(existing) = entry.iter_mut().find(|c| c.session.id == session_id.0) {
+            *existing = child_checkpoint;
+        } else {
+            entry.push(child_checkpoint);
+        }
+    }
+
     /// Run a single step for a session, updating status after execution.
     ///
     /// Common logic shared between `GraphFlowEngine` and `EngineProxy`.
@@ -500,6 +597,17 @@ impl EngineSharedState {
         } else {
             0
         };
+
+        // Capture the pre-step root session (position/context) so a failed
+        // `commit_transition` (e.g. stale-child CAS) can restore the root to
+        // its pre-step position — `FlowRunner.run` saves position/context
+        // before `commit_transition`, so without this the root would be left
+        // partially advanced on failure (Important 2).
+        let pre_step_root = self
+            .storage
+            .get(&session_id.0)
+            .await
+            .map_err(EngineError::GraphFlow)?;
 
         // Execute one step using the Arc<FlowRunner>.
         let result = runner.run(&session_id.0).await?;
@@ -546,11 +654,30 @@ impl EngineSharedState {
                     root: &root,
                     children: &children,
                 };
-                store
+                if let Err(e) = store
                     .commit_transition(session_id, expected_revision, checkpoint, status.clone(), &next_state)
-                    .await?;
+                    .await
+                {
+                    // The transition failed (e.g. stale-child CAS). Restore
+                    // the root position/context to its pre-step state so a
+                    // failed child CAS cannot leave a partially advanced root
+                    // checkpoint (Important 2). The restore is a position-only
+                    // save (only updates current_task_id/context_json where
+                    // status='running'), so it never flips status/metadata.
+                    if let Some(pre) = &pre_step_root {
+                        let _ = self.storage.save(pre.clone()).await;
+                    }
+                    return Err(e);
+                }
             }
         }
+
+        // If this session is a child, synchronize its persisted checkpoint
+        // back into the parent's children map so the parent's next
+        // `commit_transition` submits the correct child revision (Important 1).
+        // This runs AFTER the child's own `commit_transition` (above) so the
+        // parent's map reflects the child's post-transition revision.
+        self.sync_child_checkpoint_after_step(session_id).await;
 
         // Update in-memory status.
         if let Some(s) = self
@@ -578,15 +705,25 @@ impl EngineSharedState {
         &self,
         params: ChildSessionParams,
     ) -> Result<SessionId, EngineError> {
+        // Collision-resistant child id (Minor 1): two child admissions in
+        // the same millisecond must not collide with `start_run`'s
+        // existing-row rejection. A UUID is unique per admission.
         let child_session_id = format!(
             "{}:child:{}",
             params.parent_session_id,
-            chrono::Utc::now().timestamp_millis()
+            uuid::Uuid::new_v4()
         );
         let start_task_id = params.inner_graph.start_task_id().unwrap_or_default();
         let mut session_mut =
             graph_flow::Session::new_from_task(child_session_id.clone(), &start_task_id);
         session_mut.context = params.initial_context;
+        // Record the parent so `run_step_internal` can sync this child's
+        // checkpoint back to the parent's children map after each step
+        // (Important 1: child revisions must be synchronized).
+        session_mut
+            .context
+            .set("_parent_session_id", params.parent_session_id.clone())
+            .await;
 
         // When a workflow store is present, create a v1 child run that
         // inherits the trusted root descriptor (A2/A4). The child's
@@ -1013,6 +1150,11 @@ impl GraphFlowEngine {
             if summary.status.is_terminal() {
                 continue;
             }
+
+            // Important 1: hydrate the in-memory children map from persisted
+            // child rows so a restarted parent knows its child checkpoints
+            // (with current revisions) for its next commit_transition.
+            self.state.hydrate_children(&summary.session_id).await;
 
             // R6: Try to reconstruct the FlowRunner from the embedded preset.
             // The preset_id in the summary corresponds to the preset that was

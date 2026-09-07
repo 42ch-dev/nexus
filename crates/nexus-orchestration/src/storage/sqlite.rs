@@ -377,19 +377,19 @@ fn child_descriptor(
     }
 }
 
-/// Determine the error for a failed child CAS (0 rows affected).
+/// Determine the outcome of a failed child CAS (0 rows affected).
 ///
-/// Distinguishes a revision mismatch from a terminal/cancelled fence by
-/// reading the child's current row within the transaction (A2/A4). A child
-/// upsert that matches zero rows means the child's persisted revision no
-/// longer equals the expected value, or the child is already terminal — the
-/// root transition must roll back rather than silently drop the child
-/// checkpoint (Important 1).
-async fn child_cas_error(
+/// Returns `None` when the child is already terminal at the expected
+/// revision — the parent's checkpoint confirms the child's final state and
+/// no overwrite is needed (Important 1: a legitimately-completed child must
+/// not fail the parent's transition). Returns `Some(EngineError)` when the
+/// child CAS genuinely failed: a stale revision (child moved on) or a
+/// terminal child at a stale revision.
+async fn child_cas_outcome(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     child_id: &str,
     expected_revision: u64,
-) -> EngineError {
+) -> Option<EngineError> {
     let row: Option<(i64, String)> = sqlx::query_as(
         "SELECT state_revision, status FROM orchestration_sessions WHERE session_id = ?",
     )
@@ -405,23 +405,27 @@ async fn child_cas_error(
                 status.as_str(),
                 "completed" | "failed" | "cancelled" | "interrupted"
             );
-            if terminal {
-                EngineError::TerminalState(child_id.to_string())
+            if terminal && found_rev == expected_revision as i64 {
+                // Child already terminal at the expected revision — the
+                // parent's checkpoint confirms it; no overwrite needed.
+                None
+            } else if terminal {
+                Some(EngineError::TerminalState(child_id.to_string()))
             } else if found_rev != expected_revision as i64 {
-                EngineError::RevisionMismatch {
+                Some(EngineError::RevisionMismatch {
                     session_id: child_id.to_string(),
                     expected: expected_revision,
                     found: u64::try_from(found_rev).unwrap_or(0),
-                }
+                })
             } else {
-                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                Some(EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                     "child CAS failed for '{child_id}' (revision {expected_revision}, status {status})"
-                )))
+                ))))
             }
         }
-        None => EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+        None => Some(EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "child CAS failed for '{child_id}': row absent"
-        ))),
+        )))),
     }
 }
 
@@ -701,9 +705,15 @@ impl WorkflowStateStore for SqliteSessionStorage {
             // A child CAS that matches zero rows means the child's persisted
             // revision no longer equals the expected value, or the child is
             // already terminal. The root start must roll back rather than
-            // silently drop the child checkpoint (Important 1).
+            // silently drop the child checkpoint (Important 1). A child that
+            // is already terminal at the expected revision is confirmed (no
+            // overwrite needed) and does not fail the root start.
             if child_result.rows_affected() == 0 {
-                return Err(child_cas_error(&mut tx, &child_id, child.state_revision).await);
+                if let Some(err) =
+                    child_cas_outcome(&mut tx, &child_id, child.state_revision).await
+                {
+                    return Err(err);
+                }
             }
         }
 
@@ -912,9 +922,15 @@ impl WorkflowStateStore for SqliteSessionStorage {
             // A child CAS that matches zero rows means the child's persisted
             // revision no longer equals the expected value, or the child is
             // already terminal. The root transition must roll back rather
-            // than silently drop the child checkpoint (Important 1).
+            // than silently drop the child checkpoint (Important 1). A child
+            // that is already terminal at the expected revision is confirmed
+            // (no overwrite needed) and does not fail the root transition.
             if child_result.rows_affected() == 0 {
-                return Err(child_cas_error(&mut tx, &child_id, child.state_revision).await);
+                if let Some(err) =
+                    child_cas_outcome(&mut tx, &child_id, child.state_revision).await
+                {
+                    return Err(err);
+                }
             }
         }
 
@@ -932,6 +948,75 @@ impl WorkflowStateStore for SqliteSessionStorage {
             descriptor: root_descriptor,
             state: Some(next_state.clone()),
         })
+    }
+
+    async fn load_children(
+        &self,
+        parent_session_id: &SessionId,
+    ) -> Result<Vec<RunRecord>, EngineError> {
+        let parent = parent_session_id.0.clone();
+        let rows = sqlx::query_as!(
+            RunRow,
+            r#"SELECT session_id as "session_id!", status as "status!",
+                      execution_version as "execution_version!",
+                      state_revision as "state_revision!", run_state_json, run_descriptor_json
+               FROM orchestration_sessions WHERE parent_session_id = ?"#,
+            parent
+        )
+        .fetch_all(&*self.pool)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "load_children '{}': {e}", parent_session_id.0
+            )))
+        })?;
+
+        let mut children = Vec::with_capacity(rows.len());
+        for row in rows {
+            let execution_version = u32::try_from(row.execution_version).unwrap_or(0);
+            let state_revision = u64::try_from(row.state_revision).unwrap_or(0);
+            if execution_version >= 1 {
+                let status = SessionStatus::from_db_str(&row.status).ok_or_else(|| {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                        "load_children '{}': unknown/unsupported v1 status {:?} (non-replayable)",
+                        row.session_id, row.status
+                    )))
+                })?;
+                let descriptor_bytes = row.run_descriptor_json.as_deref().ok_or_else(|| {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                        "load_children '{}': v1 child missing run_descriptor_json (non-replayable)",
+                        row.session_id
+                    )))
+                })?;
+                let state_bytes = row.run_state_json.as_deref().ok_or_else(|| {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                        "load_children '{}': v1 child missing run_state_json (non-replayable)",
+                        row.session_id
+                    )))
+                })?;
+                let descriptor =
+                    deserialize_blob::<RunDescriptorV1>(descriptor_bytes, "run_descriptor_json")?;
+                let state = deserialize_blob::<RunStateV1>(state_bytes, "run_state_json")?;
+                children.push(RunRecord {
+                    session_id: SessionId(row.session_id),
+                    status,
+                    state_revision,
+                    execution_version,
+                    descriptor: Some(descriptor),
+                    state: Some(state),
+                });
+            } else {
+                // A v0 child row is legacy/unverified; surface it as a
+                // non-replayable error rather than silently dropping it.
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "load_children '{}': v0 legacy child row (non-replayable)",
+                        row.session_id
+                    )),
+                ));
+            }
+        }
+        Ok(children)
     }
 }
 

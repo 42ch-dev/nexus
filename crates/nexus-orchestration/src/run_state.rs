@@ -267,4 +267,17 @@ pub trait WorkflowStateStore: Send + Sync {
         next_status: SessionStatus,
         next_state: &RunStateV1,
     ) -> Result<RunRecord, EngineError>;
+
+    /// Load all persisted child runs whose `parent_session_id` matches.
+    ///
+    /// Used to hydrate the engine's in-memory children map during recovery
+    /// (Important 1): a restarted parent must know its child checkpoints so
+    /// its next `commit_transition` submits the correct child revisions.
+    ///
+    /// # Errors
+    /// Returns [`EngineError`] on storage failure.
+    async fn load_children(
+        &self,
+        parent_session_id: &SessionId,
+    ) -> Result<Vec<RunRecord>, EngineError>;
 }
