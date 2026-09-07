@@ -1319,29 +1319,28 @@ impl WorkflowStateStore for SqliteSessionStorage {
         })?;
         let state_bytes = serialize_blob(step_state)?;
 
-        // Fence to the statuses that may actually be stepped (`status`
-        // running or paused — a paused session is re-stepped by the drive
-        // loop) AND `state_revision = expected`. `waiting_for_input` (and
-        // unknown statuses) are excluded so a stale step invocation can never
-        // overwrite a durable human-wait row, including its WaitRecord token
-        // (A4). Deliberately does NOT advance the revision (a subsequent
-        // `commit_transition` still CAS-anchors to the same pre-step
-        // revision); it only marks the durable in-flight intent.
+        // Fence to the statuses that may actually be stepped (`running` or
+        // `paused`) and `state_revision = expected`. `waiting_for_input` and
+        // unknown statuses are excluded so a stale step cannot overwrite a
+        // durable wait. Advancing the revision in the same write makes the
+        // in-flight marker a CAS boundary: a control signal loaded before this
+        // marker cannot subsequently erase it.
         let expected_revision_i64 = expected_revision as i64;
-        let result = sqlx::query!(
+        let result = sqlx::query(
             r#"
             UPDATE orchestration_sessions
-            SET current_task_id = ?, context_json = ?, updated_at = ?, run_state_json = ?
+            SET current_task_id = ?, context_json = ?, updated_at = ?, run_state_json = ?,
+                state_revision = state_revision + 1
             WHERE session_id = ? AND status IN ('running', 'paused')
               AND state_revision = ?
             "#,
-            current_task_id,
-            context_bytes,
-            now,
-            state_bytes,
-            id,
-            expected_revision_i64
         )
+        .bind(current_task_id)
+        .bind(context_bytes)
+        .bind(now)
+        .bind(state_bytes)
+        .bind(id)
+        .bind(expected_revision_i64)
         .execute(&*self.pool)
         .await
         .map_err(|e| {

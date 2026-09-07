@@ -577,19 +577,23 @@ impl EngineSharedState {
             return Ok(target_status);
         };
 
-        let expected_revision = store
+        let record = store
             .load_run(session_id)
             .await?
-            .map(|r| r.state_revision)
-            .unwrap_or(0);
+            .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
+        let expected_revision = record.state_revision;
+        let mut next_state = record.state.unwrap_or_default();
 
-        // Resume/Advance must not revive a terminal session (Critical 3).
-        if matches!(target_status, SessionStatus::Running) {
-            if let Some(record) = store.load_run(session_id).await? {
-                if record.status.is_terminal() {
-                    return Err(EngineError::TerminalState(session_id.0.clone()));
-                }
-            }
+        if record.status.is_terminal() {
+            return Err(EngineError::TerminalState(session_id.0.clone()));
+        }
+        if !matches!(signal, EngineSignal::Cancel)
+            && (matches!(record.status, SessionStatus::WaitingForInput)
+                || next_state.wait.is_some()
+                || next_state.step_in_flight.is_some()
+                || next_state.in_flight.is_some())
+        {
+            return Err(EngineError::TerminalState(session_id.0.clone()));
         }
 
         let root = self
@@ -599,14 +603,9 @@ impl EngineSharedState {
             .map_err(EngineError::GraphFlow)?
             .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
 
-        let next_state = if matches!(target_status, SessionStatus::Cancelled) {
-            RunStateV1 {
-                cancel_requested: true,
-                ..RunStateV1::default()
-            }
-        } else {
-            RunStateV1::default()
-        };
+        if matches!(target_status, SessionStatus::Cancelled) {
+            next_state.cancel_requested = true;
+        }
         let checkpoint = RunCheckpoint {
             root: &root,
             children: &[],
@@ -737,6 +736,7 @@ impl EngineSharedState {
         } else {
             0
         };
+        let mut transition_revision = expected_revision;
 
         // Capture the pre-step root session (position/context) so a failed
         // `commit_transition` (e.g. stale-child CAS) can restore the root to
@@ -750,19 +750,21 @@ impl EngineSharedState {
             .map_err(EngineError::GraphFlow)?;
 
         // Persist the current-position safety intent BEFORE any external
-        // effect in the step (A2/A7 Important 5): mark `step_in_flight` with
-        // the pre-step task id (plus position/context) so a crash after an
-        // effect but before the result commit leaves an interrupted (never
-        // replayable) run — never an unmarked running row. The write is
-        // fenced to the re-stepable statuses `status IN ('running', 'paused')`
-        // (a paused row is re-stepped by the drive loop) AND the pre-step
-        // revision and does NOT advance the revision (a subsequent
-        // `commit_transition` still CAS-anchors to the same pre-step
-        // revision). A FlowRunner/storage save failure after this point
-        // cannot leave an unmarked running row.
-        // The marker is cleared on a completed checkpoint (Minor 2).
+        // effect in the step. The marker write is fenced to step-able status
+        // plus the pre-step revision and atomically advances the revision.
+        // A signal loaded before the marker then loses its CAS; a signal
+        // loaded afterward sees the in-flight state and is refused unless it
+        // is cancellation. The subsequent transition anchors to the marker's
+        // revision. A FlowRunner/storage save failure after this point cannot
+        // leave an unmarked running row.
         if let Some(store) = &self.workflow_store {
             if let Some(pre) = &pre_step_root {
+                transition_revision = expected_revision.checked_add(1).ok_or_else(|| {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                        "run '{}': state revision overflow",
+                        session_id.0
+                    )))
+                })?;
                 let in_flight_state = RunStateV1 {
                     step_in_flight: Some(pre.current_task_id.clone()),
                     ..RunStateV1::default()
@@ -780,9 +782,6 @@ impl EngineSharedState {
                     )
                     .await
                 {
-                    // The pre-step row is no longer running/fenced: refuse to
-                    // execute a step that could perform an external effect on
-                    // an unmarked row (A2/A7).
                     return Err(e);
                 }
             }
@@ -880,7 +879,7 @@ impl EngineSharedState {
                     clear_step_effect_marker(&root).await;
                 }
                 let commit_result = store
-                    .commit_transition(session_id, expected_revision, checkpoint, status.clone(), &next_state)
+                    .commit_transition(session_id, transition_revision, checkpoint, status.clone(), &next_state)
                     .await;
                 match commit_result {
                     Ok(_) => {
@@ -921,7 +920,7 @@ impl EngineSharedState {
                             let interrupted = store
                                 .commit_transition(
                                     session_id,
-                                    expected_revision,
+                                    transition_revision,
                                     interrupted_checkpoint,
                                     SessionStatus::Interrupted,
                                     &interrupted_state,
@@ -953,7 +952,7 @@ impl EngineSharedState {
                         // the pre-step mark wrote (a safe boundary).
                         if let Some(pre) = &pre_step_root {
                             let _ = store
-                                .restore_pre_step(session_id, expected_revision, pre)
+                                .restore_pre_step(session_id, transition_revision, pre)
                                 .await;
                         }
                         return Err(commit_err);

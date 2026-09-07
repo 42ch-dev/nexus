@@ -843,6 +843,119 @@ async fn engine_wait_produces_durable_wait_token() {
         "wait token must be a fresh UUID, not empty"
     );
     assert_eq!(wait.kind, nexus_orchestration::run_state::WaitKind::Manual);
+
+    let wait_id = wait.wait_id;
+    let revision = record.state_revision;
+    for signal in [
+        nexus_orchestration::engine::EngineSignal::Pause,
+        nexus_orchestration::engine::EngineSignal::Resume,
+        nexus_orchestration::engine::EngineSignal::Advance,
+    ] {
+        let err = engine
+            .signal(&sid, signal)
+            .await
+            .expect_err("ordinary control signals must not consume a human wait");
+        assert!(
+            matches!(
+                err,
+                nexus_orchestration::engine::EngineError::TerminalState(_)
+            ),
+            "wait fence must reject the signal, got {err:?}"
+        );
+    }
+    let after = storage
+        .load_run(&sid)
+        .await
+        .expect("reload wait")
+        .expect("run present");
+    assert_eq!(after.status, SessionStatus::WaitingForInput);
+    assert_eq!(after.state_revision, revision, "rejected signals do not write");
+    assert_eq!(
+        after.state.and_then(|state| state.wait).map(|wait| wait.wait_id),
+        Some(wait_id),
+        "only the wait-token CAS may consume the durable wait"
+    );
+}
+
+#[tokio::test]
+async fn in_flight_marker_fences_control_signals_and_stale_transition() {
+    let (pool, _db) = fresh_pool().await;
+    let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
+    let storage_arc: Arc<dyn SessionStorage> = storage.clone();
+    let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
+    let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+        nexus_orchestration::CapabilityRegistry::with_builtins(),
+    ));
+    let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+        storage_arc,
+        workflow_store,
+        caps,
+    );
+    let graph = Arc::new(graph_flow::Graph::new("test-graph"));
+    graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+    let sid = engine
+        .start_session("novel-writing", graph)
+        .await
+        .expect("start_session");
+    let root = storage
+        .get(&sid.0)
+        .await
+        .expect("load root")
+        .expect("root present");
+    let marker = RunStateV1 {
+        step_in_flight: Some(root.current_task_id.clone()),
+        ..RunStateV1::default()
+    };
+    storage
+        .mark_step_in_flight(
+            &sid,
+            1,
+            RunCheckpoint {
+                root: &root,
+                children: &[],
+            },
+            &marker,
+        )
+        .await
+        .expect("persist marker");
+
+    let err = engine
+        .signal(&sid, nexus_orchestration::engine::EngineSignal::Pause)
+        .await
+        .expect_err("signal must not erase in-flight evidence");
+    assert!(matches!(
+        err,
+        nexus_orchestration::engine::EngineError::TerminalState(_)
+    ));
+
+    let stale = storage
+        .commit_transition(
+            &sid,
+            1,
+            RunCheckpoint {
+                root: &root,
+                children: &[],
+            },
+            SessionStatus::Paused,
+            &RunStateV1::default(),
+        )
+        .await
+        .expect_err("transition loaded before the marker must lose its CAS");
+    assert!(matches!(
+        stale,
+        nexus_orchestration::engine::EngineError::RevisionMismatch { .. }
+    ));
+    let after = storage
+        .load_run(&sid)
+        .await
+        .expect("reload run")
+        .expect("run present");
+    assert_eq!(after.state_revision, 2);
+    assert_eq!(
+        after.state.and_then(|state| state.step_in_flight),
+        Some(root.current_task_id),
+        "in-flight evidence survives both signal orderings"
+    );
 }
 
 // Important 1 + 2: child identity is reconstructible and revision-fenced.
@@ -1965,8 +2078,8 @@ async fn engine_nested_child_runs_to_completion_then_parent_commits() {
         .expect("load_run")
         .expect("parent present");
     assert_eq!(
-        parent_record.state_revision, 2,
-        "parent transition committed after child completion"
+        parent_record.state_revision, 3,
+        "in-flight marker and parent transition both advance the revision"
     );
 
     // The child must be terminal (completed) and reconstructible.
@@ -2575,8 +2688,8 @@ async fn failed_cas_restore_is_revision_fenced() {
         .expect("load_run")
         .expect("root present");
     assert_eq!(
-        root_record.state_revision, 2,
-        "the concurrent bump (revision 2) must survive the failed step"
+        root_record.state_revision, 3,
+        "the marker and concurrent bump must both survive the failed step"
     );
     assert_ne!(
         after.current_task_id, pre_task,
@@ -3308,9 +3421,10 @@ async fn terminal_child_is_reattached_not_respawned() {
             SessionStatus::Completed,
             "terminal child stays terminal"
         );
-        // The child's revision must be unchanged (it was never re-stepped).
+        // Marker + terminal commit advanced the child twice; reattachment
+        // must not advance it again.
         assert_eq!(
-            children[0].state_revision, 2,
+            children[0].state_revision, 3,
             "terminal child checkpoint persisted before parent commit; not re-stepped"
         );
     }
@@ -3704,15 +3818,16 @@ async fn step_in_flight_persisted_before_effect_dispatch() {
         .expect("mark_step_in_flight succeeds before the effect");
 
     // The durable row must carry the in-flight marker with status still
-    // running and revision unchanged (1) — a crash now leaves an interrupted
-    // marker, never an unmarked running row.
+    // running and a newly advanced revision. The revision bump is the CAS
+    // boundary that prevents a previously loaded signal from erasing the
+    // marker.
     let record = storage
         .load_run(&parent_sid)
         .await
         .expect("load_run")
         .expect("row present");
     assert_eq!(record.status, SessionStatus::Running);
-    assert_eq!(record.state_revision, 1, "in-flight mark must not advance revision");
+    assert_eq!(record.state_revision, 2, "in-flight mark advances revision");
     let state = record.state.expect("state present");
     assert_eq!(
         state.step_in_flight.as_deref(),
@@ -5072,11 +5187,10 @@ async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume(
         "a child human wait must propagate to the parent as WaitingForInput, got {outcome:?}"
     );
 
-    // The child's row: still waiting_for_input with its own fresh A4 token.
-    // Revision 3 = start_run(1) → child's own park commit(2) → parent's
-    // atomic child-checkpoint persist bumps it once more (3). The OLD
-    // auto-resume loop re-parked the child up to 256 times — far beyond 3 —
-    // so exactly 3 proves no automatic resume/replay occurred.
+    // The child remains waiting with exactly one step marker, one wait
+    // transition, and one parent child-checkpoint confirmation after start:
+    // start_run(1) → mark(2) → park(3) → parent confirmation(4). Any
+    // automatic resume/replay would advance it again.
     let children = storage
         .load_children(&parent_sid)
         .await
@@ -5089,7 +5203,7 @@ async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume(
         "the child must remain waiting — no auto-resume"
     );
     assert_eq!(
-        child.state_revision, 3,
+        child.state_revision, 4,
         "child parked exactly once (no auto-resume/replay loop)"
     );
     let child_wait = child

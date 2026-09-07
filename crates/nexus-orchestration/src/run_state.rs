@@ -295,12 +295,12 @@ pub trait WorkflowStateStore: Send + Sync {
     /// replayable) run.
     ///
     /// Writes `step_state` (with `step_in_flight` set) plus the current step
-    /// position/context, fenced to `status = 'running'` AND
-    /// `state_revision = expected_revision`, WITHOUT advancing the revision
-    /// (so the subsequent `commit_transition` still CAS-anchors to the same
-    /// pre-step revision). Fails when the pre-step row is no longer running or
-    /// its revision moved — the external effect must not run on an unmarked
-    /// row.
+    /// position/context, fenced to `status IN ('running', 'paused')` and
+    /// `state_revision = expected_revision`. The marker atomically advances
+    /// the revision by one, so a concurrently loaded control signal cannot
+    /// erase it. The subsequent transition CAS anchors to that new revision.
+    /// Fails when the pre-step row is no longer step-able or its revision
+    /// moved — the external effect must not run on an unmarked row.
     ///
     /// # Errors
     /// Returns [`EngineError`] on storage failure or when the fence does not
