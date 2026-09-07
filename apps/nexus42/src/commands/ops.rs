@@ -13,11 +13,14 @@
 //! Contract: `.mstar/sdd/2026-09-03-v1.182-p1-bl04-checkpoint-resume-ux/inspect-contract.md`.
 //!
 //! Honesty discipline:
-//! - `db_status` is the raw DB column. For **v1 rows** (`execution_version >= 1`)
+//! - `db_status` is the raw DB column. For **v1 rows** (`execution_version == 1`)
 //!   it is the authoritative status (A2 — written by `commit_transition`); for
-//!   **v0 legacy rows** it stays diagnostic only (every legacy save writes
-//!   `'running'`; ON CONFLICT never updated it). The v0/v1 split is surfaced via
-//!   `execution_version` plus the canonical A7 `recovery_class`.
+//!   **v0 legacy rows** (`execution_version == 0`) it stays diagnostic only
+//!   (every legacy save writes `'running'`; ON CONFLICT never updated it).
+//!   Negative/forward execution versions are unsupported and surface as
+//!   `recovery_class: unreadable` (never coerced to legacy or v1). The
+//!   v0/v1 split is surfaced via `execution_version` plus the canonical A7
+//!   `recovery_class`.
 //! - Corrupt `context_json` → `verdict: "unknown"` / `context_unreadable`;
 //!   no verdict is fabricated from unreadable data. `context_readable` is a
 //!   two-class flag: `false` ONLY for corrupt bytes; valid-JSON-unexpected-
@@ -63,13 +66,15 @@ struct InspectDto {
     preset_version: i64,
     /// Raw DB status column — authoritative for v1 rows, diagnostic for v0.
     db_status: String,
-    /// Execution version: `0` = legacy/unverified, `>=1` = v1 authoritative (A2).
+    /// Execution version: `0` = legacy/unverified, `1` = v1 authoritative
+    /// (A2); negative/forward versions are unsupported (unreadable).
     execution_version: i64,
     /// State revision (CAS anchor; `0` on v0 rows).
     state_revision: i64,
     /// Canonical A7 recovery class (v1.186 P0, Task 2) — shared with daemon
-    /// boot/resume; `null` when the row's durable state cannot be read.
-    recovery_class: Option<RecoveryClass>,
+    /// boot/resume; always present (`unreadable` covers corrupt/unsupported
+    /// rows, `legacy_unverified` covers v0 rows).
+    recovery_class: RecoveryClass,
     /// Durable human-wait token (A4) for v1 `waiting_for_input` rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     wait_id: Option<String>,
@@ -274,36 +279,47 @@ async fn inspect_inner(session_id: Option<String>, config: &CliConfig) -> Result
 
 /// Parse the durable v1 run state blob from a checkpoint row.
 ///
-/// `None` for v0 rows (no blob, legacy/unverified) and for corrupt/absent
-/// blobs on v1 rows (non-replayable under A7 — surfaced as
-/// `recovery_class: null` with the `Unreadable` cascade below, never
-/// fabricated).
+/// `None` for v0 rows (no blob, legacy/unverified) and for corrupt/absent/
+/// type-invalid blobs (surfaced as `recovery_class: unreadable` under A7,
+/// never fabricated). Structural validation happens here — JSON that parses
+/// but does not deserialize as [`RunStateV1`] (e.g. `{"cancel_requested":
+/// "false"}`) returns `None` just like corrupt bytes, so list and detail
+/// agree.
 fn parse_run_state(bytes: Option<&[u8]>) -> Option<nexus_orchestration::run_state::RunStateV1> {
     let bytes = bytes?;
     serde_json::from_slice(bytes).ok()
 }
 
-/// Compute the canonical A7 recovery class for a v1 row (authoritative
-/// status + durable state). `legacy` v0 rows stay `LegacyUnverified`.
+/// Compute the canonical A7 recovery class from the authoritative status +
+/// durable state (shared by detail and list projection).
+///
+/// Exact execution-version contract (A7 / `load_run`): only `0` (legacy,
+/// unverified) and `1` (v1 authoritative) are accepted. Negative and
+/// forward versions are unsupported and non-replayable — they surface as
+/// [`RecoveryClass::Unreadable`], never coerced to legacy or v1. `state`
+/// is the structurally deserialized [`RunStateV1`] (`None` = absent/
+/// corrupt/type-invalid); terminal status still classifies `Terminal`
+/// first via the shared [`resume_rules::classify_recovery`].
 fn recovery_class_for(
     execution_version: i64,
     status: &str,
     state: Option<&nexus_orchestration::run_state::RunStateV1>,
     chain_class: bool,
-) -> Option<RecoveryClass> {
-    if execution_version < 1 {
-        return Some(RecoveryClass::LegacyUnverified);
+) -> RecoveryClass {
+    match execution_version {
+        0 => RecoveryClass::LegacyUnverified,
+        1 => {
+            // A v1 row's status must be a known A2 status; anything else is
+            // corrupt/ambiguous and non-replayable (mirrors `load_run`).
+            let Some(status) = nexus_orchestration::engine::SessionStatus::from_db_str(status)
+            else {
+                return RecoveryClass::Unreadable;
+            };
+            resume_rules::classify_recovery(&status, state, chain_class)
+        }
+        // Negative or forward (>= 2) execution versions are unsupported.
+        _ => RecoveryClass::Unreadable,
     }
-    let status = nexus_orchestration::engine::SessionStatus::from_db_str(status)?;
-    let Some(class) = (|| {
-        let state = state?;
-        Some(resume_rules::classify_recovery(&status, Some(state), chain_class))
-    })() else {
-        // v1 row with missing/corrupt state blob — corrupt/unsupported,
-        // non-replayable (A7 rule 2).
-        return Some(RecoveryClass::Unreadable);
-    };
-    Some(class)
 }
 
 /// Project a raw checkpoint row into the inspect DTO (contract §3–§4).
@@ -346,6 +362,12 @@ fn project(row: &CheckpointRow) -> InspectDto {
 
     // Canonical A7 recovery class (v1.186 P0, Task 2): the durable v1
     // status/state are the authority for v1 rows; v0 rows are legacy.
+    // Terminal status wins over absent/corrupt state via the shared
+    // classifier (A7 rule 1). `parse_run_state` returns `None` for v0 rows
+    // (no blob) and corrupt/absent blobs; v1 state (and its wait token) is
+    // gated on EXACT execution_version == 1 — v0 stray bytes must never be
+    // interpreted through v1 wait semantics (Important 4), and unsupported
+    // negative/forward versions surface as `Unreadable` (Important 2).
     let run_state = parse_run_state(row.run_state_json.as_deref());
     let recovery_class = recovery_class_for(
         row.execution_version,
@@ -353,8 +375,9 @@ fn project(row: &CheckpointRow) -> InspectDto {
         run_state.as_ref(),
         !live_join_keys.is_empty(),
     );
-    let wait_id = run_state
-        .as_ref()
+    let wait_id = (row.execution_version == 1)
+        .then(|| run_state.as_ref())
+        .flatten()
         .and_then(|s| s.wait.as_ref().map(|w| w.wait_id.clone()));
 
     // For v1 rows the resumable verdict is projected from the canonical A7
@@ -362,8 +385,8 @@ fn project(row: &CheckpointRow) -> InspectDto {
     // stays the v0 projection only, so durable interrupted evidence is never
     // hidden. `LegacyUnverified` routes through the legacy `resumable` above.
     let resumable = match recovery_class {
-        Some(RecoveryClass::LegacyUnverified) | None => resumable,
-        Some(class) => verdict_for_recovery(class, &row.status, None),
+        RecoveryClass::LegacyUnverified => resumable,
+        class => verdict_for_recovery(class, &row.status, None),
     };
 
     InspectDto {
@@ -387,11 +410,15 @@ fn project(row: &CheckpointRow) -> InspectDto {
 }
 
 /// Project a lean list row into the inspect DTO. The storage layer already
-/// evaluated the resume-rule predicates in SQL (no `context_json` loaded),
-/// so the verdict comes from the shared extraction cascade — identical
-/// rule order and wording to detail mode. The v1 durable columns are
-/// projected in SQL too, so the canonical A7 recovery class is computed
-/// daemon-free without loading the state blob into the CLI.
+/// evaluated the legacy resume-rule predicates in SQL (no `context_json`
+/// loaded) for the v0 verdict, and projects the v1 durable state RAW
+/// (`run_state_json`). The canonical A7 recovery class is computed by the
+/// SAME shared function as detail mode and the daemon
+/// ([`recovery_class_for`] → [`resume_rules::classify_recovery`]) — list
+/// and detail must never drift: both structurally deserialize `RunStateV1`
+/// and both enforce the exact execution-version 0/1 contract, so
+/// syntactically-valid-but-structurally-corrupt JSON is `Unreadable` in
+/// both modes and unsupported versions are never coerced.
 fn project_summary(row: &CheckpointSummary) -> InspectDto {
     let run_failure = (row.run_status.is_some() || row.run_error.is_some()).then(|| RunFailure {
         run_status: row.run_status.clone(),
@@ -418,35 +445,24 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
     let context_readable =
         unreadable_kind.map(|kind| matches!(kind, UnreadableKind::UnexpectedShape));
 
-    // Canonical A7 recovery class from the SQL-projected durable state
-    // inputs (v1.186 P0, Task 2). A v1 row whose state blob is missing or
-    // unparseable (`run_state_valid_json: None/false`) is corrupt/
-    // unsupported and non-replayable.
-    let recovery_class = if row.execution_version < 1 {
-        Some(RecoveryClass::LegacyUnverified)
-    } else if row.run_state_valid_json != Some(true) {
-        Some(RecoveryClass::Unreadable)
-    } else {
-        let chain_class = has_live_join_keys;
-        let interrupted = row.in_flight_or_cancel_requested
-            || row.step_in_flight.is_some();
-        let class = if matches!(row.status.as_str(), "completed" | "failed" | "cancelled") {
-            RecoveryClass::Terminal
-        } else if matches!(row.status.as_str(), "interrupted") || interrupted {
-            RecoveryClass::Interrupted
-        } else if matches!(row.status.as_str(), "waiting_for_input") {
-            if chain_class {
-                RecoveryClass::ConvergeMerge
-            } else {
-                RecoveryClass::HumanWait
-            }
-        } else if chain_class {
-            RecoveryClass::ConvergeMerge
-        } else {
-            RecoveryClass::SafeBoundary
-        };
-        Some(class)
-    };
+    // Canonical A7 recovery class (v1.186 P0, Task 2): the exact same
+    // deserialization + version contract as detail mode. v1 state blobs are
+    // validated structurally here (equivalent to `RunStateV1`
+    // deserialization), so `json_valid` alone never labels corrupt evidence
+    // as readable; v0 rows stay legacy/unverified; negative/forward
+    // versions are unsupported/unreadable; the wait token is gated on exact
+    // version 1.
+    let run_state = parse_run_state(row.run_state_json.as_deref());
+    let recovery_class = recovery_class_for(
+        row.execution_version,
+        &row.status,
+        run_state.as_ref(),
+        has_live_join_keys,
+    );
+    let wait_id = (row.execution_version == 1)
+        .then(|| run_state.as_ref())
+        .flatten()
+        .and_then(|s| s.wait.as_ref().map(|w| w.wait_id.clone()));
 
     let legacy_resumable = verdict_for(
         row.status.as_str(),
@@ -461,11 +477,10 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
     // For v1 rows the verdict is projected from the canonical A7 class
     // (authoritative status/state) — the legacy context-key cascade stays
     // the v0 projection only, so durable interrupted evidence is never
-    // hidden. `LegacyUnverified`/missing class routes through the legacy
-    // cascade above.
+    // hidden. `LegacyUnverified` routes through the legacy cascade above.
     let resumable = match recovery_class {
-        Some(RecoveryClass::LegacyUnverified) | None => legacy_resumable,
-        Some(class) => verdict_for_recovery(class, &row.status, unreadable_kind),
+        RecoveryClass::LegacyUnverified => legacy_resumable,
+        class => verdict_for_recovery(class, &row.status, unreadable_kind),
     };
 
     InspectDto {
@@ -477,7 +492,7 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
         execution_version: row.execution_version,
         state_revision: row.state_revision,
         recovery_class,
-        wait_id: row.wait_id.clone(),
+        wait_id,
         current_task_id: row.current_task_id.clone(),
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -605,6 +620,20 @@ fn render_ts(secs: i64) -> String {
     )
 }
 
+/// Stable human word for a [`RecoveryClass`] (same wording as detail and
+/// list output; the DTO `serde` name stays the machine contract).
+fn recovery_class_str(class: RecoveryClass) -> &'static str {
+    match class {
+        RecoveryClass::Terminal => "terminal",
+        RecoveryClass::Unreadable => "unreadable",
+        RecoveryClass::Interrupted => "interrupted",
+        RecoveryClass::HumanWait => "human_wait",
+        RecoveryClass::ConvergeMerge => "converge_merge",
+        RecoveryClass::SafeBoundary => "safe_boundary",
+        RecoveryClass::LegacyUnverified => "legacy_unverified",
+    }
+}
+
 fn render_detail(dto: &InspectDto) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "session:        {}", dto.session_id);
@@ -612,18 +641,7 @@ fn render_detail(dto: &InspectDto) -> String {
     let _ = writeln!(out, "preset:         {}", dto.preset_id);
     let _ = writeln!(out, "preset_version: {}", dto.preset_version);
     let _ = writeln!(out, "status:         {}", dto.db_status);
-    if let Some(class) = dto.recovery_class {
-        let class_str: &str = match class {
-            RecoveryClass::Terminal => "terminal",
-            RecoveryClass::Unreadable => "unreadable",
-            RecoveryClass::Interrupted => "interrupted",
-            RecoveryClass::HumanWait => "human_wait",
-            RecoveryClass::ConvergeMerge => "converge_merge",
-            RecoveryClass::SafeBoundary => "safe_boundary",
-            RecoveryClass::LegacyUnverified => "legacy_unverified",
-        };
-        let _ = writeln!(out, "recovery_class: {class_str}");
-    }
+    let _ = writeln!(out, "recovery_class: {}", recovery_class_str(dto.recovery_class));
     let position = dto.current_task_id.as_deref().unwrap_or("(none recorded)");
     let _ = writeln!(out, "position:       {position}");
     let _ = writeln!(out, "created_at:     {}", render_ts(dto.created_at));
@@ -684,10 +702,11 @@ fn render_list(rows: &[InspectDto], total: i64) -> String {
     for row in rows {
         let _ = writeln!(
             out,
-            "{}  {}  {}  {}  {}  {}",
+            "{}  {}  {}  {}  {}  {}  {}",
             row.session_id,
             row.preset_id,
             row.db_status,
+            recovery_class_str(row.recovery_class),
             row.current_task_id.as_deref().unwrap_or("-"),
             render_ts(row.updated_at),
             row.resumable.verdict
@@ -897,10 +916,7 @@ mod tests {
             status: "running".to_string(),
             execution_version: 0,
             state_revision: 0,
-            run_state_valid_json: None,
-            wait_id: None,
-            step_in_flight: None,
-            in_flight_or_cancel_requested: false,
+            run_state_json: None,
             created_at: 1_756_990_000,
             updated_at: 1_756_990_300,
             context_valid_json: true,
@@ -937,10 +953,7 @@ mod tests {
             status: "running".to_string(),
             execution_version: 0,
             state_revision: 0,
-            run_state_valid_json: None,
-            wait_id: None,
-            step_in_flight: None,
-            in_flight_or_cancel_requested: false,
+            run_state_json: None,
             created_at: 1_756_990_000,
             updated_at: 1_756_990_300,
             context_valid_json: false,

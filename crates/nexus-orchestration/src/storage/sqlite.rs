@@ -142,12 +142,21 @@ impl SqliteSessionStorage {
     /// Bounded to the 200 most recently updated non-terminal rows
     /// (recovery-filter status set) — the list never grows unbounded over
     /// the store's lifetime, and `context_json` (which embeds chat history)
-    /// is **not** loaded: the resume-rule predicates are projected in SQL
-    /// (JSON1: `json_valid` / `json_type` / `json_extract` / `json_each`)
-    /// into [`CheckpointSummary`] verdict inputs. `json_each` is guarded by
-    /// a `json_type($.data) = 'object'` CASE so a corrupt or non-object
-    /// blob can never raise; corrupt rows surface as
+    /// is **not** loaded: the legacy resume-rule predicates are projected in
+    /// SQL (JSON1: `json_valid` / `json_type` / `json_extract` /
+    /// `json_each`) into [`CheckpointSummary`] verdict inputs. `json_each`
+    /// is guarded by a `json_type($.data) = 'object'` CASE so a corrupt or
+    /// non-object blob can never raise; corrupt rows surface as
     /// `context_valid_json = false`.
+    ///
+    /// The durable v1 state (`run_state_json`) is projected RAW — SQL only
+    /// checks `json_valid` so a corrupt blob cannot raise, but structural
+    /// validation (type checking equivalent to `RunStateV1`
+    /// deserialization, plus the exact execution-version contract 0/1) is
+    /// done in Rust by the CLI consumer. `json_valid` alone must never
+    /// label structurally corrupt evidence as readable; list and detail
+    /// agree because both deserialize the same blob through the canonical
+    /// classifier.
     ///
     /// Ordering is `updated_at DESC`; a secondary `session_id DESC` tie-break
     /// keeps order deterministic for identical timestamps (bulk seeds).
@@ -157,33 +166,8 @@ impl SqliteSessionStorage {
     pub async fn list_checkpoint_rows(&self) -> Result<Vec<CheckpointSummary>, sqlx::Error> {
         sqlx::query_as::<_, CheckpointSummary>(
             "SELECT session_id, creator_id, preset_id, preset_version, current_task_id,
-                    status, execution_version, state_revision, created_at, updated_at,
-                    CASE
-                        WHEN execution_version >= 1
-                             AND json_valid(run_state_json) THEN 1
-                        ELSE NULL
-                    END AS run_state_valid_json,
-                    CASE
-                        WHEN execution_version >= 1
-                             AND json_valid(run_state_json)
-                        THEN json_extract(run_state_json, '$.wait.wait_id')
-                        ELSE NULL
-                    END AS wait_id,
-                    CASE
-                        WHEN execution_version >= 1
-                             AND json_valid(run_state_json)
-                             AND json_type(run_state_json, '$.step_in_flight') = 'text'
-                        THEN json_extract(run_state_json, '$.step_in_flight')
-                        ELSE NULL
-                    END AS step_in_flight,
-                    CASE
-                        WHEN execution_version >= 1
-                             AND json_valid(run_state_json)
-                             AND (json_extract(run_state_json, '$.in_flight') IS NOT NULL
-                                  OR json_extract(run_state_json, '$.cancel_requested') = 1)
-                        THEN 1
-                        ELSE 0
-                    END AS in_flight_or_cancel_requested,
+                    status, execution_version, state_revision, run_state_json,
+                    created_at, updated_at,
                     json_valid(context_json) AS context_valid_json,
                     CASE
                         WHEN json_valid(context_json)

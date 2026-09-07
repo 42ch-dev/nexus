@@ -1265,34 +1265,58 @@ mod tests {
         {
             let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
             seed_v1_row(&pool, "v1:wait", "waiting_for_input", None, false, true, false).await;
+            // A token-bearing wait WITH live scheduler join keys must still
+            // classify as a human wait (L2 Important 1): the durable A4 wait
+            // token beats old join keys; daemon must not re-drive it.
+            seed_v1_row(&pool, "v1:wait_joins", "waiting_for_input", None, false, true, true)
+                .await;
             pool.close().await;
         }
         let (storage, sqlite) = a7_storage(&db_path).await;
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
         let engine =
             ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
-        let sum = SessionSummary {
-            session_id: SessionId("v1:wait".to_string()),
-            creator_id: "ctr".to_string(),
-            preset_id: "e2e-converge".to_string(),
-            status: SessionStatus::WaitingForInput,
-            current_task_id: Some("task_7".to_string()),
-        };
+        let sums = vec![
+            SessionSummary {
+                session_id: SessionId("v1:wait".to_string()),
+                creator_id: "ctr".to_string(),
+                preset_id: "e2e-converge".to_string(),
+                status: SessionStatus::WaitingForInput,
+                current_task_id: Some("task_7".to_string()),
+            },
+            SessionSummary {
+                session_id: SessionId("v1:wait_joins".to_string()),
+                creator_id: "ctr".to_string(),
+                preset_id: "e2e-converge".to_string(),
+                status: SessionStatus::WaitingForInput,
+                current_task_id: Some("task_7".to_string()),
+            },
+        ];
         let decisions = resume_driven_sessions(
             &engine,
             &storage,
             Some(&store),
-            &[sum],
+            &sums,
             &PresetRunConfig::default(),
             None,
         )
         .await;
         assert_eq!(
             decisions,
-            vec![ResumeDecision::SkippedHumanWait {
-                session_id: SessionId("v1:wait".to_string())
-            }],
-            "a v1 human wait is never stepped or approved at boot"
+            vec![
+                ResumeDecision::SkippedHumanWait {
+                    session_id: SessionId("v1:wait".to_string())
+                },
+                ResumeDecision::SkippedHumanWait {
+                    session_id: SessionId("v1:wait_joins".to_string())
+                },
+            ],
+            "a v1 human wait (token-bearing, even with old join keys) is never \
+             stepped or approved at boot"
+        );
+        assert!(
+            engine.script.lock().len() == 1,
+            "no run_step may be consumed for either token-bearing wait"
         );
         // The A4 wait token is preserved in the durable state.
         let record = sqlite

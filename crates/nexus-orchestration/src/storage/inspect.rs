@@ -9,12 +9,13 @@
 //! `sqlite.rs` (the pool is private to that module).
 //!
 //! Honesty invariants:
-//! - `status` is the raw DB column. For **v1 rows** (`execution_version >= 1`)
+//! - `status` is the raw DB column. For **v1 rows** (`execution_version == 1`)
 //!   it is authoritative (written by `commit_transition`); for **v0 legacy
-//!   rows** it remains diagnostic only (every legacy save wrote `'running'`;
-//!   ON CONFLICT never updated it; the schedule-cancel handler wrote
-//!   `'cancelled'`). The v0/v1 split is surfaced via the `execution_version`
-//!   column (A2).
+//!   rows** (`execution_version == 0`) it remains diagnostic only (every
+//!   legacy save wrote `'running'`; ON CONFLICT never updated it; the
+//!   schedule-cancel handler wrote `'cancelled'`). Negative/forward
+//!   execution versions are unsupported and non-replayable. The v0/v1
+//!   split is surfaced via the `execution_version` column (A2).
 //! - The list view never loads `context_json` (it can embed chat history);
 //!   it projects the resume-rule predicates in SQL instead.
 //! - Timestamps are unix epoch seconds written on every save.
@@ -27,8 +28,9 @@
 /// can distinguish corrupt bytes from unexpected shapes and report
 /// `_run_status`/`_run_error` verbatim. `execution_version` /
 /// `state_revision` / `run_state_json` are the A2 durable columns; v1 rows
-/// (`execution_version >= 1`) carry the authoritative status/state, v0 rows
-/// (`execution_version = 0`) stay legacy/unverified.
+/// (`execution_version == 1`) carry the authoritative status/state, v0 rows
+/// (`execution_version == 0`) stay legacy/unverified, and negative/forward
+/// versions are unsupported.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct CheckpointRow {
     /// Run id (PRIMARY KEY).
@@ -45,7 +47,8 @@ pub struct CheckpointRow {
     pub status: String,
     /// Raw serialized session context blob.
     pub context_json: Vec<u8>,
-    /// Execution version: `0` = legacy/unverified, `>=1` = v1 authoritative (A2).
+    /// Execution version: `0` = legacy/unverified, `1` = v1 authoritative
+    /// (A2); negative/forward versions are unsupported.
     pub execution_version: i64,
     /// State revision (CAS anchor; `0` on v0 rows).
     pub state_revision: i64,
@@ -71,7 +74,14 @@ pub struct CheckpointRow {
 /// - `live_join_keys` — non-null join-tracker key names, comma-joined,
 ///   in JSON-object order (`None` when none live).
 ///
-/// The daemon-side rules 1–4 are exactly reproduced by
+/// The v1 durable state is projected RAW (`run_state_json`, A2) — NOT
+/// digested in SQL. Structural validation equivalent to `RunStateV1`
+/// deserialization happens in Rust ([`crate::resume_rules::classify_recovery`]
+/// via the CLI's `parse_run_state`), so list and detail agree on
+/// syntactically-valid-but-structurally-corrupt blobs: `json_valid` alone
+/// must never label corrupt evidence as readable.
+///
+/// The daemon-side rules 1–4 (legacy v0 cascade) are exactly reproduced by
 /// [`crate::resume_rules::classify_resumability_extracted`].
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct CheckpointSummary {
@@ -87,20 +97,14 @@ pub struct CheckpointSummary {
     pub current_task_id: Option<String>,
     /// Raw DB status column — authoritative for v1 rows, diagnostic for v0.
     pub status: String,
-    /// Execution version: `0` = legacy/unverified, `>=1` = v1 authoritative (A2).
+    /// Execution version: `0` = legacy/unverified, `1` = v1 authoritative;
+    /// negative/forward versions are unsupported and non-replayable.
     pub execution_version: i64,
     /// State revision (CAS anchor; `0` on v0 rows).
     pub state_revision: i64,
-    /// `run_state_json` parses as JSON (v1 rows only; `None` when corrupt).
-    pub run_state_valid_json: Option<bool>,
-    /// `wait.wait_id` when the persisted v1 state carries a human wait (A4).
-    pub wait_id: Option<String>,
-    /// `step_in_flight` task id when the persisted v1 state carries an
-    /// unfinished step mark (A2/A7 interrupted evidence).
-    pub step_in_flight: Option<String>,
-    /// `true` when the persisted v1 state carries an in_flight prompt attempt
-    /// or an unresolved cancel request (A2/A7 interrupted evidence).
-    pub in_flight_or_cancel_requested: bool,
+    /// Serialized [`crate::run_state::RunStateV1`] for v1 rows, raw
+    /// (`None` = absent on v0 rows or corrupt/absent blob on v1 rows).
+    pub run_state_json: Option<Vec<u8>>,
     /// First-save timestamp (unix epoch seconds).
     pub created_at: i64,
     /// Last-save timestamp (unix epoch seconds).

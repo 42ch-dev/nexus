@@ -1,30 +1,49 @@
-//! Shared resume-rule predicates for the v1.180 checkpoint slice
-//! (V1.182 P1 BL-04 QC fix wave — item 4, qc1 W1).
+//! Shared resume-rule predicates for the checkpoint slice.
 //!
-//! Single source of truth for the `resume_driven_sessions` rules that the
-//! daemon (`crates/nexus-daemon-runtime/src/preset_run.rs`) and the
-//! daemon-free `nexus42 ops inspect` CLI (`apps/nexus42/src/commands/ops.rs`)
+//! Single source of truth for the recovery selection rules that the daemon
+//! (`resume_driven_sessions`) and the daemon-free `nexus42 ops inspect` CLI
 //! BOTH evaluate. Before this module the same predicates lived at two
-//! independent code sites (`preset_run.rs:349-405` and `ops.rs:222-329`);
-//! a future rule change would silently desync the CLI verdict from boot
-//! re-drive. Predicates here operate on the generic
-//! `serde_json::Map<String, Value>` form (the inspection surface's public
-//! data shape); the daemon adapts its `graph_flow::Context` via
-//! [`context_data`].
+//! independent code sites; a future rule change would silently desync the
+//! CLI verdict from boot re-drive.
 //!
-//! Rules projected (order is authoritative — matches `resume_driven_sessions`
-//! plus the boot recovery filter):
-//!   1. non-terminal status (`running`/`paused`/`waiting_for_input` — the
-//!      recovery filter at `storage/sqlite.rs`); a terminal row (e.g.
-//!      `'cancelled'` written by the schedule-cancel handler) is never a
-//!      re-drive candidate, even with live join keys.
-//!   2. context unreadable (corrupt blob, or parseable but unexpected
-//!      `data` shape) → no verdict fabricated.
-//!   3. typed failure record (`_run_status`/`_run_error` as JSON strings).
-//!   4. converge/merge chain class: any non-null live join key
-//!      (`_converge_arrivals_*` / `_merge_*` / `_join_wait_start_*`).
+//! Two classifiers live here with distinct consumers:
 //!
-//! Rule 4 of the daemon (`engine.has_runner`, boot-time in-memory state) is
+//! 1. **[`classify_recovery`]** — the canonical v1.186 A7 recovery classifier
+//!    (P0 Task 2). It consumes the authoritative v1 status plus the
+//!    deserialized [`crate::run_state::RunStateV1`] (A2 durable state) and
+//!    yields one of seven [`RecoveryClass`] values. Daemon boot/resume, ops
+//!    detail, and ops list all call it — there is exactly ONE recovery
+//!    precedence for v1 rows (first rule that fires):
+//!
+//!    1. Authoritative terminal status (`completed`/`failed`/`cancelled`) —
+//!       never re-driven, even when the durable state is absent/corrupt.
+//!    2. Unreadable row — a v1 row without a parseable/structurally valid
+//!       `RunStateV1` blob (missing, corrupt, or type-invalid JSON) or with
+//!       an unknown/unsupported status is corrupt/unsupported and
+//!       non-replayable. This precedes interrupted evidence (rule 3).
+//!    3. Interrupted evidence — v1 status `interrupted`, unresolved
+//!       `cancel_requested`, a dispatching/active `in_flight` prompt, or an
+//!       unfinished `step_in_flight` mark — wins over old join keys and
+//!       never auto-retries.
+//!    4. Durable human wait (A4) — a token-bearing `wait` record is a human
+//!       wait even when old scheduler join keys exist (scheduler joins must
+//!       be represented without a human wait token). Never stepped at boot.
+//!    5. Waiting at a parked converge/merge chain without a human wait token
+//!       → bounded join resume.
+//!    6. Running/paused at a fully committed step boundary: with live chain
+//!       keys → bounded join resume; without chain keys → safe boundary
+//!       (reconstructable, not auto-driven outside the chain class).
+//!    7. v0 rows stay `LegacyUnverified` (status diagnostic only) — the
+//!       version contract is enforced at the storage/projection boundary.
+//!
+//! 2. **[`classify_resumability`] / [`classify_resumability_extracted`]** —
+//!    the pinned v1.180 conservative four-rule cascade over the legacy
+//!    `serde_json::Map<String, Value>` context shape. It remains ONLY the
+//!    v0 projection: rule 1 terminal status, then context readability,
+//!    typed `_run_status`/`_run_error` failure records, then converge/merge
+//!    chain class. v1 rows never route through it.
+//!
+//! The old daemon rule 4 (`engine.has_runner`, boot-time in-memory state) is
 //! NOT derivable from persisted data and is never part of a verdict here —
 //! consumers carry it as the separate `runner_check` caveat.
 
@@ -78,7 +97,12 @@ pub enum RecoveryClass {
 /// ([`is_converge_merge_chain`]) — the only input not carried by `RunStateV1`.
 ///
 /// `state: None` means the v1 row's state blob is missing/unparseable
-/// (corrupt/unsupported) — non-replayable `Unreadable`, never fabricated.
+/// (corrupt/unsupported) — non-replayable `Unreadable`, except that an
+/// authoritative terminal status (`completed`/`failed`/`cancelled`) still
+/// classifies `Terminal` first (rule 1 beats rule 2). Within the non-terminal
+/// statuses, corrupt/unsupported metadata precedes interrupted evidence
+/// (rule 2 beats rule 3); a durable human-wait token beats old scheduler
+/// join keys (rule 4 beats rule 5).
 #[must_use]
 pub fn classify_recovery(
     status: &SessionStatus,
@@ -86,24 +110,41 @@ pub fn classify_recovery(
     chain_class: bool,
 ) -> RecoveryClass {
     // 1. Authoritative v1 status wins (A2: status is the SSOT for v1 rows).
+    //    Terminal lookup stays authoritative even when the durable state
+    //    blob is absent/corrupt (A7 rule 1).
     match status {
         SessionStatus::Completed | SessionStatus::Failed | SessionStatus::Cancelled => {
             return RecoveryClass::Terminal;
         }
-        SessionStatus::Interrupted => return RecoveryClass::Interrupted,
-        SessionStatus::Running | SessionStatus::Paused | SessionStatus::WaitingForInput => {}
+        _ => {}
     }
-    // 2. A v1 row without a parseable state blob is corrupt/unsupported.
+    // 2. A v1 row without a parseable/structurally valid state blob is
+    //    corrupt/unsupported and non-replayable — this precedes interrupted
+    //    evidence, including an explicit `interrupted` status (A7 rule 2).
     let Some(state) = state else {
         return RecoveryClass::Unreadable;
     };
-    // 3. In-flight/cancel evidence wins over old join keys; never retried.
-    if state.cancel_requested || state.in_flight.is_some() || state.step_in_flight.is_some() {
+    // 3. Interrupted evidence wins over old join keys; never retried:
+    //    explicit interrupted status, unresolved cancel, a dispatching/
+    //    active in-flight prompt, or an unfinished step mark.
+    if matches!(status, SessionStatus::Interrupted)
+        || state.cancel_requested
+        || state.in_flight.is_some()
+        || state.step_in_flight.is_some()
+    {
         return RecoveryClass::Interrupted;
     }
-    // 4/5. Waiting: a live join key names a parked converge/merge chain (bounded
-    // join resume); otherwise it is a human wait — token preserved, never stepped
-    // at boot. Conservative: a wait without chain evidence is never advanced.
+    // 4. A durable A4 human-wait token beats old scheduler join keys: a
+    //    token-bearing wait is a human wait even when live converge/merge
+    //    join keys exist (a scheduler join park must be represented without
+    //    a human wait token).
+    if state.wait.is_some() {
+        return RecoveryClass::HumanWait;
+    }
+    // 5. Waiting without a durable wait token: a live join key names a
+    //    parked converge/merge chain (bounded join resume); a tokenless
+    //    bare wait stays conservatively human-wait-shaped and is never
+    //    advanced at boot.
     if matches!(status, SessionStatus::WaitingForInput) {
         return if chain_class {
             RecoveryClass::ConvergeMerge
@@ -470,10 +511,50 @@ mod tests {
             classify_recovery(&WaitingForInput, Some(&state(None, false, true)), false),
             RecoveryClass::HumanWait
         );
-        // Live chain keys at a wait → parked converge/merge join resume.
+        // A durable human-wait token beats old scheduler join keys — a
+        // token-bearing wait is HumanWait even in a chain-shaped context
+        // (scheduler joins must be represented without a human wait token).
         assert_eq!(
             classify_recovery(&WaitingForInput, Some(&state(None, false, true)), true),
+            RecoveryClass::HumanWait
+        );
+        // Tokenless wait at live chain keys → parked converge/merge join
+        // resume (bounded re-drive only).
+        assert_eq!(
+            classify_recovery(&WaitingForInput, Some(&state(None, false, false)), true),
             RecoveryClass::ConvergeMerge
+        );
+    }
+
+    #[test]
+    fn a7_terminal_status_wins_even_when_state_absent_or_corrupt() {
+        use crate::engine::SessionStatus::*;
+        // A terminal row with NO durable state blob is still terminal
+        // (A7 rule 1 beats rule 2) — lookup stays authoritative without a
+        // live runner.
+        for status in [Completed, Failed, Cancelled] {
+            assert_eq!(
+                classify_recovery(&status, None, false),
+                RecoveryClass::Terminal,
+                "terminal {status:?} with absent state must stay terminal"
+            );
+        }
+    }
+
+    #[test]
+    fn a7_corrupt_state_precedes_interrupted_status() {
+        use crate::engine::SessionStatus::Interrupted;
+        // A7 rule 2 (corrupt/unsupported metadata) fires before rule 3
+        // (interrupted evidence): `Interrupted` status + missing state blob
+        // is Unreadable, not Interrupted.
+        assert_eq!(
+            classify_recovery(&Interrupted, None, false),
+            RecoveryClass::Unreadable
+        );
+        // With a readable state blob, the interrupted status fires rule 3.
+        assert_eq!(
+            classify_recovery(&Interrupted, Some(&state(None, false, false)), false),
+            RecoveryClass::Interrupted
         );
     }
 
