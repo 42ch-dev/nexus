@@ -21,13 +21,14 @@ use thiserror::Error;
 
 // Re-export for internal use.
 use crate::capability::CapabilityRegistry;
+use crate::run_state::{RunCheckpoint, RunStateV1, WorkflowStateStore};
 
 // ---------------------------------------------------------------------------
 // Helper types
 // ---------------------------------------------------------------------------
 
 /// Opaque session identifier.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct SessionId(pub String);
 
 /// Composite key that uniquely identifies a session within the engine.
@@ -68,26 +69,65 @@ pub struct SessionSummary {
 }
 
 /// Runtime status of a session.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SessionStatus {
     Running,
     Paused,
     WaitingForInput,
     Completed,
     Failed,
+    /// Cancelled by an operator; terminal, never auto-driven.
+    Cancelled,
+    /// Interrupted — uncertain in-flight work; stopped, never safe retry.
+    Interrupted,
 }
 
 impl SessionStatus {
     /// Returns `true` if the session is in a terminal state.
     #[must_use]
     pub const fn is_terminal(&self) -> bool {
-        matches!(self, Self::Completed | Self::Failed)
+        matches!(
+            self,
+            Self::Completed | Self::Failed | Self::Cancelled | Self::Interrupted
+        )
     }
 
     /// Returns `true` if the session has completed successfully.
     #[must_use]
     pub const fn is_completed(&self) -> bool {
         matches!(self, Self::Completed)
+    }
+
+    /// Map to the authoritative DB `status` string (A2).
+    #[must_use]
+    pub const fn as_db_str(&self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Paused => "paused",
+            Self::WaitingForInput => "waiting_for_input",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Interrupted => "interrupted",
+        }
+    }
+
+    /// Parse a DB `status` string back into a [`SessionStatus`].
+    ///
+    /// Unknown values map to [`SessionStatus::Running`] (the historical
+    /// fallback for non-terminal rows); callers that need strict parsing
+    /// should match on the string directly.
+    #[must_use]
+    pub fn from_db_str(status: &str) -> Self {
+        match status {
+            "paused" => Self::Paused,
+            "waiting_for_input" => Self::WaitingForInput,
+            "completed" => Self::Completed,
+            "failed" => Self::Failed,
+            "cancelled" => Self::Cancelled,
+            "interrupted" => Self::Interrupted,
+            _ => Self::Running,
+        }
     }
 }
 
@@ -174,6 +214,21 @@ pub enum EngineError {
         "no graph loaded — run_step requires a graph (set via start_session or system preset)"
     )]
     NoGraphLoaded,
+    /// A revision compare-and-swap failed: the persisted `state_revision` no
+    /// longer equals the expected value (a concurrent transition won).
+    #[error("state revision mismatch for session {session_id}: expected {expected}, found {found}")]
+    RevisionMismatch {
+        /// Session id.
+        session_id: String,
+        /// Expected revision.
+        expected: u64,
+        /// Persisted revision.
+        found: u64,
+    },
+    /// A transition was attempted on a row that is already terminal or
+    /// cancelled — late graph saves must not overwrite newer checkpoint state.
+    #[error("session {0} is already terminal/cancelled; refusing transition")]
+    TerminalState(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -260,6 +315,11 @@ pub struct EngineSharedState {
     pub runners: Arc<tokio::sync::RwLock<std::collections::HashMap<String, Arc<FlowRunner>>>>,
     /// In-memory bookkeeping of active sessions.
     pub sessions: Arc<tokio::sync::RwLock<Vec<SessionSummary>>>,
+    /// Transactional workflow state store (A2) — present when the storage
+    /// backend also implements [`WorkflowStateStore`] (SQLite production;
+    /// `None` for in-memory test storage). When present, terminal/wait
+    /// transitions are persisted authoritatively via `commit_transition`.
+    pub workflow_store: Option<Arc<dyn WorkflowStateStore>>,
 }
 
 impl EngineSharedState {
@@ -269,6 +329,20 @@ impl EngineSharedState {
             storage,
             runners: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             sessions: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            workflow_store: None,
+        }
+    }
+
+    /// Create shared state with a transactional workflow store (A2).
+    pub fn with_workflow_store(
+        storage: Arc<dyn SessionStorage>,
+        workflow_store: Arc<dyn WorkflowStateStore>,
+    ) -> Self {
+        Self {
+            storage,
+            runners: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            sessions: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            workflow_store: Some(workflow_store),
         }
     }
 
@@ -293,6 +367,11 @@ impl EngineSharedState {
     ///
     /// Common logic shared between `GraphFlowEngine` and `EngineProxy`.
     ///
+    /// When a transactional [`WorkflowStateStore`] is present (SQLite
+    /// production), terminal/wait transitions are persisted authoritatively
+    /// via `commit_transition` under a revision CAS — the DB `status` column
+    /// becomes the authoritative value, never a second context-key SSOT.
+    ///
     /// # Errors
     /// Returns [`EngineError`] if the engine has no graph loaded, the step cannot be resolved,
     /// or capability execution fails.
@@ -309,16 +388,54 @@ impl EngineSharedState {
                 .ok_or(EngineError::NoGraphLoaded)?
         };
 
+        // Capture the current revision before the step so the transition CAS
+        // is anchored to the pre-step state (A2).
+        let expected_revision = if let Some(store) = &self.workflow_store {
+            store
+                .load_run(session_id)
+                .await?
+                .map(|r| r.state_revision)
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
         // Execute one step using the Arc<FlowRunner>.
         let result = runner.run(&session_id.0).await?;
 
-        // Update in-memory status.
+        // Map graph-flow ExecutionStatus → SessionStatus.
         let status = match &result.status {
             ExecutionStatus::Completed => SessionStatus::Completed,
             ExecutionStatus::Error(_) => SessionStatus::Failed,
             ExecutionStatus::WaitingForInput => SessionStatus::WaitingForInput,
             ExecutionStatus::Paused { .. } => SessionStatus::Paused,
         };
+
+        // Persist the authoritative status transition (A2) when a workflow
+        // store is present. Terminal/wait statuses must survive restart and
+        // not be disguised as `running`.
+        if let Some(store) = &self.workflow_store {
+            if status.is_terminal() || matches!(status, SessionStatus::WaitingForInput) {
+                // Re-fetch the root session (the step already saved position).
+                let root = self
+                    .storage
+                    .get(&session_id.0)
+                    .await
+                    .map_err(EngineError::GraphFlow)?
+                    .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
+
+                let next_state = build_step_state(&result, &status);
+                let checkpoint = RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                };
+                store
+                    .commit_transition(session_id, expected_revision, checkpoint, status.clone(), &next_state)
+                    .await?;
+            }
+        }
+
+        // Update in-memory status.
         if let Some(s) = self
             .sessions
             .write()
@@ -330,6 +447,30 @@ impl EngineSharedState {
         }
 
         Ok(result)
+    }
+}
+
+/// Build the durable [`RunStateV1`] for a step outcome (A2).
+///
+/// On a terminal/wait transition the step is no longer in flight; the
+/// failure record is populated from a graph-flow error when the step failed.
+fn build_step_state(
+    result: &graph_flow::ExecutionResult,
+    status: &SessionStatus,
+) -> RunStateV1 {
+    let failure = match (&result.status, status) {
+        (ExecutionStatus::Error(msg), SessionStatus::Failed) => Some(crate::run_state::RunFailure {
+            code: "graph_step_error".to_string(),
+            message: msg.clone(),
+        }),
+        _ => None,
+    };
+    RunStateV1 {
+        wait: None,
+        step_in_flight: None,
+        in_flight: None,
+        failure,
+        cancel_requested: false,
     }
 }
 
@@ -421,13 +562,52 @@ impl OrchestrationEngine for EngineProxy {
         session_id: &SessionId,
         signal: EngineSignal,
     ) -> Result<(), EngineError> {
+        let target_status = match signal {
+            EngineSignal::Pause => SessionStatus::Paused,
+            EngineSignal::Resume | EngineSignal::Advance => SessionStatus::Running,
+            EngineSignal::Cancel => SessionStatus::Cancelled,
+        };
+
+        // Persist a terminal cancel transition authoritatively (A2) when a
+        // workflow store is present. Cancellation must not claim rollback of
+        // completed effects; it only records the terminal class.
+        if matches!(target_status, SessionStatus::Cancelled) {
+            if let Some(store) = &self.state.workflow_store {
+                let expected_revision = store
+                    .load_run(session_id)
+                    .await?
+                    .map(|r| r.state_revision)
+                    .unwrap_or(0);
+                let root = self
+                    .state
+                    .storage
+                    .get(&session_id.0)
+                    .await
+                    .map_err(EngineError::GraphFlow)?
+                    .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
+                let next_state = RunStateV1 {
+                    cancel_requested: true,
+                    ..RunStateV1::default()
+                };
+                let checkpoint = RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                };
+                store
+                    .commit_transition(
+                        session_id,
+                        expected_revision,
+                        checkpoint,
+                        target_status.clone(),
+                        &next_state,
+                    )
+                    .await?;
+            }
+        }
+
         let mut sessions = self.state.sessions.write().await;
         if let Some(s) = sessions.iter_mut().find(|s| s.session_id == *session_id) {
-            match signal {
-                EngineSignal::Pause => s.status = SessionStatus::Paused,
-                EngineSignal::Resume | EngineSignal::Advance => s.status = SessionStatus::Running,
-                EngineSignal::Cancel => s.status = SessionStatus::Failed,
-            }
+            s.status = target_status;
             Ok(())
         } else {
             Err(EngineError::SessionNotFound(session_id.0.clone()))
@@ -561,12 +741,35 @@ impl GraphFlowEngine {
     /// The `storage` parameter accepts **any** [`SessionStorage`] implementation
     /// — `InMemorySessionStorage` for tests, `SqliteSessionStorage` for
     /// production.
+    ///
+    /// This constructor does **not** attach a transactional
+    /// [`WorkflowStateStore`]; use [`Self::new_with_storage_and_workflow_store`]
+    /// when the storage backend also implements it (SQLite production) so
+    /// terminal/wait transitions persist authoritatively.
     pub fn new_with_storage(
         storage: Arc<dyn SessionStorage>,
         caps: crate::capability::CapabilityRegistryHolder,
     ) -> Self {
         Self {
             state: Arc::new(EngineSharedState::new(storage)),
+            caps,
+            daemon_tool_dispatch: None,
+        }
+    }
+
+    /// Create a new engine with a transactional workflow store (A2).
+    ///
+    /// `storage` is the graph-flow session backend; `workflow_store` is the
+    /// authoritative run-state store (the SQLite adapter implements both).
+    /// When present, terminal/wait transitions are persisted via
+    /// `commit_transition` under a revision CAS.
+    pub fn new_with_storage_and_workflow_store(
+        storage: Arc<dyn SessionStorage>,
+        workflow_store: Arc<dyn WorkflowStateStore>,
+        caps: crate::capability::CapabilityRegistryHolder,
+    ) -> Self {
+        Self {
+            state: Arc::new(EngineSharedState::with_workflow_store(storage, workflow_store)),
             caps,
             daemon_tool_dispatch: None,
         }
@@ -821,13 +1024,52 @@ impl OrchestrationEngine for GraphFlowEngine {
         session_id: &SessionId,
         signal: EngineSignal,
     ) -> Result<(), EngineError> {
+        let target_status = match signal {
+            EngineSignal::Pause => SessionStatus::Paused,
+            EngineSignal::Resume | EngineSignal::Advance => SessionStatus::Running,
+            EngineSignal::Cancel => SessionStatus::Cancelled,
+        };
+
+        // Persist a terminal cancel transition authoritatively (A2) when a
+        // workflow store is present. Cancellation must not claim rollback of
+        // completed effects; it only records the terminal class.
+        if matches!(target_status, SessionStatus::Cancelled) {
+            if let Some(store) = &self.state.workflow_store {
+                let expected_revision = store
+                    .load_run(session_id)
+                    .await?
+                    .map(|r| r.state_revision)
+                    .unwrap_or(0);
+                let root = self
+                    .state
+                    .storage
+                    .get(&session_id.0)
+                    .await
+                    .map_err(EngineError::GraphFlow)?
+                    .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
+                let next_state = RunStateV1 {
+                    cancel_requested: true,
+                    ..RunStateV1::default()
+                };
+                let checkpoint = RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                };
+                store
+                    .commit_transition(
+                        session_id,
+                        expected_revision,
+                        checkpoint,
+                        target_status.clone(),
+                        &next_state,
+                    )
+                    .await?;
+            }
+        }
+
         let mut sessions = self.state.sessions.write().await;
         if let Some(s) = sessions.iter_mut().find(|s| s.session_id == *session_id) {
-            match signal {
-                EngineSignal::Pause => s.status = SessionStatus::Paused,
-                EngineSignal::Resume | EngineSignal::Advance => s.status = SessionStatus::Running,
-                EngineSignal::Cancel => s.status = SessionStatus::Failed,
-            }
+            s.status = target_status;
             Ok(())
         } else {
             Err(EngineError::SessionNotFound(session_id.0.clone()))

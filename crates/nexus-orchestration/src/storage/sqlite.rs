@@ -31,7 +31,10 @@ use graph_flow::{Session, SessionStorage};
 use std::sync::Arc;
 
 use super::inspect::{CheckpointRow, CheckpointSummary};
-use crate::engine::{SessionId, SessionStatus, SessionSummary};
+use crate::engine::{EngineError, SessionId, SessionStatus, SessionSummary};
+use crate::run_state::{
+    RunCheckpoint, RunDescriptorV1, RunRecord, RunStateV1, WorkflowStateStore,
+};
 
 /// SQLite-backed session storage sharing `nexus-local-db`'s pool.
 pub struct SqliteSessionStorage {
@@ -246,6 +249,8 @@ impl SessionStorage for SqliteSessionStorage {
                 current_task_id = excluded.current_task_id,
                 context_json     = excluded.context_json,
                 updated_at       = excluded.updated_at
+            WHERE orchestration_sessions.status NOT IN
+                ('completed', 'failed', 'cancelled', 'interrupted')
             "#,
             session_id,
             creator_id,
@@ -312,6 +317,387 @@ impl SessionStorage for SqliteSessionStorage {
             return Err(graph_flow::GraphError::SessionNotFound(id.to_string()));
         }
         Ok(())
+    }
+}
+
+/// Internal row mapping for the durable run-state SELECT (A2).
+#[derive(sqlx::FromRow)]
+struct RunRow {
+    session_id: String,
+    status: String,
+    execution_version: i64,
+    state_revision: i64,
+    run_state_json: Option<Vec<u8>>,
+    run_descriptor_json: Option<Vec<u8>>,
+}
+
+/// Serialize a run-state value to a BLOB, mapping serde errors to
+/// [`EngineError::GraphFlow`] (storage-layer serialization failure).
+fn serialize_blob<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, EngineError> {
+    serde_json::to_vec(value).map_err(|e| {
+        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            "serialize run-state blob: {e}"
+        )))
+    })
+}
+
+/// Deserialize a run-state BLOB, mapping serde errors to
+/// [`EngineError::GraphFlow`].
+fn deserialize_blob<T: serde::de::DeserializeOwned>(
+    bytes: &[u8],
+    what: &str,
+) -> Result<T, EngineError> {
+    serde_json::from_slice(bytes).map_err(|e| {
+        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            "deserialize {what}: {e}"
+        )))
+    })
+}
+
+#[async_trait]
+impl WorkflowStateStore for SqliteSessionStorage {
+    async fn load_run(&self, session_id: &SessionId) -> Result<Option<RunRecord>, EngineError> {
+        let id = session_id.0.clone();
+        let row = sqlx::query_as!(
+            RunRow,
+            r#"SELECT session_id as "session_id!", status as "status!",
+                      execution_version as "execution_version!",
+                      state_revision as "state_revision!", run_state_json, run_descriptor_json
+               FROM orchestration_sessions WHERE session_id = ?"#,
+            id
+        )
+        .fetch_optional(&*self.pool)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "load_run '{}': {e}", session_id.0
+            )))
+        })?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        let status = SessionStatus::from_db_str(&row.status);
+        let execution_version = u32::try_from(row.execution_version).unwrap_or(0);
+        let state_revision = u64::try_from(row.state_revision).unwrap_or(0);
+
+        // v0 rows are legacy/unverified: no descriptor/state, status is
+        // diagnostic only. v1 rows carry the authoritative descriptor/state.
+        let (descriptor, state) = if execution_version >= 1 {
+            let descriptor = row
+                .run_descriptor_json
+                .as_deref()
+                .map(|b| deserialize_blob::<RunDescriptorV1>(b, "run_descriptor_json"))
+                .transpose()?;
+            let state = row
+                .run_state_json
+                .as_deref()
+                .map(|b| deserialize_blob::<RunStateV1>(b, "run_state_json"))
+                .transpose()?;
+            (descriptor, state)
+        } else {
+            (None, None)
+        };
+
+        Ok(Some(RunRecord {
+            session_id: SessionId(row.session_id),
+            status,
+            state_revision,
+            execution_version,
+            descriptor,
+            state,
+        }))
+    }
+
+    async fn start_run(
+        &self,
+        session_id: &SessionId,
+        descriptor: &RunDescriptorV1,
+        checkpoint: RunCheckpoint<'_>,
+        next_state: &RunStateV1,
+    ) -> Result<RunRecord, EngineError> {
+        let now = chrono::Utc::now().timestamp();
+        let id = session_id.0.clone();
+        let creator_id = descriptor.creator_id.clone();
+        let preset_id = descriptor.preset_id.clone();
+        let preset_version = i64::from(descriptor.preset_version);
+        let parent_session_id = descriptor
+            .parent_session_id
+            .as_ref()
+            .map(|s| s.0.clone());
+        let current_task_id = checkpoint.root.current_task_id.clone();
+        let context_bytes = serde_json::to_vec(&checkpoint.root.context).map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "serialize context: {e}"
+            )))
+        })?;
+        let state_bytes = serialize_blob(next_state)?;
+        let descriptor_bytes = serialize_blob(descriptor)?;
+
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "start_run begin tx: {e}"
+                )))
+            })?;
+
+        // CAS: only start a v1 run on a fresh (v0 or absent) row. A real
+        // explicit new start never launders an uncertain old run.
+        let result = sqlx::query!(
+            r#"
+            INSERT INTO orchestration_sessions
+                (session_id, creator_id, preset_id, preset_version,
+                 parent_session_id, current_task_id, status,
+                 context_json, chat_history_json, created_at, updated_at,
+                 execution_version, state_revision, run_state_json, run_descriptor_json)
+            VALUES (?, ?, ?, ?, ?, ?, 'running', ?, NULL, ?, ?, 1, 1, ?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET
+                status = 'running',
+                current_task_id = excluded.current_task_id,
+                context_json = excluded.context_json,
+                updated_at = excluded.updated_at,
+                execution_version = 1,
+                state_revision = 1,
+                run_state_json = excluded.run_state_json,
+                run_descriptor_json = excluded.run_descriptor_json
+            WHERE orchestration_sessions.execution_version = 0
+            "#,
+            id,
+            creator_id,
+            preset_id,
+            preset_version,
+            parent_session_id,
+            current_task_id,
+            context_bytes,
+            now,
+            now,
+            state_bytes,
+            descriptor_bytes
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "start_run '{}': {e}", session_id.0
+            )))
+        })?;
+
+        if result.rows_affected() == 0 {
+            return Err(EngineError::TerminalState(session_id.0.clone()));
+        }
+
+        // Persist child checkpoints atomically under the root start.
+        for child in checkpoint.children {
+            let child_ctx = serde_json::to_vec(&child.session.context).map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "serialize child context: {e}"
+                )))
+            })?;
+            let child_state = serialize_blob(&child.state)?;
+            let child_status = child.status.as_db_str();
+            let child_id = child.session.id.clone();
+            let child_task = child.session.current_task_id.clone();
+            let child_creator = "unknown".to_string();
+            let child_preset = "default".to_string();
+            sqlx::query!(
+                r#"
+                INSERT INTO orchestration_sessions
+                    (session_id, creator_id, preset_id, preset_version,
+                     parent_session_id, current_task_id, status,
+                     context_json, chat_history_json, created_at, updated_at,
+                     execution_version, state_revision, run_state_json)
+                VALUES (?, ?, ?, 0, ?, ?, ?, ?, NULL, ?, ?, 1, 1, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    status = excluded.status,
+                    current_task_id = excluded.current_task_id,
+                    context_json = excluded.context_json,
+                    updated_at = excluded.updated_at,
+                    run_state_json = excluded.run_state_json
+                "#,
+                child_id,
+                child_creator,
+                child_preset,
+                checkpoint.root.id,
+                child_task,
+                child_status,
+                child_ctx,
+                now,
+                now,
+                child_state
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "start_run child '{child_id}': {e}"
+                )))
+            })?;
+        }
+
+        tx.commit().await.map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "start_run commit: {e}"
+            )))
+        })?;
+
+        Ok(RunRecord {
+            session_id: SessionId(session_id.0.clone()),
+            status: SessionStatus::Running,
+            state_revision: 1,
+            execution_version: 1,
+            descriptor: Some(descriptor.clone()),
+            state: Some(next_state.clone()),
+        })
+    }
+
+    async fn commit_transition(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: RunCheckpoint<'_>,
+        next_status: SessionStatus,
+        next_state: &RunStateV1,
+    ) -> Result<RunRecord, EngineError> {
+        let now = chrono::Utc::now().timestamp();
+        let id = session_id.0.clone();
+        let current_task_id = checkpoint.root.current_task_id.clone();
+        let context_bytes = serde_json::to_vec(&checkpoint.root.context).map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "serialize context: {e}"
+            )))
+        })?;
+        let state_bytes = serialize_blob(next_state)?;
+        let status_str = next_status.as_db_str();
+
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "commit_transition begin tx: {e}"
+                )))
+            })?;
+
+        // Revision CAS + terminal/cancelled fence: only advance when the
+        // persisted revision still matches AND the row is not already
+        // terminal/cancelled. A late graph save cannot overwrite newer
+        // checkpoint state.
+        let expected_revision_i64 = expected_revision as i64;
+        let result = sqlx::query!(
+            r#"
+            UPDATE orchestration_sessions
+            SET status = ?, current_task_id = ?, context_json = ?,
+                updated_at = ?, state_revision = state_revision + 1,
+                run_state_json = ?
+            WHERE session_id = ? AND state_revision = ?
+              AND status NOT IN ('completed', 'failed', 'cancelled', 'interrupted')
+            "#,
+            status_str,
+            current_task_id,
+            context_bytes,
+            now,
+            state_bytes,
+            id,
+            expected_revision_i64
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "commit_transition '{}': {e}", session_id.0
+            )))
+        })?;
+
+        if result.rows_affected() == 0 {
+            // Distinguish a revision mismatch from a terminal/cancelled fence.
+            let current = sqlx::query_scalar::<_, i64>(
+                "SELECT state_revision FROM orchestration_sessions WHERE session_id = ?",
+            )
+            .bind(&session_id.0)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "commit_transition read revision: {e}"
+                )))
+            })?;
+
+            return match current {
+                Some(found) if found != expected_revision as i64 => {
+                    Err(EngineError::RevisionMismatch {
+                        session_id: session_id.0.clone(),
+                        expected: expected_revision,
+                        found: u64::try_from(found).unwrap_or(0),
+                    })
+                }
+                _ => Err(EngineError::TerminalState(session_id.0.clone())),
+            };
+        }
+
+        // Persist child checkpoints atomically under the root transition.
+        for child in checkpoint.children {
+            let child_ctx = serde_json::to_vec(&child.session.context).map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "serialize child context: {e}"
+                )))
+            })?;
+            let child_state = serialize_blob(&child.state)?;
+            let child_status = child.status.as_db_str();
+            let child_id = child.session.id.clone();
+            let child_task = child.session.current_task_id.clone();
+            let child_creator = "unknown".to_string();
+            let child_preset = "default".to_string();
+            sqlx::query!(
+                r#"
+                INSERT INTO orchestration_sessions
+                    (session_id, creator_id, preset_id, preset_version,
+                     parent_session_id, current_task_id, status,
+                     context_json, chat_history_json, created_at, updated_at,
+                     execution_version, state_revision, run_state_json)
+                VALUES (?, ?, ?, 0, ?, ?, ?, ?, NULL, ?, ?, 1, 1, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    status = excluded.status,
+                    current_task_id = excluded.current_task_id,
+                    context_json = excluded.context_json,
+                    updated_at = excluded.updated_at,
+                    execution_version = 1,
+                    run_state_json = excluded.run_state_json
+                "#,
+                child_id,
+                child_creator,
+                child_preset,
+                checkpoint.root.id,
+                child_task,
+                child_status,
+                child_ctx,
+                now,
+                now,
+                child_state
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "commit_transition child '{child_id}': {e}"
+                )))
+            })?;
+        }
+
+        tx.commit().await.map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "commit_transition commit: {e}"
+            )))
+        })?;
+
+        Ok(RunRecord {
+            session_id: SessionId(session_id.0.clone()),
+            status: next_status,
+            state_revision: expected_revision + 1,
+            execution_version: 1,
+            descriptor: None,
+            state: Some(next_state.clone()),
+        })
     }
 }
 

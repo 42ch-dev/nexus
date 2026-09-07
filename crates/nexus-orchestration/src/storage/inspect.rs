@@ -9,9 +9,12 @@
 //! `sqlite.rs` (the pool is private to that module).
 //!
 //! Honesty invariants:
-//! - `status` is the raw DB column — NOT authoritative (every save writes
-//!   `'running'`; ON CONFLICT never updates it; the schedule-cancel handler
-//!   writes `'cancelled'`).
+//! - `status` is the raw DB column. For **v1 rows** (`execution_version >= 1`)
+//!   it is authoritative (written by `commit_transition`); for **v0 legacy
+//!   rows** it remains diagnostic only (every legacy save wrote `'running'`;
+//!   ON CONFLICT never updated it; the schedule-cancel handler wrote
+//!   `'cancelled'`). The v0/v1 split is surfaced via the `execution_version`
+//!   column (A2).
 //! - The list view never loads `context_json` (it can embed chat history);
 //!   it projects the resume-rule predicates in SQL instead.
 //! - Timestamps are unix epoch seconds written on every save.

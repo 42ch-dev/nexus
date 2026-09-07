@@ -9,6 +9,7 @@ use crate::capability::CapabilityRegistry;
 use crate::preset::manifest::{
     ContextUpdateOp, ExitWhen, InitialAction, InnerGraph, NextTarget, PresetManifest,
 };
+use crate::run_state::PresetSourceIdentity;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -334,6 +335,89 @@ pub fn load_preset(
     }
 
     load_preset_from_str(&yaml, caps)
+}
+
+/// Compute the content-addressed [`PresetSourceIdentity`] (A2/A7).
+///
+/// The content hash is over the manifest **and** referenced prompt/template
+/// bytes — not the YAML hash alone — so a changed template invalidates the
+/// identity and recovery refuses to fall back to current bytes.
+///
+/// For a directory bundle, referenced template files are read from
+/// `bundle_root`; for an embedded preset they are read from the compiled-in
+/// embedded directory. Missing referenced templates are hashed as absent
+/// (the loader's asset validation already rejects missing files for
+/// directory bundles; embedded presets are validated at build time).
+///
+/// # Errors
+/// Returns [`PresetLoadError`] if a referenced template cannot be read from a
+/// directory bundle.
+pub fn preset_source_identity(
+    manifest: &PresetManifest,
+    bundle_root: Option<&Path>,
+    embedded_id: Option<&str>,
+) -> Result<PresetSourceIdentity, PresetLoadError> {
+    // Hash the manifest YAML first.
+    let manifest_yaml = serde_yaml::to_string(manifest).map_err(PresetLoadError::from)?;
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(manifest_yaml.as_bytes());
+
+    // Fold in every referenced template file's bytes (deterministic order).
+    let mut template_paths: Vec<String> = collect_template_file_entries(manifest)
+        .into_iter()
+        .map(|(_, tf)| tf.to_string())
+        .collect();
+    template_paths.sort_unstable();
+    template_paths.dedup();
+
+    for tf in &template_paths {
+        hasher.update(tf.as_bytes());
+        hasher.update(&[0u8]);
+        let bytes = if let Some(root) = bundle_root {
+            match std::fs::read(root.join(tf)) {
+                Ok(b) => b,
+                Err(e) => {
+                    return Err(PresetLoadError::Validation {
+                        len: 1,
+                        problems: vec![ValidationProblem {
+                            path: format!("template_file {tf}"),
+                            error: format!("failed to read referenced template: {e}"),
+                        }],
+                    });
+                }
+            }
+        } else if let Some(id) = embedded_id {
+            crate::preset::read_embedded_template(id, tf)
+                .map(String::into_bytes)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        hasher.update(&bytes);
+    }
+
+    let mut content_hash = [0u8; 32];
+    content_hash.copy_from_slice(hasher.finalize().as_bytes());
+
+    Ok(match (bundle_root, embedded_id) {
+        (Some(root), _) => PresetSourceIdentity::Directory {
+            root: root.to_path_buf(),
+            content_hash,
+        },
+        (None, Some(id)) => PresetSourceIdentity::Embedded {
+            preset_id: id.to_string(),
+            content_hash,
+        },
+        (None, None) => {
+            return Err(PresetLoadError::Validation {
+                len: 1,
+                problems: vec![ValidationProblem {
+                    path: "preset_source_identity".to_string(),
+                    error: "neither bundle_root nor embedded_id provided".to_string(),
+                }],
+            });
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------

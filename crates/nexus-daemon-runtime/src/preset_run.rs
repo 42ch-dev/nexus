@@ -145,6 +145,10 @@ pub async fn drive_preset_run(
         match engine.get_status(session_id).await {
             Ok(SessionStatus::Completed) => return PresetRunOutcome::Completed { steps },
             Ok(SessionStatus::Failed) => return PresetRunOutcome::Cancelled { steps },
+            // Cancelled/Interrupted are terminal — never auto-driven (A2).
+            Ok(SessionStatus::Cancelled | SessionStatus::Interrupted) => {
+                return PresetRunOutcome::Cancelled { steps };
+            }
             Ok(SessionStatus::WaitingForInput) if !config.resume_waiting => {
                 return PresetRunOutcome::WaitingForInput { steps };
             }

@@ -223,6 +223,8 @@ fn session_status_to_str(status: &SessionStatus) -> String {
         SessionStatus::WaitingForInput => "waiting_for_input".to_string(),
         SessionStatus::Completed => "completed".to_string(),
         SessionStatus::Failed => "failed".to_string(),
+        SessionStatus::Cancelled => "cancelled".to_string(),
+        SessionStatus::Interrupted => "interrupted".to_string(),
     }
 }
 
