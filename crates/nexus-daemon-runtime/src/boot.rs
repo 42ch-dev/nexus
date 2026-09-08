@@ -868,12 +868,18 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // ONE production drive-owner path per Creator DB + session.
     let run_coordinator: Option<Arc<WorkflowRunCoordinator>> = match &sqlite_boot_storage {
         Some(_) => {
-            let coordinator = Arc::new(WorkflowRunCoordinator::new(
+            let mut coordinator_builder = WorkflowRunCoordinator::new(
                 concrete_engine.clone(),
                 session_storage.clone(),
                 Arc::new(state.pool().expect("creator pool present").clone()),
                 session_cancels.clone(),
-            ));
+            );
+            // N-4: attach the Host plane so admission validates provider
+            // references in agent bindings before enqueue.
+            if let Some(host) = state.agent_host() {
+                coordinator_builder = coordinator_builder.with_agent_host(host);
+            }
+            let coordinator = Arc::new(coordinator_builder);
             state.set_run_coordinator(coordinator.clone());
             if let Some(executor) = &prompt_executor {
                 state.set_prompt_executor(executor.clone());

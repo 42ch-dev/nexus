@@ -106,6 +106,13 @@ pub struct WorkspaceState {
     session_cancels: Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
+    /// One async initialization gate for the lazy-attach runtime bundle
+    /// (N-2): concurrent `ensure_creator_pool` callers serialize here and
+    /// re-check; only the winner opens the pool and publishes the bundle.
+    /// Readers can never observe a duplicate or mixed bundle — there is
+    /// exactly one builder and the readiness slot (`run_coordinator`) is
+    /// published after its dependencies (engine, prompt executor).
+    bundle_gate: Arc<tokio::sync::Mutex<()>>,
     /// Agent host facade (set at daemon startup when agent host subsystem is wired).
     agent_host: Arc<Option<Arc<dyn nexus_agent_host::HostFacade>>>,
     /// Process-lifetime Actor session indexes over `HostFacade` (v1.184 P2).
@@ -221,6 +228,7 @@ impl WorkspaceState {
             run_coordinator: Arc::new(RwLock::new(None)),
             prompt_executor: Arc::new(RwLock::new(None)),
             session_cancels: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            bundle_gate: Arc::new(tokio::sync::Mutex::new(())),
             agent_host: Arc::new(None),
             actor_sessions: ActorSessionRegistry::new(),
             agent_host_config: Arc::new(AgentHostConfig::default()),
@@ -320,6 +328,7 @@ impl WorkspaceState {
             run_coordinator: Arc::new(RwLock::new(None)),
             prompt_executor: Arc::new(RwLock::new(None)),
             session_cancels: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            bundle_gate: Arc::new(tokio::sync::Mutex::new(())),
             agent_host: Arc::new(None),
             actor_sessions: ActorSessionRegistry::new(),
             agent_host_config: Arc::new(agent_host_config),
@@ -468,74 +477,84 @@ impl WorkspaceState {
     /// finds `active_creator_id` in config. Idempotent: no-ops if pool already
     /// open for the same creator.
     ///
-    /// I-3: when the pool is opened lazily (Tier-0 boot had no creator DB),
+    /// I-3/N-2: when the pool is opened lazily (Tier-0 boot had no creator DB),
     /// the matching runtime bundle is published BEFORE the attach is
     /// reported ready: durable `SqliteSessionStorage`/`WorkflowStateStore`,
     /// a `GraphFlowEngine` configured with that store, a
     /// `HostPromptExecutor`, a `WorkflowRunCoordinator`, and a
-    /// `ScheduleSupervisor` with `ScheduleRunStarter`. Concurrent attaches
-    /// publish one bundle only (the winner's).
+    /// `ScheduleSupervisor` with `ScheduleRunStarter`. The whole
+    /// open-and-publish sequence runs under ONE async initialization gate:
+    /// concurrent callers serialize, re-check, and observe the winner's
+    /// complete bundle — never a mixed engine/coordinator/supervisor state
+    /// and never a duplicate bundle (N-2).
     ///
     /// # Errors
     ///
     /// Returns an error if the creator DB path cannot be resolved, schema init
     /// fails, or pool creation fails.
     pub async fn ensure_creator_pool(&self) -> anyhow::Result<()> {
-        if self.creator_pool_ready() {
-            if self.run_coordinator().is_none() {
-                self.publish_lazy_attach_bundle()?;
-            }
+        // Fast path: the pool AND its matching bundle are already published.
+        if self.creator_pool_ready() && self.run_coordinator().is_some() {
             return Ok(());
         }
 
-        let user_home =
-            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
-        let CreatorDbOutcome {
-            db,
-            db_path,
-            narrative_gateway,
-            session_manager,
-            open_error,
-        } = Self::try_open_creator_db(&user_home, &self.nexus_home).await;
+        // N-2: one async initialization gate for the open-and-publish
+        // sequence. The first caller opens the pool and publishes the
+        // bundle; every concurrent caller waits here, re-checks, and returns
+        // without building a second bundle.
+        let _gate = self.bundle_gate.lock().await;
 
-        if let (Some(db), Some(db_path), Some(narrative_gateway), Some(session_manager)) =
-            (db, db_path, narrative_gateway, session_manager)
-        {
-            {
-                let mut slot = self.creator_db_write();
-                if slot.db.is_some() {
-                    drop(slot);
-                    // Concurrent attach already published the pool; wait until
-                    // the matching coordinator bundle is visible (I-3).
-                    if self.run_coordinator().is_none() {
-                        self.publish_lazy_attach_bundle()?;
-                    }
-                    return Ok(());
-                }
-                slot.db = Some(db);
-                slot.db_path = Some(db_path);
-                slot.narrative_gateway = Some(narrative_gateway);
-                slot.session_manager = Some(session_manager);
-                if let Some(db_ref) = slot.db.as_ref() {
-                    self.publish_shared_pool(db_ref);
-                }
-            }
-
-            // Publish the matching runtime bundle before this attach is
-            // treated as ready by callers that only saw the pool (I-3).
-            if self.run_coordinator().is_none() {
-                self.publish_lazy_attach_bundle()?;
-            }
-
-            Ok(())
-        } else {
-            // Propagate the captured diagnostic so the web classifier can
-            // detect migration-class failures (AC-P0-3). Falls back to a
-            // generic message only when no creator was active.
-            let detail = open_error
-                .unwrap_or_else(|| "no active creator or path resolution failed".to_string());
-            Err(anyhow::anyhow!("Failed to open creator database: {detail}"))
+        // Re-check under the gate: the winner may have completed while we
+        // waited.
+        if self.creator_pool_ready() && self.run_coordinator().is_some() {
+            return Ok(());
         }
+
+        if !self.creator_pool_ready() {
+            let user_home = dirs::home_dir()
+                .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+            let CreatorDbOutcome {
+                db,
+                db_path,
+                narrative_gateway,
+                session_manager,
+                open_error,
+            } = Self::try_open_creator_db(&user_home, &self.nexus_home).await;
+
+            if let (Some(db), Some(db_path), Some(narrative_gateway), Some(session_manager)) =
+                (db, db_path, narrative_gateway, session_manager)
+            {
+                {
+                    let mut slot = self.creator_db_write();
+                    if slot.db.is_none() {
+                        slot.db = Some(db);
+                        slot.db_path = Some(db_path);
+                        slot.narrative_gateway = Some(narrative_gateway);
+                        slot.session_manager = Some(session_manager);
+                        if let Some(db_ref) = slot.db.as_ref() {
+                            self.publish_shared_pool(db_ref);
+                        }
+                    }
+                }
+            } else {
+                // Propagate the captured diagnostic so the web classifier can
+                // detect migration-class failures (AC-P0-3). Falls back to a
+                // generic message only when no creator was active.
+                let detail = open_error
+                    .unwrap_or_else(|| "no active creator or path resolution failed".to_string());
+                return Err(anyhow::anyhow!("Failed to open creator database: {detail}"));
+            }
+        }
+
+        // Publish the matching runtime bundle before this attach is treated
+        // as ready by callers that only saw the pool (I-3). Under the gate
+        // exactly one caller reaches this point; a second caller re-checks
+        // `run_coordinator().is_some()` above and returns.
+        if self.run_coordinator().is_none() {
+            self.publish_lazy_attach_bundle()?;
+        }
+
+        Ok(())
     }
 
     /// Publish the durable Creator-DB runtime bundle after a lazy Profile
@@ -565,14 +584,39 @@ impl WorkspaceState {
         let storage: Arc<dyn GraphFlowSessionStorage> = sqlite_storage.clone();
         let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();
 
+        // Prompt executor: the daemon-owned HostPromptExecutor over the
+        // Host facade (A1). When no Host facade is wired (tests), the
+        // executor is absent and LLM-backed capabilities fail closed.
+        let prompt_executor: Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>> =
+            match self.agent_host() {
+                Some(host) => {
+                    let host_config = self.agent_host_config();
+                    Some(Arc::new(crate::prompt_executor::HostPromptExecutor::new(
+                        host,
+                        workflow_store.clone(),
+                        host_config.timeouts.clone(),
+                    )))
+                }
+                None => None,
+            };
+
         // Capability holder: reuse the boot holder when present; otherwise
-        // build a builtins-only holder (the boot registry is always present
-        // in production — this is a defensive fallback).
+        // build a runtime-deps holder over the SAME pool, prompt executor,
+        // cancellation map and tool dispatch (N-7: a lazy-attached creator
+        // must drive LLM-backed capabilities through the production
+        // executor, not a builtins-only placeholder registry).
         let holder = match self.capability_registry_holder() {
             Some(holder) => holder,
             None => {
+                let deps = nexus_orchestration::capability::CapabilityRuntimeDeps {
+                    pool: Some(pool_arc.as_ref().clone()),
+                    prompt_executor: prompt_executor.clone(),
+                    session_cancels: self.session_cancels(),
+                    daemon_tool_dispatch: self.daemon_tool_dispatch(),
+                    cdn_config: None,
+                };
                 let holder = CapabilityRegistryHolder::with_registry(Arc::new(
-                    CapabilityRegistry::with_builtins(),
+                    nexus_orchestration::capability::CapabilityRegistry::with_runtime_deps(&deps),
                 ));
                 self.set_capability_registry(holder.clone());
                 holder
@@ -593,21 +637,6 @@ impl WorkspaceState {
         if let Some(dispatch) = self.daemon_tool_dispatch() {
             engine.set_daemon_tool_dispatch(dispatch);
         }
-        // Prompt executor: the daemon-owned HostPromptExecutor over the
-        // Host facade (A1). When no Host facade is wired (tests), the
-        // executor is absent and LLM-backed capabilities fail closed.
-        let prompt_executor: Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>> =
-            match self.agent_host() {
-                Some(host) => {
-                    let host_config = self.agent_host_config();
-                    Some(Arc::new(crate::prompt_executor::HostPromptExecutor::new(
-                        host,
-                        workflow_store.clone(),
-                        host_config.timeouts.clone(),
-                    )))
-                }
-                None => None,
-            };
         if let Some(executor) = &prompt_executor {
             engine.set_prompt_executor(executor.clone(), self.session_cancels());
         }
@@ -619,13 +648,19 @@ impl WorkspaceState {
             self.set_prompt_executor(executor.clone());
         }
 
-        // Coordinator over the same engine/storage/pool.
-        let coordinator = Arc::new(crate::preset_run::WorkflowRunCoordinator::new(
+        // Coordinator over the same engine/storage/pool. When a Host facade
+        // is wired, attach it so admission validates provider references in
+        // agent bindings before enqueue (N-4).
+        let mut coordinator_builder = crate::preset_run::WorkflowRunCoordinator::new(
             engine_arc.clone(),
             storage.clone(),
             pool_arc.clone(),
             self.session_cancels(),
-        ));
+        );
+        if let Some(host) = self.agent_host() {
+            coordinator_builder = coordinator_builder.with_agent_host(host);
+        }
+        let coordinator = Arc::new(coordinator_builder);
         self.set_run_coordinator(coordinator.clone());
 
         // Schedule supervisor with the daemon admission callback.

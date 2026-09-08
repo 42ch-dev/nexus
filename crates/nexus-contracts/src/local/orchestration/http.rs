@@ -64,6 +64,21 @@ pub struct GetSessionResponse {
     pub session: SessionSummary,
 }
 
+/// Role → provider binding (A1) for the camelCase session-create wire
+/// contract (`agentBindings`). The schedule path uses the snake_case
+/// [`crate::local::schedule::http::AgentBindingDto`]; session creation
+/// preserves its existing camelCase convention (`presetId`, `creatorId`,
+/// `agentBindings` → `providerId`, `model`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionAgentBindingDto {
+    /// Provider id.
+    pub provider_id: String,
+    /// Optional model id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
 /// Request body for `POST /v1/daemon/orchestration/sessions` (schedule start).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,6 +90,11 @@ pub struct CreateSessionRequest {
     /// Optional seed text for `preset.input.*`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<String>,
+    /// Role → provider binding map (A1, v1.186 P2 T1). Frozen at admission
+    /// into the run descriptor; graph node `agent` selects the role key.
+    /// Unknown role/provider references are refused before enqueue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_bindings: Option<std::collections::HashMap<String, SessionAgentBindingDto>>,
 }
 
 /// Response body for `POST /v1/daemon/orchestration/sessions` (schedule start).

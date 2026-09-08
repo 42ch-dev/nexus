@@ -57,6 +57,7 @@ async fn create_session(server: &TestServer, creator_id: &str, preset_id: &str) 
         creator_id: creator_id.to_string(),
         preset_id: preset_id.to_string(),
         seed: None,
+        agent_bindings: None,
     };
     let resp = server
         .post("/v1/daemon/orchestration/sessions")

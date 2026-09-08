@@ -30,10 +30,11 @@ pub async fn create_session(
     // the daemon must have a creator DB (boot or lazy attach) before a
     // public session can be driven.
     //
-    // I-5: `CreateSessionRequest` has no sanctioned `agent_bindings` field.
-    // Role bindings are frozen on the schedule add/admit path
-    // (`AddScheduleRequest.agent_bindings` -> execution descriptor).
-    // Unknown/empty binding keys on that path are refused before drive.
+    // I-5/N-4: `CreateSessionRequest.agentBindings` (camelCase) carries the
+    // role → provider binding map; the coordinator freezes it into the run
+    // descriptor and refuses unknown role/provider references before
+    // enqueue. Absent bindings behave as an empty map (the `default` role
+    // must then be bound by the preset's own admission path).
     let coordinator = state
         .run_coordinator()
         .ok_or_else(|| NexusApiError::service_unavailable("run coordinator not configured"))?;
@@ -46,13 +47,34 @@ pub async fn create_session(
 
     // I-4: resolve via the shared public resolver (embedded, user, and
     // system directory presets) — not `load_embedded_preset` only. The
-    // coordinator's `start_session` freezes the supplied seed/input into
-    // the v1 admission path and drives the run — mandatory, never optional.
+    // coordinator's `start_session` freezes the supplied seed/input and
+    // agent bindings into the v1 admission path and drives the run —
+    // mandatory, never optional. Unknown role/provider references are
+    // refused before enqueue (N-4).
+    let agent_bindings = body
+        .agent_bindings
+        .as_ref()
+        .map(|bindings| {
+            bindings
+                .iter()
+                .map(|(role, dto)| {
+                    (
+                        role.clone(),
+                        nexus_orchestration::run_state::AgentBinding {
+                            provider_id: dto.provider_id.clone(),
+                            model: dto.model.clone(),
+                        },
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let session_id = coordinator
         .start_session(
             &body.preset_id,
             &body.creator_id,
             body.seed.as_deref(),
+            agent_bindings,
             state.nexus_home(),
             &caps,
             state.daemon_tool_dispatch(),
@@ -61,7 +83,12 @@ pub async fn create_session(
         .await
         .map_err(|e| {
             let msg = e.to_string();
-            if msg.contains("not eligible") || msg.contains("system preset") {
+            if msg.contains("not eligible")
+                || msg.contains("system preset")
+                || msg.contains("unknown role")
+                || msg.contains("unknown provider")
+                || msg.contains("invalid agent binding")
+            {
                 NexusApiError::BadRequest {
                     code: "invalid_input".into(),
                     message: msg,

@@ -574,6 +574,10 @@ pub struct WorkflowRunCoordinator {
     /// The creator-DB pool the coordinator's durable store reads through
     /// (used for durable-state gating in `ensure_driving`, I-2).
     pool: Arc<sqlx::SqlitePool>,
+    /// The daemon's Host plane (A1) — used to validate provider references
+    /// in agent bindings before enqueue (N-4). `None` when no Host facade
+    /// is wired (tests): provider validation is skipped then.
+    agent_host: Option<Arc<dyn nexus_agent_host::HostFacade>>,
     /// Shared per-run cancellation tokens (A1) — the same map the engine
     /// registers run tokens in and the prompt executor resolves.
     session_cancels: std::sync::Arc<
@@ -607,10 +611,19 @@ impl WorkflowRunCoordinator {
             engine,
             storage,
             pool,
+            agent_host: None,
             session_cancels,
             drives: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             config: PresetRunConfig::default(),
         }
+    }
+
+    /// Attach the daemon's Host plane so admission can validate provider
+    /// references in agent bindings before enqueue (N-4).
+    #[must_use]
+    pub fn with_agent_host(mut self, host: Arc<dyn nexus_agent_host::HostFacade>) -> Self {
+        self.agent_host = Some(host);
+        self
     }
 
     /// The engine this coordinator drives (as the trait surface).
@@ -632,6 +645,7 @@ impl WorkflowRunCoordinator {
         preset_id: &str,
         creator_id: &str,
         seed: Option<&str>,
+        agent_bindings: std::collections::HashMap<String, nexus_orchestration::run_state::AgentBinding>,
         nexus_home: &std::path::Path,
         caps: &nexus_orchestration::CapabilityRegistryHolder,
         daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>,
@@ -651,6 +665,11 @@ impl WorkflowRunCoordinator {
             .ok_or_else(|| RunControlError::NoWorkspace("capability registry unavailable".into()))?;
         let loaded = nexus_orchestration::preset::resolve_preset(preset_id, nexus_home, &registry)
             .map_err(|e| RunControlError::PresetLoad(preset_id.to_string(), e.to_string()))?;
+
+        // N-4: validate role/provider references BEFORE enqueue. Every
+        // binding role must be a declared preset role (or `default`), and
+        // every provider id must exist in the Host provider catalog.
+        validate_agent_bindings(&loaded, &agent_bindings, self.agent_host.as_ref()).await?;
 
         // Freeze the supplied seed: JSON object → structured `preset.input.*`;
         // anything else → core-context text.
@@ -688,13 +707,70 @@ impl WorkflowRunCoordinator {
                 None,
                 input,
                 core_context.as_deref(),
-                std::collections::HashMap::new(),
+                agent_bindings,
                 Arc::new(wired),
             )
             .await
             .map_err(|e| RunControlError::Admission(e.to_string()))?;
         self.ensure_driving(&sid).await?;
         Ok(sid)
+    }
+
+    /// Persist a durable non-replayable failure for a v1 run whose drive
+    /// loop failed (closure 8 / I-2 residual).
+    ///
+    /// A failed driver must never leave the durable v1 record classified
+    /// runnable: `drive_preset_run`'s context-key failure record
+    /// (`_run_status`/`_run_error`) does not change the authoritative DB
+    /// `status` column, so a later `ensure_driving` would classify the
+    /// still-`running` row as runnable and spawn again. This method commits
+    /// a revision-fenced `Failed` transition with a stable `RunFailure`
+    /// record and clears in-flight markers — the run becomes terminal and
+    /// is never re-driven. This is the Task 1 driver-failure boundary, not
+    /// general Task 3 settlement: only the drive-loop failure path writes
+    /// here.
+    async fn persist_drive_failure(&self, session_id: &SessionId, error: &str) {
+        let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
+            self.pool.clone(),
+        );
+        let Ok(Some(record)) = store.load_run(session_id).await else {
+            return;
+        };
+        if record.execution_version < 1 || record.status.is_terminal() {
+            return;
+        }
+        let expected_revision = record.state_revision;
+        let mut next_state = record.state.unwrap_or_default();
+        next_state.in_flight = None;
+        next_state.step_in_flight = None;
+        next_state.failure = Some(nexus_orchestration::run_state::RunFailure {
+            code: "driver_failed".to_string(),
+            message: error.to_string(),
+        });
+        let root = match self.storage.get(&session_id.0).await {
+            Ok(Some(root)) => root,
+            _ => return,
+        };
+        let checkpoint = nexus_orchestration::run_state::RunCheckpoint {
+            root: &root,
+            children: &[],
+        };
+        if let Err(e) = store
+            .commit_transition(
+                session_id,
+                expected_revision,
+                checkpoint,
+                nexus_orchestration::engine::SessionStatus::Failed,
+                &next_state,
+            )
+            .await
+        {
+            tracing::warn!(
+                session_id = %session_id.0,
+                error = %e,
+                "coordinator: could not persist durable drive failure"
+            );
+        }
     }
 
     /// Ensure exactly one drive loop is running for `session_id` (A3).
@@ -774,6 +850,7 @@ impl WorkflowRunCoordinator {
         let config = self.config.clone();
         let sid = session_id.clone();
         let drive_cancel = cancel.clone();
+        let coordinator = self.clone();
         let join = tokio::spawn(async move {
             let outcome = drive_preset_run(
                 &*engine,
@@ -783,6 +860,12 @@ impl WorkflowRunCoordinator {
                 Some(&drive_cancel),
             )
             .await;
+            // Closure 8: a failed driver persists a durable non-replayable
+            // `Failed` transition so the v1 record is never classified
+            // runnable again after owner cleanup.
+            if let PresetRunOutcome::Failed { error, .. } = &outcome {
+                coordinator.persist_drive_failure(&sid, error).await;
+            }
             tracing::debug!(
                 session_id = %sid.0,
                 outcome = ?outcome,
@@ -956,6 +1039,7 @@ impl WorkflowRunCoordinator {
             };
             let sid = session_id.clone();
             let drive_cancel = cancel.clone();
+            let coordinator = self.clone();
             let join = tokio::spawn(async move {
                 let outcome = drive_preset_run(
                     &*engine,
@@ -965,6 +1049,12 @@ impl WorkflowRunCoordinator {
                     Some(&drive_cancel),
                 )
                 .await;
+                // Closure 8: a failed recovery drive persists a durable
+                // non-replayable `Failed` transition (same boundary as
+                // `ensure_driving`).
+                if let PresetRunOutcome::Failed { error, .. } = &outcome {
+                    coordinator.persist_drive_failure(&sid, error).await;
+                }
                 tracing::debug!(
                     session_id = %sid.0,
                     outcome = ?outcome,
@@ -1170,6 +1260,18 @@ impl WorkflowRunCoordinator {
             ));
         }
 
+        // N-1: apply the SAME scheduled-at/dependency/concurrency eligibility
+        // decision the supervisor tick uses. A blocked row (unfinished
+        // dependency, serial conflict, future scheduled_at) remains pending
+        // and unowned — immediate public admission must not bypass the
+        // admission matrix.
+        if !schedule_eligible(pool, &row).await? {
+            return Err(RunControlError::NotEligible(
+                schedule_id.to_string(),
+                "dependency/concurrency/scheduled_at gate not satisfied".to_string(),
+            ));
+        }
+
         // 2. Resolve the preset and freeze the descriptor + core seed.
         let registry = caps
             .get()
@@ -1177,53 +1279,49 @@ impl WorkflowRunCoordinator {
         let loaded = nexus_orchestration::preset::resolve_preset(&row.preset_id, nexus_home, &registry)
             .map_err(|e| RunControlError::PresetLoad(row.preset_id.clone(), e.to_string()))?;
 
-        // 3. Freeze the core-context seed. A read/migration/corruption error
-        //    FAILS CLOSED (I-6) — a missing expected seed is never silently
-        //    converted to `None`. "No seed exists" (version 0, no rows) is
-        //    distinct from a read failure.
+        // 3. Freeze the core-context seed at the EXACT version persisted with
+        //    the schedule row (N-3/I-6): admission reads the frozen version,
+        //    never the latest snapshot — a concurrent edit cannot change the
+        //    run payload between seed and admission. A read/migration/
+        //    corruption error FAILS CLOSED. "No seed exists" (version 0, no
+        //    rows) is distinct from a read failure.
         let (core_context, core_context_version) = {
             let mgr = nexus_orchestration::schedule::derivation::CoreContextManager::new(
                 std::sync::Arc::new(pool.clone()),
             );
             let sid = nexus_contracts::local::schedule::ScheduleId(schedule_id.to_string());
-            match mgr.current_snapshot(&sid).await {
-                Ok(record) => {
-                    let version = record.version.0;
-                    let body = match record.content {
-                        nexus_contracts::local::schedule::CoreContextPayload::Text { body } => body,
-                        nexus_contracts::local::schedule::CoreContextPayload::Struct { body } => {
-                            serde_json::to_string(&body).map_err(|e| {
-                                RunControlError::Admission(format!(
-                                    "core-context struct serialization failed: {e}"
-                                ))
-                            })?
-                        }
-                    };
-                    (Some(body), version)
-                }
-                Err(nexus_orchestration::schedule::derivation::CoreContextError::NotFound(_)) => {
-                    if row.current_core_context_version > 0 {
-                        return Err(RunControlError::Admission(format!(
-                            "core-context version {} is missing",
-                            row.current_core_context_version
-                        )));
+            let frozen_version = u32::try_from(row.current_core_context_version).unwrap_or(0);
+            if frozen_version == 0 {
+                (None, 0)
+            } else {
+                match mgr
+                    .read(&sid, nexus_contracts::local::schedule::CoreContextVersion(frozen_version))
+                    .await
+                {
+                    Ok(record) => {
+                        let version = record.version.0;
+                        let body = match record.content {
+                            nexus_contracts::local::schedule::CoreContextPayload::Text { body } => body,
+                            nexus_contracts::local::schedule::CoreContextPayload::Struct { body } => {
+                                serde_json::to_string(&body).map_err(|e| {
+                                    RunControlError::Admission(format!(
+                                        "core-context struct serialization failed: {e}"
+                                    ))
+                                })?
+                            }
+                        };
+                        (Some(body), version)
                     }
-                    (None, 0)
-                }
-                Err(nexus_orchestration::schedule::derivation::CoreContextError::VersionNotFound(_, version)) => {
-                    // I-6: version 0 with no rows is "no seed", not a missing expected snapshot.
-                    if version == 0 && row.current_core_context_version == 0 {
-                        (None, 0)
-                    } else {
+                    Err(nexus_orchestration::schedule::derivation::CoreContextError::VersionNotFound(_, version)) => {
                         return Err(RunControlError::Admission(format!(
                             "core-context version {version} is missing"
                         )));
                     }
-                }
-                Err(e) => {
-                    return Err(RunControlError::Admission(format!(
-                        "core-context snapshot read failed: {e}"
-                    )));
+                    Err(e) => {
+                        return Err(RunControlError::Admission(format!(
+                            "core-context snapshot read failed: {e}"
+                        )));
+                    }
                 }
             }
         };
@@ -1253,13 +1351,10 @@ impl WorkflowRunCoordinator {
                 std::collections::HashMap::new(),
             ),
         };
-        for (role, binding) in &agent_bindings {
-            if role.is_empty() || binding.provider_id.trim().is_empty() {
-                return Err(RunControlError::Admission(format!(
-                    "invalid agent binding for role '{role}'"
-                )));
-            }
-        }
+        // N-4: validate role/provider references BEFORE enqueue — the same
+        // gate session POST uses. Unknown roles/providers refuse before any
+        // run row is created.
+        validate_agent_bindings(&loaded, &agent_bindings, self.agent_host.as_ref()).await?;
 
 
         // 5. Mint the owned session id and admit atomically (C-1).
@@ -1305,7 +1400,17 @@ impl WorkflowRunCoordinator {
             }
             Err(e) => {
                 let msg = e.to_string();
-                if msg.contains("claimed concurrently") || msg.contains("already owns run") {
+                // A concurrent admission won the claim between our read and
+                // the store transaction: the store reports the row as
+                // already claimed ("claimed concurrently", "already owns
+                // run") or as `running` with an owned session ("status is
+                // 'running'" — the store's status gate rejects the claimed
+                // row before its re-entry check). In every case the winner's
+                // owned run is re-read and driven (single-flight).
+                if msg.contains("claimed concurrently")
+                    || msg.contains("already owns run")
+                    || msg.contains("status is 'running'")
+                {
                     let winner: Option<String> = sqlx::query_scalar(
                         "SELECT current_session_id FROM creator_schedules WHERE schedule_id = ?",
                     )
@@ -1351,6 +1456,149 @@ struct ScheduleAdmissionRow {
     execution_policy: String,
     work_id: Option<String>,
     execution_descriptor_json: Option<Vec<u8>>,
+}
+
+/// Evaluate the SAME scheduled-at/dependency/concurrency eligibility
+/// decision the supervisor tick uses (N-1), for immediate public admission.
+///
+/// A row is eligible only when: `scheduled_at` is absent or due, every
+/// `depends_on` entry is completed/cancelled, and the per-creator
+/// concurrency rule passes (serial: no other driven run for the creator;
+/// parallel_with: every running driven run is whitelisted; parallel_any:
+/// always). Only `driven_v1` rows count toward the running set — legacy/
+/// system-inert rows are excluded from execution capacity (A3).
+async fn schedule_eligible(
+    pool: &sqlx::SqlitePool,
+    row: &ScheduleAdmissionRow,
+) -> Result<bool, RunControlError> {
+    // scheduled_at gate (same shape as the supervisor's clocked tick).
+    let scheduled_at: Option<i64> = sqlx::query_scalar(
+        "SELECT scheduled_at FROM creator_schedules WHERE schedule_id = ?",
+    )
+    .bind(&row.schedule_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
+    if let Some(at) = scheduled_at {
+        if at > chrono::Utc::now().timestamp() {
+            return Ok(false);
+        }
+    }
+
+    // Load the candidate's concurrency + dependencies.
+    let concurrency_kind: String = sqlx::query_scalar(
+        "SELECT concurrency_kind FROM creator_schedules WHERE schedule_id = ?",
+    )
+    .bind(&row.schedule_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
+    let concurrency_whitelist: Option<String> = sqlx::query_scalar(
+        "SELECT concurrency_whitelist FROM creator_schedules WHERE schedule_id = ?",
+    )
+    .bind(&row.schedule_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
+    let deps: Vec<String> = sqlx::query_scalar(
+        "SELECT depends_on FROM schedule_dependencies WHERE schedule_id = ?",
+    )
+    .bind(&row.schedule_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
+
+    // Completed/cancelled set for dependency satisfaction (Failed does not
+    // satisfy — spec §4).
+    let completed: std::collections::HashSet<String> = sqlx::query_scalar(
+        "SELECT schedule_id FROM creator_schedules WHERE status IN ('completed', 'cancelled')",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?
+    .into_iter()
+    .collect();
+    for dep in &deps {
+        if !completed.contains(dep) {
+            return Ok(false);
+        }
+    }
+
+    // Per-creator running set: only driven_v1 rows count toward capacity.
+    // The candidate's OWN row is excluded — a concurrent admission that
+    // already claimed this row must not make the candidate look
+    // serial-blocked; the loser re-reads the winner's owned run instead.
+    let running: Vec<String> = sqlx::query_scalar(
+        "SELECT schedule_id FROM creator_schedules
+         WHERE creator_id = ? AND status = 'running'
+           AND execution_policy = 'driven_v1'
+           AND schedule_id != ?",
+    )
+    .bind(&row.creator_id)
+    .bind(&row.schedule_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
+
+    match concurrency_kind.as_str() {
+        "parallel_any" => Ok(true),
+        "parallel_with" => {
+            let whitelist: std::collections::HashSet<String> = concurrency_whitelist
+                .as_deref()
+                .and_then(|json| serde_json::from_str(json).ok())
+                .unwrap_or_default();
+            Ok(running.iter().all(|id| whitelist.contains(id)))
+        }
+        // "serial" (and any unknown kind — conservative fail-closed).
+        _ => Ok(running.is_empty()),
+    }
+}
+
+/// Validate role/provider references in agent bindings BEFORE enqueue (N-4).
+///
+/// Every binding role must be a declared preset role (or `default`), and
+/// every provider id must exist in the Host provider catalog. Unresolved
+/// keys refuse before any run row is created or any external effect runs.
+/// When no Host facade is wired (tests / Tier-0), provider existence cannot
+/// be verified — only the nonempty shape is enforced (the Host executor
+/// still refuses unknown providers at prompt time).
+async fn validate_agent_bindings(
+    loaded: &nexus_orchestration::preset::LoadedPreset,
+    bindings: &std::collections::HashMap<String, nexus_orchestration::run_state::AgentBinding>,
+    host: Option<&Arc<dyn nexus_agent_host::HostFacade>>,
+) -> Result<(), RunControlError> {
+    let role_ids: std::collections::HashSet<&str> =
+        loaded.roles.iter().map(|r| r.id.as_str()).collect();
+    for (role, binding) in bindings {
+        if role.is_empty() || binding.provider_id.trim().is_empty() {
+            return Err(RunControlError::Admission(format!(
+                "invalid agent binding for role '{role}'"
+            )));
+        }
+        if role != "default" && !role_ids.contains(role.as_str()) {
+            return Err(RunControlError::Admission(format!(
+                "unknown role '{role}' in agent bindings (declared roles: {})",
+                if role_ids.is_empty() {
+                    "none — single-agent presets accept only 'default'".to_string()
+                } else {
+                    role_ids.iter().map(|r| format!("'{r}'")).collect::<Vec<_>>().join(", ")
+                }
+            )));
+        }
+        if let Some(host) = host {
+            let catalog = host
+                .provider_catalog()
+                .await
+                .map_err(|e| RunControlError::Admission(format!("provider catalog unavailable: {e}")))?;
+            if catalog.find(&nexus_agent_host::ProviderId::new(binding.provider_id.clone())).is_none() {
+                return Err(RunControlError::Admission(format!(
+                    "unknown provider '{}' for role '{role}'",
+                    binding.provider_id
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

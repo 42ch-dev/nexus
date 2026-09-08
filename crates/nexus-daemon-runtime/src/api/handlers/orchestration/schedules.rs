@@ -836,6 +836,17 @@ async fn admit_new_schedule(
                     "new schedule not immediately eligible; leaving pending"
                 );
                 Ok("pending".to_string())
+            } else if msg.contains("unknown role")
+                || msg.contains("unknown provider")
+                || msg.contains("invalid agent binding")
+            {
+                // N-4: invalid binding references refuse the add loudly —
+                // the row stays paused and the caller sees a 400, never a
+                // silent pending admission.
+                Err(NexusApiError::BadRequest {
+                    code: "invalid_input".into(),
+                    message: msg,
+                })
             } else {
                 Err(NexusApiError::Internal {
                     code: "RUN_CONTROL_ERROR".into(),

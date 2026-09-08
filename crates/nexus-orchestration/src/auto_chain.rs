@@ -1331,6 +1331,8 @@ fn enqueue_descriptor_json(
     work_id: &str,
     preset_id: &str,
     preset_version: i64,
+    input: serde_json::Map<String, serde_json::Value>,
+    agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
 ) -> Vec<u8> {
     let descriptor = crate::run_state::RunDescriptorV1 {
         creator_id: creator_id.to_string(),
@@ -1346,8 +1348,8 @@ fn enqueue_descriptor_json(
             preset_id: preset_id.to_string(),
             content_hash: [0; 32],
         },
-        input: serde_json::Map::new(),
-        agent_bindings: std::collections::HashMap::new(),
+        input,
+        agent_bindings,
         parent_session_id: None,
         graph_name: None,
     };
@@ -1409,6 +1411,34 @@ pub async fn enqueue_auto_chain_schedule(
     // (`driven_v1`).
 
     let preset_version = preset_version_for_id(&schedule_req.preset_id);
+    // N-5: freeze the ACTUAL structured input the builder prepared
+    // (work_id, stage, chapter, research artifacts, open_findings_block,
+    // volume, …) plus the schedule's agent bindings into the durable
+    // descriptor — never an empty map. Admission reconstructs the run
+    // input from this descriptor, so the first step renders real variables.
+    let input = schedule_req
+        .input
+        .as_ref()
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+    let agent_bindings = schedule_req
+        .agent_bindings
+        .as_ref()
+        .map(|bindings| {
+            bindings
+                .iter()
+                .map(|(role, dto)| {
+                    (
+                        role.clone(),
+                        crate::run_state::AgentBinding {
+                            provider_id: dto.provider_id.clone(),
+                            model: dto.model.clone(),
+                        },
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     sqlx::query(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
@@ -1425,7 +1455,14 @@ pub async fn enqueue_auto_chain_schedule(
     .bind(now_ts)
     .bind(now_ts)
     .bind(work_id)
-    .bind(enqueue_descriptor_json(creator_id, work_id, &schedule_req.preset_id, preset_version))
+    .bind(enqueue_descriptor_json(
+        creator_id,
+        work_id,
+        &schedule_req.preset_id,
+        preset_version,
+        input,
+        agent_bindings,
+    ))
     .execute(&mut *tx)
     .await
     .map_err(|e| {
@@ -1590,7 +1627,11 @@ pub async fn enqueue_review_master_schedule(
     // SAFETY: dynamic SQL — review-master schedule insert with derived params.
     // Matches the `enqueue_auto_chain_schedule` pattern (runtime sqlx is the
     // established convention in this crate; see auto_chain.rs:354-355).
-    // A3 admission cutover: drive-enabled (`driven_v1`).
+    // A3 admission cutover: drive-enabled (`driven_v1`). N-5: the frozen
+    // descriptor carries the work_id input so admission reconstructs the
+    // run with its work identity.
+    let mut input = serde_json::Map::new();
+    input.insert("work_id".to_string(), serde_json::json!(work_id));
     sqlx::query(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
@@ -1606,7 +1647,14 @@ pub async fn enqueue_review_master_schedule(
     .bind(now_ts)
     .bind(now_ts)
     .bind(work_id)
-    .bind(enqueue_descriptor_json(creator_id, work_id, "novel-review-master", preset_version))
+    .bind(enqueue_descriptor_json(
+        creator_id,
+        work_id,
+        "novel-review-master",
+        preset_version,
+        input,
+        std::collections::HashMap::new(),
+    ))
     .execute(pool)
     .await
     .map_err(|e| {
@@ -1664,7 +1712,11 @@ pub async fn enqueue_cron_schedule(
     // SAFETY: dynamic SQL — cron-triggered schedule insert with derived params.
     // Matches the `enqueue_review_master_schedule` pattern (runtime sqlx is the
     // established convention in this crate; see auto_chain.rs:354-355).
-    // A3 admission cutover: drive-enabled (`driven_v1`).
+    // A3 admission cutover: drive-enabled (`driven_v1`). N-5: the frozen
+    // descriptor carries the work_id input so admission reconstructs the
+    // run with its work identity.
+    let mut input = serde_json::Map::new();
+    input.insert("work_id".to_string(), serde_json::json!(work_id));
     sqlx::query(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
@@ -1681,7 +1733,14 @@ pub async fn enqueue_cron_schedule(
     .bind(now_ts)
     .bind(now_ts)
     .bind(work_id)
-    .bind(enqueue_descriptor_json(creator_id, work_id, preset_id, preset_version))
+    .bind(enqueue_descriptor_json(
+        creator_id,
+        work_id,
+        preset_id,
+        preset_version,
+        input,
+        std::collections::HashMap::new(),
+    ))
     .execute(pool)
     .await
     .map_err(|e| {

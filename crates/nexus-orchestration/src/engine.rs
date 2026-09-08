@@ -798,6 +798,12 @@ impl EngineSharedState {
                 &next_state,
             )
             .await?;
+        // A signal that advanced a CHILD's revision must synchronize the
+        // parent's children map (N-7): the inner poller resumes a paused
+        // child via `EngineSignal::Resume`, which commits +1 revision here;
+        // without the sync the parent's next `commit_transition` submits a
+        // stale child CAS anchor and the run is misclassified Interrupted.
+        self.sync_child_checkpoint_after_step(session_id).await?;
         Ok(target_status)
     }
 
@@ -1075,6 +1081,29 @@ impl EngineSharedState {
                     .await;
                 match commit_result {
                     Ok(_) => {
+                        // The parent's `commit_transition` persisted each
+                        // child checkpoint with `state_revision + 1` (the
+                        // store's ON CONFLICT bump). Synchronize the
+                        // in-memory children map to the persisted revisions
+                        // for exactly the children THIS commit carried —
+                        // otherwise the stale pre-commit revision fails the
+                        // child CAS on the parent's next step and the run is
+                        // misclassified Interrupted (N-7: multi-step inner
+                        // graphs after a child step).
+                        {
+                            let mut child_map = self.children.write().await;
+                            if let Some(entries) = child_map.get_mut(&session_id.0) {
+                                for child in entries.iter_mut() {
+                                    if children
+                                        .iter()
+                                        .any(|c| c.session.id == child.session.id)
+                                    {
+                                        child.state_revision =
+                                            child.state_revision.saturating_add(1);
+                                    }
+                                }
+                            }
+                        }
                         if parent_advanced
                             && children.iter().any(|child| child.status.is_terminal())
                         {
