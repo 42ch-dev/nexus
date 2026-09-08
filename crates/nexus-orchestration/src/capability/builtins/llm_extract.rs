@@ -29,13 +29,23 @@ use std::sync::Arc;
 /// returns [`CapabilityError::WorkerUnavailable`] (standalone/test mode).
 pub struct LlmExtract {
     executor: Option<Arc<dyn PromptExecutor>>,
+    /// Per-run coordinator cancellation tokens (A1): the executor listens to
+    /// the token for the current run concurrently with the Host stream.
+    session_cancels: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    >,
 }
 
 impl LlmExtract {
     /// Create in standalone/test mode (no prompt executor).
     #[must_use]
-    pub const fn new() -> Self {
-        Self { executor: None }
+    pub fn new() -> Self {
+        Self {
+            executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
+        }
     }
 
     /// Create with a prompt executor for production Host dispatch.
@@ -43,7 +53,24 @@ impl LlmExtract {
     pub fn with_prompt_executor(executor: Arc<dyn PromptExecutor>) -> Self {
         Self {
             executor: Some(executor),
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
         }
+    }
+
+    /// Builder-style per-run coordinator cancellation tokens (A1).
+    #[must_use]
+    pub fn with_session_cancels(
+        mut self,
+        session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        >,
+    ) -> Self {
+        self.session_cancels = session_cancels;
+        self
     }
 }
 
@@ -143,6 +170,17 @@ impl Capability for LlmExtract {
             .as_ref()
             .ok_or(CapabilityError::WorkerUnavailable)?;
 
+        // A1: resolve the coordinator cancellation token for this run from
+        // the shared per-run map (never a fresh token — a coordinator cancel
+        // must be able to interrupt this prompt).
+        let cancellation = self
+            .session_cancels
+            .read()
+            .map_err(|e| CapabilityError::Internal(format!("session cancels lock: {e}")))?
+            .get(session_id)
+            .cloned()
+            .unwrap_or_else(tokio_util::sync::CancellationToken::new);
+
         // Build the extraction prompt: instruction + verbatim prose, framed so
         // the agent returns a JSON object with a `candidates` array (entities)
         // and an optional `relationships` array (V1.76). deny_all tool policy —
@@ -172,7 +210,7 @@ impl Capability for LlmExtract {
                 agent_ref: None,
                 prompt: extract_prompt,
                 tool_policy: ToolPolicy::DenyAll,
-                cancellation: tokio_util::sync::CancellationToken::new(),
+                cancellation,
             })
             .await?;
 

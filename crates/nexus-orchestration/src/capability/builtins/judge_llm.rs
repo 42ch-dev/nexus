@@ -29,13 +29,23 @@ const NOGO_WORDS: &[&str] = &[
 /// [`CapabilityError::WorkerUnavailable`] (standalone/test mode).
 pub struct JudgeLlm {
     executor: Option<Arc<dyn PromptExecutor>>,
+    /// Per-run coordinator cancellation tokens (A1): the executor listens to
+    /// the token for the current run concurrently with the Host stream.
+    session_cancels: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    >,
 }
 
 impl JudgeLlm {
     /// Create in standalone/test mode (no prompt executor).
     #[must_use]
-    pub const fn new() -> Self {
-        Self { executor: None }
+    pub fn new() -> Self {
+        Self {
+            executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
+        }
     }
 
     /// Create with a prompt executor for production Host dispatch.
@@ -43,7 +53,24 @@ impl JudgeLlm {
     pub fn with_prompt_executor(executor: Arc<dyn PromptExecutor>) -> Self {
         Self {
             executor: Some(executor),
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
         }
+    }
+
+    /// Builder-style per-run coordinator cancellation tokens (A1).
+    #[must_use]
+    pub fn with_session_cancels(
+        mut self,
+        session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        >,
+    ) -> Self {
+        self.session_cancels = session_cancels;
+        self
     }
 }
 
@@ -104,6 +131,17 @@ impl Capability for JudgeLlm {
             .as_ref()
             .ok_or(CapabilityError::WorkerUnavailable)?;
 
+        // A1: resolve the coordinator cancellation token for this run from
+        // the shared per-run map (never a fresh token — a coordinator cancel
+        // must be able to interrupt this prompt).
+        let cancellation = self
+            .session_cancels
+            .read()
+            .map_err(|e| CapabilityError::Internal(format!("session cancels lock: {e}")))?
+            .get(session_id)
+            .cloned()
+            .unwrap_or_else(tokio_util::sync::CancellationToken::new);
+
         // Build judge prompt with GO/NOGO framing.
         let judge_prompt = format!(
             "You are a judge. Evaluate the following and respond with GO or NOGO.\n\
@@ -118,7 +156,7 @@ impl Capability for JudgeLlm {
                 agent_ref: None,
                 prompt: judge_prompt,
                 tool_policy: ToolPolicy::DenyAll,
-                cancellation: tokio_util::sync::CancellationToken::new(),
+                cancellation,
             })
             .await?;
 

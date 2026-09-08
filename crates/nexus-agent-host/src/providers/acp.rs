@@ -152,11 +152,14 @@ impl AcpProvider {
             let risk = classifier.classify_or_default(tool_name);
             // A1: the orchestration scope narrows the Host configuration —
             // a tool outside the requested scope is denied before the
-            // resolver is consulted (the scope can never elevate).
-            let scope = active_permission_scope
-                .try_read()
-                .ok()
-                .and_then(|guard| *guard);
+            // resolver is consulted (the scope can never elevate). The scope
+            // read must NEVER fail open: if the lock cannot be acquired the
+            // active scope could be a narrowing policy in force, so the tool
+            // is denied rather than approved with no scope applied.
+            let scope = match active_permission_scope.try_read() {
+                Ok(guard) => *guard,
+                Err(_) => return AcpPermissionOutcome::Deny,
+            };
             if let Some(scope) = scope {
                 let allowed = match risk {
                     crate::capability::risk::ToolRisk::Read => scope.allow_read,

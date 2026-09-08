@@ -317,20 +317,29 @@ pub trait WorkflowStateStore: Send + Sync {
     /// the external Host effect, and update it to `Active` once the Host
     /// session/operation IDs are known.
     ///
-    /// This is a **non-CAS** intent write: it merges `in_flight` into the
-    /// current `run_state_json` fenced to step-able status (`running`/
-    /// `paused`) WITHOUT advancing the revision, so the engine's step
-    /// transition CAS anchor is preserved. A crash after the effect but
-    /// before the result checkpoint leaves the attempt persisted and the run
-    /// recovers as `Interrupted` (never auto-replayed). The engine's
-    /// terminal/wait `commit_transition` clears `in_flight` on success.
+    /// The write is **revision-linearized with the engine's control
+    /// transitions**: it compare-and-sets on `state_revision =
+    /// expected_revision` AND the step marker `step_in_flight =
+    /// expected_step` (when `Some`) and fenced to step-able status
+    /// (`running`/`paused`), while leaving the revision itself unchanged so
+    /// the engine's step transition CAS anchor is preserved. A stale prompt
+    /// invocation that loaded the run before a control transition
+    /// (e.g. `Cancel`) fails the CAS and is rejected — it can never
+    /// overwrite newer state. A crash after the effect but before the result
+    /// checkpoint leaves the attempt persisted and the run recovers as
+    /// `Interrupted` (never auto-replayed). The engine's terminal/wait
+    /// `commit_transition` clears `in_flight` on success.
     ///
     /// # Errors
-    /// Returns [`EngineError`] on storage failure or when the row is not
-    /// step-able — the external effect must not run on an unmarked row.
+    /// Returns [`EngineError::RevisionMismatch`] when the persisted revision
+    /// no longer equals `expected_revision` (or the step marker moved),
+    /// [`EngineError::TerminalState`] when the row is no longer step-able —
+    /// the external effect must not run on an unmatching row.
     async fn persist_prompt_attempt(
         &self,
         session_id: &SessionId,
+        expected_revision: u64,
+        expected_step: Option<&str>,
         attempt: &PromptAttempt,
     ) -> Result<(), EngineError>;
 

@@ -1060,6 +1060,17 @@ impl EngineSharedState {
         let mut session_mut =
             graph_flow::Session::new_from_task(child_session_id.clone(), &start_task_id);
         session_mut.context = params.initial_context;
+        // Seed the trusted child run identity into the child context BEFORE
+        // any inner node executes: `InnerGraphNodeTask::resolve_session_id`
+        // reads `_session_id` to route the prompt through the durable child
+        // descriptor. Without this, un-bound inner `acp_prompt` nodes fell
+        // back to `"default"` and the Host executor refused/looked up the
+        // wrong run (Important: nested graph prompts lose the child durable
+        // identity).
+        session_mut
+            .context
+            .set("_session_id", child_session_id.clone())
+            .await;
         // Record the parent so `run_step_internal` can sync this child's
         // checkpoint back to the parent's children map after each step
         // (Important 1: child revisions must be synchronized).

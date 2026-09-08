@@ -1394,16 +1394,23 @@ impl WorkflowStateStore for SqliteSessionStorage {
     /// the external Host effect, and update it to `Active` once the Host
     /// session/operation IDs are known.
     ///
-    /// This is a **non-CAS** intent write: it merges `in_flight` into the
-    /// current `run_state_json` fenced on the current revision and status
-    /// (`running`/`paused`) WITHOUT advancing the revision, so the engine's
-    /// step transition CAS anchor is preserved. A crash after the effect but
-    /// before the result checkpoint leaves the attempt persisted and the run
-    /// recovers as `Interrupted` (never auto-replayed). The engine's
-    /// terminal/wait `commit_transition` clears `in_flight` on success.
+    /// Revision-linearized write: merges `in_flight` into the current
+    /// `run_state_json` fenced on `state_revision = expected_revision` AND
+    /// (when `expected_step` is `Some`) the current step marker
+    /// `step_in_flight = expected_step`, plus step-able status
+    /// (`running`/`paused`). The revision is NOT advanced so the engine's
+    /// step transition CAS anchor is preserved. A stale prompt invocation
+    /// whose loaded revision/step were superseded by a control transition
+    /// fails the CAS and is rejected — a post-transition prompt can never
+    /// replace newer state. A crash after the effect but before the result
+    /// checkpoint leaves the attempt persisted and the run recovers as
+    /// `Interrupted` (never auto-replayed). The engine's terminal/wait
+    /// `commit_transition` clears `in_flight` on success.
     async fn persist_prompt_attempt(
         &self,
         session_id: &SessionId,
+        expected_revision: u64,
+        expected_step: Option<&str>,
         attempt: &PromptAttempt,
     ) -> Result<(), EngineError> {
         let id = session_id.0.clone();
@@ -1416,24 +1423,57 @@ impl WorkflowStateStore for SqliteSessionStorage {
 
         // Merge the attempt into the current run_state_json without
         // advancing the revision. The fence keeps the write off terminal
-        // rows and off rows whose revision moved since the caller loaded it.
-        let result = sqlx::query(
-            r#"
-            UPDATE orchestration_sessions
-            SET run_state_json = json_set(
-                    COALESCE(run_state_json, '{}'),
-                    '$.in_flight',
-                    json(?)
-                ),
-                updated_at = ?
-            WHERE session_id = ? AND status IN ('running', 'paused')
-            "#,
-        )
-        .bind(&attempt_json)
-        .bind(chrono::Utc::now().timestamp())
-        .bind(id)
-        .execute(&*self.pool)
-        .await
+        // rows, off rows whose revision moved since the caller loaded it,
+        // and (with `expected_step = Some(task)`) off rows whose step
+        // marker moved — the same linearization boundary the engine's
+        // control transitions anchor to.
+        let expected_revision_i64 = expected_revision as i64;
+        let result = match expected_step {
+            Some(step) => {
+                sqlx::query(
+                    r#"
+                    UPDATE orchestration_sessions
+                    SET run_state_json = json_set(
+                            COALESCE(run_state_json, '{}'),
+                            '$.in_flight',
+                            json(?)
+                        ),
+                        updated_at = ?
+                    WHERE session_id = ? AND status IN ('running', 'paused')
+                      AND state_revision = ?
+                      AND json_extract(COALESCE(run_state_json, '{}'), '$.step_in_flight') = ?
+                    "#,
+                )
+                .bind(&attempt_json)
+                .bind(chrono::Utc::now().timestamp())
+                .bind(&id)
+                .bind(expected_revision_i64)
+                .bind(step)
+                .execute(&*self.pool)
+                .await
+            }
+            None => {
+                sqlx::query(
+                    r#"
+                    UPDATE orchestration_sessions
+                    SET run_state_json = json_set(
+                            COALESCE(run_state_json, '{}'),
+                            '$.in_flight',
+                            json(?)
+                        ),
+                        updated_at = ?
+                    WHERE session_id = ? AND status IN ('running', 'paused')
+                      AND state_revision = ?
+                    "#,
+                )
+                .bind(&attempt_json)
+                .bind(chrono::Utc::now().timestamp())
+                .bind(&id)
+                .bind(expected_revision_i64)
+                .execute(&*self.pool)
+                .await
+            }
+        }
         .map_err(|e| {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "persist_prompt_attempt '{}': {e}",
@@ -1442,7 +1482,51 @@ impl WorkflowStateStore for SqliteSessionStorage {
         })?;
 
         if result.rows_affected() == 0 {
-            return Err(EngineError::TerminalState(session_id.0.clone()));
+            // Distinguish a revision/step mismatch from a non-running row.
+            #[derive(sqlx::FromRow)]
+            struct FenceRow {
+                state_revision: i64,
+                step_marker: Option<String>,
+            }
+            let current: Option<FenceRow> = sqlx::query_as(
+                "SELECT state_revision, \
+                        json_extract(COALESCE(run_state_json, '{}'), '$.step_in_flight') \
+                        AS step_marker \
+                 FROM orchestration_sessions WHERE session_id = ?",
+            )
+            .bind(&session_id.0)
+            .fetch_optional(&*self.pool)
+            .await
+            .map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "persist_prompt_attempt read row: {e}"
+                )))
+            })?;
+            return Err(match current {
+                Some(row) if row.state_revision != expected_revision as i64 => {
+                    EngineError::RevisionMismatch {
+                        session_id: session_id.0.clone(),
+                        expected: expected_revision,
+                        found: u64::try_from(row.state_revision).unwrap_or(0),
+                    }
+                }
+                // The revision still matches but the step marker moved (or is
+                // absent while `expected_step` named one): a newer step
+                // superseded this prompt's admission — same linearization
+                // boundary, same typed mismatch.
+                Some(row)
+                    if expected_step.is_some()
+                        && row.step_marker.as_deref() != expected_step =>
+                {
+                    EngineError::RevisionMismatch {
+                        session_id: session_id.0.clone(),
+                        expected: expected_revision,
+                        found: u64::try_from(row.state_revision).unwrap_or(0),
+                    }
+                }
+                Some(_) => EngineError::TerminalState(session_id.0.clone()),
+                None => EngineError::SessionNotFound(session_id.0.clone()),
+            });
         }
         Ok(())
     }
@@ -1895,5 +1979,198 @@ mod tests {
         .await
         .expect("count");
         assert_eq!(count, 1, "read-only accessors must not write");
+    }
+
+    /// Seed a v1 run row with a frozen descriptor and a step marker
+    /// (`step_in_flight = "task_a"`), at revision 2 (1 after `start_run` +
+    /// 1 after the engine's `mark_step_in_flight`).
+    async fn seed_v1_stepped_row(pool: &sqlx::SqlitePool, session_id: &str) {
+        let descriptor = RunDescriptorV1 {
+            creator_id: "ctr_t".to_string(),
+            work_id: None,
+            workspace_root: std::path::PathBuf::from("/ws"),
+            preset_id: "preset_t".to_string(),
+            preset_version: 7,
+            source: crate::run_state::PresetSourceIdentity::Embedded {
+                preset_id: "preset_t".to_string(),
+                content_hash: [7u8; 32],
+            },
+            input: serde_json::Map::new(),
+            agent_bindings: std::collections::HashMap::from([(
+                "default".to_string(),
+                crate::run_state::AgentBinding {
+                    provider_id: "mock-acp".to_string(),
+                    model: None,
+                },
+            )]),
+            parent_session_id: None,
+            graph_name: None,
+        };
+        let state = serde_json::json!({
+            "wait": null,
+            "step_in_flight": "task_a",
+            "in_flight": null,
+            "failure": null,
+            "cancel_requested": false,
+        });
+        let state_bytes = serde_json::to_vec(&state).expect("serialize seed state");
+        let descriptor_bytes = serde_json::to_vec(&descriptor).expect("serialize seed descriptor");
+        sqlx::query(
+            "INSERT INTO orchestration_sessions
+                (session_id, creator_id, preset_id, preset_version, status,
+                 current_task_id, context_json, created_at, updated_at,
+                 execution_version, state_revision, run_state_json, run_descriptor_json)
+             VALUES (?, 'ctr_t', 'preset_t', 7, 'running', 'task_a',
+                     '{}', 1756990000, 1756990300, 1, 2, ?, ?)",
+        )
+        .bind(session_id)
+        .bind(&state_bytes)
+        .bind(&descriptor_bytes)
+        .execute(pool)
+        .await
+        .expect("seed v1 stepped row");
+    }
+
+    fn test_attempt(
+        task_id: &str,
+        phase: crate::run_state::PromptPhase,
+    ) -> PromptAttempt {
+        PromptAttempt {
+            attempt_id: uuid::Uuid::new_v4().to_string(),
+            task_id: task_id.to_string(),
+            phase,
+            host_session_id: None,
+            operation_id: None,
+            process_identity: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn persist_prompt_attempt_cas_writes_and_preserves_revision() {
+        let (pool, _db) = fresh_pool().await;
+        seed_v1_stepped_row(&pool, "sess-cas-ok").await;
+        let storage = SqliteSessionStorage::new(pool.clone());
+
+        // Matching fence: revision 2 + step marker "task_a" → the intent is
+        // written and the revision is NOT advanced (the engine's step
+        // transition CAS anchor is preserved).
+        storage
+            .persist_prompt_attempt(
+                &SessionId("sess-cas-ok".into()),
+                2,
+                Some("task_a"),
+                &test_attempt("t1", crate::run_state::PromptPhase::Dispatching),
+            )
+            .await
+            .expect("matching fence must write");
+        let record = storage
+            .load_run(&SessionId("sess-cas-ok".into()))
+            .await
+            .expect("load")
+            .expect("row");
+        assert_eq!(record.state_revision, 2, "intent write must not advance the revision");
+        let state = record.state.expect("v1 state");
+        assert_eq!(state.in_flight.as_ref().expect("in_flight").task_id, "t1");
+    }
+
+    #[tokio::test]
+    async fn stale_prompt_attempt_after_revision_transition_is_rejected() {
+        let (pool, _db) = fresh_pool().await;
+        seed_v1_stepped_row(&pool, "sess-stale").await;
+        let storage = SqliteSessionStorage::new(pool.clone());
+
+        // A control transition (e.g. Cancel) advances the revision while the
+        // prompt invocation holds the old anchor.
+        sqlx::query(
+            "UPDATE orchestration_sessions
+             SET state_revision = state_revision + 1, run_state_json = json_set(
+                     COALESCE(run_state_json, '{}'), '$.cancel_requested', json('true'))
+             WHERE session_id = 'sess-stale'",
+        )
+        .execute(&*pool)
+        .await
+        .expect("advance revision");
+
+        // The stale prompt attempt must be rejected — the post-transition
+        // state (revision 3, cancel_requested) is never overwritten.
+        let err = storage
+            .persist_prompt_attempt(
+                &SessionId("sess-stale".into()),
+                2, // stale anchor
+                Some("task_a"),
+                &test_attempt("stale-t1", crate::run_state::PromptPhase::Dispatching),
+            )
+            .await
+            .expect_err("stale revision must fail the CAS");
+        match err {
+            EngineError::RevisionMismatch {
+                session_id,
+                expected,
+                found,
+            } => {
+                assert_eq!(session_id, "sess-stale");
+                assert_eq!(expected, 2);
+                assert_eq!(found, 3);
+            }
+            other => panic!("expected RevisionMismatch, got: {other:?}"),
+        }
+
+        let record = storage
+            .load_run(&SessionId("sess-stale".into()))
+            .await
+            .expect("load")
+            .expect("row");
+        assert_eq!(record.state_revision, 3, "newer state must be untouched");
+        let state = record.state.as_ref().expect("state");
+        assert!(
+            state.cancel_requested,
+            "post-transition cancel_requested must survive the stale prompt"
+        );
+        assert!(
+            state.in_flight.is_none(),
+            "stale prompt must never install an in_flight attempt"
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_prompt_attempt_with_moved_step_marker_is_rejected() {
+        let (pool, _db) = fresh_pool().await;
+        seed_v1_stepped_row(&pool, "sess-step-moved").await;
+        let storage = SqliteSessionStorage::new(pool.clone());
+
+        // The step moved on (a newer task is now in flight) while the prompt
+        // invocation still holds the old task marker.
+        sqlx::query(
+            "UPDATE orchestration_sessions
+             SET run_state_json = json_set(
+                     COALESCE(run_state_json, '{}'), '$.step_in_flight', json('\"task_b\"'))",
+        )
+        .execute(&*pool)
+        .await
+        .expect("move step marker");
+
+        let err = storage
+            .persist_prompt_attempt(
+                &SessionId("sess-step-moved".into()),
+                2, // revision still matches
+                Some("task_a"),
+                &test_attempt("stale-t2", crate::run_state::PromptPhase::Dispatching),
+            )
+            .await
+            .expect_err("moved step marker must fail the CAS");
+        assert!(
+            matches!(err, EngineError::RevisionMismatch { .. }),
+            "expected RevisionMismatch for moved marker, got: {err:?}"
+        );
+
+        let record = storage
+            .load_run(&SessionId("sess-step-moved".into()))
+            .await
+            .expect("load")
+            .expect("row");
+        assert!(
+            record.state.expect("state").in_flight.is_none(),
+            "stale step prompt must never install an in_flight attempt"
+        );
     }
 }

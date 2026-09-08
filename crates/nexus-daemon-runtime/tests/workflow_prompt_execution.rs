@@ -31,15 +31,18 @@ use nexus_orchestration::capability::{
     CapabilityError, CapabilityRegistry, CapabilityRuntimeDeps, PromptExecutor, PromptRequest,
     ToolPolicy,
 };
+use nexus_orchestration::engine::{
+    GraphFlowEngine, OrchestrationEngine, SessionStatus, SessionSummary, StepOutcome,
+};
 use nexus_orchestration::run_state::{
     AgentBinding, PresetSourceIdentity, RunCheckpoint, RunDescriptorV1, RunStateV1,
     WorkflowStateStore,
 };
 use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
-use nexus_orchestration::SessionId;
+use nexus_orchestration::{CapabilityRegistryHolder, SessionId};
 use tempfile::TempDir;
 
-use graph_flow::{Session as GraphSession, Task};
+use graph_flow::{FlowRunner, Graph, Session as GraphSession, SessionStorage, Task};
 
 const FIXTURE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -460,7 +463,46 @@ async fn eof_after_initialize_is_typed_failure() {
 }
 
 #[tokio::test]
-async fn cancellation_is_typed_failure_and_reaches_fixture() {
+async fn pre_cancelled_request_is_fenced_before_launch() {
+    let _lock = env_lock();
+    let ws = setup_workspace();
+    let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log);
+    let (host, _storage, workflow_store, executor, _registry, _cancels) =
+        build_stack(&ws, provider_cfg).await;
+    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp").await;
+
+    // A5 cancellation fence: the token is cancelled BEFORE `execute` — no
+    // durable intent write, no Host session launch, no prompt may reach the
+    // fixture; the request refuses with a typed failure.
+    let cancel = tokio_util::sync::CancellationToken::new();
+    cancel.cancel();
+    let result = executor
+        .execute(PromptRequest {
+            run_id: run_id.clone(),
+            task_id: "task-1".to_string(),
+            agent_ref: None,
+            prompt: "never-sent".to_string(),
+            tool_policy: ToolPolicy::DenyAll,
+            cancellation: cancel,
+        })
+        .await;
+    assert!(result.is_err(), "pre-cancelled request must refuse");
+    match result.unwrap_err() {
+        CapabilityError::Cancelled => {}
+        other => panic!("expected Cancelled, got: {other:?}"),
+    }
+
+    // No fixture process was ever spawned (no external effect at all).
+    assert!(
+        !ws.fixture_log.exists(),
+        "pre-cancelled request must not spawn the fixture"
+    );
+
+    host.shutdown().await.expect("host shutdown");
+}
+
+#[tokio::test]
+async fn in_stream_cancel_calls_host_cancel_and_bounds_cleanup() {
     let _lock = env_lock();
     let ws = setup_workspace();
     let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log).with_env("BLOCK_PROMPT", "1");
@@ -469,15 +511,14 @@ async fn cancellation_is_typed_failure_and_reaches_fixture() {
     let run_id = start_v1_run(&workflow_store, &ws, "mock-acp").await;
 
     // The fixture never responds to the prompt; the coordinator token fires
-    // after a short delay, the executor cancels the owned operation and
-    // returns a typed failure.
+    // WHILE the prompt is in flight, the executor cancels the owned
+    // operation and returns a typed failure. (The pre-launch fence is proven
+    // separately by `pre_cancelled_request_is_fenced_before_launch`.)
     let cancel = tokio_util::sync::CancellationToken::new();
     let cancel_for_task = cancel.clone();
     let executor_for_task = executor.clone();
     let run_for_task = run_id.clone();
     let handle = tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        cancel_for_task.cancel();
         executor_for_task
             .execute(PromptRequest {
                 run_id: run_for_task,
@@ -490,6 +531,22 @@ async fn cancellation_is_typed_failure_and_reaches_fixture() {
             .await
     });
 
+    // Wait until the fixture observes the prompt (the operation is in
+    // flight), then fire the coordinator token.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let log = read_fixture_log(&ws.fixture_log);
+        if log.iter().any(|e| e["event"] == "prompt") {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "fixture never observed the prompt: {log:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    cancel.cancel();
+
     let result = handle.await.expect("task completes");
     assert!(result.is_err(), "cancellation must be a typed failure");
     match result.unwrap_err() {
@@ -497,18 +554,355 @@ async fn cancellation_is_typed_failure_and_reaches_fixture() {
         other => panic!("expected Cancelled, got: {other:?}"),
     }
 
-    // The fixture observed the prompt and the cancel.
+    // The fixture observed the prompt and then the cancel (the cancel RPC
+    // round-trip drains asynchronously after the typed failure returns).
     let log = read_fixture_log(&ws.fixture_log);
     assert!(
         log.iter().any(|e| e["event"] == "prompt"),
         "fixture must observe the prompt: {log:?}"
     );
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let log = read_fixture_log(&ws.fixture_log);
+        if log.iter().any(|e| e["event"] == "cancel") {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "cancel must reach the fixture: {log:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+
+    host.shutdown().await.expect("host shutdown");
+}
+
+#[tokio::test]
+async fn concurrent_same_key_second_prompt_reuses_session_not_spawn() {
+    let _lock = env_lock();
+    let ws = setup_workspace();
+    let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log).with_env("BLOCK_PROMPT", "1");
+    let (host, _storage, workflow_store, executor, _registry, _cancels) =
+        build_stack(&ws, provider_cfg).await;
+    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp").await;
+
+    // First prompt blocks in-stream (fixture never answers): the session is
+    // Busy while it runs.
+    let cancel_first = tokio_util::sync::CancellationToken::new();
+    let cancel_first_for_task = cancel_first.clone();
+    let executor_first = executor.clone();
+    let run_first = run_id.clone();
+    let first = tokio::spawn(async move {
+        executor_first
+            .execute(PromptRequest {
+                run_id: run_first,
+                task_id: "task-1".to_string(),
+                agent_ref: None,
+                prompt: "blocked-1".to_string(),
+                tool_policy: ToolPolicy::DenyAll,
+                cancellation: cancel_first_for_task,
+            })
+            .await
+    });
+
+    // Wait until the fixture observes the first prompt (session now Busy).
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let log = read_fixture_log(&ws.fixture_log);
+        if log.iter().any(|e| e["event"] == "prompt") {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "fixture never observed the first prompt: {log:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+
+    // The second same-key prompt MUST NOT create a second owned session: it
+    // reuses the published (run, role) session and fails on the serial-reuse
+    // boundary (session Busy) — the Minor finding's failure mode would have
+    // spawned a second subprocess instead.
+    let result = executor
+        .execute(request(&run_id, "hello-2", ToolPolicy::DenyAll))
+        .await;
+    assert!(result.is_err(), "second same-key prompt must not overlap (serial reuse)");
+    match result.unwrap_err() {
+        CapabilityError::TransientExternal(msg) => {
+            assert!(
+                msg.contains("host exec failed"),
+                "serial-reuse refusal must surface the exec boundary: {msg}"
+            );
+        }
+        other => panic!("expected TransientExternal exec refusal, got: {other:?}"),
+    }
+
+    // Single-flight proof: exactly ONE owned session and ONE fixture
+    // subprocess exist for the (run, role) key.
+    let sessions = host.list_sessions().await.expect("list sessions");
+    assert_eq!(
+        sessions.len(),
+        1,
+        "single-flight must create exactly one session for one (run, role) key"
+    );
+    let log = read_fixture_log(&ws.fixture_log);
+    let start_pids: std::collections::HashSet<String> = log
+        .iter()
+        .filter(|e| e["event"] == "start")
+        .map(|e| e["pid"].to_string())
+        .collect();
+    assert_eq!(
+        start_pids.len(),
+        1,
+        "second same-key prompt must never spawn a second subprocess: {log:?}"
+    );
+    assert_eq!(
+        log.iter().filter(|e| e["event"] == "prompt").count(),
+        1,
+        "only the first prompt reaches the fixture: {log:?}"
+    );
+
+    // Release the blocked prompt via the coordinator token; the first
+    // request then cancels the operation and returns a typed failure.
+    cancel_first.cancel();
+    let first_result = first.await.expect("first task joins");
+    match first_result {
+        Err(CapabilityError::Cancelled) => {}
+        other => panic!("expected Cancelled after release, got: {other:?}"),
+    }
+
+    host.shutdown().await.expect("host shutdown");
+}
+
+#[tokio::test]
+async fn capability_route_cancel_uses_shared_coordinator_token() {
+    let _lock = env_lock();
+    let ws = setup_workspace();
+    let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log);
+    let (host, _storage, workflow_store, _executor, registry, session_cancels) =
+        build_stack(&ws, provider_cfg).await;
+    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp").await;
+
+    // A1 shared cancellation: the capability route must resolve the run's
+    // coordinator token from `session_cancels` (never mint a fresh,
+    // uncancellable token). A cancelled token in the shared map fences the
+    // prompt at the executor's admission — no fixture effect.
+    let cancel = tokio_util::sync::CancellationToken::new();
+    cancel.cancel();
+    session_cancels
+        .write()
+        .expect("session cancels write")
+        .insert(run_id.clone(), cancel);
+
+    let cap = registry.get("acp.prompt").expect("acp.prompt registered");
+    let result = cap
+        .run(serde_json::json!({
+            "prompt": "blocked-by-shared-token",
+            "tool_policy": "deny_all",
+            "_creator_id": "ctr_test",
+            "_session_id": run_id,
+        }))
+        .await;
+    assert!(result.is_err(), "capability route must surface the cancellation");
+    match result.unwrap_err() {
+        CapabilityError::Cancelled => {}
+        other => panic!("expected Cancelled through capability route, got: {other:?}"),
+    }
+
     assert!(
-        log.iter().any(|e| e["event"] == "cancel"),
-        "cancel must reach the fixture: {log:?}"
+        !ws.fixture_log.exists(),
+        "cancelled capability prompt must never spawn the fixture"
     );
 
     host.shutdown().await.expect("host shutdown");
+}
+
+#[tokio::test]
+async fn nested_inner_graph_prompt_executes_with_child_identity() {
+    let _lock = env_lock();
+    let ws = setup_workspace();
+    let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log);
+    let (host, storage, workflow_store, executor, _registry, session_cancels) =
+        build_stack(&ws, provider_cfg).await;
+
+    // Parent v1 run with the frozen default binding → mock-acp, positioned
+    // at the `parent_state` task (mirrors `start_preset_run`).
+    let parent_sid = format!("run:{}", uuid::Uuid::new_v4());
+    let parent_session = GraphSession::new_from_task(parent_sid.clone(), "parent_state");
+    parent_session
+        .context
+        .set("_session_id", parent_sid.clone())
+        .await;
+    let mut agent_bindings = HashMap::new();
+    agent_bindings.insert(
+        "default".to_string(),
+        AgentBinding {
+            provider_id: "mock-acp".to_string(),
+            model: None,
+        },
+    );
+    let parent_descriptor = RunDescriptorV1 {
+        creator_id: "ctr_test".to_string(),
+        work_id: None,
+        workspace_root: ws.creator_ws.clone(),
+        preset_id: "parent-preset".to_string(),
+        preset_version: 1,
+        source: PresetSourceIdentity::Embedded {
+            preset_id: "parent-preset".to_string(),
+            content_hash: [7u8; 32],
+        },
+        input: serde_json::Map::new(),
+        agent_bindings,
+        parent_session_id: None,
+        graph_name: None,
+    };
+    workflow_store
+        .start_run(
+            &SessionId(parent_sid.clone()),
+            &parent_descriptor,
+            RunCheckpoint {
+                root: &parent_session,
+                children: &[],
+            },
+            &RunStateV1::default(),
+        )
+        .await
+        .expect("start parent run");
+
+    // Inner graph with a production-wired prompt node that has NO explicit
+    // session id — it must resolve the child run identity from the child
+    // context (`_session_id` seeded by `spawn_child_session_internal`).
+    let inner_graph = Arc::new(Graph::new("inner_graph"));
+    let prompt_node = nexus_orchestration::tasks::InnerGraphNodeTask::new("n1")
+        .with_template("hello from outer")
+        .with_tool_policy(ToolPolicy::DenyAll)
+        .with_prompt_executor(Some(executor.clone() as Arc<dyn PromptExecutor>))
+        .with_session_cancels(session_cancels.clone());
+    inner_graph.add_task(Arc::new(prompt_node));
+    inner_graph.add_task(Arc::new(EndTask));
+    inner_graph.add_edge("n1", "end_task");
+
+    // Parent graph whose start task is an InnerGraphTask over that graph.
+    let parent_graph = Arc::new(Graph::new("parent_graph"));
+    let storage_arc: Arc<dyn graph_flow::SessionStorage> = storage.clone();
+    let caps = CapabilityRegistryHolder::with_registry(Arc::new(CapabilityRegistry::empty()));
+    let engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+        storage_arc.clone(),
+        workflow_store.clone(),
+        caps,
+    );
+    let engine_shared = engine.shared_state();
+    let engine_arc: Arc<dyn OrchestrationEngine> = Arc::new(engine);
+    let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
+        engine_arc.clone(),
+        inner_graph.clone(),
+        "parent_state",
+        "_session_id",
+        None,
+    );
+    parent_graph.add_task(Arc::new(inner_task));
+    parent_graph.add_task(Arc::new(EndTask));
+    parent_graph.add_edge("parent_state", "end_task");
+
+    // Register the parent runner AFTER the graph is fully wired (the runner
+    // shares the same `Arc<Graph>`, so start-task resolution sees the final
+    // graph), and register the parent in the in-memory tracker.
+    {
+        engine_shared
+            .runners
+            .write()
+            .await
+            .insert(parent_sid.clone(), Arc::new(FlowRunner::new(parent_graph, storage_arc)));
+        engine_shared.sessions.write().await.push(SessionSummary {
+            session_id: SessionId(parent_sid.clone()),
+            creator_id: "ctr_test".to_string(),
+            preset_id: "parent-preset".to_string(),
+            status: SessionStatus::Running,
+            current_task_id: Some("parent_state".to_string()),
+        });
+    }
+
+    // Step the parent: the inner graph spawns a child run, the child prompt
+    // node routes through the executor with the CHILD's durable identity.
+    let outcome = engine_arc
+        .run_step(&SessionId(parent_sid.clone()))
+        .await
+        .expect("parent step runs inner graph");
+    assert!(
+        matches!(outcome, StepOutcome::Paused { .. }),
+        "expected Paused after inner graph, got {outcome:?}"
+    );
+    let outcome = engine_arc
+        .run_step(&SessionId(parent_sid.clone()))
+        .await
+        .expect("parent step completes");
+    assert!(
+        matches!(outcome, StepOutcome::Completed { .. }),
+        "expected Completed, got {outcome:?}"
+    );
+
+    // The fixture observed the nested prompt (transformed non-echo) — the
+    // prompt executed through the Host executor under the child identity,
+    // never an unbound "default" refusal.
+    let log = read_fixture_log(&ws.fixture_log);
+    assert!(
+        log.iter().any(|e| e["event"] == "prompt" && e["prompt"] == "hello from outer"),
+        "fixture must observe the nested prompt: {log:?}"
+    );
+
+    // A durable child run was created with the trusted child identity
+    // (parent link + inner graph name) and completed.
+    let children = workflow_store
+        .load_children(&SessionId(parent_sid.clone()))
+        .await
+        .expect("load children");
+    assert_eq!(children.len(), 1, "one durable child run");
+    let child = &children[0];
+    let child_desc = child.descriptor.as_ref().expect("child descriptor");
+    assert_eq!(
+        child_desc.parent_session_id.as_ref().expect("parent link").0,
+        parent_sid
+    );
+    assert_eq!(child_desc.graph_name.as_deref(), Some("inner_graph"));
+    assert_eq!(child.status, SessionStatus::Completed);
+
+    // The child's persisted context carries the child run id as `_session_id`
+    // (the identity the prompt node resolved and executed under), and the
+    // node's transformed output landed on the child context.
+    let child_session = storage
+        .get(&child.session_id.0)
+        .await
+        .expect("child session snapshot")
+        .expect("child session present");
+    let child_ctx_id: String = child_session.context.get("_session_id").await.unwrap();
+    assert_eq!(child_ctx_id, child.session_id.0);
+    let child_output: String = child_session
+        .context
+        .get("state.n1.output")
+        .await
+        .expect("child prompt output");
+    assert_eq!(child_output, "transformed:hello from outer");
+
+    host.shutdown().await.expect("host shutdown");
+}
+
+struct EndTask;
+
+#[async_trait::async_trait]
+impl Task for EndTask {
+    fn id(&self) -> &str {
+        "end_task"
+    }
+
+    async fn run(
+        &self,
+        _ctx: graph_flow::Context,
+    ) -> graph_flow::Result<graph_flow::TaskResult> {
+        Ok(graph_flow::TaskResult::new(
+            None,
+            graph_flow::NextAction::End,
+        ))
+    }
 }
 
 trait ProviderConfigExt {

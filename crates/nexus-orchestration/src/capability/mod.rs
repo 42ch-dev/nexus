@@ -596,6 +596,7 @@ impl CapabilityRegistry {
             .as_ref()
             .map_or_else(builtins::JudgeLlm::new, |executor| {
                 builtins::JudgeLlm::with_prompt_executor(executor.clone())
+                    .with_session_cancels(deps.session_cancels.clone())
             });
 
         let context_summarize = deps
@@ -603,6 +604,7 @@ impl CapabilityRegistry {
             .as_ref()
             .map_or_else(builtins::ContextSummarize::new, |executor| {
                 builtins::ContextSummarize::with_prompt_executor(executor.clone())
+                    .with_session_cancels(deps.session_cancels.clone())
             });
 
         // V1.51 T-A P0: nexus.llm.extract reuses the same prompt executor as
@@ -612,6 +614,7 @@ impl CapabilityRegistry {
             .as_ref()
             .map_or_else(builtins::LlmExtract::new, |executor| {
                 builtins::LlmExtract::with_prompt_executor(executor.clone())
+                    .with_session_cancels(deps.session_cancels.clone())
             });
 
         let acp_prompt = deps
@@ -619,6 +622,7 @@ impl CapabilityRegistry {
             .as_ref()
             .map_or_else(builtins::AcpPrompt::new, |executor| {
                 builtins::AcpPrompt::with_prompt_executor(executor.clone())
+                    .with_session_cancels(deps.session_cancels.clone())
             });
 
         // V1.57 P1: cdn_config is constructor-injected (no global state).

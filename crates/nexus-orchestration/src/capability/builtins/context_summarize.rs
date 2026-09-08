@@ -26,13 +26,23 @@ use std::sync::Arc;
 /// [`CapabilityError::WorkerUnavailable`] (standalone/test mode).
 pub struct ContextSummarize {
     executor: Option<Arc<dyn PromptExecutor>>,
+    /// Per-run coordinator cancellation tokens (A1): the executor listens to
+    /// the token for the current run concurrently with the Host stream.
+    session_cancels: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    >,
 }
 
 impl ContextSummarize {
     /// Create in standalone/test mode (no prompt executor).
     #[must_use]
-    pub const fn new() -> Self {
-        Self { executor: None }
+    pub fn new() -> Self {
+        Self {
+            executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
+        }
     }
 
     /// Create with a prompt executor for production Host dispatch.
@@ -40,7 +50,24 @@ impl ContextSummarize {
     pub fn with_prompt_executor(executor: Arc<dyn PromptExecutor>) -> Self {
         Self {
             executor: Some(executor),
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
         }
+    }
+
+    /// Builder-style per-run coordinator cancellation tokens (A1).
+    #[must_use]
+    pub fn with_session_cancels(
+        mut self,
+        session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        >,
+    ) -> Self {
+        self.session_cancels = session_cancels;
+        self
     }
 }
 
@@ -127,6 +154,17 @@ impl Capability for ContextSummarize {
         // Compute blake3 hash of the prompt actually sent.
         let prompt_hash = blake3::hash(prompt.as_bytes()).to_hex().to_string();
 
+        // A1: resolve the coordinator cancellation token for this run from
+        // the shared per-run map (never a fresh token — a coordinator cancel
+        // must be able to interrupt this prompt).
+        let cancellation = self
+            .session_cancels
+            .read()
+            .map_err(|e| CapabilityError::Internal(format!("session cancels lock: {e}")))?
+            .get(session_id)
+            .cloned()
+            .unwrap_or_else(tokio_util::sync::CancellationToken::new);
+
         // Execute through the Host plane.
         let result = executor
             .execute(PromptRequest {
@@ -135,7 +173,7 @@ impl Capability for ContextSummarize {
                 agent_ref: None,
                 prompt,
                 tool_policy: ToolPolicy::DenyAll,
-                cancellation: tokio_util::sync::CancellationToken::new(),
+                cancellation,
             })
             .await?;
 
