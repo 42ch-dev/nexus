@@ -3991,7 +3991,6 @@ dependencies = [
  "nexus-narrative",
  "nexus-spoke-adapter",
  "nexus-wasm-host",
- "nix 0.29.0",
  "regex",
  "reqwest",
  "serde",

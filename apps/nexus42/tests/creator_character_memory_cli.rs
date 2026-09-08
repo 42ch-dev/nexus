@@ -100,7 +100,7 @@ impl HostFacade for MockHost {
     ) -> HostResult<HostEventStream> {
         self.execs.fetch_add(1, Ordering::SeqCst);
         let op_id = match op {
-            HostOperation::Prompt { op_id, content } => {
+            HostOperation::Prompt { op_id, content, .. } => {
                 let text = match content.as_slice() {
                     [HostContentBlock::Text { text }] => text.clone(),
                     other => format!("unexpected content {other:?}"),

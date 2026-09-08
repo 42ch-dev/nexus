@@ -232,7 +232,14 @@ async fn restart_mid_chain_resumes_without_re_executing_completed_edges() {
     // `recover_sessions` → `reconstruct_runner`; the test preset is not
     // embedded, so the test wires the graph itself).
     let engine_ref: Arc<dyn OrchestrationEngine> = engine2.clone();
-    let wired = build_wired_outer_graph(&loaded, &engine_ref, &caps, Some(dispatch.clone()));
+    let wired = build_wired_outer_graph(
+        &loaded,
+        &engine_ref,
+        &caps,
+        Some(dispatch.clone()),
+        None,
+        engine2.shared_state().session_cancels.clone(),
+    );
     let runner = Arc::new(graph_flow::FlowRunner::new(
         Arc::new(wired),
         storage2.clone(),
@@ -562,7 +569,14 @@ async fn inspect_after_interrupt_is_side_effect_free_and_resume_matches_baseline
     // ---- Phase 2: boot resume AFTER the inspect passes ----
     let (engine2, storage2) = build_engine(&pool, dispatch.clone());
     let engine_ref: Arc<dyn OrchestrationEngine> = engine2.clone();
-    let wired = build_wired_outer_graph(&loaded, &engine_ref, &caps, Some(dispatch.clone()));
+    let wired = build_wired_outer_graph(
+        &loaded,
+        &engine_ref,
+        &caps,
+        Some(dispatch.clone()),
+        None,
+        engine2.shared_state().session_cancels.clone(),
+    );
     let runner = Arc::new(graph_flow::FlowRunner::new(
         Arc::new(wired),
         storage2.clone(),
