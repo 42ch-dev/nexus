@@ -3125,6 +3125,7 @@ mod tests {
         );
 
         let ctx = graph_flow::Context::new();
+        ctx.set("_session_id", "default").await;
         let (result, reason) = judge_task.evaluate(&ctx).await.unwrap();
         assert!(result, "GO response should give true: {reason}");
         assert!(reason.contains("go"), "reason should mention go: {reason}");
@@ -3167,6 +3168,7 @@ mod tests {
         );
 
         let ctx = graph_flow::Context::new();
+        ctx.set("_session_id", "default").await;
         let (result, reason) = judge_task.evaluate(&ctx).await.unwrap();
         assert!(!result, "NOGO response should give false: {reason}");
         assert!(
@@ -3187,6 +3189,7 @@ mod tests {
         );
 
         let ctx = graph_flow::Context::new();
+        ctx.set("_session_id", "default").await;
         let (result, reason) = judge_task.evaluate(&ctx).await.unwrap();
         assert!(!result, "no worker → NOGO (safe default)");
         assert!(reason.contains("unavailable"), "reason: {reason}");
@@ -3511,6 +3514,7 @@ mod tests {
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
 
         let ctx = graph_flow::Context::new();
+        ctx.set("_session_id", "default").await;
         let result = task.run(ctx.clone()).await.unwrap();
         assert!(
             matches!(result.next_action, NextAction::Continue),
@@ -3563,6 +3567,7 @@ mod tests {
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
 
         let ctx = graph_flow::Context::new();
+        ctx.set("_session_id", "default").await;
         let result = task.run(ctx.clone()).await.unwrap();
         assert!(
             matches!(result.next_action, NextAction::WaitForInput),
@@ -3602,6 +3607,7 @@ mod tests {
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
 
         let ctx = graph_flow::Context::new();
+        ctx.set("_session_id", "default").await;
         let result = task.run(ctx.clone()).await.unwrap();
         assert!(
             matches!(result.next_action, NextAction::WaitForInput),

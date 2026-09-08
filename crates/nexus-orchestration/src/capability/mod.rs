@@ -962,11 +962,10 @@ mod tests {
     use crate::capability::test_support::write_capability_dir;
 
     #[test]
-    fn registry_has_34_builtins() {
-        // 31 V1.60 + 1 narrative.compute (V1.61 P3) + 1 essay.draft_status.finalize (V1.63 P2)
-        // + 1 script.section_status.update (V1.67 P2 R-V160P1-QC1-W001) = 34.
+    fn registry_has_33_builtins() {
+        // V1.186 removed the obsolete `acp.session_load` placeholder from the prior 34.
         let reg = CapabilityRegistry::with_builtins();
-        assert_eq!(reg.len(), 34);
+        assert_eq!(reg.len(), 33);
     }
 
     #[test]
@@ -1036,9 +1035,8 @@ mod tests {
     async fn registry_iter_returns_all() {
         let reg = CapabilityRegistry::with_builtins();
         let names: Vec<&str> = reg.iter().map(super::Capability::name).collect();
-        // 31 (V1.60) + 1 (V1.61 P3 narrative.compute) + 1 (V1.63 P2 essay.draft_status.finalize)
-        // + 1 (V1.67 P2 script.section_status.update).
-        assert_eq!(names.len(), 34);
+        // V1.186 removed the obsolete `acp.session_load` placeholder from the prior 34.
+        assert_eq!(names.len(), 33);
         assert!(names.contains(&"sync.pull"));
         assert!(names.contains(&"judge.rule"));
         assert!(names.contains(&"acp.prompt"));

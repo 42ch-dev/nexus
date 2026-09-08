@@ -828,7 +828,7 @@ impl PromptExecutor for HostPromptExecutor {
         for (key, sid) in sessions {
             match tokio::time::timeout(
                 self.timeouts.shutdown_duration(),
-                self.host.shutdown_session(sid),
+                self.host.shutdown_session(sid.clone()),
             )
             .await
             {

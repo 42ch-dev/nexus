@@ -893,7 +893,6 @@ mod tests {
                 display_name: "Mock".to_string(),
                 protocol_kind: crate::capability::model::ProtocolKind::Acp,
                 capabilities: crate::capability::model::CapabilityDescriptor::acp_full(),
-                process_identity: None,
             }
         }
 
@@ -915,7 +914,7 @@ mod tests {
                 session_id: HostSessionId::new(),
                 capabilities: crate::capability::model::CapabilityDescriptor::acp_full(),
                 process_identity: None,
-            }
+            })
         }
 
         async fn execute(
@@ -994,7 +993,6 @@ mod tests {
                 display_name: "TrackingMock".to_string(),
                 protocol_kind: crate::capability::model::ProtocolKind::Acp,
                 capabilities: crate::capability::model::CapabilityDescriptor::acp_full(),
-                process_identity: None,
             }
         }
 
@@ -1016,7 +1014,7 @@ mod tests {
                 session_id: HostSessionId::new(),
                 capabilities: crate::capability::model::CapabilityDescriptor::acp_full(),
                 process_identity: None,
-            }
+            })
         }
 
         async fn execute(
@@ -1092,7 +1090,6 @@ mod tests {
                 display_name: "HangingMock".to_string(),
                 protocol_kind: crate::capability::model::ProtocolKind::Acp,
                 capabilities: crate::capability::model::CapabilityDescriptor::acp_full(),
-                process_identity: None,
             }
         }
 
@@ -1114,7 +1111,7 @@ mod tests {
                 session_id: HostSessionId::new(),
                 capabilities: crate::capability::model::CapabilityDescriptor::acp_full(),
                 process_identity: None,
-            }
+            })
         }
 
         async fn execute(
@@ -1916,7 +1913,6 @@ mod tests {
                 display_name: "SlowLaunch".to_string(),
                 protocol_kind: crate::capability::model::ProtocolKind::Acp,
                 capabilities: crate::capability::model::CapabilityDescriptor::acp_full(),
-                process_identity: None,
             }
         }
 
@@ -1940,7 +1936,7 @@ mod tests {
                 session_id: HostSessionId::new(),
                 capabilities: crate::capability::model::CapabilityDescriptor::acp_full(),
                 process_identity: None,
-            }
+            })
         }
 
         async fn execute(

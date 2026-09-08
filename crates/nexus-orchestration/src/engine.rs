@@ -693,7 +693,7 @@ impl EngineSharedState {
                 .commit_transition(
                     session_id,
                     expected_revision,
-                    checkpoint,
+                    checkpoint.clone(),
                     record.status.clone(),
                     &next_state,
                 )
@@ -718,7 +718,14 @@ impl EngineSharedState {
                     // Cleanup unconfirmed: persist Interrupted (actionable,
                     // never false successful cancellation) and surface the
                     // error. The run stays visibly interrupted.
-                    let current = store.load_run(session_id).await?;
+                    let Some(current) = store.load_run(session_id).await? else {
+                        return Err(EngineError::GraphFlow(
+                            graph_flow::GraphError::StorageError(format!(
+                                "run '{}' disappeared during cancel cleanup",
+                                session_id.0
+                            )),
+                        ));
+                    };
                     let current_revision = current.state_revision;
                     let mut interrupted_state = current.state.unwrap_or_default();
                     interrupted_state.cancel_requested = true;
@@ -751,7 +758,14 @@ impl EngineSharedState {
             }
 
             // C-001 phase 2: confirmed cleanup — persist terminal Cancelled.
-            let current = store.load_run(session_id).await?;
+            let Some(current) = store.load_run(session_id).await? else {
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "run '{}' disappeared before cancelled settlement",
+                        session_id.0
+                    )),
+                ));
+            };
             let current_revision = current.state_revision;
             let mut cancelled_state = current.state.unwrap_or_default();
             cancelled_state.cancel_requested = true;

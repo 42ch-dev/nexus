@@ -846,7 +846,7 @@ impl Drop for ManagedAcpProcess {
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
                 let owned = ManagedAcpProcess {
-                    agent_id,
+                    agent_id: agent_id.clone(),
                     child: Some(child),
                     agent_path,
                     birth,
