@@ -9,6 +9,7 @@ use crate::capability::CapabilityRegistry;
 use crate::preset::manifest::{
     ContextUpdateOp, ExitWhen, InitialAction, InnerGraph, NextTarget, PresetManifest,
 };
+use crate::run_state::PresetSourceIdentity;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -46,6 +47,12 @@ pub struct LoadedPreset {
     /// Role definitions for multi-agent presets (WS-E T6).
     /// Empty = single-agent mode (backward compatible).
     pub roles: Vec<crate::preset::manifest::PresetRoleDefinition>,
+    /// Content-addressed preset source identity (A2/A7).
+    ///
+    /// `Some` when the loader knows the source (embedded or directory
+    /// bundle); `None` for raw-YAML loads (`load_preset_from_str`) where the
+    /// caller must supply the identity before starting a v1 run.
+    pub source_identity: Option<PresetSourceIdentity>,
 }
 
 impl std::fmt::Debug for LoadedPreset {
@@ -278,6 +285,7 @@ pub fn load_preset_from_str_with_limits(
             })
             .collect(),
         roles: manifest.roles.clone(),
+        source_identity: None,
         manifest,
     })
 }
@@ -333,7 +341,139 @@ pub fn load_preset(
         tracing::warn!(path = %d.path, message = %d.message, category = ?d.category, "A3 loader warning");
     }
 
-    load_preset_from_str(&yaml, caps)
+    let mut loaded = load_preset_from_str(&yaml, caps)?;
+    // A directory bundle knows its source identity (A2/A7): content hash
+    // over the manifest + every referenced asset, with a canonicalized root.
+    loaded.source_identity = Some(preset_source_identity(&loaded.manifest, Some(bundle_root), None)?);
+    Ok(loaded)
+}
+
+/// Compute the content-addressed [`PresetSourceIdentity`] (A2/A7).
+///
+/// The content hash is over the manifest **and** every referenced asset
+/// (template_file, prompt_file, system_prompt_file in capability args, and
+/// role system_prompt_file) — not the YAML hash alone — so a changed
+/// template invalidates the identity and recovery refuses to fall back to
+/// current bytes.
+///
+/// For a directory bundle, referenced asset files are read from the
+/// **canonicalized** `bundle_root`; each path is validated as a safe
+/// relative path before joining. For an embedded preset they are read from
+/// the compiled-in embedded directory. A missing referenced asset is an
+/// **error** (never hashed as empty) — the identity must be exact.
+///
+/// # Errors
+/// Returns [`PresetLoadError`] if a referenced asset cannot be read, is an
+/// unsafe path, or neither `bundle_root` nor `embedded_id` is provided.
+pub fn preset_source_identity(
+    manifest: &PresetManifest,
+    bundle_root: Option<&Path>,
+    embedded_id: Option<&str>,
+) -> Result<PresetSourceIdentity, PresetLoadError> {
+    // Hash the manifest YAML first.
+    let manifest_yaml = serde_yaml::to_string(manifest).map_err(PresetLoadError::from)?;
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(manifest_yaml.as_bytes());
+
+    // Canonicalize the directory root so the stored identity is stable and
+    // symlink-consistent (A2/A7).
+    let canonical_root = match bundle_root {
+        Some(root) => Some(root.canonicalize().map_err(|e| {
+            PresetLoadError::Validation {
+                len: 1,
+                problems: vec![ValidationProblem {
+                    path: "preset_source_identity".to_string(),
+                    error: format!("failed to canonicalize bundle root: {e}"),
+                }],
+            }
+        })?),
+        None => None,
+    };
+
+    // Fold in every referenced asset's bytes (deterministic order). Uses the
+    // same collector as the asset validation surface so the identity covers
+    // template_file, prompt_file, system_prompt_file in capability args, and
+    // role system_prompt_file (Important 6).
+    let mut asset_paths: Vec<String> = super::validation::collect_asset_file_references(manifest)
+        .into_iter()
+        .map(|(_, rel)| rel)
+        .collect();
+    asset_paths.sort_unstable();
+    asset_paths.dedup();
+
+    for rel in &asset_paths {
+        // Enforce safe relative paths before joining (A2/A7).
+        if let Err(reason) = assert_template_file_safe(rel) {
+            return Err(PresetLoadError::Validation {
+                len: 1,
+                problems: vec![ValidationProblem {
+                    path: format!("asset {rel}"),
+                    error: format!("unsafe referenced asset path: {reason}"),
+                }],
+            });
+        }
+        hasher.update(rel.as_bytes());
+        hasher.update(&[0u8]);
+        let bytes = if let Some(root) = &canonical_root {
+            match std::fs::read(root.join(rel)) {
+                Ok(b) => b,
+                Err(e) => {
+                    return Err(PresetLoadError::Validation {
+                        len: 1,
+                        problems: vec![ValidationProblem {
+                            path: format!("asset {rel}"),
+                            error: format!("failed to read referenced asset: {e}"),
+                        }],
+                    });
+                }
+            }
+        } else if let Some(id) = embedded_id {
+            crate::preset::read_embedded_template(id, rel).ok_or_else(|| {
+                PresetLoadError::Validation {
+                    len: 1,
+                    problems: vec![ValidationProblem {
+                        path: format!("asset {rel}"),
+                        error: format!(
+                            "referenced asset '{rel}' is missing from embedded preset '{id}'"
+                        ),
+                    }],
+                }
+            })?
+            .into_bytes()
+        } else {
+            return Err(PresetLoadError::Validation {
+                len: 1,
+                problems: vec![ValidationProblem {
+                    path: "preset_source_identity".to_string(),
+                    error: "neither bundle_root nor embedded_id provided".to_string(),
+                }],
+            });
+        };
+        hasher.update(&bytes);
+    }
+
+    let mut content_hash = [0u8; 32];
+    content_hash.copy_from_slice(hasher.finalize().as_bytes());
+
+    Ok(match (canonical_root, embedded_id) {
+        (Some(root), _) => PresetSourceIdentity::Directory {
+            root,
+            content_hash,
+        },
+        (None, Some(id)) => PresetSourceIdentity::Embedded {
+            preset_id: id.to_string(),
+            content_hash,
+        },
+        (None, None) => {
+            return Err(PresetLoadError::Validation {
+                len: 1,
+                problems: vec![ValidationProblem {
+                    path: "preset_source_identity".to_string(),
+                    error: "neither bundle_root nor embedded_id provided".to_string(),
+                }],
+            });
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1713,6 +1853,13 @@ states:
         ) -> Result<crate::engine::SessionId, crate::engine::EngineError> {
             unimplemented!()
         }
+        async fn attach_existing_child_session(
+            &self,
+            _: &str,
+            _: std::sync::Arc<graph_flow::Graph>,
+        ) -> Option<crate::engine::SessionId> {
+            unimplemented!("wiring test must not execute engine steps")
+        }
         async fn start_session_with_preset(
             &self,
             _: &LoadedPreset,
@@ -1724,6 +1871,12 @@ states:
             _: &crate::engine::SessionId,
         ) -> Result<graph_flow::Context, crate::engine::EngineError> {
             unimplemented!()
+        }
+        async fn get_current_task_id(
+            &self,
+            _: &crate::engine::SessionId,
+        ) -> Result<Option<String>, crate::engine::EngineError> {
+            unimplemented!("wiring test must not query session cursors")
         }
         async fn has_runner(&self, _: &crate::engine::SessionId) -> bool {
             unimplemented!("wiring test must not query runner existence")

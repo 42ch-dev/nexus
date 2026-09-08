@@ -63,6 +63,7 @@ use nexus_orchestration::capability::watch::{
 use nexus_orchestration::worker::{WorkerManagerSpawner, WorkerRegistry};
 use nexus_orchestration::{
     engine::{EngineSignal, OrchestrationEngine},
+    run_state::WorkflowStateStore,
     schedule::supervisor::ScheduleSupervisor,
     storage::sqlite::SqliteSessionStorage,
     system_preset_dir, CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps,
@@ -641,12 +642,38 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     state.set_daemon_tool_dispatch(tool_dispatch.clone());
     tracing::info!("Daemon tool dispatch adapter wired");
 
-    let mut concrete_engine =
-        GraphFlowEngine::new_with_storage(session_storage.clone(), capability_holder.clone());
+    // Critical 2: when a creator DB is present, wire the durable
+    // WorkflowStateStore (the SQLite adapter implements both SessionStorage
+    // and WorkflowStateStore) into the engine so real daemon sessions are v1
+    // runs (authoritative status/descriptor/state persisted via start_run /
+    // commit_transition). The workspace root is frozen into every v1
+    // descriptor. When no creator DB is present (Tier-0 boot), fall back to
+    // the in-memory engine (no v1 persistence).
+    let mut concrete_engine = match &sqlite_boot_storage {
+        Some(sqlite_storage) => {
+            let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();
+            let workspace_root = state
+                .workspace_path()
+                .map(std::path::PathBuf::from)
+                .unwrap_or_default();
+            GraphFlowEngine::new_with_storage_and_workflow_store_and_workspace(
+                session_storage.clone(),
+                workflow_store,
+                capability_holder.clone(),
+                workspace_root,
+            )
+        }
+        None => {
+            GraphFlowEngine::new_with_storage(session_storage.clone(), capability_holder.clone())
+        }
+    };
 
     // DF-47 (V1.42 P3): wire the daemon tool dispatch into the engine so
     // HostTool enter actions in preset graphs can invoke nexus.* tools.
     concrete_engine.set_daemon_tool_dispatch(tool_dispatch.clone());
+    // A2/A7: the engine resolves directory presets for source identity from
+    // the nexus home.
+    concrete_engine.set_nexus_home(state.nexus_home().clone());
 
     // WS2 R1: Recover persisted non-terminal sessions into in-memory tracker.
     if let Some(sqlite_storage) = sqlite_boot_storage {
@@ -697,9 +724,17 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                                 resume_waiting: true,
                                 ..PresetRunConfig::default()
                             };
+                            // A7 (v1.186 P0 T2): the durable workflow store
+                            // (same SQLite adapter) governs the recovery
+                            // class — interrupted work is never re-driven,
+                            // human waits are never stepped at boot, and only
+                            // the converge/merge chain class reaches the
+                            // bounded join re-drive.
+                            let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();
                             let decisions = resume_driven_sessions(
                                 &resume_engine,
                                 &resume_storage,
+                                Some(&workflow_store),
                                 &drivable,
                                 &config,
                                 Some(&resume_cancel),

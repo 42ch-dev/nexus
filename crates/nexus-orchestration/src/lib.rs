@@ -17,6 +17,7 @@ pub mod preset_ids;
 pub mod quality_loop;
 pub mod resume_rules;
 pub mod review_report;
+pub mod run_state;
 pub mod rules_history;
 pub mod rules_layers;
 pub mod schedule;
@@ -39,6 +40,11 @@ pub use capability::{
 };
 pub use engine::{ChildSessionParams, EngineError, GraphFlowEngine, OrchestrationEngine};
 pub use preset::resolve_preset;
+pub use run_state::{
+    AgentBinding, ChildCheckpoint, OwnedProcessIdentity, PresetSourceIdentity, PromptAttempt,
+    PromptPhase, RunCheckpoint, RunDescriptorV1, RunFailure, RunRecord, RunStateV1, WaitKind,
+    WaitRecord, WorkflowStateStore,
+};
 pub use scheduler::{ClockSource, MockClock, Scheduler, SystemClock};
 pub use stage_gates::{
     build_preset_input, build_stage_schedule_label, preset_for_stage, WorkFields,

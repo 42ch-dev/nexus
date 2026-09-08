@@ -15,7 +15,7 @@
 //!   best-effort using the DTOs from `nexus-contracts::local::acp_runtime::trace`.
 
 use crate::capability::{CapabilityError, CapabilityRegistry};
-use crate::engine::OrchestrationEngine;
+use crate::engine::{OrchestrationEngine, SessionId};
 use crate::preset::manifest::{ConvergeConfig, ConvergeStrategy};
 use crate::preset::manifest::{EnterAction, ExitWhen, MergeKind, NextTarget, StateDefinition};
 use async_trait::async_trait;
@@ -74,6 +74,18 @@ impl Task for CapabilityTask {
         let cap = self.registry.get(&name).ok_or_else(|| {
             graph_flow::GraphError::TaskExecutionFailed(format!("capability not found: {name}"))
         })?;
+
+        // A capability invocation may perform an external effect (capability
+        // calls can trigger provider/prompt/host activity). Mark the step as
+        // having performed a potentially-external effect so a failed
+        // post-effect `commit_transition` can persist an interrupted
+        // disposition rather than blindly rewinding (Important 3).
+        context
+            .set(
+                crate::engine::EXTERNAL_EFFECT_MARKER,
+                true,
+            )
+            .await;
 
         match cap.run(input).await {
             Ok(output) => {
@@ -226,6 +238,14 @@ impl Task for InnerGraphTask {
         &self,
         context: graph_flow::Context,
     ) -> Result<TaskResult, graph_flow::GraphError> {
+        // 0. Current-step hygiene: child-wait markers from an earlier step
+        //    must never leak into this one's boundary (round-4 Critical 2).
+        //    Cleared here; re-set only when THIS step parks at a child
+        //    human wait.
+        context.set("_child_wait_record", Value::Null).await;
+        context.set("_child_wait_session", Value::Null).await;
+        context.set("_child_wait_task", Value::Null).await;
+
         // 1. Read the parent session ID from context.
         let parent_session_id: String = context
             .get(&self.parent_session_id_key)
@@ -259,21 +279,63 @@ impl Task for InnerGraphTask {
             }
         }
 
-        // 3. Spawn the child session.
-        let params = crate::engine::ChildSessionParams {
-            parent_session_id: parent_session_id.clone(),
-            inner_graph: self.inner_graph.clone(),
-            initial_context: child_ctx,
+        // 3. Attach an existing persisted child session (recovery, Important 4)
+        //    or spawn a new one. After a parent restarts with its cursor
+        //    still at this inner-graph task, recovery hydrates the persisted
+        //    child rows into the engine's children map; we reattach the
+        //    matching non-terminal child and resume it (preserving
+        //    cursor/context) rather than creating a duplicate child row and
+        //    potentially replaying completed child work. We only spawn a new
+        //    child when no matching child row exists.
+        let child_sid = if let Some(existing) = self
+            .engine
+            .attach_existing_child_session(&parent_session_id, self.inner_graph.clone())
+            .await
+        {
+            existing
+        } else {
+            let params = crate::engine::ChildSessionParams {
+                parent_session_id: parent_session_id.clone(),
+                inner_graph: self.inner_graph.clone(),
+                initial_context: child_ctx,
+            };
+
+            self.engine.spawn_child_session(params).await.map_err(|e| {
+                graph_flow::GraphError::TaskExecutionFailed(format!(
+                    "InnerGraphTask: failed to spawn child session: {e}"
+                ))
+            })?
         };
 
-        let child_sid = self.engine.spawn_child_session(params).await.map_err(|e| {
-            graph_flow::GraphError::TaskExecutionFailed(format!(
-                "InnerGraphTask: failed to spawn child session: {e}"
-            ))
-        })?;
+        // Driving an inner graph session is itself an external effect: the
+        // child may run capability/prompt/host-tool effects (or have run them
+        // pre-crash — the persisted child carries a completed effect that must
+        // not be replayed). Propagate the effect marker to the parent so a
+        // failed post-child-effect parent `commit_transition` (e.g. stale child
+        // CAS) is classified Interrupted, never deterministically restored and
+        // replayed on restart (Important 2). Scoped to this parent step: the
+        // engine clears the marker after a successful parent checkpoint.
+        context.set(crate::engine::EXTERNAL_EFFECT_MARKER, true).await;
 
-        // 4. Poll child session to completion.
+        // A reattached child that is already terminal (its durable checkpoint
+        // was persisted before the parent committed past this inner graph)
+        // must NOT be re-stepped — its completed prompt/effect work would be
+        // replayed. Consume it directly: read its terminal output below and
+        // record an empty run (no extra step). We detect terminal status via
+        // the engine's in-memory tracker (registered by attach).
+        let child_terminal = self
+            .engine
+            .get_status(&child_sid)
+            .await
+            .map(|s| s.is_terminal())
+            .unwrap_or(false);
+
+        // 4. Poll child session to completion (only for a non-terminal child —
+        //    a terminal reattached child is consumed, never re-stepped,
+        //    Round-5 Important 1).
         let mut last_error = None;
+        let mut child_wait = None;
+        if !child_terminal {
         for _ in 0..256 {
             let outcome = self.engine.run_step(&child_sid).await.map_err(|e| {
                 graph_flow::GraphError::TaskExecutionFailed(format!(
@@ -300,18 +362,62 @@ impl Task for InnerGraphTask {
                         "InnerGraphTask: child paused, resuming"
                     );
                 }
-                crate::engine::StepOutcome::WaitingForInput { .. } => {
-                    // Inner graphs shouldn't wait for input; resume.
-                    let _ = self
-                        .engine
-                        .signal(&child_sid, crate::engine::EngineSignal::Resume)
-                        .await;
+                crate::engine::StepOutcome::WaitingForInput { response } => {
+                    // Round-4 Critical 2 (A4): a supported inner-graph child
+                    // waiting for human input MUST NOT be auto-resumed by the
+                    // inner poller (auto-approval bypass). Preserve the
+                    // child's WaitRecord and propagate the wait to the parent:
+                    // the parent step parks with `WaitForInput` and the root
+                    // `WaitRecord` carries the exact child cursor (A4 "a
+                    // waiting child makes the parent waiting"). Explicit
+                    // continuation re-runs the parent inner-graph task, which
+                    // reattaches the still-waiting child and steps it — the
+                    // child's durable token is then consumed by the matching
+                    // authorized continue, never by boot or the poller.
+                    child_wait = Some((child_sid.0.clone(), response));
+                    break;
                 }
                 crate::engine::StepOutcome::Error(e) => {
                     last_error = Some(e);
                     break;
                 }
             }
+        }
+        }
+
+        // 5a. Round-4 Critical 2: a child human wait must make THIS parent
+        //     step return `WaitForInput` (never Continue) so the engine
+        //     persists the parent as `waiting_for_input` with a fresh A4
+        //     token naming the exact waiting child. The child's persisted
+        //     wait record is untouched (its token remains for the matching
+        //     continue); parent/root wait + child checkpoint are persisted
+        //     together by `commit_transition` before the engine returns
+        //     `WaitingForInput` (A4). The child's current task id comes from
+        //     the authoritative persisted child snapshot; `None` degrades to
+        //     the child session id (never empty).
+        if let Some((child_session, response)) = child_wait {
+            let child_task_id = self
+                .engine
+                .get_current_task_id(&SessionId(child_session.clone()))
+                .await
+                .unwrap_or(None);
+            context.set("_child_wait_session", child_session.clone()).await;
+            context.set(
+                "_child_wait_task",
+                child_task_id.unwrap_or_else(|| child_session.clone()),
+            )
+            .await;
+            return Ok(TaskResult::new(
+                Some(
+                    response.unwrap_or_else(|| {
+                        format!(
+                            "inner graph '{}' child '{}' is waiting for human input",
+                            self.inner_graph.id, child_session
+                        )
+                    }),
+                ),
+                NextAction::WaitForInput,
+            ));
         }
 
         // 5. Read output_binding from child final context.
@@ -1146,6 +1252,20 @@ impl StateCompositeTask {
     /// `HashSet<String>` of predecessor task IDs populated at graph build time),
     /// so the converge gate check `arrived_sources.len() == expected_predecessor_count`
     /// correctly gates on per-predecessor arrival.
+    ///
+    /// # ROUND-4 GATE-SCOPE CORRECTION
+    ///
+    /// This writer is invoked by labeled/conditional ROUTING for ANY routed
+    /// target — including plain manual-wait states — so the
+    /// `_converge_arrivals_*` (and `_merge_*` / `_join_wait_start_*`) keys it
+    /// produces are **not** authoritative evidence that the CURRENT step parked
+    /// at a scheduler gate. The authoritative scheduler-park signal is the
+    /// state-scoped [`set_gate_park`] marker that the gated task itself writes
+    /// ONLY at its genuine merge/converge wait returns (and nulls on gate
+    /// success/leave/timeout). Recovery classification therefore uses
+    /// `gate_park_live(data, current_task_id)`, never the any-key chain test,
+    /// so a manual wait reached through a labeled/conditional path with stale
+    /// or broad join keys keeps its fresh retained A4 token.
     pub fn record_converge_arrival(context: &graph_flow::Context, target: &str, source_id: &str) {
         let converge_key = format!("_converge_arrivals_{target}");
         let mut arrived: std::collections::HashSet<String> =
@@ -1155,6 +1275,28 @@ impl StateCompositeTask {
             context.set_sync(&converge_key, arrived);
         }
         // else: duplicate arrival from same source → idempotent no-op.
+    }
+
+    /// Set or clear the CURRENT-GATE scheduler-park marker for `state_id`
+    /// (round 4, Critical 1).
+    ///
+    /// The gated `StateCompositeTask` writes `_gate_park_{state_id}` = `true`
+    /// exactly when its merge/converge gate returns `WaitForInput` (the engine
+    /// persists that outcome as `paused` + tokenless), and nulls it on gate
+    /// success-leave and deadline expiry (reroute/typed failure). This is the
+    /// ONLY authoritative scheduler-park evidence: unlike the routing-written
+    /// `_merge_*` / `_converge_arrivals_*` / `_join_wait_start_*` keys (which
+    /// label/conditional routing writes for ANY routed target), the marker is
+    /// state-scoped and written by the gate itself. A manual/nested wait
+    /// reached through a labeled/conditional path never carries a live marker
+    /// for its own state, so it stays `waiting_for_input` with a fresh token.
+    async fn set_gate_park(context: &graph_flow::Context, state_id: &str, parked: bool) {
+        let key = format!("_gate_park_{state_id}");
+        if parked {
+            context.set_sync(&key, true);
+        } else {
+            context.set_sync(&key, Value::Null);
+        }
     }
 
     /// Bounded-join deadline check for one waiting tick (DR-06, v1.179).
@@ -1214,6 +1356,11 @@ impl StateCompositeTask {
         };
         context.set(arrivals_key, Value::Null).await;
         context.set(&wait_start_key, Value::Null).await;
+        // Round-4 Critical 1: the join is no longer parked — the deadline
+        // fired (reroute or typed failure). Clear the current-gate marker
+        // so a later WaitForInput outcome at this state is never misread
+        // as a scheduler park.
+        Self::set_gate_park(context, &self.id, false).await;
 
         if let Some(target) = &self.on_timeout {
             let note = format!(
@@ -1604,6 +1751,12 @@ impl Task for StateCompositeTask {
                     merge_kind = ?merge_kind,
                     "merge node waiting for more incoming labeled edges"
                 );
+                // Round-4 Critical 1: write the CURRENT-GATE park marker so
+                // the engine classifies this WaitingForInput outcome as a
+                // scheduler park (paused + tokenless). Historical/broad join
+                // keys written by labeled/conditional ROUTING are not
+                // authoritative park evidence; this state-scoped marker is.
+                Self::set_gate_park(&context, &self.id, true).await;
                 return Ok(TaskResult::new(
                     Some(format!(
                         "merge node '{state_id}': {arrived_count}/{expected} arrivals, waiting",
@@ -1615,6 +1768,10 @@ impl Task for StateCompositeTask {
 
             // Merge condition met — clear arrivals for next cycle.
             context.set(&self.merge_key, serde_json::Value::Null).await;
+            // Success-leave: the join has passed, so the gate is no longer
+            // parked (a later re-entry at this state must never be misread
+            // as a scheduler park).
+            Self::set_gate_park(&context, &self.id, false).await;
             tracing::info!(
                 state_id = %self.id,
                 arrived = arrived_count,
@@ -1654,6 +1811,9 @@ impl Task for StateCompositeTask {
                         strategy = ?converge_config.strategy,
                         "converge node waiting for more incoming edges"
                     );
+                    // Round-4 Critical 1: CURRENT-GATE park marker (see the
+                    // merge gate above).
+                    Self::set_gate_park(&context, &self.id, true).await;
                     return Ok(TaskResult::new(
                         Some(format!(
                             "converge node '{state_id}': {arrived_count}/{expected} arrivals, waiting ({:?})",
@@ -1667,6 +1827,8 @@ impl Task for StateCompositeTask {
                 context
                     .set(&self.converge_key, serde_json::Value::Null)
                     .await;
+                // Success-leave: the join has passed (see merge gate above).
+                Self::set_gate_park(&context, &self.id, false).await;
                 tracing::info!(
                     state_id = %self.id,
                     arrived = arrived_count,
@@ -2353,6 +2515,17 @@ impl Task for AcpPromptTask {
                 "session_id": self.session_id,
             });
 
+            // Dispatching a prompt to an external ACP worker is an external
+            // effect — mark the step so a failed post-effect commit persists
+            // an interrupted disposition rather than blindly rewinding
+            // (Important 3).
+            context
+                .set(
+                    crate::engine::EXTERNAL_EFFECT_MARKER,
+                    true,
+                )
+                .await;
+
             let ipc_result = handle.call_json_rpc("worker/acp_prompt", params).await;
 
             // Put the handle back (even if IPC failed, the pipes may still be usable).
@@ -2682,6 +2855,15 @@ impl Task for HostToolCallTask {
 
         let result_value = if let Some(ref dispatch_ref) = self.direct_dispatch {
             // Production path (direct): call through injected dispatch.
+            // A host-tool dispatch is an external effect — mark the step so a
+            // failed post-effect commit persists an interrupted disposition
+            // rather than blindly rewinding (Important 3).
+            context
+                .set(
+                    crate::engine::EXTERNAL_EFFECT_MARKER,
+                    true,
+                )
+                .await;
             dispatch_ref
                 .dispatch_tool(&self.tool_name, &rendered_args, &request_id)
                 .await
@@ -2693,6 +2875,13 @@ impl Task for HostToolCallTask {
                 })?
         } else if let Some(ref dispatch_arc) = self.dispatch {
             // Test-oriented path: call through Mutex-wrapped dispatch slot.
+            // A host-tool dispatch is an external effect (Important 3).
+            context
+                .set(
+                    crate::engine::EXTERNAL_EFFECT_MARKER,
+                    true,
+                )
+                .await;
             let dispatch = {
                 let guard = dispatch_arc.lock().map_err(|e| {
                     graph_flow::GraphError::TaskExecutionFailed(format!(

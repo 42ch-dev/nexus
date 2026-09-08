@@ -228,6 +228,17 @@ pub fn load_user_preset_from_dir(
         }
     };
 
+    // A user preset is a directory bundle: it knows its source identity
+    // (A2/A7) — content hash over the manifest + every referenced asset.
+    let mut loaded = loaded;
+    loaded.source_identity = Some(
+        crate::preset::loader::preset_source_identity(&loaded.manifest, Some(bundle_dir), None)
+            .map_err(|e| UserPresetWarning {
+                dir_name: dir_name.to_string(),
+                message: format!("failed to compute source identity: {e}"),
+            })?,
+    );
+
     Ok(UserPresetEntry {
         id: dir_name.to_string(),
         bundle_dir: bundle_dir.to_path_buf(),

@@ -47,8 +47,8 @@ pub mod validation;
 
 pub use loader::{
     load_preset, load_preset_from_str, load_preset_from_str_with_limits,
-    loader_validate_manifest_compat, yaml_value_depth, LoadedPreset, PresetLoadError,
-    ValidationProblem, DEFAULT_MAX_YAML_DEPTH, DEFAULT_MAX_YAML_SIZE,
+    loader_validate_manifest_compat, preset_source_identity, yaml_value_depth, LoadedPreset,
+    PresetLoadError, ValidationProblem, DEFAULT_MAX_YAML_DEPTH, DEFAULT_MAX_YAML_SIZE,
 };
 pub use validation::{
     validate_assets_in_bundle, validate_path_safety, validate_preset_semantic, DiagnosticCategory,
@@ -108,7 +108,11 @@ pub fn load_embedded_preset(
             }],
         })?;
 
-    load_preset_from_str(yaml, caps)
+    let mut loaded = load_preset_from_str(yaml, caps)?;
+    // An embedded preset knows its source identity (A2/A7): content hash
+    // over the manifest + every referenced asset from the compiled-in tree.
+    loaded.source_identity = Some(loader::preset_source_identity(&loaded.manifest, None, Some(id))?);
+    Ok(loaded)
 }
 
 // ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@ use std::sync::Arc;
 struct EngineCtx {
     _tmp: test_utils::TestTempRoot,
     server: TestServer,
+    pool: sqlx::SqlitePool,
 }
 
 async fn test_server_with_engine() -> EngineCtx {
@@ -38,10 +39,15 @@ async fn test_server_with_engine() -> EngineCtx {
         nexus_orchestration::CapabilityRegistryHolder::with_registry(registry),
     );
 
+    let pool = state.pool().expect("workspace pool").clone();
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");
-    EngineCtx { _tmp: tmp, server }
+    EngineCtx {
+        _tmp: tmp,
+        server,
+        pool,
+    }
 }
 
 // axum_test's AutoFuture is not Send; this helper is awaited directly by #[tokio::test], never spawned
@@ -101,6 +107,35 @@ async fn get_session_by_id_hits_handler_not_framework_404() {
     let body: Value = resp.json();
     assert_eq!(body["session"]["sessionId"], session_id);
     assert_eq!(body["session"]["presetId"], "novel-writing");
+}
+
+#[tokio::test]
+#[serial]
+async fn get_session_reads_persisted_terminal_after_runtime_restart() {
+    let ctx = test_server_with_engine().await;
+    sqlx::query(
+        "INSERT INTO orchestration_sessions
+            (session_id, creator_id, preset_id, preset_version, status,
+             current_task_id, context_json, created_at, updated_at,
+             execution_version, state_revision)
+         VALUES (?, ?, ?, 3, 'completed', NULL, '{}', 1, 2, 1, 4)",
+    )
+    .bind("persisted-terminal")
+    .bind("test_creator")
+    .bind("novel-writing")
+    .execute(&ctx.pool)
+    .await
+    .expect("seed persisted terminal");
+
+    let resp = ctx
+        .server
+        .get("/v1/daemon/orchestration/sessions/persisted-terminal")
+        .await;
+    resp.assert_status(StatusCode::OK);
+    let body: Value = resp.json();
+    assert_eq!(body["session"]["sessionId"], "persisted-terminal");
+    assert_eq!(body["session"]["status"], "completed");
+    assert_eq!(body["session"]["creatorId"], "test_creator");
 }
 
 #[tokio::test]
