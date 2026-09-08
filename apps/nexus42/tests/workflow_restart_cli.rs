@@ -668,13 +668,14 @@ async fn restart_durable_status_converge_merge_redrives_after_reopen() {
     let sid = "conv:parked-join";
 
     // "Process A": v1 row parked at the converge join — tokenless (A7 rule
-    // 5), running, live join keys, one arrival of two. The instrumented
-    // start/branch_a edges "already fired" in the prior process (fixture).
+    // 5), running, exact current-gate park marker, live join keys, one arrival
+    // of two. The instrumented start/branch_a edges already fired (fixture).
     {
         let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
         let context = serde_json::json!({"data": {
             "_converge_arrivals_join": ["branch_a"],
-            "_join_wait_start_join": chrono::Utc::now().timestamp_millis()
+            "_join_wait_start_join": chrono::Utc::now().timestamp_millis(),
+            "_gate_park_join": true
         }, "chat_history": {"messages": [], "max_messages": 1000}})
         .to_string()
         .into_bytes();
@@ -903,36 +904,27 @@ async fn restart_durable_status_converge_merge_redrives_after_reopen() {
     drop(tmp);
 }
 
-/// CONTRACT test (was the BLOCKED pin — now GREEN with the writer-side fix):
-/// a converge-join park state that the ENGINE itself writes (`paused` + live
-/// join keys + NO human-wait token — the corrected `run_step_internal` /
-/// `build_step_state` shape per A2, cross-checked by the reopen flow in
-/// [`restart_durable_status_converge_merge_redrives_after_reopen`]) must be
-/// re-checked on every later boot so the bounded join deadline can fire
-/// ("converge/merge resume still works"). Because the engine no longer
-/// mints a Manual wait token for scheduler parks, `classify_recovery`
-/// rule 4 cannot misclassify the park as a human wait — rule 5
-/// (`ConvergeMerge`) governs and the daemon re-drives the join.
-///
-/// Round-4 rename: the fixture is now explicitly the ENGINE-PARKED
-/// tokenless shape (`paused` + live join keys + no `_gate_park_*` marker
-/// seed needed — the seeded row IS the writer output), so the test name
-/// states the corrected fixture instead of the old token-row misseed.
+/// CONTRACT test: a converge-join park state with the ENGINE writer's durable
+/// shape (`paused` + an exact current-task `_gate_park_*` marker + live join
+/// keys + NO human-wait token) must be re-checked on every later boot so the
+/// bounded join deadline can fire ("converge/merge resume still works").
+/// `classify_recovery` uses that exact marker rather than broad join keys,
+/// preventing a labeled-routed manual wait with stale keys from auto-driving.
 #[tokio::test]
 async fn restart_durable_status_engine_parked_join_redrives_after_reopen() {
     let (tmp, _nexus_home, db_path) = test_utils::create_test_workspace().await;
     let user_home = tmp.path();
     let sid = "conv:engine-parked";
 
-    // "Process A" (real engine parking — the FIXED durable shape): `paused`
-    // at the converge join, live join keys (1/2 arrivals, deadline not yet
-    // elapsed), and NO human-wait token. This is exactly what the
-    // store-wired engine now persists on every park (A2).
+    // "Process A" (real engine parking shape): `paused` at the converge join,
+    // exact current-gate marker, live join keys (1/2 arrivals, deadline not
+    // yet elapsed), and NO human-wait token.
     {
         let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
         let context = serde_json::json!({"data": {
             "_converge_arrivals_join": ["branch_a"],
-            "_join_wait_start_join": chrono::Utc::now().timestamp_millis()
+            "_join_wait_start_join": chrono::Utc::now().timestamp_millis(),
+            "_gate_park_join": true
         }, "chat_history": {"messages": [], "max_messages": 1000}})
         .to_string()
         .into_bytes();

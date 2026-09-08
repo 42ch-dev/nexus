@@ -4565,11 +4565,10 @@ states:
 }
 
 // Writer shape (a): a real engine step that parks at a converge/merge join
-// (live join keys in the post-step context, arrivals 1/2, deadline not
-// elapsed) must persist `paused` with NO `WaitRecord` — the bounded join
-// re-drive keeps the deadline re-check alive on every restart. Reopening the
-// same DB and classifying the row through the canonical A7 classifier yields
-// `ConvergeMerge` (rule 5), never `HumanWait` (tokenless join).
+// must persist `paused`, NO `WaitRecord`, and the exact current-task gate-park
+// marker alongside live join keys. The exact marker authorizes bounded
+// re-drive after restart without confusing manual waits that retain stale
+// broad join keys.
 #[tokio::test]
 async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
     let (pool, db) = fresh_pool().await;
@@ -4667,11 +4666,15 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
         ],
         "the parked join must retain its live join keys"
     );
+    assert!(
+        nexus_orchestration::resume_rules::gate_park_live(map, &persisted.current_task_id),
+        "the engine writer must persist the exact current-task gate marker"
+    );
     drop(context_value);
 
     // Reopen the SAME DB file (daemon restart boundary) — the canonical A7
-    // classifier must see the engine-parked row as a converge/merge chain,
-    // never a human wait (no token to trip rule 4).
+    // classifier must see the exact engine gate marker and classify the park
+    // as a converge/merge chain, never a human wait.
     pool.close().await;
     let pool_b = nexus_local_db::open_pool(db.path()).await.expect("reopen pool");
     let storage_b = Arc::new(SqliteSessionStorage::new(pool_b.clone().into()));
@@ -4686,13 +4689,18 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
         .expect("get after reopen")
         .expect("session present");
     let context_value_b = serde_json::to_value(&context_b.context).expect("context json");
-    let chain_class = nexus_orchestration::resume_rules::context_data(&context_value_b)
-        .is_some_and(nexus_orchestration::resume_rules::is_converge_merge_chain);
+    let gate_park_live = nexus_orchestration::resume_rules::context_data(&context_value_b)
+        .is_some_and(|data| {
+            nexus_orchestration::resume_rules::gate_park_live(
+                data,
+                &context_b.current_task_id,
+            )
+        });
     assert_eq!(
         nexus_orchestration::resume_rules::classify_recovery(
             &record_after_reopen.status,
             record_after_reopen.state.as_ref(),
-            chain_class,
+            gate_park_live,
         ),
         nexus_orchestration::resume_rules::RecoveryClass::ConvergeMerge,
         "an engine-parked join reopens as ConvergeMerge (rule 5), not HumanWait"
