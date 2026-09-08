@@ -67,7 +67,7 @@ Users need to express creator workflows as configurable, prompt-driven strategie
 1. `crates/nexus-acp-host` owns ACP transport and managed subprocess lifecycle behind the Host provider plane.
 2. `crates/nexus-orchestration` owns graph-flow adaptation, capability registration, preset loading, and SQLite `SessionStorage`.
 3. daemon runtime owns orchestration, lifecycle HSM, and the existing `HostFacade` integration.
-4. `nexus42` retains interactive `acp run` and schedule commands; the obsolete `acp-worker` subcommand is removed.
+4. `nexus42` retains interactive `acp run` and schedule commands; the obsolete secondary ACP subcommand is removed.
 5. First built-in preset: `_system.maintenance` (mandatory) and one user-facing sample `novel-writing`.
 6. Knowledge docs revised: [acp-client-tech-spec.md](acp-client-tech-spec.md).
 
@@ -111,7 +111,7 @@ Per [effort-estimation.md](https://github.com/btspoony/mstar-harness/blob/main/d
 
 ### 2.3 Non-goals (explicit)
 
-- **Not an ACP Agent/Server promotion**: daemon runtime remains not-an-ACP-host. See [acp-client-tech-spec.md](acp-client-tech-spec.md) §2.3 (*worker-delegated hosting*).
+- **Not an ACP protocol server promotion**: daemon runtime coordinates the existing Host provider plane; it does not expose ACP as a new public server protocol. See [acp-client-tech-spec.md](acp-client-tech-spec.md) §2.3.
 - **Not a LangChain-style in-memory pipeline**: all engine execution is **durable** and **resumable across daemon restart**; in-memory-only pipelines are explicitly rejected.
 - **Not a replacement for interactive `nexus42 agent run`**: that path stays direct stdio CLI-to-agent; orchestration does not route through it.
 
@@ -340,7 +340,7 @@ All capabilities below are registered at daemon runtime startup. Adding a new ca
 | `narrative.compute`         | Invoke WASM compute module; apply state_delta, timeline_events, new_key_blocks, return battle_report | `nexus-orchestration`  | **Real** — calls `nexus-wasm-host::compute()` (V1.61 P3; spec-seal V1.62 P2); see §8.4.1 |
 | `timer.wait_until`          | Schedule a wake-up signal (requires B-track clock)             | `nexus-orchestration`  | Deferred clock integration — **Durable roadmap:** DR-12 |
 
-> **V1.186 Host cutover:** all prompt-backed capabilities share the injected `PromptExecutor`; standalone constructors fail closed rather than installing an echo or worker fallback.
+> **V1.186 Host cutover:** all prompt-backed capabilities share the injected `PromptExecutor`; standalone constructors fail closed rather than installing an echo or secondary transport fallback.
 
 ### 5.3 Capability input/output schemas
 
@@ -350,7 +350,7 @@ Each capability ships its `input_schema` and `output_schema` as constants (JSON 
 
 ### 5.4 Capability errors
 
-`CapabilityError` variants: `InputInvalid`, `TransientExternal`, `PermanentExternal`, `WorkerUnavailable`, `AcpSessionLost`, `Cancelled`, `Internal`. Engine translates these into graph-flow `TaskResult` + Session context `_error` field so presets can fork on error kind.
+`CapabilityError` distinguishes invalid input, transient/permanent external failure, provider availability, ACP session loss, cancellation, and internal failure. Engine translates these into graph-flow failure/wait behavior and persisted `_error` context so presets can branch without treating partial output as success.
 
 ### 5.5 Runtime dependency injection (V1.31; Host cutover V1.186)
 
@@ -1011,7 +1011,7 @@ Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependen
 - Create `crates/nexus-acp-host/` with modules `client`, `transport`, `skills`, `registry`, `error`, `capabilities` (capability ID constants relocated).
 - `git mv` existing files from `apps/nexus42/src/acp/*` preserving history where possible.
 - Update `apps/nexus42` to `use nexus_acp_host as acp` and re-export for existing call-sites in `commands/agent.rs`.
-- Register the ACP provider recipe with the existing Host plane; no worker CLI entry point.
+- Register the ACP provider recipe with the existing Host plane; no secondary daemon subprocess CLI entry point.
 - `Cargo.toml` workspace updates; update `rust-toolchain`, CI matrix, and `verify-codegen` (no codegen impact expected).
 - Update `acp-client-tech-spec.md` §11 with final crate layout.
 
@@ -1095,13 +1095,13 @@ The following questions were originally parked as B-track in this document. Afte
 
 | ID    | Question                                                                                               | V1.4 Resolution                                                                                       |
 | ----- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| OQ-1  | How many concurrent Schedules can one creator have active at once?                                      | **Answered in WS7** — multi-Schedule; concurrency declared per-add; ACP-calling Schedules serialised per-creator via worker mutex. See [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) §5. |
+| OQ-1  | How many concurrent Schedules can one creator have active at once?                                      | **Answered** — multi-Schedule; prompt operations serialize per run and each admitted run owns its Host session. See [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) §5. |
 | OQ-2  | Schedule priority and preemption semantics                                                              | **Answered in WS7** — no priority / no preemption in V1.4; explicit `schedule pause/resume/cancel` only. See §2 decisions in the schedule spec. |
 | OQ-3  | What happens when all creator Schedules complete                                                        | **Answered in WS7** — creator returns to idle (no default loop). See §2 decisions.                    |
 | OQ-4  | `seed + user_edits + iterated_experience → core_context` derivation + versioning                         | **Partially answered in WS7**; V1.4 implements seed / user_edit / preset_hook derivation kinds and reserves `LlmSummarize` for V1.5. See [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) §6 + §11. |
 | OQ-5  | `nexus42 schedule add/update/remove/inspect` semantics — editing in-flight                              | **Answered in WS7** — full CRUD; in-flight edits accepted but take effect at next state transition ("core_context is stable during execution"). See §3.3 + §6.4. |
 | OQ-6  | Timer / clock model for wall-clock triggers                                                             | **Partially answered** — V1.4 on-demand only; `scheduled_at` column reserved; V1.5 adds clock poller zero-migration. See WS7 §2 + §10. |
-| OQ-7  | Multi-agent per creator (worker hosts > 1 agent)                                                        | **Still deferred** to V1.5+ (see WS7 §13). **Durable roadmap:** DR-09. |
+| OQ-7  | Can one run use multiple configured agent roles?                                                      | **Answered in V1.186** — role bindings are frozen in the run descriptor and each `(run, role)` owns a Host session. |
 | OQ-8  | User-authored capabilities (shell / WASM plugin ABI)                                                    | **Still deferred** to V1.5+ (see WS7 §13). **Durable roadmap:** DR-10. |
 
 ---
@@ -1147,7 +1147,7 @@ If you landed on this section looking for the `schemas/` refactor scope, open th
 
 Internal:
 
-- [acp-client-tech-spec.md](acp-client-tech-spec.md) — companion spec for ACP host split and worker-delegated hosting
+- [acp-client-tech-spec.md](acp-client-tech-spec.md) — companion ACP transport, provider, and Host ownership specification
 - `local-db-refactor.md` — `nexus-local-db` ownership rules for the new `orchestration_sessions` table. See `local-db-refactor.md §4` for pool sharing model.
 - `acp-client-tech-spec-legacy.md` — archived; do not rely on directly (see Superseded header)
 
@@ -1176,7 +1176,7 @@ External (stable, public):
 **Status:** Prepare product lock; not shipped. Durable overlay for user-selected direction **A** (real workflow execution completeness). Durable terminal/wait truth and real Host/ACP execution are **in this lock**, not deferred kernel work. Implementation lives in iteration v1.186 plans P0–P3; this section is the Master product overlay (no iteration-path links).
 
 1. **Authoritative status.** Reuse `orchestration_sessions.status TEXT` for `running` | `paused` | `waiting_for_input` | `completed` | `failed` | `cancelled` | `interrupted`. Add versioned execution metadata, a revision fence and a frozen run descriptor with a new append-only migration. Transition checkpoint/context/status/metadata atomically; graph position saves MUST NOT overwrite terminal/wait status or a newer revision. Legacy rows without authoritative metadata remain explicitly legacy/unverified unless existing evidence supports conservative reconciliation; do not fabricate historical completion. Public inspect after daemon restart MUST agree, including terminals without a live runner.
-2. **One Host plane.** Choose in-process graph/capability execution through an injected Host-independent `PromptExecutor`, implemented in the daemon over existing `HostFacade`. Migrate graph `acp_prompt` and **all** echo-capable consumers: `acp.prompt`, `judge.llm`, `context.summarize`, `nexus.llm.extract`; remove obsolete worker prompt-success branches after all callers migrate. Success requires normalized agent output and `HostEvent::OpFinished` with `FinishReason::EndTurn`; refusal, limits, stream EOF and partial output are not successful completion. Host session/process ownership and generic ACP configuration are defined in [agent-host.md](agent-host.md) §4. No second LLM runtime or native RPC adapter.
+2. **One Host plane.** Choose in-process graph/capability execution through an injected Host-independent `PromptExecutor`, implemented in the daemon over existing `HostFacade`. Migrate graph `acp_prompt` and all prompt-backed consumers: `acp.prompt`, `judge.llm`, `context.summarize`, `nexus.llm.extract`; retire every secondary prompt-success branch after callers migrate. Success requires normalized agent output and `HostEvent::OpFinished` with `FinishReason::EndTurn`; refusal, limits, stream EOF and partial output are not successful completion. Host session/process ownership and generic ACP configuration are defined in [agent-host.md](agent-host.md) §4. No second LLM runtime or native RPC adapter.
 3. **Public driver.** One daemon coordinator owns single-flight bounded driving for session POST, creator run and schedule admission; the graph-flow engine and existing step loop remain the execution backend. Schedule admission atomically associates a durable session before enqueue; seed/input/preset/provider bindings are frozen before eligibility. Explicit `execution_policy` distinguishes `legacy_inert`, `driven_v1`, and `system_inert`; dates or a Running label are not opt-in. Historical never-started rows MUST NOT execute on boot/tick/cron; only an explicit authorized public start opts that row in. Schedule terminal settlement and existing auto-chain insertion are idempotent by the owned terminal run.
 4. **Human wait.** A fresh UUID `wait_id` identifies each manual-wait arrival and persists through restart with the root/child task cursor. Authorized matching continuation consumes it by revision CAS; missing token is `422 invalid_input`, stale/consumed token `409 workflow_wait_conflict`, incompatible state `409 workflow_state_conflict` in the existing error envelope. Other advance/resume/force-transition routes MUST NOT bypass the same human gate. Supported child waits inherit trusted creator/root-preset/parent/graph identity and durable checkpoints; parent-only status without a reconstructible child cursor is insufficient. Never auto-resume WaitingForInput children; multiple waits are exposed one at a time without approving siblings.
 5. **Cancel.** Persist a cancel fence before new steps, deliver cancellation out-of-band to the actual Host operation, then bounded session cleanup/reap. Persist cancelled only when owned work has stopped; unconfirmed cleanup is interrupted with an actionable reason, never false successful cancellation. Terminal-v-cancel and continue-v-cancel races are revision-linearized. Cancel MUST NOT claim rollback of effects already committed outside Nexus.
