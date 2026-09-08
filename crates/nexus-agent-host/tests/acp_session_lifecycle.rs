@@ -322,6 +322,7 @@ async fn prompt_returns_non_echo_agent_output() {
                 content: vec![HostContentBlock::Text {
                     text: "hello-fixture".to_string(),
                 }],
+                permission_scope: None,
             },
         )
         .await
@@ -428,6 +429,7 @@ async fn cancel_reaches_owned_operation_and_shutdown_reaps_exact_process() {
                 content: vec![HostContentBlock::Text {
                     text: "blocked".to_string(),
                 }],
+                permission_scope: None,
             },
         )
         .await

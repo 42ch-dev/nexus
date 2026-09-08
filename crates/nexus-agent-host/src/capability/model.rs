@@ -24,6 +24,22 @@ pub enum ProtocolKind {
     NativeCli,
 }
 
+/// Narrowing permission scope for a Host prompt operation (A1).
+///
+/// Intersected with Host configuration per operation; a provider unable to
+/// honor a requested scope refuses `not_supported` rather than silently
+/// discarding the policy. `None` preserves the standalone Host/Character
+/// policy and never means unrestricted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptPermissionScope {
+    /// Read-only tools allowed.
+    pub allow_read: bool,
+    /// Write tools allowed.
+    pub allow_write: bool,
+    /// Destructive tools allowed.
+    pub allow_destructive: bool,
+}
+
 /// Host operation — only execution-scoped variants.
 ///
 /// Cancel flows through `HostFacade::cancel()` / `ProviderAdapter::cancel()`.
@@ -37,6 +53,10 @@ pub enum HostOperation {
         op_id: HostOperationId,
         /// Content blocks comprising the prompt.
         content: Vec<HostContentBlock>,
+        /// Narrowing permission scope (A1). `None` preserves the standalone
+        /// Host/Character policy; a provider unable to honor a requested
+        /// scope refuses `not_supported`.
+        permission_scope: Option<PromptPermissionScope>,
     },
     /// Switch the model for the current session.
     SetModel {

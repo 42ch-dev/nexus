@@ -38,7 +38,8 @@ use std::sync::Arc;
 use super::inspect::{CheckpointRow, CheckpointSummary};
 use crate::engine::{EngineError, SessionId, SessionStatus, SessionSummary};
 use crate::run_state::{
-    ChildCheckpoint, RunCheckpoint, RunDescriptorV1, RunRecord, RunStateV1, WorkflowStateStore,
+    ChildCheckpoint, PromptAttempt, RunCheckpoint, RunDescriptorV1, RunRecord, RunStateV1,
+    WorkflowStateStore,
 };
 
 /// SQLite-backed session storage sharing `nexus-local-db`'s pool.
@@ -1385,6 +1386,63 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 Some(_) => EngineError::TerminalState(session_id.0.clone()),
                 None => EngineError::SessionNotFound(session_id.0.clone()),
             });
+        }
+        Ok(())
+    }
+
+    /// Persist the durable `PromptAttempt` dispatch intent (A2/A5) BEFORE
+    /// the external Host effect, and update it to `Active` once the Host
+    /// session/operation IDs are known.
+    ///
+    /// This is a **non-CAS** intent write: it merges `in_flight` into the
+    /// current `run_state_json` fenced on the current revision and status
+    /// (`running`/`paused`) WITHOUT advancing the revision, so the engine's
+    /// step transition CAS anchor is preserved. A crash after the effect but
+    /// before the result checkpoint leaves the attempt persisted and the run
+    /// recovers as `Interrupted` (never auto-replayed). The engine's
+    /// terminal/wait `commit_transition` clears `in_flight` on success.
+    async fn persist_prompt_attempt(
+        &self,
+        session_id: &SessionId,
+        attempt: &PromptAttempt,
+    ) -> Result<(), EngineError> {
+        let id = session_id.0.clone();
+        let attempt_json = serde_json::to_string(attempt).map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "persist_prompt_attempt '{}': serialize attempt: {e}",
+                session_id.0
+            )))
+        })?;
+
+        // Merge the attempt into the current run_state_json without
+        // advancing the revision. The fence keeps the write off terminal
+        // rows and off rows whose revision moved since the caller loaded it.
+        let result = sqlx::query(
+            r#"
+            UPDATE orchestration_sessions
+            SET run_state_json = json_set(
+                    COALESCE(run_state_json, '{}'),
+                    '$.in_flight',
+                    json(?)
+                ),
+                updated_at = ?
+            WHERE session_id = ? AND status IN ('running', 'paused')
+            "#,
+        )
+        .bind(&attempt_json)
+        .bind(chrono::Utc::now().timestamp())
+        .bind(id)
+        .execute(&*self.pool)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "persist_prompt_attempt '{}': {e}",
+                session_id.0
+            )))
+        })?;
+
+        if result.rows_affected() == 0 {
+            return Err(EngineError::TerminalState(session_id.0.clone()));
         }
         Ok(())
     }

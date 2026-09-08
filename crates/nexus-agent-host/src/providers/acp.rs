@@ -51,6 +51,12 @@ struct ConnectedAcpSession {
     /// Configuration options exposed by the agent at session creation.
     /// Used for dynamic model switching via `set_config_option`.
     config_options: Option<Vec<NexusConfigOption>>,
+    /// Active narrowing permission scope for the current operation (A1).
+    /// The permission handler reads this per tool call; the Host enforces
+    /// one active op per session, so the single slot is race-free.
+    active_permission_scope: std::sync::Arc<
+        tokio::sync::RwLock<Option<crate::capability::model::PromptPermissionScope>>,
+    >,
     /// Map of active operation IDs to their cancel signal.
     /// Wave 1 enforces one op per session; this field supports future multi-op.
     #[allow(dead_code)]
@@ -128,14 +134,39 @@ impl AcpProvider {
     }
 
     /// Build the permission handler closure for a session's SDK adapter.
+    ///
+    /// The handler intersects the active operation's narrowing permission
+    /// scope (A1) with the Host permission resolver: a scope can narrow but
+    /// never elevate Host configuration. `None` scope preserves the
+    /// standalone Host/Character policy.
     fn build_permission_handler(
         &self,
+        active_permission_scope: std::sync::Arc<
+            tokio::sync::RwLock<Option<crate::capability::model::PromptPermissionScope>>,
+        >,
     ) -> Arc<dyn Fn(&str) -> AcpPermissionOutcome + Send + Sync> {
         let pid = self.provider_id.clone();
         let classifier = AutoToolRiskClassifier::new();
         let resolver = self.permission_resolver.clone();
         Arc::new(move |tool_name: &str| {
             let risk = classifier.classify_or_default(tool_name);
+            // A1: the orchestration scope narrows the Host configuration —
+            // a tool outside the requested scope is denied before the
+            // resolver is consulted (the scope can never elevate).
+            let scope = active_permission_scope
+                .try_read()
+                .ok()
+                .and_then(|guard| *guard);
+            if let Some(scope) = scope {
+                let allowed = match risk {
+                    crate::capability::risk::ToolRisk::Read => scope.allow_read,
+                    crate::capability::risk::ToolRisk::Write => scope.allow_write,
+                    crate::capability::risk::ToolRisk::Destructive => scope.allow_destructive,
+                };
+                if !allowed {
+                    return AcpPermissionOutcome::Deny;
+                }
+            }
             let outcome = resolver.resolve(ProtocolKind::Acp, &pid.0, tool_name, Some(risk));
             match outcome {
                 PermissionOutcome::Allow => AcpPermissionOutcome::Approve,
@@ -197,10 +228,18 @@ impl AcpProvider {
         );
 
         // Await the handler registration — the provider is not usable until
-        // the handler is installed (QC2 F-005, QC3 F-003).
+        // the handler is installed (QC2 F-005, QC3 F-003). The handler reads
+        // the active per-operation permission scope from the session slot
+        // (A1); the slot is created before the client so the closure can
+        // capture it, and stored into the session on success.
+        let active_permission_scope: std::sync::Arc<
+            tokio::sync::RwLock<Option<crate::capability::model::PromptPermissionScope>>,
+        > = std::sync::Arc::new(tokio::sync::RwLock::new(None));
         let client_arc = Arc::new(client);
         client_arc
-            .set_permission_handler(self.build_permission_handler())
+            .set_permission_handler(self.build_permission_handler(
+                active_permission_scope.clone(),
+            ))
             .await;
 
         // Any handshake failure below must run the owned teardown/reap
@@ -342,6 +381,7 @@ impl AcpProvider {
             process: owned_process,
             acp_session_id: session_created.session_id,
             config_options: session_created.config_options,
+            active_permission_scope,
             active_ops: HashMap::new(),
         })
     }
@@ -731,8 +771,12 @@ impl ProviderAdapter for AcpProvider {
         session: &ManagedSessionHandle,
         op: crate::capability::model::HostOperation,
     ) -> HostResult<HostEventStream> {
-        let (op_id, content_blocks) = match op {
-            crate::capability::model::HostOperation::Prompt { op_id, content } => (op_id, content),
+        let (op_id, content_blocks, permission_scope) = match op {
+            crate::capability::model::HostOperation::Prompt {
+                op_id,
+                content,
+                permission_scope,
+            } => (op_id, content, permission_scope),
             crate::capability::model::HostOperation::SetMode { mode } => {
                 return self.handle_set_mode(session, mode).await;
             }
@@ -742,10 +786,14 @@ impl ProviderAdapter for AcpProvider {
         };
 
         // Look up the connected ACP session (client + ACP session ID)
-        let (client, acp_session_id) = {
+        let (client, acp_session_id, active_permission_scope) = {
             let sessions = self.sessions.read().await;
             match sessions.get(&session.session_id) {
-                Some(s) => (Arc::clone(&s.client), s.acp_session_id.clone()),
+                Some(s) => (
+                    Arc::clone(&s.client),
+                    s.acp_session_id.clone(),
+                    s.active_permission_scope.clone(),
+                ),
                 None => {
                     // Session not found — emit OpStarted+OpFailed stream so the
                     // session state machine transitions back to Ready (QC3 F-001).
@@ -758,6 +806,13 @@ impl ProviderAdapter for AcpProvider {
                 }
             }
         };
+
+        // A1: install the active per-operation permission scope before the
+        // prompt streams; the permission handler reads it per tool call.
+        // The Host enforces one active op per session, so the single slot is
+        // race-free. The scope is cleared when the stream ends (terminal
+        // event or error) so a later serial prompt starts from `None`.
+        *active_permission_scope.write().await = permission_scope;
 
         // Build the prompt request — clone acp_session_id for potential cancel.
         let acp_sid_for_cancel = acp_session_id.clone();
@@ -856,9 +911,10 @@ impl ProviderAdapter for AcpProvider {
                 self.provider_id.clone(),
                 prompt_dur,
                 shutdown_dur,
+                active_permission_scope,
             )),
             |state| async move {
-                let Some((mut rx, client, acp_sid, session_id, op_id, provider_id, dur, cancel_dur)) =
+                let Some((mut rx, client, acp_sid, session_id, op_id, provider_id, dur, cancel_dur, scope)) =
                     state
                 else {
                     return None;
@@ -869,23 +925,31 @@ impl ProviderAdapter for AcpProvider {
                         let event = Self::stream_update_to_event(update, &session_id, &op_id);
                         let terminal =
                             matches!(event, HostEvent::OpFinished(_) | HostEvent::OpFailed(_));
+                        if terminal {
+                            // A1: clear the active per-operation scope so a
+                            // later serial prompt starts from `None`.
+                            *scope.write().await = None;
+                        }
                         let next = if terminal {
                             None
                         } else {
-                            Some((rx, client, acp_sid, session_id, op_id, provider_id, dur, cancel_dur))
+                            Some((rx, client, acp_sid, session_id, op_id, provider_id, dur, cancel_dur, scope))
                         };
                         Some((Ok(event), next))
                     }
-                    Ok(None) => Some((
-                        Ok(HostEvent::OpFailed(OperationFailedEvent {
-                            session_id,
-                            op_id,
-                            error_category: "protocol_eof".to_string(),
-                            error_message: "ACP prompt stream closed without a stop reason"
-                                .to_string(),
-                        })),
-                        None,
-                    )),
+                    Ok(None) => {
+                        *scope.write().await = None;
+                        Some((
+                            Ok(HostEvent::OpFailed(OperationFailedEvent {
+                                session_id,
+                                op_id,
+                                error_category: "protocol_eof".to_string(),
+                                error_message: "ACP prompt stream closed without a stop reason"
+                                    .to_string(),
+                            })),
+                            None,
+                        ))
+                    }
                     Err(_) => {
                         tracing::warn!(
                             provider_id = %provider_id,
@@ -911,6 +975,7 @@ impl ProviderAdapter for AcpProvider {
                                 );
                             }
                         }
+                        *scope.write().await = None;
                         Some((
                             Ok(HostEvent::OpFailed(OperationFailedEvent {
                                 session_id,

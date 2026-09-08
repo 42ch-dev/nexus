@@ -82,7 +82,8 @@ async fn server_with_scan(scan_dir: &Path) -> (TestTempRoot, TestServer, Workspa
 
     let deps = CapabilityRuntimeDeps {
         pool: None,
-        worker_provider: None,
+        prompt_executor: None,
+        session_cancels: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         daemon_tool_dispatch: None,
         cdn_config: None,
     };
@@ -162,7 +163,8 @@ async fn boot_never_fails_on_bad_or_missing_capabilities_dir() {
 
     let deps = CapabilityRuntimeDeps {
         pool: None,
-        worker_provider: None,
+        prompt_executor: None,
+        session_cancels: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         daemon_tool_dispatch: None,
         cdn_config: None,
     };

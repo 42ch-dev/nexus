@@ -1,45 +1,45 @@
 //! `context.summarize` capability — LLM-driven `core_context` summarization.
 //!
 //! Takes the current `core_context` content and optionally a state execution
-//! trace, invokes an LLM to produce a condensed summary, and returns the
+//! trace, invokes an agent to produce a condensed summary, and returns the
 //! result for the engine to write as a new `core_context_versions` row with
 //! `derivation_kind = 'llm_summarize'`.
 //!
 //! Design: `creator-schedule-and-core-context.md` §11, DF-34, plan J3.
 //!
 //! Two execution modes:
-//! 1. **With worker IPC**: when `WorkerHandleProvider` is injected, builds a
-//!    summarization prompt, calls `worker/acp_prompt`, returns summary text
-//!    and blake3 prompt hash.
-//! 2. **Standalone (no provider)**: returns `WorkerUnavailable` — no
+//! 1. **With prompt executor**: when `PromptExecutor` is injected, builds a
+//!    summarization prompt, executes it through the Host plane, returns
+//!    summary text and blake3 prompt hash.
+//! 2. **Standalone (no executor)**: returns `WorkerUnavailable` — no
 //!    truncation or `SUMMARIZE_STUB` fallback in production path.
 
-use crate::capability::{Capability, CapabilityError, WorkerHandleProvider};
+use crate::capability::{Capability, CapabilityError, PromptExecutor, PromptRequest, ToolPolicy};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
 /// The `context.summarize` capability.
 ///
-/// Holds an optional [`WorkerHandleProvider`] for LLM calls. When present,
-/// sends the summarization prompt via worker IPC. When absent, returns
+/// Holds an optional [`PromptExecutor`] for agent calls. When present, sends
+/// the summarization prompt via the Host plane. When absent, returns
 /// [`CapabilityError::WorkerUnavailable`] (standalone/test mode).
 pub struct ContextSummarize {
-    workers: Option<Arc<dyn WorkerHandleProvider>>,
+    executor: Option<Arc<dyn PromptExecutor>>,
 }
 
 impl ContextSummarize {
-    /// Create in standalone/test mode (no worker IPC).
+    /// Create in standalone/test mode (no prompt executor).
     #[must_use]
     pub const fn new() -> Self {
-        Self { workers: None }
+        Self { executor: None }
     }
 
-    /// Create with a worker handle provider for production IPC.
+    /// Create with a prompt executor for production Host dispatch.
     #[must_use]
-    pub fn with_worker_provider(provider: Arc<dyn WorkerHandleProvider>) -> Self {
+    pub fn with_prompt_executor(executor: Arc<dyn PromptExecutor>) -> Self {
         Self {
-            workers: Some(provider),
+            executor: Some(executor),
         }
     }
 }
@@ -58,7 +58,7 @@ impl Capability for ContextSummarize {
 
     // Identity fields ("_creator_id", "_session_id") are injected by
     // orchestration context, NOT accepted from user input (security:
-    // prevents cross-creator IPC routing — SEC-V131-01).
+    // prevents cross-creator routing — SEC-V131-01).
     fn input_schema(&self) -> &'static str {
         r#"{
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -105,19 +105,14 @@ impl Capability for ContextSummarize {
             .and_then(|v| v.as_str())
             .ok_or_else(|| CapabilityError::InputInvalid("missing 'content' field".into()))?;
 
-        let workers = self
-            .workers
+        let executor = self
+            .executor
             .as_ref()
             .ok_or(CapabilityError::WorkerUnavailable)?;
 
         // Security: only accept context-injected identity fields (prefixed _).
         // Raw `creator_id`/`session_id` from user/preset input are ignored
-        // to prevent cross-creator IPC routing (IDOR). See SEC-V131-01.
-        let creator_id = input
-            .get("_creator_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("default");
-
+        // to prevent cross-creator routing (IDOR). See SEC-V131-01.
         let session_id = input
             .get("_session_id")
             .and_then(|v| v.as_str())
@@ -132,19 +127,20 @@ impl Capability for ContextSummarize {
         // Compute blake3 hash of the prompt actually sent.
         let prompt_hash = blake3::hash(prompt.as_bytes()).to_hex().to_string();
 
-        // Call worker IPC.
-        let response = workers
-            .call_acp_prompt(creator_id, session_id, prompt, "deny_all")
+        // Execute through the Host plane.
+        let result = executor
+            .execute(PromptRequest {
+                run_id: session_id.to_string(),
+                task_id: "context.summarize".to_string(),
+                agent_ref: None,
+                prompt,
+                tool_policy: ToolPolicy::DenyAll,
+                cancellation: tokio_util::sync::CancellationToken::new(),
+            })
             .await?;
 
-        let summary = response
-            .get("full_text")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-
         Ok(json!({
-            "summary": summary,
+            "summary": result.full_text,
             "prompt_hash": prompt_hash
         }))
     }
@@ -264,39 +260,38 @@ mod tests {
         );
     }
 
-    // ── J3: With mock provider ────────────────────────────────────────
+    // ── J3: With mock executor ────────────────────────────────────────
 
-    struct MockSummaryProvider {
-        captured_creator_id: std::sync::Mutex<String>,
+    struct MockSummaryExecutor {
+        captured_run_id: parking_lot::Mutex<String>,
     }
 
-    impl MockSummaryProvider {
+    impl MockSummaryExecutor {
         fn new() -> Self {
             Self {
-                captured_creator_id: std::sync::Mutex::new(String::new()),
+                captured_run_id: parking_lot::Mutex::new(String::new()),
             }
         }
     }
 
     #[async_trait]
-    impl WorkerHandleProvider for MockSummaryProvider {
-        async fn call_acp_prompt(
+    impl PromptExecutor for MockSummaryExecutor {
+        async fn execute(
             &self,
-            creator_id: &str,
-            _session_id: &str,
-            _prompt: String,
-            _tool_policy: &str,
-        ) -> Result<Value, CapabilityError> {
-            *self.captured_creator_id.lock().unwrap() = creator_id.to_string();
-            Ok(json!({
-                "full_text": "A concise summary of the content."
-            }))
+            request: PromptRequest,
+        ) -> Result<crate::capability::PromptResult, CapabilityError> {
+            *self.captured_run_id.lock() = request.run_id.clone();
+            Ok(crate::capability::PromptResult {
+                full_text: "A concise summary of the content.".to_string(),
+                host_session_id: "host-sess".to_string(),
+                operation_id: "op-1".to_string(),
+            })
         }
     }
 
     #[tokio::test]
-    async fn context_summarize_with_mock_worker() {
-        let cap = ContextSummarize::with_worker_provider(Arc::new(MockSummaryProvider::new()));
+    async fn context_summarize_with_mock_executor() {
+        let cap = ContextSummarize::with_prompt_executor(Arc::new(MockSummaryExecutor::new()));
         let input = json!({
             "content": "The story is about a brave knight who saves the kingdom from a dragon."
         });
@@ -309,7 +304,7 @@ mod tests {
 
     #[tokio::test]
     async fn context_summarize_with_trace_and_template() {
-        let cap = ContextSummarize::with_worker_provider(Arc::new(MockSummaryProvider::new()));
+        let cap = ContextSummarize::with_prompt_executor(Arc::new(MockSummaryExecutor::new()));
         let input = json!({
             "content": "Some context",
             "trace": "User entered state X, performed action Y",
@@ -322,7 +317,7 @@ mod tests {
 
     #[tokio::test]
     async fn context_summarize_missing_content_errors() {
-        let cap = ContextSummarize::with_worker_provider(Arc::new(MockSummaryProvider::new()));
+        let cap = ContextSummarize::with_prompt_executor(Arc::new(MockSummaryExecutor::new()));
         let input = json!({});
         let result = cap.run(input).await;
         assert!(result.is_err());
@@ -333,12 +328,12 @@ mod tests {
     // ── SEC-V131-01: Identity boundary regression tests ────────────────
 
     /// Proves that raw `creator_id` / `session_id` from preset args are
-    /// NOT forwarded to the worker — only context-injected `_creator_id`
-    /// and `_session_id` are trusted.
+    /// NOT forwarded to the executor — only context-injected `_session_id`
+    /// is trusted as the run identity.
     #[tokio::test]
     async fn context_summarize_raw_creator_id_ignored_on_spoof_attempt() {
-        let provider = Arc::new(MockSummaryProvider::new());
-        let cap = ContextSummarize::with_worker_provider(provider.clone());
+        let executor = Arc::new(MockSummaryExecutor::new());
+        let cap = ContextSummarize::with_prompt_executor(executor.clone());
         let input = json!({
             "content": "Some text",
             // Spoof attempt: raw preset args should be ignored
@@ -347,21 +342,18 @@ mod tests {
         });
         let result = cap.run(input).await.unwrap();
         assert!(result.get("summary").is_some());
-        {
-            let captured = provider.captured_creator_id.lock().unwrap();
-            assert_eq!(
-                *captured, "default",
-                "SEC-V131-01: raw creator_id leaked through"
-            );
-            drop(captured);
-        }
+        assert_eq!(
+            *executor.captured_run_id.lock(),
+            "default",
+            "SEC-V131-01: raw session_id leaked through"
+        );
     }
 
-    /// Proves context-injected `_creator_id` / `_session_id` are used.
+    /// Proves context-injected `_session_id` is used as the run identity.
     #[tokio::test]
     async fn context_summarize_context_injected_identity_trusted() {
-        let provider = Arc::new(MockSummaryProvider::new());
-        let cap = ContextSummarize::with_worker_provider(provider.clone());
+        let executor = Arc::new(MockSummaryExecutor::new());
+        let cap = ContextSummarize::with_prompt_executor(executor.clone());
         let input = json!({
             "content": "Some text",
             "_creator_id": "legit_creator",
@@ -369,18 +361,14 @@ mod tests {
         });
         let result = cap.run(input).await.unwrap();
         assert!(result.get("summary").is_some());
-        {
-            let captured = provider.captured_creator_id.lock().unwrap();
-            assert_eq!(*captured, "legit_creator");
-            drop(captured);
-        }
+        assert_eq!(*executor.captured_run_id.lock(), "legit_session");
     }
 
     /// Proves context-injected identity wins even when raw args are present.
     #[tokio::test]
     async fn context_summarize_context_identity_overrides_raw_spoof() {
-        let provider = Arc::new(MockSummaryProvider::new());
-        let cap = ContextSummarize::with_worker_provider(provider.clone());
+        let executor = Arc::new(MockSummaryExecutor::new());
+        let cap = ContextSummarize::with_prompt_executor(executor.clone());
         let input = json!({
             "content": "Some text",
             "creator_id": "spoofed_creator",
@@ -390,14 +378,11 @@ mod tests {
         });
         let result = cap.run(input).await.unwrap();
         assert!(result.get("summary").is_some());
-        {
-            let captured = provider.captured_creator_id.lock().unwrap();
-            assert_eq!(
-                *captured, "legit_creator",
-                "SEC-V131-01: context ID must win over raw spoof"
-            );
-            drop(captured);
-        }
+        assert_eq!(
+            *executor.captured_run_id.lock(),
+            "legit_session",
+            "SEC-V131-01: context ID must win over raw spoof"
+        );
     }
 
     // ── J3: Prompt builder unit tests ─────────────────────────────────

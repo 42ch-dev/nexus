@@ -4814,20 +4814,21 @@ async fn engine_manual_wait_persists_waiting_for_input_fresh_retained_token() {
 // is the ONLY authoritative scheduler-park evidence).
 // ---------------------------------------------------------------------------
 
-/// Judge provider returning a GO verdict whose reason contains the "go"
+/// Judge executor returning a GO verdict whose reason contains the "go"
 /// label (the `resolve_labeled_target` first-token match).
 struct GoJudgeProvider;
 
 #[async_trait::async_trait]
-impl nexus_orchestration::capability::WorkerHandleProvider for GoJudgeProvider {
-    async fn call_acp_prompt(
+impl nexus_orchestration::capability::PromptExecutor for GoJudgeProvider {
+    async fn execute(
         &self,
-        _creator_id: &str,
-        _session_id: &str,
-        _prompt: String,
-        _tool_policy: &str,
-    ) -> Result<serde_json::Value, nexus_orchestration::capability::CapabilityError> {
-        Ok(serde_json::json!({ "full_text": "Go ahead — first-token match routes label 'go'." }))
+        _request: nexus_orchestration::capability::PromptRequest,
+    ) -> Result<nexus_orchestration::capability::PromptResult, nexus_orchestration::capability::CapabilityError> {
+        Ok(nexus_orchestration::capability::PromptResult {
+            full_text: "Go ahead — first-token match routes label 'go'.".to_string(),
+            host_session_id: "host-sess".to_string(),
+            operation_id: "op-1".to_string(),
+        })
     }
 }
 
@@ -4835,7 +4836,8 @@ impl nexus_orchestration::capability::WorkerHandleProvider for GoJudgeProvider {
 fn judge_registry_holder() -> nexus_orchestration::CapabilityRegistryHolder {
     let deps = nexus_orchestration::capability::CapabilityRuntimeDeps {
         pool: None,
-        worker_provider: Some(std::sync::Arc::new(GoJudgeProvider)),
+        prompt_executor: Some(std::sync::Arc::new(GoJudgeProvider)),
+        session_cancels: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         daemon_tool_dispatch: None,
         cdn_config: None,
     };

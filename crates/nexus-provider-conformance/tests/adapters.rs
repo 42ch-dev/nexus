@@ -77,6 +77,7 @@ fn prompt_op() -> HostOperation {
         content: vec![HostContentBlock::Text {
             text: "hello".to_string(),
         }],
+        permission_scope: None,
     }
 }
 

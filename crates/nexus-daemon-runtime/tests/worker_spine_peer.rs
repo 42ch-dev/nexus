@@ -188,7 +188,8 @@ async fn start_server(
     if let Some(dir) = scan_dir {
         let deps = CapabilityRuntimeDeps {
             pool: None,
-            worker_provider: None,
+            prompt_executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             daemon_tool_dispatch: None,
             cdn_config: None,
         };
@@ -820,7 +821,8 @@ async fn worker_spine_peer_user_cap_run_error_is_honest_failure() {
     let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
     let deps = CapabilityRuntimeDeps {
         pool: None,
-        worker_provider: None,
+        prompt_executor: None,
+        session_cancels: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         daemon_tool_dispatch: None,
         cdn_config: None,
     };
@@ -869,7 +871,8 @@ async fn worker_spine_peer_user_cap_structural_gate_rejects_non_object_pre_io() 
     let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
     let deps = CapabilityRuntimeDeps {
         pool: None,
-        worker_provider: None,
+        prompt_executor: None,
+        session_cancels: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         daemon_tool_dispatch: None,
         cdn_config: None,
     };
@@ -922,7 +925,8 @@ async fn worker_spine_peer_user_cap_structural_gate_rejects_missing_required_pre
     let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
     let deps = CapabilityRuntimeDeps {
         pool: None,
-        worker_provider: None,
+        prompt_executor: None,
+        session_cancels: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         daemon_tool_dispatch: None,
         cdn_config: None,
     };
@@ -974,7 +978,8 @@ async fn worker_spine_peer_user_cap_structural_gate_rejects_http_lane_pre_io() {
     let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
     let deps = CapabilityRuntimeDeps {
         pool: None,
-        worker_provider: None,
+        prompt_executor: None,
+        session_cancels: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         daemon_tool_dispatch: None,
         cdn_config: None,
     };

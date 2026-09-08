@@ -255,8 +255,12 @@ pub fn load_preset_from_str_with_limits(
     // 3. Build outer graph per §8.2 mapping table.
     let outer_graph = build_outer_graph(&manifest);
 
-    // 4. Build inner graphs per §8.2 mapping table.
-    let inner_graphs = build_inner_graphs(&manifest);
+    // 4. Build inner graphs per §8.2 mapping table. The production prompt
+    // executor and per-run cancellation tokens are wired at graph build time
+    // (A1); `None`/empty keeps loader-only/test construction executor-free.
+    let inner_graphs = build_inner_graphs(&manifest, None, std::sync::Arc::new(
+        std::sync::RwLock::new(std::collections::HashMap::new()),
+    ));
 
     // 5. Extract output bindings from manifest.
     let output_bindings = extract_output_bindings(&manifest);
@@ -1250,17 +1254,30 @@ fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
 ///
 /// `daemon_tool_dispatch` is passed by value because it's cloned into each
 /// composite task that contains `HostTool` enter actions.
+///
+/// `prompt_executor` / `session_cancels` (A1): the production prompt executor
+/// and per-run coordinator cancellation tokens are wired into every inner
+/// graph `acp_prompt` node at wired-graph build time — the loader-only
+/// graphs stay executor-free for validation/test construction.
 #[allow(clippy::needless_pass_by_value)]
 pub fn build_wired_outer_graph(
     loaded: &LoadedPreset,
     engine: &Arc<dyn crate::engine::OrchestrationEngine>,
     caps: &Arc<CapabilityRegistry>,
     daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
+    prompt_executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+    session_cancels: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    >,
 ) -> graph_flow::Graph {
     use crate::tasks::StateCompositeTask;
     use std::collections::HashMap;
 
     let graph = graph_flow::Graph::new(&loaded.id);
+
+    // A1: rebuild the inner graphs with the production prompt executor and
+    // cancellation tokens wired into every `acp_prompt` node.
+    let inner_graphs = build_inner_graphs(&loaded.manifest, prompt_executor, session_cancels);
 
     // V1.52 T-B P1: pre-compute incoming labeled edge counts for merge nodes.
     // W-2 (v1.179 QC fix round 2): production wiring shares the exact scan
@@ -1324,7 +1341,7 @@ pub fn build_wired_outer_graph(
             .with_expected_incoming(incoming)
             .with_converge_predecessors(preds)
             .with_engine(engine.clone())
-            .with_inner_graphs(loaded.inner_graphs.clone())
+            .with_inner_graphs(inner_graphs.clone())
             .with_output_bindings(loaded.output_bindings.clone())
             .with_registry(caps.clone());
 
@@ -1387,7 +1404,19 @@ fn extract_output_bindings(manifest: &PresetManifest) -> HashMap<String, String>
 /// Each node's `agent` field (if present) is stored in `InnerGraphNodeTask::agent_ref`.
 /// At runtime, the engine resolves agent refs to `session_ids` and stores them
 /// in context as `_session_routes`, which `InnerGraphNodeTask::run()` uses for routing.
-fn build_inner_graphs(manifest: &PresetManifest) -> HashMap<String, Arc<graph_flow::Graph>> {
+///
+/// ## A1: prompt executor wiring
+///
+/// The production `PromptExecutor` and the per-run coordinator cancellation
+/// tokens are wired into every `acp_prompt` node so graph prompt execution
+/// goes through the Host plane — never an echo/worker fallback.
+fn build_inner_graphs(
+    manifest: &PresetManifest,
+    prompt_executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+    session_cancels: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    >,
+) -> HashMap<String, Arc<graph_flow::Graph>> {
     use crate::preset::manifest::GraphNodeKind;
     use crate::tasks::InnerGraphNodeTask;
 
@@ -1413,6 +1442,9 @@ fn build_inner_graphs(manifest: &PresetManifest) -> HashMap<String, Arc<graph_fl
                             )
                             // Template file path (will be resolved at runtime)
                             .with_template(node.template_file.clone().unwrap_or_default())
+                            // A1: production prompt executor + cancellation tokens
+                            .with_prompt_executor(prompt_executor.clone())
+                            .with_session_cancels(session_cancels.clone())
                     }
                 };
                 graph.add_task(std::sync::Arc::new(task));
@@ -1927,7 +1959,14 @@ states:
         let loaded = load_preset_from_str(yaml, &caps).expect("implicit labeled-edge merge loads");
 
         let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
-        let graph = build_wired_outer_graph(&loaded, &engine, &Arc::new(caps), None);
+        let graph = build_wired_outer_graph(
+            &loaded,
+            &engine,
+            &Arc::new(caps),
+            None,
+            None,
+            std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        );
 
         let task = graph
             .get_task("m")

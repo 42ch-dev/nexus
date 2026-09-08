@@ -3,13 +3,13 @@
 //! Design: `orchestration-engine.md` §5.2, DF-33, plan J2.
 //!
 //! Two execution modes:
-//! 1. **With worker IPC**: when `WorkerHandleProvider` is injected through the
-//!    registry, builds a judge prompt, calls `worker/acp_prompt` with
-//!    `deny_all` tool policy, and parses the LLM response as GO/NOGO.
-//! 2. **Standalone (no provider)**: returns `WorkerUnavailable` — no heuristic
+//! 1. **With prompt executor**: when `PromptExecutor` is injected through the
+//!    registry, builds a judge prompt, executes it with `deny_all` tool
+//!    policy through the Host plane, and parses the agent response as GO/NOGO.
+//! 2. **Standalone (no executor)**: returns `WorkerUnavailable` — no heuristic
 //!    matching on input text.
 
-use crate::capability::{Capability, CapabilityError, WorkerHandleProvider};
+use crate::capability::{Capability, CapabilityError, PromptExecutor, PromptRequest, ToolPolicy};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -24,25 +24,25 @@ const NOGO_WORDS: &[&str] = &[
 
 /// The `judge.llm` capability.
 ///
-/// Holds an optional [`WorkerHandleProvider`] for LLM calls. When present,
-/// sends the evaluation prompt via worker IPC. When absent, returns
+/// Holds an optional [`PromptExecutor`] for agent calls. When present, sends
+/// the evaluation prompt via the Host plane. When absent, returns
 /// [`CapabilityError::WorkerUnavailable`] (standalone/test mode).
 pub struct JudgeLlm {
-    workers: Option<Arc<dyn WorkerHandleProvider>>,
+    executor: Option<Arc<dyn PromptExecutor>>,
 }
 
 impl JudgeLlm {
-    /// Create in standalone/test mode (no worker IPC).
+    /// Create in standalone/test mode (no prompt executor).
     #[must_use]
     pub const fn new() -> Self {
-        Self { workers: None }
+        Self { executor: None }
     }
 
-    /// Create with a worker handle provider for production IPC.
+    /// Create with a prompt executor for production Host dispatch.
     #[must_use]
-    pub fn with_worker_provider(provider: Arc<dyn WorkerHandleProvider>) -> Self {
+    pub fn with_prompt_executor(executor: Arc<dyn PromptExecutor>) -> Self {
         Self {
-            workers: Some(provider),
+            executor: Some(executor),
         }
     }
 }
@@ -61,7 +61,7 @@ impl Capability for JudgeLlm {
 
     // Identity fields ("_creator_id", "_session_id") are injected by
     // orchestration context, NOT accepted from user input (security:
-    // prevents cross-creator IPC routing — SEC-V131-01).
+    // prevents cross-creator routing — SEC-V131-01).
     fn input_schema(&self) -> &'static str {
         r#"{
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -93,19 +93,14 @@ impl Capability for JudgeLlm {
 
         // Security: only accept context-injected identity fields (prefixed _).
         // Raw `creator_id`/`session_id` from user/preset input are ignored
-        // to prevent cross-creator IPC routing (IDOR). See SEC-V131-01.
-        let creator_id = input
-            .get("_creator_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("default");
-
+        // to prevent cross-creator routing (IDOR). See SEC-V131-01.
         let session_id = input
             .get("_session_id")
             .and_then(|v| v.as_str())
             .unwrap_or("default");
 
-        let workers = self
-            .workers
+        let executor = self
+            .executor
             .as_ref()
             .ok_or(CapabilityError::WorkerUnavailable)?;
 
@@ -116,16 +111,18 @@ impl Capability for JudgeLlm {
              {prompt_text}"
         );
 
-        let response = workers
-            .call_acp_prompt(creator_id, session_id, judge_prompt, "deny_all")
+        let result = executor
+            .execute(PromptRequest {
+                run_id: session_id.to_string(),
+                task_id: "judge.llm".to_string(),
+                agent_ref: None,
+                prompt: judge_prompt,
+                tool_policy: ToolPolicy::DenyAll,
+                cancellation: tokio_util::sync::CancellationToken::new(),
+            })
             .await?;
 
-        let full_text = response
-            .get("full_text")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-
-        let (result, reason) = parse_judge_response(full_text);
+        let (result, reason) = parse_judge_response(&result.full_text);
 
         Ok(json!({
             "result": result,
@@ -266,65 +263,67 @@ mod tests {
         );
     }
 
-    // ── J2: With mock provider — GO response ──────────────────────────
+    // ── J2: With mock executor — GO response ──────────────────────────
 
-    /// Mock provider that records the `creator_id` it was called with,
+    /// Mock executor that records the `run_id` it was called with,
     /// enabling identity-spoof regression tests.
-    struct MockGoProvider {
-        captured_creator_id: std::sync::Mutex<String>,
+    struct MockGoExecutor {
+        captured_run_id: parking_lot::Mutex<String>,
     }
 
-    impl MockGoProvider {
+    impl MockGoExecutor {
         fn new() -> Self {
             Self {
-                captured_creator_id: std::sync::Mutex::new(String::new()),
+                captured_run_id: parking_lot::Mutex::new(String::new()),
             }
         }
     }
 
     #[async_trait]
-    impl WorkerHandleProvider for MockGoProvider {
-        async fn call_acp_prompt(
+    impl PromptExecutor for MockGoExecutor {
+        async fn execute(
             &self,
-            creator_id: &str,
-            _session_id: &str,
-            _prompt: String,
-            _tool_policy: &str,
-        ) -> Result<Value, CapabilityError> {
-            *self.captured_creator_id.lock().unwrap() = creator_id.to_string();
-            Ok(json!({ "full_text": "GO — the evaluation passes." }))
+            request: PromptRequest,
+        ) -> Result<crate::capability::PromptResult, CapabilityError> {
+            *self.captured_run_id.lock() = request.run_id.clone();
+            Ok(crate::capability::PromptResult {
+                full_text: "GO — the evaluation passes.".to_string(),
+                host_session_id: "host-sess".to_string(),
+                operation_id: "op-1".to_string(),
+            })
         }
     }
 
     #[tokio::test]
-    async fn judge_llm_with_mock_worker_go() {
-        let cap = JudgeLlm::with_worker_provider(Arc::new(MockGoProvider::new()));
+    async fn judge_llm_with_mock_executor_go() {
+        let cap = JudgeLlm::with_prompt_executor(Arc::new(MockGoExecutor::new()));
         let input = json!({ "prompt": "Is the task complete?" });
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["result"], true);
         assert!(result["reason"].as_str().unwrap().contains("go"));
     }
 
-    // ── J2: With mock provider — NOGO response ────────────────────────
+    // ── J2: With mock executor — NOGO response ────────────────────────
 
-    struct MockNogoProvider;
+    struct MockNogoExecutor;
 
     #[async_trait]
-    impl WorkerHandleProvider for MockNogoProvider {
-        async fn call_acp_prompt(
+    impl PromptExecutor for MockNogoExecutor {
+        async fn execute(
             &self,
-            _creator_id: &str,
-            _session_id: &str,
-            _prompt: String,
-            _tool_policy: &str,
-        ) -> Result<Value, CapabilityError> {
-            Ok(json!({ "full_text": "NO — stop and review." }))
+            _request: PromptRequest,
+        ) -> Result<crate::capability::PromptResult, CapabilityError> {
+            Ok(crate::capability::PromptResult {
+                full_text: "NO — stop and review.".to_string(),
+                host_session_id: "host-sess".to_string(),
+                operation_id: "op-1".to_string(),
+            })
         }
     }
 
     #[tokio::test]
-    async fn judge_llm_with_mock_worker_nogo() {
-        let cap = JudgeLlm::with_worker_provider(Arc::new(MockNogoProvider));
+    async fn judge_llm_with_mock_executor_nogo() {
+        let cap = JudgeLlm::with_prompt_executor(Arc::new(MockNogoExecutor));
         let input = json!({ "prompt": "Is the task complete?" });
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["result"], false);
@@ -333,7 +332,7 @@ mod tests {
 
     #[tokio::test]
     async fn judge_llm_missing_prompt_errors() {
-        let cap = JudgeLlm::with_worker_provider(Arc::new(MockNogoProvider));
+        let cap = JudgeLlm::with_prompt_executor(Arc::new(MockNogoExecutor));
         let input = json!({});
         let result = cap.run(input).await;
         assert!(result.is_err());
@@ -342,12 +341,12 @@ mod tests {
     // ── SEC-V131-01: Identity boundary regression tests ────────────────
 
     /// Proves that raw `creator_id` / `session_id` from preset args are
-    /// NOT forwarded to the worker — only context-injected `_creator_id`
-    /// and `_session_id` are trusted.
+    /// NOT forwarded to the executor — only context-injected `_session_id`
+    /// is trusted as the run identity.
     #[tokio::test]
     async fn judge_llm_raw_creator_id_ignored_on_spoof_attempt() {
-        let provider = Arc::new(MockGoProvider::new());
-        let cap = JudgeLlm::with_worker_provider(provider.clone());
+        let executor = Arc::new(MockGoExecutor::new());
+        let cap = JudgeLlm::with_prompt_executor(executor.clone());
         let input = json!({
             "prompt": "evaluate",
             // Spoof attempt: raw preset args should be ignored
@@ -356,22 +355,19 @@ mod tests {
         });
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["result"], true);
-        // The worker must have received "default", NOT "spoofed_creator"
-        {
-            let captured = provider.captured_creator_id.lock().unwrap();
-            assert_eq!(
-                *captured, "default",
-                "SEC-V131-01: raw creator_id leaked through"
-            );
-            drop(captured);
-        }
+        // The executor must have received "default", NOT "spoofed_session".
+        assert_eq!(
+            *executor.captured_run_id.lock(),
+            "default",
+            "SEC-V131-01: raw session_id leaked through"
+        );
     }
 
-    /// Proves context-injected `_creator_id` / `_session_id` are used.
+    /// Proves context-injected `_session_id` is used as the run identity.
     #[tokio::test]
     async fn judge_llm_context_injected_identity_trusted() {
-        let provider = Arc::new(MockGoProvider::new());
-        let cap = JudgeLlm::with_worker_provider(provider.clone());
+        let executor = Arc::new(MockGoExecutor::new());
+        let cap = JudgeLlm::with_prompt_executor(executor.clone());
         let input = json!({
             "prompt": "evaluate",
             "_creator_id": "legit_creator",
@@ -379,18 +375,14 @@ mod tests {
         });
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["result"], true);
-        {
-            let captured = provider.captured_creator_id.lock().unwrap();
-            assert_eq!(*captured, "legit_creator");
-            drop(captured);
-        }
+        assert_eq!(*executor.captured_run_id.lock(), "legit_session");
     }
 
     /// Proves context-injected identity wins even when raw args are present.
     #[tokio::test]
     async fn judge_llm_context_identity_overrides_raw_spoof() {
-        let provider = Arc::new(MockGoProvider::new());
-        let cap = JudgeLlm::with_worker_provider(provider.clone());
+        let executor = Arc::new(MockGoExecutor::new());
+        let cap = JudgeLlm::with_prompt_executor(executor.clone());
         let input = json!({
             "prompt": "evaluate",
             "creator_id": "spoofed_creator",
@@ -400,13 +392,10 @@ mod tests {
         });
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["result"], true);
-        {
-            let captured = provider.captured_creator_id.lock().unwrap();
-            assert_eq!(
-                *captured, "legit_creator",
-                "SEC-V131-01: context ID must win over raw spoof"
-            );
-            drop(captured);
-        }
+        assert_eq!(
+            *executor.captured_run_id.lock(),
+            "legit_session",
+            "SEC-V131-01: context ID must win over raw spoof"
+        );
     }
 }

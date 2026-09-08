@@ -313,6 +313,27 @@ pub trait WorkflowStateStore: Send + Sync {
         step_state: &RunStateV1,
     ) -> Result<(), EngineError>;
 
+    /// Persist the durable `PromptAttempt` dispatch intent (A2/A5) BEFORE
+    /// the external Host effect, and update it to `Active` once the Host
+    /// session/operation IDs are known.
+    ///
+    /// This is a **non-CAS** intent write: it merges `in_flight` into the
+    /// current `run_state_json` fenced to step-able status (`running`/
+    /// `paused`) WITHOUT advancing the revision, so the engine's step
+    /// transition CAS anchor is preserved. A crash after the effect but
+    /// before the result checkpoint leaves the attempt persisted and the run
+    /// recovers as `Interrupted` (never auto-replayed). The engine's
+    /// terminal/wait `commit_transition` clears `in_flight` on success.
+    ///
+    /// # Errors
+    /// Returns [`EngineError`] on storage failure or when the row is not
+    /// step-able — the external effect must not run on an unmarked row.
+    async fn persist_prompt_attempt(
+        &self,
+        session_id: &SessionId,
+        attempt: &PromptAttempt,
+    ) -> Result<(), EngineError>;
+
     /// Load all persisted child runs whose `parent_session_id` matches.
     ///
     /// Used to hydrate the engine's in-memory children map during recovery

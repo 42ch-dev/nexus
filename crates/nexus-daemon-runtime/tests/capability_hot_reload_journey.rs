@@ -104,7 +104,8 @@ async fn rig(
 
     let deps = CapabilityRuntimeDeps {
         pool: None,
-        worker_provider: None,
+        prompt_executor: None,
+        session_cancels: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         daemon_tool_dispatch: None,
         cdn_config: None,
     };

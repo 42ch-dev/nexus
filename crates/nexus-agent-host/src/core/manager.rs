@@ -1770,6 +1770,7 @@ mod tests {
                     content: vec![crate::capability::model::HostContentBlock::Text {
                         text: "hello".to_string(),
                     }],
+                    permission_scope: None,
                 },
             )
             .await;
@@ -1830,6 +1831,7 @@ mod tests {
                     content: vec![crate::capability::model::HostContentBlock::Text {
                         text: "hello".to_string(),
                     }],
+                    permission_scope: None,
                 },
             )
             .await;

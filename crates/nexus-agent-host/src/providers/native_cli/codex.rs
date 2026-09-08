@@ -1014,6 +1014,7 @@ mod tests {
                     content: vec![HostContentBlock::Text {
                         text: text.to_string(),
                     }],
+                    permission_scope: None,
                 },
             )
             .await
@@ -1124,6 +1125,7 @@ mod tests {
                     content: vec![HostContentBlock::Text {
                         text: "hi".to_string(),
                     }],
+                    permission_scope: None,
                 },
             )
             .await;
@@ -1209,6 +1211,7 @@ mod tests {
                     content: vec![HostContentBlock::Text {
                         text: "hi".to_string(),
                     }],
+                    permission_scope: None,
                 },
             )
             .await
@@ -1224,6 +1227,7 @@ mod tests {
                     content: vec![HostContentBlock::Text {
                         text: "again".to_string(),
                     }],
+                    permission_scope: None,
                 },
             )
             .await
@@ -1354,6 +1358,7 @@ mod tests {
                     content: vec![HostContentBlock::Text {
                         text: "first".to_string(),
                     }],
+                    permission_scope: None,
                 },
             )
             .await
@@ -1369,6 +1374,7 @@ mod tests {
                     content: vec![HostContentBlock::Text {
                         text: "second".to_string(),
                     }],
+                    permission_scope: None,
                 },
             )
             .await
@@ -1413,6 +1419,7 @@ mod tests {
                     content: vec![HostContentBlock::Text {
                         text: "hi".to_string(),
                     }],
+                    permission_scope: None,
                 },
             )
             .await
@@ -1435,6 +1442,7 @@ mod tests {
                     content: vec![HostContentBlock::Text {
                         text: "again".to_string(),
                     }],
+                    permission_scope: None,
                 },
             )
             .await
@@ -1477,6 +1485,7 @@ mod tests {
                     content: vec![HostContentBlock::Text {
                         text: "blocked".to_string(),
                     }],
+                    permission_scope: None,
                 },
             )
             .await
@@ -1544,6 +1553,7 @@ mod tests {
                 HostOperation::Prompt {
                     op_id: HostOperationId::new(),
                     content: vec![],
+                    permission_scope: None,
                 },
             )
             .await;

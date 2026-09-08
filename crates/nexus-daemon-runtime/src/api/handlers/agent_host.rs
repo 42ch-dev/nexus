@@ -776,6 +776,7 @@ pub async fn execute_operation(
                 content: vec![
                     nexus_agent_host::capability::model::HostContentBlock::Text { text: content },
                 ],
+                permission_scope: None,
             };
             let stream = host.exec(sid.clone(), host_op).await.map_err(|e| {
                 if snapshot.is_some() {

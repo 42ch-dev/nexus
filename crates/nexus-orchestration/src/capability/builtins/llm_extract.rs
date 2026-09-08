@@ -1,48 +1,48 @@
 //! `nexus.llm.extract` capability — extract World KB candidates from chapter
-//! prose using a judge-style LLM call.
+//! prose using a judge-style agent call.
 //!
 //! Design: `.mstar/specs/llm-extract.md`, compass §0.1 #7.
 //!
-//! Sibling to `judge.llm`: both reuse the V1.32 LLM worker pool via
-//! [`WorkerHandleProvider`]. Where `judge.llm` emits a GO/NOGO verdict,
-//! `nexus.llm.extract` emits a `candidates` array of World KB candidates
-//! carrying an LLM-judged `block_type`, `canonical_name`, `confidence`, and a
-//! verbatim `source_quote`.
+//! Sibling to `judge.llm`: both reuse the production prompt executor. Where
+//! `judge.llm` emits a GO/NOGO verdict, `nexus.llm.extract` emits a
+//! `candidates` array of World KB candidates carrying an agent-judged
+//! `block_type`, `canonical_name`, `confidence`, and a verbatim
+//! `source_quote`.
 //!
 //! Two execution modes (mirrors `judge.llm`):
-//! 1. **With worker IPC**: builds an extraction prompt, calls `worker/acp_prompt`
-//!    with `deny_all` tool policy (extraction is read-only), parses the LLM
+//! 1. **With prompt executor**: builds an extraction prompt, executes it with
+//!    `deny_all` tool policy (extraction is read-only), parses the agent
 //!    response JSON into `candidates`.
-//! 2. **Standalone (no provider)**: returns [`CapabilityError::WorkerUnavailable`]
+//! 2. **Standalone (no executor)**: returns [`CapabilityError::WorkerUnavailable`]
 //!    — no heuristic fallback inside the capability (the caller's review-time
 //!    hook owns the fallback decision; see `quality_loop`).
 
-use crate::capability::{Capability, CapabilityError, WorkerHandleProvider};
+use crate::capability::{Capability, CapabilityError, PromptExecutor, PromptRequest, ToolPolicy};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
 /// The `nexus.llm.extract` capability.
 ///
-/// Holds an optional [`WorkerHandleProvider`] for LLM calls. When present,
-/// sends the extraction prompt + chapter prose via worker IPC. When absent,
+/// Holds an optional [`PromptExecutor`] for agent calls. When present, sends
+/// the extraction prompt + chapter prose via the Host plane. When absent,
 /// returns [`CapabilityError::WorkerUnavailable`] (standalone/test mode).
 pub struct LlmExtract {
-    workers: Option<Arc<dyn WorkerHandleProvider>>,
+    executor: Option<Arc<dyn PromptExecutor>>,
 }
 
 impl LlmExtract {
-    /// Create in standalone/test mode (no worker IPC).
+    /// Create in standalone/test mode (no prompt executor).
     #[must_use]
     pub const fn new() -> Self {
-        Self { workers: None }
+        Self { executor: None }
     }
 
-    /// Create with a worker handle provider for production IPC.
+    /// Create with a prompt executor for production Host dispatch.
     #[must_use]
-    pub fn with_worker_provider(provider: Arc<dyn WorkerHandleProvider>) -> Self {
+    pub fn with_prompt_executor(executor: Arc<dyn PromptExecutor>) -> Self {
         Self {
-            workers: Some(provider),
+            executor: Some(executor),
         }
     }
 }
@@ -61,7 +61,7 @@ impl Capability for LlmExtract {
 
     // Identity fields ("_creator_id", "_session_id") are injected by
     // orchestration context, NOT accepted from user input (security:
-    // prevents cross-creator IPC routing — SEC-V131-01, same rule as
+    // prevents cross-creator routing — SEC-V131-01, same rule as
     // judge.llm).
     fn input_schema(&self) -> &'static str {
         r#"{
@@ -132,24 +132,20 @@ impl Capability for LlmExtract {
 
         // Security: only accept context-injected identity fields (prefixed _).
         // Raw `creator_id`/`session_id` from user/preset input are ignored
-        // to prevent cross-creator IPC routing (IDOR). See SEC-V131-01.
-        let creator_id = input
-            .get("_creator_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("default");
+        // to prevent cross-creator routing (IDOR). See SEC-V131-01.
         let session_id = input
             .get("_session_id")
             .and_then(|v| v.as_str())
             .unwrap_or("default");
 
-        let workers = self
-            .workers
+        let executor = self
+            .executor
             .as_ref()
             .ok_or(CapabilityError::WorkerUnavailable)?;
 
         // Build the extraction prompt: instruction + verbatim prose, framed so
-        // the LLM returns a JSON object with a `candidates` array (entities) and
-        // an optional `relationships` array (V1.76). deny_all tool policy —
+        // the agent returns a JSON object with a `candidates` array (entities)
+        // and an optional `relationships` array (V1.76). deny_all tool policy —
         // extraction is read-only, no tools, no side-effect.
         let extract_prompt = format!(
             "{prompt_text}\n\n\
@@ -169,17 +165,19 @@ impl Capability for LlmExtract {
              CHAPTER PROSE:\n{chapter_prose}"
         );
 
-        let response = workers
-            .call_acp_prompt(creator_id, session_id, extract_prompt, "deny_all")
+        let result = executor
+            .execute(PromptRequest {
+                run_id: session_id.to_string(),
+                task_id: "nexus.llm.extract".to_string(),
+                agent_ref: None,
+                prompt: extract_prompt,
+                tool_policy: ToolPolicy::DenyAll,
+                cancellation: tokio_util::sync::CancellationToken::new(),
+            })
             .await?;
 
-        let full_text = response
-            .get("full_text")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-
-        let candidates = parse_extract_response(full_text);
-        let relationships = parse_relationships_response(full_text);
+        let candidates = parse_extract_response(&result.full_text);
+        let relationships = parse_relationships_response(&result.full_text);
         Ok(json!({ "candidates": candidates, "relationships": relationships }))
     }
 }
@@ -362,33 +360,34 @@ mod tests {
         assert!(result.is_err());
     }
 
-    /// Mock provider returning a JSON object with a `candidates` array.
-    struct MockExtractProvider {
+    /// Mock executor returning a JSON object with a `candidates` array.
+    struct MockExtractExecutor {
         response: String,
     }
 
     #[async_trait]
-    impl WorkerHandleProvider for MockExtractProvider {
-        async fn call_acp_prompt(
+    impl PromptExecutor for MockExtractExecutor {
+        async fn execute(
             &self,
-            _creator_id: &str,
-            _session_id: &str,
-            _prompt: String,
-            _tool_policy: &str,
-        ) -> Result<Value, CapabilityError> {
-            Ok(json!({ "full_text": self.response.clone() }))
+            _request: PromptRequest,
+        ) -> Result<crate::capability::PromptResult, CapabilityError> {
+            Ok(crate::capability::PromptResult {
+                full_text: self.response.clone(),
+                host_session_id: "host-sess".to_string(),
+                operation_id: "op-1".to_string(),
+            })
         }
     }
 
-    fn mock_provider(response: &str) -> Arc<MockExtractProvider> {
-        Arc::new(MockExtractProvider {
+    fn mock_executor(response: &str) -> Arc<MockExtractExecutor> {
+        Arc::new(MockExtractExecutor {
             response: response.to_string(),
         })
     }
 
     #[tokio::test]
-    async fn llm_extract_with_mock_worker_returns_candidates() {
-        let cap = LlmExtract::with_worker_provider(mock_provider(
+    async fn llm_extract_with_mock_executor_returns_candidates() {
+        let cap = LlmExtract::with_prompt_executor(mock_executor(
             r#"{"candidates":[
                 {"canonical_name":"Lin Xia","block_type":"character","summary":"A warrior","confidence":0.9,"source_quote":"Lin Xia drew her blade."},
                 {"canonical_name":"Azure Gate","block_type":"scene","summary":null,"confidence":0.8,"source_quote":"the Azure Gate groaned open"}
@@ -405,7 +404,7 @@ mod tests {
 
     #[tokio::test]
     async fn llm_extract_parses_code_fenced_json() {
-        let cap = LlmExtract::with_worker_provider(mock_provider(
+        let cap = LlmExtract::with_prompt_executor(mock_executor(
             "```json\n{\"candidates\":[{\"canonical_name\":\"X\",\"block_type\":\"item\",\"confidence\":0.5,\"source_quote\":\"q\"}]}\n```",
         ));
         let input = json!({ "prompt": "extract", "chapter_prose": "..." });
@@ -417,7 +416,7 @@ mod tests {
 
     #[tokio::test]
     async fn llm_extract_malformed_json_returns_empty_candidates() {
-        let cap = LlmExtract::with_worker_provider(mock_provider("this is not json at all"));
+        let cap = LlmExtract::with_prompt_executor(mock_executor("this is not json at all"));
         let input = json!({ "prompt": "extract", "chapter_prose": "..." });
         let result = cap.run(input).await.unwrap();
         let candidates = result.get("candidates").and_then(|v| v.as_array()).unwrap();
@@ -506,8 +505,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn llm_extract_with_mock_worker_returns_relationships() {
-        let cap = LlmExtract::with_worker_provider(mock_provider(
+    async fn llm_extract_with_mock_executor_returns_relationships() {
+        let cap = LlmExtract::with_prompt_executor(mock_executor(
             r#"{"candidates":[
                 {"canonical_name":"Aria","block_type":"character","confidence":0.9,"source_quote":"Aria drew her blade."}
             ],"relationships":[
@@ -533,30 +532,31 @@ mod tests {
 
     // ── SEC-V131-01: identity boundary regression (mirrors judge.llm) ──────
 
-    struct CapturingProvider {
-        captured: std::sync::Mutex<String>,
+    struct CapturingExecutor {
+        captured: parking_lot::Mutex<String>,
     }
 
     #[async_trait]
-    impl WorkerHandleProvider for CapturingProvider {
-        async fn call_acp_prompt(
+    impl PromptExecutor for CapturingExecutor {
+        async fn execute(
             &self,
-            creator_id: &str,
-            _session_id: &str,
-            _prompt: String,
-            _tool_policy: &str,
-        ) -> Result<Value, CapabilityError> {
-            *self.captured.lock().unwrap() = creator_id.to_string();
-            Ok(json!({ "full_text": "{\"candidates\":[]}" }))
+            request: PromptRequest,
+        ) -> Result<crate::capability::PromptResult, CapabilityError> {
+            *self.captured.lock() = request.run_id.clone();
+            Ok(crate::capability::PromptResult {
+                full_text: "{\"candidates\":[]}".to_string(),
+                host_session_id: "host-sess".to_string(),
+                operation_id: "op-1".to_string(),
+            })
         }
     }
 
     #[tokio::test]
     async fn llm_extract_raw_creator_id_ignored_on_spoof_attempt() {
-        let provider = Arc::new(CapturingProvider {
-            captured: std::sync::Mutex::new(String::new()),
+        let executor = Arc::new(CapturingExecutor {
+            captured: parking_lot::Mutex::new(String::new()),
         });
-        let cap = LlmExtract::with_worker_provider(provider.clone());
+        let cap = LlmExtract::with_prompt_executor(executor.clone());
         let input = json!({
             "prompt": "extract",
             "chapter_prose": "...",
@@ -565,10 +565,10 @@ mod tests {
             "session_id": "spoofed_session"
         });
         let _ = cap.run(input).await.unwrap();
-        let captured = provider.captured.lock().unwrap().clone();
+        let captured = executor.captured.lock().clone();
         assert_eq!(
             captured, "default",
-            "SEC-V131-01: raw creator_id leaked through"
+            "SEC-V131-01: raw session_id leaked through"
         );
     }
 }

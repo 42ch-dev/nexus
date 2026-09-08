@@ -36,9 +36,10 @@ pub mod worker;
 
 pub use capability::{
     Capability, CapabilityError, CapabilityRegistry, CapabilityRegistryHolder,
-    CapabilityRuntimeDeps, WorkerHandleProvider,
+    CapabilityRuntimeDeps, PromptExecutor, PromptPermissionScope, PromptRequest, PromptResult,
+    ToolPolicy,
 };
-pub use engine::{ChildSessionParams, EngineError, GraphFlowEngine, OrchestrationEngine};
+pub use engine::{ChildSessionParams, EngineError, GraphFlowEngine, OrchestrationEngine, SessionId};
 pub use preset::resolve_preset;
 pub use run_state::{
     AgentBinding, ChildCheckpoint, OwnedProcessIdentity, PresetSourceIdentity, PromptAttempt,

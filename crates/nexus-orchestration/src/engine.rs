@@ -1495,6 +1495,15 @@ pub struct GraphFlowEngine {
     caps: crate::capability::CapabilityRegistryHolder,
     /// Daemon-side tool dispatch for `nexus.*` host tool actions (DF-47, V1.42 P3).
     daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
+    /// Production prompt executor (A1) — wired into every inner graph
+    /// `acp_prompt` node at wired-graph build time. `None` for
+    /// in-memory/test engines (inner prompt nodes refuse).
+    prompt_executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+    /// Per-run coordinator cancellation tokens (A1) — the executor listens to
+    /// the token for the current run concurrently with the Host stream.
+    session_cancels: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    >,
     /// Resolved workspace root the engine's runs execute in (A2). `None`
     /// for in-memory/test engines that do not persist v1 descriptors.
     workspace_root: Option<std::path::PathBuf>,
@@ -1509,6 +1518,8 @@ impl Clone for GraphFlowEngine {
             state: self.state.clone(),
             caps: self.caps.clone(),
             daemon_tool_dispatch: self.daemon_tool_dispatch.clone(),
+            prompt_executor: self.prompt_executor.clone(),
+            session_cancels: self.session_cancels.clone(),
             workspace_root: self.workspace_root.clone(),
             nexus_home: self.nexus_home.clone(),
         }
@@ -1534,6 +1545,10 @@ impl GraphFlowEngine {
             state: Arc::new(EngineSharedState::new(storage)),
             caps,
             daemon_tool_dispatch: None,
+            prompt_executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
             workspace_root: None,
             nexus_home: None,
         }
@@ -1554,6 +1569,10 @@ impl GraphFlowEngine {
             state: Arc::new(EngineSharedState::with_workflow_store(storage, workflow_store)),
             caps,
             daemon_tool_dispatch: None,
+            prompt_executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
             workspace_root: None,
             nexus_home: None,
         }
@@ -1572,6 +1591,10 @@ impl GraphFlowEngine {
             state: Arc::new(EngineSharedState::with_workflow_store(storage, workflow_store)),
             caps,
             daemon_tool_dispatch: None,
+            prompt_executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
             workspace_root: Some(workspace_root),
             nexus_home: None,
         }
@@ -1592,6 +1615,25 @@ impl GraphFlowEngine {
         dispatch: Arc<dyn crate::capability::DaemonToolDispatch>,
     ) {
         self.daemon_tool_dispatch = Some(dispatch);
+    }
+
+    /// Set the production prompt executor and per-run cancellation tokens
+    /// (A1).
+    ///
+    /// Must be called before any session starts so inner graph `acp_prompt`
+    /// nodes execute through the Host plane. Typically called once during
+    /// daemon boot.
+    pub fn set_prompt_executor(
+        &mut self,
+        executor: Arc<dyn crate::capability::PromptExecutor>,
+        session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        >,
+    ) {
+        self.prompt_executor = Some(executor);
+        self.session_cancels = session_cancels;
     }
 
     /// Recover persisted sessions into the in-memory tracker (WS2 R1 + R6).
@@ -1781,6 +1823,8 @@ impl GraphFlowEngine {
             &engine_proxy,
             &caps,
             self.daemon_tool_dispatch.clone(),
+            self.prompt_executor.clone(),
+            self.session_cancels.clone(),
         );
 
         // Create FlowRunner with the wired graph and existing storage.
@@ -1830,6 +1874,8 @@ impl GraphFlowEngine {
             &engine_proxy,
             &caps,
             self.daemon_tool_dispatch.clone(),
+            self.prompt_executor.clone(),
+            self.session_cancels.clone(),
         );
 
         let runner = Arc::new(FlowRunner::new(Arc::new(wired), self.state.storage.clone()));
@@ -2274,6 +2320,8 @@ impl OrchestrationEngine for GraphFlowEngine {
             &proxy,
             &caps,
             self.daemon_tool_dispatch.clone(),
+            self.prompt_executor.clone(),
+            self.session_cancels.clone(),
         );
         self.start_preset_run(loaded, "", Arc::new(wired)).await
     }
@@ -2292,6 +2340,8 @@ impl OrchestrationEngine for GraphFlowEngine {
             &proxy,
             &caps,
             self.daemon_tool_dispatch.clone(),
+            self.prompt_executor.clone(),
+            self.session_cancels.clone(),
         );
         self.start_preset_run(loaded, creator_id, Arc::new(wired))
             .await

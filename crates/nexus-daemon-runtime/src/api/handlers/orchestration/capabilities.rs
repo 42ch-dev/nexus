@@ -189,7 +189,8 @@ mod tests {
             crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         let deps = nexus_orchestration::CapabilityRuntimeDeps {
             pool: None,
-            worker_provider: None,
+            prompt_executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             daemon_tool_dispatch: None,
             cdn_config: None,
         };
