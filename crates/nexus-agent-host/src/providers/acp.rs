@@ -1439,6 +1439,37 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn permission_scope_lock_contention_denies() {
+        use crate::capability::model::PromptPermissionScope;
+        use crate::config::PolicyConfig;
+
+        let mut policy = nexus_acp_host::policy::PermissionPolicy::new();
+        policy.grant_agent("test-acp", "file_read");
+        let provider = AcpProvider::from_config(
+            acp_config("test-acp", Some("mock-acp"), true),
+            TimeoutConfig::default(),
+            HostPermissionResolver::with_acp_policy(&PolicyConfig::default(), policy),
+        )
+        .expect("valid recipe");
+        let active_scope = Arc::new(tokio::sync::RwLock::new(Some(
+            PromptPermissionScope {
+                allow_read: true,
+                allow_write: false,
+                allow_destructive: false,
+            },
+        )));
+        let handler = provider.build_permission_handler(active_scope.clone());
+
+        assert_eq!(handler("file_read"), AcpPermissionOutcome::Approve);
+        let _guard = active_scope.write().await;
+        assert_eq!(
+            handler("file_read"),
+            AcpPermissionOutcome::Deny,
+            "an unreadable narrowing scope must fail closed"
+        );
+    }
+
     // ── Recipe-based construction (A5) ─────────────────────────────────
 
     fn acp_config(id: &str, command: Option<&str>, enabled: bool) -> ProviderConfig {
