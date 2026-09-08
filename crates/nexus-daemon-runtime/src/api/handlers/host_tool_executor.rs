@@ -1,18 +1,18 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::too_many_lines)]
-//! Host Tool Executor — 3-caller entry points for daemon-mediated agent tool access.
+//! Host Tool Executor — caller entry points for daemon-mediated agent tool access.
 //!
-//! V1.57 P1: Refactored from god-file (4298→≤800 lines).
-//! Three caller entry points (CLI, worker, HTTP) all dispatch through the
+//! V1.57 P1: Refactored from god-file.
+//! Caller entry points (CLI/HTTP, Schedule) all dispatch through the
 //! same `CapabilityRegistry::dispatch` path. Handlers live in
 //! [`host_tool_handlers`]; admission/permission/audit live there too.
 //!
-//! # Architecture (post-V1.57 P1)
+//! # Architecture (post-V1.57 P1, post-V1.186 P1 T3)
 //!
 //! ```text
 //! CLI host-call          ─┐
-//! Worker agent_tool_req  ─┤  normalize → admission → CapabilityRegistry::dispatch
-//! HTTP ToolExecuteRequest ─┘
+//! HTTP ToolExecuteRequest ─┤  normalize → admission → CapabilityRegistry::dispatch
+//! Schedule dispatch       ─┘
 //! ```
 
 use crate::api::errors::NexusApiError;
@@ -100,7 +100,7 @@ pub(crate) const STAGE_METADATA_ALLOWED_KEYS: &[&str] = &[
 
 /// Request for executing a host tool through the daemon.
 ///
-/// Shared by HTTP, internal agent-host route, and worker upcall (spec §5).
+/// Shared by HTTP, internal agent-host route, and schedule dispatch (spec §5).
 #[derive(Debug, Clone, Deserialize)]
 pub struct ToolExecuteRequest {
     pub tool_name: String,
@@ -117,14 +117,12 @@ pub struct ToolExecuteRequest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HostToolCallerKind {
-    AcpAgent,
     Schedule,
 }
 
 impl std::fmt::Display for HostToolCallerKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::AcpAgent => write!(f, "acp_agent"),
             Self::Schedule => write!(f, "schedule"),
         }
     }
@@ -155,16 +153,16 @@ pub struct ToolExecuteError {
     pub message: String,
 }
 
-// ─── HostToolExecutor — unified 3-caller entry points ─────────────────────
+// ─── HostToolExecutor — unified caller entry points ───────────────────────
 
-/// Internal service for executing host tools via 3 caller entry points.
+/// Internal service for executing host tools.
 ///
-/// V1.57 P1: Refactored from god-file. Three caller entry points exist:
-/// 1. CLI `host-call` — normalizes `host-call <tool_id> --args <json>`
-/// 2. Worker `agent_tool_request` — normalizes worker IPC messages
-/// 3. HTTP `ToolExecuteRequest` — normalizes daemon HTTP POST payload
+/// Caller entry points:
+/// 1. CLI `host-call` / HTTP `ToolExecuteRequest` — normalize into the
+///    shared `ToolExecuteRequest` wire format
+/// 2. Schedule — `dispatch_for_schedule` for in-process preset/task dispatch
 ///
-/// All three dispatch through the same `CapabilityRegistry::dispatch` path.
+/// All dispatch through the same `CapabilityRegistry::dispatch` path.
 pub struct HostToolExecutor;
 
 impl HostToolExecutor {
@@ -177,56 +175,6 @@ impl HostToolExecutor {
         state: &WorkspaceState,
     ) -> Result<serde_json::Value, NexusApiError> {
         Self::registry_dispatch(req, state).await
-    }
-
-    /// **Entry point 2 (Worker upcall)**: Dispatch `agent_tool_request` through registry.
-    ///
-    /// Normalizes `worker/agent_tool_request { tool_name, args, request_id }`
-    /// into `ToolExecuteRequest` → same admission + dispatch + audit path.
-    pub async fn dispatch_from_worker(
-        tool_name: &str,
-        args: &serde_json::Value,
-        request_id: &str,
-        state: &WorkspaceState,
-    ) -> WorkerToolResult {
-        let req = ToolExecuteRequest {
-            tool_name: tool_name.to_string(),
-            parameters: args.clone(),
-            session_id: None,
-            request_id: Some(request_id.to_string()),
-            caller_kind: Some(HostToolCallerKind::AcpAgent),
-        };
-
-        match Self::execute(&req, state).await {
-            Ok(result) => WorkerToolResult {
-                request_id: request_id.to_string(),
-                grant: true,
-                output: Some(result),
-                error: None,
-            },
-            Err(e) => {
-                let code = e.error_code().to_string();
-                // AR-76 #4: peer denies surface the original lowercase spoke
-                // wire code (`details.wire_code`) verbatim. The worker
-                // `WorkerToolResult` wire is unchanged (code + message
-                // only), so the wire code rides the message for this path —
-                // the HTTP lane keeps the typed `details.wire_code` DTO.
-                let message = match &e {
-                    NexusApiError::PeerToolDenied {
-                        message, wire_code, ..
-                    } => {
-                        format!("{message} (wire_code: {wire_code})")
-                    }
-                    _ => e.to_string(),
-                };
-                WorkerToolResult {
-                    request_id: request_id.to_string(),
-                    grant: false,
-                    output: None,
-                    error: Some(WorkerToolError { code, message }),
-                }
-            }
-        }
     }
 
     /// Core dispatch: admission pipeline → `CapabilityRegistry::dispatch` → audit.
@@ -288,24 +236,6 @@ impl HostToolExecutor {
 
         Self::execute(&req, state).await
     }
-}
-
-/// Worker upcall result shape.
-#[derive(Debug, Serialize)]
-pub struct WorkerToolResult {
-    pub request_id: String,
-    pub grant: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub output: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<WorkerToolError>,
-}
-
-/// Error payload in worker upcall result.
-#[derive(Debug, Serialize)]
-pub struct WorkerToolError {
-    pub code: String,
-    pub message: String,
 }
 
 // ─── DaemonToolDispatch adapter (DF-47) ───────────────────────────────────

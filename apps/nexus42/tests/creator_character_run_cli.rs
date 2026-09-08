@@ -75,6 +75,8 @@ impl HostFacade for MockHost {
             active_op_id: None,
             negotiated_capabilities:
                 nexus_agent_host::capability::model::CapabilityDescriptor::native_cli_limited(),
+            owner: request.owner,
+            process_identity: None,
         };
         self.sessions
             .lock()
@@ -95,7 +97,7 @@ impl HostFacade for MockHost {
     ) -> HostResult<HostEventStream> {
         self.execs.fetch_add(1, Ordering::SeqCst);
         let op_id = match op {
-            HostOperation::Prompt { op_id, content } => {
+            HostOperation::Prompt { op_id, content, .. } => {
                 let text = match content.as_slice() {
                     [HostContentBlock::Text { text }] => text.clone(),
                     other => format!("unexpected content {other:?}"),
@@ -1069,7 +1071,7 @@ impl HostFacade for P3MockHost {
         self.inner.execs.fetch_add(1, Ordering::SeqCst);
         let script = self.script.load(Ordering::SeqCst);
         let op_id = match op {
-            HostOperation::Prompt { op_id, content } => {
+            HostOperation::Prompt { op_id, content, .. } => {
                 let text = match content.as_slice() {
                     [HostContentBlock::Text { text }] => text.clone(),
                     other => format!("unexpected content {other:?}"),

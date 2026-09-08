@@ -8,7 +8,7 @@
 
 - [acp-capability-set.md](acp-capability-set.md) — full logical capability catalog (mostly deferred DF-46)
 - [agent-host.md](agent-host.md) — Managed-only host, mediation invariants
-- [orchestration-engine.md](orchestration-engine.md) — `worker/agent_tool_request` IPC
+- [orchestration-engine.md](orchestration-engine.md) — schedule tool dispatch (worker `agent_tool_request` IPC removed, M-007)
 - [local-runtime-boundary.md](local-runtime-boundary.md) — CLI vs daemon vs Agent topology
 - [creator-workflow.md](creator-workflow.md) — FL-E stages; Work read/patch tools
 
@@ -20,7 +20,7 @@ Preset orchestration drives **multi-step** creative work via schedules and capab
 
 - Permissions and workspace boundaries match Daemon API rules.
 - Audit trails exist for agent-initiated mutations.
-- The same handlers can serve HTTP tool execute and worker upcalls.
+- The same handlers can serve HTTP tool execute and the schedule lane.
 
 **Non-goals V1.34**: spawn `nexus42` per tool (DF-48); standalone MCP server (DF-49); full `acp-capability-set` implementation (DF-46).
 
@@ -45,7 +45,7 @@ Preset orchestration drives **multi-step** creative work via schedules and capab
         │ tool call (ACP wire)
         ▼
 [nexus42 worker / nexus-acp-host]
-        │ worker/agent_tool_request  OR  HTTP POST tool-executions
+        │ HTTP POST tool-executions
         ▼
 [HostToolExecutor]
         │ permission.toml + workspace path rules + active creator
@@ -56,8 +56,12 @@ Preset orchestration drives **multi-step** creative work via schedules and capab
 Preset path (unchanged):
 
 ```text
-[Schedule / Session] → capability (ep.acp.prompt) → worker IPC → Agent
+[Schedule / Session] → capability (ep.acp.prompt) → Host session → Agent
 ```
+
+M-007: the worker `agent_tool_request` IPC lane was removed; the schedule
+lane (`HostToolExecutor::dispatch_for_schedule`) is the surviving
+in-process dispatch path.
 
 The two paths **must not** share session secrets across creators (IDOR prevention per V1.32 `SEC-V131-01` pattern).
 
@@ -99,7 +103,7 @@ V1.34 registry **includes** fs tools and `nexus.*` in one dispatch table (P4).
 
 ### 4.3 Admission pipeline
 
-Every tool execution entrypoint — HTTP tool execute, internal agent-host route, and worker upcall — must pass through the same five gates before dispatching a handler:
+Every tool execution entrypoint — HTTP tool execute, internal agent-host route, and the schedule lane — must pass through the same five gates before dispatching a handler:
 
 1. **Tool id allowlist** — `tool_name` must match one of the six V1.34 `nexus.*` ids above or the two V1.33 `fs/*` baseline ids. Unknown ids fail with `NOT_SUPPORTED` and must not reach handler code.
 2. **Creator active** — `WorkspaceState` must carry exactly one active creator context. Missing, inactive, or ambiguous creator state fails with `FORBIDDEN` for creator-scoped `nexus.*` tools.
@@ -176,25 +180,17 @@ Audit: append row to tool audit log (existing ACP tool audit table pattern).
 
 ---
 
-## 7. Worker upcall unification
+## 7. Dispatch lane unification
 
-Cross-reference with [orchestration-engine.md](orchestration-engine.md) §6.4: `worker/agent_tool_request` carries `{ tool_name, args, request_id }` from the worker to the daemon, and **every** `tool_name` in the `nexus.*` namespace or V1.33 `fs/*` baseline must be admitted through this spec's registry. The worker upcall is an entrypoint into the registry, not a second registry.
-
-`worker/agent_tool_request` parameters:
-
-```json
-{ "tool_name": "nexus.work.get", "args": { }, "request_id": "..." }
-```
-
-P4 **must** map `tool_name` through the same registry as `POST /v1/local/acp/tool/execute` and internal agent-host route.
+Cross-reference with [orchestration-engine.md](orchestration-engine.md) §6.4: the worker `agent_tool_request` IPC lane was **removed** (M-007) — the surviving dispatch lanes are daemon HTTP tool execute, the internal agent-host route, and the in-process schedule lane (`HostToolExecutor::dispatch_for_schedule` with `HostToolCallerKind::Schedule`). Every `tool_name` in the `nexus.*` namespace or V1.33 `fs/*` baseline must be admitted through this spec's registry. Each lane is an entrypoint into the registry, not a second registry.
 
 ### 7.1 Single dispatch table invariant
 
-There is exactly one normative dispatch table for P4: `HostToolExecutor` owns tool id admission and handler lookup for all eight V1.34 ids (six `nexus.*` plus two `fs/*`). Whether the request arrives through daemon HTTP tool execute, the internal agent-host route, or `worker/agent_tool_request`, the entrypoint must normalize request fields into the same internal request shape and call the same dispatch table.
+There is exactly one normative dispatch table: `HostToolExecutor` owns tool id admission and handler lookup for all eight V1.34 ids (six `nexus.*` plus two `fs/*`). Whether the request arrives through daemon HTTP tool execute, the internal agent-host route, or the schedule lane, the entrypoint must normalize request fields into the same internal request shape and call the same dispatch table.
 
 Required consequences:
 
-- No duplicate `match tool_name` table in worker IPC handling.
+- No duplicate `match tool_name` table in any lane handling.
 - No CLI subprocess fallback for any `nexus.*` id.
 - No schedule-only handler path that bypasses `permissions.toml`, active-creator checks, workspace bounds, or audit logging.
 - If a handler is not in the table, every entrypoint returns `NOT_SUPPORTED` consistently.
@@ -203,7 +199,7 @@ Required consequences:
 
 The registry applies the V1.32 `SEC-V131-01` pattern: caller-supplied ids are never sufficient authorization. For every `nexus.*` request, the daemon must bind the request to the active creator context first, then verify referenced Works, schedules, workspace roots, and context assembly inputs belong to that same creator/workspace boundary.
 
-Worker sessions must not cache or reuse tool grants across creators. A worker started for creator A cannot invoke `nexus.work.get`, `nexus.work.patch`, `nexus.orchestration.schedule_status`, or `nexus.context.assemble` against creator B's entities, even when it supplies a syntactically valid id. Cross-creator attempts fail with `FORBIDDEN` and produce an audit row.
+Sessions must not cache or reuse tool grants across creators. A session started for creator A cannot invoke `nexus.work.get`, `nexus.work.patch`, `nexus.orchestration.schedule_status`, or `nexus.context.assemble` against creator B's entities, even when it supplies a syntactically valid id. Cross-creator attempts fail with `FORBIDDEN` and produce an audit row.
 
 If P4 completes unification, **do not** register DF-47. If partial, register DF-47 in deferred tracker.
 
@@ -214,6 +210,8 @@ If P4 completes unification, **do not** register DF-47. If partial, register DF-
 P4 shipped the unified dispatch adapter (`HostToolExecutor::execute` normalizes both HTTP tool execute and `dispatch_from_worker` paths into the same dispatch table), and hermetic unit tests confirm the adapter works.
 
 V1.42 P3 completes the production caller: `DaemonToolDispatchAdapter` bridges the orchestration engine's `HostToolCallTask` to `HostToolExecutor::dispatch_for_schedule` for schedule-initiated in-process tool dispatch. One tool (`nexus.orchestration.schedule_status`) is proven end-to-end with 5 hermetic E2E tests.
+
+M-007 (V1.186 P1): the worker `agent_tool_request` IPC lane and `dispatch_from_worker` were removed; the surviving dispatch lane is Schedule-only (`dispatch_for_schedule`, `HostToolCallerKind::Schedule`).
 
 DF-47 row in the deferred tracker is narrowed. Full DF-46 capability matrix (all `nexus.*` tools wired for schedule dispatch) remains deferred.
 
@@ -272,7 +270,7 @@ client request → ACP wire → host_tool_executor::execute()
 1. Compass §2.3 tool list matches this §4 table.
 2. No normative requirement for agents to invoke CLI subprocesses.
 3. `policy_blocked` behavior for assemble documented and testable.
-4. orchestration-engine cross-references §7 upcall unification.
+4. orchestration-engine cross-references §7 dispatch lane unification (worker IPC lane removed, M-007).
 
 ---
 
@@ -384,8 +382,8 @@ Current repo snapshot checked for this spec:
 | `ToolExecutionRequest` / execute request `{ tool_name, parameters, session_id? }` | **Not codegen'd.** Existing shape is handwritten daemon runtime `ToolExecuteRequest`. | Add JSON Schema before replacing handwritten request DTO in P4/P5+ follow-up. Preserve compatibility with existing `fs/*` fields. |
 | `ToolExecutionResponse` / success `{ success, result }` | **Not codegen'd.** Existing shape is handwritten daemon runtime `ToolExecuteResponse`. | Add generated wrapper that can carry arbitrary handler result JSON while keeping stable `success`. |
 | `ToolExecutionError` / failure `{ success: false, error: { code, reason?, message?, details? } }` | **Not codegen'd.** Existing Daemon API error code enums live in runtime error handling, not generated contracts. | Add generated error envelope or reuse a future shared Daemon API error schema; include `FORBIDDEN`, `POLICY_BLOCKED`, `NOT_SUPPORTED`, `INVALID_INPUT`. |
-| `WorkerAgentToolRequest` `{ tool_name, args, request_id }` | **Not codegen'd.** Currently documented only in orchestration-engine §6.4. | Future schema should normalize `args` ↔ `parameters` mapping without creating a second dispatch type. |
-| `WorkerAgentToolRequestResult` `{ request_id, grant, output? }` | **Not codegen'd.** Currently documented only in orchestration-engine §6.4. | Future schema should wrap the same `ToolExecutionResponse` / `ToolExecutionError` result shape. |
+| `WorkerAgentToolRequest` `{ tool_name, args, request_id }` | **Removed (M-007).** The worker `agent_tool_request` IPC lane was removed; the schedule lane normalizes `{ tool_name, args, request_id }` in-process via `HostToolExecutor::dispatch_for_schedule`. | No future schema needed for a removed lane. |
+| `WorkerAgentToolRequestResult` `{ request_id, grant, output? }` | **Removed (M-007).** Same lane removal. | No future schema needed for a removed lane. |
 | `nexus.context.assemble` local result subset | **Partially present.** `ContextAssembleRequestV1` / `ContextAssembleResponseV1` exist, but are cloud/deferred and not the daemon tool response envelope. | P4 may reference local assembly domain types internally; generated tool contract still needs the wrapper + `POLICY_BLOCKED` behavior. |
 | Tool-specific parameters for six `nexus.*` ids | **Not codegen'd.** No per-tool parameter schemas in `schemas/`. | Future schemas should cover `whoami`, `workspace.info`, `work.get`, `work.patch`, `schedule_status`, and `context.assemble` minimal params/results. |
 
@@ -401,7 +399,7 @@ P4 implements this spec; it must not expand into DF-46/47/49/50/55 unless PM ope
 
 1. **HTTP POST tool execute** — normalize the existing daemon tool-execute request into the registry request shape.
 2. **Internal agent-host route** — continue sharing `HostToolExecutor`; do not add a second dispatch table.
-3. **Worker upcall** — normalize `worker/agent_tool_request { tool_name, args, request_id }` into the same registry request shape; map result/error back to `worker/agent_tool_request_result`.
+3. **Schedule lane** — `HostToolExecutor::dispatch_for_schedule` (in-process, `HostToolCallerKind::Schedule`) normalizes `{ tool_name, args, request_id }` into the same registry request shape. The worker `agent_tool_request` IPC upcall was removed (M-007).
 
 ### 12.2 Tool id allowlist
 
@@ -514,7 +512,7 @@ The six `nexus.*` handlers must run after the §4.3 admission pipeline. Existing
 
 ### 12.4 Error code mapping
 
-| Internal enum | Wire code | HTTP suggestion | Worker result |
+| Internal enum | Wire code | HTTP suggestion | Schedule/agent result |
 | --- | --- | --- | --- |
 | `Forbidden` | `FORBIDDEN` | 403 | `grant = false`, error payload |
 | `PolicyBlocked` | `POLICY_BLOCKED` | 403 or 409 (P4 chooses one consistently) | `grant = false`, error payload |
@@ -552,7 +550,7 @@ P4 must cover at least the §10 vectors:
 2. Isolation: cross-creator Work id returns `FORBIDDEN` and no data.
 3. Policy: `nexus.context.assemble` platform-required request while paused returns `POLICY_BLOCKED` / `policy_blocked`, with no platform HTTP call.
 
-Add one worker-upcall test proving `worker/agent_tool_request` and HTTP execute hit the same dispatch table for at least `nexus.work.get`.
+Add one schedule-lane test proving `dispatch_for_schedule` and HTTP execute hit the same dispatch table for at least `nexus.work.get`.
 
 ---
 

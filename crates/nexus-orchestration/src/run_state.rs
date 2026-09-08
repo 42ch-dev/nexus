@@ -313,6 +313,71 @@ pub trait WorkflowStateStore: Send + Sync {
         step_state: &RunStateV1,
     ) -> Result<(), EngineError>;
 
+    /// Persist the durable `PromptAttempt` dispatch intent (A2/A5) BEFORE
+    /// the external Host effect, and update it to `Active` once the Host
+    /// session/operation IDs are known.
+    ///
+    /// The write is **revision-linearized with the engine's control
+    /// transitions**: it compare-and-sets on `state_revision =
+    /// expected_revision` AND the step marker `step_in_flight =
+    /// expected_step` (when `Some`) and fenced to step-able status
+    /// (`running`/`paused`), while leaving the revision itself unchanged so
+    /// the engine's step transition CAS anchor is preserved. A stale prompt
+    /// invocation that loaded the run before a control transition
+    /// (e.g. `Cancel`) fails the CAS and is rejected — it can never
+    /// overwrite newer state. A crash after the effect but before the result
+    /// checkpoint leaves the attempt persisted and the run recovers as
+    /// `Interrupted` (never auto-replayed). The engine's terminal/wait
+    /// `commit_transition` clears `in_flight` on success.
+    ///
+    /// **Durable attempt ownership (Important)**: `expected_attempt_id`
+    /// names this request's own admission. When `Some`, the row must either
+    /// have no `in_flight` attempt yet (the Dispatching claim) or already
+    /// carry exactly this operation's attempt id (the Active update of the
+    /// SAME operation) — a concurrent same-anchor prompt can never
+    /// overwrite or replace the durable in-flight operation with another
+    /// attempt's ids. Callers pass `None` only when they intentionally
+    /// bypass ownership CAS (storage-level tests).
+    ///
+    /// # Errors
+    /// Returns [`EngineError::RevisionMismatch`] when the persisted revision
+    /// no longer equals `expected_revision` (or the step marker moved, or an
+    /// unrelated operation owns `in_flight`), [`EngineError::TerminalState`]
+    /// when the row is no longer step-able — the external effect must not
+    /// run on an unmatching row.
+    async fn persist_prompt_attempt(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_step: Option<&str>,
+        expected_attempt_id: Option<&str>,
+        attempt: &PromptAttempt,
+    ) -> Result<(), EngineError>;
+
+    /// Clear the durable `in_flight` prompt-attempt marker after the owning
+    /// operation completed successfully.
+    ///
+    /// Fenced on the same linearization anchor (`state_revision`,
+    /// `step_in_flight`, and the owning `attempt_id`): only the operation
+    /// whose marker is present may clear it, and only while the revision it
+    /// admitted on is still current. A zero-row result (marker already
+    /// cleared by the engine's `commit_transition`, or the state advanced)
+    /// is a benign no-op — the newer state owns the row. The engine's
+    /// terminal/wait `commit_transition` also clears `in_flight` on success;
+    /// this method lets the executor clear it for standalone/sequential
+    /// capability callers so the next operation can claim an empty slot.
+    ///
+    /// # Errors
+    /// Returns [`EngineError`] only on storage failure; fence misses are
+    /// returned as `Ok(())` (idempotent).
+    async fn clear_prompt_attempt(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_step: Option<&str>,
+        attempt_id: &str,
+    ) -> Result<(), EngineError>;
+
     /// Load all persisted child runs whose `parent_session_id` matches.
     ///
     /// Used to hydrate the engine's in-memory children map during recovery

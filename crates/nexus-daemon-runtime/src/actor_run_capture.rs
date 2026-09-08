@@ -164,6 +164,7 @@ const fn map_finish_reason(reason: &FinishReason) -> CharacterOperationResultFin
         FinishReason::MaxTokens => CharacterOperationResultFinishReason::MaxTokens,
         FinishReason::MaxTurnRequests => CharacterOperationResultFinishReason::MaxTurnRequests,
         FinishReason::Refusal => CharacterOperationResultFinishReason::Refusal,
+        FinishReason::Cancelled => CharacterOperationResultFinishReason::Cancelled,
     }
 }
 
@@ -250,9 +251,10 @@ const fn run_status_from_terminal(
     let finish = map_finish_reason(reason);
     let status = match reason {
         FinishReason::EndTurn => CharacterOperationResultRunStatus::Succeeded,
-        FinishReason::MaxTokens | FinishReason::MaxTurnRequests | FinishReason::Refusal => {
-            CharacterOperationResultRunStatus::Incomplete
-        }
+        FinishReason::MaxTokens
+        | FinishReason::MaxTurnRequests
+        | FinishReason::Refusal
+        | FinishReason::Cancelled => CharacterOperationResultRunStatus::Incomplete,
     };
     if cancel_requested {
         return (CharacterOperationResultRunStatus::Cancelled, Some(finish));

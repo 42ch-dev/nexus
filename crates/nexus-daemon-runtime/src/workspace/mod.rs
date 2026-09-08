@@ -23,7 +23,7 @@ use nexus_contracts::local::domain::RuntimeMode;
 use nexus_contracts::CertFingerprintResponse;
 use nexus_orchestration::{
     engine::OrchestrationEngine, schedule::supervisor::ScheduleSupervisor, CapabilityRegistry,
-    CapabilityRegistryHolder, WorkerManager,
+    CapabilityRegistryHolder,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -79,8 +79,6 @@ pub struct WorkspaceState {
     lifecycle: Arc<Option<Arc<StatigLifecycle>>>,
     /// Orchestration engine (set at daemon startup when WS2 is wired).
     engine: Arc<Option<Arc<dyn OrchestrationEngine>>>,
-    /// Worker manager (set at daemon startup when WS2 is wired).
-    worker_manager: Arc<Option<Arc<WorkerManager>>>,
     /// Capability registry holder (set at daemon startup when WS2 is wired;
     /// V1.176 P1, AR-92 #2). The holder is shared with the engine and the
     /// hot-reload watcher; every `capability_registry()` read clones the
@@ -198,7 +196,6 @@ impl WorkspaceState {
             runtime_mode: RuntimeMode::LocalOnly,
             lifecycle: Arc::new(None),
             engine: Arc::new(None),
-            worker_manager: Arc::new(None),
             capability_registry: Arc::new(None),
             schedule_supervisor: Arc::new(None),
             agent_host: Arc::new(None),
@@ -295,7 +292,6 @@ impl WorkspaceState {
             runtime_mode,
             lifecycle: Arc::new(None),
             engine: Arc::new(None),
-            worker_manager: Arc::new(None),
             capability_registry: Arc::new(None),
             schedule_supervisor: Arc::new(None),
             agent_host: Arc::new(None),
@@ -544,11 +540,6 @@ impl WorkspaceState {
         self.engine = Arc::new(Some(engine));
     }
 
-    /// Set the worker manager.
-    pub fn set_worker_manager(&mut self, worker_manager: Arc<WorkerManager>) {
-        self.worker_manager = Arc::new(Some(worker_manager));
-    }
-
     /// Set the capability registry holder (shared with the engine and the
     /// hot-reload watcher — AR-92 #2). The registry itself is swapped into
     /// the holder by the watcher; readers clone per call.
@@ -635,12 +626,6 @@ impl WorkspaceState {
     #[must_use]
     pub fn schedule_supervisor(&self) -> Option<Arc<ScheduleSupervisor>> {
         self.schedule_supervisor.as_ref().clone()
-    }
-
-    /// Get the worker manager, if set.
-    #[must_use]
-    pub fn worker_manager(&self) -> Option<Arc<WorkerManager>> {
-        self.worker_manager.as_ref().clone()
     }
 
     /// Get the current capability registry, if set (V1.176 P1, AR-92).

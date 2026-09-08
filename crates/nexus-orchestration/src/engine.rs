@@ -406,6 +406,19 @@ pub struct EngineSharedState {
     /// `commit_transition` — making nested child rows reconstructible after
     /// restart (Important 2). Keyed by root session id.
     pub children: Arc<tokio::sync::RwLock<std::collections::HashMap<String, Vec<ChildCheckpoint>>>>,
+    /// Per-run coordinator cancellation tokens (A1) — the production prompt
+    /// consumers resolve their run token from this shared map and fail
+    /// closed (`CancellationUnavailable`) when none is registered. The
+    /// daemon boot constructs the map, wires it via
+    /// `GraphFlowEngine::set_prompt_executor`, and every run the engine
+    /// admits (start/spawn/recovery) registers a token here.
+    pub session_cancels: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    >,
+    /// Production prompt executor (A1) — used by the cancel path to await
+    /// bounded owned-Host teardown before persisting terminal `Cancelled`
+    /// (C-001). `None` for in-memory/test engines.
+    pub prompt_executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
 }
 
 impl EngineSharedState {
@@ -417,6 +430,10 @@ impl EngineSharedState {
             sessions: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             workflow_store: None,
             children: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
+            prompt_executor: None,
         }
     }
 
@@ -431,7 +448,24 @@ impl EngineSharedState {
             sessions: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             workflow_store: Some(workflow_store),
             children: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
+            prompt_executor: None,
         }
+    }
+
+    /// Register a run's coordinator cancellation token (A1, fail-closed
+    /// contract). Idempotent — every admission path (start, spawn, recovery)
+    /// calls this so the shared map carries one token per run; a prompt for
+    /// an unregistered run fails closed with `CancellationUnavailable`
+    /// rather than minting an uncancellable token.
+    pub fn register_cancellation(&self, session_id: &SessionId) {
+        self.session_cancels
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(session_id.0.clone())
+            .or_insert_with(tokio_util::sync::CancellationToken::new);
     }
 
     /// Recover persisted non-terminal sessions into in-memory tracker (WS2 R1).
@@ -596,6 +630,15 @@ impl EngineSharedState {
     ///
     /// Returns the target status on success. When the store is absent
     /// (in-memory test storage) this is a no-op returning the target status.
+    ///
+    /// **Cancel ordering (C-001):** the durable cancel-intent fence is
+    /// persisted FIRST (revision-fenced `commit_transition` with
+    /// `cancel_requested = true`, status kept non-terminal), then the run's
+    /// coordinator cancellation token is fired, then the prompt executor's
+    /// bounded owned-Host teardown is awaited. Terminal `Cancelled` is
+    /// persisted only after owned Host work is stopped/reaped;
+    /// cleanup-unconfirmed persists `Interrupted` (actionable, never false
+    /// successful cancellation).
     async fn persist_signal_transition(
         &self,
         session_id: &SessionId,
@@ -636,14 +679,116 @@ impl EngineSharedState {
             .await
             .map_err(EngineError::GraphFlow)?
             .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
-
-        if matches!(target_status, SessionStatus::Cancelled) {
-            next_state.cancel_requested = true;
-        }
         let checkpoint = RunCheckpoint {
             root: &root,
             children: &[],
         };
+
+        if matches!(target_status, SessionStatus::Cancelled) {
+            // C-001 phase 1: durable cancel-intent fence. Persist
+            // `cancel_requested = true` while keeping the status
+            // non-terminal — the run is not yet confirmed cancelled.
+            next_state.cancel_requested = true;
+            store
+                .commit_transition(
+                    session_id,
+                    expected_revision,
+                    checkpoint.clone(),
+                    record.status.clone(),
+                    &next_state,
+                )
+                .await?;
+
+            // Fire the run's coordinator cancellation token so the
+            // in-flight prompt operation observes cancellation and begins
+            // its bounded Host cleanup.
+            if let Some(token) = self
+                .session_cancels
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&session_id.0)
+                .cloned()
+            {
+                token.cancel();
+            }
+
+            // Await the prompt executor's bounded owned-Host teardown.
+            if let Some(executor) = &self.prompt_executor {
+                if let Err(e) = executor.finalize_run(&session_id.0).await {
+                    // Cleanup unconfirmed: persist Interrupted (actionable,
+                    // never false successful cancellation) and surface the
+                    // error. The run stays visibly interrupted.
+                    let Some(current) = store.load_run(session_id).await? else {
+                        return Err(EngineError::GraphFlow(
+                            graph_flow::GraphError::StorageError(format!(
+                                "run '{}' disappeared during cancel cleanup",
+                                session_id.0
+                            )),
+                        ));
+                    };
+                    let current_revision = current.state_revision;
+                    let mut interrupted_state = current.state.unwrap_or_default();
+                    interrupted_state.cancel_requested = true;
+                    interrupted_state.in_flight = None;
+                    let _ = store
+                        .commit_transition(
+                            session_id,
+                            current_revision,
+                            checkpoint,
+                            SessionStatus::Interrupted,
+                            &interrupted_state,
+                        )
+                        .await;
+                    if let Some(s) = self
+                        .sessions
+                        .write()
+                        .await
+                        .iter_mut()
+                        .find(|s| s.session_id == *session_id)
+                    {
+                        s.status = SessionStatus::Interrupted;
+                    }
+                    return Err(EngineError::GraphFlow(
+                        graph_flow::GraphError::TaskExecutionFailed(format!(
+                            "cancel cleanup unconfirmed for run '{}': {e}",
+                            session_id.0
+                        )),
+                    ));
+                }
+            }
+
+            // C-001 phase 2: confirmed cleanup — persist terminal Cancelled.
+            let Some(current) = store.load_run(session_id).await? else {
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "run '{}' disappeared before cancelled settlement",
+                        session_id.0
+                    )),
+                ));
+            };
+            let current_revision = current.state_revision;
+            let mut cancelled_state = current.state.unwrap_or_default();
+            cancelled_state.cancel_requested = true;
+            cancelled_state.in_flight = None;
+            store
+                .commit_transition(
+                    session_id,
+                    current_revision,
+                    checkpoint,
+                    SessionStatus::Cancelled,
+                    &cancelled_state,
+                )
+                .await?;
+            // M-004: reclaim the run's coordinator cancellation token at
+            // the same confirmed run-terminal ownership boundary.
+            self.session_cancels
+                .write()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&session_id.0);
+            return Ok(SessionStatus::Cancelled);
+        }
+
+        // Non-cancel signals: single commit as before.
         store
             .commit_transition(
                 session_id,
@@ -941,6 +1086,47 @@ impl EngineSharedState {
                                 }
                             }
                         }
+
+                        // I-001 / M-004: a confirmed run-terminal transition
+                        // (Completed/Failed) finalizes every `(run, role)`
+                        // Host session and reclaims the run's coordinator
+                        // cancellation token. The cancel path
+                        // (`persist_signal_transition`) performs the same
+                        // finalization before persisting terminal
+                        // `Cancelled`; cleanup-unconfirmed stays
+                        // non-terminal/actionable (never finalized here).
+                        //
+                        // I-002: the token is reclaimed ONLY when
+                        // finalization is confirmed. On unconfirmed cleanup
+                        // the token and the executor's session entries are
+                        // kept so a later retry can still reap the owned
+                        // sessions; the run is already terminal, so no new
+                        // admission can occur, but the coordinator token
+                        // must remain cancellable for the retry path.
+                        if status.is_terminal() {
+                            let finalized = match &self.prompt_executor {
+                                Some(executor) => {
+                                    match executor.finalize_run(&session_id.0).await {
+                                        Ok(()) => true,
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                session_id = %session_id.0,
+                                                error = %e,
+                                                "run-terminal Host session finalization unconfirmed; keeping cancellation token for retry"
+                                            );
+                                            false
+                                        }
+                                    }
+                                }
+                                None => true,
+                            };
+                            if finalized {
+                                self.session_cancels
+                                    .write()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .remove(&session_id.0);
+                            }
+                        }
                     }
                     Err(commit_err) => {
                         if had_effect {
@@ -1060,6 +1246,17 @@ impl EngineSharedState {
         let mut session_mut =
             graph_flow::Session::new_from_task(child_session_id.clone(), &start_task_id);
         session_mut.context = params.initial_context;
+        // Seed the trusted child run identity into the child context BEFORE
+        // any inner node executes: `InnerGraphNodeTask::resolve_session_id`
+        // reads `_session_id` to route the prompt through the durable child
+        // descriptor. Without this, un-bound inner `acp_prompt` nodes fell
+        // back to `"default"` and the Host executor refused/looked up the
+        // wrong run (Important: nested graph prompts lose the child durable
+        // identity).
+        session_mut
+            .context
+            .set("_session_id", child_session_id.clone())
+            .await;
         // Record the parent so `run_step_internal` can sync this child's
         // checkpoint back to the parent's children map after each step
         // (Important 1: child revisions must be synchronized).
@@ -1110,6 +1307,11 @@ impl EngineSharedState {
         } else {
             self.storage.save(session_mut.clone()).await?;
         }
+
+        // Register the child run's coordinator cancellation token (A1): the
+        // child's `acp_prompt` nodes resolve their token from the shared
+        // per-run map and fail closed when none is registered.
+        self.register_cancellation(&SessionId(child_session_id.clone()));
 
         // Record the child checkpoint so the root transition persists the
         // nested child row atomically (Important 2). The CAS anchor is the
@@ -1192,6 +1394,10 @@ impl EngineSharedState {
             let runner = Arc::new(FlowRunner::new(inner_graph, self.storage.clone()));
             self.runners.write().await.insert(child_id.clone(), runner);
         }
+        // Register the reattached child's coordinator cancellation token
+        // (A1): a resumed child's `acp_prompt` nodes must find their token
+        // in the shared map (fail-closed otherwise).
+        self.register_cancellation(&SessionId(child_id.clone()));
         let (parent_creator_id, parent_preset_id) = self
             .sessions
             .read()
@@ -1495,6 +1701,15 @@ pub struct GraphFlowEngine {
     caps: crate::capability::CapabilityRegistryHolder,
     /// Daemon-side tool dispatch for `nexus.*` host tool actions (DF-47, V1.42 P3).
     daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
+    /// Production prompt executor (A1) — wired into every inner graph
+    /// `acp_prompt` node at wired-graph build time. `None` for
+    /// in-memory/test engines (inner prompt nodes refuse).
+    prompt_executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
+    /// Per-run coordinator cancellation tokens (A1) — the executor listens to
+    /// the token for the current run concurrently with the Host stream.
+    session_cancels: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    >,
     /// Resolved workspace root the engine's runs execute in (A2). `None`
     /// for in-memory/test engines that do not persist v1 descriptors.
     workspace_root: Option<std::path::PathBuf>,
@@ -1509,6 +1724,8 @@ impl Clone for GraphFlowEngine {
             state: self.state.clone(),
             caps: self.caps.clone(),
             daemon_tool_dispatch: self.daemon_tool_dispatch.clone(),
+            prompt_executor: self.prompt_executor.clone(),
+            session_cancels: self.session_cancels.clone(),
             workspace_root: self.workspace_root.clone(),
             nexus_home: self.nexus_home.clone(),
         }
@@ -1534,6 +1751,10 @@ impl GraphFlowEngine {
             state: Arc::new(EngineSharedState::new(storage)),
             caps,
             daemon_tool_dispatch: None,
+            prompt_executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
             workspace_root: None,
             nexus_home: None,
         }
@@ -1554,6 +1775,10 @@ impl GraphFlowEngine {
             state: Arc::new(EngineSharedState::with_workflow_store(storage, workflow_store)),
             caps,
             daemon_tool_dispatch: None,
+            prompt_executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
             workspace_root: None,
             nexus_home: None,
         }
@@ -1572,6 +1797,10 @@ impl GraphFlowEngine {
             state: Arc::new(EngineSharedState::with_workflow_store(storage, workflow_store)),
             caps,
             daemon_tool_dispatch: None,
+            prompt_executor: None,
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
             workspace_root: Some(workspace_root),
             nexus_home: None,
         }
@@ -1583,6 +1812,25 @@ impl GraphFlowEngine {
         self.nexus_home = Some(nexus_home);
     }
 
+    /// Register a run's coordinator cancellation token in the shared
+    /// per-run map (A1, fail-closed contract).
+    ///
+    /// Every run the engine admits — preset start, session start, nested
+    /// child spawn, and boot recovery — registers a fresh cancellation
+    /// token so the production prompt consumers (capabilities + graph
+    /// `acp_prompt`) find a cancellable token at dispatch. A prompt invoked
+    /// for a run with NO registered token fails closed with
+    /// `CancellationUnavailable` (never a fresh uncancellable token). The
+    /// future P2 coordinator shares this same map and the executor's
+    /// per-run operation locks.
+    fn register_cancellation(&self, session_id: &SessionId) {
+        self.session_cancels
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(session_id.0.clone())
+            .or_insert_with(tokio_util::sync::CancellationToken::new);
+    }
+
     /// Set the daemon-side tool dispatch adapter (DF-47, V1.42 P3).
     ///
     /// Must be called before any session starts if preset graphs contain
@@ -1592,6 +1840,37 @@ impl GraphFlowEngine {
         dispatch: Arc<dyn crate::capability::DaemonToolDispatch>,
     ) {
         self.daemon_tool_dispatch = Some(dispatch);
+    }
+
+    /// Set the production prompt executor and per-run cancellation tokens
+    /// (A1).
+    ///
+    /// Must be called before any session starts so inner graph `acp_prompt`
+    /// nodes execute through the Host plane. Typically called once during
+    /// daemon boot.
+    pub fn set_prompt_executor(
+        &mut self,
+        executor: Arc<dyn crate::capability::PromptExecutor>,
+        session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        >,
+    ) {
+        self.prompt_executor = Some(executor.clone());
+        self.session_cancels = session_cancels.clone();
+        // Unify the shared per-run cancellation map: run-admission
+        // registrations (spawn/attach on `EngineSharedState`) and the
+        // prompt consumers (graph tasks wired with this engine's map,
+        // capabilities wired with the boot map) must read the SAME Arc.
+        // The production boot calls this on a freshly constructed engine
+        // (state refcount 1), so `get_mut` succeeds; engines whose shared
+        // state is aliased keep their own map (test wiring passes the
+        // engine's shared map to the prompt consumers explicitly).
+        if let Some(state) = std::sync::Arc::get_mut(&mut self.state) {
+            state.session_cancels = session_cancels;
+            state.prompt_executor = Some(executor);
+        }
     }
 
     /// Recover persisted sessions into the in-memory tracker (WS2 R1 + R6).
@@ -1609,6 +1888,12 @@ impl GraphFlowEngine {
             if summary.status.is_terminal() {
                 continue;
             }
+
+            // Register the recovered run's coordinator cancellation token
+            // (A1): a resumed run's prompt consumers resolve their token
+            // from the shared per-run map and fail closed when none is
+            // registered.
+            self.register_cancellation(&summary.session_id);
 
             // Important 1: hydrate the in-memory children map from persisted
             // child rows so a restarted parent knows its child checkpoints
@@ -1781,6 +2066,8 @@ impl GraphFlowEngine {
             &engine_proxy,
             &caps,
             self.daemon_tool_dispatch.clone(),
+            self.prompt_executor.clone(),
+            self.session_cancels.clone(),
         );
 
         // Create FlowRunner with the wired graph and existing storage.
@@ -1830,6 +2117,8 @@ impl GraphFlowEngine {
             &engine_proxy,
             &caps,
             self.daemon_tool_dispatch.clone(),
+            self.prompt_executor.clone(),
+            self.session_cancels.clone(),
         );
 
         let runner = Arc::new(FlowRunner::new(Arc::new(wired), self.state.storage.clone()));
@@ -1915,6 +2204,11 @@ impl GraphFlowEngine {
                     &RunStateV1::default(),
                 )
                 .await?;
+            let sid = SessionId(session_id.clone());
+            // Register the run's coordinator cancellation token (A1): the
+            // run's prompt consumers resolve their token from the shared
+            // per-run map and fail closed when none is registered.
+            self.register_cancellation(&sid);
             let runner = Arc::new(FlowRunner::new(graph, self.state.storage.clone()));
             self.state
                 .runners
@@ -2005,6 +2299,7 @@ impl GraphFlowEngine {
                     &RunStateV1::default(),
                 )
                 .await?;
+            self.register_cancellation(&SessionId(session_id.clone()));
         } else {
             self.state.storage.save(session).await?;
         }
@@ -2141,6 +2436,7 @@ impl OrchestrationEngine for GraphFlowEngine {
                     &RunStateV1::default(),
                 )
                 .await?;
+            self.register_cancellation(&SessionId(session_id.clone()));
         } else {
             self.state.storage.save(session).await?;
         }
@@ -2274,6 +2570,8 @@ impl OrchestrationEngine for GraphFlowEngine {
             &proxy,
             &caps,
             self.daemon_tool_dispatch.clone(),
+            self.prompt_executor.clone(),
+            self.session_cancels.clone(),
         );
         self.start_preset_run(loaded, "", Arc::new(wired)).await
     }
@@ -2292,6 +2590,8 @@ impl OrchestrationEngine for GraphFlowEngine {
             &proxy,
             &caps,
             self.daemon_tool_dispatch.clone(),
+            self.prompt_executor.clone(),
+            self.session_cancels.clone(),
         );
         self.start_preset_run(loaded, creator_id, Arc::new(wired))
             .await

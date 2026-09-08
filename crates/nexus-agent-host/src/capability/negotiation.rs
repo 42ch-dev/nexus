@@ -249,6 +249,11 @@ mod tests {
             mode: Some("ask".to_string()), // set_mode = true in acp_full()
             mcp_servers: vec![],
             metadata: serde_json::Value::Null,
+            owner: crate::capability::model::SessionOwner {
+                creator_id: "ctr_test".to_string(),
+                workspace_root: std::path::PathBuf::from("/tmp"),
+                orchestration_run_id: None,
+            },
         };
         assert!(validate_session_request(&pid, &caps, &request).is_ok());
     }
@@ -264,6 +269,11 @@ mod tests {
             mode: None,
             mcp_servers: vec![],
             metadata: serde_json::Value::Null,
+            owner: crate::capability::model::SessionOwner {
+                creator_id: "ctr_test".to_string(),
+                workspace_root: std::path::PathBuf::from("/tmp"),
+                orchestration_run_id: None,
+            },
         };
         let result = validate_session_request(&pid, &caps, &request);
         assert!(result.is_err());
@@ -285,6 +295,11 @@ mod tests {
                 url: "https://example.com/mcp".to_string(),
             }],
             metadata: serde_json::Value::Null,
+            owner: crate::capability::model::SessionOwner {
+                creator_id: "ctr_test".to_string(),
+                workspace_root: std::path::PathBuf::from("/tmp"),
+                orchestration_run_id: None,
+            },
         };
         let result = validate_session_request(&pid, &caps, &request);
         assert!(result.is_err());

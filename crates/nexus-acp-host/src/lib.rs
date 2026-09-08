@@ -47,7 +47,7 @@ pub use skills::{build_v1_0_capabilities, capabilities};
 
 // Re-export transport types for subprocess management.
 #[allow(unused_imports)]
-pub use transport::{AcpSession, AgentSpawner, Platform};
+pub use transport::{AcpSession, AgentSpawner, ManagedAcpProcess, Platform, ProcessBirthToken};
 
 // Re-export the gated MCP wiring for session construction.
 #[cfg(feature = "connect-client")]

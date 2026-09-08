@@ -14,14 +14,12 @@
 //!    and must pass before the plan can be marked Done.
 
 use assert_cmd::Command;
-use predicates::prelude::*;
 
 // =============================================================================
 // Part 1: Current-state snapshot (V1.15 baseline — these MUST pass today)
 // =============================================================================
 
-/// Snapshot: V1.15 has exactly 24 user-visible top-level command groups
-/// (plus 1 hidden `acp-worker` not counted here).
+/// Snapshot: V1.15 has exactly 24 user-visible top-level command groups.
 ///
 /// If this test breaks, a command was accidentally added or removed during
 /// refactoring — investigate before proceeding.
@@ -86,26 +84,6 @@ fn current_state_visible_command_groups() {
         visible_count, 6,
         "Current-state snapshot: expected exactly 6 user-visible commands, found {visible_count}"
     );
-}
-
-/// Snapshot: Hidden `acp-worker` command exists but is NOT shown in --help.
-#[test]
-fn current_state_acp_worker_is_hidden() {
-    // `acp-worker` should NOT appear in --help
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("--help")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("acp-worker").not());
-
-    // But it should be a valid (hidden) subcommand — running it without args
-    // should fail with a usage error, not "unrecognized subcommand"
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("acp-worker")
-        .assert()
-        .failure();
 }
 
 /// Snapshot: `daemon` command has expected subcommands in V1.15.

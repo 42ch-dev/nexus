@@ -27,6 +27,8 @@ struct ProviderEntry {
     adapter: Arc<dyn ProviderAdapter>,
     /// Whether this provider is currently available.
     available: bool,
+    /// The configured launch recipe (truthful catalog reporting).
+    launch: crate::LaunchStrategy,
 }
 
 /// Broadcast channel capacity for host events.
@@ -113,7 +115,13 @@ impl HostManager {
     /// Register a provider adapter.
     ///
     /// Must be called before `start()`. The adapter is stored behind `Arc<dyn ProviderAdapter>`.
-    pub async fn register_provider(&self, adapter: Arc<dyn ProviderAdapter>) {
+    /// `launch` is the configured launch recipe reported truthfully by the
+    /// catalog (never a fabricated empty recipe).
+    pub async fn register_provider(
+        &self,
+        adapter: Arc<dyn ProviderAdapter>,
+        launch: crate::LaunchStrategy,
+    ) {
         let desc = adapter.descriptor();
         let provider_id = desc.provider_id.clone();
         let mut providers = self.providers.write().await;
@@ -122,6 +130,7 @@ impl HostManager {
             ProviderEntry {
                 adapter,
                 available: false,
+                launch,
             },
         );
     }
@@ -312,18 +321,35 @@ impl crate::HostFacade for HostManager {
         let adapter = entry.adapter.clone();
         drop(providers);
 
-        // Build launch spec with cwd validated against workspace boundary (QC2 F-002).
+        // Build launch spec with cwd validated against workspace boundary (QC2 F-002)
+        // and against the verified Creator workspace root (A5 owner/cwd isolation).
         let boundary = {
             let ws = self.workspace_root.read().await;
             ws.clone()
                 .ok_or_else(|| HostError::internal("workspace root not set — host not started"))?
         };
         let validated_cwd = crate::config::validate_workspace_path_under(&request.cwd, &boundary)?;
+        // The session cwd must belong to the verified Creator workspace; a
+        // profile switch or foreign workspace must never retarget an existing
+        // run (A5: owner_workspace_mismatch).
+        let owner_workspace = crate::config::validate_workspace_path_under(
+            &request.owner.workspace_root,
+            &boundary,
+        )?;
+        if !validated_cwd.starts_with(&owner_workspace) {
+            return Err(HostError::owner_workspace_mismatch(format!(
+                "session cwd '{}' is outside verified Creator workspace '{}'",
+                validated_cwd.display(),
+                owner_workspace.display()
+            ))
+            .with_provider(request.provider_id.clone()));
+        }
         let launch_spec = crate::capability::model::LaunchSpec {
             cwd: validated_cwd,
             model: request.model,
             mode: request.mode,
             mcp_servers: request.mcp_servers,
+            owner: request.owner.clone(),
         };
 
         // Launch the session on the provider with session_ms timeout (D-004).
@@ -349,8 +375,13 @@ impl crate::HostFacade for HostManager {
 
         // Register in our session registry
         let mut sessions = self.sessions.write().await;
-        let session_id =
-            sessions.register(request.provider_id.clone(), handle.capabilities.clone());
+        let session_id = sessions.register(
+            handle.session_id,
+            request.provider_id.clone(),
+            handle.capabilities.clone(),
+            request.owner.clone(),
+            handle.process_identity.clone(),
+        );
 
         // Transition to starting → ready
         sessions.transition_to_starting(&session_id)?;
@@ -396,6 +427,7 @@ impl crate::HostFacade for HostManager {
             provider_id: session.provider_id.clone(),
             session_id: session_id.clone(),
             capabilities: session.negotiated_capabilities.clone(),
+            process_identity: session.process_identity.clone(),
         };
         drop(sessions);
 
@@ -444,8 +476,26 @@ impl crate::HostFacade for HostManager {
                         let _ = tx.send(event.clone());
                     }
                     if let Ok(HostEvent::OpFinished(_) | HostEvent::OpFailed(_)) = &result {
+                        // The operation is terminal: leave Busy or Cancelling
+                        // (both keyed by this op) back to Ready. During a
+                        // cancellation the session stays Cancelling until the
+                        // stream itself emits its terminal event — a
+                        // subsequent exec cannot overlap the still-owning
+                        // ACP read loop (A5 "reuse serially").
                         let mut sess = sessions.write().await;
-                        let _ = sess.transition_busy_to_ready(&sid, &oid);
+                        match sess.get(&sid).map(|s| s.state.clone()) {
+                            Some(crate::core::session::SessionState::Busy(op))
+                                if &op == &oid =>
+                            {
+                                let _ = sess.transition_busy_to_ready(&sid, &oid);
+                            }
+                            Some(crate::core::session::SessionState::Cancelling(op))
+                                if &op == &oid =>
+                            {
+                                let _ = sess.transition_cancelling_to_ready(&sid, &oid);
+                            }
+                            _ => {}
+                        }
                     }
                     result
                 }
@@ -467,7 +517,10 @@ impl crate::HostFacade for HostManager {
                 .ok_or_else(|| HostError::internal(format!("no session found for op {op_id}")))?;
         }
 
-        // Transition to Cancelling
+        // Transition to Cancelling. The session STAYS Cancelling until the
+        // provider stream emits its terminal event (the wrapped exec stream
+        // then transitions to Ready) — no immediate Ready that would allow an
+        // overlapping prompt on one ACP session (L2 Issue 5).
         {
             let mut sessions = self.sessions.write().await;
             sessions.transition_to_cancelling(&session.id, &op_id)?;
@@ -479,16 +532,14 @@ impl crate::HostFacade for HostManager {
             provider_id: session.provider_id.clone(),
             session_id: session.id.clone(),
             capabilities: session.negotiated_capabilities.clone(),
+            process_identity: session.process_identity.clone(),
         };
 
-        adapter.cancel(&handle, op_id.clone()).await?;
+        adapter.cancel(&handle, op_id).await?;
 
-        // Transition back to Ready
-        {
-            let mut sessions = self.sessions.write().await;
-            sessions.transition_cancelling_to_ready(&session.id, &op_id)?;
-        }
-
+        // No transition here: the cancelled ACP stream's terminal event will
+        // return the session to Ready. A cancel failure leaves the session
+        // Cancelling; the stream's own timeout/EOF guarantee a terminal.
         Ok(())
     }
 
@@ -551,13 +602,19 @@ impl crate::HostFacade for HostManager {
                         provider_id: provider_id.clone(),
                         session_id: session_id.clone(),
                         capabilities: session.negotiated_capabilities.clone(),
+                        process_identity: session.process_identity.clone(),
                     };
                     Some((adapter, handle))
                 })
                 .collect()
         };
 
-        // Call ProviderAdapter::shutdown() for each active session with a per-session timeout.
+        // Call ProviderAdapter::shutdown() for each active session with a
+        // per-session timeout. A typed error or outer timeout means the exact
+        // owned process cleanup was not confirmed: those sessions must remain
+        // visibly interrupted (L2 Issue 2) — never marked/removed as cleanly
+        // stopped, never dropped from ownership maps.
+        let mut cleanup_unconfirmed: Vec<HostSessionId> = Vec::new();
         for (adapter, handle) in shutdown_tasks {
             let session_id = handle.session_id.clone();
             let provider_id = handle.provider_id.clone();
@@ -575,24 +632,43 @@ impl crate::HostFacade for HostManager {
                         session_id = %session_id,
                         provider_id = %provider_id,
                         error = %e,
-                        "Provider adapter shutdown returned error"
+                        "Provider adapter shutdown returned error (cleanup unconfirmed)"
                     );
+                    cleanup_unconfirmed.push(session_id);
                 }
                 Err(_) => {
                     tracing::warn!(
                         session_id = %session_id,
                         provider_id = %provider_id,
                         timeout_ms = shutdown_timeout.as_millis(),
-                        "Provider adapter shutdown timed out, proceeding with cleanup"
+                        "Provider adapter shutdown timed out (cleanup unconfirmed)"
                     );
+                    cleanup_unconfirmed.push(session_id);
                 }
             }
         }
 
-        // Now transition sessions through Stopping → Stopped and clean up the registry.
+        // Now transition sessions through Stopping → Stopped and clean up the
+        // registry — EXCEPT sessions whose cleanup is unconfirmed.
         {
             let mut sessions = self.sessions.write().await;
             for session_id in &session_ids {
+                if cleanup_unconfirmed.contains(session_id) {
+                    let already_recoverable = matches!(
+                        sessions.get(session_id).map(|session| &session.state),
+                        Some(crate::core::session::SessionState::ErrorRecoverable)
+                    );
+                    if !already_recoverable {
+                        if matches!(
+                            sessions.get(session_id).map(|session| &session.state),
+                            Some(crate::core::session::SessionState::Ready)
+                        ) {
+                            sessions.transition_to_stopping(session_id)?;
+                        }
+                        sessions.transition_to_error_recoverable(session_id)?;
+                    }
+                    continue;
+                }
                 let _ = sessions.transition_to_stopping(session_id);
                 let _ = sessions.transition_to_stopped(
                     session_id,
@@ -601,18 +677,38 @@ impl crate::HostFacade for HostManager {
             }
 
             for session_id in &session_ids {
+                if cleanup_unconfirmed.contains(session_id) {
+                    continue;
+                }
                 let _ = sessions.remove_stopped(session_id);
             }
         }
 
-        // Clear provider mappings
-        self.session_providers.write().await.clear();
+        // Clear provider mappings only for sessions with confirmed cleanup;
+        // unconfirmed sessions keep their ownership mapping for reconciliation.
+        {
+            let mut session_providers = self.session_providers.write().await;
+            for session_id in &session_ids {
+                if !cleanup_unconfirmed.contains(session_id) {
+                    session_providers.remove(session_id);
+                }
+            }
+        }
 
         tracing::info!(
-            sessions_closed = session_ids.len(),
-            "Host manager shutdown complete"
+            sessions_closed = session_ids.len() - cleanup_unconfirmed.len(),
+            sessions_unconfirmed = cleanup_unconfirmed.len(),
+            "Host manager shutdown complete (unconfirmed sessions retained)"
         );
-        Ok(())
+        if cleanup_unconfirmed.is_empty() {
+            Ok(())
+        } else {
+            Err(HostError::cleanup_unconfirmed(format!(
+                "{} session(s) with unconfirmed owned-process cleanup retained: {:?}",
+                cleanup_unconfirmed.len(),
+                cleanup_unconfirmed
+            )))
+        }
     }
 
     async fn shutdown_session(&self, session_id: HostSessionId) -> HostResult<()> {
@@ -633,6 +729,7 @@ impl crate::HostFacade for HostManager {
             provider_id: session.provider_id.clone(),
             session_id: session_id.clone(),
             capabilities: session.negotiated_capabilities.clone(),
+            process_identity: session.process_identity.clone(),
         };
 
         // Read configured shutdown timeout
@@ -641,29 +738,61 @@ impl crate::HostFacade for HostManager {
             |c| c.timeouts.shutdown_duration(),
         );
 
-        // Call provider adapter shutdown with timeout
-        match tokio::time::timeout(shutdown_timeout, adapter.shutdown(handle)).await {
+        // Call provider adapter shutdown with timeout. A typed cleanup
+        // failure/timeout means the exact owned process was not confirmed
+        // reaped: the session must remain visibly interrupted (A5), never be
+        // marked/removed as cleanly stopped.
+        let cleanup_unconfirmed = match tokio::time::timeout(shutdown_timeout, adapter.shutdown(handle)).await {
             Ok(Ok(())) => {
                 tracing::info!(
                     session_id = %session_id,
                     provider_id = %session.provider_id,
                     "Per-session shutdown succeeded"
                 );
+                false
             }
             Ok(Err(e)) => {
                 tracing::warn!(
                     session_id = %session_id,
                     error = %e,
-                    "Per-session provider shutdown returned error"
+                    "Per-session provider shutdown returned error (cleanup unconfirmed)"
                 );
+                true
             }
             Err(_) => {
                 tracing::warn!(
                     session_id = %session_id,
                     timeout_ms = shutdown_timeout.as_millis(),
-                    "Per-session provider shutdown timed out"
+                    "Per-session provider shutdown timed out (cleanup unconfirmed)"
                 );
+                true
             }
+        };
+
+        if cleanup_unconfirmed {
+            // Keep the session in the registry as ErrorRecoverable: it must
+            // not be reported as cleanly stopped while cleanup is unconfirmed.
+            let mut sessions = self.sessions.write().await;
+            let already_recoverable = matches!(
+                sessions.get(&session_id).map(|current| &current.state),
+                Some(crate::core::session::SessionState::ErrorRecoverable)
+            );
+            if !already_recoverable {
+                if matches!(
+                    sessions.get(&session_id).map(|current| &current.state),
+                    Some(crate::core::session::SessionState::Ready)
+                ) {
+                    sessions.transition_to_stopping(&session_id)?;
+                }
+                sessions.transition_to_error_recoverable(&session_id)?;
+            }
+            return Err(
+                HostError::cleanup_unconfirmed(format!(
+                    "session {session_id} cleanup unconfirmed"
+                ))
+                .with_provider(session.provider_id.clone())
+                .with_session(session_id.clone()),
+            );
         }
 
         // Transition session through Stopping → Stopped
@@ -692,39 +821,35 @@ impl crate::HostFacade for HostManager {
     }
 
     async fn provider_catalog(&self) -> HostResult<crate::discovery::ProviderCatalog> {
-        // Collect adapter descriptors under a short-lived read lock.
+        // Collect adapter descriptors and their configured launch recipes
+        // under a short-lived read lock.
         let descs: Vec<(
             ProviderId,
             bool,
             crate::capability::model::ProviderDescriptor,
+            crate::LaunchStrategy,
         )> = {
             let providers = self.providers.read().await;
             providers
                 .iter()
-                .map(|(pid, entry)| (pid.clone(), entry.available, entry.adapter.descriptor()))
+                .map(|(pid, entry)| {
+                    (
+                        pid.clone(),
+                        entry.available,
+                        entry.adapter.descriptor(),
+                        entry.launch.clone(),
+                    )
+                })
                 .collect()
         };
 
         let mut entries = Vec::new();
-        for (provider_id, available, desc) in descs {
+        for (provider_id, available, desc, launch) in descs {
             entries.push(crate::ProviderCatalogEntry {
                 provider_id: provider_id.clone(),
                 display_name: desc.display_name.clone(),
                 protocol_kind: desc.protocol_kind,
-                launch: match desc.protocol_kind {
-                    crate::capability::model::ProtocolKind::Acp => crate::LaunchStrategy::Acp {
-                        command: String::new(),
-                        args: vec![],
-                        env: std::collections::HashMap::new(),
-                    },
-                    crate::capability::model::ProtocolKind::NativeCli => {
-                        crate::LaunchStrategy::NativeCli {
-                            command: String::new(),
-                            args: vec![],
-                            env: std::collections::HashMap::new(),
-                        }
-                    }
-                },
+                launch,
                 source: crate::DiscoverySource::Config,
                 trust: crate::TrustLevel::Explicit,
                 capabilities: desc.capabilities,
@@ -788,6 +913,7 @@ mod tests {
                 provider_id: self.provider_id.clone(),
                 session_id: HostSessionId::new(),
                 capabilities: crate::capability::model::CapabilityDescriptor::acp_full(),
+                process_identity: None,
             })
         }
 
@@ -887,6 +1013,7 @@ mod tests {
                 provider_id: self.provider_id.clone(),
                 session_id: HostSessionId::new(),
                 capabilities: crate::capability::model::CapabilityDescriptor::acp_full(),
+                process_identity: None,
             })
         }
 
@@ -983,6 +1110,7 @@ mod tests {
                 provider_id: self.provider_id.clone(),
                 session_id: HostSessionId::new(),
                 capabilities: crate::capability::model::CapabilityDescriptor::acp_full(),
+                process_identity: None,
             })
         }
 
@@ -1024,6 +1152,26 @@ mod tests {
             timeouts: crate::config::TimeoutConfig::default(),
         }
     }
+
+    fn test_owner() -> crate::capability::model::SessionOwner {
+        test_owner_for(std::path::PathBuf::from("/tmp"))
+    }
+
+    fn test_owner_for(workspace_root: std::path::PathBuf) -> crate::capability::model::SessionOwner {
+        crate::capability::model::SessionOwner {
+            creator_id: "ctr_test".to_string(),
+            workspace_root,
+            orchestration_run_id: None,
+        }
+    }
+
+    fn mock_launch() -> crate::LaunchStrategy {
+        crate::LaunchStrategy::Acp {
+            command: "mock".to_string(),
+            args: vec![],
+            env: std::collections::HashMap::new(),
+        }
+    }
     #[tokio::test]
     async fn absent_optional_config_path_returns_defaults() {
         // An absent optional config whose parent exists is tolerated and
@@ -1037,9 +1185,12 @@ mod tests {
         };
         let manager = HostManager::new();
         manager
-            .register_provider(Arc::new(MockProvider {
-                provider_id: ProviderId::new("mock"),
-            }))
+            .register_provider(
+                Arc::new(MockProvider {
+                    provider_id: ProviderId::new("mock"),
+                }),
+                mock_launch(),
+            )
             .await;
         manager
             .start(cfg)
@@ -1056,9 +1207,12 @@ mod tests {
         };
         let manager = HostManager::new();
         manager
-            .register_provider(Arc::new(MockProvider {
-                provider_id: ProviderId::new("mock"),
-            }))
+            .register_provider(
+                Arc::new(MockProvider {
+                    provider_id: ProviderId::new("mock"),
+                }),
+                mock_launch(),
+            )
             .await;
         let err = manager
             .start(rel)
@@ -1073,9 +1227,12 @@ mod tests {
         };
         let manager = HostManager::new();
         manager
-            .register_provider(Arc::new(MockProvider {
-                provider_id: ProviderId::new("mock"),
-            }))
+            .register_provider(
+                Arc::new(MockProvider {
+                    provider_id: ProviderId::new("mock"),
+                }),
+                mock_launch(),
+            )
             .await;
         let err = manager.start(empty).await.expect_err("empty path rejected");
         assert!(matches!(err, HostError::PolicyDenied { .. }), "got {err:?}");
@@ -1092,9 +1249,12 @@ mod tests {
         };
         let manager = HostManager::new();
         manager
-            .register_provider(Arc::new(MockProvider {
-                provider_id: ProviderId::new("mock"),
-            }))
+            .register_provider(
+                Arc::new(MockProvider {
+                    provider_id: ProviderId::new("mock"),
+                }),
+                mock_launch(),
+            )
             .await;
         let err = manager
             .start(parentdir)
@@ -1113,9 +1273,12 @@ mod tests {
         };
         let manager = HostManager::new();
         manager
-            .register_provider(Arc::new(MockProvider {
-                provider_id: ProviderId::new("mock"),
-            }))
+            .register_provider(
+                Arc::new(MockProvider {
+                    provider_id: ProviderId::new("mock"),
+                }),
+                mock_launch(),
+            )
             .await;
         let err = manager
             .start(esc)
@@ -1128,9 +1291,12 @@ mod tests {
     async fn start_and_health_check() {
         let manager = HostManager::new();
         manager
-            .register_provider(Arc::new(MockProvider {
-                provider_id: ProviderId::new("mock"),
-            }))
+            .register_provider(
+                Arc::new(MockProvider {
+                    provider_id: ProviderId::new("mock"),
+                }),
+                mock_launch(),
+            )
             .await;
 
         manager
@@ -1147,9 +1313,12 @@ mod tests {
     async fn create_session_registers_in_state_machine() {
         let manager = HostManager::new();
         manager
-            .register_provider(Arc::new(MockProvider {
-                provider_id: ProviderId::new("mock"),
-            }))
+            .register_provider(
+                Arc::new(MockProvider {
+                    provider_id: ProviderId::new("mock"),
+                }),
+                mock_launch(),
+            )
             .await;
 
         manager.start(start_config()).await.expect("start");
@@ -1162,6 +1331,7 @@ mod tests {
                 mode: None,
                 mcp_servers: vec![],
                 metadata: serde_json::Value::Null,
+                owner: test_owner(),
             })
             .await
             .expect("create_session should succeed");
@@ -1186,6 +1356,7 @@ mod tests {
                 mode: None,
                 mcp_servers: vec![],
                 metadata: serde_json::Value::Null,
+                owner: test_owner(),
             })
             .await;
 
@@ -1203,9 +1374,12 @@ mod tests {
     async fn shutdown_clears_sessions() {
         let manager = HostManager::new();
         manager
-            .register_provider(Arc::new(MockProvider {
-                provider_id: ProviderId::new("mock"),
-            }))
+            .register_provider(
+                Arc::new(MockProvider {
+                    provider_id: ProviderId::new("mock"),
+                }),
+                mock_launch(),
+            )
             .await;
         manager.start(start_config()).await.expect("start");
 
@@ -1217,6 +1391,7 @@ mod tests {
                 mode: None,
                 mcp_servers: vec![],
                 metadata: serde_json::Value::Null,
+                owner: test_owner(),
             })
             .await
             .expect("create");
@@ -1239,6 +1414,7 @@ mod tests {
                 mode: None,
                 mcp_servers: vec![],
                 metadata: serde_json::Value::Null,
+                owner: test_owner(),
             })
             .await;
 
@@ -1251,7 +1427,7 @@ mod tests {
     async fn shutdown_calls_provider_adapter_for_each_session() {
         let provider = Arc::new(TrackingMockProvider::new(ProviderId::new("mock")));
         let manager = HostManager::new();
-        manager.register_provider(provider.clone()).await;
+        manager.register_provider(provider.clone(), mock_launch()).await;
         manager.start(start_config()).await.expect("start");
 
         let session1 = manager
@@ -1262,6 +1438,7 @@ mod tests {
                 mode: None,
                 mcp_servers: vec![],
                 metadata: serde_json::Value::Null,
+                owner: test_owner(),
             })
             .await
             .expect("create session 1");
@@ -1274,6 +1451,7 @@ mod tests {
                 mode: None,
                 mcp_servers: vec![],
                 metadata: serde_json::Value::Null,
+                owner: test_owner(),
             })
             .await
             .expect("create session 2");
@@ -1296,12 +1474,12 @@ mod tests {
         );
     }
 
-    /// Verify that shutdown does not hang when a provider's shutdown takes too long.
+    /// Verify bounded global shutdown retains cleanup-unconfirmed ownership.
     #[tokio::test]
-    async fn shutdown_respects_timeout_and_does_not_hang() {
+    async fn shutdown_timeout_retains_unconfirmed_session() {
         let provider = Arc::new(HangingMockProvider::new(ProviderId::new("mock")));
         let manager = HostManager::new();
-        manager.register_provider(provider.clone()).await;
+        manager.register_provider(provider.clone(), mock_launch()).await;
 
         // Create a temp config file with a very short shutdown timeout.
         let temp_dir = tempfile::tempdir().expect("temp dir");
@@ -1330,21 +1508,18 @@ mod tests {
                 mode: None,
                 mcp_servers: vec![],
                 metadata: serde_json::Value::Null,
+                owner: test_owner(),
             })
             .await
             .expect("create");
 
-        // shutdown should complete within a reasonable total time even though the
-        // provider's shutdown() hangs forever.  The per-session timeout is 100ms,
-        // so the whole thing should finish well within 5s.
+        // The per-session timeout bounds the call, but unconfirmed cleanup is
+        // an error and the owned session must remain visible for recovery.
         let result = tokio::time::timeout(std::time::Duration::from_secs(5), manager.shutdown())
             .await
             .expect("shutdown should not hang");
-
-        assert!(
-            result.is_ok(),
-            "shutdown should succeed even with a hanging provider"
-        );
+        let error = result.expect_err("hanging cleanup must remain unconfirmed");
+        assert_eq!(error.category(), "cleanup_unconfirmed");
         assert!(
             provider.was_shutdown_called(),
             "provider shutdown() should have been invoked"
@@ -1352,7 +1527,27 @@ mod tests {
 
         let health = manager.health().await.expect("health");
         assert!(!health.running);
-        assert_eq!(health.active_sessions, 0);
+        assert_eq!(health.active_sessions, 1);
+        let sessions = manager.list_sessions().await.expect("sessions");
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(
+            sessions[0].state,
+            crate::core::session::SessionState::ErrorRecoverable
+        );
+
+        // A failed retry is idempotent: it remains typed cleanup-unconfirmed
+        // and preserves the same recoverable ownership state.
+        let retry_error = manager
+            .shutdown()
+            .await
+            .expect_err("retry must remain cleanup-unconfirmed");
+        assert_eq!(retry_error.category(), "cleanup_unconfirmed");
+        let retained = manager.list_sessions().await.expect("retained session");
+        assert_eq!(retained.len(), 1);
+        assert_eq!(
+            retained[0].state,
+            crate::core::session::SessionState::ErrorRecoverable
+        );
     }
 
     /// Verify shutdown works correctly when there are no active sessions.
@@ -1360,7 +1555,7 @@ mod tests {
     async fn shutdown_with_no_sessions_succeeds() {
         let provider = Arc::new(TrackingMockProvider::new(ProviderId::new("mock")));
         let manager = HostManager::new();
-        manager.register_provider(provider.clone()).await;
+        manager.register_provider(provider.clone(), mock_launch()).await;
         manager.start(start_config()).await.expect("start");
 
         manager.shutdown().await.expect("shutdown");
@@ -1400,7 +1595,7 @@ mod tests {
 
         let provider = Arc::new(TrackingMockProvider::new(ProviderId::new("mock")));
         let manager = HostManager::new();
-        manager.register_provider(provider.clone()).await;
+        manager.register_provider(provider.clone(), mock_launch()).await;
         manager.start(start_config()).await.expect("start");
 
         // Create a session
@@ -1412,6 +1607,7 @@ mod tests {
                 mode: None,
                 mcp_servers: vec![],
                 metadata: serde_json::Value::Null,
+                owner: test_owner(),
             })
             .await
             .expect("create session");
@@ -1450,9 +1646,12 @@ mod tests {
         let manager = HostManager::with_admission(admission);
         // Register a provider, but admission policy has empty known_providers.
         manager
-            .register_provider(Arc::new(MockProvider {
-                provider_id: ProviderId::new("mock"),
-            }))
+            .register_provider(
+                Arc::new(MockProvider {
+                    provider_id: ProviderId::new("mock"),
+                }),
+                mock_launch(),
+            )
             .await;
         manager.start(start_config()).await.expect("start");
 
@@ -1464,6 +1663,7 @@ mod tests {
                 mode: None,
                 mcp_servers: vec![],
                 metadata: serde_json::Value::Null,
+                owner: test_owner(),
             })
             .await;
 
@@ -1489,9 +1689,12 @@ mod tests {
         let admission = AdmissionPolicy::from_config(&config, known);
         let manager = HostManager::with_admission(admission);
         manager
-            .register_provider(Arc::new(MockProvider {
-                provider_id: ProviderId::new("mock"),
-            }))
+            .register_provider(
+                Arc::new(MockProvider {
+                    provider_id: ProviderId::new("mock"),
+                }),
+                mock_launch(),
+            )
             .await;
         manager.start(start_config()).await.expect("start");
 
@@ -1504,6 +1707,7 @@ mod tests {
                 mode: None,
                 mcp_servers: vec![],
                 metadata: serde_json::Value::Null,
+                owner: test_owner(),
             })
             .await
             .expect("first session should succeed");
@@ -1517,6 +1721,7 @@ mod tests {
                 mode: None,
                 mcp_servers: vec![],
                 metadata: serde_json::Value::Null,
+                owner: test_owner(),
             })
             .await;
 
@@ -1543,9 +1748,12 @@ mod tests {
         let admission = AdmissionPolicy::from_config(&config, known);
         let manager = HostManager::with_admission(admission);
         manager
-            .register_provider(Arc::new(MockProvider {
-                provider_id: ProviderId::new("mock"),
-            }))
+            .register_provider(
+                Arc::new(MockProvider {
+                    provider_id: ProviderId::new("mock"),
+                }),
+                mock_launch(),
+            )
             .await;
         manager.start(start_config()).await.expect("start");
 
@@ -1557,6 +1765,7 @@ mod tests {
                 mode: None,
                 mcp_servers: vec![],
                 metadata: serde_json::Value::Null,
+                owner: test_owner(),
             })
             .await
             .expect("session should be created");
@@ -1569,6 +1778,7 @@ mod tests {
                     content: vec![crate::capability::model::HostContentBlock::Text {
                         text: "hello".to_string(),
                     }],
+                    permission_scope: None,
                 },
             )
             .await;
@@ -1597,9 +1807,12 @@ mod tests {
         let admission = AdmissionPolicy::from_config(&config, known);
         let manager = HostManager::with_admission(admission);
         manager
-            .register_provider(Arc::new(MockProvider {
-                provider_id: ProviderId::new("mock"),
-            }))
+            .register_provider(
+                Arc::new(MockProvider {
+                    provider_id: ProviderId::new("mock"),
+                }),
+                mock_launch(),
+            )
             .await;
         manager.start(start_config()).await.expect("start");
 
@@ -1611,6 +1824,7 @@ mod tests {
                 mode: None,
                 mcp_servers: vec![],
                 metadata: serde_json::Value::Null,
+                owner: test_owner(),
             })
             .await
             .expect("session should be created");
@@ -1625,6 +1839,7 @@ mod tests {
                     content: vec![crate::capability::model::HostContentBlock::Text {
                         text: "hello".to_string(),
                     }],
+                    permission_scope: None,
                 },
             )
             .await;
@@ -1641,9 +1856,12 @@ mod tests {
 
         let manager = HostManager::new();
         manager
-            .register_provider(Arc::new(MockProvider {
-                provider_id: ProviderId::new("mock"),
-            }))
+            .register_provider(
+                Arc::new(MockProvider {
+                    provider_id: ProviderId::new("mock"),
+                }),
+                mock_launch(),
+            )
             .await;
 
         // Start with workspace_root = temp_dir
@@ -1667,6 +1885,7 @@ mod tests {
                 mode: None,
                 mcp_servers: vec![],
                 metadata: serde_json::Value::Null,
+                owner: test_owner_for(temp_dir.path().to_path_buf()),
             })
             .await;
 
@@ -1716,6 +1935,7 @@ mod tests {
                 provider_id: self.provider_id.clone(),
                 session_id: HostSessionId::new(),
                 capabilities: crate::capability::model::CapabilityDescriptor::acp_full(),
+                process_identity: None,
             })
         }
 
@@ -1755,9 +1975,12 @@ mod tests {
 
         let manager = HostManager::new();
         manager
-            .register_provider(Arc::new(SlowLaunchProvider {
-                provider_id: ProviderId::new("slow-mock"),
-            }))
+            .register_provider(
+                Arc::new(SlowLaunchProvider {
+                    provider_id: ProviderId::new("slow-mock"),
+                }),
+                mock_launch(),
+            )
             .await;
 
         manager
@@ -1779,6 +2002,7 @@ mod tests {
                 mode: None,
                 mcp_servers: vec![],
                 metadata: serde_json::Value::Null,
+                owner: test_owner_for(temp_dir.path().to_path_buf()),
             })
             .await;
 

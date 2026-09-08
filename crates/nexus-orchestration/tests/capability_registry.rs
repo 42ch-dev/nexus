@@ -10,7 +10,7 @@ async fn registry_lookup_builtin_workspace_open() {
 }
 
 #[tokio::test]
-async fn registry_has_thirty_four_builtins() {
+async fn registry_has_thirty_three_builtins() {
     // V1.36 P1 added `novel.project_scaffold` (18→19);
     // P3 added `novel.chapter_transition` (19→20);
     // V1.51 T-A P0 added `nexus.llm.extract` (20→21);
@@ -25,16 +25,16 @@ async fn registry_has_thirty_four_builtins() {
     // V1.61 P3 added `narrative.compute` (31→32).
     // V1.63 P2 added `essay.draft_status.finalize` (32→33).
     // V1.67 P2 (R-V160P1-QC1-W001) added `script.section_status.update` (33→34).
-    // UPDATE THIS TEST when adding a new builtin.
+    // V1.186 P1 removed the obsolete `acp.session_load` placeholder (34→33).
+    // UPDATE THIS TEST when adding or removing a builtin.
     let reg = CapabilityRegistry::with_builtins();
-    assert_eq!(reg.len(), 34);
+    assert_eq!(reg.len(), 33);
 }
 
 #[tokio::test]
 async fn registry_lookup_acp_capabilities() {
     let reg = CapabilityRegistry::with_builtins();
     assert!(reg.get("acp.prompt").is_some());
-    assert!(reg.get("acp.session_load").is_some());
     assert!(reg.get("judge.llm").is_some());
     assert!(reg.get("context.summarize").is_some());
     // V1.51 T-A P0: nexus.llm.extract (sibling to judge.llm).

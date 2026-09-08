@@ -254,24 +254,26 @@ Daemon runtime is a **local supervisor**. It is **not** an ACP Agent or ACP Serv
 
 ---
 
-## V1.57 P1 Draft overlay: Host tool executor — 3-caller entry points
+## V1.57 P1 Draft overlay: Host tool executor — caller entry points
 
 **Status**: Draft (V1.57 P1)  
 
 ### Host tool dispatch topology
 
-The host tool executor (`host_tool_executor.rs`) provides three caller entry
+The host tool executor (`host_tool_executor.rs`) provides two caller entry
 points, all dispatching through the same `CapabilityRegistry::dispatch` path:
 
 | Entry point | Caller | Normalization | Dispatch |
 |-------------|--------|---------------|----------|
 | `HostToolExecutor::execute()` | CLI `host-call` + HTTP `POST /v1/daemon/agent-host/internal/tool-executions` | `ToolExecuteRequest` → admission pipeline | `CapabilityRegistry::dispatch` |
-| `HostToolExecutor::dispatch_from_worker()` | Worker `agent_tool_request` IPC | `{tool_name, args, request_id}` → `ToolExecuteRequest` | Same path |
 | `HostToolExecutor::dispatch_for_schedule()` | Schedule executor (in-process) | `{tool_name, args, request_id}` → `ToolExecuteRequest` with `HostToolCallerKind::Schedule` | Same path |
 
-All three entry points share a single admission pipeline (5 gates: allowlist,
-active creator, workspace bounds, permissions.toml, audit log) and dispatch
-through the same `CapabilityRegistry::dispatch(tool_id, input)` call.
+M-007: the worker `agent_tool_request` IPC lane (`dispatch_from_worker()`,
+`HostToolCallerKind::Worker`) was removed — the surviving dispatch lane is
+Schedule-only. All remaining entry points share a single admission pipeline
+(5 gates: allowlist, active creator, workspace bounds, permissions.toml,
+audit log) and dispatch through the same
+`CapabilityRegistry::dispatch(tool_id, input)` call.
 
 ### V1.57 P1 refactor
 
@@ -281,22 +283,21 @@ through the same `CapabilityRegistry::dispatch(tool_id, input)` call.
   registry-bound `host_tool_handlers` module
 - `CdnConfig` constructor-injected (no global `RwLock`)
 
-### V1.57 P3: Worker IPC allowlist — dynamic derivation
+### V1.57 P3: Tool allowlist — dynamic derivation
 
 **Status**: Shipped (V1.57 P3)
 
 The admission pipeline's Gate 1 (tool ID allowlist) now uses
 `CapabilityRegistry::lookup()` as its dynamic SSOT instead of the static
 `TOOL_ALLOWLIST` constant (see `host_tool_handlers.rs::admission_pipeline`).
-This means the worker `agent_tool_request` IPC path — which normalizes
-through `HostToolExecutor::dispatch_from_worker()` → `execute()` →
-`admission_pipeline()` — derives its allowlist from the same registry as
-CLI and HTTP entry points. All 18 shipped `nexus.*` host tool IDs are
-dispatchable via worker IPC; unknown IDs return `NOT_SUPPORTED`.
+This means the CLI/HTTP and schedule entry points — which normalize through
+`HostToolExecutor::execute()` / `dispatch_for_schedule()` →
+`admission_pipeline()` — derive their allowlist from the same registry as
+each other. All 18 shipped `nexus.*` host tool IDs are dispatchable via
+those lanes; unknown IDs return `NOT_SUPPORTED`.
 
 Cross-caller E2E test: `crates/nexus-daemon-runtime/tests/cross_caller_e2e.rs`
-verifies dispatch equivalence across all 3 caller paths for all 18 IDs
-(54 invocation cases).
+verifies dispatch equivalence across the caller paths for all 18 IDs.
 
 ## V1.58 P0 Draft overlay: .sqlx cache hygiene protocol (R-V156-PROCESS-01 + R-V156P1-CACHE-01)
 
@@ -616,7 +617,7 @@ The Vite dev origin (`http://localhost:5173`) is allowed unconditionally because
 
 | Condition | Outcome |
 |-----------|---------|
-| Request carries no `Origin` header | **Permitted** — non-browser clients (CLI `host-call`, `curl`, worker IPC, direct browser tab navigation to the daemon's own URL at `http://127.0.0.1:<port>`) do not send an `Origin` header. Same-origin browser requests also omit `Origin`. |
+| Request carries no `Origin` header | **Permitted** — non-browser clients (CLI `host-call`, `curl`, direct browser tab navigation to the daemon's own URL at `http://127.0.0.1:<port>`) do not send an `Origin` header. Same-origin browser requests also omit `Origin`. |
 | `Origin` header value is in the allowlist | **Permitted** — the request proceeds to auth middleware (§4.4.3) and the handler |
 | `Origin` header value is NOT in the allowlist | **Rejected** — `403 Forbidden` with a clear error message including the rejected origin value and a reference to `NEXUS_DAEMON_ALLOWED_ORIGINS` as the documented escape hatch |
 
@@ -634,7 +635,7 @@ Both layers derive their allowlist from the same configuration source. The middl
 
 The Origin gate is **independent of** and **applied before** the auth middleware (§4.4.3). The keyless-localhost mode (`NEXUS42_DAEMON_API_KEY` unset) remains the default (deprecation is a non-goal; see V1.86 compass §1). Before V1.86, a cross-origin browser request to `http://127.0.0.1:8420` passed both permissive CORS (all origins allowed) AND keyless-localhost auth (TCP connection is loopback). After V1.86, the Origin gate rejects the cross-origin request at the first layer — the auth middleware is never reached — because the malicious site's `Origin` (e.g., `https://evil.com`) is not in the allowlist.
 
-Non-browser clients (CLI, workers, `curl`) do not send an `Origin` header and pass the Origin gate, then proceed through auth as before.
+Non-browser clients (CLI, `curl`) do not send an `Origin` header and pass the Origin gate, then proceed through auth as before.
 
 #### 13.1.5 Observability
 
@@ -651,7 +652,7 @@ fs/* tools require an active workspace with defined bounds
 
 **Rationale:** the fs/* path guard (§13.3, §4.5 W-002) requires a workspace root to enforce the containment boundary. Without a workspace root there is no boundary to enforce and any filesystem path would pass. Deny-by-default is the safe primitive; a sandbox-dir fallback is YAGNI.
 
-**Caller audit:** all three host-tool caller entry points (CLI `host-call`, worker `agent_tool_request` IPC, schedule executor) require an active workspace context for legitimate fs/* usage. No legitimate no-workspace fs/* invocation path exists in the current architecture. This invariant is verified by grepping all `HostToolExecutor` call sites at the time of the fix and documented here so future callers respect it.
+**Caller audit:** all host-tool caller entry points (CLI `host-call`, schedule executor) require an active workspace context for legitimate fs/* usage. The worker `agent_tool_request` IPC lane was removed (M-007); no legitimate no-workspace fs/* invocation path exists in the current architecture. This invariant is verified by grepping all `HostToolExecutor` call sites at the time of the fix and documented here so future callers respect it.
 
 **Implementation contract:** the denial is in `admission_pipeline()` (`api/handlers/host_tool_handlers.rs`), before `execute_read_file` / `execute_write_file` run. The admission check is:
 ```rust

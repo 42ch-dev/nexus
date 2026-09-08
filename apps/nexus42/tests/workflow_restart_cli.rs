@@ -702,7 +702,14 @@ async fn restart_durable_status_converge_merge_redrives_after_reopen() {
     engine.set_daemon_tool_dispatch(dispatch.clone());
     let engine = Arc::new(engine);
     let engine_ref: Arc<dyn OrchestrationEngine> = engine.clone();
-    let wired = build_wired_outer_graph(&loaded, &engine_ref, &caps, Some(dispatch.clone()));
+    let wired = build_wired_outer_graph(
+        &loaded,
+        &engine_ref,
+        &caps,
+        Some(dispatch.clone()),
+        None,
+        engine.shared_state().session_cancels.clone(),
+    );
     let runner = Arc::new(graph_flow::FlowRunner::new(
         Arc::new(wired),
         dyn_storage.clone(),
@@ -830,7 +837,14 @@ async fn restart_durable_status_converge_merge_redrives_after_reopen() {
     engine_c.set_daemon_tool_dispatch(dispatch.clone());
     let engine_c = Arc::new(engine_c);
     let engine_c_ref: Arc<dyn OrchestrationEngine> = engine_c.clone();
-    let wired_c = build_wired_outer_graph(&loaded_c, &engine_c_ref, &caps_c, Some(dispatch.clone()));
+    let wired_c = build_wired_outer_graph(
+        &loaded_c,
+        &engine_c_ref,
+        &caps_c,
+        Some(dispatch.clone()),
+        None,
+        engine_c.shared_state().session_cancels.clone(),
+    );
     let runner_c = Arc::new(graph_flow::FlowRunner::new(
         Arc::new(wired_c),
         dyn_storage_c.clone(),
@@ -948,7 +962,14 @@ async fn restart_durable_status_engine_parked_join_redrives_after_reopen() {
     }));
     let engine = Arc::new(engine);
     let engine_ref: Arc<dyn OrchestrationEngine> = engine.clone();
-    let wired = build_wired_outer_graph(&loaded, &engine_ref, &caps, None);
+    let wired = build_wired_outer_graph(
+        &loaded,
+        &engine_ref,
+        &caps,
+        None,
+        None,
+        engine.shared_state().session_cancels.clone(),
+    );
     let runner = Arc::new(graph_flow::FlowRunner::new(
         Arc::new(wired),
         dyn_storage.clone(),

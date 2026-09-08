@@ -11,7 +11,7 @@ export interface CharacterOperationResult {
   operation_id: string;
   session_id: string;
   run_status: "running" | "succeeded" | "incomplete" | "failed" | "cancelled";
-  finish_reason: "end_turn" | "max_tokens" | "max_turn_requests" | "refusal" | null;
+  finish_reason: "end_turn" | "max_tokens" | "max_turn_requests" | "refusal" | "cancelled" | null;
   capture: NexusCharacterRunCaptureOutcome;
 }
 /**
