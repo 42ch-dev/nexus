@@ -551,6 +551,46 @@ pub enum RunControlError {
     /// The daemon has no active creator DB / engine (Tier-0 boot).
     #[error("no active creator workspace: {0}")]
     NoWorkspace(String),
+    /// A human-wait continuation token was stale, consumed, or wrong (A4).
+    #[error("wait conflict for session {session_id}: current status {status}, current_wait_id {current_wait_id:?}")]
+    WaitConflict {
+        /// Session id.
+        session_id: String,
+        /// Current persisted status.
+        status: String,
+        /// Current durable wait id (null when the run is not waiting).
+        current_wait_id: Option<String>,
+    },
+    /// The run is in a state that does not accept the requested signal.
+    #[error("workflow state conflict for session {0}: {1}")]
+    StateConflict(String, String),
+}
+
+/// Public control signal for a driven run (A4/A5).
+///
+/// The coordinator routes the signal to the engine's revision-fenced
+/// transition path and re-drives the run when the signal makes it runnable.
+#[derive(Debug, Clone)]
+pub enum RunSignal {
+    /// Authorized continuation of a human wait (A4). `wait_id` must match
+    /// the durable wait token exactly.
+    Continue { wait_id: String },
+    /// Cancel the run (A5): fences later steps, reaches the Host/process
+    /// owner, and persists `Cancelled` only when stop is confirmed.
+    Cancel,
+    /// Pause the run.
+    Pause,
+    /// Resume a non-human pause.
+    Resume,
+}
+
+/// Outcome of [`WorkflowRunCoordinator::signal_run`].
+#[derive(Debug, Clone)]
+pub struct RunControlResult {
+    /// Persisted status after the signal.
+    pub status: String,
+    /// Current durable wait id (null when the run is not waiting).
+    pub current_wait_id: Option<String>,
 }
 
 /// One cancellation/join owner per (Creator DB identity, session) (A3).
@@ -1750,6 +1790,91 @@ impl WorkflowRunCoordinator {
                 Err(RunControlError::Admission(msg))
             }
         }
+    }
+
+    /// Route a public control signal to the run's engine transition path
+    /// (A4/A5) and re-drive when the signal makes the run runnable.
+    ///
+    /// - `Continue { wait_id }` → the engine's revision-fenced wait CAS
+    ///   clears the exact durable wait (root + nested child atomically) and
+    ///   flips the run to `Running`; the coordinator then re-drives the
+    ///   session (single-flight — a duplicate consumer loses the CAS and
+    ///   never starts a second driver).
+    /// - `Cancel` → the engine's A5 cancel path: durable cancel-intent
+    ///   fence, coordinator token fire, bounded owned-Host teardown, then
+    ///   terminal `Cancelled` only when stop is confirmed (unconfirmed →
+    ///   `Interrupted`).
+    /// - `Pause` / `Resume` → the engine's non-wait transitions.
+    ///
+    /// Returns the persisted status and current wait id (null when not
+    /// waiting) so the caller can project the exact A4/A5 envelope.
+    ///
+    /// # Errors
+    /// Returns [`RunControlError::WaitConflict`] for a stale/consumed/wrong
+    /// wait token (no mutation), [`RunControlError::StateConflict`] for a
+    /// wrong current state, and other [`RunControlError`] variants for
+    /// storage/engine failures.
+    pub async fn signal_run(
+        &self,
+        session_id: &SessionId,
+        signal: RunSignal,
+    ) -> Result<RunControlResult, RunControlError> {
+        let engine_signal = match &signal {
+            RunSignal::Continue { wait_id } => EngineSignal::Continue {
+                wait_id: wait_id.clone(),
+            },
+            RunSignal::Cancel => EngineSignal::Cancel,
+            RunSignal::Pause => EngineSignal::Pause,
+            RunSignal::Resume => EngineSignal::Resume,
+        };
+
+        self.engine
+            .signal(session_id, engine_signal)
+            .await
+            .map_err(|e| match e {
+                nexus_orchestration::engine::EngineError::WaitConflict {
+                    session_id,
+                    status,
+                    current_wait_id,
+                } => RunControlError::WaitConflict {
+                    session_id,
+                    status: status.as_db_str().to_string(),
+                    current_wait_id,
+                },
+                nexus_orchestration::engine::EngineError::TerminalState(sid) => {
+                    RunControlError::StateConflict(sid, "run is terminal or not in a signalable state".to_string())
+                }
+                nexus_orchestration::engine::EngineError::SessionNotFound(sid) => {
+                    RunControlError::ScheduleNotFound(sid)
+                }
+                other => RunControlError::Drive(other.to_string()),
+            })?;
+
+        // A successful Continue makes the run runnable: re-drive it through
+        // the single coordinator owner (single-flight — a duplicate consumer
+        // that lost the CAS never reaches this point).
+        if matches!(signal, RunSignal::Continue { .. }) {
+            self.ensure_driving(session_id).await?;
+        }
+
+        // Project the persisted status + current wait id for the response.
+        let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
+            self.pool.clone(),
+        );
+        let record = store
+            .load_run(session_id)
+            .await
+            .map_err(|e| RunControlError::Drive(e.to_string()))?
+            .ok_or_else(|| RunControlError::ScheduleNotFound(session_id.0.clone()))?;
+        let current_wait_id = record
+            .state
+            .as_ref()
+            .and_then(|s| s.wait.as_ref())
+            .map(|w| w.wait_id.clone());
+        Ok(RunControlResult {
+            status: record.status.as_db_str().to_string(),
+            current_wait_id,
+        })
     }
 }
 

@@ -10,4 +10,8 @@
 export interface SignalScheduleResponse {
   schedule_id: string;
   status: string;
+  /**
+   * Current durable wait id after the signal (null when not waiting).
+   */
+  current_wait_id?: string | null;
 }

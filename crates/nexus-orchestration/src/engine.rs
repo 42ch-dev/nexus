@@ -200,6 +200,11 @@ pub enum EngineSignal {
     Resume,
     Cancel,
     Advance,
+    /// Authorized continuation of a human wait (A4). Carries the exact
+    /// durable wait token; a stale/consumed/wrong token loses the CAS and
+    /// is refused with [`EngineError::WaitConflict`] — never a second
+    /// driver and never an auto-approval.
+    Continue { wait_id: String },
 }
 
 /// Parameters for spawning a child session (inner graph).
@@ -280,6 +285,22 @@ pub enum EngineError {
         session_id: String,
         /// Persisted execution version of the existing row.
         execution_version: u32,
+    },
+    /// A human-wait continuation token was stale, consumed, or wrong (A4).
+    ///
+    /// The caller must surface the current persisted status and current
+    /// wait id (null when none) so the operator can re-issue the exact
+    /// token. No mutation occurred and no second driver was started.
+    #[error(
+        "wait conflict for session {session_id}: token does not match the current wait"
+    )]
+    WaitConflict {
+        /// Session id.
+        session_id: String,
+        /// Current persisted status.
+        status: SessionStatus,
+        /// Current durable wait id (null when the run is not waiting).
+        current_wait_id: Option<String>,
     },
 }
 
@@ -627,6 +648,14 @@ impl EngineSharedState {
     /// - `Resume`/`Advance` → `Running`, **fenced against terminal states**
     ///   (Critical 3): a terminal session must never be flipped back to
     ///   `Running` by a resume signal.
+    /// - `Continue { wait_id }` → `Running`, **fenced against the exact
+    ///   durable wait token** (A4): the run must be waiting with a
+    ///   `WaitRecord` whose `wait_id` matches. A stale/consumed/wrong token
+    ///   loses the CAS and returns [`EngineError::WaitConflict`] — no
+    ///   mutation, no second driver. A nested child wait clears the child's
+    ///   durable wait record in the SAME root `commit_transition` (one
+    ///   atomic CAS), so a duplicate consumer can never clear the child
+    ///   without winning the root.
     ///
     /// Returns the target status on success. When the store is absent
     /// (in-memory test storage) this is a no-op returning the target status.
@@ -648,6 +677,7 @@ impl EngineSharedState {
             EngineSignal::Pause => SessionStatus::Paused,
             EngineSignal::Resume | EngineSignal::Advance => SessionStatus::Running,
             EngineSignal::Cancel => SessionStatus::Cancelled,
+            EngineSignal::Continue { .. } => SessionStatus::Running,
         };
 
         let Some(store) = &self.workflow_store else {
@@ -664,7 +694,11 @@ impl EngineSharedState {
         if record.status.is_terminal() {
             return Err(EngineError::TerminalState(session_id.0.clone()));
         }
-        if !matches!(signal, EngineSignal::Cancel)
+        // Continue is the ONLY non-cancel signal that may act on a waiting
+        // run; all other non-cancel signals are fenced against waits and
+        // in-flight markers (A4: advance/resume/force-transition cannot
+        // bypass a human wait).
+        if !matches!(signal, EngineSignal::Cancel | EngineSignal::Continue { .. })
             && (matches!(record.status, SessionStatus::WaitingForInput)
                 || next_state.wait.is_some()
                 || next_state.step_in_flight.is_some()
@@ -679,6 +713,94 @@ impl EngineSharedState {
             .await
             .map_err(EngineError::GraphFlow)?
             .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
+
+        // A4: authorized continuation of a human wait.
+        if let EngineSignal::Continue { wait_id } = signal {
+            // The run must be waiting with a durable wait record.
+            let Some(wait) = &next_state.wait else {
+                return Err(EngineError::WaitConflict {
+                    session_id: session_id.0.clone(),
+                    status: record.status.clone(),
+                    current_wait_id: None,
+                });
+            };
+            if wait.wait_id != *wait_id {
+                return Err(EngineError::WaitConflict {
+                    session_id: session_id.0.clone(),
+                    status: record.status.clone(),
+                    current_wait_id: Some(wait.wait_id.clone()),
+                });
+            }
+
+            // Nested child wait: the child's durable wait record must also
+            // be cleared so the child can be re-stepped (A4 "propagate one
+            // authorized token to the exact waiting descendant"). The child
+            // checkpoint is carried in the SAME root `commit_transition`
+            // so the root+child wait clear is one atomic CAS — a duplicate
+            // consumer loses the root CAS and never clears the child.
+            let mut children: Vec<ChildCheckpoint> = Vec::new();
+            if let Some(child_session_id) = &wait.child_session_id {
+                let child_sid = SessionId(child_session_id.clone());
+                let child_record = store
+                    .load_run(&child_sid)
+                    .await?
+                    .ok_or_else(|| EngineError::SessionNotFound(child_session_id.clone()))?;
+                let child_session = self
+                    .storage
+                    .get(child_session_id)
+                    .await
+                    .map_err(EngineError::GraphFlow)?
+                    .ok_or_else(|| EngineError::SessionNotFound(child_session_id.clone()))?;
+                let mut child_state = child_record.state.unwrap_or_default();
+                child_state.wait = None;
+                let graph_name = child_record
+                    .descriptor
+                    .as_ref()
+                    .and_then(|d| d.graph_name.clone());
+                children.push(ChildCheckpoint {
+                    session: child_session,
+                    status: SessionStatus::Running,
+                    state: child_state,
+                    state_revision: child_record.state_revision,
+                    graph_name,
+                });
+            }
+
+            // Clear the root wait and make the run runnable. The child
+            // checkpoint (when nested) is committed atomically with the
+            // root under the root revision CAS.
+            next_state.wait = None;
+            let checkpoint = RunCheckpoint {
+                root: &root,
+                children: &children,
+            };
+            store
+                .commit_transition(
+                    session_id,
+                    expected_revision,
+                    checkpoint,
+                    SessionStatus::Running,
+                    &next_state,
+                )
+                .await?;
+
+            // The root commit advanced each carried child's persisted
+            // revision by one; synchronize the in-memory children map so
+            // the parent's next `commit_transition` submits the correct
+            // child CAS anchor (N-7).
+            if !children.is_empty() {
+                let mut child_map = self.children.write().await;
+                if let Some(entries) = child_map.get_mut(&session_id.0) {
+                    for child in entries.iter_mut() {
+                        if children.iter().any(|c| c.session.id == child.session.id) {
+                            child.state_revision = child.state_revision.saturating_add(1);
+                        }
+                    }
+                }
+            }
+            return Ok(SessionStatus::Running);
+        }
+
         let checkpoint = RunCheckpoint {
             root: &root,
             children: &[],
@@ -701,15 +823,33 @@ impl EngineSharedState {
 
             // Fire the run's coordinator cancellation token so the
             // in-flight prompt operation observes cancellation and begins
-            // its bounded Host cleanup.
-            if let Some(token) = self
-                .session_cancels
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .get(&session_id.0)
-                .cloned()
+            // its bounded Host cleanup. The root token covers root-level
+            // prompt nodes; nested inner-graph prompt nodes run in child
+            // sessions with their OWN registered tokens (A4 nested child
+            // propagation) — fire those too so a cancel reaches the exact
+            // waiting descendant.
             {
-                token.cancel();
+                let child_ids: Vec<String> = {
+                    let children = self.children.read().await;
+                    children
+                        .get(&session_id.0)
+                        .map(|entries| {
+                            entries
+                                .iter()
+                                .map(|c| c.session.id.clone())
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default()
+                };
+                let cancels = self.session_cancels.read().unwrap_or_else(|e| e.into_inner());
+                if let Some(token) = cancels.get(&session_id.0).cloned() {
+                    token.cancel();
+                }
+                for child_id in child_ids {
+                    if let Some(token) = cancels.get(&child_id).cloned() {
+                        token.cancel();
+                    }
+                }
             }
 
             // Await the prompt executor's bounded owned-Host teardown.

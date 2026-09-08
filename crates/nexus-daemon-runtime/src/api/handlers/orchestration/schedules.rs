@@ -1398,6 +1398,7 @@ pub async fn signal_schedule(
                 Json(SignalScheduleResponse {
                     schedule_id,
                     status: "running".to_string(),
+                    current_wait_id: None,
                 }),
             ));
         }
@@ -1427,6 +1428,7 @@ pub async fn signal_schedule(
                 Json(SignalScheduleResponse {
                     schedule_id,
                     status: "paused".to_string(),
+                    current_wait_id: None,
                 }),
             ));
         }
@@ -1458,30 +1460,66 @@ pub async fn signal_schedule(
                 Json(SignalScheduleResponse {
                     schedule_id,
                     status: new_status,
+                    current_wait_id: None,
                 }),
             ));
         }
         "cancel" => match current_status_str.as_str() {
             "pending" | "running" | "paused" => {
-                // Use supervisor for consistent DB + running cache update.
-                // R1 fix: log pause error at warn! level instead of silently ignoring.
-                // The pause failure must NOT block the cancel operation — the
-                // schedule enters terminal state regardless.
-                if current_status_str == "running" {
-                    if let Err(e) = supervisor.pause_schedule(&schedule_id).await {
-                        tracing::warn!(
-                            "pause failed during cancel for schedule {}: {}; continuing with cancel",
-                            schedule_id,
-                            e
-                        );
-                    }
+                // A5: cancel must reach the active Host/ACP work through the
+                // coordinator — the engine's cancel path persists the
+                // durable cancel-intent fence, fires the run token, awaits
+                // bounded owned-Host teardown, and only then persists
+                // terminal `cancelled` (unconfirmed → `interrupted`). The
+                // schedule row is updated to match the run's terminal
+                // outcome.
+                let session_id = sqlx::query_scalar::<_, Option<String>>(
+                    "SELECT current_session_id FROM creator_schedules WHERE schedule_id = ?",
+                )
+                .bind(&schedule_id)
+                .fetch_optional(&*pool)
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    code: "DATABASE_ERROR".into(),
+                    message: format!("database error: {e}"),
+                })?
+                .flatten();
+
+                let mut terminal_status = "cancelled".to_string();
+                if let Some(sid) = session_id {
+                    let coordinator = state.run_coordinator().ok_or_else(|| {
+                        NexusApiError::service_unavailable("run coordinator not configured")
+                    })?;
+                    let result = coordinator
+                        .signal_run(
+                            &nexus_orchestration::engine::SessionId(sid),
+                            crate::preset_run::RunSignal::Cancel,
+                        )
+                        .await
+                        .map_err(|e| match e {
+                            crate::preset_run::RunControlError::StateConflict(sid, msg) => {
+                                NexusApiError::ConflictCoded {
+                                    code: "workflow_state_conflict".into(),
+                                    message: format!("state conflict for {sid}: {msg}"),
+                                }
+                            }
+                            crate::preset_run::RunControlError::ScheduleNotFound(sid) => {
+                                NexusApiError::NotFound(format!("session {sid} not found"))
+                            }
+                            other => NexusApiError::Internal {
+                                code: "RUN_CONTROL_ERROR".into(),
+                                message: other.to_string(),
+                            },
+                        })?;
+                    terminal_status = result.status;
                 }
 
                 // SAFETY: runtime `sqlx::query` — same pool lifetime constraint as inspect_schedule above.
                 sqlx::query(
-                        "UPDATE creator_schedules SET status = 'cancelled', terminated_at = ?, updated_at = ?
+                        "UPDATE creator_schedules SET status = ?, terminated_at = ?, updated_at = ?
                          WHERE schedule_id = ?",
                     )
+                    .bind(&terminal_status)
                     .bind(now)
                     .bind(&schedule_id)
                     .execute(&*pool)
@@ -1495,7 +1533,8 @@ pub async fn signal_schedule(
                     StatusCode::OK,
                     Json(SignalScheduleResponse {
                         schedule_id,
-                        status: "cancelled".to_string(),
+                        status: terminal_status,
+                        current_wait_id: None,
                     }),
                 ));
             }
@@ -1507,14 +1546,65 @@ pub async fn signal_schedule(
         },
         "advance" => {
             // Advance is a pass-through signal for the session engine;
-            // confirm the schedule is running.
+            // confirm the schedule is running. When the schedule owns a
+            // session, the signal routes through the engine's
+            // revision-fenced transition path so a human wait is NEVER
+            // bypassed (A4: advance/resume/force-transition cannot bypass
+            // a human wait — the engine refuses with
+            // workflow_state_conflict).
             match current_status_str.as_str() {
                 "running" => {
+                    let session_id = sqlx::query_scalar::<_, Option<String>>(
+                        "SELECT current_session_id FROM creator_schedules WHERE schedule_id = ?",
+                    )
+                    .bind(&schedule_id)
+                    .fetch_optional(&*pool)
+                    .await
+                    .map_err(|e| NexusApiError::Internal {
+                        code: "DATABASE_ERROR".into(),
+                        message: format!("database error: {e}"),
+                    })?
+                    .flatten();
+                    if let Some(sid) = session_id {
+                        let coordinator = state.run_coordinator().ok_or_else(|| {
+                            NexusApiError::service_unavailable("run coordinator not configured")
+                        })?;
+                        let result = coordinator
+                            .signal_run(
+                                &nexus_orchestration::engine::SessionId(sid),
+                                crate::preset_run::RunSignal::Resume,
+                            )
+                            .await
+                            .map_err(|e| match e {
+                                crate::preset_run::RunControlError::StateConflict(sid, msg) => {
+                                    NexusApiError::ConflictCoded {
+                                        code: "workflow_state_conflict".into(),
+                                        message: format!("state conflict for {sid}: {msg}"),
+                                    }
+                                }
+                                crate::preset_run::RunControlError::ScheduleNotFound(sid) => {
+                                    NexusApiError::NotFound(format!("session {sid} not found"))
+                                }
+                                other => NexusApiError::Internal {
+                                    code: "RUN_CONTROL_ERROR".into(),
+                                    message: other.to_string(),
+                                },
+                            })?;
+                        return Ok((
+                            StatusCode::OK,
+                            Json(SignalScheduleResponse {
+                                schedule_id,
+                                status: result.status,
+                                current_wait_id: result.current_wait_id,
+                            }),
+                        ));
+                    }
                     return Ok((
                         StatusCode::OK,
                         Json(SignalScheduleResponse {
                             schedule_id,
                             status: "running".to_string(),
+                            current_wait_id: None,
                         }),
                     ));
                 }
@@ -1525,11 +1615,97 @@ pub async fn signal_schedule(
                 }
             }
         }
+        "continue" => {
+            // A4: authorized continuation of a human wait. The exact
+            // durable wait token is required; a stale/consumed/wrong token
+            // refuses with 409 workflow_wait_conflict and never starts a
+            // second driver. The coordinator routes the signal to the
+            // engine's revision-fenced wait CAS and re-drives the run.
+            let wait_id = body.wait_id.as_deref().ok_or_else(|| {
+                NexusApiError::BadRequestCodedDetails {
+                    code: "invalid_input".into(),
+                    message: "continue requires the exact durable wait token".into(),
+                    details: serde_json::json!({
+                        "field": "wait_id",
+                        "reason": "continue requires the exact durable wait token",
+                    }),
+                }
+            })?;
+            let coordinator = state.run_coordinator().ok_or_else(|| {
+                NexusApiError::service_unavailable("run coordinator not configured")
+            })?;
+            let session_id = sqlx::query_scalar::<_, Option<String>>(
+                "SELECT current_session_id FROM creator_schedules WHERE schedule_id = ?",
+            )
+            .bind(&schedule_id)
+            .fetch_optional(&*pool)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: format!("database error: {e}"),
+            })?
+            .flatten()
+            .ok_or_else(|| {
+                NexusApiError::Conflict(format!(
+                    "cannot continue schedule {schedule_id}: no owned run"
+                ))
+            })?;
+            let result = coordinator
+                .signal_run(
+                    &nexus_orchestration::engine::SessionId(session_id),
+                    crate::preset_run::RunSignal::Continue {
+                        wait_id: wait_id.to_string(),
+                    },
+                )
+                .await
+                .map_err(|e| match e {
+                    crate::preset_run::RunControlError::WaitConflict {
+                        session_id,
+                        status,
+                        current_wait_id,
+                    } => {
+                        // A4 exact envelope: `{session_id, status,
+                        // current_wait_id}` in details.
+                        NexusApiError::ConflictCodedDetails {
+                            code: "workflow_wait_conflict".into(),
+                            message: format!(
+                                "wait conflict for {session_id}: current status {status}, current_wait_id {current_wait_id:?}"
+                            ),
+                            details: serde_json::json!({
+                                "session_id": session_id,
+                                "status": status,
+                                "current_wait_id": current_wait_id,
+                            }),
+                        }
+                    }
+                    crate::preset_run::RunControlError::StateConflict(sid, msg) => {
+                        NexusApiError::ConflictCoded {
+                            code: "workflow_state_conflict".into(),
+                            message: format!("state conflict for {sid}: {msg}"),
+                        }
+                    }
+                    crate::preset_run::RunControlError::ScheduleNotFound(sid) => {
+                        NexusApiError::NotFound(format!("session {sid} not found"))
+                    }
+                    other => NexusApiError::Internal {
+                        code: "RUN_CONTROL_ERROR".into(),
+                        message: other.to_string(),
+                    },
+                })?;
+            return Ok((
+                StatusCode::OK,
+                Json(SignalScheduleResponse {
+                    schedule_id,
+                    status: result.status,
+                    current_wait_id: result.current_wait_id,
+                }),
+            ));
+        }
         _ => {
             return Err(NexusApiError::BadRequest {
                 code: "unknown_signal".into(),
                 message: format!(
-                    "unknown signal '{}'; expected start|pause|resume|cancel|advance",
+                    "unknown signal '{}'; expected start|pause|resume|cancel|advance|continue",
                     body.signal
                 ),
             });
@@ -2189,9 +2365,10 @@ mod tests {
 
     #[test]
     fn signal_request_parse_valid_signals() {
-        for signal in &["pause", "resume", "cancel", "start", "advance"] {
+        for signal in &["pause", "resume", "cancel", "start", "advance", "continue"] {
             let req = SignalScheduleRequest {
                 signal: signal.to_string(),
+                wait_id: None,
             };
             let json = serde_json::to_string(&req).expect("SignalScheduleRequest should serialize");
             let back: SignalScheduleRequest =

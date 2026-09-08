@@ -202,12 +202,19 @@ pub struct CoreContextHistoryEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignalScheduleRequest {
     pub signal: String,
+    /// Exact durable wait token for `continue` (A4). Required for
+    /// `signal: "continue"`; ignored/absent for other signals.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignalScheduleResponse {
     pub schedule_id: String,
     pub status: String,
+    /// Current durable wait id after the signal (null when not waiting).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_wait_id: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -407,10 +414,25 @@ mod tests {
     fn signal_schedule_request_roundtrip() {
         let req = SignalScheduleRequest {
             signal: "pause".to_string(),
+            wait_id: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         let back: SignalScheduleRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(back.signal, "pause");
+        assert!(back.wait_id.is_none());
+    }
+
+    #[test]
+    fn signal_schedule_request_continue_roundtrip() {
+        let req = SignalScheduleRequest {
+            signal: "continue".to_string(),
+            wait_id: Some("w-123".to_string()),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"wait_id\":\"w-123\""));
+        let back: SignalScheduleRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.signal, "continue");
+        assert_eq!(back.wait_id.as_deref(), Some("w-123"));
     }
 
     #[test]

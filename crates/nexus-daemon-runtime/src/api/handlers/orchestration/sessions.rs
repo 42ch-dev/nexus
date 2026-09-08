@@ -256,21 +256,120 @@ pub async fn signal_session(
         "resume" => EngineSignal::Resume,
         "cancel" => EngineSignal::Cancel,
         "advance" => EngineSignal::Advance,
+        "continue" => {
+            let wait_id = body.wait_id.as_deref().ok_or_else(|| {
+                NexusApiError::BadRequestCodedDetails {
+                    code: "invalid_input".into(),
+                    message: "continue requires the exact durable wait token".into(),
+                    details: serde_json::json!({
+                        "field": "waitId",
+                        "reason": "continue requires the exact durable wait token",
+                    }),
+                }
+            })?;
+            EngineSignal::Continue {
+                wait_id: wait_id.to_string(),
+            }
+        }
         other => {
             return Err(NexusApiError::BadRequest {
                 code: "invalid_signal".into(),
                 message: format!(
-                    "invalid signal: '{other}' — expected pause|resume|cancel|advance"
+                    "invalid signal: '{other}' — expected pause|resume|cancel|advance|continue"
                 ),
             });
         }
     };
 
     let sid = nexus_orchestration::engine::SessionId(session_id);
+
+    // `continue` must route through the coordinator so the run is re-driven
+    // after the wait CAS (single-flight). Other signals go through the
+    // engine's revision-fenced transition path directly.
+    if body.signal == "continue" {
+        let coordinator = state.run_coordinator().ok_or_else(|| {
+            NexusApiError::service_unavailable("run coordinator not configured")
+        })?;
+        let wait_id = body.wait_id.as_deref().ok_or_else(|| {
+            NexusApiError::BadRequestCodedDetails {
+                code: "invalid_input".into(),
+                message: "continue requires the exact durable wait token".into(),
+                details: serde_json::json!({
+                    "field": "waitId",
+                    "reason": "continue requires the exact durable wait token",
+                }),
+            }
+        })?;
+        let result = coordinator
+            .signal_run(
+                &sid,
+                crate::preset_run::RunSignal::Continue {
+                    wait_id: wait_id.to_string(),
+                },
+            )
+            .await
+            .map_err(|e| match e {
+                crate::preset_run::RunControlError::WaitConflict {
+                    session_id,
+                    status,
+                    current_wait_id,
+                } => NexusApiError::ConflictCodedDetails {
+                    code: "workflow_wait_conflict".into(),
+                    message: format!(
+                        "wait conflict for {session_id}: current status {status}, current_wait_id {current_wait_id:?}"
+                    ),
+                    details: serde_json::json!({
+                        "session_id": session_id,
+                        "status": status,
+                        "current_wait_id": current_wait_id,
+                    }),
+                },
+                crate::preset_run::RunControlError::StateConflict(sid, msg) => {
+                    NexusApiError::ConflictCoded {
+                        code: "workflow_state_conflict".into(),
+                        message: format!("state conflict for {sid}: {msg}"),
+                    }
+                }
+                crate::preset_run::RunControlError::ScheduleNotFound(sid) => {
+                    NexusApiError::NotFound(format!("session {sid} not found"))
+                }
+                other => NexusApiError::Internal {
+                    code: "RUN_CONTROL_ERROR".into(),
+                    message: other.to_string(),
+                },
+            })?;
+        return Ok((
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "signal": "continue",
+                "status": result.status,
+                "current_wait_id": result.current_wait_id,
+            })),
+        ));
+    }
+
     engine.signal(&sid, signal).await.map_err(
         |e: nexus_orchestration::engine::EngineError| match e {
             nexus_orchestration::engine::EngineError::SessionNotFound(_) => {
                 NexusApiError::NotFound("session not found".into())
+            }
+            nexus_orchestration::engine::EngineError::WaitConflict {
+                session_id,
+                status,
+                current_wait_id,
+            } => NexusApiError::ConflictCoded {
+                code: "workflow_wait_conflict".into(),
+                message: format!(
+                    "wait conflict for {session_id}: current status: {}, current_wait_id: {}",
+                    status.as_db_str(),
+                    current_wait_id.unwrap_or_else(|| "<none>".to_string())
+                ),
+            },
+            nexus_orchestration::engine::EngineError::TerminalState(sid) => {
+                NexusApiError::ConflictCoded {
+                    code: "workflow_state_conflict".into(),
+                    message: format!("state conflict for {sid}: run is terminal or not in a signalable state"),
+                }
             }
             other => NexusApiError::Internal {
                 code: "ENGINE_ERROR".into(),

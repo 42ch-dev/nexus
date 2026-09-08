@@ -167,6 +167,16 @@ pub enum ScheduleCommand {
         id: String,
     },
 
+    /// Continue a schedule past a human wait with the exact durable wait token (A4)
+    Continue {
+        /// Schedule ID to continue
+        id: String,
+
+        /// Exact durable wait token from the wait record
+        #[arg(long)]
+        wait_id: String,
+    },
+
     /// Show creator's schedule timeline
     Timeline {
         /// Creator ID
@@ -299,6 +309,9 @@ pub async fn run(cmd: ScheduleCommand, config: &CliConfig) -> Result<()> {
         ScheduleCommand::Resume { id } => signal_schedule_cmd(&client, &id, "resume").await,
         ScheduleCommand::Cancel { id } => signal_schedule_cmd(&client, &id, "cancel").await,
         ScheduleCommand::Advance { id } => signal_schedule_cmd(&client, &id, "advance").await,
+        ScheduleCommand::Continue { id, wait_id } => {
+            signal_schedule_cmd_with_wait(&client, &id, "continue", Some(&wait_id)).await
+        }
         ScheduleCommand::Timeline { creator, days } => timeline(&client, &creator, days).await,
     }
 }
@@ -559,13 +572,26 @@ async fn signal_schedule_cmd(
     id: &str,
     signal: &str,
 ) -> Result<()> {
+    signal_schedule_cmd_with_wait(client, id, signal, None).await
+}
+
+async fn signal_schedule_cmd_with_wait(
+    client: &crate::api::DaemonClient,
+    id: &str,
+    signal: &str,
+    wait_id: Option<&str>,
+) -> Result<()> {
     let path = format!("{SCHEDULE_BASE}/{id}/signal");
     let body = SignalScheduleRequest {
         signal: signal.to_string(),
+        wait_id: wait_id.map(str::to_string),
     };
     let resp: SignalScheduleResponse = client.post(&path, &body).await?;
 
     println!("schedule {id}: {} → {}", signal, resp.status);
+    if let Some(wait_id) = &resp.current_wait_id {
+        println!("current_wait_id: {wait_id}");
+    }
     Ok(())
 }
 
@@ -894,6 +920,26 @@ mod tests {
                 assert_eq!(id, "SCH001");
             }
             other => panic!("expected Advance, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn continue_command_parses() {
+        let cmd = ScheduleCli::try_parse_from([
+            "schedule",
+            "continue",
+            "SCH001",
+            "--wait-id",
+            "w-abc-123",
+        ])
+        .expect("parse command");
+
+        match cmd.command {
+            ScheduleCommand::Continue { id, wait_id } => {
+                assert_eq!(id, "SCH001");
+                assert_eq!(wait_id, "w-abc-123");
+            }
+            other => panic!("expected Continue, got: {other:?}"),
         }
     }
 

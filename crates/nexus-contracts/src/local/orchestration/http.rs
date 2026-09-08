@@ -123,8 +123,12 @@ pub struct ReloadPresetResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignalSessionRequest {
-    /// One of `pause`, `resume`, `cancel`, `advance`.
+    /// One of `pause`, `resume`, `cancel`, `advance`, `continue`.
     pub signal: String,
+    /// Exact durable wait token for `continue` (A4). Required for
+    /// `signal: "continue"`; ignored/absent for other signals.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_id: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

@@ -2440,3 +2440,687 @@ async fn admission_failed_driver_transition_refuses_reentry() {
     );
     assert_eq!(row.status, "running", "schedule row stays running (session is terminal)");
 }
+
+// ---------------------------------------------------------------------------
+// Task 2 — control acceptance: wait continue, cancellation, nested waits
+// ---------------------------------------------------------------------------
+
+/// Deterministic blocking Host fixture (T2): the first prompt BLOCKS until
+/// `release()` is called (or the operation is cancelled), then emits a
+/// transformed delta + EndTurn. Every prompt increments the effect counter.
+/// `cancel` records the cancelled op id AND releases any blocked stream so
+/// the prompt executor's drain loop can observe cancellation. `shutdown_session`
+/// increments the reap counter. This is the deterministic production-daemon
+/// blocking ACP fixture the T2 acceptance requires.
+struct BlockingHost {
+    prompts: Mutex<Vec<String>>,
+    effects: AtomicU64,
+    cancels: AtomicU64,
+    reaps: AtomicU64,
+    block_first: AtomicU64,
+    /// Incremented when a blocked stream's first event is actually being
+    /// awaited (the prompt executor's drain loop is polling) — the
+    /// deterministic signal that a cancel will reach the Host operation.
+    streams_started: std::sync::Arc<AtomicU64>,
+    release: tokio::sync::watch::Sender<bool>,
+    /// Kept alive so `send` never fails (the channel stays open even when
+    /// no stream is currently subscribed).
+    _keep_alive: tokio::sync::watch::Receiver<bool>,
+}
+
+impl BlockingHost {
+    fn new() -> Arc<Self> {
+        let (release, keep_alive) = tokio::sync::watch::channel(false);
+        Arc::new(Self {
+            prompts: Mutex::new(Vec::new()),
+            effects: AtomicU64::new(0),
+            cancels: AtomicU64::new(0),
+            reaps: AtomicU64::new(0),
+            block_first: AtomicU64::new(1),
+            streams_started: std::sync::Arc::new(AtomicU64::new(0)),
+            release,
+            _keep_alive: keep_alive,
+        })
+    }
+
+    fn release(&self) {
+        let _ = self.release.send(true);
+    }
+
+    fn effects(&self) -> u64 {
+        self.effects.load(Ordering::SeqCst)
+    }
+
+    fn streams_started(&self) -> u64 {
+        self.streams_started.load(Ordering::SeqCst)
+    }
+
+    fn cancels(&self) -> u64 {
+        self.cancels.load(Ordering::SeqCst)
+    }
+
+    fn reaps(&self) -> u64 {
+        self.reaps.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl HostFacade for BlockingHost {
+    async fn start(&self, _config: HostStartConfig) -> HostResult<()> {
+        Ok(())
+    }
+
+    async fn create_session(
+        &self,
+        request: nexus_agent_host::capability::CreateSessionRequest,
+    ) -> HostResult<HostSession> {
+        Ok(HostSession {
+            id: HostSessionId::new(),
+            provider_id: request.provider_id,
+            state: SessionState::Ready,
+            created_at: chrono::Utc::now(),
+            active_op_id: None,
+            negotiated_capabilities: CapabilityDescriptor::native_cli_limited(),
+            owner: request.owner,
+            process_identity: None,
+        })
+    }
+
+    async fn exec(
+        &self,
+        session_id: HostSessionId,
+        op: HostOperation,
+    ) -> HostResult<HostEventStream> {
+        self.effects.fetch_add(1, Ordering::SeqCst);
+        let op_id = match op {
+            HostOperation::Prompt { op_id, content, .. } => {
+                let text = match content.as_slice() {
+                    [HostContentBlock::Text { text }] => text.clone(),
+                    other => format!("unexpected content {other:?}"),
+                };
+                self.prompts.lock().expect("prompts").push(text);
+                op_id
+            }
+            other => {
+                return Err(HostError::internal(format!(
+                    "unexpected operation {other:?}"
+                )));
+            }
+        };
+
+        // Block the FIRST prompt's first event until released or cancelled.
+        // The stream is returned immediately so the prompt executor's drain
+        // loop can observe the coordinator token concurrently.
+        let block = self.block_first.swap(0, Ordering::SeqCst) == 1;
+        let release_rx = self.release.subscribe();
+
+        let started = HostEvent::OpStarted(OperationStartedEvent {
+            op_id: op_id.clone(),
+            session_id: session_id.clone(),
+        });
+        let delta = HostEvent::MessageDelta(TextDeltaEvent {
+            session_id: session_id.clone(),
+            op_id: op_id.clone(),
+            text: "transformed:blocking-output".to_string(),
+        });
+        let finished = HostEvent::OpFinished(OperationFinishedEvent {
+            session_id,
+            op_id,
+            reason: FinishReason::EndTurn,
+        });
+        let streams_started = std::sync::Arc::clone(&self.streams_started);
+
+        Ok(Box::pin(futures_util::stream::unfold(
+            (block, release_rx, started, delta, finished, 0u8),
+            move |(block, mut release_rx, started, delta, finished, state)| {
+                let streams_started = std::sync::Arc::clone(&streams_started);
+                async move {
+                    if state == 0 {
+                        if block {
+                            // Signal that the drain loop is now polling this
+                            // stream (deterministic cancel-reachability),
+                            // then wait until released (or cancelled via the
+                            // same watch flag — `cancel` sends `true`).
+                            streams_started.fetch_add(1, Ordering::SeqCst);
+                            while !*release_rx.borrow() {
+                                if release_rx.changed().await.is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                        Some((Ok(started.clone()), (false, release_rx, started, delta, finished, 1)))
+                    } else if state == 1 {
+                        Some((Ok(delta.clone()), (false, release_rx, started, delta, finished, 2)))
+                    } else if state == 2 {
+                        Some((Ok(finished.clone()), (false, release_rx, started, delta, finished, 3)))
+                    } else {
+                        None
+                    }
+                }
+            },
+        )))
+    }
+
+    async fn cancel(&self, _op_id: HostOperationId) -> HostResult<()> {
+        self.cancels.fetch_add(1, Ordering::SeqCst);
+        // Release any blocked stream so the drain loop can observe
+        // cancellation and terminate the operation.
+        let _ = self.release.send(true);
+        Ok(())
+    }
+
+    async fn health(&self) -> HostResult<HostHealth> {
+        Ok(HostHealth {
+            running: true,
+            active_sessions: 0,
+            active_operations: 0,
+        })
+    }
+
+    async fn shutdown(&self) -> HostResult<()> {
+        Ok(())
+    }
+
+    async fn shutdown_session(&self, _session_id: HostSessionId) -> HostResult<()> {
+        self.reaps.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    async fn list_sessions(&self) -> HostResult<Vec<HostSession>> {
+        Ok(Vec::new())
+    }
+
+    async fn provider_catalog(&self) -> HostResult<ProviderCatalog> {
+        Ok(ProviderCatalog {
+            entries: vec![ProviderCatalogEntry {
+                provider_id: nexus_agent_host::ProviderId::new(MOCK_PROVIDER),
+                display_name: MOCK_PROVIDER.to_string(),
+                protocol_kind: ProtocolKind::NativeCli,
+                launch: LaunchStrategy::NativeCli {
+                    command: "mock".to_string(),
+                    args: vec![],
+                    env: HashMap::new(),
+                },
+                source: DiscoverySource::Config,
+                trust: TrustLevel::Explicit,
+                capabilities: CapabilityDescriptor::native_cli_limited(),
+                health: ProviderHealth {
+                    provider_id: nexus_agent_host::ProviderId::new(MOCK_PROVIDER),
+                    available: true,
+                    latency_ms: None,
+                    message: None,
+                },
+            }],
+        })
+    }
+
+    fn subscribe_events(
+        &self,
+        _session_id: HostSessionId,
+    ) -> tokio::sync::broadcast::Receiver<HostEvent> {
+        let (events, _) = tokio::sync::broadcast::channel(64);
+        events.subscribe()
+    }
+}
+
+/// T2: authorized continue with the exact durable wait token resumes the
+/// run — the effect counter advances past the wait and the run completes.
+/// A stale/duplicate continue refuses with the A4 409 envelope and never
+/// starts a second driver.
+#[tokio::test]
+async fn control_authorized_continue_resumes_and_stale_refuses() {
+    let host = BlockingHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+
+    // Admit a public schedule; the drive loop parks at the manual wait
+    // after the generate step (the blocking Host releases the first prompt).
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": PUBLIC_PRESET,
+            "label": "p2-t2-continue",
+            "seed": "p2-t2-topic",
+            "input": { "keyword": "p2-t2", "topic": "p2-t2-topic" },
+            "agent_bindings": {
+                "default": { "provider_id": MOCK_PROVIDER }
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+
+    // Release the first prompt so the run reaches the manual wait.
+    host.release();
+    let row = load_drive_row(&daemon, &schedule_id).await;
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("owned session")
+        .to_string();
+    let (run_status, state) = wait_for_run_status(&daemon, &sid, "waiting_for_input", 15).await;
+    assert_eq!(run_status, "waiting_for_input");
+    let wait_id = state["wait"]["wait_id"]
+        .as_str()
+        .expect("durable wait id")
+        .to_string();
+    assert!(!wait_id.is_empty(), "wait id must be a fresh UUID");
+    let effects_before = host.effects();
+
+    // Stale/duplicate continue: wrong token → 409 workflow_wait_conflict
+    // with the exact envelope; no mutation, no second driver.
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "continue", "wait_id": "stale-token" }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CONFLICT, "{body}");
+    assert_eq!(
+        body["error"]["code"].as_str(),
+        Some("workflow_wait_conflict"),
+        "{body}"
+    );
+    assert_eq!(
+        body["error"]["details"]["session_id"].as_str(),
+        Some(sid.as_str()),
+        "A4 envelope must carry the session id: {body}"
+    );
+    assert_eq!(
+        body["error"]["details"]["status"].as_str(),
+        Some("waiting_for_input"),
+        "A4 envelope must carry the current status: {body}"
+    );
+    assert_eq!(
+        body["error"]["details"]["current_wait_id"].as_str(),
+        Some(wait_id.as_str()),
+        "A4 envelope must carry the current wait id: {body}"
+    );
+    // No mutation: still waiting, same wait id, no new effects.
+    let (run_status, state) = load_run_record(&daemon, &sid).await;
+    assert_eq!(run_status, "waiting_for_input");
+    assert_eq!(
+        state["wait"]["wait_id"].as_str(),
+        Some(wait_id.as_str()),
+        "stale continue must not consume the wait"
+    );
+    assert_eq!(host.effects(), effects_before, "no new effects after stale continue");
+
+    // Missing wait_id → 422 invalid_input.
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "continue" }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        body["error"]["code"].as_str(),
+        Some("invalid_input"),
+        "{body}"
+    );
+    assert_eq!(
+        body["error"]["details"]["field"].as_str(),
+        Some("wait_id"),
+        "{body}"
+    );
+
+    // Authorized continue with the exact token: the run resumes and
+    // completes. (The Host exec happens at the generate step, before the
+    // wait; after continue the run only steps to the terminal `done` state,
+    // so the effect counter is unchanged — completion is the proof.)
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "continue", "wait_id": wait_id }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{body}");
+    assert_eq!(body["status"].as_str(), Some("running"), "{body}");
+
+    // The run completes (persist → done).
+    let (run_status, _) = wait_for_run_status(&daemon, &sid, "completed", 15).await;
+    assert_eq!(run_status, "completed");
+    assert_eq!(
+        host.effects(),
+        effects_before,
+        "continue must not spawn a second Host exec (single-flight)"
+    );
+
+    // Duplicate continue after completion → 409 workflow_state_conflict
+    // (the run is terminal; no second driver).
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "continue", "wait_id": "any-token" }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CONFLICT, "{body}");
+    assert_eq!(
+        body["error"]["code"].as_str(),
+        Some("workflow_state_conflict"),
+        "{body}"
+    );
+}
+
+/// T2: cancel reaches the active Host/ACP work — the coordinator token
+/// fires, the Host operation is cancelled, the owned session is reaped, and
+/// the run persists `cancelled` (never a false success). Later effects are
+/// suppressed by the fence.
+#[tokio::test]
+async fn control_cancel_reaches_host_and_persists_cancelled() {
+    let host = BlockingHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+
+    // Admit a public schedule; the first prompt BLOCKS in the Host.
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": PUBLIC_PRESET,
+            "label": "p2-t2-cancel",
+            "seed": "p2-t2-topic",
+            "input": { "keyword": "p2-t2", "topic": "p2-t2-topic" },
+            "agent_bindings": {
+                "default": { "provider_id": MOCK_PROVIDER }
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+
+    // Wait for the prompt to be in flight AND its stream to be polled by
+    // the executor's drain loop (deterministic cancel-reachability: a
+    // cancel issued now is observed by the drain loop and reaches the Host
+    // operation).
+    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            if host.streams_started() >= 1 {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("prompt stream polled");
+
+    let row = load_drive_row(&daemon, &schedule_id).await;
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("owned session")
+        .to_string();
+    let effects_before = host.effects();
+
+    // Cancel the schedule: the coordinator routes to the engine's A5
+    // cancel path — durable cancel-intent fence, token fire, bounded
+    // owned-Host teardown, then terminal Cancelled.
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "cancel" }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{body}");
+    assert_eq!(body["status"].as_str(), Some("cancelled"), "{body}");
+
+    // The run persists cancelled (terminal, never auto-driven).
+    let (run_status, state) = wait_for_run_status(&daemon, &sid, "cancelled", 15).await;
+    assert_eq!(run_status, "cancelled");
+    assert_eq!(
+        state["cancel_requested"].as_bool(),
+        Some(true),
+        "cancelled run must carry cancel_requested"
+    );
+
+    // The Host observed the cancellation: the operation was cancelled and
+    // the owned session was reaped.
+    assert!(
+        host.cancels() >= 1,
+        "cancel must reach the Host operation (cancels={})",
+        host.cancels()
+    );
+    assert!(
+        host.reaps() >= 1,
+        "cancel must reap the owned Host session (reaps={})",
+        host.reaps()
+    );
+
+    // No later effects: the fence suppressed the persist step.
+    assert_eq!(
+        host.effects(),
+        effects_before,
+        "no downstream effects after the cancel fence"
+    );
+
+    // Repeat cancel is idempotent: the schedule is already cancelled.
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "cancel" }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CONFLICT, "{body}");
+}
+
+/// T2: completed-v-cancel race — a run that already completed stays
+/// completed; cancel cannot erase committed work.
+#[tokio::test]
+async fn control_completed_vs_cancel_race_completed_wins() {
+    let host = BlockingHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+
+    // Admit a public schedule; release the first prompt so the run parks
+    // at the manual wait.
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": PUBLIC_PRESET,
+            "label": "p2-t2-race",
+            "seed": "p2-t2-topic",
+            "input": { "keyword": "p2-t2", "topic": "p2-t2-topic" },
+            "agent_bindings": {
+                "default": { "provider_id": MOCK_PROVIDER }
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    host.release();
+
+    let row = load_drive_row(&daemon, &schedule_id).await;
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("owned session")
+        .to_string();
+    let (run_status, state) = wait_for_run_status(&daemon, &sid, "waiting_for_input", 15).await;
+    assert_eq!(run_status, "waiting_for_input");
+    let wait_id = state["wait"]["wait_id"]
+        .as_str()
+        .expect("durable wait id")
+        .to_string();
+
+    // Continue to completion.
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "continue", "wait_id": wait_id }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{body}");
+    let (run_status, _) = wait_for_run_status(&daemon, &sid, "completed", 15).await;
+    assert_eq!(run_status, "completed");
+
+    // Cancel after completion: the run stays completed (revision-fenced).
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "cancel" }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CONFLICT, "{body}");
+    let (run_status, _) = load_run_record(&daemon, &sid).await;
+    assert_eq!(run_status, "completed", "completed remains completed");
+}
+
+/// T2: restart/hydration leaves a HumanWait blocked — the durable wait
+/// token survives and the run is never auto-advanced at boot.
+#[tokio::test]
+async fn control_restart_wait_stays_blocked() {
+    let host = BlockingHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+
+    // Admit a public schedule; release the first prompt so the run parks
+    // at the manual wait.
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": PUBLIC_PRESET,
+            "label": "p2-t2-restart",
+            "seed": "p2-t2-topic",
+            "input": { "keyword": "p2-t2", "topic": "p2-t2-topic" },
+            "agent_bindings": {
+                "default": { "provider_id": MOCK_PROVIDER }
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    host.release();
+
+    let row = load_drive_row(&daemon, &schedule_id).await;
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("owned session")
+        .to_string();
+    let (run_status, state) = wait_for_run_status(&daemon, &sid, "waiting_for_input", 15).await;
+    assert_eq!(run_status, "waiting_for_input");
+    let wait_id = state["wait"]["wait_id"]
+        .as_str()
+        .expect("durable wait id")
+        .to_string();
+
+    // Simulate restart: the durable record is still waiting_for_input with
+    // the same token. The recovery classifier must NOT auto-advance it.
+    let class = nexus_orchestration::resume_rules::classify_recovery(
+        &nexus_orchestration::engine::SessionStatus::WaitingForInput,
+        Some(&nexus_orchestration::run_state::RunStateV1 {
+            wait: Some(nexus_orchestration::run_state::WaitRecord {
+                wait_id: wait_id.clone(),
+                task_id: "persist".to_string(),
+                child_session_id: None,
+                child_task_id: None,
+                kind: nexus_orchestration::run_state::WaitKind::Manual,
+            }),
+            ..nexus_orchestration::run_state::RunStateV1::default()
+        }),
+        false,
+    );
+    assert_eq!(
+        class,
+        nexus_orchestration::resume_rules::RecoveryClass::HumanWait,
+        "a durable human wait must classify HumanWait (never auto-advanced)"
+    );
+
+    // The wait token is retained through restart: a matching continue still
+    // works after the "restart" (the durable record is unchanged).
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "continue", "wait_id": wait_id }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{body}");
+    let (run_status, _) = wait_for_run_status(&daemon, &sid, "completed", 15).await;
+    assert_eq!(run_status, "completed");
+}
+
+/// T2: advance/resume/force-transition cannot bypass a human wait — the
+/// engine's non-continue signals are fenced against waiting runs.
+#[tokio::test]
+async fn control_advance_cannot_bypass_human_wait() {
+    let host = BlockingHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+
+    // Admit a public schedule; release the first prompt so the run parks
+    // at the manual wait.
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": PUBLIC_PRESET,
+            "label": "p2-t2-advance",
+            "seed": "p2-t2-topic",
+            "input": { "keyword": "p2-t2", "topic": "p2-t2-topic" },
+            "agent_bindings": {
+                "default": { "provider_id": MOCK_PROVIDER }
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    host.release();
+
+    let row = load_drive_row(&daemon, &schedule_id).await;
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("owned session")
+        .to_string();
+    let (run_status, state) = wait_for_run_status(&daemon, &sid, "waiting_for_input", 15).await;
+    assert_eq!(run_status, "waiting_for_input");
+    let wait_id = state["wait"]["wait_id"]
+        .as_str()
+        .expect("durable wait id")
+        .to_string();
+    let effects_before = host.effects();
+
+    // Advance on a waiting run must refuse (409 workflow_state_conflict) —
+    // it cannot bypass the human wait.
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "advance" }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CONFLICT, "{body}");
+    assert_eq!(
+        body["error"]["code"].as_str(),
+        Some("workflow_state_conflict"),
+        "{body}"
+    );
+
+    // Resume on a waiting run must also refuse (the schedule is running,
+    // so the supervisor refuses the resume transition).
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "resume" }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CONFLICT, "{body}");
+
+    // The wait is untouched and no effects ran.
+    let (run_status, state) = load_run_record(&daemon, &sid).await;
+    assert_eq!(run_status, "waiting_for_input");
+    assert_eq!(
+        state["wait"]["wait_id"].as_str(),
+        Some(wait_id.as_str()),
+        "bypass attempts must not consume the wait"
+    );
+    assert_eq!(host.effects(), effects_before, "no effects after bypass attempts");
+}
