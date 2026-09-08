@@ -33,9 +33,11 @@ const FIXTURE: &str = concat!(
     "/tests/fixtures/mock_acp_workflow.py"
 );
 
-/// Serialize with env-mutating discovery tests (see `test_support`).
+/// Serialize environment-mutating tests within this integration-test binary.
+static PROCESS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-    nexus_agent_host::test_support::PROCESS_ENV_LOCK
+    PROCESS_ENV_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner())
 }
@@ -119,8 +121,8 @@ fn host_start_config(ws: &TestWorkspace) -> HostStartConfig {
 async fn build_host(
     ws: &TestWorkspace,
     provider_cfg: ProviderConfig,
-) -> (HostManager, Arc<dyn HostFacade>) {
-    let manager = HostManager::new();
+) -> (Arc<HostManager>, Arc<dyn HostFacade>) {
+    let manager = Arc::new(HostManager::new());
     let provider = AcpProvider::from_config(
         provider_cfg.clone(),
         TimeoutConfig {
@@ -142,7 +144,8 @@ async fn build_host(
     };
     manager.register_provider(Arc::new(provider), launch).await;
     manager.start(host_start_config(ws)).await.expect("host start");
-    (manager, Arc::new(manager))
+    let host: Arc<dyn HostFacade> = manager.clone();
+    (manager, host)
 }
 
 fn read_fixture_log(path: &Path) -> Vec<serde_json::Value> {
@@ -158,6 +161,19 @@ fn read_fixture_log(path: &Path) -> Vec<serde_json::Value> {
 
 fn start_events(log: &[serde_json::Value]) -> Vec<&serde_json::Value> {
     log.iter().filter(|e| e["event"] == "start").collect()
+}
+async fn wait_for_event(path: &Path, event: &str) -> Vec<serde_json::Value> {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let log = read_fixture_log(path);
+            if log.iter().any(|entry| entry["event"] == event) {
+                return log;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("fixture did not emit {event} within bound"))
 }
 
 #[tokio::test]
@@ -212,7 +228,7 @@ async fn lazy_per_session_pid_and_creator_cwd_isolation() {
     let _lock = env_lock();
     let ws = setup_workspace();
     let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log, &[], true);
-    let (manager, host) = build_host(&ws, provider_cfg).await;
+    let (_manager, host) = build_host(&ws, provider_cfg).await;
 
     // Session A for creator-a, cwd under creator-a workspace.
     let session_a = host
@@ -365,7 +381,8 @@ async fn missing_and_disabled_providers_refuse() {
             &AgentHostConfig::default().policy,
         ),
     )
-    .expect_err("disabled provider must refuse");
+    .err()
+    .expect("disabled provider must refuse");
     assert_eq!(err.category(), "provider_unavailable");
 
     // The disabled provider was never registered → catalog omits it.
@@ -381,7 +398,7 @@ async fn cancel_reaches_owned_operation_and_shutdown_reaps_exact_process() {
     let _lock = env_lock();
     let ws = setup_workspace();
     let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log, &[("BLOCK_PROMPT", "1")], true);
-    let (manager, host) = build_host(&ws, provider_cfg).await;
+    let (_manager, host) = build_host(&ws, provider_cfg).await;
 
     let session = host
         .create_session(CreateSessionRequest {
@@ -418,21 +435,32 @@ async fn cancel_reaches_owned_operation_and_shutdown_reaps_exact_process() {
     let drain = tokio::spawn(async move {
         let _: Vec<HostEvent> = stream.map(|r| r.expect("event")).collect().await;
     });
+    wait_for_event(&ws.fixture_log, "prompt_blocked").await;
 
     // Cancel targets the owned operation: the ACP session/cancel must reach
     // the fixture.
-    host.cancel(op_id).await.expect("cancel");
-    let log = read_fixture_log(&ws.fixture_log);
+    tokio::time::timeout(std::time::Duration::from_secs(5), host.cancel(op_id))
+        .await
+        .expect("cancel must complete within bound")
+        .expect("cancel");
+    let log = wait_for_event(&ws.fixture_log, "cancel").await;
     assert!(
         log.iter().any(|e| e["event"] == "cancel"),
         "session/cancel must reach the owned fixture: {log:?}"
     );
 
     // Shutdown drains and reaps the exact owned process tree.
-    host.shutdown_session(session.id.clone())
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        host.shutdown_session(session.id.clone()),
+    )
+    .await
+    .expect("shutdown must complete within bound")
+    .expect("shutdown");
+    tokio::time::timeout(std::time::Duration::from_secs(15), drain)
         .await
-        .expect("shutdown");
-    drain.await.expect("drain task");
+        .expect("stream drain must complete within bound")
+        .expect("drain task");
 
     // The exact owned PID must be gone (reaped), and we must never have
     // signalled a reused/unowned PID — the fixture's own child (if any)

@@ -18,7 +18,8 @@ use futures_util::StreamExt;
 use tokio::sync::RwLock;
 
 use nexus_acp_host::{
-    AcpPermissionOutcome, AcpSdkAdapter, AcpStreamUpdate, ManagedAcpProcess, NexusAcpClient,
+    AcpPermissionOutcome, AcpSdkAdapter, AcpStreamUpdate, AgentSpawner, ManagedAcpProcess,
+    NexusAcpClient,
 };
 use nexus_contracts::local::acp::{
     NexusConfigOption, NexusConfigOptionCategory, NexusContentBlock, NexusInitializeRequest,
@@ -39,7 +40,6 @@ use crate::policy::permission::{HostPermissionResolver, PermissionOutcome};
 use crate::ProviderAdapter;
 
 /// Internal state tracked per active ACP session.
-#[derive(Debug)]
 struct ConnectedAcpSession {
     /// The SDK client bound to this session's owned subprocess.
     client: Arc<AcpSdkAdapter>,
@@ -173,7 +173,7 @@ impl AcpProvider {
             .collect();
 
         let spawner = AgentSpawner::new(cwd.clone());
-        let (child, stdin, stdout) = spawner
+        let (mut child, stdin, stdout) = spawner
             .spawn_with_env(&command, &args, &env)
             .map_err(|e| {
                 HostError::launch_failed(
@@ -226,48 +226,74 @@ impl AcpProvider {
                 version: env!("CARGO_PKG_VERSION").to_string(),
             },
         );
-        tokio::time::timeout(launch_dur, client_arc.initialize(init_request))
-            .await
-            .map_err(|_| {
-                HostError::timeout(
-                    "launch",
-                    format!(
-                        "ACP initialize handshake timed out after {}ms",
-                        self.timeouts.launch_ms
-                    ),
-                )
-                .with_provider(self.provider_id.clone())
-            })?
-            .map_err(|e| {
-                HostError::launch_failed(
+        let init_result = tokio::select! {
+            biased;
+            result = tokio::time::timeout(launch_dur, client_arc.initialize(init_request)) => {
+                result
+                    .map_err(|_| {
+                        HostError::timeout(
+                            "launch",
+                            format!(
+                                "ACP initialize handshake timed out after {}ms",
+                                self.timeouts.launch_ms
+                            ),
+                        )
+                        .with_provider(self.provider_id.clone())
+                    })?
+                    .map_err(|e| {
+                        HostError::launch_failed(
+                            self.provider_id.clone(),
+                            "ACP initialize handshake failed",
+                            Some(e.to_string()),
+                        )
+                    })?
+            }
+            status = child.wait() => {
+                return Err(HostError::launch_failed(
                     self.provider_id.clone(),
-                    "ACP initialize handshake failed",
-                    Some(e.to_string()),
-                )
-            })?;
+                    "ACP process exited during initialize handshake",
+                    Some(status.map_or_else(|e| e.to_string(), |status| status.to_string())),
+                ));
+            }
+        };
+        let _ = init_result;
 
-        // Create the ACP session with session timeout.
+        // Create the ACP session with session timeout while also observing
+        // process exit. EOF/crash is a launch failure, never a timeout.
         let acp_request = NexusNewSessionRequest::new(cwd);
-        let session_created =
-            tokio::time::timeout(self.timeouts.session_duration(), client_arc.create_session(acp_request))
-                .await
-                .map_err(|_| {
-                    HostError::timeout(
-                        "launch",
-                        format!(
-                            "ACP session creation timed out after {}ms",
-                            self.timeouts.session_ms
-                        ),
-                    )
-                    .with_provider(self.provider_id.clone())
-                })?
-                .map_err(|e| {
-                    HostError::launch_failed(
-                        self.provider_id.clone(),
-                        "ACP session creation failed",
-                        Some(e.to_string()),
-                    )
-                })?;
+        let session_created = tokio::select! {
+            biased;
+            result = tokio::time::timeout(
+                self.timeouts.session_duration(),
+                client_arc.create_session(acp_request),
+            ) => {
+                result
+                    .map_err(|_| {
+                        HostError::timeout(
+                            "launch",
+                            format!(
+                                "ACP session creation timed out after {}ms",
+                                self.timeouts.session_ms
+                            ),
+                        )
+                        .with_provider(self.provider_id.clone())
+                    })?
+                    .map_err(|e| {
+                        HostError::launch_failed(
+                            self.provider_id.clone(),
+                            "ACP session creation failed",
+                            Some(e.to_string()),
+                        )
+                    })?
+            }
+            status = child.wait() => {
+                return Err(HostError::launch_failed(
+                    self.provider_id.clone(),
+                    "ACP process exited during session creation",
+                    Some(status.map_or_else(|e| e.to_string(), |status| status.to_string())),
+                ));
+            }
+        };
 
         Ok(ConnectedAcpSession {
             client: client_arc,
@@ -389,6 +415,16 @@ impl AcpProvider {
                     reason: finish,
                 })
             }
+            AcpStreamUpdate::Failed {
+                error_category,
+                error_message,
+                ..
+            } => HostEvent::OpFailed(OperationFailedEvent {
+                session_id: session_id.clone(),
+                op_id: op_id.clone(),
+                error_category,
+                error_message,
+            }),
             AcpStreamUpdate::PermissionResult {
                 tool_name,
                 approved,
@@ -715,28 +751,9 @@ impl ProviderAdapter for AcpProvider {
             }
         };
 
-        // Convert the mpsc::Receiver into a futures Stream of HostEvent
         let session_id = session.session_id.clone();
-        let op_id_for_stream = op_id.clone();
-        let prompt_dur_for_stream = prompt_dur;
-        let provider_id_for_stream = self.provider_id.clone();
-
-        // Clones for the timeout fallback closure (inner_stream closure
-        // consumes session_id and op_id_for_stream via move).
-        let session_id_for_timeout = session_id.clone();
-        let op_id_for_timeout = op_id_for_stream.clone();
-
-        // Clone client and ACP session ID for best-effort cancel on streaming
-        // timeout (QC3 F-002).
-        let client_for_cancel = client;
-        let acp_sid_for_stream_cancel = acp_sid_for_cancel;
-
-        // First emit OpStarted, then forward the stream with a cumulative
-        // streaming timeout (QC2 F-001). The timeout budget covers the entire
-        // execute duration from stream start; if no event arrives within the
-        // remaining budget, we emit OpFailed and end the stream.
         let started = futures_util::stream::once({
-            let op_id = op_id_for_stream.clone();
+            let op_id = op_id.clone();
             let session_id = session_id.clone();
             async move {
                 Ok(HostEvent::OpStarted(OperationStartedEvent {
@@ -746,39 +763,52 @@ impl ProviderAdapter for AcpProvider {
             }
         });
 
-        let inner_stream = tokio_stream::wrappers::ReceiverStream::new(rx).map(move |update| {
-            let sid = session_id.clone();
-            let oid = op_id_for_stream.clone();
-            Ok(Self::stream_update_to_event(update, &sid, &oid))
-        });
+        // Yield exactly one terminal event. A closed ACP channel is failure,
+        // and a receive timeout cancels the remote operation before ending.
+        let updates = futures_util::stream::unfold(
+            Some((
+                rx,
+                client,
+                acp_sid_for_cancel,
+                session_id,
+                op_id,
+                self.provider_id.clone(),
+                prompt_dur,
+            )),
+            |state| async move {
+                let Some((mut rx, client, acp_sid, session_id, op_id, provider_id, dur)) =
+                    state
+                else {
+                    return None;
+                };
 
-        // Wrap with a cumulative timeout: if the stream produces no event
-        // within `prompt_dur` from this point, abort with OpFailed.
-        // Use tokio_stream::StreamExt::timeout (not futures_util) for per-item
-        // deadline enforcement (QC2 F-001).
-        //
-        // On streaming timeout, send a best-effort ACP cancel to avoid
-        // orphaned sessions (QC3 F-002). We use .then() to await the cancel
-        // before yielding the terminal OpFailed.
-        let timeout_stream = tokio_stream::StreamExt::timeout(inner_stream, prompt_dur_for_stream)
-            .then(move |result| {
-                let client = client_for_cancel.clone();
-                let acp_sid = acp_sid_for_stream_cancel.clone();
-                let sid = session_id_for_timeout.clone();
-                let oid = op_id_for_timeout.clone();
-                let provider_id = provider_id_for_stream.clone();
-                let dur = prompt_dur_for_stream;
-
-                async move {
-                    if let Ok(event) = result {
-                        event
-                    } else {
-                        // Elapsed — no event arrived within the budget.
-                        // Best-effort cancel the orphaned ACP session (QC3 F-002).
+                match tokio::time::timeout(dur, rx.recv()).await {
+                    Ok(Some(update)) => {
+                        let event = Self::stream_update_to_event(update, &session_id, &op_id);
+                        let terminal =
+                            matches!(event, HostEvent::OpFinished(_) | HostEvent::OpFailed(_));
+                        let next = if terminal {
+                            None
+                        } else {
+                            Some((rx, client, acp_sid, session_id, op_id, provider_id, dur))
+                        };
+                        Some((Ok(event), next))
+                    }
+                    Ok(None) => Some((
+                        Ok(HostEvent::OpFailed(OperationFailedEvent {
+                            session_id,
+                            op_id,
+                            error_category: "protocol_eof".to_string(),
+                            error_message: "ACP prompt stream closed without a stop reason"
+                                .to_string(),
+                        })),
+                        None,
+                    )),
+                    Err(_) => {
                         tracing::warn!(
                             provider_id = %provider_id,
-                            session_id = %sid,
-                            "Streaming timed out: no event within prompt_ms budget, sending best-effort cancel"
+                            session_id = %session_id,
+                            "ACP prompt stream timed out; sending best-effort cancel"
                         );
                         if let Err(cancel_err) = client.cancel(acp_sid).await {
                             tracing::warn!(
@@ -786,20 +816,24 @@ impl ProviderAdapter for AcpProvider {
                                 "Best-effort cancel failed on streaming timeout"
                             );
                         }
-                        Ok(HostEvent::OpFailed(OperationFailedEvent {
-                            session_id: sid,
-                            op_id: oid,
-                            error_category: "streaming_timeout".to_string(),
-                            error_message: format!(
-                                "streaming timed out: no event within {}ms budget",
-                                dur.as_millis()
-                            ),
-                        }))
+                        Some((
+                            Ok(HostEvent::OpFailed(OperationFailedEvent {
+                                session_id,
+                                op_id,
+                                error_category: "streaming_timeout".to_string(),
+                                error_message: format!(
+                                    "streaming timed out: no event within {}ms budget",
+                                    dur.as_millis()
+                                ),
+                            })),
+                            None,
+                        ))
                     }
                 }
-            });
+            },
+        );
 
-        let stream = started.chain(timeout_stream).boxed();
+        let stream = started.chain(updates).boxed();
 
         Ok(stream)
     }

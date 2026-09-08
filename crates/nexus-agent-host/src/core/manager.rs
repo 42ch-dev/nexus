@@ -376,6 +376,7 @@ impl crate::HostFacade for HostManager {
         // Register in our session registry
         let mut sessions = self.sessions.write().await;
         let session_id = sessions.register(
+            handle.session_id,
             request.provider_id.clone(),
             handle.capabilities.clone(),
             request.owner.clone(),

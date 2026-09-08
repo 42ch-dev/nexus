@@ -2059,8 +2059,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn legacy_create_request_bytes_omit_actor_pair() {
+    #[tokio::test]
+    async fn legacy_create_request_uses_verified_owner_without_actor_pair() {
         let req: CreateSessionRequest = serde_json::from_value(serde_json::json!({
             "provider_id": "claude-native",
             "cwd": "/tmp"
@@ -2068,13 +2068,15 @@ mod tests {
         .expect("legacy body");
         assert!(req.actor_ref.is_none());
         assert!(req.viewpoint.is_none());
-        let host_req = host_create_request(&req);
+
+        let state = state_with_host().await;
+        let host_req = host_create_request(&req, &state, "ctr_verified");
         assert!(host_req.metadata.is_null());
         assert!(host_req.mcp_servers.is_empty());
-        let host_json = serde_json::to_string(&host_req).expect("host json");
+        assert_eq!(host_req.owner.creator_id, "ctr_verified");
         assert_eq!(
-            host_json,
-            r#"{"provider_id":"claude-native","cwd":"/tmp","model":null,"mode":null,"mcp_servers":[],"metadata":null}"#
+            host_req.owner.workspace_root,
+            verified_workspace_root(&state)
         );
     }
 

@@ -118,14 +118,14 @@ impl SessionRegistry {
         Self::default()
     }
 
-    /// Register a new session in Created state.
+    /// Register a provider-launched session in Created state.
     pub fn register(
         &mut self,
+        id: HostSessionId,
         provider_id: ProviderId,
         capabilities: CapabilityDescriptor,
         owner: crate::capability::model::SessionOwner,
     ) -> HostSessionId {
-        let id = HostSessionId::new();
         let session = HostSession {
             id: id.clone(),
             provider_id,
@@ -465,6 +465,7 @@ mod tests {
 
     fn register_session(registry: &mut SessionRegistry) -> HostSessionId {
         registry.register(
+            HostSessionId::new(),
             ProviderId::new("test-provider"),
             test_caps(),
             crate::capability::model::SessionOwner {
