@@ -264,6 +264,89 @@ impl AgentSpawner {
     }
 }
 
+/// Platform process-birth identity token.
+///
+/// Captured at spawn as the numeric PID plus an OS start-time token: on
+/// Linux the `/proc/<pid>/stat` starttime, on macOS the `proc_bsdinfo`
+/// start tick via `proc_pidinfo` (zero subprocesses). The token is
+/// re-validated (PID + start) before every signal, so a recycled PID is
+/// never signalled. The owned Unix process-group identity is
+/// `PGID == PID` (process-group leader created at spawn).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProcessBirthToken {
+    /// The numeric PID this token was captured for.
+    pub pid: u32,
+    /// Birth start tick (platform-specific; opaque).
+    pub start_tick: u64,
+}
+
+#[cfg(target_os = "linux")]
+fn read_start_tick(pid: u32) -> Option<u64> {
+    // /proc/<pid>/stat field 22 is the process start time in clock ticks
+    // since boot. Parse defensively: field 2 (comm) may contain spaces, so
+    // scan past the last ')'.
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let close = stat.rfind(')')?;
+    let rest = stat.get(close + 1..)?;
+    let fields: Vec<&str> = rest.split_whitespace().collect();
+    // `rest` starts right after ')' with a leading space; field 22 is
+    // index 22 - 3 = 19 in `fields` (fields 0-2 covered "(comm)").
+    fields.get(19)?.parse().ok()
+}
+
+#[cfg(target_os = "macos")]
+fn read_start_tick(pid: u32) -> Option<u64> {
+    // Zero-subprocess libc API (nix re-exports libc): proc_pidinfo with
+    // PROC_PIDTBSDINFO returns proc_bsdinfo including the process start
+    // time (seconds + microseconds since boot).
+    use nix::libc::{proc_bsdinfo, proc_pidinfo, PROC_PIDTBSDINFO};
+    let mut info: proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = unsafe {
+        proc_pidinfo(
+            pid as libc::c_int,
+            PROC_PIDTBSDINFO,
+            0,
+            &mut info as *mut proc_bsdinfo as *mut libc::c_void,
+            std::mem::size_of::<proc_bsdinfo>() as libc::c_int,
+        )
+    };
+    if size <= 0 {
+        return None;
+    }
+    // Combine seconds + microseconds into a monotone comparable tick.
+    Some(
+        info.pbi_start_tvsec
+            .wrapping_mul(1_000_000)
+            .wrapping_add(info.pbi_start_tvusec),
+    )
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn read_start_tick(_pid: u32) -> Option<u64> {
+    None
+}
+
+impl ProcessBirthToken {
+    /// Capture the birth token for a freshly spawned child.
+    ///
+    /// Returns `None` when the platform cannot provide a birth token or the
+    /// process has already exited; callers must treat cleanup as unconfirmed
+    /// rather than signalling on a PID alone.
+    pub fn capture(pid: u32) -> Option<Self> {
+        read_start_tick(pid).map(|start_tick| Self { pid, start_tick })
+    }
+
+    /// Verify the token still describes the same process birth.
+    ///
+    /// `true` only when the numeric PID matches AND the platform start time
+    /// still matches (a recycled PID with a different start time returns
+    /// `false`). On platforms without birth-token support, verification
+    /// fails closed (never signal on PID alone).
+    pub fn verify(&self) -> bool {
+        read_start_tick(self.pid) == Some(self.start_tick)
+    }
+}
+
 /// Owned ACP agent subprocess bound to exactly one Host session.
 ///
 /// Unlike [`AcpSession`] (a CLI-owned one-shot), this struct is the
@@ -279,23 +362,30 @@ pub struct ManagedAcpProcess {
     child: tokio::process::Child,
     /// Path to the agent binary or command (for error reporting).
     agent_path: PathBuf,
-    /// Platform process-birth identity: the original PID assigned at spawn
-    /// (== the owned process-group id on Unix). Retained across reap so group
-    /// quiescence can be confirmed after the leader exits without ever
-    /// signalling a recycled PID/group.
-    birth_pid: Option<u32>,
+    /// Platform process-birth identity: numeric PID plus OS start-time token,
+    /// captured at spawn (== the owned process-group id on Unix). Retained
+    /// across reap so group quiescence can be confirmed after the leader
+    /// exits; the token is RE-VALIDATED before every signal so a recycled
+    /// PID/group is never signalled. If it cannot be established or
+    /// validated, cleanup is reported unconfirmed.
+    birth: Option<ProcessBirthToken>,
 }
 
 impl ManagedAcpProcess {
-    /// Wrap a freshly spawned child, capturing its birth identity.
+    /// Wrap a freshly spawned child, capturing its platform birth identity.
+    ///
+    /// The OS birth token (PID + start time) is captured while the child is
+    /// still alive; a platform that cannot provide one yields no token, and
+    /// cleanup must then be reported unconfirmed rather than signalling on a
+    /// PID alone.
     #[must_use]
     pub fn new(agent_id: String, child: tokio::process::Child, agent_path: PathBuf) -> Self {
-        let birth_pid = child.id();
+        let birth = child.id().and_then(ProcessBirthToken::capture);
         Self {
             agent_id,
             child,
             agent_path,
-            birth_pid,
+            birth,
         }
     }
 
@@ -305,23 +395,42 @@ impl ManagedAcpProcess {
         self.child.id()
     }
 
-    /// The platform process-birth identity (original PID at spawn).
+    /// The platform process-birth identity (numeric PID + start token).
     #[must_use]
-    pub const fn birth_pid(&self) -> Option<u32> {
-        self.birth_pid
+    pub const fn birth(&self) -> Option<&ProcessBirthToken> {
+        self.birth.as_ref()
     }
 
     /// The owned process-group id (Unix: PGID == birth PID).
     #[cfg(unix)]
     #[must_use]
     fn pgrp(&self) -> Option<nix::unistd::Pid> {
-        self.birth_pid
-            .map(|pid| nix::unistd::Pid::from_raw(pid.cast_signed()))
+        self.birth
+            .as_ref()
+            .map(|birth| nix::unistd::Pid::from_raw(birth.pid.cast_signed()))
     }
 
     /// Whether the owned child is still running.
     pub fn is_running(&mut self) -> bool {
         self.child.id().is_some()
+    }
+
+    /// Guarded signal: only signal the owned group after the platform
+    /// birth token is re-validated (PID + start time still match).
+    #[cfg(unix)]
+    fn signal_group_guarded(
+        birth: &ProcessBirthToken,
+        signal: nix::sys::signal::Signal,
+    ) -> bool {
+        if !birth.verify() {
+            tracing::warn!(
+                pid = birth.pid,
+                "process birth token invalidated; refusing to signal possibly-recycled group"
+            );
+            return false;
+        }
+        let pgrp = nix::unistd::Pid::from_raw(birth.pid.cast_signed());
+        nix::sys::signal::killpg(pgrp, signal).is_ok()
     }
 
     /// Poll the owned process group until quiescent or the bound expires.
@@ -362,7 +471,7 @@ impl ManagedAcpProcess {
     /// Returns an error when the owned child cannot be confirmed reaped after
     /// the final SIGKILL (cleanup unconfirmed must remain visibly
     /// interrupted, never silently successful).
-    pub async fn shutdown(mut self, grace: Duration) -> AcpResult<()> {
+    pub async fn shutdown(&mut self, grace: Duration) -> AcpResult<()> {
         tracing::info!(
             agent_id = %self.agent_id,
             grace_ms = grace.as_millis(),
@@ -389,7 +498,7 @@ impl ManagedAcpProcess {
                 );
                 return Err(AcpError::agent_crashed(
                     None,
-                    self.agent_path,
+                    self.agent_path.clone(),
                     Some(e.to_string()),
                 ));
             }
@@ -404,27 +513,38 @@ impl ManagedAcpProcess {
 
         #[cfg(unix)]
         {
-            use nix::sys::signal::{killpg, Signal};
+            use nix::sys::signal::Signal;
 
             // Group identity comes from the platform process-birth identity
             // (PGID == birth PID), NOT the live child id: after the leader is
-            // reaped, the birth identity still identifies the owned group
-            // without ever signalling a recycled PID.
-            let Some(pgrp) = self.pgrp() else {
+            // reaped, the birth identity still identifies the owned group.
+            // Every signal re-validates the birth token (PID + OS start
+            // time); a missing or invalidated token means cleanup is
+            // UNCONFIRMED — the group is never signalled on a PID alone.
+            let Some(birth) = self.birth.clone() else {
+                // No birth token: the platform cannot prove ownership. Reap
+                // the leader and report unconfirmed cleanup, never signal.
+                let agent_path = self.agent_path.clone();
                 let status = self.child.wait().await.map_err(|e| {
-                    AcpError::agent_crashed(None, self.agent_path, Some(e.to_string()))
+                    AcpError::agent_crashed(None, agent_path.clone(), Some(e.to_string()))
                 })?;
-                tracing::info!(
+                tracing::warn!(
                     agent_id = %self.agent_id,
                     exit_code = ?status.code(),
-                    "Owned ACP process exited between grace and group signal"
+                    "no process-birth token; owned ACP cleanup unconfirmed (leader reaped)"
                 );
-                return Ok(());
+                return Err(AcpError::agent_crashed(
+                    None,
+                    agent_path,
+                    Some("No process-birth token; owned ACP process cleanup unconfirmed".into()),
+                ));
             };
+            let pgrp = nix::unistd::Pid::from_raw(birth.pid.cast_signed());
 
             // If the leader already exited during the grace window, confirm
-            // the whole owned group is quiescent before claiming success;
-            // survivors are still SIGKILLed as a unit.
+            // the whole owned group is quiescent (guarded by the birth
+            // token's numeric identity) before claiming success; survivors
+            // are still SIGKILLed as a unit.
             if self.child.id().is_none() {
                 if Self::wait_group_quiescent(pgrp, grace).await {
                     let status = self.child.wait().await.map_err(|e| {
@@ -437,25 +557,35 @@ impl ManagedAcpProcess {
                     );
                     return Ok(());
                 }
-                let _ = killpg(pgrp, Signal::SIGKILL);
-                if Self::wait_group_quiescent(pgrp, grace).await {
+                if Self::signal_group_guarded(&birth, Signal::SIGKILL)
+                    && Self::wait_group_quiescent(pgrp, grace).await
+                {
                     let _ = self.child.wait().await;
                     return Ok(());
                 }
                 return Err(AcpError::agent_crashed(
                     None,
-                    self.agent_path,
+                    self.agent_path.clone(),
                     Some("Owned ACP process group cleanup unconfirmed after SIGKILL".into()),
                 ));
             }
 
             // Step 2: SIGTERM the owned process group (leader + descendants).
-            if let Err(e) = killpg(pgrp, Signal::SIGTERM) {
+            if !Self::signal_group_guarded(&birth, Signal::SIGTERM) {
                 tracing::warn!(
                     agent_id = %self.agent_id,
-                    error = %e,
-                    "Failed to send SIGTERM to owned ACP process group"
+                    "birth token invalidated or SIGTERM failed; owned group not signalled"
                 );
+                // Escalate immediately: unconfirmed group signal means
+                // cleanup is not confirmed.
+                if !Self::signal_group_guarded(&birth, Signal::SIGKILL) {
+                    let _ = self.child.wait().await;
+                    return Err(AcpError::agent_crashed(
+                        None,
+                        self.agent_path.clone(),
+                        Some("Owned ACP process group cleanup unconfirmed (signal refused)".into()),
+                    ));
+                }
             } else {
                 tracing::debug!(agent_id = %self.agent_id, "SIGTERM sent to owned ACP process group");
             }
@@ -466,14 +596,6 @@ impl ManagedAcpProcess {
                     // Leader exited after group SIGTERM. Ownership is only
                     // confirmed when the WHOLE owned group is quiescent: a
                     // descendant that ignored SIGTERM must be SIGKILLed.
-                    let Some(pgrp) = self.pgrp() else {
-                        tracing::info!(
-                            agent_id = %self.agent_id,
-                            exit_code = ?status.code(),
-                            "Owned ACP leader exited after group SIGTERM (no birth identity)"
-                        );
-                        return Ok(());
-                    };
                     if Self::wait_group_quiescent(pgrp, grace).await {
                         tracing::info!(
                             agent_id = %self.agent_id,
@@ -486,29 +608,15 @@ impl ManagedAcpProcess {
                         agent_id = %self.agent_id,
                         "Descendants remain after group SIGTERM, proceeding to group SIGKILL"
                     );
-                    if let Err(e) = killpg(pgrp, Signal::SIGKILL) {
-                        tracing::error!(
-                            agent_id = %self.agent_id,
-                            error = %e,
-                            "Failed to send SIGKILL to owned ACP process group"
-                        );
-                        return Err(AcpError::agent_crashed(
-                            None,
-                            self.agent_path,
-                            Some(format!("Failed to kill owned ACP process group: {e}")),
-                        ));
-                    }
-                    let quiescent = Self::wait_group_quiescent(pgrp, grace).await;
-                    // The leader is already reaped; quiescence is the group
-                    // confirmation. Unconfirmed survivors mean cleanup is not
-                    // confirmed — report so, never claim success.
-                    if quiescent {
-                        tracing::info!(
-                            agent_id = %self.agent_id,
-                            exit_code = ?status.code(),
-                            "Owned ACP process group quiescent after group SIGKILL"
-                        );
-                        return Ok(());
+                    if Self::signal_group_guarded(&birth, Signal::SIGKILL) {
+                        if Self::wait_group_quiescent(pgrp, grace).await {
+                            tracing::info!(
+                                agent_id = %self.agent_id,
+                                exit_code = ?status.code(),
+                                "Owned ACP process group quiescent after group SIGKILL"
+                            );
+                            return Ok(());
+                        }
                     }
                     tracing::error!(
                         agent_id = %self.agent_id,
@@ -516,7 +624,7 @@ impl ManagedAcpProcess {
                     );
                     return Err(AcpError::agent_crashed(
                         None,
-                        self.agent_path,
+                        self.agent_path.clone(),
                         Some("Owned ACP process group cleanup unconfirmed after SIGKILL".into()),
                     ));
                 }
@@ -525,30 +633,29 @@ impl ManagedAcpProcess {
                         agent_id = %self.agent_id,
                         "Owned ACP process did not exit after group SIGTERM, proceeding to SIGKILL"
                     );
-                    // Guard again: only signal the group if the exact owned
-                    // child is still alive (PID not recycled).
-                    if self.child.id().is_some() {
-                        if let Err(e) = killpg(pgrp, Signal::SIGKILL) {
-                            tracing::error!(
+                    if Self::signal_group_guarded(&birth, Signal::SIGKILL) {
+                        let status = self.child.wait().await.map_err(|e| {
+                            AcpError::agent_crashed(None, self.agent_path.clone(), Some(e.to_string()))
+                        })?;
+                        if Self::wait_group_quiescent(pgrp, grace).await {
+                            tracing::info!(
                                 agent_id = %self.agent_id,
-                                error = %e,
-                                "Failed to send SIGKILL to owned ACP process group"
+                                exit_code = ?status.code(),
+                                "Owned ACP process killed forcefully (group SIGKILL); group quiescent"
                             );
-                            return Err(AcpError::agent_crashed(
-                                None,
-                                self.agent_path,
-                                Some(format!("Failed to kill owned ACP process group: {e}")),
-                            ));
+                            return Ok(());
                         }
                     }
-                    let status = self.child.wait().await.map_err(|e| {
-                        AcpError::agent_crashed(None, self.agent_path, Some(e.to_string()))
-                    })?;
-                    tracing::info!(
+                    tracing::error!(
                         agent_id = %self.agent_id,
-                        exit_code = ?status.code(),
-                        "Owned ACP process killed forcefully (group SIGKILL)"
+                        "Owned ACP process group cleanup unconfirmed after SIGKILL"
                     );
+                    let _ = self.child.wait().await;
+                    return Err(AcpError::agent_crashed(
+                        None,
+                        self.agent_path.clone(),
+                        Some("Owned ACP process group cleanup unconfirmed after SIGKILL".into()),
+                    ));
                 }
                 Ok(Err(e)) => {
                     tracing::error!(
@@ -558,7 +665,7 @@ impl ManagedAcpProcess {
                     );
                     return Err(AcpError::agent_crashed(
                         None,
-                        self.agent_path,
+                        self.agent_path.clone(),
                         Some(e.to_string()),
                     ));
                 }
@@ -588,42 +695,68 @@ impl ManagedAcpProcess {
     ///
     /// Used on launch-failure paths: the spawned child has no ACP session to
     /// cancel cooperatively, so we proceed directly to the owned process-tree
-    /// termination/reap sequence (group SIGTERM → SIGKILL → reap, guarded by
-    /// owned child liveness). Returns an error if the exact owned child
-    /// cannot be confirmed reaped.
+    /// termination/reap sequence (group SIGTERM → SIGKILL → reap). Every
+    /// signal re-validates the platform process-birth token (PID + OS start
+    /// time): a missing or invalidated token refuses to signal and returns
+    /// cleanup-unconfirmed.
     ///
     /// # Errors
     ///
-    /// Returns an error when the owned child cannot be confirmed reaped.
+    /// Returns an error when the owned child/group cannot be confirmed
+    /// reaped.
     pub async fn terminate(mut self, grace: Duration) -> AcpResult<()> {
         #[cfg(unix)]
         {
-            use nix::sys::signal::{killpg, Signal};
+            use nix::sys::signal::Signal;
+
+            let Some(birth) = self.birth.clone() else {
+                let agent_path = self.agent_path.clone();
+                let _ = self.child.wait().await;
+                tracing::warn!(
+                    agent_id = %self.agent_id,
+                    "no process-birth token; owned ACP launch teardown unconfirmed"
+                );
+                return Err(AcpError::agent_crashed(
+                    None,
+                    agent_path,
+                    Some("No process-birth token; owned ACP process cleanup unconfirmed".into()),
+                ));
+            };
+            let pgrp = nix::unistd::Pid::from_raw(birth.pid.cast_signed());
 
             // If the leader already exited, confirm the whole owned group is
             // quiescent before reporting clean teardown; survivors are
-            // SIGKILLed as a unit (L2 Issue 1 — no early Ok on leader exit).
-            let Some(pgrp) = self.pgrp() else {
-                let _ = self.child.wait().await;
-                return Ok(());
-            };
+            // SIGKILLed as a unit (no early Ok on leader exit).
             if self.child.id().is_none() {
                 if Self::wait_group_quiescent(pgrp, grace).await {
                     let _ = self.child.wait().await;
                     return Ok(());
                 }
-                let _ = killpg(pgrp, Signal::SIGKILL);
-                if Self::wait_group_quiescent(pgrp, grace).await {
+                if Self::signal_group_guarded(&birth, Signal::SIGKILL)
+                    && Self::wait_group_quiescent(pgrp, grace).await
+                {
                     let _ = self.child.wait().await;
                     return Ok(());
                 }
+                let agent_path = self.agent_path.clone();
                 return Err(AcpError::agent_crashed(
                     None,
-                    self.agent_path,
+                    agent_path,
                     Some("Owned ACP process group cleanup unconfirmed after SIGKILL".into()),
                 ));
-            };
-            let _ = killpg(pgrp, Signal::SIGTERM);
+            }
+
+            // SIGTERM the owned group; a refused/invalid birth token
+            // escalates straight to guarded SIGKILL.
+            if !Self::signal_group_guarded(&birth, Signal::SIGTERM) {
+                let _ = self.child.wait().await;
+                let agent_path = self.agent_path.clone();
+                return Err(AcpError::agent_crashed(
+                    None,
+                    agent_path,
+                    Some("Owned ACP process group cleanup unconfirmed (signal refused)".into()),
+                ));
+            }
             let wait_result = timeout(grace, self.child.wait()).await;
             match wait_result {
                 Ok(Ok(_)) => {
@@ -632,41 +765,52 @@ impl ManagedAcpProcess {
                     if Self::wait_group_quiescent(pgrp, grace).await {
                         return Ok(());
                     }
-                    let _ = killpg(pgrp, Signal::SIGKILL);
-                    if Self::wait_group_quiescent(pgrp, grace).await {
+                    if Self::signal_group_guarded(&birth, Signal::SIGKILL)
+                        && Self::wait_group_quiescent(pgrp, grace).await
+                    {
                         return Ok(());
                     }
+                    let agent_path = self.agent_path.clone();
                     Err(AcpError::agent_crashed(
                         None,
-                        self.agent_path,
+                        agent_path,
                         Some("Owned ACP process group cleanup unconfirmed after SIGKILL".into()),
                     ))
                 }
                 Err(_) => {
-                    if self.child.id().is_some() {
-                        let _ = killpg(pgrp, Signal::SIGKILL);
+                    if Self::signal_group_guarded(&birth, Signal::SIGKILL) {
+                        let status = self.child.wait().await.map_err(|e| {
+                            AcpError::agent_crashed(
+                                None,
+                                self.agent_path.clone(),
+                                Some(e.to_string()),
+                            )
+                        })?;
+                        if Self::wait_group_quiescent(pgrp, grace).await {
+                            tracing::info!(
+                                agent_id = %self.agent_id,
+                                exit_code = ?status.code(),
+                                "Owned ACP process killed forcefully (group SIGKILL); group quiescent"
+                            );
+                            return Ok(());
+                        }
                     }
-                    self.child.wait().await.map_err(|e| {
-                        AcpError::agent_crashed(
-                            None,
-                            self.agent_path.clone(),
-                            Some(e.to_string()),
-                        )
-                    })?;
-                    if Self::wait_group_quiescent(pgrp, grace).await {
-                        return Ok(());
-                    }
+                    let agent_path = self.agent_path.clone();
+                    let _ = self.child.wait().await;
                     Err(AcpError::agent_crashed(
                         None,
-                        self.agent_path,
+                        agent_path,
                         Some("Owned ACP process group cleanup unconfirmed after SIGKILL".into()),
                     ))
                 }
-                Ok(Err(e)) => Err(AcpError::agent_crashed(
-                    None,
-                    self.agent_path,
-                    Some(e.to_string()),
-                )),
+                Ok(Err(e)) => {
+                    let agent_path = self.agent_path.clone();
+                    Err(AcpError::agent_crashed(
+                        None,
+                        agent_path,
+                        Some(e.to_string()),
+                    ))
+                }
             }
         }
 
@@ -890,7 +1034,7 @@ impl AcpSession {
                     );
                     return Err(AcpError::agent_crashed(
                         None,
-                        self.agent_path,
+                        self.agent_path.clone(),
                         Some(e.to_string()),
                     ));
                 }

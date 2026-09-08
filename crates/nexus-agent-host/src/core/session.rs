@@ -290,7 +290,12 @@ impl SessionRegistry {
 
     /// Transition to Stopping.
     ///
-    /// Valid from: Ready, Starting, `Cancelling`.
+    /// Valid from: Ready, Starting, `Cancelling`, `ErrorRecoverable`.
+    ///
+    /// `ErrorRecoverable` is the retained state for a session whose last
+    /// cleanup attempt was unconfirmed; a later ownership-safe successful
+    /// cleanup retries through this path to `Stopped` (A5: recovery keeps a
+    /// visibly-interrupted session until cleanup is confirmed).
     ///
     /// # Errors
     ///
@@ -298,7 +303,10 @@ impl SessionRegistry {
     pub fn transition_to_stopping(&mut self, session_id: &HostSessionId) -> HostResult<()> {
         let session = self.get_session_mut(session_id)?;
         match &session.state {
-            SessionState::Ready | SessionState::Starting | SessionState::Cancelling(_) => {
+            SessionState::Ready
+            | SessionState::Starting
+            | SessionState::Cancelling(_)
+            | SessionState::ErrorRecoverable => {
                 session.state = SessionState::Stopping;
                 Ok(())
             }
@@ -637,6 +645,36 @@ mod tests {
         // Restart from error recoverable
         registry.transition_to_starting(&id).unwrap();
         assert_eq!(registry.get(&id).unwrap().state, SessionState::Starting);
+    }
+
+    /// A session retained as ErrorRecoverable after unconfirmed cleanup must
+    /// be able to complete a later ownership-safe cleanup retry through
+    /// Stopping → Stopped and be removed (A5 / L2 Issue 3).
+    #[test]
+    fn error_recoverable_retry_cleanup_to_stopped() {
+        let mut registry = SessionRegistry::new();
+        let id = register_session(&mut registry);
+        registry.transition_to_starting(&id).unwrap();
+        registry.transition_to_ready(&id).unwrap();
+
+        // First cleanup attempt left cleanup unconfirmed → ErrorRecoverable.
+        registry.transition_to_error_recoverable(&id).unwrap();
+        assert_eq!(
+            registry.get(&id).unwrap().state,
+            SessionState::ErrorRecoverable
+        );
+
+        // Later ownership-safe retry completes: ErrorRecoverable → Stopping.
+        registry.transition_to_stopping(&id).expect("retry to Stopping");
+        let event = registry
+            .transition_to_stopped(&id, SessionStopReason::GracefulShutdown)
+            .expect("Stopping → Stopped");
+        assert!(matches!(event, HostEvent::SessionStopped(_)));
+        assert!(registry.get(&id).unwrap().state.is_terminal());
+
+        // Registry and mapping removal happens after the successful retry.
+        registry.remove_stopped(&id).expect("remove after retry");
+        assert!(registry.get(&id).is_none());
     }
 
     #[test]

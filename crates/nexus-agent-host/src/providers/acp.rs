@@ -335,7 +335,11 @@ impl AcpProvider {
 
         Ok(ConnectedAcpSession {
             client: client_arc,
-            process: ManagedAcpProcess::new(self.provider_id.0.clone(), child, agent_path),
+            process: ManagedAcpProcess::new(
+                self.provider_id.0.clone(),
+                child,
+                agent_path,
+            ),
             acp_session_id: session_created.session_id,
             config_options: session_created.config_options,
             active_ops: HashMap::new(),
@@ -828,6 +832,7 @@ impl ProviderAdapter for AcpProvider {
         };
 
         let session_id = session.session_id.clone();
+        let shutdown_dur = self.timeouts.shutdown_duration();
         let started = futures_util::stream::once({
             let op_id = op_id.clone();
             let session_id = session_id.clone();
@@ -850,9 +855,10 @@ impl ProviderAdapter for AcpProvider {
                 op_id,
                 self.provider_id.clone(),
                 prompt_dur,
+                shutdown_dur,
             )),
             |state| async move {
-                let Some((mut rx, client, acp_sid, session_id, op_id, provider_id, dur)) =
+                let Some((mut rx, client, acp_sid, session_id, op_id, provider_id, dur, cancel_dur)) =
                     state
                 else {
                     return None;
@@ -866,7 +872,7 @@ impl ProviderAdapter for AcpProvider {
                         let next = if terminal {
                             None
                         } else {
-                            Some((rx, client, acp_sid, session_id, op_id, provider_id, dur))
+                            Some((rx, client, acp_sid, session_id, op_id, provider_id, dur, cancel_dur))
                         };
                         Some((Ok(event), next))
                     }
@@ -886,15 +892,12 @@ impl ProviderAdapter for AcpProvider {
                             session_id = %session_id,
                             "ACP prompt stream timed out; sending best-effort cancel"
                         );
-                        // Bound the best-effort cancel (L2 Issue 3): a stalled
-                        // control connection must never block the promised
-                        // terminal OpFailed.
-                        match tokio::time::timeout(
-                            std::time::Duration::from_secs(5),
-                            client.cancel(acp_sid),
-                        )
-                        .await
-                        {
+                        // Bound the best-effort cancel by the configured
+                        // shutdown deadline (A5: TimeoutConfig.shutdown_ms),
+                        // never a hard-coded value: a stalled control
+                        // connection must not block the promised terminal
+                        // OpFailed beyond the configured bound.
+                        match tokio::time::timeout(cancel_dur, client.cancel(acp_sid)).await {
                             Ok(Ok(_)) => {}
                             Ok(Err(cancel_err)) => {
                                 tracing::warn!(
@@ -955,8 +958,53 @@ impl ProviderAdapter for AcpProvider {
     }
 
     async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
-        // Remove the session from tracking and take ownership of the exact
-        // connected session (client + owned child) for bounded teardown.
+        // Cooperative cancel/drain phase, bounded independently (A5): a
+        // stalled control connection must not consume the whole shutdown
+        // budget and skip owned process-tree termination. On timeout or
+        // error, we still proceed to the owned cleanup phase and report
+        // unconfirmed cancellation.
+        let shutdown_dur = self.timeouts.shutdown_duration();
+        {
+            let connected = {
+                let sessions = self.sessions.read().await;
+                match sessions.get(&session.session_id) {
+                    Some(s) => (Arc::clone(&s.client), s.acp_session_id.clone()),
+                    None => {
+                        // No provider session — nothing to reap.
+                        return Ok(());
+                    }
+                }
+            };
+            let cancel_result = tokio::time::timeout(
+                shutdown_dur,
+                connected.0.cancel(connected.1),
+            )
+            .await;
+            match cancel_result {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => {
+                    tracing::warn!(
+                        session_id = %session.session_id,
+                        provider_id = %self.provider_id,
+                        error = %e,
+                        "cooperative ACP cancel failed; proceeding to owned process-tree cleanup"
+                    );
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        session_id = %session.session_id,
+                        provider_id = %self.provider_id,
+                        "cooperative ACP cancel timed out; proceeding to owned process-tree cleanup"
+                    );
+                }
+            }
+        }
+
+        // Take ownership of the exact connected session and run the owned
+        // process-tree termination/reap. On success the session entry is
+        // removed; on unconfirmed cleanup the entry is RETAINED in the
+        // registry so a later ownership-safe retry can complete (L2
+        // Issue 3) and the failure is a typed error, never a clean stop.
         let connected = {
             let mut sessions = self.sessions.write().await;
             sessions.remove(&session.session_id)
@@ -970,40 +1018,6 @@ impl ProviderAdapter for AcpProvider {
             return Ok(());
         };
 
-        // Cooperative cancel/drain phase, bounded independently (A5): a
-        // stalled control connection must not consume the whole shutdown
-        // budget and skip owned process-tree termination. On timeout or
-        // error, we still proceed to the owned cleanup phase and report
-        // unconfirmed cancellation.
-        let shutdown_dur = self.timeouts.shutdown_duration();
-        let cancel_result = tokio::time::timeout(
-            shutdown_dur,
-            connected.client.cancel(connected.acp_session_id.clone()),
-        )
-        .await;
-        match cancel_result {
-            Ok(Ok(_)) => {}
-            Ok(Err(e)) => {
-                tracing::warn!(
-                    session_id = %session.session_id,
-                    provider_id = %self.provider_id,
-                    error = %e,
-                    "cooperative ACP cancel failed; proceeding to owned process-tree cleanup"
-                );
-            }
-            Err(_) => {
-                tracing::warn!(
-                    session_id = %session.session_id,
-                    provider_id = %self.provider_id,
-                    "cooperative ACP cancel timed out; proceeding to owned process-tree cleanup"
-                );
-            }
-        }
-
-        // Owned process-tree termination/reap. A cleanup failure must be
-        // propagated as a typed error so the manager never marks/removes the
-        // session as cleanly stopped while the exact owned process is
-        // unconfirmed reaped (A5: unconfirmed cleanup stays interrupted).
         match connected.process.shutdown(shutdown_dur).await {
             Ok(()) => {
                 tracing::info!(
@@ -1020,7 +1034,13 @@ impl ProviderAdapter for AcpProvider {
                     error = %e,
                     "ACP owned process-tree shutdown unconfirmed"
                 );
-                Err(HostError::internal(format!(
+                // Retain the connected session for later ownership-safe
+                // cleanup retry (the process handle must stay owned).
+                self.sessions
+                    .write()
+                    .await
+                    .insert(session.session_id.clone(), connected);
+                Err(HostError::cleanup_unconfirmed(format!(
                     "ACP session {} cleanup unconfirmed: {e}",
                     session.session_id
                 ))
