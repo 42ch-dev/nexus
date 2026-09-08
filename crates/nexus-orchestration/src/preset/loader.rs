@@ -1430,9 +1430,7 @@ fn build_inner_graphs(
                 // Determine kind (currently only acp_prompt supported).
                 let task = match node.kind {
                     GraphNodeKind::AcpPrompt => {
-                        InnerGraphNodeTask::new(&node.id)
-                            // WS-E T5: store agent ref for runtime resolution
-                            .with_agent_ref(node.agent.clone().unwrap_or_default())
+                        let mut task = InnerGraphNodeTask::new(&node.id)
                             // Tool policy from node (parse from string)
                             .with_tool_policy(
                                 node.tool_policy
@@ -1444,7 +1442,14 @@ fn build_inner_graphs(
                             .with_template(node.template_file.clone().unwrap_or_default())
                             // A1: production prompt executor + cancellation tokens
                             .with_prompt_executor(prompt_executor.clone())
-                            .with_session_cancels(session_cancels.clone())
+                            .with_session_cancels(session_cancels.clone());
+                        // I-003: preserve agent absence as `None` so the
+                        // executor selects the `default` role binding; never
+                        // synthesize `Some("")`.
+                        if let Some(agent_ref) = &node.agent {
+                            task = task.with_agent_ref(agent_ref.clone());
+                        }
+                        task
                     }
                 };
                 graph.add_task(std::sync::Arc::new(task));

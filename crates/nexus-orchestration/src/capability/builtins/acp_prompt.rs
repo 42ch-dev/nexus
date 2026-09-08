@@ -133,10 +133,20 @@ impl Capability for AcpPrompt {
         // Security: only accept context-injected identity fields (prefixed _).
         // Raw `creator_id`/`session_id` from user/preset input are ignored
         // to prevent cross-creator routing (IDOR).
+        //
+        // M-002: a missing trusted `_session_id` refuses with a typed error
+        // — never a magic `default` run id. The orchestration engine seeds
+        // the trusted `_session_id` at run admission; its absence means the
+        // capability is being invoked outside a trusted run context.
         let session_id = input
             .get("_session_id")
             .and_then(|v| v.as_str())
-            .unwrap_or("default");
+            .ok_or_else(|| {
+                CapabilityError::Forbidden(
+                    "missing trusted _session_id: orchestration context must inject the run identity"
+                        .to_string(),
+                )
+            })?;
 
         let executor = self
             .executor
@@ -187,7 +197,8 @@ mod tests {
         let cap = AcpPrompt::new();
         let input = json!({
             "prompt": "Hello, agent!",
-            "tool_policy": "deny_all"
+            "tool_policy": "deny_all",
+            "_session_id": "sess"
         });
         let result = cap.run(input).await;
         assert!(result.is_err());

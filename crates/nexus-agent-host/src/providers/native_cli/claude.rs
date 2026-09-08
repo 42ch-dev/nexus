@@ -417,6 +417,7 @@ impl ProviderAdapter for ClaudeCliProvider {
             provider_id: self.provider_id.clone(),
             session_id: host_session_id,
             capabilities: CapabilityDescriptor::native_cli_limited(),
+            process_identity: None,
         })
     }
 

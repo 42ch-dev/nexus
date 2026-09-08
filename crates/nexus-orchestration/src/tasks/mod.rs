@@ -2267,15 +2267,26 @@ impl InnerGraphNodeTask {
     /// An explicit id is used by already-bound callers. Otherwise the engine's
     /// trusted `_session_id` context value identifies the run. Agent role
     /// selection is carried separately in `PromptRequest::agent_ref`.
-    async fn resolve_session_id(&self, context: &graph_flow::Context) -> String {
+    ///
+    /// M-002: a node with neither an explicit id nor a trusted `_session_id`
+    /// context value refuses with a typed graph error — never a magic
+    /// `default` run id. The engine seeds `_session_id` at run admission;
+    /// its absence means the node is being executed outside a trusted run
+    /// context.
+    async fn resolve_session_id(
+        &self,
+        context: &graph_flow::Context,
+    ) -> Result<String, graph_flow::GraphError> {
         if let Some(sid) = &self.session_id {
-            return sid.clone();
+            return Ok(sid.clone());
         }
 
-        context
-            .get("_session_id")
-            .await
-            .unwrap_or_else(|| "default".to_string())
+        context.get("_session_id").await.ok_or_else(|| {
+            graph_flow::GraphError::TaskExecutionFailed(
+                "missing trusted _session_id: orchestration context must inject the run identity"
+                    .to_string(),
+            )
+        })
     }
 }
 
@@ -2289,8 +2300,9 @@ impl Task for InnerGraphNodeTask {
         &self,
         context: graph_flow::Context,
     ) -> Result<TaskResult, graph_flow::GraphError> {
-        // Resolve session_id for this node (WS-E T5).
-        let session_id = self.resolve_session_id(&context).await;
+        // Resolve session_id for this node (WS-E T5). M-002: a missing
+        // trusted identity refuses the node execution.
+        let session_id = self.resolve_session_id(&context).await?;
 
         // If we have a prompt executor, delegate to AcpPromptTask.
         if let Some(executor) = &self.executor {
@@ -3976,13 +3988,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn inner_graph_node_task_falls_back_to_default() {
-        // WS-E T5: No session_id, no agent_ref → default.
-        // A1: no executor — typed refusal.
+    async fn inner_graph_node_task_missing_identity_refuses() {
+        // M-002: no explicit session_id and no trusted `_session_id` in the
+        // context → the node refuses with a typed graph error; there is no
+        // magic `default` fallback run id.
         let task = InnerGraphNodeTask::new("n1");
         let ctx = graph_flow::Context::new();
         let result = task.run(ctx.clone()).await;
-        assert!(result.is_err(), "no executor must refuse: {result:?}");
+        assert!(result.is_err(), "missing identity must refuse: {result:?}");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("missing trusted _session_id"),
+            "typed refusal expected: {err}"
+        );
     }
 
     #[tokio::test]

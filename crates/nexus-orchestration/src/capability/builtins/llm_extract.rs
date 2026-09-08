@@ -160,10 +160,20 @@ impl Capability for LlmExtract {
         // Security: only accept context-injected identity fields (prefixed _).
         // Raw `creator_id`/`session_id` from user/preset input are ignored
         // to prevent cross-creator routing (IDOR). See SEC-V131-01.
+        //
+        // M-002: a missing trusted `_session_id` refuses with a typed error
+        // — never a magic `default` run id. The orchestration engine seeds
+        // the trusted `_session_id` at run admission; its absence means the
+        // capability is being invoked outside a trusted run context.
         let session_id = input
             .get("_session_id")
             .and_then(|v| v.as_str())
-            .unwrap_or("default");
+            .ok_or_else(|| {
+                CapabilityError::Forbidden(
+                    "missing trusted _session_id: orchestration context must inject the run identity"
+                        .to_string(),
+                )
+            })?;
 
         let executor = self
             .executor
@@ -387,7 +397,7 @@ mod tests {
     #[tokio::test]
     async fn llm_extract_standalone_returns_unavailable() {
         let cap = LlmExtract::new();
-        let input = json!({ "prompt": "extract", "chapter_prose": "Lin Xia walked." });
+        let input = json!({ "prompt": "extract", "chapter_prose": "Lin Xia walked.", "_session_id": "sess" });
         let result = cap.run(input).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -447,7 +457,7 @@ mod tests {
             ]}"#,
         ))
             .with_session_cancels(cancels_with(&["default"]));
-        let input = json!({ "prompt": "extract", "chapter_prose": "..." });
+        let input = json!({ "prompt": "extract", "chapter_prose": "...", "_session_id": "default" });
         let result = cap.run(input).await.unwrap();
         let candidates = result.get("candidates").and_then(|v| v.as_array()).unwrap();
         assert_eq!(candidates.len(), 2);
@@ -462,7 +472,7 @@ mod tests {
             "```json\n{\"candidates\":[{\"canonical_name\":\"X\",\"block_type\":\"item\",\"confidence\":0.5,\"source_quote\":\"q\"}]}\n```",
         ))
             .with_session_cancels(cancels_with(&["default"]));
-        let input = json!({ "prompt": "extract", "chapter_prose": "..." });
+        let input = json!({ "prompt": "extract", "chapter_prose": "...", "_session_id": "default" });
         let result = cap.run(input).await.unwrap();
         let candidates = result.get("candidates").and_then(|v| v.as_array()).unwrap();
         assert_eq!(candidates.len(), 1);
@@ -473,7 +483,7 @@ mod tests {
     async fn llm_extract_malformed_json_returns_empty_candidates() {
         let cap = LlmExtract::with_prompt_executor(mock_executor("this is not json at all"))
             .with_session_cancels(cancels_with(&["default"]));
-        let input = json!({ "prompt": "extract", "chapter_prose": "..." });
+        let input = json!({ "prompt": "extract", "chapter_prose": "...", "_session_id": "default" });
         let result = cap.run(input).await.unwrap();
         let candidates = result.get("candidates").and_then(|v| v.as_array()).unwrap();
         assert!(candidates.is_empty(), "malformed JSON → empty candidates");
@@ -572,7 +582,7 @@ mod tests {
             ]}"#,
         ))
             .with_session_cancels(cancels_with(&["default"]));
-        let input = json!({ "prompt": "extract", "chapter_prose": "..." });
+        let input = json!({ "prompt": "extract", "chapter_prose": "...", "_session_id": "default" });
         let result = cap.run(input).await.unwrap();
         // candidates still present.
         let candidates = result.get("candidates").and_then(|v| v.as_array()).unwrap();
@@ -622,10 +632,16 @@ mod tests {
             "creator_id": "spoofed_creator",
             "session_id": "spoofed_session"
         });
-        let _ = cap.run(input).await.unwrap();
+        // M-002: with no trusted `_session_id` the capability fails closed
+        // (Forbidden) instead of falling back to a magic `default` run id.
+        let result = cap.run(input).await;
+        assert!(
+            result.is_err(),
+            "SEC-V131-01/M-002: raw session_id must never be trusted; missing trusted _session_id must refuse"
+        );
         let captured = executor.captured.lock().expect("capture lock").clone();
         assert_eq!(
-            captured, "default",
+            captured, "",
             "SEC-V131-01: raw session_id leaked through"
         );
     }

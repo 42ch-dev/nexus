@@ -140,10 +140,20 @@ impl Capability for ContextSummarize {
         // Security: only accept context-injected identity fields (prefixed _).
         // Raw `creator_id`/`session_id` from user/preset input are ignored
         // to prevent cross-creator routing (IDOR). See SEC-V131-01.
+        //
+        // M-002: a missing trusted `_session_id` refuses with a typed error
+        // — never a magic `default` run id. The orchestration engine seeds
+        // the trusted `_session_id` at run admission; its absence means the
+        // capability is being invoked outside a trusted run context.
         let session_id = input
             .get("_session_id")
             .and_then(|v| v.as_str())
-            .unwrap_or("default");
+            .ok_or_else(|| {
+                CapabilityError::Forbidden(
+                    "missing trusted _session_id: orchestration context must inject the run identity"
+                        .to_string(),
+                )
+            })?;
 
         let trace = input.get("trace").and_then(|v| v.as_str()).unwrap_or("");
         let template = input.get("template").and_then(|v| v.as_str()).unwrap_or("");
@@ -285,7 +295,7 @@ mod tests {
     #[tokio::test]
     async fn context_summarize_standalone_returns_unavailable() {
         let cap = ContextSummarize::new();
-        let input = json!({ "content": "Some text" });
+        let input = json!({ "content": "Some text", "_session_id": "sess" });
         let result = cap.run(input).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -350,7 +360,8 @@ mod tests {
         let cap = ContextSummarize::with_prompt_executor(Arc::new(MockSummaryExecutor::new()))
             .with_session_cancels(cancels_with(&["default"]));
         let input = json!({
-            "content": "The story is about a brave knight who saves the kingdom from a dragon."
+            "content": "The story is about a brave knight who saves the kingdom from a dragon.",
+            "_session_id": "default"
         });
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["summary"], "A concise summary of the content.");
@@ -366,7 +377,8 @@ mod tests {
         let input = json!({
             "content": "Some context",
             "trace": "User entered state X, performed action Y",
-            "template": "Summarize focusing on character development."
+            "template": "Summarize focusing on character development.",
+            "_session_id": "default"
         });
         let result = cap.run(input).await.unwrap();
         assert!(result.get("summary").is_some());
@@ -388,7 +400,9 @@ mod tests {
 
     /// Proves that raw `creator_id` / `session_id` from preset args are
     /// NOT forwarded to the executor — only context-injected `_session_id`
-    /// is trusted as the run identity.
+    /// is trusted as the run identity. M-002: with no trusted `_session_id`
+    /// the capability now fails closed (Forbidden) instead of falling back
+    /// to a magic `default` run id.
     #[tokio::test]
     async fn context_summarize_raw_creator_id_ignored_on_spoof_attempt() {
         let executor = Arc::new(MockSummaryExecutor::new());
@@ -400,11 +414,15 @@ mod tests {
             "creator_id": "spoofed_creator",
             "session_id": "spoofed_session"
         });
-        let result = cap.run(input).await.unwrap();
-        assert!(result.get("summary").is_some());
+        let result = cap.run(input).await;
+        assert!(
+            result.is_err(),
+            "SEC-V131-01/M-002: raw session_id must never be trusted; missing trusted _session_id must refuse"
+        );
+        // The executor must never have been reached with a spoofed id.
         assert_eq!(
             *executor.captured_run_id.lock().expect("capture lock"),
-            "default",
+            "",
             "SEC-V131-01: raw session_id leaked through"
         );
     }

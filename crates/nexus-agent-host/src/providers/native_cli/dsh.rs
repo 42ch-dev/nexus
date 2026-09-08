@@ -560,6 +560,7 @@ impl ProviderAdapter for DshNativeProvider {
             provider_id: self.provider_id.clone(),
             session_id: host_session_id,
             capabilities: CapabilityDescriptor::dsh_limited(),
+            process_identity: None,
         })
     }
 
@@ -938,6 +939,7 @@ mod tests {
             provider_id: ProviderId::new("dsh-native"),
             session_id: HostSessionId::new(),
             capabilities: CapabilityDescriptor::dsh_limited(),
+            process_identity: None,
         };
 
         let result = provider

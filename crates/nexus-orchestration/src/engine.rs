@@ -415,6 +415,10 @@ pub struct EngineSharedState {
     pub session_cancels: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
+    /// Production prompt executor (A1) — used by the cancel path to await
+    /// bounded owned-Host teardown before persisting terminal `Cancelled`
+    /// (C-001). `None` for in-memory/test engines.
+    pub prompt_executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
 }
 
 impl EngineSharedState {
@@ -429,6 +433,7 @@ impl EngineSharedState {
             session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
                 std::collections::HashMap::new(),
             )),
+            prompt_executor: None,
         }
     }
 
@@ -446,6 +451,7 @@ impl EngineSharedState {
             session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
                 std::collections::HashMap::new(),
             )),
+            prompt_executor: None,
         }
     }
 
@@ -624,6 +630,15 @@ impl EngineSharedState {
     ///
     /// Returns the target status on success. When the store is absent
     /// (in-memory test storage) this is a no-op returning the target status.
+    ///
+    /// **Cancel ordering (C-001):** the durable cancel-intent fence is
+    /// persisted FIRST (revision-fenced `commit_transition` with
+    /// `cancel_requested = true`, status kept non-terminal), then the run's
+    /// coordinator cancellation token is fired, then the prompt executor's
+    /// bounded owned-Host teardown is awaited. Terminal `Cancelled` is
+    /// persisted only after owned Host work is stopped/reaped;
+    /// cleanup-unconfirmed persists `Interrupted` (actionable, never false
+    /// successful cancellation).
     async fn persist_signal_transition(
         &self,
         session_id: &SessionId,
@@ -664,14 +679,102 @@ impl EngineSharedState {
             .await
             .map_err(EngineError::GraphFlow)?
             .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
-
-        if matches!(target_status, SessionStatus::Cancelled) {
-            next_state.cancel_requested = true;
-        }
         let checkpoint = RunCheckpoint {
             root: &root,
             children: &[],
         };
+
+        if matches!(target_status, SessionStatus::Cancelled) {
+            // C-001 phase 1: durable cancel-intent fence. Persist
+            // `cancel_requested = true` while keeping the status
+            // non-terminal — the run is not yet confirmed cancelled.
+            next_state.cancel_requested = true;
+            store
+                .commit_transition(
+                    session_id,
+                    expected_revision,
+                    checkpoint,
+                    record.status.clone(),
+                    &next_state,
+                )
+                .await?;
+
+            // Fire the run's coordinator cancellation token so the
+            // in-flight prompt operation observes cancellation and begins
+            // its bounded Host cleanup.
+            if let Some(token) = self
+                .session_cancels
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&session_id.0)
+                .cloned()
+            {
+                token.cancel();
+            }
+
+            // Await the prompt executor's bounded owned-Host teardown.
+            if let Some(executor) = &self.prompt_executor {
+                if let Err(e) = executor.finalize_run(&session_id.0).await {
+                    // Cleanup unconfirmed: persist Interrupted (actionable,
+                    // never false successful cancellation) and surface the
+                    // error. The run stays visibly interrupted.
+                    let current = store.load_run(session_id).await?;
+                    let current_revision = current.state_revision;
+                    let mut interrupted_state = current.state.unwrap_or_default();
+                    interrupted_state.cancel_requested = true;
+                    interrupted_state.in_flight = None;
+                    let _ = store
+                        .commit_transition(
+                            session_id,
+                            current_revision,
+                            checkpoint,
+                            SessionStatus::Interrupted,
+                            &interrupted_state,
+                        )
+                        .await;
+                    if let Some(s) = self
+                        .sessions
+                        .write()
+                        .await
+                        .iter_mut()
+                        .find(|s| s.session_id == *session_id)
+                    {
+                        s.status = SessionStatus::Interrupted;
+                    }
+                    return Err(EngineError::GraphFlow(
+                        graph_flow::GraphError::TaskExecutionFailed(format!(
+                            "cancel cleanup unconfirmed for run '{}': {e}",
+                            session_id.0
+                        )),
+                    ));
+                }
+            }
+
+            // C-001 phase 2: confirmed cleanup — persist terminal Cancelled.
+            let current = store.load_run(session_id).await?;
+            let current_revision = current.state_revision;
+            let mut cancelled_state = current.state.unwrap_or_default();
+            cancelled_state.cancel_requested = true;
+            cancelled_state.in_flight = None;
+            store
+                .commit_transition(
+                    session_id,
+                    current_revision,
+                    checkpoint,
+                    SessionStatus::Cancelled,
+                    &cancelled_state,
+                )
+                .await?;
+            // M-004: reclaim the run's coordinator cancellation token at
+            // the same confirmed run-terminal ownership boundary.
+            self.session_cancels
+                .write()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&session_id.0);
+            return Ok(SessionStatus::Cancelled);
+        }
+
+        // Non-cancel signals: single commit as before.
         store
             .commit_transition(
                 session_id,
@@ -967,6 +1070,47 @@ impl EngineSharedState {
                                 if entries.is_empty() {
                                     child_map.remove(&session_id.0);
                                 }
+                            }
+                        }
+
+                        // I-001 / M-004: a confirmed run-terminal transition
+                        // (Completed/Failed) finalizes every `(run, role)`
+                        // Host session and reclaims the run's coordinator
+                        // cancellation token. The cancel path
+                        // (`persist_signal_transition`) performs the same
+                        // finalization before persisting terminal
+                        // `Cancelled`; cleanup-unconfirmed stays
+                        // non-terminal/actionable (never finalized here).
+                        //
+                        // I-002: the token is reclaimed ONLY when
+                        // finalization is confirmed. On unconfirmed cleanup
+                        // the token and the executor's session entries are
+                        // kept so a later retry can still reap the owned
+                        // sessions; the run is already terminal, so no new
+                        // admission can occur, but the coordinator token
+                        // must remain cancellable for the retry path.
+                        if status.is_terminal() {
+                            let finalized = match &self.prompt_executor {
+                                Some(executor) => {
+                                    match executor.finalize_run(&session_id.0).await {
+                                        Ok(()) => true,
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                session_id = %session_id.0,
+                                                error = %e,
+                                                "run-terminal Host session finalization unconfirmed; keeping cancellation token for retry"
+                                            );
+                                            false
+                                        }
+                                    }
+                                }
+                                None => true,
+                            };
+                            if finalized {
+                                self.session_cancels
+                                    .write()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .remove(&session_id.0);
                             }
                         }
                     }
@@ -1699,7 +1843,7 @@ impl GraphFlowEngine {
             >,
         >,
     ) {
-        self.prompt_executor = Some(executor);
+        self.prompt_executor = Some(executor.clone());
         self.session_cancels = session_cancels.clone();
         // Unify the shared per-run cancellation map: run-admission
         // registrations (spawn/attach on `EngineSharedState`) and the
@@ -1711,6 +1855,7 @@ impl GraphFlowEngine {
         // engine's shared map to the prompt consumers explicitly).
         if let Some(state) = std::sync::Arc::get_mut(&mut self.state) {
             state.session_cancels = session_cancels;
+            state.prompt_executor = Some(executor);
         }
     }
 

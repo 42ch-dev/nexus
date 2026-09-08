@@ -228,6 +228,10 @@ pub enum FinishReason {
     MaxTurnRequests,
     /// Agent refused the request.
     Refusal,
+    /// The turn was cancelled by the client (I-004). Typed non-success:
+    /// never mapped to `EndTurn`/succeeded for workflow or Character
+    /// consumers.
+    Cancelled,
 }
 
 /// Operation failed event payload (terminal).
@@ -555,6 +559,25 @@ pub struct ManagedSessionHandle {
     pub session_id: HostSessionId,
     /// Negotiated capabilities for this session.
     pub capabilities: CapabilityDescriptor,
+    /// Opaque owned-process identity (PID + platform birth + owned group)
+    /// captured at launch (A5). `None` when the platform cannot establish a
+    /// birth token; cleanup must then be reported unconfirmed. Never a
+    /// transport handle — the daemon persists this fingerprint only.
+    pub process_identity: Option<OwnedProcessIdentity>,
+}
+
+/// Opaque owned-process identity (A5) — PID plus platform process-birth and
+/// owned group identity; never PID alone. Mirrors the durable
+/// `nexus_orchestration::run_state::OwnedProcessIdentity` shape so the
+/// daemon can persist the fingerprint without importing provider crates.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OwnedProcessIdentity {
+    /// Process id.
+    pub pid: u32,
+    /// Platform process-birth identity (e.g. start time) for reuse detection.
+    pub process_birth: Option<String>,
+    /// Owned process-group identity for tree cleanup.
+    pub group_id: Option<String>,
 }
 
 /// Host-level health report.
@@ -579,6 +602,9 @@ pub struct HostSession {
     pub capabilities: CapabilityDescriptor,
     /// Session state.
     pub state: SessionState,
+    /// Opaque owned-process identity (PID + birth + group) captured at
+    /// launch (A5). `None` when the platform cannot establish a birth token.
+    pub process_identity: Option<OwnedProcessIdentity>,
 }
 
 /// Session state in the host state machine.

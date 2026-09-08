@@ -481,20 +481,30 @@ impl AcpProvider {
                 stop_reason: reason,
                 ..
             } => {
-                // Refusal and resource limits are typed failures for Host
-                // consumers (A5): a caller must never persist refusal or
-                // limit exhaustion as successful workflow output. Only a
-                // genuine EndTurn (or an acknowledged Cancelled, which the
-                // operation-level cancel path handles) is OpFinished.
+                // Refusal, resource limits and cancellation are typed
+                // non-success for Host consumers (A5 / I-004): a caller
+                // must never persist refusal, limit exhaustion or a
+                // cancelled turn as successful workflow output. Only a
+                // genuine EndTurn is OpFinished success.
                 match reason {
-                    nexus_contracts::local::acp::NexusStopReason::EndTurn
-                    | nexus_contracts::local::acp::NexusStopReason::Cancelled => {
-                        // An acknowledged Cancelled is the terminal of the
-                        // operation-level cancel path and maps to EndTurn.
+                    nexus_contracts::local::acp::NexusStopReason::EndTurn => {
                         HostEvent::OpFinished(OperationFinishedEvent {
                             session_id: session_id.clone(),
                             op_id: op_id.clone(),
                             reason: FinishReason::EndTurn,
+                        })
+                    }
+                    nexus_contracts::local::acp::NexusStopReason::Cancelled => {
+                        // I-004: an acknowledged Cancelled is typed
+                        // non-success — never EndTurn/succeeded. The
+                        // operation-level cancel path (HostFacade::cancel)
+                        // drives the actual cancellation; this event lets
+                        // consumers distinguish a cancelled turn from a
+                        // completed one.
+                        HostEvent::OpFinished(OperationFinishedEvent {
+                            session_id: session_id.clone(),
+                            op_id: op_id.clone(),
+                            reason: FinishReason::Cancelled,
                         })
                     }
                     nexus_contracts::local::acp::NexusStopReason::Refusal => {
@@ -709,38 +719,46 @@ impl ProviderAdapter for AcpProvider {
         &self,
         _request: crate::capability::model::ProbeRequest,
     ) -> HostResult<ProviderHealth> {
-        // A probe performs a real bounded initialize handshake against a
-        // freshly spawned owned child, then tears it down. It never touches
-        // an existing session's process.
-        let spec = crate::capability::model::LaunchSpec {
-            cwd: std::path::PathBuf::from("/tmp"),
-            model: None,
-            mode: None,
-            mcp_servers: vec![],
-            owner: crate::capability::model::SessionOwner {
-                creator_id: "probe".to_string(),
-                workspace_root: std::path::PathBuf::from("/tmp"),
-                orchestration_run_id: None,
+        // M-006: probe is a recipe-availability check only — resolve the
+        // launch command on PATH (bounded by the launch timeout), never a
+        // real spawn. A probe must not fabricate an owner/workspace and
+        // spawn an owned child just to tear it down: that would execute
+        // the agent binary outside any trusted Creator context.
+        let command = self.recipe.command.clone().unwrap_or_default();
+        let provider_id = self.provider_id.clone();
+        let launch_dur = self.timeouts.launch_duration();
+
+        let result = tokio::time::timeout(
+            launch_dur,
+            tokio::task::spawn_blocking(move || which::which(&command)),
+        )
+        .await
+        .map_err(|_| {
+            HostError::timeout(
+                "probe",
+                format!(
+                    "command lookup timed out after {}ms",
+                    self.timeouts.launch_ms
+                ),
+            )
+            .with_provider(self.provider_id.clone())
+        })?;
+
+        let health = match result {
+            Ok(Ok(resolved_path)) => ProviderHealth {
+                provider_id,
+                available: true,
+                latency_ms: None,
+                message: Some(resolved_path.to_string_lossy().into_owned()),
             },
-        };
-        match self.connect_session(&spec).await {
-            Ok(connected) => {
-                let mut process = connected.process;
-                let _ = process.shutdown(self.timeouts.shutdown_duration()).await;
-                Ok(ProviderHealth {
-                    provider_id: self.provider_id.clone(),
-                    available: true,
-                    latency_ms: None,
-                    message: None,
-                })
-            }
-            Err(e) => Ok(ProviderHealth {
-                provider_id: self.provider_id.clone(),
+            _ => ProviderHealth {
+                provider_id,
                 available: false,
                 latency_ms: None,
-                message: Some(format!("probe failed: {e}")),
-            }),
-        }
+                message: Some(format!("command '{}' not found on PATH", self.recipe.command.as_deref().unwrap_or(""))),
+            },
+        };
+        Ok(health)
     }
 
     async fn launch(
@@ -750,6 +768,18 @@ impl ProviderAdapter for AcpProvider {
         // Lazy per-session spawn: the owned ACP child is created here, on
         // first use for this Host session — never at boot/catalog load.
         let connected = self.connect_session(&spec).await?;
+
+        // Capture the opaque owned-process identity (A5): PID + platform
+        // birth token + owned group id. The birth token is re-validated
+        // before every signal; a missing token means cleanup must be
+        // reported unconfirmed. No transport handle crosses this boundary.
+        let process_identity = connected.process.birth().map(|birth| {
+            crate::capability::model::OwnedProcessIdentity {
+                pid: birth.pid,
+                process_birth: Some(birth.start_tick.to_string()),
+                group_id: Some(birth.pid.to_string()),
+            }
+        });
 
         let host_session_id = HostSessionId::new();
 
@@ -763,6 +793,7 @@ impl ProviderAdapter for AcpProvider {
             provider_id: self.provider_id.clone(),
             session_id: host_session_id,
             capabilities: CapabilityDescriptor::acp_full(),
+            process_identity,
         })
     }
 

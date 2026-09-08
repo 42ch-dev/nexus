@@ -93,6 +93,9 @@ pub struct HostSession {
     pub negotiated_capabilities: CapabilityDescriptor,
     /// Verified owner metadata (Creator + canonical workspace).
     pub owner: crate::capability::model::SessionOwner,
+    /// Opaque owned-process identity (PID + birth + group) captured at
+    /// launch (A5). `None` when the platform cannot establish a birth token.
+    pub process_identity: Option<crate::capability::model::OwnedProcessIdentity>,
 }
 
 /// Registry of all active host sessions.
@@ -125,6 +128,7 @@ impl SessionRegistry {
         provider_id: ProviderId,
         capabilities: CapabilityDescriptor,
         owner: crate::capability::model::SessionOwner,
+        process_identity: Option<crate::capability::model::OwnedProcessIdentity>,
     ) -> HostSessionId {
         let session = HostSession {
             id: id.clone(),
@@ -134,6 +138,7 @@ impl SessionRegistry {
             active_op_id: None,
             negotiated_capabilities: capabilities,
             owner,
+            process_identity,
         };
         self.sessions.insert(id.clone(), session);
         id
@@ -481,6 +486,7 @@ mod tests {
                 workspace_root: std::path::PathBuf::from("/tmp"),
                 orchestration_run_id: None,
             },
+            None,
         )
     }
 

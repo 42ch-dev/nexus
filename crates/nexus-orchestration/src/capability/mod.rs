@@ -205,6 +205,16 @@ pub trait PromptExecutor: Send + Sync {
     /// refusal/EOF/denial/timeout/cancellation — never a partial-output
     /// success.
     async fn execute(&self, request: PromptRequest) -> Result<PromptResult, CapabilityError>;
+
+    /// Finalize a run's owned Host sessions after the run reached a
+    /// confirmed terminal state (A5). Waits (bounded) for any in-flight
+    /// operation's cleanup to complete, then shuts down and evicts every
+    /// `(run, role)` session. Returns `Ok(())` only when cleanup is
+    /// confirmed; `Err` means cleanup-unconfirmed (the run must remain
+    /// non-terminal/actionable). Default no-op for non-Host executors.
+    async fn finalize_run(&self, _run_id: &str) -> Result<(), CapabilityError> {
+        Ok(())
+    }
 }
 
 /// Provider trait for daemon-side `nexus.*` tool dispatch (DF-47 production wiring).

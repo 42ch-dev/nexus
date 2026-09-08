@@ -1383,6 +1383,7 @@ mod tests {
                 active_op_id: None,
                 negotiated_capabilities: CapabilityDescriptor::native_cli_limited(),
                 owner: request.owner,
+                process_identity: None,
             };
             self.sessions
                 .lock()
