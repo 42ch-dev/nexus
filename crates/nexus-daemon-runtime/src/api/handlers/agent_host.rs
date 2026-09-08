@@ -108,6 +108,9 @@ fn map_host_error(e: &nexus_agent_host::HostError) -> NexusApiError {
             resource: "agent_host".into(),
             reason: e.to_string(),
         },
+        "cleanup_unconfirmed" => NexusApiError::ServiceUnavailable {
+            message: e.to_string(),
+        },
         _ => NexusApiError::Internal {
             code: "AGENT_HOST_ERROR".into(),
             message: e.to_string(),

@@ -310,15 +310,26 @@ impl AcpProvider {
                 // Run the owned teardown/reap sequence for the launched child.
                 let owned =
                     ManagedAcpProcess::new(self.provider_id.0.clone(), child, agent_path);
-                let reap = owned.terminate(self.timeouts.shutdown_duration()).await;
-                if let Err(reap_err) = reap {
-                    tracing::warn!(
-                        provider_id = %self.provider_id,
-                        error = %reap_err,
-                        "launch failure left owned ACP process unconfirmed reaped"
-                    );
+                match owned.terminate(self.timeouts.shutdown_duration()).await {
+                    Ok(()) => return Err(error),
+                    Err(reap_err) => {
+                        // The caller must distinguish a cleanly torn-down
+                        // failed launch from an unconfirmed live process
+                        // (L2 Issue 4): a failed reap becomes the returned
+                        // typed error, never hidden behind the original
+                        // launch error.
+                        tracing::warn!(
+                            provider_id = %self.provider_id,
+                            error = %reap_err,
+                            "launch failure left owned ACP process unconfirmed reaped"
+                        );
+                        return Err(HostError::cleanup_unconfirmed(format!(
+                            "launch of '{}' failed ({error}) and owned ACP process cleanup is unconfirmed: {reap_err}",
+                            self.provider_id
+                        ))
+                        .with_provider(self.provider_id.clone()));
+                    }
                 }
-                return Err(error);
             }
         };
 
@@ -775,7 +786,9 @@ impl ProviderAdapter for AcpProvider {
             }
             Err(_) => {
                 // Timeout on stream setup — best-effort cancel the orphaned ACP
-                // session before emitting OpFailed (QC3 F-002).
+                // session before emitting OpFailed (QC3 F-002). The cancel is
+                // bounded independently so a stalled control connection can
+                // never block the promised terminal failure (L2 Issue 3).
                 tracing::warn!(
                     provider_id = %self.provider_id,
                     session_id = %session.session_id,
@@ -783,11 +796,24 @@ impl ProviderAdapter for AcpProvider {
                     timeout_ms = self.timeouts.prompt_ms,
                     "stream_prompt setup timed out, sending best-effort cancel"
                 );
-                if let Err(cancel_err) = client.cancel(acp_sid_for_cancel).await {
-                    tracing::warn!(
-                        error = %cancel_err,
-                        "Best-effort cancel failed on stream setup timeout"
-                    );
+                match tokio::time::timeout(
+                    self.timeouts.shutdown_duration(),
+                    client.cancel(acp_sid_for_cancel),
+                )
+                .await
+                {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(cancel_err)) => {
+                        tracing::warn!(
+                            error = %cancel_err,
+                            "Best-effort cancel failed on stream setup timeout"
+                        );
+                    }
+                    Err(_) => {
+                        tracing::warn!(
+                            "Best-effort cancel timed out on stream setup timeout"
+                        );
+                    }
                 }
                 return Ok(Self::make_error_stream(
                     session.session_id.clone(),
@@ -860,11 +886,27 @@ impl ProviderAdapter for AcpProvider {
                             session_id = %session_id,
                             "ACP prompt stream timed out; sending best-effort cancel"
                         );
-                        if let Err(cancel_err) = client.cancel(acp_sid).await {
-                            tracing::warn!(
-                                error = %cancel_err,
-                                "Best-effort cancel failed on streaming timeout"
-                            );
+                        // Bound the best-effort cancel (L2 Issue 3): a stalled
+                        // control connection must never block the promised
+                        // terminal OpFailed.
+                        match tokio::time::timeout(
+                            std::time::Duration::from_secs(5),
+                            client.cancel(acp_sid),
+                        )
+                        .await
+                        {
+                            Ok(Ok(_)) => {}
+                            Ok(Err(cancel_err)) => {
+                                tracing::warn!(
+                                    error = %cancel_err,
+                                    "Best-effort cancel failed on streaming timeout"
+                                );
+                            }
+                            Err(_) => {
+                                tracing::warn!(
+                                    "Best-effort cancel timed out on streaming timeout"
+                                );
+                            }
                         }
                         Some((
                             Ok(HostEvent::OpFailed(OperationFailedEvent {

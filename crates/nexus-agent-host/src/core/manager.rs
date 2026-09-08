@@ -474,8 +474,26 @@ impl crate::HostFacade for HostManager {
                         let _ = tx.send(event.clone());
                     }
                     if let Ok(HostEvent::OpFinished(_) | HostEvent::OpFailed(_)) = &result {
+                        // The operation is terminal: leave Busy or Cancelling
+                        // (both keyed by this op) back to Ready. During a
+                        // cancellation the session stays Cancelling until the
+                        // stream itself emits its terminal event — a
+                        // subsequent exec cannot overlap the still-owning
+                        // ACP read loop (A5 "reuse serially").
                         let mut sess = sessions.write().await;
-                        let _ = sess.transition_busy_to_ready(&sid, &oid);
+                        match sess.get(&sid).map(|s| s.state.clone()) {
+                            Some(crate::core::session::SessionState::Busy(op))
+                                if &op == &oid =>
+                            {
+                                let _ = sess.transition_busy_to_ready(&sid, &oid);
+                            }
+                            Some(crate::core::session::SessionState::Cancelling(op))
+                                if &op == &oid =>
+                            {
+                                let _ = sess.transition_cancelling_to_ready(&sid, &oid);
+                            }
+                            _ => {}
+                        }
                     }
                     result
                 }
@@ -497,7 +515,10 @@ impl crate::HostFacade for HostManager {
                 .ok_or_else(|| HostError::internal(format!("no session found for op {op_id}")))?;
         }
 
-        // Transition to Cancelling
+        // Transition to Cancelling. The session STAYS Cancelling until the
+        // provider stream emits its terminal event (the wrapped exec stream
+        // then transitions to Ready) — no immediate Ready that would allow an
+        // overlapping prompt on one ACP session (L2 Issue 5).
         {
             let mut sessions = self.sessions.write().await;
             sessions.transition_to_cancelling(&session.id, &op_id)?;
@@ -511,14 +532,11 @@ impl crate::HostFacade for HostManager {
             capabilities: session.negotiated_capabilities.clone(),
         };
 
-        adapter.cancel(&handle, op_id.clone()).await?;
+        adapter.cancel(&handle, op_id).await?;
 
-        // Transition back to Ready
-        {
-            let mut sessions = self.sessions.write().await;
-            sessions.transition_cancelling_to_ready(&session.id, &op_id)?;
-        }
-
+        // No transition here: the cancelled ACP stream's terminal event will
+        // return the session to Ready. A cancel failure leaves the session
+        // Cancelling; the stream's own timeout/EOF guarantee a terminal.
         Ok(())
     }
 
@@ -587,7 +605,12 @@ impl crate::HostFacade for HostManager {
                 .collect()
         };
 
-        // Call ProviderAdapter::shutdown() for each active session with a per-session timeout.
+        // Call ProviderAdapter::shutdown() for each active session with a
+        // per-session timeout. A typed error or outer timeout means the exact
+        // owned process cleanup was not confirmed: those sessions must remain
+        // visibly interrupted (L2 Issue 2) — never marked/removed as cleanly
+        // stopped, never dropped from ownership maps.
+        let mut cleanup_unconfirmed: Vec<HostSessionId> = Vec::new();
         for (adapter, handle) in shutdown_tasks {
             let session_id = handle.session_id.clone();
             let provider_id = handle.provider_id.clone();
@@ -605,24 +628,31 @@ impl crate::HostFacade for HostManager {
                         session_id = %session_id,
                         provider_id = %provider_id,
                         error = %e,
-                        "Provider adapter shutdown returned error"
+                        "Provider adapter shutdown returned error (cleanup unconfirmed)"
                     );
+                    cleanup_unconfirmed.push(session_id);
                 }
                 Err(_) => {
                     tracing::warn!(
                         session_id = %session_id,
                         provider_id = %provider_id,
                         timeout_ms = shutdown_timeout.as_millis(),
-                        "Provider adapter shutdown timed out, proceeding with cleanup"
+                        "Provider adapter shutdown timed out (cleanup unconfirmed)"
                     );
+                    cleanup_unconfirmed.push(session_id);
                 }
             }
         }
 
-        // Now transition sessions through Stopping → Stopped and clean up the registry.
+        // Now transition sessions through Stopping → Stopped and clean up the
+        // registry — EXCEPT sessions whose cleanup is unconfirmed.
         {
             let mut sessions = self.sessions.write().await;
             for session_id in &session_ids {
+                if cleanup_unconfirmed.contains(session_id) {
+                    let _ = sessions.transition_to_error_recoverable(session_id);
+                    continue;
+                }
                 let _ = sessions.transition_to_stopping(session_id);
                 let _ = sessions.transition_to_stopped(
                     session_id,
@@ -631,18 +661,38 @@ impl crate::HostFacade for HostManager {
             }
 
             for session_id in &session_ids {
+                if cleanup_unconfirmed.contains(session_id) {
+                    continue;
+                }
                 let _ = sessions.remove_stopped(session_id);
             }
         }
 
-        // Clear provider mappings
-        self.session_providers.write().await.clear();
+        // Clear provider mappings only for sessions with confirmed cleanup;
+        // unconfirmed sessions keep their ownership mapping for reconciliation.
+        {
+            let mut session_providers = self.session_providers.write().await;
+            for session_id in &session_ids {
+                if !cleanup_unconfirmed.contains(session_id) {
+                    session_providers.remove(session_id);
+                }
+            }
+        }
 
         tracing::info!(
-            sessions_closed = session_ids.len(),
-            "Host manager shutdown complete"
+            sessions_closed = session_ids.len() - cleanup_unconfirmed.len(),
+            sessions_unconfirmed = cleanup_unconfirmed.len(),
+            "Host manager shutdown complete (unconfirmed sessions retained)"
         );
-        Ok(())
+        if cleanup_unconfirmed.is_empty() {
+            Ok(())
+        } else {
+            Err(HostError::cleanup_unconfirmed(format!(
+                "{} session(s) with unconfirmed owned-process cleanup retained: {:?}",
+                cleanup_unconfirmed.len(),
+                cleanup_unconfirmed
+            )))
+        }
     }
 
     async fn shutdown_session(&self, session_id: HostSessionId) -> HostResult<()> {
