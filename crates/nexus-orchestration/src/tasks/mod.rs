@@ -2264,33 +2264,20 @@ impl InnerGraphNodeTask {
         self
     }
 
-    /// Resolve the effective `session_id` for this node (WS-E T5).
+    /// Resolve the durable orchestration run id for this node.
     ///
-    /// Priority:
-    /// 1. Explicit `session_id` (if set at construction)
-    /// 2. Lookup from context using `agent_ref` (if set and `session_routes` present)
-    /// 3. Default "default"
+    /// An explicit id is used by already-bound callers. Otherwise the engine's
+    /// trusted `_session_id` context value identifies the run. Agent role
+    /// selection is carried separately in `PromptRequest::agent_ref`.
     async fn resolve_session_id(&self, context: &graph_flow::Context) -> String {
-        // Priority 1: explicit session_id
-        if let Some(ref sid) = self.session_id {
+        if let Some(sid) = &self.session_id {
             return sid.clone();
         }
 
-        // Priority 2: lookup from session_routes via agent_ref
-        if let Some(ref agent) = self.agent_ref {
-            let routes_key = "_session_routes";
-            let routes_json: Option<serde_json::Value> = context.get(routes_key).await;
-            if let Some(routes) = routes_json {
-                if let Some(obj) = routes.as_object() {
-                    if let Some(sid) = obj.get(agent).and_then(|v| v.as_str()) {
-                        return sid.to_string();
-                    }
-                }
-            }
-        }
-
-        // Priority 3: default
-        "default".to_string()
+        context
+            .get("_session_id")
+            .await
+            .unwrap_or_else(|| "default".to_string())
     }
 }
 
@@ -2308,8 +2295,8 @@ impl Task for InnerGraphNodeTask {
         let session_id = self.resolve_session_id(&context).await;
 
         // If we have a prompt executor, delegate to AcpPromptTask.
-        if let Some(ref executor) = self.executor {
-            let acp_task = AcpPromptTask::new(
+        if let Some(executor) = &self.executor {
+            let mut acp_task = AcpPromptTask::new(
                 Some(executor.clone()),
                 self.session_cancels.clone(),
                 &self.id,
@@ -2317,6 +2304,9 @@ impl Task for InnerGraphNodeTask {
                 self.tool_policy,
                 Some(session_id),
             );
+            if let Some(agent_ref) = &self.agent_ref {
+                acp_task = acp_task.with_agent_ref(agent_ref.clone());
+            }
             return acp_task.run(context).await;
         }
 
@@ -2373,6 +2363,8 @@ pub struct AcpPromptTask {
     /// Routes the prompt to a specific agent slot within the worker.
     /// Default `"default"` for backward compatibility with single-agent workers.
     session_id: String,
+    /// Optional role key used to resolve the run's frozen provider binding.
+    agent_ref: Option<String>,
 }
 
 impl AcpPromptTask {
@@ -2402,6 +2394,7 @@ impl AcpPromptTask {
             template: template.into(),
             tool_policy,
             session_id: session_id.unwrap_or_else(|| "default".to_string()),
+            agent_ref: None,
         }
     }
 
@@ -2421,6 +2414,7 @@ impl AcpPromptTask {
             template: template.into(),
             tool_policy,
             session_id: "default".to_string(),
+            agent_ref: None,
         }
     }
 
@@ -2447,7 +2441,15 @@ impl AcpPromptTask {
             template: template.into(),
             tool_policy,
             session_id: session_id.into(),
+            agent_ref: None,
         }
+    }
+
+    /// Select a role key from the run's frozen agent bindings.
+    #[must_use]
+    pub fn with_agent_ref(mut self, agent_ref: impl Into<String>) -> Self {
+        self.agent_ref = Some(agent_ref.into());
+        self
     }
 
     /// Render the prompt template using handlebars against a nested JSON payload.
@@ -2514,7 +2516,7 @@ impl Task for AcpPromptTask {
                 .execute(crate::capability::PromptRequest {
                     run_id: self.session_id.clone(),
                     task_id: self.state_id.clone(),
-                    agent_ref: None,
+                    agent_ref: self.agent_ref.clone(),
                     prompt,
                     tool_policy: self.tool_policy,
                     cancellation,
@@ -4048,6 +4050,41 @@ mod tests {
         assert_eq!(second, first);
     }
 
+    #[derive(Default)]
+    struct CapturingIdentityExecutor {
+        request: std::sync::Mutex<Option<crate::capability::PromptRequest>>,
+    }
+
+    #[async_trait]
+    impl crate::capability::PromptExecutor for CapturingIdentityExecutor {
+        async fn execute(
+            &self,
+            request: crate::capability::PromptRequest,
+        ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError> {
+            *self.request.lock().expect("capture lock") = Some(request);
+            Ok(crate::capability::PromptResult {
+                full_text: "captured".to_string(),
+                host_session_id: "host-sess".to_string(),
+                operation_id: "op-1".to_string(),
+            })
+        }
+    }
+
+    fn identity_registry(
+        executor: Arc<CapturingIdentityExecutor>,
+    ) -> Arc<CapabilityRegistry> {
+        let deps = crate::capability::CapabilityRuntimeDeps {
+            pool: None,
+            prompt_executor: Some(executor),
+            session_cancels: Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
+            daemon_tool_dispatch: None,
+            cdn_config: None,
+        };
+        Arc::new(CapabilityRegistry::with_runtime_deps(&deps))
+    }
+
     // ── SEC-V131-01: Caller-boundary identity injection regression ────
     //
     // Proves that when the orchestration engine invokes a capability via
@@ -4080,8 +4117,9 @@ mod tests {
             on_timeout: None,
         };
 
+        let executor = Arc::new(CapturingIdentityExecutor::default());
         let task = StateCompositeTask::from_manifest(&state_def)
-            .with_registry(Arc::new(CapabilityRegistry::with_builtins()));
+            .with_registry(identity_registry(executor.clone()));
 
         // Simulate the engine setting identity in context (as start_session does).
         let ctx = graph_flow::Context::new();
@@ -4094,21 +4132,13 @@ mod tests {
             "terminal state should End"
         );
 
-        // Verify the capability received the injected identity.
-        // acp.prompt in standalone mode echoes session_id in its output.
-        let output: serde_json::Value = ctx.get("_capability_output").await.unwrap_or(Value::Null);
-        let full_text = output
-            .get("full_text")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        assert!(
-            full_text.contains("sess_42ch_001"),
-            "capability should receive injected session_id, got: {full_text}"
-        );
-        assert!(
-            !full_text.contains("default"),
-            "capability should NOT receive 'default' session_id, got: {full_text}"
-        );
+        let captured = executor
+            .request
+            .lock()
+            .expect("capture lock")
+            .clone()
+            .expect("prompt request");
+        assert_eq!(captured.run_id, "sess_42ch_001");
     }
 
     #[tokio::test]
@@ -4138,8 +4168,9 @@ mod tests {
             on_timeout: None,
         };
 
+        let executor = Arc::new(CapturingIdentityExecutor::default());
         let task = StateCompositeTask::from_manifest(&state_def)
-            .with_registry(Arc::new(CapabilityRegistry::with_builtins()));
+            .with_registry(identity_registry(executor.clone()));
 
         let ctx = graph_flow::Context::new();
         ctx.set("_creator_id", "real_creator").await;
@@ -4148,19 +4179,13 @@ mod tests {
         let result = task.run(ctx.clone()).await.unwrap();
         assert!(matches!(result.next_action, NextAction::End));
 
-        let output: serde_json::Value = ctx.get("_capability_output").await.unwrap_or(Value::Null);
-        let full_text = output
-            .get("full_text")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        assert!(
-            full_text.contains("real_session"),
-            "engine must overwrite spoofed session_id with real value, got: {full_text}"
-        );
-        assert!(
-            !full_text.contains("spoofed_session"),
-            "spoofed session_id must not reach capability, got: {full_text}"
-        );
+        let captured = executor
+            .request
+            .lock()
+            .expect("capture lock")
+            .clone()
+            .expect("prompt request");
+        assert_eq!(captured.run_id, "real_session");
     }
 
     #[tokio::test]

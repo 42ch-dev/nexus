@@ -5,7 +5,7 @@
 //! transformation, proving the task records the agent output — never the
 //! prompt echo.
 
-use graph_flow::{NextAction, Task};
+use graph_flow::Task;
 use nexus_orchestration::capability::{CapabilityError, PromptExecutor, PromptRequest, PromptResult};
 use nexus_orchestration::tasks::{AcpPromptTask, ToolPolicy};
 
@@ -117,11 +117,13 @@ preset:
   requires_capabilities:
     - acp.prompt
     - judge.llm
+  initial: start
+  terminal: start
   initial_action:
     kind: seed_direct
-  states:
-    - id: start
-      terminal: true
+states:
+  - id: start
+    terminal: true
 "#;
     let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
     let loaded = nexus_orchestration::preset::load_preset_from_str(yaml, &caps);

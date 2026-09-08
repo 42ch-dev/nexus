@@ -533,7 +533,7 @@ mod tests {
     // ── SEC-V131-01: identity boundary regression (mirrors judge.llm) ──────
 
     struct CapturingExecutor {
-        captured: parking_lot::Mutex<String>,
+        captured: std::sync::Mutex<String>,
     }
 
     #[async_trait]
@@ -542,7 +542,7 @@ mod tests {
             &self,
             request: PromptRequest,
         ) -> Result<crate::capability::PromptResult, CapabilityError> {
-            *self.captured.lock() = request.run_id.clone();
+            *self.captured.lock().expect("capture lock") = request.run_id.clone();
             Ok(crate::capability::PromptResult {
                 full_text: "{\"candidates\":[]}".to_string(),
                 host_session_id: "host-sess".to_string(),
@@ -554,7 +554,7 @@ mod tests {
     #[tokio::test]
     async fn llm_extract_raw_creator_id_ignored_on_spoof_attempt() {
         let executor = Arc::new(CapturingExecutor {
-            captured: parking_lot::Mutex::new(String::new()),
+            captured: std::sync::Mutex::new(String::new()),
         });
         let cap = LlmExtract::with_prompt_executor(executor.clone());
         let input = json!({
@@ -565,7 +565,7 @@ mod tests {
             "session_id": "spoofed_session"
         });
         let _ = cap.run(input).await.unwrap();
-        let captured = executor.captured.lock().clone();
+        let captured = executor.captured.lock().expect("capture lock").clone();
         assert_eq!(
             captured, "default",
             "SEC-V131-01: raw session_id leaked through"

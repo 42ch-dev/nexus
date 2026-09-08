@@ -176,7 +176,7 @@ mod tests {
     // ── With mock prompt executor ─────────────────────────────────────
 
     struct MockAcpExecutor {
-        captured: parking_lot::Mutex<Option<PromptRequest>>,
+        captured: std::sync::Mutex<Option<PromptRequest>>,
     }
 
     #[async_trait]
@@ -185,7 +185,7 @@ mod tests {
             &self,
             request: PromptRequest,
         ) -> Result<crate::capability::PromptResult, CapabilityError> {
-            *self.captured.lock() = Some(request.clone());
+            *self.captured.lock().expect("capture lock") = Some(request.clone());
             Ok(crate::capability::PromptResult {
                 full_text: "transformed:hello".to_string(),
                 host_session_id: "host-sess".to_string(),
@@ -197,7 +197,7 @@ mod tests {
     #[tokio::test]
     async fn acp_prompt_with_executor_returns_agent_output() {
         let executor = Arc::new(MockAcpExecutor {
-            captured: parking_lot::Mutex::new(None),
+            captured: std::sync::Mutex::new(None),
         });
         let cap = AcpPrompt::with_prompt_executor(executor.clone());
         let input = json!({
@@ -209,7 +209,7 @@ mod tests {
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["full_text"], "transformed:hello");
         assert_eq!(result["host_session_id"], "host-sess");
-        let captured = executor.captured.lock().clone().unwrap();
+        let captured = executor.captured.lock().expect("capture lock").clone().unwrap();
         assert_eq!(captured.run_id, "sess");
         assert_eq!(captured.tool_policy, ToolPolicy::DenyAll);
     }

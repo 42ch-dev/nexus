@@ -756,7 +756,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 
     let runtime_deps = CapabilityRuntimeDeps {
         pool: None,
-        prompt_executor,
+        prompt_executor: prompt_executor.clone(),
         session_cancels: session_cancels.clone(),
         daemon_tool_dispatch: None,
         cdn_config,

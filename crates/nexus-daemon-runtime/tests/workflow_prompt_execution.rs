@@ -21,13 +21,11 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use nexus_agent_host::capability::model::{
-    CreateSessionRequest, HostStartConfig, SessionOwner,
-};
+use nexus_agent_host::capability::model::HostStartConfig;
 use nexus_agent_host::config::{AgentHostConfig, ProviderConfig, TimeoutConfig};
 use nexus_agent_host::core::manager::HostManager;
 use nexus_agent_host::providers::acp::AcpProvider;
-use nexus_agent_host::{HostFacade, LaunchStrategy, ProviderId};
+use nexus_agent_host::{HostFacade, LaunchStrategy};
 use nexus_daemon_runtime::prompt_executor::HostPromptExecutor;
 use nexus_orchestration::capability::{
     CapabilityError, CapabilityRegistry, CapabilityRuntimeDeps, PromptExecutor, PromptRequest,
@@ -41,7 +39,7 @@ use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 use nexus_orchestration::SessionId;
 use tempfile::TempDir;
 
-use graph_flow::Session as GraphSession;
+use graph_flow::{Session as GraphSession, Task};
 
 const FIXTURE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -215,7 +213,6 @@ async fn build_stack(
 /// provider, and return the run id.
 async fn start_v1_run(
     workflow_store: &Arc<dyn WorkflowStateStore>,
-    storage: &Arc<SqliteSessionStorage>,
     ws: &TestWorkspace,
     provider_id: &str,
 ) -> String {
@@ -225,7 +222,6 @@ async fn start_v1_run(
         .context
         .set("_session_id", run_id.clone())
         .await;
-    storage.save(session.clone()).await.expect("save session");
 
     let mut agent_bindings = HashMap::new();
     agent_bindings.insert(
@@ -282,9 +278,9 @@ async fn all_five_consumers_observe_non_echo_agent_output() {
     let _lock = env_lock();
     let ws = setup_workspace();
     let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log);
-    let (host, storage, workflow_store, executor, registry, session_cancels) =
+    let (host, _storage, workflow_store, executor, registry, session_cancels) =
         build_stack(&ws, provider_cfg).await;
-    let run_id = start_v1_run(&workflow_store, &storage, &ws, "mock-acp").await;
+    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp").await;
 
     // 1. acp.prompt capability.
     let cap = registry.get("acp.prompt").expect("acp.prompt registered");
@@ -385,7 +381,7 @@ async fn all_five_consumers_observe_non_echo_agent_output() {
         .expect("load run");
     let state = record.expect("record").state.expect("v1 state");
     let in_flight = state.in_flight.expect("in_flight persisted");
-    assert_eq!(in_flight.task_id, "task-1");
+    assert_eq!(in_flight.task_id, "n1");
     assert!(in_flight.host_session_id.is_some());
     assert!(in_flight.operation_id.is_some());
 
@@ -403,9 +399,9 @@ async fn missing_binding_refuses_before_effect() {
     let _lock = env_lock();
     let ws = setup_workspace();
     let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log);
-    let (host, storage, workflow_store, executor, _registry, _cancels) =
+    let (host, _storage, workflow_store, executor, _registry, _cancels) =
         build_stack(&ws, provider_cfg).await;
-    let run_id = start_v1_run(&workflow_store, &storage, &ws, "mock-acp").await;
+    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp").await;
 
     // A request with an unresolved role binding refuses before any external
     // effect (A1: explicit provider selection, no implicit fallback).
@@ -442,9 +438,9 @@ async fn eof_after_initialize_is_typed_failure() {
     let ws = setup_workspace();
     let provider_cfg =
         acp_provider_config("mock-acp", &ws.fixture_log).with_env("EOF_AFTER_INIT", "1");
-    let (host, storage, workflow_store, executor, _registry, _cancels) =
+    let (host, _storage, workflow_store, executor, _registry, _cancels) =
         build_stack(&ws, provider_cfg).await;
-    let run_id = start_v1_run(&workflow_store, &storage, &ws, "mock-acp").await;
+    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp").await;
 
     // The fixture exits right after initialize; session creation fails with a
     // typed launch error — never a fake success.
@@ -468,9 +464,9 @@ async fn cancellation_is_typed_failure_and_reaches_fixture() {
     let _lock = env_lock();
     let ws = setup_workspace();
     let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log).with_env("BLOCK_PROMPT", "1");
-    let (host, storage, workflow_store, executor, _registry, _cancels) =
+    let (host, _storage, workflow_store, executor, _registry, _cancels) =
         build_stack(&ws, provider_cfg).await;
-    let run_id = start_v1_run(&workflow_store, &storage, &ws, "mock-acp").await;
+    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp").await;
 
     // The fixture never responds to the prompt; the coordinator token fires
     // after a short delay, the executor cancels the owned operation and
@@ -516,7 +512,7 @@ async fn cancellation_is_typed_failure_and_reaches_fixture() {
 }
 
 trait ProviderConfigExt {
-    fn with_env(mut self, key: &str, value: &str) -> Self;
+    fn with_env(self, key: &str, value: &str) -> Self;
 }
 
 impl ProviderConfigExt for ProviderConfig {

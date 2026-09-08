@@ -268,13 +268,13 @@ mod tests {
     /// Mock executor that records the `run_id` it was called with,
     /// enabling identity-spoof regression tests.
     struct MockGoExecutor {
-        captured_run_id: parking_lot::Mutex<String>,
+        captured_run_id: std::sync::Mutex<String>,
     }
 
     impl MockGoExecutor {
         fn new() -> Self {
             Self {
-                captured_run_id: parking_lot::Mutex::new(String::new()),
+                captured_run_id: std::sync::Mutex::new(String::new()),
             }
         }
     }
@@ -285,7 +285,7 @@ mod tests {
             &self,
             request: PromptRequest,
         ) -> Result<crate::capability::PromptResult, CapabilityError> {
-            *self.captured_run_id.lock() = request.run_id.clone();
+            *self.captured_run_id.lock().expect("capture lock") = request.run_id.clone();
             Ok(crate::capability::PromptResult {
                 full_text: "GO — the evaluation passes.".to_string(),
                 host_session_id: "host-sess".to_string(),
@@ -357,7 +357,7 @@ mod tests {
         assert_eq!(result["result"], true);
         // The executor must have received "default", NOT "spoofed_session".
         assert_eq!(
-            *executor.captured_run_id.lock(),
+            *executor.captured_run_id.lock().expect("capture lock"),
             "default",
             "SEC-V131-01: raw session_id leaked through"
         );
@@ -375,7 +375,10 @@ mod tests {
         });
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["result"], true);
-        assert_eq!(*executor.captured_run_id.lock(), "legit_session");
+        assert_eq!(
+            *executor.captured_run_id.lock().expect("capture lock"),
+            "legit_session"
+        );
     }
 
     /// Proves context-injected identity wins even when raw args are present.
@@ -393,7 +396,7 @@ mod tests {
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["result"], true);
         assert_eq!(
-            *executor.captured_run_id.lock(),
+            *executor.captured_run_id.lock().expect("capture lock"),
             "legit_session",
             "SEC-V131-01: context ID must win over raw spoof"
         );

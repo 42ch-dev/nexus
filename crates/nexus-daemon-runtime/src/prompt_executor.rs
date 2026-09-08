@@ -30,11 +30,10 @@ use nexus_agent_host::capability::model::{
 use nexus_agent_host::config::TimeoutConfig;
 use nexus_agent_host::{HostFacade, HostOperationId, ProviderId};
 use nexus_orchestration::capability::{
-    CapabilityError, PromptExecutor, PromptRequest, PromptResult, ToolPolicy,
+    CapabilityError, PromptExecutor, PromptRequest, PromptResult,
 };
 use nexus_orchestration::run_state::{PromptAttempt, PromptPhase, WorkflowStateStore};
 use nexus_orchestration::SessionId;
-use tokio_util::sync::CancellationToken;
 
 /// Key for a lazily-reused Host session: the same run+role reuses its
 /// session serially; another run/Creator never shares it (A5).
@@ -157,7 +156,7 @@ impl HostPromptExecutor {
                 ))
             })?;
 
-        let sid = session.session_id;
+        let sid = session.id;
         self.sessions
             .write()
             .await
@@ -272,11 +271,9 @@ impl PromptExecutor for HostPromptExecutor {
         // 6. Drain the stream, collecting MessageDelta only, while listening
         //    to the coordinator cancellation token concurrently (A5).
         let mut full_text = String::new();
-        let mut terminal: Option<Result<PromptResult, CapabilityError>> = None;
         let mut stream = std::pin::pin!(stream);
         let cancel = request.cancellation.clone();
-
-        loop {
+        let terminal = loop {
             tokio::select! {
                 biased;
                 _ = cancel.cancelled() => {
@@ -285,8 +282,7 @@ impl PromptExecutor for HostPromptExecutor {
                     // lifecycle. The stream's own terminal event (or the
                     // bounded cleanup) guarantees a typed failure.
                     let _ = self.host.cancel(op_id.clone()).await;
-                    terminal = Some(Err(CapabilityError::Cancelled));
-                    break;
+                    break Err(CapabilityError::Cancelled);
                 }
                 event = stream.next() => {
                     match event {
@@ -295,48 +291,43 @@ impl PromptExecutor for HostPromptExecutor {
                         }
                         Some(Ok(HostEvent::OpFinished(finished))) => {
                             if finished.reason == nexus_agent_host::capability::model::FinishReason::EndTurn {
-                                terminal = Some(Ok(PromptResult {
+                                break Ok(PromptResult {
                                     full_text,
                                     host_session_id: host_session_id.to_string(),
                                     operation_id: op_id.to_string(),
-                                }));
-                            } else {
-                                terminal = Some(Err(CapabilityError::TransientExternal(format!(
-                                    "agent stopped with non-EndTurn reason {:?}",
-                                    finished.reason
-                                ))));
+                                });
                             }
-                            break;
+                            break Err(CapabilityError::TransientExternal(format!(
+                                "agent stopped with non-EndTurn reason {:?}",
+                                finished.reason
+                            )));
                         }
                         Some(Ok(HostEvent::OpFailed(failed))) => {
-                            terminal = Some(Err(CapabilityError::TransientExternal(format!(
+                            break Err(CapabilityError::TransientExternal(format!(
                                 "host operation failed: {} ({})",
                                 failed.error_category, failed.error_message
-                            ))));
-                            break;
+                            )));
                         }
                         Some(Ok(_)) => {
                             // Ignore non-message events (thoughts, tool calls,
                             // status, plan updates).
                         }
                         Some(Err(e)) => {
-                            terminal = Some(Err(CapabilityError::TransientExternal(format!(
+                            break Err(CapabilityError::TransientExternal(format!(
                                 "host event stream error: {e}"
-                            ))));
-                            break;
+                            )));
                         }
                         None => {
                             // EOF without a terminal event is a typed failure
                             // (A1: only MessageDelta + EndTurn succeeds).
-                            terminal = Some(Err(CapabilityError::TransientExternal(
+                            break Err(CapabilityError::TransientExternal(
                                 "host event stream closed without a terminal event".to_string(),
-                            )));
-                            break;
+                            ));
                         }
                     }
                 }
             }
-        }
+        };
 
         // 7. On cancellation, bound the session cleanup through the T1 Host
         //    lifecycle (A5): shutdown drains and reaps the owned process.
@@ -348,8 +339,6 @@ impl PromptExecutor for HostPromptExecutor {
             .await;
         }
 
-        terminal.ok_or_else(|| {
-            CapabilityError::Internal("prompt stream ended without a terminal outcome".to_string())
-        })?
+        terminal
     }
 }
