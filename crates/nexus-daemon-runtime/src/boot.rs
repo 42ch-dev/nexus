@@ -1154,7 +1154,14 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 
         if which::which("codex").is_ok() {
             manager
-                .register_provider(Arc::new(CodexNativeProvider::default_config()))
+                .register_provider(
+                    Arc::new(CodexNativeProvider::default_config()),
+                    nexus_agent_host::LaunchStrategy::NativeCli {
+                        command: "codex".to_string(),
+                        args: vec![],
+                        env: std::collections::HashMap::new(),
+                    },
+                )
                 .await;
             providers_registered += 1;
             tracing::info!(
@@ -1170,7 +1177,14 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 
         if which::which("claude").is_ok() {
             manager
-                .register_provider(Arc::new(ClaudeCliProvider::default_config()))
+                .register_provider(
+                    Arc::new(ClaudeCliProvider::default_config()),
+                    nexus_agent_host::LaunchStrategy::NativeCli {
+                        command: "claude".to_string(),
+                        args: vec![],
+                        env: std::collections::HashMap::new(),
+                    },
+                )
                 .await;
             providers_registered += 1;
             tracing::info!(
@@ -1197,15 +1211,29 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         // DSH_RUNTIME_BIN → RuntimeNotFound).
         if let Ok(dsh_path) = which::which("dsh-jsonrpc-agent") {
             manager
-                .register_provider(Arc::new(DshNativeProvider::with_runtime_bin(Some(
-                    dsh_path.to_string_lossy().into_owned(),
-                ))))
+                .register_provider(
+                    Arc::new(DshNativeProvider::with_runtime_bin(Some(
+                        dsh_path.to_string_lossy().into_owned(),
+                    ))),
+                    nexus_agent_host::LaunchStrategy::NativeCli {
+                        command: "dsh-jsonrpc-agent".to_string(),
+                        args: vec![],
+                        env: std::collections::HashMap::new(),
+                    },
+                )
                 .await;
             providers_registered += 1;
             tracing::info!(provider = "dsh-native", "registered native agent provider");
         } else if std::env::var_os("DSH_RUNTIME_BIN").is_some_and(|value| !value.is_empty()) {
             manager
-                .register_provider(Arc::new(DshNativeProvider::with_runtime_bin(None)))
+                .register_provider(
+                    Arc::new(DshNativeProvider::with_runtime_bin(None)),
+                    nexus_agent_host::LaunchStrategy::NativeCli {
+                        command: "dsh-jsonrpc-agent".to_string(),
+                        args: vec![],
+                        env: std::collections::HashMap::new(),
+                    },
+                )
                 .await;
             providers_registered += 1;
             tracing::info!(
@@ -1220,9 +1248,47 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             );
         }
 
+        // Configured generic ACP providers (V1.186): register launch recipes
+        // only — no client/process at boot. The first Host session for a
+        // provider lazily spawns its owned ACP child bound to the verified
+        // Creator workspace cwd. Disabled/missing providers are refused at
+        // construction and never registered.
+        let host_config = state.agent_host_config();
+        for provider_config in &host_config.providers {
+            if provider_config.protocol != "acp" {
+                continue;
+            }
+            match nexus_agent_host::providers::acp::AcpProvider::from_config(
+                provider_config.clone(),
+                host_config.timeouts.clone(),
+                nexus_agent_host::HostPermissionResolver::new_native_only(&host_config.policy),
+            ) {
+                Ok(provider) => {
+                    let launch = nexus_agent_host::LaunchStrategy::Acp {
+                        command: provider_config.command.clone().unwrap_or_default(),
+                        args: provider_config.args.clone(),
+                        env: provider_config.env.clone(),
+                    };
+                    manager.register_provider(Arc::new(provider), launch).await;
+                    providers_registered += 1;
+                    tracing::info!(
+                        provider = %provider_config.id,
+                        "registered configured ACP provider (lazy session-scoped spawn)"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        provider = %provider_config.id,
+                        error = %e,
+                        "skipping configured ACP provider"
+                    );
+                }
+            }
+        }
+
         tracing::info!(
             providers_registered,
-            "native agent provider registration complete"
+            "agent provider registration complete"
         );
         Arc::new(manager)
     };

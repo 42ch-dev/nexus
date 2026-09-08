@@ -45,6 +45,12 @@ pub enum HostError {
         message: String,
     },
 
+    /// Session cwd does not belong to the verified Creator workspace.
+    OwnerWorkspaceMismatch {
+        provider_id: Option<ProviderId>,
+        message: String,
+    },
+
     /// Stage-level timeout exceeded.
     OperationTimeout {
         provider_id: Option<ProviderId>,
@@ -129,6 +135,15 @@ impl HostError {
         }
     }
 
+    /// Create an owner-workspace-mismatch error.
+    #[must_use]
+    pub fn owner_workspace_mismatch(message: impl fmt::Display) -> Self {
+        Self::OwnerWorkspaceMismatch {
+            provider_id: None,
+            message: message.to_string(),
+        }
+    }
+
     /// Create an operation-timeout error.
     #[must_use]
     pub fn timeout(stage: impl fmt::Display, message: impl fmt::Display) -> Self {
@@ -191,6 +206,9 @@ impl HostError {
             Self::PolicyDenied {
                 provider_id: pid, ..
             }
+            | Self::OwnerWorkspaceMismatch {
+                provider_id: pid, ..
+            }
             | Self::OperationTimeout {
                 provider_id: pid, ..
             }
@@ -249,6 +267,7 @@ impl HostError {
             Self::LaunchFailed { .. } => "launch_failed",
             Self::CapabilityUnsupported { .. } => "capability_unsupported",
             Self::PolicyDenied { .. } => "policy_denied",
+            Self::OwnerWorkspaceMismatch { .. } => "owner_workspace_mismatch",
             Self::OperationTimeout { .. } => "operation_timeout",
             Self::OperationCancelled { .. } => "operation_cancelled",
             Self::ProviderProtocolError { .. } => "provider_protocol_error",
@@ -289,6 +308,9 @@ impl fmt::Display for HostError {
             }
             Self::PolicyDenied { message, .. } => {
                 write!(f, "policy denied: {message}")
+            }
+            Self::OwnerWorkspaceMismatch { message, .. } => {
+                write!(f, "owner workspace mismatch: {message}")
             }
             Self::OperationTimeout { stage, message, .. } => {
                 write!(f, "timeout [{stage}]: {message}")

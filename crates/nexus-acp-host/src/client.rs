@@ -806,6 +806,15 @@ impl AcpSdkAdapter {
         &self.agent_path
     }
 
+    /// Whether the SDK connection has been established.
+    ///
+    /// `with_connection` spawns the connection setup asynchronously; callers
+    /// that need the connection immediately (e.g. a lazy session spawn) poll
+    /// this with a bounded deadline before issuing requests.
+    pub async fn is_connected(&self) -> bool {
+        self.connection.read().await.is_some()
+    }
+
     /// Return the agent ID.
     #[must_use]
     pub fn agent_id(&self) -> &str {

@@ -104,6 +104,10 @@ fn map_host_error(e: &nexus_agent_host::HostError) -> NexusApiError {
             resource: "agent_host".into(),
             reason: e.to_string(),
         },
+        "owner_workspace_mismatch" => NexusApiError::Forbidden {
+            resource: "agent_host".into(),
+            reason: e.to_string(),
+        },
         _ => NexusApiError::Internal {
             code: "AGENT_HOST_ERROR".into(),
             message: e.to_string(),
@@ -271,7 +275,7 @@ pub async fn create_session(
             req.mode.clone(),
             &ctx,
         )?;
-        let host_req = host_create_request(&req);
+        let host_req = host_create_request(&req, &state, &ctx.owner_creator_id);
         let host_for_create = Arc::clone(&host);
         let session = state
             .actor_sessions()
@@ -300,7 +304,8 @@ pub async fn create_session(
     }
 
     let host = get_host(&state)?;
-    let host_req = host_create_request(&req);
+    let owner_creator_id = require_creator(&state)?;
+    let host_req = host_create_request(&req, &state, &owner_creator_id);
     let model = req.model.clone();
 
     let session = host
@@ -326,9 +331,27 @@ fn session_cwd_path(req: &CreateSessionRequest) -> std::path::PathBuf {
     )
 }
 
-/// Legacy host request: empty MCP list and `metadata: null`.
+/// Resolve the canonical Creator workspace root from verified state.
+///
+/// The active workspace path is the trusted boundary for Host sessions; the
+/// request body never supplies the workspace root.
+fn verified_workspace_root(state: &WorkspaceState) -> std::path::PathBuf {
+    state
+        .workspace_path()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| state.nexus_home().clone())
+}
+
+/// Build the Host create request with verified owner metadata.
+///
+/// `owner_creator_id` comes from existing verified admission (the active
+/// Creator at request time, or the admitted Character's owner) — never from
+/// request-body assertions. The canonical workspace root is the active
+/// workspace path.
 fn host_create_request(
     req: &CreateSessionRequest,
+    state: &WorkspaceState,
+    owner_creator_id: &str,
 ) -> nexus_agent_host::capability::CreateSessionRequest {
     nexus_agent_host::capability::CreateSessionRequest {
         provider_id: nexus_agent_host::ProviderId::new(&req.provider_id),
@@ -337,6 +360,11 @@ fn host_create_request(
         mode: req.mode.clone(),
         mcp_servers: vec![],
         metadata: serde_json::Value::Null,
+        owner: nexus_agent_host::capability::model::SessionOwner {
+            creator_id: owner_creator_id.to_string(),
+            workspace_root: verified_workspace_root(state),
+            orchestration_run_id: None,
+        },
     }
 }
 
@@ -2518,6 +2546,7 @@ mod tests {
                 active_op_id: None,
                 negotiated_capabilities:
                     nexus_agent_host::capability::model::CapabilityDescriptor::native_cli_limited(),
+                owner: request.owner,
             };
             self.sessions
                 .lock()

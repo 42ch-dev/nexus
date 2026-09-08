@@ -261,6 +261,22 @@ pub struct HostStartConfig {
     pub timeouts: crate::config::TimeoutConfig,
 }
 
+/// Verified owner metadata bound to a Host session.
+///
+/// Constructed by Host/Character admission from existing verified scope
+/// (never from request-body assertions). The canonical workspace cwd is
+/// validated against this owner before any subprocess spawn.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionOwner {
+    /// The verified Creator ID that owns this session.
+    pub creator_id: String,
+    /// Canonical workspace root of the Creator (absolute path).
+    pub workspace_root: PathBuf,
+    /// Optional orchestration run ID (set by the trusted orchestration
+    /// adapter; `None` for standalone Character/public Host sessions).
+    pub orchestration_run_id: Option<String>,
+}
+
 /// Request to create a new managed session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateSessionRequest {
@@ -276,6 +292,8 @@ pub struct CreateSessionRequest {
     pub mcp_servers: Vec<McpServerConfig>,
     /// Additional metadata (opaque to host).
     pub metadata: serde_json::Value,
+    /// Verified owner metadata (Creator + canonical workspace).
+    pub owner: SessionOwner,
 }
 
 /// MCP server configuration.
@@ -504,6 +522,8 @@ pub struct LaunchSpec {
     pub mode: Option<String>,
     /// MCP server configurations.
     pub mcp_servers: Vec<McpServerConfig>,
+    /// Verified owner metadata (Creator + canonical workspace).
+    pub owner: SessionOwner,
 }
 
 /// Handle to a managed provider session.

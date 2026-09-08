@@ -91,6 +91,8 @@ pub struct HostSession {
     pub active_op_id: Option<HostOperationId>,
     /// Negotiated capabilities for this session.
     pub negotiated_capabilities: CapabilityDescriptor,
+    /// Verified owner metadata (Creator + canonical workspace).
+    pub owner: crate::capability::model::SessionOwner,
 }
 
 /// Registry of all active host sessions.
@@ -121,6 +123,7 @@ impl SessionRegistry {
         &mut self,
         provider_id: ProviderId,
         capabilities: CapabilityDescriptor,
+        owner: crate::capability::model::SessionOwner,
     ) -> HostSessionId {
         let id = HostSessionId::new();
         let session = HostSession {
@@ -130,6 +133,7 @@ impl SessionRegistry {
             created_at: Utc::now(),
             active_op_id: None,
             negotiated_capabilities: capabilities,
+            owner,
         };
         self.sessions.insert(id.clone(), session);
         id
@@ -460,7 +464,15 @@ mod tests {
     }
 
     fn register_session(registry: &mut SessionRegistry) -> HostSessionId {
-        registry.register(ProviderId::new("test-provider"), test_caps())
+        registry.register(
+            ProviderId::new("test-provider"),
+            test_caps(),
+            crate::capability::model::SessionOwner {
+                creator_id: "ctr_test".to_string(),
+                workspace_root: std::path::PathBuf::from("/tmp"),
+                orchestration_run_id: None,
+            },
+        )
     }
 
     #[test]
