@@ -1210,6 +1210,16 @@ impl WorkflowRunCoordinator {
                     }
                     (None, 0)
                 }
+                Err(nexus_orchestration::schedule::derivation::CoreContextError::VersionNotFound(_, version)) => {
+                    // I-6: version 0 with no rows is "no seed", not a missing expected snapshot.
+                    if version == 0 && row.current_core_context_version == 0 {
+                        (None, 0)
+                    } else {
+                        return Err(RunControlError::Admission(format!(
+                            "core-context version {version} is missing"
+                        )));
+                    }
+                }
                 Err(e) => {
                     return Err(RunControlError::Admission(format!(
                         "core-context snapshot read failed: {e}"
