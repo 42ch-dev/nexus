@@ -1395,15 +1395,15 @@ fn extract_output_bindings(manifest: &PresetManifest) -> HashMap<String, String>
 
 /// Build inner graphs per §8.2.
 ///
-/// `inner_graphs.<name>.nodes[].kind=acp_prompt` → `AcpPromptTask` (stub in T3,
-/// full in T4).
+/// `inner_graphs.<name>.nodes[].kind=acp_prompt` → `AcpPromptTask`.
 /// `inner_graphs.<name>.nodes[].depends_on` → `add_edge`.
 ///
 /// ## WS-E T5: agent field propagation
 ///
 /// Each node's `agent` field (if present) is stored in `InnerGraphNodeTask::agent_ref`.
-/// At runtime, the engine resolves agent refs to `session_ids` and stores them
-/// in context as `_session_routes`, which `InnerGraphNodeTask::run()` uses for routing.
+/// At runtime the engine seeds the trusted child `_session_id` context value,
+/// which `InnerGraphNodeTask::resolve_session_id` uses as the durable run
+/// identity for the Host prompt route.
 ///
 /// ## A1: prompt executor wiring
 ///

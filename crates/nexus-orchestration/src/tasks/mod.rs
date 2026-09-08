@@ -9,8 +9,6 @@
 //!   and propagate it to all child tasks.
 //! - `CapabilityTask::run` should generate a `capability_call_id` per invocation
 //!   and store `_last_capability_call_id` + capability call metadata in context.
-//! - `AcpPromptTask::run` should include `run_id` and `capability_call_id` in
-//!   `worker/acp_prompt` params when a worker handle exists.
 //! - If `_trace_file` is present in context, append start/finish trace events
 //!   best-effort using the DTOs from `nexus-contracts::local::acp_runtime::trace`.
 
@@ -2165,15 +2163,15 @@ impl Task for StateCompositeTask {
 /// A task for a node within an inner graph.
 ///
 /// §8.2 mapping:
-/// - `kind=acp_prompt` → `AcpPromptTask` (full in T4; T3 stub that stores a placeholder).
+/// - `kind=acp_prompt` → `AcpPromptTask` through the Host plane.
 ///
 /// ## WS-E T5: `session_id` routing
 ///
-/// The task can route prompts to different agent sessions based on:
+/// The task routes the prompt to the durable orchestration run based on:
 /// 1. Explicit `session_id` provided at construction (for preset resolution)
-/// 2. Node's `agent` field resolved from `session_routes` in context (runtime lookup)
+/// 2. The engine-seeded `_session_id` trusted context value (runtime lookup)
 ///
-/// Backward compatible: if no session routing is configured, uses `"default"`.
+/// Backward compatible: if no session identity is available, uses `"default"`.
 pub struct InnerGraphNodeTask {
     id: String,
     /// Production prompt executor. `None` for stub/test mode.
@@ -2726,10 +2724,10 @@ type DaemonDispatchSlot = std::sync::Arc<
 /// A task that calls a `nexus.*` host tool through the daemon's unified registry.
 ///
 /// Production wiring for DF-47: the schedule executor can invoke read-only
-/// (or mutating) `nexus.*` tools on a configured stage without worker IPC.
-/// The call goes directly through [`crate::capability::DaemonToolDispatch`]
-/// which is implemented in `nexus-daemon-runtime` using
-/// `HostToolExecutor::dispatch_from_worker`.
+/// (or mutating) `nexus.*` tools on a configured stage in-process. The call
+/// goes directly through [`crate::capability::DaemonToolDispatch`] which is
+/// implemented in `nexus-daemon-runtime` by `DaemonToolDispatchAdapter`
+/// (`HostToolExecutor::dispatch_for_schedule`).
 ///
 /// Design: `agent-nexus-tool-bridge.md` §7.4, V1.42 P3.
 pub struct HostToolCallTask {
@@ -3978,69 +3976,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn inner_graph_node_task_resolves_session_id_from_routes() {
-        // WS-E T5: InnerGraphNodeTask should lookup session_id from session_routes
-        let task = InnerGraphNodeTask::new("n1").with_agent_ref("writer"); // agent role reference
-
-        let ctx = graph_flow::Context::new();
-        // Set session_routes: writer → writer_session
-        ctx.set(
-            "_session_routes",
-            serde_json::json!({
-                "writer": "writer_session",
-                "reviewer": "reviewer_session",
-            }),
-        )
-        .await;
-
-        let result = task.run(ctx.clone()).await;
-        assert!(result.is_err(), "no executor must refuse: {result:?}");
-    }
-
-    #[tokio::test]
     async fn inner_graph_node_task_falls_back_to_default() {
-        // WS-E T5: No session_id, no agent_ref, no routes → default.
+        // WS-E T5: No session_id, no agent_ref → default.
         // A1: no executor — typed refusal.
         let task = InnerGraphNodeTask::new("n1");
         let ctx = graph_flow::Context::new();
-        let result = task.run(ctx.clone()).await;
-        assert!(result.is_err(), "no executor must refuse: {result:?}");
-    }
-
-    #[tokio::test]
-    async fn inner_graph_node_task_agent_ref_missing_in_routes() {
-        // WS-E T5: agent_ref set but not in routes → default
-        let task = InnerGraphNodeTask::new("n1").with_agent_ref("unknown_role");
-
-        let ctx = graph_flow::Context::new();
-        ctx.set(
-            "_session_routes",
-            serde_json::json!({
-                "writer": "writer_session",
-            }),
-        )
-        .await;
-
-        let result = task.run(ctx.clone()).await;
-        assert!(result.is_err(), "no executor must refuse: {result:?}");
-    }
-
-    #[tokio::test]
-    async fn inner_graph_node_task_explicit_session_id_overrides_routes() {
-        // WS-E T5: explicit session_id should win over routes lookup
-        let task = InnerGraphNodeTask::new("n1")
-            .with_session_id("explicit_session")
-            .with_agent_ref("writer"); // this should be ignored
-
-        let ctx = graph_flow::Context::new();
-        ctx.set(
-            "_session_routes",
-            serde_json::json!({
-                "writer": "writer_session",
-            }),
-        )
-        .await;
-
         let result = task.run(ctx.clone()).await;
         assert!(result.is_err(), "no executor must refuse: {result:?}");
     }

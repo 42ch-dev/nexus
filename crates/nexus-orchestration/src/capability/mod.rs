@@ -209,9 +209,11 @@ pub trait PromptExecutor: Send + Sync {
 
 /// Provider trait for daemon-side `nexus.*` tool dispatch (DF-47 production wiring).
 ///
-/// Implemented by `nexus-daemon-runtime` using `HostToolExecutor::dispatch_from_worker`.
+/// Implemented by `nexus-daemon-runtime`'s `DaemonToolDispatchAdapter`, which
+/// dispatches through `HostToolExecutor::dispatch_for_schedule` (the Schedule
+/// caller lane with `HostToolCallerKind::Schedule` audit differentiation).
 /// Injected into `HostToolCallTask` so the orchestration engine can invoke
-/// `nexus.*` tools on a schedule tick without worker IPC round-trip.
+/// `nexus.*` tools on a schedule tick in-process.
 ///
 /// Design: `agent-nexus-tool-bridge.md` §7.4, V1.42 P3.
 #[async_trait]

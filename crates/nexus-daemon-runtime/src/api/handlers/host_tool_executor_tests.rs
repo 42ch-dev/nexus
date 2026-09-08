@@ -422,37 +422,6 @@ async fn fs_write_rejects_symlink_parent_escape() {
     );
 }
 
-/// V1.86 T4: worker IPC entry point (`dispatch_from_worker`) applies the same
-/// fs/* path guard as the CLI/HTTP path.
-#[tokio::test]
-async fn worker_fs_read_rejects_escape() {
-    let (_tmp, nexus_home, db_path, workspace_dir) = create_initialized_test_workspace().await;
-    let state = WorkspaceState::new_for_testing(
-        nexus_home,
-        db_path,
-        Some(workspace_dir.to_string_lossy().to_string()),
-    )
-    .await;
-
-    std::fs::write(
-        workspace_dir.parent().unwrap().join("outside_worker.md"),
-        "x",
-    )
-    .expect("write outside");
-
-    let result = HostToolExecutor::dispatch_from_worker(
-        "fs/read_text_file",
-        &serde_json::json!({ "path": "../outside_worker.md" }),
-        "req-worker-fs-001",
-        &state,
-    )
-    .await;
-
-    assert!(!result.grant, "worker fs/* escape must not be granted");
-    let error = result.error.expect("worker should return error");
-    assert_eq!(error.code, "forbidden");
-}
-
 #[tokio::test]
 async fn whoami_returns_active_creator() {
     let (_tmp, nexus_home, db_path) = create_test_workspace().await;
@@ -596,40 +565,6 @@ async fn context_assemble_policy_blocked_when_local_only() {
         Err(e) => panic!("Expected BadRequest(POLICY_BLOCKED), got: {e:?}"),
         Ok(_) => panic!("Expected error"),
     }
-}
-
-/// Worker upcall dispatch hits the same registry as HTTP (spec §7.1).
-#[tokio::test]
-async fn worker_upcall_whoami_same_result_as_http() {
-    let (_tmp, nexus_home, db_path) = create_test_workspace().await;
-    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-
-    let http_req = ToolExecuteRequest {
-        tool_name: "nexus.context.whoami".to_string(),
-        parameters: serde_json::json!({}),
-        session_id: None,
-        request_id: None,
-        caller_kind: None,
-    };
-    let http_result = HostToolExecutor::execute(&http_req, &state)
-        .await
-        .expect("HTTP execute");
-
-    let worker_result = HostToolExecutor::dispatch_from_worker(
-        "nexus.context.whoami",
-        &serde_json::json!({}),
-        "req-001",
-        &state,
-    )
-    .await;
-
-    assert!(worker_result.grant, "Worker upcall should succeed");
-    assert_eq!(worker_result.request_id, "req-001");
-    let output = worker_result.output.expect("worker should have output");
-    assert_eq!(
-        output, http_result,
-        "HTTP and worker must produce same result"
-    );
 }
 
 // ─── V1.53 P0 Sub-phase 1: Registry parity tests ───────────────────────
@@ -2463,7 +2398,7 @@ async fn registry_dispatch_propagates_audit_write_failure() {
     }
 }
 
-// ─── V1.57 P1: 3-caller integration tests ─────────────────────────────
+// ─── V1.57 P1: 2-caller integration tests ─────────────────────────────
 
 /// CLI entry point test: `HostToolExecutor::execute()` dispatches through
 /// the capability registry for a read tool.
@@ -2486,28 +2421,7 @@ async fn test_host_call_dispatches_through_registry_read() {
     assert_eq!(val["creator_id"], "test_creator");
 }
 
-/// Worker entry point test: `dispatch_from_worker()` dispatches through
-/// the same registry as HTTP/CLI.
-#[tokio::test]
-async fn test_worker_agent_tool_request_dispatches_through_registry() {
-    let (_tmp, nexus_home, db_path) = create_test_workspace().await;
-    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-
-    let worker_result = HostToolExecutor::dispatch_from_worker(
-        "nexus.context.whoami",
-        &serde_json::json!({}),
-        "req-worker-001",
-        &state,
-    )
-    .await;
-
-    assert!(worker_result.grant, "Worker upcall should succeed");
-    assert_eq!(worker_result.request_id, "req-worker-001");
-    let output = worker_result.output.expect("worker should have output");
-    assert_eq!(output["creator_id"], "test_creator");
-}
-
-/// HTTP entry point test: `execute()` → same registry dispatch as worker/CLI.
+/// HTTP entry point test: `execute()` → same registry dispatch as CLI.
 #[tokio::test]
 async fn test_http_tool_execute_dispatches_through_registry() {
     let (_tmp, nexus_home, db_path) = create_test_workspace().await;
@@ -2527,9 +2441,10 @@ async fn test_http_tool_execute_dispatches_through_registry() {
     assert_eq!(val["creator_id"], "test_creator");
 }
 
-/// Dispatch equivalence: same `tool_id` + input → same output across all 3 paths.
+/// Dispatch equivalence: same `tool_id` + input → same output across CLI/HTTP
+/// and Schedule paths.
 #[tokio::test]
-async fn test_dispatch_equivalence_all_three_paths() {
+async fn test_dispatch_equivalence_cli_and_schedule_paths() {
     let (_tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
@@ -2545,18 +2460,7 @@ async fn test_dispatch_equivalence_all_three_paths() {
         .await
         .expect("HTTP path");
 
-    // Path 2: Worker
-    let worker_result = HostToolExecutor::dispatch_from_worker(
-        "nexus.context.whoami",
-        &serde_json::json!({}),
-        "req-equiv",
-        &state,
-    )
-    .await;
-    assert!(worker_result.grant);
-    let worker_output = worker_result.output.expect("worker output");
-
-    // Path 3: Schedule
+    // Path 2: Schedule
     let schedule_result = HostToolExecutor::dispatch_for_schedule(
         "nexus.context.whoami",
         &serde_json::json!({}),
@@ -2566,103 +2470,8 @@ async fn test_dispatch_equivalence_all_three_paths() {
     .await
     .expect("schedule path");
 
-    // All three paths produce identical creator_id
-    assert_eq!(http_result["creator_id"], worker_output["creator_id"]);
+    // Both paths produce identical creator_id
     assert_eq!(http_result["creator_id"], schedule_result["creator_id"]);
-    assert_eq!(worker_output["creator_id"], schedule_result["creator_id"]);
-}
-
-// ─── V1.57 P3: Worker allowlist dynamic derivation ─────────────────────────
-
-/// All 18 `nexus.*` host tool IDs that the worker must support.
-///
-/// V1.57 P3: Derived from `CapabilityRegistry`. Previously (V1.42 P3) the
-/// worker was limited to a single ID (`nexus.orchestration.schedule_status`).
-/// Now all 18 shipped `nexus.*` IDs are dispatchable via worker IPC.
-const ALL_NEXUS_TOOL_IDS: &[&str] = &[
-    "nexus.context.whoami",
-    "nexus.workspace.info",
-    "nexus.work.get",
-    "nexus.work.patch",
-    "nexus.orchestration.schedule_status",
-    "nexus.context.assemble",
-    "nexus.world.snapshot.get",
-    "nexus.timeline.recent.get",
-    "nexus.kb_snapshot.read",
-    "nexus.manuscript.chapter.get",
-    "nexus.observability.daemon.health",
-    "nexus.kb_snapshot.write",
-    "nexus.manuscript.chapter.update",
-    "nexus.world.configure",
-    "nexus.work.schedule.set",
-    "nexus.finding.resolve",
-    "nexus.pool.entry.manage",
-    "nexus.registry.refresh",
-];
-
-/// V1.57 P3: Every `nexus.*` tool in the registry is dispatchable via
-/// worker `agent_tool_request` IPC.
-///
-/// Verifies that the worker entry point (`dispatch_from_worker`) accepts
-/// all 18 shipped `nexus.*` host tool IDs. The worker normalizes
-/// `agent_tool_request` into `ToolExecuteRequest` and dispatches through
-/// the same registry as CLI/HTTP (per P1's 3-caller unification).
-///
-/// Some tools require seeded DB state to return success (e.g. `nexus.work.get`
-/// needs a work record). This test only verifies the **admission gate** —
-/// that the tool ID is recognized (not `NOT_SUPPORTED`) and the active-creator
-/// check passes. Handlers that fail with `INVALID_INPUT` or `NOT_FOUND` are
-/// still considered "dispatchable" because the registry looked them up.
-#[tokio::test]
-async fn test_worker_dispatches_all_registered_nexus_tools() {
-    let (_tmp, nexus_home, db_path) = create_test_workspace().await;
-    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-
-    for &tool_id in ALL_NEXUS_TOOL_IDS {
-        let result = HostToolExecutor::dispatch_from_worker(
-            tool_id,
-            &serde_json::json!({}),
-            &format!("req-{tool_id}"),
-            &state,
-        )
-        .await;
-
-        // The tool must NOT return NOT_SUPPORTED (the allowlist check passed).
-        // It may return other errors (INVALID_INPUT, NOT_FOUND, FORBIDDEN)
-        // depending on required DB state — those are handler-level failures,
-        // not admission failures.
-        if let Some(err) = &result.error {
-            assert_ne!(
-                err.code, "not_supported",
-                "Worker rejected registered tool '{tool_id}' as NOT_SUPPORTED"
-            );
-        }
-        // If grant=true, the dispatch succeeded. If grant=false with a
-        // non-NOT_SUPPORTED error, the handler was found but input/state
-        // was insufficient — that's still a successful dispatch lookup.
-    }
-}
-
-/// V1.57 P3: Unknown tool IDs return `NOT_SUPPORTED` via worker IPC.
-///
-/// Confirms admission gate equivalence: an unknown ID is rejected the
-/// same way on the worker path as on CLI/HTTP.
-#[tokio::test]
-async fn test_worker_rejects_unknown_tool() {
-    let (_tmp, nexus_home, db_path) = create_test_workspace().await;
-    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-
-    let result = HostToolExecutor::dispatch_from_worker(
-        "nexus.nonexistent.tool",
-        &serde_json::json!({}),
-        "req-unknown",
-        &state,
-    )
-    .await;
-
-    assert!(!result.grant, "Unknown tool should not be granted");
-    let err = result.error.expect("Unknown tool must produce error");
-    assert_eq!(err.code, "not_supported");
 }
 
 // ─── V1.59 P0: DF-47 manuscript & misc capability parity batch ────────────

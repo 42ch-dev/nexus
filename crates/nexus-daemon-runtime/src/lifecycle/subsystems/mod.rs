@@ -7,13 +7,11 @@ mod agent_host;
 mod db;
 mod http;
 mod mock_all;
-mod worker_mgr;
 
 pub use agent_host::AgentHostSubsystem;
 pub use db::DbSubsystem;
 pub use http::HttpSubsystem;
 pub use mock_all::MockAllSubsystems;
-pub use worker_mgr::{WorkerMgrSubsystem, DEFAULT_MAX_WORKERS};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -34,7 +32,7 @@ pub enum SubsystemHealth {
 
 /// Trait for subsystem lifecycle management.
 ///
-/// Each managed subsystem (HTTP, DB, Sync, Engine, `WorkerMgr`) implements this trait.
+/// Each managed subsystem (HTTP, DB, Sync, Engine) implements this trait.
 /// The lifecycle HSM calls these methods during state transitions.
 #[async_trait]
 pub trait SubsystemBootstrap: Send + Sync {

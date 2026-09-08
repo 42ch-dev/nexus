@@ -1,4 +1,4 @@
-//! nexus-orchestration — engine adapter, capability registry, worker manager.
+//! nexus-orchestration — engine adapter, capability registry, graph executor.
 //! Authoritative design: `.mstar/specs/orchestration-engine.md`.
 
 pub mod auto_chain;
@@ -32,7 +32,6 @@ pub mod system_preset;
 pub mod system_preset_dir;
 pub mod tasks;
 pub mod user_preset_dir;
-pub mod worker;
 
 pub use capability::{
     Capability, CapabilityError, CapabilityRegistry, CapabilityRegistryHolder,
@@ -50,7 +49,6 @@ pub use scheduler::{ClockSource, MockClock, Scheduler, SystemClock};
 pub use stage_gates::{
     build_preset_input, build_stage_schedule_label, preset_for_stage, WorkFields,
 };
-pub use worker::WorkerManager;
 
 use std::path::Path;
 

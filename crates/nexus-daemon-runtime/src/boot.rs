@@ -59,14 +59,13 @@ use nexus_orchestration::capability::watch::{
     digest_from_admitted, rebuild_registry_with_merge, scan_dir_digest, watch_loop_inner,
     DigestPoll, USER_CAP_WATCH_INTERVAL,
 };
-use nexus_orchestration::worker::{WorkerManagerSpawner, WorkerRegistry};
 use nexus_orchestration::{
     engine::{EngineSignal, OrchestrationEngine},
     run_state::WorkflowStateStore,
     schedule::supervisor::ScheduleSupervisor,
     storage::sqlite::SqliteSessionStorage,
     system_preset_dir, CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps,
-    GraphFlowEngine, WorkerManager,
+    GraphFlowEngine,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -650,22 +649,6 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         },
     );
 
-    // V1.51 T-A P0 (QC3 F-001): construct the shared worker registry BEFORE
-    // the capability registry. The same registry is later shared with
-    // `WorkerMgrSubsystem` (see `create_subsystems`). V1.186 P1 T2 (A1):
-    // production prompt execution no longer routes through the worker
-    // registry — the daemon-owned `HostPromptExecutor` is the single
-    // production prompt seam; the worker registry remains for the
-    // WorkerMgrSubsystem lifecycle only (worker deletion is Task 3).
-    let shared_worker_registry: Arc<tokio::sync::Mutex<WorkerRegistry<WorkerManagerSpawner>>> = {
-        let manager = Arc::new(tokio::sync::Mutex::new(WorkerManager::new()));
-        let spawner = WorkerManagerSpawner::new(manager);
-        Arc::new(tokio::sync::Mutex::new(WorkerRegistry::new(
-            crate::lifecycle::subsystems::DEFAULT_MAX_WORKERS,
-            spawner,
-        )))
-    };
-
     // V1.61 P-last T1/T2/T3: build ONE daemon-wide `WasmEngine` + `ModuleCache`
     // and inject them into `narrative.compute` so module compilation happens
     // exactly once process-wide (closes R-V161P3-PERF-001/002). The cache is
@@ -984,10 +967,8 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     }
 
     let engine: Arc<dyn OrchestrationEngine> = Arc::new(concrete_engine);
-    let workers = Arc::new(WorkerManager::new());
 
     state.set_engine(engine);
-    state.set_worker_manager(workers);
     state.set_capability_registry(capability_holder.clone());
     tracing::info!("Orchestration engine wired");
 
@@ -1324,12 +1305,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     }
 
     // --- Section 6: Lifecycle HSM initialization ---
-    let subsystems = create_subsystems(
-        &state,
-        config.port,
-        agent_host_facade,
-        shared_worker_registry.clone(),
-    );
+    let subsystems = create_subsystems(&state, config.port, agent_host_facade);
     let lifecycle = Arc::new(StatigLifecycle::new_with_subsystems(
         subsystems,
         config.shutdown_grace_ms,
@@ -1739,9 +1715,8 @@ fn create_subsystems(
     state: &WorkspaceState,
     port: u16,
     agent_host_facade: Arc<dyn nexus_agent_host::HostFacade>,
-    worker_registry: Arc<tokio::sync::Mutex<WorkerRegistry<WorkerManagerSpawner>>>,
 ) -> Vec<Arc<dyn crate::lifecycle::SubsystemBootstrap>> {
-    use crate::lifecycle::{AgentHostSubsystem, DbSubsystem, HttpSubsystem, WorkerMgrSubsystem};
+    use crate::lifecycle::{AgentHostSubsystem, DbSubsystem, HttpSubsystem};
 
     let nexus_home = state.nexus_home();
     let agent_host_config_path = nexus_home.join("agent-host").join("config.toml");
@@ -1752,11 +1727,6 @@ fn create_subsystems(
     let mut subsystems: Vec<Arc<dyn crate::lifecycle::SubsystemBootstrap>> = vec![
         Arc::new(HttpSubsystem::new(port)),
         Arc::new(DbSubsystem::new(state.database_path())),
-        // V1.51 T-A P0 (QC3 F-001): share the same worker registry with the
-        // WorkerMgrSubsystem lifecycle. V1.186 P1 T2 (A1): production prompt
-        // execution routes through the HostPromptExecutor, not the worker
-        // registry (worker deletion is Task 3).
-        Arc::new(WorkerMgrSubsystem::with_registry(worker_registry)),
     ];
 
     // Agent Host is an optional subsystem — failure does not block daemon startup

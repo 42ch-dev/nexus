@@ -90,14 +90,6 @@ async fn acp_prompt_task_no_executor_refuses() {
     );
 }
 
-/// Test that `WorkerSpec::test_stub` creates a valid spec for shell scripts.
-#[test]
-fn worker_spec_test_stub() {
-    let spec = nexus_orchestration::worker::WorkerSpec::test_stub("echo.sh");
-    assert_eq!(spec.program, "bash");
-    assert!(spec.args.contains(&"echo.sh".to_string()));
-}
-
 /// Test that the three new capabilities are registered.
 #[test]
 fn acp_capabilities_registered() {

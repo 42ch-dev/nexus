@@ -2,7 +2,7 @@
 #![allow(clippy::significant_drop_tightening)]
 //! Mock subsystems for testing.
 //!
-//! Provides a single struct that implements all 5 subsystem mocks,
+//! Provides a single struct that implements all 4 subsystem mocks,
 //! useful for integration tests where we want to control subsystem behavior.
 
 use std::sync::Arc;
@@ -76,14 +76,13 @@ impl SubsystemBootstrap for MockSubsystem {
 
 /// Container for all mock subsystems.
 ///
-/// Implements all 5 subsystem bootstraps for integration testing.
+/// Implements all 4 subsystem bootstraps for integration testing.
 #[derive(Debug)]
 pub struct MockAllSubsystems {
     http: MockSubsystem,
     db: MockSubsystem,
     sync: MockSubsystem,
     engine: MockSubsystem,
-    worker_mgr: MockSubsystem,
 }
 
 impl MockAllSubsystems {
@@ -95,7 +94,6 @@ impl MockAllSubsystems {
             db: MockSubsystem::new(SubsystemKind::Db, true),
             sync: MockSubsystem::new(SubsystemKind::Sync, true),
             engine: MockSubsystem::new(SubsystemKind::Engine, true),
-            worker_mgr: MockSubsystem::new(SubsystemKind::WorkerMgr, true),
         }
     }
 
@@ -110,10 +108,6 @@ impl MockAllSubsystems {
                 SubsystemKind::Engine,
                 failing_kind != SubsystemKind::Engine,
             ),
-            worker_mgr: MockSubsystem::new(
-                SubsystemKind::WorkerMgr,
-                failing_kind != SubsystemKind::WorkerMgr,
-            ),
         }
     }
 
@@ -125,7 +119,6 @@ impl MockAllSubsystems {
             Arc::new(self.db.clone()),
             Arc::new(self.sync.clone()),
             Arc::new(self.engine.clone()),
-            Arc::new(self.worker_mgr.clone()),
         ]
     }
 
@@ -151,12 +144,6 @@ impl MockAllSubsystems {
     #[must_use]
     pub const fn engine(&self) -> &MockSubsystem {
         &self.engine
-    }
-
-    /// Get the `WorkerMgr` mock subsystem.
-    #[must_use]
-    pub const fn worker_mgr(&self) -> &MockSubsystem {
-        &self.worker_mgr
     }
 }
 

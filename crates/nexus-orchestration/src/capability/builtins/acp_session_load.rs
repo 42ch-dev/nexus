@@ -1,10 +1,9 @@
-//! `acp.session_load` capability — resume a named ACP session on the creator's worker.
+//! `acp.session_load` capability — resume a named ACP session.
 //!
 //! Design: `orchestration-engine.md` §5.2.
 //!
 //! DF-36 partial de-stub: The capability now validates all input fields and
-//! returns structured data. Real worker IPC dispatch happens through
-//! `WorkerHandle` in the task execution layer.
+//! returns structured data.
 
 use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
@@ -15,9 +14,7 @@ use serde_json::{json, Value};
 /// Input schema: `{ session_id: string }`
 /// Output schema: `{ ok: bool, error?: string }`
 ///
-/// When called from a preset task, the worker handle dispatches
-/// `worker/acp_session_load` via IPC. Standalone invocation returns
-/// a validated placeholder.
+/// Validates and returns a structured ok result.
 pub struct AcpSessionLoad;
 
 #[async_trait]
@@ -63,8 +60,6 @@ impl Capability for AcpSessionLoad {
         }
 
         // DF-36 partial de-stub: Validate and return structured success.
-        // The actual worker IPC dispatch happens via WorkerHandle in the
-        // task execution layer (AcpPromptTask handles session routing).
         Ok(json!({
             "ok": true,
             "session_id": session_id,

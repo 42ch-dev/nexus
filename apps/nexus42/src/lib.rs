@@ -15,7 +15,6 @@ pub mod db;
 pub mod domain;
 pub mod errors;
 pub mod paths;
-pub mod session_capture;
 
 #[cfg(test)]
 mod testutil;
