@@ -254,20 +254,22 @@ pub async fn add_schedule(
         // Insert schedule row inside the same transaction.
         let schedule_id = format!("SCH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
         let now_ts = chrono::Utc::now().timestamp();
-        sqlx::query!(
+        // A3 admission cutover: a new public schedule is drive-enabled
+        // (`driven_v1`); the legacy_inert default only applies to pre-cutover rows.
+        sqlx::query(
             "INSERT INTO creator_schedules \
              (schedule_id, creator_id, preset_id, preset_version, status, \
               concurrency_kind, current_core_context_version, label, \
-              created_at, updated_at, work_id) \
-             VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?)",
-            schedule_id,
-            body.creator_id,
-            body.preset_id,
-            body.label,
-            now_ts,
-            now_ts,
-            work_id,
+              created_at, updated_at, work_id, execution_policy) \
+             VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?, 'driven_v1')",
         )
+        .bind(&schedule_id)
+        .bind(&body.creator_id)
+        .bind(&body.preset_id)
+        .bind(&body.label)
+        .bind(now_ts)
+        .bind(now_ts)
+        .bind(&work_id)
         .execute(&mut *tx)
         .await
         .map_err(|e| NexusApiError::Internal {
@@ -438,20 +440,22 @@ pub async fn add_schedule(
                         let schedule_id =
                             format!("SCH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
                         let now_ts = chrono::Utc::now().timestamp();
-                        sqlx::query!(
+                        // A3 admission cutover: a new public schedule is
+                        // drive-enabled (`driven_v1`).
+                        sqlx::query(
                             "INSERT INTO creator_schedules \
-                         (schedule_id, creator_id, preset_id, preset_version, status, \
-                          concurrency_kind, current_core_context_version, label, \
-                          created_at, updated_at, work_id) \
-                         VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?)",
-                            schedule_id,
-                            body.creator_id,
-                            body.preset_id,
-                            body.label,
-                            now_ts,
-                            now_ts,
-                            work_id,
+                             (schedule_id, creator_id, preset_id, preset_version, status, \
+                              concurrency_kind, current_core_context_version, label, \
+                              created_at, updated_at, work_id, execution_policy) \
+                             VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?, 'driven_v1')",
                         )
+                        .bind(&schedule_id)
+                        .bind(&body.creator_id)
+                        .bind(&body.preset_id)
+                        .bind(&body.label)
+                        .bind(now_ts)
+                        .bind(now_ts)
+                        .bind(&work_id)
                         .execute(&mut *tx)
                         .await
                         .map_err(|e| NexusApiError::Internal {
@@ -1009,9 +1013,57 @@ pub async fn signal_schedule(
         )));
     }
 
-    let new_status = match body.signal.as_str() {
+    match body.signal.as_str() {
         "start" => match current_status_str.as_str() {
-            "pending" => "running",
+            "pending" => {
+                // A3 (v1.186 P2 T1): explicit public `schedule start` opts a
+                // never-started row in. The coordinator atomically creates
+                // the owned v1 run + schedule→session identity and drives it
+                // (single-flight). Legacy/system-inert rows are refused —
+                // `_system.*` cannot be opted in by a generic signal (A8).
+                let coordinator = state.run_coordinator().ok_or_else(|| {
+                    NexusApiError::service_unavailable("run coordinator not configured")
+                })?;
+                let pool = supervisor.pool();
+                let caps = state.capability_registry_holder().ok_or_else(|| {
+                    NexusApiError::service_unavailable("capability registry not configured")
+                })?;
+                let session_id = coordinator
+                    .admit_schedule(
+                        &schedule_id,
+                        &pool,
+                        state.nexus_home(),
+                        &caps,
+                        state.daemon_tool_dispatch(),
+                        state.prompt_executor(),
+                    )
+                    .await
+                    .map_err(|e| {
+                        let msg = e.to_string();
+                        if msg.contains("not eligible") || msg.contains("execution_policy") {
+                            NexusApiError::Conflict(format!(
+                                "cannot start schedule {schedule_id}: {msg}"
+                            ))
+                        } else {
+                            NexusApiError::Internal {
+                                code: "RUN_CONTROL_ERROR".into(),
+                                message: msg,
+                            }
+                        }
+                    })?;
+                tracing::info!(
+                    schedule_id = %schedule_id,
+                    session_id = %session_id,
+                    "explicit schedule start admitted driven run"
+                );
+                return Ok((
+                    StatusCode::OK,
+                    Json(SignalScheduleResponse {
+                        schedule_id,
+                        status: "running".to_string(),
+                    }),
+                ));
+            }
             _ => {
                 return Err(NexusApiError::Conflict(format!(
                     "cannot start schedule {schedule_id}: current status is {current_status_str}"
@@ -1153,34 +1205,6 @@ pub async fn signal_schedule(
         }
     };
 
-    // SAFETY: runtime `sqlx::query` — same pool lifetime constraint as inspect_schedule above.
-    sqlx::query(
-        "UPDATE creator_schedules SET status = ?, updated_at = ?
-         WHERE schedule_id = ?",
-    )
-    .bind(new_status)
-    .bind(now)
-    .bind(&schedule_id)
-    .execute(&*pool)
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".into(),
-        message: format!("database error: {e}"),
-    })?;
-
-    // After starting or resuming, trigger a supervisor tick to potentially
-    // start dependent schedules.
-    if new_status == "running" || new_status == "pending" {
-        let _ = supervisor.tick().await;
-    }
-
-    Ok((
-        StatusCode::OK,
-        Json(SignalScheduleResponse {
-            schedule_id,
-            status: new_status.to_string(),
-        }),
-    ))
 }
 
 // ---------------------------------------------------------------------------

@@ -86,6 +86,22 @@ pub struct WorkspaceState {
     capability_registry: Arc<Option<CapabilityRegistryHolder>>,
     /// Schedule supervisor for WS7 schedule management (set at daemon startup).
     schedule_supervisor: Arc<Option<Arc<ScheduleSupervisor>>>,
+    /// Single public run coordinator (v1.186 P2 T1, A3) — one cancellation/
+    /// join owner per (Creator DB, session) around the bounded
+    /// `drive_preset_run` loop. Set at daemon boot when a creator DB is
+    /// present; `None` on Tier-0 boot (deferred until Profile attach).
+    run_coordinator: Arc<Option<Arc<crate::preset_run::WorkflowRunCoordinator>>>,
+    /// Production prompt executor (A1, v1.186 P1 T2) — the daemon-owned
+    /// `HostPromptExecutor` over the Host facade. Set at daemon boot when a
+    /// creator DB is present; `None` on Tier-0 boot. Schedule admission
+    /// resolves it here to wire the same executor into driven graphs.
+    prompt_executor: Arc<Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>>>,
+    /// Shared per-run cancellation tokens (A1, v1.186 P1 T2) — the same map
+    /// the engine registers run tokens in and the prompt executor resolves.
+    /// Created at daemon boot; the lazy-attach bundle shares it.
+    session_cancels: Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    >,
     /// Agent host facade (set at daemon startup when agent host subsystem is wired).
     agent_host: Arc<Option<Arc<dyn nexus_agent_host::HostFacade>>>,
     /// Process-lifetime Actor session indexes over `HostFacade` (v1.184 P2).
@@ -198,6 +214,9 @@ impl WorkspaceState {
             engine: Arc::new(None),
             capability_registry: Arc::new(None),
             schedule_supervisor: Arc::new(None),
+            run_coordinator: Arc::new(None),
+            prompt_executor: Arc::new(None),
+            session_cancels: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             agent_host: Arc::new(None),
             actor_sessions: ActorSessionRegistry::new(),
             agent_host_config: Arc::new(AgentHostConfig::default()),
@@ -294,6 +313,9 @@ impl WorkspaceState {
             engine: Arc::new(None),
             capability_registry: Arc::new(None),
             schedule_supervisor: Arc::new(None),
+            run_coordinator: Arc::new(None),
+            prompt_executor: Arc::new(None),
+            session_cancels: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             agent_host: Arc::new(None),
             actor_sessions: ActorSessionRegistry::new(),
             agent_host_config: Arc::new(agent_host_config),
@@ -476,6 +498,7 @@ impl WorkspaceState {
                 self.publish_shared_pool(db_ref);
             }
             drop(slot);
+
             Ok(())
         } else {
             // Propagate the captured diagnostic so the web classifier can
@@ -552,6 +575,54 @@ impl WorkspaceState {
         self.schedule_supervisor = Arc::new(Some(supervisor));
     }
 
+    /// Set the single public run coordinator (v1.186 P2 T1, A3).
+    ///
+    /// Called from daemon boot when a creator DB is present. The coordinator
+    /// owns one cancellation/join handle per (Creator DB, session) around
+    /// the bounded `drive_preset_run` loop; schedule admission and session
+    /// POST route through it.
+    pub fn set_run_coordinator(
+        &mut self,
+        coordinator: Arc<crate::preset_run::WorkflowRunCoordinator>,
+    ) {
+        self.run_coordinator = Arc::new(Some(coordinator));
+    }
+
+    /// Set the production prompt executor (A1, v1.186 P1 T2).
+    ///
+    /// Called from daemon boot when a creator DB is present so schedule
+    /// admission can wire the same executor into driven graphs.
+    pub fn set_prompt_executor(
+        &mut self,
+        executor: Arc<dyn nexus_orchestration::capability::PromptExecutor>,
+    ) {
+        self.prompt_executor = Arc::new(Some(executor));
+    }
+
+    /// Set the shared per-run cancellation tokens (A1, v1.186 P1 T2).
+    ///
+    /// Called from daemon boot so the lazy-attach bundle shares the SAME
+    /// map the boot engine and prompt executor use.
+    pub fn set_session_cancels(
+        &mut self,
+        cancels: Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        >,
+    ) {
+        self.session_cancels = cancels;
+    }
+
+    /// Get the single public run coordinator, if wired.
+    ///
+    /// Returns `None` on Tier-0 boot (no creator DB) or before Profile
+    /// attach publishes the matching bundle.
+    #[must_use]
+    pub fn run_coordinator(&self) -> Option<Arc<crate::preset_run::WorkflowRunCoordinator>> {
+        self.run_coordinator.as_ref().clone()
+    }
+
     /// Set the agent host facade.
     /// Called from boot.rs after constructing the agent host subsystem.
     pub fn set_agent_host(&mut self, host: Arc<dyn nexus_agent_host::HostFacade>) {
@@ -584,6 +655,27 @@ impl WorkspaceState {
         &self,
     ) -> Option<Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>> {
         self.daemon_tool_dispatch.as_ref().clone()
+    }
+
+    /// Get the production prompt executor (A1), if wired.
+    ///
+    /// `None` on Tier-0 boot (no creator DB) — LLM-backed capabilities
+    /// return `WorkerUnavailable` then.
+    #[must_use]
+    pub fn prompt_executor(
+        &self,
+    ) -> Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>> {
+        self.prompt_executor.as_ref().clone()
+    }
+
+    /// Get the shared per-run cancellation tokens (A1).
+    #[must_use]
+    pub fn session_cancels(
+        &self,
+    ) -> Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    > {
+        self.session_cancels.clone()
     }
 
     /// Get the agent host facade, if set.

@@ -1368,13 +1368,15 @@ pub async fn enqueue_auto_chain_schedule(
     // SAFETY: dynamic SQL — auto-chain schedule insert with derived params.
     // R-V139P5-S4: read preset_version from the manifest mapping instead of
     // hard-coding 1. Keep in sync with embedded-presets/*/preset.yaml `version:`.
+    // A3 admission cutover: an auto-chain-created schedule is drive-enabled
+    // (`driven_v1`).
     let preset_version = preset_version_for_id(&schedule_req.preset_id);
     sqlx::query(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
             concurrency_kind, current_core_context_version, label,
-            created_at, updated_at, work_id)
-           VALUES (?, ?, ?, ?, 'pending', 'serial', 0, ?, ?, ?, ?)",
+            created_at, updated_at, work_id, execution_policy)
+           VALUES (?, ?, ?, ?, 'pending', 'serial', 0, ?, ?, ?, ?, 'driven_v1')",
     )
     .bind(&schedule_id)
     .bind(creator_id)
@@ -1532,12 +1534,13 @@ pub async fn enqueue_review_master_schedule(
     // SAFETY: dynamic SQL — review-master schedule insert with derived params.
     // Matches the `enqueue_auto_chain_schedule` pattern (runtime sqlx is the
     // established convention in this crate; see auto_chain.rs:354-355).
+    // A3 admission cutover: drive-enabled (`driven_v1`).
     sqlx::query(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
             concurrency_kind, current_core_context_version, label,
-            created_at, updated_at, work_id)
-           VALUES (?, ?, 'novel-review-master', ?, 'pending', 'serial', 0, ?, ?, ?, ?)",
+            created_at, updated_at, work_id, execution_policy)
+           VALUES (?, ?, 'novel-review-master', ?, 'pending', 'serial', 0, ?, ?, ?, ?, 'driven_v1')",
     )
     .bind(&schedule_id)
     .bind(creator_id)
@@ -1603,12 +1606,13 @@ pub async fn enqueue_cron_schedule(
     // SAFETY: dynamic SQL — cron-triggered schedule insert with derived params.
     // Matches the `enqueue_review_master_schedule` pattern (runtime sqlx is the
     // established convention in this crate; see auto_chain.rs:354-355).
+    // A3 admission cutover: drive-enabled (`driven_v1`).
     sqlx::query(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
             concurrency_kind, current_core_context_version, label,
-            created_at, updated_at, work_id)
-           VALUES (?, ?, ?, ?, 'pending', 'serial', 0, ?, ?, ?, ?)",
+            created_at, updated_at, work_id, execution_policy)
+           VALUES (?, ?, ?, ?, 'pending', 'serial', 0, ?, ?, ?, ?, 'driven_v1')",
     )
     .bind(&schedule_id)
     .bind(creator_id)

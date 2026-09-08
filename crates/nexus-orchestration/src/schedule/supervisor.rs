@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use nexus_contracts::local::schedule::{
     ParallelWithIds, Schedule, ScheduleConcurrency, ScheduleId, ScheduleStatus,
 };
@@ -19,6 +20,40 @@ use nexus_local_db::SqlitePool;
 use tokio::sync::Mutex;
 
 use super::admission::{admit, CompletedSet, RunningSet};
+
+/// `creator_schedules.execution_policy` value for a never-started legacy row
+/// (the migration default — no owned session, never started by boot/tick/cron
+/// until an explicit public `schedule start` opts it in).
+pub const EXECUTION_POLICY_LEGACY_INERT: &str = "legacy_inert";
+/// `creator_schedules.execution_policy` value for a new admission that IS
+/// driven by the daemon coordinator (`WorkflowRunCoordinator::admit_schedule`).
+pub const EXECUTION_POLICY_DRIVEN_V1: &str = "driven_v1";
+/// `creator_schedules.execution_policy` value for `_system.*` internal
+/// presets (e.g. `_system.maintenance`) — never driven, never user work.
+pub const EXECUTION_POLICY_SYSTEM_INERT: &str = "system_inert";
+
+/// Host-free daemon admission callback (A3).
+///
+/// `ScheduleSupervisor` lives in `nexus-orchestration` and MUST NOT couple to
+/// daemon internals (engine, coordinator, Host). This trait is the seam: the
+/// daemon implements it over its `WorkflowRunCoordinator` and injects it via
+/// [`ScheduleSupervisor::with_schedule_starter`]. When present, `tick` admits
+/// a `driven_v1` pending row by calling `start` (which atomically creates the
+/// owned v1 run, freezes the schedule→session identity, and drives it) instead
+/// of merely flipping the row to `Running` without a session.
+#[async_trait]
+pub trait ScheduleRunStarter: Send + Sync {
+    /// Admit `schedule_id` as a driven run and return the owned session id.
+    ///
+    /// The implementation must make the schedule `Running` with a
+    /// `current_session_id` atomically (before enqueue), then drive the run.
+    /// Re-entry returns the same owned run.
+    ///
+    /// # Errors
+    /// Returns [`SupervisorError`] on any admission failure (not eligible,
+    /// inactive creator/workspace, policy refusal, engine/store error).
+    async fn start(&self, schedule_id: &str) -> Result<String, SupervisorError>;
+}
 
 /// Error type for supervisor operations.
 #[derive(Debug, thiserror::Error)]
@@ -61,6 +96,12 @@ pub struct ScheduleSupervisor {
     /// it. New graphs (which DO need hot-added user capabilities) snapshot
     /// the shared holder in the engine instead (`GraphFlowEngine::current_caps`).
     registry: Arc<Option<std::sync::Arc<crate::capability::CapabilityRegistry>>>,
+    /// Injected daemon admission callback (A3). When `Some`, `tick` admits a
+    /// `driven_v1` pending row through [`ScheduleRunStarter::start`] (which
+    /// creates the owned run + schedule→session identity atomically) instead
+    /// of a status-only `Running` flip. `None` (tests, non-daemon use) keeps
+    /// the pre-driver status-only admission.
+    schedule_starter: Arc<Option<Arc<dyn ScheduleRunStarter>>>,
 }
 
 struct Inner {
@@ -95,6 +136,7 @@ impl ScheduleSupervisor {
             tick_in_progress: AtomicBool::new(false),
             workspace_dir: Arc::new(workspace_dir),
             registry: Arc::new(None),
+            schedule_starter: Arc::new(None),
         }
     }
 
@@ -111,6 +153,18 @@ impl ScheduleSupervisor {
         self.registry = Arc::new(Some(registry));
         self
     }
+
+    /// Inject the daemon admission callback for driven-v1 rows (A3).
+    ///
+    /// The daemon wires its `WorkflowRunCoordinator` here at boot so that
+    /// `tick` admits new `driven_v1` schedules through the single-run owner.
+    /// Legacy/system-inert rows are never passed to the starter.
+    #[must_use]
+    pub fn with_schedule_starter(mut self, starter: Arc<dyn ScheduleRunStarter>) -> Self {
+        self.schedule_starter = Arc::new(Some(starter));
+        self
+    }
+
 
     /// Load pending schedules from DB, evaluate admission, and start eligible ones.
     ///
@@ -203,7 +257,8 @@ impl ScheduleSupervisor {
             "SELECT schedule_id, creator_id, preset_id, preset_version,
                     status, concurrency_kind, concurrency_whitelist,
                     current_core_context_version, current_session_id,
-                    scheduled_at, label, created_at, updated_at, terminated_at
+                    scheduled_at, label, created_at, updated_at, terminated_at,
+                    execution_policy
              FROM creator_schedules
              WHERE status IN ('pending', 'running', 'paused')",
         )
@@ -224,12 +279,26 @@ impl ScheduleSupervisor {
 
         let completed_ids: Vec<ScheduleId> = completed_rows.into_iter().map(ScheduleId).collect();
 
-        // Classify active rows into running (by creator) and pending
+        // Classify active rows into running (by creator) and pending.
+        //
+        // A3 (admission cutover): only `driven_v1` rows participate in
+        // admission/execution capacity. Legacy (`legacy_inert`) and
+        // system (`system_inert`) rows — including historical admission-only
+        // `Running` rows with no owned session — are excluded from boot/tick/
+        // cron admission and capacity so they remain inert until an explicit
+        // public `schedule start` opts them in. A `driven_v1` Running row is
+        // always paired with an owned session, so it still counts toward the
+        // per-creator run set.
         let mut running_by_creator: HashMap<String, HashSet<ScheduleId>> = HashMap::new();
-        let mut pending: Vec<Schedule> = Vec::new();
+        let mut pending: Vec<(Schedule, String)> = Vec::new();
 
         for row in &active_rows {
             let schedule = row.to_schedule();
+            // A3: non-driven rows never enter the running set (excluded from
+            // execution capacity) nor become admission candidates.
+            if row.execution_policy != EXECUTION_POLICY_DRIVEN_V1 {
+                continue;
+            }
             match schedule.status {
                 ScheduleStatus::Running => {
                     running_by_creator
@@ -249,7 +318,7 @@ impl ScheduleSupervisor {
                         }
                     };
                     if due {
-                        pending.push(schedule);
+                        pending.push((schedule, row.execution_policy.clone()));
                     }
                 }
                 _ => {}
@@ -260,8 +329,8 @@ impl ScheduleSupervisor {
 
         // Load depends_on for each pending schedule from schedule_dependencies
         let pool_ref = &*self.pool;
-        let mut pending_with_deps: Vec<Schedule> = Vec::with_capacity(pending.len());
-        for schedule in pending {
+        let mut pending_with_deps: Vec<(Schedule, String)> = Vec::with_capacity(pending.len());
+        for (schedule, policy) in pending {
             let sid = schedule.id.0.clone();
             let dep_rows = sqlx::query_scalar!(
                 "SELECT depends_on as \"depends_on!\" FROM schedule_dependencies WHERE schedule_id = ?",
@@ -272,38 +341,83 @@ impl ScheduleSupervisor {
             let deps: Vec<ScheduleId> = dep_rows.into_iter().map(ScheduleId).collect();
             let mut schedule = schedule;
             schedule.depends_on = deps;
-            pending_with_deps.push(schedule);
+            pending_with_deps.push((schedule, policy));
         }
 
         // Sort pending by created_at for FIFO ordering
-        pending_with_deps.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        pending_with_deps.sort_by(|a, b| a.0.created_at.cmp(&b.0.created_at));
 
         // Evaluate admission one at a time, updating the running set after
         // each admission so that Serial schedules don't all get admitted
         // in the same tick. Concurrency checks are scoped per-creator (H1).
+        //
+        // A3: when a daemon `ScheduleRunStarter` is injected, an admitted
+        // `driven_v1` row is handed to `starter.start` (which atomically
+        // creates the owned v1 run + schedule→session identity then drives
+        // it). When no starter is wired (tests, non-daemon use), the
+        // pre-driver status-only flip is preserved. A failed start leaves the
+        // row pending (never a surprise `Running`-with-no-session).
+        let schedule_starter = self.schedule_starter.as_ref().clone();
         let mut started = Vec::new();
+        let mut status_flip: Vec<(String, String)> = Vec::new();
         let mut running_by_creator_so_far = running_by_creator;
 
-        for candidate in &pending_with_deps {
+        for (candidate, _policy) in &pending_with_deps {
             let running_set = RunningSet::from_entries(
                 running_by_creator_so_far
                     .iter()
                     .flat_map(|(c, ids)| ids.iter().map(|id| (c.clone(), id.clone())))
                     .collect(),
             );
-            if admit(candidate, &running_set, &completed_set) {
-                started.push((candidate.creator_id.clone(), candidate.id.0.clone()));
-                // Immediately update the running set so subsequent candidates
-                // see this one as running (important for Serial).
-                running_by_creator_so_far
-                    .entry(candidate.creator_id.clone())
-                    .or_default()
-                    .insert(candidate.id.clone());
+            if !admit(candidate, &running_set, &completed_set) {
+                continue;
             }
+            let creator_id = candidate.creator_id.clone();
+            let sid = candidate.id.0.clone();
+
+            match &schedule_starter {
+                Some(starter) => {
+                    match starter.start(&sid).await {
+                        Ok(session_id) => {
+                            tracing::debug!(
+                                schedule_id = %sid,
+                                session_id = %session_id,
+                                "tick: admitted driven_v1 schedule via daemon starter"
+                            );
+                            started.push((creator_id.clone(), sid.clone()));
+                        }
+                        Err(e) => {
+                            // A failed admission never marks the row Running
+                            // (no session was created); it stays pending for a
+                            // later tick / explicit start.
+                            tracing::warn!(
+                                schedule_id = %sid,
+                                error = %e,
+                                "tick: driven_v1 schedule admission failed; leaving pending"
+                            );
+                            continue;
+                        }
+                    }
+                }
+                None => {
+                    // No daemon starter (tests / standalone supervisor): keep
+                    // the historical status-only flip so admission-gate tests
+                    // remain meaningful. Production always injects a starter.
+                    started.push((creator_id.clone(), sid.clone()));
+                    status_flip.push((creator_id, sid));
+                }
+            }
+
+            // Immediately update the running set so subsequent candidates
+            // see this one as running (important for Serial).
+            running_by_creator_so_far
+                .entry(candidate.creator_id.clone())
+                .or_default()
+                .insert(candidate.id.clone());
         }
 
-        // Update admitted schedules to Running in DB
-        for (_creator_id, sid) in &started {
+        // Status-only flip for rows admitted without a daemon starter.
+        for (_creator_id, sid) in &status_flip {
             let sid_owned = sid.to_owned();
             sqlx::query!(
                 "UPDATE creator_schedules SET status = 'running', updated_at = ?
@@ -862,25 +976,43 @@ impl ScheduleSupervisor {
         let scheduled_at = schedule.scheduled_at;
         let label = schedule.label;
 
-        sqlx::query!(
+        // A3 admission cutover: every NEW row created through the supervisor
+        // is drive-enabled (`driven_v1`); `_system.*` internal presets are
+        // explicitly `system_inert`. The migration default (`legacy_inert`)
+        // is reserved for pre-cutover rows that must stay inert until an
+        // explicit public `schedule start`.
+        let execution_policy = if preset_id.starts_with("_system.") {
+            EXECUTION_POLICY_SYSTEM_INERT
+        } else {
+            EXECUTION_POLICY_DRIVEN_V1
+        };
+
+        // SAFETY: dynamic SQL — a runtime INSERT matching the historical
+        // `insert_pending` shape plus the A3 execution-policy column. The
+        // established auto-chain/cron convention uses runtime `sqlx::query`
+        // (see auto_chain.rs); a compile-time `query!` here would require
+        // regenerated `.sqlx` metadata for every column change.
+        sqlx::query(
             r#"INSERT INTO creator_schedules
                (schedule_id, creator_id, preset_id, preset_version, status,
                 concurrency_kind, concurrency_whitelist,
                 current_core_context_version, current_session_id,
-                scheduled_at, label, created_at, updated_at, terminated_at)
-               VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, NULL, ?, ?, ?, ?, NULL)"#,
-            schedule_id,
-            creator_id,
-            preset_id,
-            preset_version_i64,
-            concurrency_kind,
-            concurrency_whitelist,
-            context_version_i64,
-            scheduled_at,
-            label,
-            created_at,
-            updated_at
+                scheduled_at, label, created_at, updated_at, terminated_at,
+                execution_policy)
+               VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, NULL, ?, ?, ?, ?, NULL, ?)"#,
         )
+        .bind(&schedule_id)
+        .bind(creator_id)
+        .bind(preset_id)
+        .bind(preset_version_i64)
+        .bind(concurrency_kind)
+        .bind(concurrency_whitelist)
+        .bind(context_version_i64)
+        .bind(scheduled_at)
+        .bind(label)
+        .bind(created_at)
+        .bind(updated_at)
+        .bind(execution_policy)
         .execute(&*self.pool)
         .await?;
 
@@ -1110,7 +1242,8 @@ impl ScheduleSupervisor {
             "SELECT schedule_id, creator_id, preset_id, preset_version,
                     status, concurrency_kind, concurrency_whitelist,
                     current_core_context_version, current_session_id,
-                    scheduled_at, label, created_at, updated_at, terminated_at
+                    scheduled_at, label, created_at, updated_at, terminated_at,
+                    execution_policy
              FROM creator_schedules
              WHERE status IN ('pending', 'running', 'paused')",
         )
@@ -1256,6 +1389,7 @@ struct ScheduleRow {
     created_at: i64,
     updated_at: i64,
     terminated_at: Option<i64>,
+    execution_policy: String,
 }
 
 impl ScheduleRow {
@@ -1369,13 +1503,15 @@ mod tests_t9 {
     ) {
         let now = chrono::Utc::now().timestamp();
         // SAFETY: test-only — DML helper that inserts a minimal schedule row for test setup.
+        // The row is drive-enabled (`driven_v1`) so the admission-gate tests
+        // exercise the post-cutover contract (legacy/system rows stay inert).
         sqlx::query(
             r"INSERT INTO creator_schedules
                (schedule_id, creator_id, preset_id, preset_version, status,
                 concurrency_kind, current_core_context_version,
-                created_at, updated_at)
+                created_at, updated_at, execution_policy)
                VALUES (?, ?, 'test-preset', 1, ?,
-               'serial', 0, ?, ?)",
+               'serial', 0, ?, ?, 'driven_v1')",
         )
         .bind(id)
         .bind(creator_id)
@@ -1528,6 +1664,61 @@ mod tests_t9 {
             sup.status_of("QC1-B").await.unwrap(),
             ScheduleStatus::Running,
             "QC1 C-1 regression: B should start — A is already completed"
+        );
+    }
+
+    /// A3 cutover: a never-started `legacy_inert` row (and a `system_inert`
+    /// row) must NOT be admitted by `tick` — no surprise run, no status-only
+    /// `Running` flip. They stay inert until an explicit public `schedule start`
+    /// opts the row in (grandfathering).
+    #[tokio::test]
+    async fn tick_leaves_legacy_and_system_rows_inert() {
+        let sup = test_supervisor_with_db().await;
+
+        let now = chrono::Utc::now().timestamp();
+        // SAFETY: test-only — insert a legacy_inert and a system_inert pending row.
+        sqlx::query(
+            r"INSERT INTO creator_schedules
+               (schedule_id, creator_id, preset_id, preset_version, status,
+                concurrency_kind, current_core_context_version,
+                created_at, updated_at, execution_policy)
+               VALUES (?, 'legacy-creator', 'legacy-preset', 1, 'pending',
+               'serial', 0, ?, ?, 'legacy_inert')",
+        )
+        .bind("LEGACY-INERT-1")
+        .bind(now)
+        .bind(now)
+        .execute(&*sup.pool)
+        .await
+        .unwrap();
+
+        // SAFETY: test-only — insert a system_inert row.
+        sqlx::query(
+            r"INSERT INTO creator_schedules
+               (schedule_id, creator_id, preset_id, preset_version, status,
+                concurrency_kind, current_core_context_version,
+                created_at, updated_at, execution_policy)
+               VALUES (?, 'legacy-creator', '_system.maintenance', 1, 'pending',
+               'serial', 0, ?, ?, 'system_inert')",
+        )
+        .bind("SYSTEM-INERT-1")
+        .bind(now)
+        .bind(now)
+        .execute(&*sup.pool)
+        .await
+        .unwrap();
+
+        sup.tick().await.unwrap();
+
+        assert_eq!(
+            sup.status_of("LEGACY-INERT-1").await.unwrap(),
+            ScheduleStatus::Pending,
+            "legacy_inert never-started row must stay pending across tick (grandfathering)"
+        );
+        assert_eq!(
+            sup.status_of("SYSTEM-INERT-1").await.unwrap(),
+            ScheduleStatus::Pending,
+            "system_inert row must stay pending across tick (_system.* inertness)"
         );
     }
 

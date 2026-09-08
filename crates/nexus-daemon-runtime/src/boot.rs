@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use crate::api;
 use crate::lifecycle::{Event, Lifecycle, StatigLifecycle, SubsystemKind};
-use crate::preset_run::{resume_driven_sessions, PresetRunConfig};
+use crate::preset_run::{resume_driven_sessions, PresetRunConfig, WorkflowRunCoordinator};
 use crate::tls;
 use crate::workspace::WorkspaceState;
 
@@ -62,7 +62,7 @@ use nexus_orchestration::capability::watch::{
 use nexus_orchestration::{
     engine::{EngineSignal, OrchestrationEngine},
     run_state::WorkflowStateStore,
-    schedule::supervisor::ScheduleSupervisor,
+    schedule::supervisor::{ScheduleRunStarter, ScheduleSupervisor, SupervisorError},
     storage::sqlite::SqliteSessionStorage,
     system_preset_dir, CapabilityRegistry, CapabilityRegistryHolder, CapabilityRuntimeDeps,
     GraphFlowEngine,
@@ -721,6 +721,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     let session_cancels: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+    state.set_session_cancels(session_cancels.clone());
     let prompt_executor: Option<std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>> =
         match &sqlite_boot_storage {
             Some(sqlite_storage) => {
@@ -847,7 +848,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     concrete_engine.set_nexus_home(state.nexus_home().clone());
 
     // WS2 R1: Recover persisted non-terminal sessions into in-memory tracker.
-    if let Some(sqlite_storage) = sqlite_boot_storage {
+    if let Some(sqlite_storage) = sqlite_boot_storage.clone() {
         match sqlite_storage.list_non_terminal_sessions().await {
             Ok(summaries) => {
                 if !summaries.is_empty() {
@@ -966,11 +967,35 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         }
     }
 
-    let engine: Arc<dyn OrchestrationEngine> = Arc::new(concrete_engine);
+    let concrete_engine = Arc::new(concrete_engine);
+    let engine: Arc<dyn OrchestrationEngine> = concrete_engine.clone();
 
     state.set_engine(engine);
     state.set_capability_registry(capability_holder.clone());
     tracing::info!("Orchestration engine wired");
+
+    // --- A3 (v1.186 P2 T1): the single public run coordinator ---
+    // One cancellation/join owner per (Creator DB, session) around the
+    // bounded `drive_preset_run` loop. Newly admitted creator runs and
+    // schedule admissions route through this coordinator; the schedule
+    // supervisor receives a Host-free `ScheduleRunStarter` seam over it.
+    // When no creator DB is present (Tier-0 boot), the coordinator is
+    // absent and pool-backed admission is deferred until Profile attach.
+    let run_coordinator: Option<Arc<WorkflowRunCoordinator>> = match &sqlite_boot_storage {
+        Some(_) => {
+            let coordinator = Arc::new(WorkflowRunCoordinator::new(
+                concrete_engine.clone(),
+                session_storage.clone(),
+                session_cancels.clone(),
+            ));
+            state.set_run_coordinator(coordinator.clone());
+            if let Some(executor) = &prompt_executor {
+                state.set_prompt_executor(executor.clone());
+            }
+            Some(coordinator)
+        }
+        None => None,
+    };
 
     // --- V1.176 P1 (AR-91/AR-92): user-capability hot-reload watcher ---
     // One background task polls the scan directory every 1 s (poll + digest,
@@ -1018,6 +1043,23 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         );
         if let Some(reg) = supervisor_registry {
             schedule_supervisor_builder = schedule_supervisor_builder.with_capability_registry(reg);
+        }
+        // A3 (v1.186 P2 T1): inject the daemon admission callback so `tick`
+        // admits `driven_v1` pending rows through the single-run owner
+        // (atomic schedule→session identity + drive) instead of a
+        // status-only `Running` flip. Legacy/system-inert rows are never
+        // passed to the starter.
+        if let Some(coordinator) = &run_coordinator {
+            let starter = DaemonScheduleRunStarter {
+                coordinator: coordinator.clone(),
+                pool: Arc::new(schedule_pool.clone()),
+                nexus_home: state.nexus_home().clone(),
+                caps: state.capability_registry_holder(),
+                daemon_tool_dispatch: state.daemon_tool_dispatch(),
+                prompt_executor: prompt_executor.clone(),
+            };
+            schedule_supervisor_builder =
+                schedule_supervisor_builder.with_schedule_starter(Arc::new(starter));
         }
         let schedule_supervisor = Arc::new(schedule_supervisor_builder);
         state.set_schedule_supervisor(schedule_supervisor.clone());
@@ -1757,6 +1799,45 @@ async fn resume_auto_chain_work(
     )
     .await
     .map_err(|e| e.to_string())
+}
+
+/// Host-free daemon admission callback (A3) — the `ScheduleRunStarter`
+/// implementation the daemon injects into the schedule supervisor.
+///
+/// `ScheduleSupervisor` lives in `nexus-orchestration` and must not couple
+/// to daemon internals; this adapter bridges the supervisor's `tick`
+/// admission to the daemon's single `WorkflowRunCoordinator`.
+struct DaemonScheduleRunStarter {
+    coordinator: Arc<WorkflowRunCoordinator>,
+    pool: Arc<sqlx::SqlitePool>,
+    nexus_home: std::path::PathBuf,
+    caps: Option<nexus_orchestration::CapabilityRegistryHolder>,
+    daemon_tool_dispatch: Option<
+        std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>,
+    >,
+    prompt_executor: Option<std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
+}
+
+#[async_trait::async_trait]
+impl ScheduleRunStarter for DaemonScheduleRunStarter {
+    async fn start(&self, schedule_id: &str) -> Result<String, SupervisorError> {
+        let caps = self.caps.clone().ok_or_else(|| {
+            SupervisorError::Database(sqlx::Error::Protocol(
+                "capability registry unavailable for schedule admission".to_string(),
+            ))
+        })?;
+        self.coordinator
+            .admit_schedule(
+                schedule_id,
+                &self.pool,
+                &self.nexus_home,
+                &caps,
+                self.daemon_tool_dispatch.clone(),
+                self.prompt_executor.clone(),
+            )
+            .await
+            .map_err(|e| SupervisorError::Database(sqlx::Error::Protocol(e.to_string())))
+    }
 }
 
 #[cfg(test)]

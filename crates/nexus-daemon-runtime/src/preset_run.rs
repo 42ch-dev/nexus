@@ -51,7 +51,6 @@ use nexus_orchestration::engine::{
 use nexus_orchestration::resume_rules;
 use nexus_orchestration::run_state::WorkflowStateStore;
 use tokio_util::sync::CancellationToken;
-
 /// Bounds and posture for one [`drive_preset_run`] call.
 #[derive(Debug, Clone)]
 pub struct PresetRunConfig {
@@ -520,6 +519,393 @@ pub async fn resume_driven_sessions(
         });
     }
     decisions
+}
+
+// ---------------------------------------------------------------------------
+// WorkflowRunCoordinator (v1.186 P2 T1, A3)
+// ---------------------------------------------------------------------------
+
+/// Error type for coordinator admission/control operations (A3).
+#[derive(Debug, thiserror::Error)]
+pub enum RunControlError {
+    /// The schedule row does not exist.
+    #[error("schedule {0} not found")]
+    ScheduleNotFound(String),
+    /// The schedule is not eligible for driven admission (legacy/system
+    /// inert, terminal, or already running with an owned session).
+    #[error("schedule {0} is not eligible for driven admission: {1}")]
+    NotEligible(String, String),
+    /// The preset could not be resolved (embedded or directory bundle).
+    #[error("preset resolution failed for '{0}': {1}")]
+    PresetLoad(String, String),
+    /// The engine/store refused the run admission.
+    #[error("run admission failed: {0}")]
+    Admission(String),
+    /// The engine/store failed while driving the run.
+    #[error("drive failed: {0}")]
+    Drive(String),
+    /// The schedule row could not be updated to the driven state.
+    #[error("schedule state update failed: {0}")]
+    ScheduleUpdate(String),
+    /// The daemon has no active creator DB / engine (Tier-0 boot).
+    #[error("no active creator workspace: {0}")]
+    NoWorkspace(String),
+}
+
+/// One cancellation/join owner per (Creator DB identity, session) (A3).
+///
+/// The coordinator is the SINGLE production owner of the bounded
+/// [`drive_preset_run`] loop for newly admitted creator runs and schedule
+/// admissions. `ensure_driving` is single-flight per session: a second
+/// caller observes the same owned run instead of starting a second driver.
+///
+/// Cancellation is out-of-band: the per-run token is registered in the
+/// shared `session_cancels` map (the engine's prompt consumers resolve it)
+/// and the drive loop checks it before every step.
+#[derive(Clone)]
+pub struct WorkflowRunCoordinator {
+    /// The daemon's concrete orchestration engine (production
+    /// `GraphFlowEngine`). Concrete so schedule admission can freeze the
+    /// descriptor/input via `start_preset_run_with_input`.
+    engine: Arc<nexus_orchestration::GraphFlowEngine>,
+    /// Durable session storage (the SQLite adapter also implements the
+    /// workflow store; used for failure-record persistence in the drive).
+    storage: Arc<dyn SessionStorage>,
+    /// Shared per-run cancellation tokens (A1) — the same map the engine
+    /// registers run tokens in and the prompt executor resolves.
+    session_cancels: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    >,
+    /// Active drive owners: session id → cancellation token + join handle.
+    /// One owner per session; re-entry returns the same run.
+    drives: Arc<tokio::sync::Mutex<std::collections::HashMap<String, DriveOwner>>>,
+    /// Bounds for each drive call.
+    config: PresetRunConfig,
+}
+
+/// An in-flight (or completed) drive owner for one session.
+struct DriveOwner {
+    cancel: tokio_util::sync::CancellationToken,
+    join: tokio::task::JoinHandle<()>,
+}
+
+impl WorkflowRunCoordinator {
+    /// Construct the coordinator over the daemon's engine/storage.
+    #[must_use]
+    pub fn new(
+        engine: Arc<nexus_orchestration::GraphFlowEngine>,
+        storage: Arc<dyn SessionStorage>,
+        session_cancels: std::sync::Arc<
+            std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+        >,
+    ) -> Self {
+        Self {
+            engine,
+            storage,
+            session_cancels,
+            drives: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            config: PresetRunConfig::default(),
+        }
+    }
+
+    /// The engine this coordinator drives (as the trait surface).
+    #[must_use]
+    pub fn engine(&self) -> Arc<dyn OrchestrationEngine> {
+        self.engine.clone()
+    }
+
+    /// Ensure exactly one drive loop is running for `session_id` (A3).
+    ///
+    /// Single-flight: when a drive is already registered for the session,
+    /// returns [`DriveDisposition::AlreadyDriving`] without spawning a
+    /// second loop. When the registered drive has finished (terminal
+    /// outcome), the entry is removed and a fresh drive is started.
+    ///
+    /// The per-run cancellation token is registered in the shared
+    /// `session_cancels` map (idempotent — the engine already registers it
+    /// at admission) so prompt consumers and out-of-band cancellation share
+    /// one token.
+    pub async fn ensure_driving(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<DriveDisposition, RunControlError> {
+        let mut drives = self.drives.lock().await;
+        if let Some(owner) = drives.get(&session_id.0) {
+            if !owner.join.is_finished() {
+                return Ok(DriveDisposition::AlreadyDriving);
+            }
+            // The previous drive finished; drop it and start fresh.
+            drives.remove(&session_id.0);
+        }
+
+        // Register (or refresh) the run's cancellation token in the shared
+        // map so the prompt executor and out-of-band cancel resolve the SAME
+        // token the drive loop checks.
+        let cancel = tokio_util::sync::CancellationToken::new();
+        self.session_cancels
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(session_id.0.clone(), cancel.clone());
+
+        let engine = self.engine.clone();
+        let storage = self.storage.clone();
+        let config = self.config.clone();
+        let sid = session_id.clone();
+        let drive_cancel = cancel.clone();
+        let join = tokio::spawn(async move {
+            let outcome = drive_preset_run(
+                &*engine,
+                Some(&storage),
+                &sid,
+                &config,
+                Some(&drive_cancel),
+            )
+            .await;
+            tracing::debug!(
+                session_id = %sid.0,
+                outcome = ?outcome,
+                "coordinator drive loop finished"
+            );
+        });
+        drives.insert(session_id.0.clone(), DriveOwner { cancel, join });
+        Ok(DriveDisposition::Started)
+    }
+
+    /// Admit a `driven_v1` schedule as an owned run and drive it (A3).
+    ///
+    /// Atomic admission contract:
+    /// 1. Loads the schedule row and verifies eligibility (exists, policy
+    ///    `driven_v1`, status pending/paused).
+    /// 2. Claims the row atomically: `status = 'running'` +
+    ///    `current_session_id = <minted id>` in one UPDATE fenced on
+    ///    `status IN ('pending','paused') AND current_session_id IS NULL`.
+    ///    A concurrent admission loses the claim and returns the winner's
+    ///    owned run (single-session admission).
+    /// 3. Resolves the preset, freezes the descriptor + core-context seed,
+    ///    and creates the v1 run (initial checkpoint + descriptor + seeded
+    ///    context) via the engine — the descriptor/core seed are durable
+    ///    before eligibility is published.
+    /// 4. On run-creation failure the claim is rolled back (row returns to
+    ///    pending, no session) so a failed admission never leaves a
+    ///    `Running`-with-no-session row.
+    /// 5. Only after the run exists does the coordinator register the
+    ///    runner and call [`ensure_driving`](Self::ensure_driving).
+    ///
+    /// Re-entry (a concurrent tick / explicit start racing) returns the same
+    /// owned run: the schedule already carries `current_session_id`, so the
+    /// second caller observes the existing run and drives it (single-flight).
+    ///
+    /// # Errors
+    /// Returns [`RunControlError`] on any admission failure. A failed
+    /// admission never marks the row `Running` without a session.
+    pub async fn admit_schedule(
+        &self,
+        schedule_id: &str,
+        pool: &sqlx::SqlitePool,
+        nexus_home: &std::path::Path,
+        caps: &nexus_orchestration::CapabilityRegistryHolder,
+        daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>,
+        prompt_executor: Option<std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
+    ) -> Result<String, RunControlError> {
+        // 1. Load the schedule row.
+        let row = sqlx::query_as::<_, ScheduleAdmissionRow>(
+            "SELECT schedule_id, creator_id, preset_id, preset_version, status,
+                    current_core_context_version, current_session_id, execution_policy
+             FROM creator_schedules WHERE schedule_id = ?",
+        )
+        .bind(schedule_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?
+        .ok_or_else(|| RunControlError::ScheduleNotFound(schedule_id.to_string()))?;
+
+        if row.execution_policy != "driven_v1" {
+            return Err(RunControlError::NotEligible(
+                schedule_id.to_string(),
+                format!("execution_policy is '{}'", row.execution_policy),
+            ));
+        }
+        if row.status != "pending" && row.status != "paused" {
+            return Err(RunControlError::NotEligible(
+                schedule_id.to_string(),
+                format!("status is '{}'", row.status),
+            ));
+        }
+        if let Some(sid) = &row.current_session_id {
+            // Re-entry: the schedule already owns a run. Verify the run
+            // actually exists (a crash between claim and run creation leaves
+            // a stale claim — clear it and re-admit); otherwise drive the
+            // existing run (single-flight) and return the same identity.
+            let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
+                std::sync::Arc::new(pool.clone()),
+            );
+            let run_exists = store
+                .load_run(&nexus_orchestration::SessionId(sid.clone()))
+                .await
+                .map_err(|e| RunControlError::Admission(e.to_string()))?
+                .is_some();
+            if run_exists {
+                let sid = nexus_orchestration::SessionId(sid.clone());
+                self.ensure_driving(&sid).await?;
+                return Ok(sid.0);
+            }
+            // Stale claim: clear it and fall through to fresh admission.
+            let now = chrono::Utc::now().timestamp();
+            sqlx::query(
+                "UPDATE creator_schedules
+                 SET status = 'pending', current_session_id = NULL, updated_at = ?
+                 WHERE schedule_id = ? AND current_session_id = ?",
+            )
+            .bind(now)
+            .bind(schedule_id)
+            .bind(sid)
+            .execute(pool)
+            .await
+            .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
+        }
+
+        // 2. Mint the owned session id and CLAIM the schedule row atomically
+        //    (the linearization point for concurrent admission).
+        let session_id = format!("{}:{}", row.preset_id, uuid::Uuid::new_v4());
+        let now = chrono::Utc::now().timestamp();
+        let claim = sqlx::query(
+            "UPDATE creator_schedules
+             SET status = 'running', current_session_id = ?, updated_at = ?
+             WHERE schedule_id = ? AND status IN ('pending', 'paused')
+               AND current_session_id IS NULL",
+        )
+        .bind(&session_id)
+        .bind(now)
+        .bind(schedule_id)
+        .execute(pool)
+        .await
+        .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
+
+        if claim.rows_affected() == 0 {
+            // A concurrent admission won the claim. Return its owned run.
+            let winner = sqlx::query_as::<_, ScheduleAdmissionRow>(
+                "SELECT schedule_id, creator_id, preset_id, preset_version, status,
+                        current_core_context_version, current_session_id, execution_policy
+                 FROM creator_schedules WHERE schedule_id = ?",
+            )
+            .bind(schedule_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?
+            .ok_or_else(|| RunControlError::ScheduleNotFound(schedule_id.to_string()))?;
+            let sid = winner.current_session_id.ok_or_else(|| {
+                RunControlError::NotEligible(
+                    schedule_id.to_string(),
+                    "concurrent admission left no owned session".to_string(),
+                )
+            })?;
+            let sid = nexus_orchestration::SessionId(sid);
+            self.ensure_driving(&sid).await?;
+            return Ok(sid.0);
+        }
+
+        // 3. Resolve the preset and freeze the descriptor + core seed.
+        let registry = caps
+            .get()
+            .ok_or_else(|| RunControlError::NoWorkspace("capability registry unavailable".into()))?;
+        let loaded = nexus_orchestration::preset::resolve_preset(&row.preset_id, nexus_home, &registry)
+            .map_err(|e| RunControlError::PresetLoad(row.preset_id.clone(), e.to_string()))?;
+
+        let core_context = {
+            let mgr = nexus_orchestration::schedule::derivation::CoreContextManager::new(
+                std::sync::Arc::new(pool.clone()),
+            );
+            match mgr
+                .current_snapshot(&nexus_contracts::local::schedule::ScheduleId(
+                    schedule_id.to_string(),
+                ))
+                .await
+            {
+                Ok(record) => match record.content {
+                    nexus_contracts::local::schedule::CoreContextPayload::Text { body } => {
+                        Some(body)
+                    }
+                    nexus_contracts::local::schedule::CoreContextPayload::Struct { body } => {
+                        Some(serde_json::to_string(&body).unwrap_or_default())
+                    }
+                },
+                Err(_) => None,
+            }
+        };
+
+        // Build the wired outer graph (production prompt executor + tool
+        // dispatch + cancellation tokens) — mirrors boot.rs.
+        let engine_proxy: Arc<dyn OrchestrationEngine> = self.engine.clone();
+        let wired = nexus_orchestration::preset::loader::build_wired_outer_graph(
+            &loaded,
+            &engine_proxy,
+            &registry,
+            daemon_tool_dispatch,
+            prompt_executor,
+            self.session_cancels.clone(),
+        );
+
+        // 4. Create the v1 run (initial checkpoint + descriptor + seeded
+        //    context). On failure, roll back the claim so the row returns
+        //    to pending with no session.
+        let run = self
+            .engine
+            .start_preset_run_with_input(
+                &session_id,
+                &loaded,
+                &row.creator_id,
+                None,
+                serde_json::Map::new(),
+                core_context.as_deref(),
+                std::collections::HashMap::new(),
+                Arc::new(wired),
+            )
+            .await;
+
+        if let Err(e) = run {
+            // Roll back the claim: the row must never stay Running without
+            // an owned run.
+            let now = chrono::Utc::now().timestamp();
+            let _ = sqlx::query(
+                "UPDATE creator_schedules
+                 SET status = 'pending', current_session_id = NULL, updated_at = ?
+                 WHERE schedule_id = ? AND current_session_id = ?",
+            )
+            .bind(now)
+            .bind(schedule_id)
+            .bind(&session_id)
+            .execute(pool)
+            .await;
+            return Err(RunControlError::Admission(e.to_string()));
+        }
+
+        // 5. Drive the owned run (single-flight).
+        let sid = nexus_orchestration::SessionId(session_id);
+        self.ensure_driving(&sid).await?;
+        Ok(sid.0)
+    }
+}
+
+/// Outcome of [`WorkflowRunCoordinator::ensure_driving`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DriveDisposition {
+    /// A fresh drive loop was started for the session.
+    Started,
+    /// A drive loop was already running for the session; no second driver.
+    AlreadyDriving,
+}
+
+/// Schedule row projection for coordinator admission.
+#[derive(sqlx::FromRow)]
+struct ScheduleAdmissionRow {
+    schedule_id: String,
+    creator_id: String,
+    preset_id: String,
+    preset_version: i64,
+    status: String,
+    current_core_context_version: i64,
+    current_session_id: Option<String>,
+    execution_policy: String,
 }
 
 #[cfg(test)]

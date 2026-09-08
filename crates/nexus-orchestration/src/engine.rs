@@ -2229,6 +2229,96 @@ impl GraphFlowEngine {
         }
     }
 
+    /// Start a v1 run for a loaded preset with frozen admission input (A3).
+    ///
+    /// Mirrors [`start_preset_run`] but freezes the schedule admission's
+    /// input map, agent bindings and work id into the descriptor AND seeds
+    /// the session context (`preset.input.*`, `core_context.text`) before
+    /// the initial checkpoint is persisted — so the first step renders real
+    /// input and the descriptor/core seed are durable before eligibility is
+    /// published (A3: persist descriptor/core seed before enqueue).
+    ///
+    /// `session_id` is caller-minted: the schedule admission claims the
+    /// schedule row with this exact id BEFORE the run is created, so a
+    /// concurrent admission can never mint a second session for the same
+    /// schedule (A3 single-session admission).
+    ///
+    /// # Errors
+    /// Returns [`EngineError`] if session creation, preset loading, or the
+    /// initial checkpoint write fails.
+    pub async fn start_preset_run_with_input(
+        &self,
+        session_id: &str,
+        loaded: &crate::preset::LoadedPreset,
+        creator_id: &str,
+        work_id: Option<String>,
+        input: serde_json::Map<String, serde_json::Value>,
+        core_context: Option<&str>,
+        agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
+        graph: Arc<Graph>,
+    ) -> Result<SessionId, EngineError> {
+        if let Some(store) = &self.state.workflow_store {
+            let mut descriptor = self.build_descriptor(loaded, creator_id)?;
+            descriptor.work_id = work_id;
+            descriptor.input = input.clone();
+            descriptor.agent_bindings = agent_bindings;
+            let start_task_id = graph.start_task_id().unwrap_or_default();
+            let session = graph_flow::Session::new_from_task(session_id.to_string(), &start_task_id);
+            session.context.set("_session_id", session_id.to_string()).await;
+            if !creator_id.is_empty() {
+                session.context.set("_creator_id", creator_id.to_string()).await;
+            }
+            // Seed the frozen admission input + core-context seed into the
+            // session context BEFORE the checkpoint is persisted (A3).
+            for (key, value) in &input {
+                session
+                    .context
+                    .set(format!("preset.input.{key}"), value.clone())
+                    .await;
+            }
+            if let Some(cc) = core_context {
+                session.context.set("core_context.text", cc.to_string()).await;
+            }
+            let checkpoint = RunCheckpoint {
+                root: &session,
+                children: &[],
+            };
+            store
+                .start_run(
+                    &SessionId(session_id.to_string()),
+                    &descriptor,
+                    checkpoint,
+                    &RunStateV1::default(),
+                )
+                .await?;
+            let sid = SessionId(session_id.to_string());
+            // Register the run's coordinator cancellation token (A1): the
+            // run's prompt consumers resolve their token from the shared
+            // per-run map and fail closed when none is registered.
+            self.register_cancellation(&sid);
+            let runner = Arc::new(FlowRunner::new(graph, self.state.storage.clone()));
+            self.state
+                .runners
+                .write()
+                .await
+                .insert(session_id.to_string(), runner);
+            self.state.sessions.write().await.push(SessionSummary {
+                session_id: SessionId(session_id.to_string()),
+                creator_id: creator_id.to_string(),
+                preset_id: loaded.id.clone(),
+                status: SessionStatus::Running,
+                current_task_id: Some(start_task_id),
+            });
+            Ok(SessionId(session_id.to_string()))
+        } else {
+            // No workflow store (Tier-0/test): fall back to the raw-graph
+            // path. Input seeding is a v1-run concern; the raw path has no
+            // durable descriptor to freeze.
+            self.start_session_with_creator(&loaded.id, graph, Some(creator_id))
+                .await
+        }
+    }
+
     /// Start a session on a specific graph.
     ///
     /// Creates a [`graph_flow::Session`] seeded at the graph's start task,

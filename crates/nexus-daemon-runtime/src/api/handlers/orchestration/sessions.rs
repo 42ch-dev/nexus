@@ -37,7 +37,10 @@ pub async fn create_session(
             message: format!("failed to load preset '{}': {}", body.preset_id, e),
         })?;
 
-    // Start session with the loaded preset.
+    // A3 (v1.186 P2 T1): a newly created session is driven by the single
+    // public run coordinator — the same owner schedule admission uses. The
+    // engine creates the v1 run (descriptor + initial checkpoint), then the
+    // coordinator registers the runner and starts the bounded drive loop.
     let session_id = engine
         .start_session_with_preset_for_creator(&loaded, &body.creator_id)
         .await
@@ -45,6 +48,16 @@ pub async fn create_session(
             code: "ENGINE_ERROR".into(),
             message: e.to_string(),
         })?;
+
+    if let Some(coordinator) = state.run_coordinator() {
+        coordinator
+            .ensure_driving(&session_id)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "RUN_CONTROL_ERROR".into(),
+                message: e.to_string(),
+            })?;
+    }
 
     Ok((
         StatusCode::CREATED,
