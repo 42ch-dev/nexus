@@ -90,17 +90,13 @@ async fn acp_prompt_task_no_executor_refuses() {
     );
 }
 
-/// Test that the three new capabilities are registered.
+/// Test that the ACP prompt and judge capabilities are registered.
 #[test]
 fn acp_capabilities_registered() {
     let reg = nexus_orchestration::CapabilityRegistry::with_builtins();
     assert!(
         reg.get("acp.prompt").is_some(),
         "acp.prompt should be registered"
-    );
-    assert!(
-        reg.get("acp.session_load").is_some(),
-        "acp.session_load should be registered"
     );
     assert!(
         reg.get("judge.llm").is_some(),

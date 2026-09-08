@@ -348,7 +348,6 @@ All capabilities below are registered at daemon runtime startup. Adding a new ca
 | `creator.write_memory`      | Persist creator memory fragments and return real `fragment_id` | `nexus-creator-memory` | **Real** — SQLite-backed write through `CreatorCapabilityStore` (V1.31 DF-30) |
 | `creator.inject_prompt`     | Queue a prompt to be sent on next `acp.prompt`                 | `nexus-orchestration`  | **Real** — persisted injection queue in `state.db` (V1.31 DF-30) |
 | `acp.prompt`                | Send a prompt to this creator's active ACP session             | `nexus-orchestration`  | Real for worker-backed preset execution |
-| `acp.session_load`          | Resume a named ACP session id on the creator's worker          | `nexus-orchestration`  | Real for worker-backed preset execution |
 | `kb.extract_work`           | Extract KB assets from a work entry into a World               | `nexus-orchestration` (preset-driven via `acp_prompt`) | Real |
 | `soul.experience.aggregate` | Aggregate SOUL Experience section from session review items    | `nexus-orchestration` (preset-driven via `acp_prompt`) | Real |
 | `judge.llm`                 | Evaluate a go/nogo prompt using a *judge* agent                | `nexus-orchestration`  | **Real** — worker-backed `acp.prompt` with `deny_all`, GO/NOGO parse (V1.31 DF-33/37) |
