@@ -566,11 +566,14 @@ pub enum RunControlError {
 pub struct WorkflowRunCoordinator {
     /// The daemon's concrete orchestration engine (production
     /// `GraphFlowEngine`). Concrete so schedule admission can freeze the
-    /// descriptor/input via `start_preset_run_with_input`.
+    /// descriptor/input via `admit_schedule_run_with_input`.
     engine: Arc<nexus_orchestration::GraphFlowEngine>,
     /// Durable session storage (the SQLite adapter also implements the
     /// workflow store; used for failure-record persistence in the drive).
     storage: Arc<dyn SessionStorage>,
+    /// The creator-DB pool the coordinator's durable store reads through
+    /// (used for durable-state gating in `ensure_driving`, I-2).
+    pool: Arc<sqlx::SqlitePool>,
     /// Shared per-run cancellation tokens (A1) — the same map the engine
     /// registers run tokens in and the prompt executor resolves.
     session_cancels: std::sync::Arc<
@@ -595,6 +598,7 @@ impl WorkflowRunCoordinator {
     pub fn new(
         engine: Arc<nexus_orchestration::GraphFlowEngine>,
         storage: Arc<dyn SessionStorage>,
+        pool: Arc<sqlx::SqlitePool>,
         session_cancels: std::sync::Arc<
             std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
         >,
@@ -602,6 +606,7 @@ impl WorkflowRunCoordinator {
         Self {
             engine,
             storage,
+            pool,
             session_cancels,
             drives: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             config: PresetRunConfig::default(),
@@ -614,12 +619,93 @@ impl WorkflowRunCoordinator {
         self.engine.clone()
     }
 
+    /// Start a new public session through the SAME v1 admission path
+    /// schedule admission uses (I-4): resolve the preset, freeze the
+    /// supplied seed/input, persist the v1 run (descriptor + initial
+    /// checkpoint), and drive it through the coordinator — mandatory, never
+    /// optional. `_system.*` presets are refused (A8).
+    ///
+    /// # Errors
+    /// Returns [`RunControlError`] on any admission failure.
+    pub async fn start_session(
+        &self,
+        preset_id: &str,
+        creator_id: &str,
+        seed: Option<&str>,
+        nexus_home: &std::path::Path,
+        caps: &nexus_orchestration::CapabilityRegistryHolder,
+        daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>,
+        prompt_executor: Option<std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
+    ) -> Result<SessionId, RunControlError> {
+        // A8 fail-closed: `_system.*` presets are never driven as user
+        // sessions.
+        if preset_id.starts_with("_system.") {
+            return Err(RunControlError::NotEligible(
+                preset_id.to_string(),
+                format!("system preset '{preset_id}' cannot be started as a user session"),
+            ));
+        }
+
+        let registry = caps
+            .get()
+            .ok_or_else(|| RunControlError::NoWorkspace("capability registry unavailable".into()))?;
+        let loaded = nexus_orchestration::preset::resolve_preset(preset_id, nexus_home, &registry)
+            .map_err(|e| RunControlError::PresetLoad(preset_id.to_string(), e.to_string()))?;
+
+        // Freeze the supplied seed: JSON object → structured `preset.input.*`;
+        // anything else → core-context text.
+        let (input, core_context) = match seed {
+            Some(seed_text) => {
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(seed_text) {
+                    if let serde_json::Value::Object(map) = value {
+                        (map, None)
+                    } else {
+                        (serde_json::Map::new(), Some(seed_text.to_string()))
+                    }
+                } else {
+                    (serde_json::Map::new(), Some(seed_text.to_string()))
+                }
+            }
+            None => (serde_json::Map::new(), None),
+        };
+
+        let session_id = format!("{}:{}", preset_id, uuid::Uuid::new_v4());
+        let engine_proxy: Arc<dyn OrchestrationEngine> = self.engine.clone();
+        let wired = nexus_orchestration::preset::loader::build_wired_outer_graph(
+            &loaded,
+            &engine_proxy,
+            &registry,
+            daemon_tool_dispatch,
+            prompt_executor,
+            self.session_cancels.clone(),
+        );
+        let sid = self
+            .engine
+            .start_preset_run_with_input(
+                &session_id,
+                &loaded,
+                creator_id,
+                None,
+                input,
+                core_context.as_deref(),
+                std::collections::HashMap::new(),
+                Arc::new(wired),
+            )
+            .await
+            .map_err(|e| RunControlError::Admission(e.to_string()))?;
+        self.ensure_driving(&sid).await?;
+        Ok(sid)
+    }
+
     /// Ensure exactly one drive loop is running for `session_id` (A3).
     ///
     /// Single-flight: when a drive is already registered for the session,
     /// returns [`DriveDisposition::AlreadyDriving`] without spawning a
-    /// second loop. When the registered drive has finished (terminal
-    /// outcome), the entry is removed and a fresh drive is started.
+    /// second loop. When the registered drive has finished, the durable
+    /// run state is consulted (I-2): terminal/interrupted/human-wait states
+    /// return a non-driving disposition; only an explicitly runnable
+    /// boundary (running/paused with no in-flight markers) creates a fresh
+    /// owner. A finished owner is never silently re-driven.
     ///
     /// The per-run cancellation token is registered in the shared
     /// `session_cancels` map (idempotent — the engine already registers it
@@ -634,8 +720,35 @@ impl WorkflowRunCoordinator {
             if !owner.join.is_finished() {
                 return Ok(DriveDisposition::AlreadyDriving);
             }
-            // The previous drive finished; drop it and start fresh.
+            // The previous drive finished. Consult the durable run state
+            // before deciding whether a fresh drive is authorized (I-2):
+            // terminal/interrupted/human-wait states are non-driving.
             drives.remove(&session_id.0);
+            let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
+                self.pool.clone(),
+            );
+            let record = store
+                .load_run(session_id)
+                .await
+                .map_err(|e| RunControlError::Drive(e.to_string()))?;
+            if let Some(record) = record {
+                if record.execution_version >= 1 {
+                    let class = nexus_orchestration::resume_rules::classify_recovery(
+                        &record.status,
+                        record.state.as_ref(),
+                        false,
+                    );
+                    match class {
+                        nexus_orchestration::resume_rules::RecoveryClass::Terminal
+                        | nexus_orchestration::resume_rules::RecoveryClass::Interrupted
+                        | nexus_orchestration::resume_rules::RecoveryClass::HumanWait
+                        | nexus_orchestration::resume_rules::RecoveryClass::Unreadable => {
+                            return Ok(DriveDisposition::NotDriving);
+                        }
+                        _ => {}
+                    }
+                }
+            }
         }
 
         // Register (or refresh) the run's cancellation token in the shared
@@ -671,23 +784,321 @@ impl WorkflowRunCoordinator {
         Ok(DriveDisposition::Started)
     }
 
+    /// Re-drive recovered sessions through the SINGLE coordinator owner
+    /// (I-1). Boot recovery must not spawn a second, unowned drive path.
+    ///
+    /// Each recovered session that is eligible to step (converge/merge chain
+    /// class, runner present) is registered in the coordinator's drives map
+    /// BEFORE the drive loop starts, so a later public re-entry
+    /// (`ensure_driving`) observes the same owner and never spawns a second
+    /// driver. Shutdown/cancellation ownership is the coordinator's token.
+    ///
+    /// Returns the same [`ResumeDecision`]s as the legacy
+    /// [`resume_driven_sessions`] so boot observability is unchanged.
+    pub async fn recover_driving(
+        &self,
+        workflow_store: Option<&Arc<dyn WorkflowStateStore>>,
+        summaries: &[SessionSummary],
+        _cancel: Option<&CancellationToken>,
+    ) -> Vec<ResumeDecision> {
+        let mut decisions = Vec::with_capacity(summaries.len());
+        for summary in summaries {
+            let session_id = summary.session_id.clone();
+
+            // Load the persisted session (position + context).
+            let session = match self.storage.get(&session_id.0).await {
+                Ok(Some(session)) => session,
+                Ok(None) => {
+                    decisions.push(ResumeDecision::SkippedUnreadable {
+                        session_id,
+                        error: "session not found in storage".to_string(),
+                    });
+                    continue;
+                }
+                Err(e) => {
+                    decisions.push(ResumeDecision::SkippedUnreadable {
+                        session_id,
+                        error: e.to_string(),
+                    });
+                    continue;
+                }
+            };
+
+            let context_value = serde_json::to_value(&session.context).ok();
+            let data = context_value.as_ref().and_then(resume_rules::context_data);
+
+            // A7 v1 gate: the durable workflow store governs the recovery
+            // class. Only the converge/merge class proceeds to the bounded
+            // join re-drive; terminal/interrupted/human-wait/unreadable
+            // classes skip immediately.
+            let mut v1_converge_merge = false;
+            if let Some(store) = workflow_store {
+                match store.load_run(&session_id).await {
+                    Ok(Some(record)) if record.execution_version >= 1 => {
+                        let gate_park = data.is_some_and(|data| {
+                            resume_rules::gate_park_live(
+                                data,
+                                summary.current_task_id.as_deref().unwrap_or_default(),
+                            )
+                        });
+                        let class = resume_rules::classify_recovery(
+                            &record.status,
+                            record.state.as_ref(),
+                            gate_park,
+                        );
+                        match class {
+                            resume_rules::RecoveryClass::ConvergeMerge => {
+                                v1_converge_merge = true;
+                            }
+                            resume_rules::RecoveryClass::Terminal => {
+                                decisions.push(ResumeDecision::SkippedTerminal { session_id });
+                                continue;
+                            }
+                            resume_rules::RecoveryClass::Unreadable => {
+                                decisions.push(ResumeDecision::SkippedUnreadableMetadata {
+                                    session_id,
+                                });
+                                continue;
+                            }
+                            resume_rules::RecoveryClass::Interrupted => {
+                                decisions.push(ResumeDecision::SkippedInterrupted { session_id });
+                                continue;
+                            }
+                            resume_rules::RecoveryClass::HumanWait => {
+                                decisions.push(ResumeDecision::SkippedHumanWait { session_id });
+                                continue;
+                            }
+                            resume_rules::RecoveryClass::SafeBoundary => {
+                                decisions.push(ResumeDecision::SkippedSafeBoundary { session_id });
+                                continue;
+                            }
+                            resume_rules::RecoveryClass::LegacyUnverified => {
+                                unreachable!("v1 load_run record cannot classify LegacyUnverified")
+                            }
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        decisions.push(ResumeDecision::SkippedUnreadable {
+                            session_id,
+                            error: e.to_string(),
+                        });
+                        continue;
+                    }
+                }
+            }
+
+            // Legacy (v0 / no-store) typed-failure filter.
+            if !v1_converge_merge && data.is_some_and(resume_rules::typed_failure_keys_present) {
+                decisions.push(ResumeDecision::SkippedTypedFailed { session_id });
+                continue;
+            }
+
+            // Human wait (v0 / no-store).
+            if !v1_converge_merge
+                && matches!(summary.status, SessionStatus::WaitingForInput)
+                && !data.is_some_and(resume_rules::is_converge_merge_chain)
+            {
+                decisions.push(ResumeDecision::SkippedNotConvergeMergeClass { session_id });
+                continue;
+            }
+
+            // Converge/merge chain class filter.
+            if !v1_converge_merge && !data.is_some_and(resume_rules::is_converge_merge_chain) {
+                decisions.push(ResumeDecision::SkippedNotConvergeMergeClass { session_id });
+                continue;
+            }
+
+            // Runner-existence filter.
+            if !self.engine.has_runner(&session_id).await {
+                decisions.push(ResumeDecision::SkippedNoRunner { session_id });
+                continue;
+            }
+
+            // Register the owner BEFORE enqueue (I-1): the coordinator's
+            // drives map is the single ownership registry. A concurrent
+            // public re-entry observes the same owner.
+            let mut drives = self.drives.lock().await;
+            if let Some(owner) = drives.get(&session_id.0) {
+                if !owner.join.is_finished() {
+                    decisions.push(ResumeDecision::ReDriven {
+                        session_id,
+                        outcome: PresetRunOutcome::MaxStepsExceeded { steps: 0 },
+                    });
+                    continue;
+                }
+                drives.remove(&session_id.0);
+            }
+            let cancel = tokio_util::sync::CancellationToken::new();
+            self.session_cancels
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(session_id.0.clone(), cancel.clone());
+
+            let engine = self.engine.clone();
+            let storage = self.storage.clone();
+            let config = PresetRunConfig {
+                resume_waiting: true,
+                ..self.config.clone()
+            };
+            let sid = session_id.clone();
+            let drive_cancel = cancel.clone();
+            let join = tokio::spawn(async move {
+                let outcome = drive_preset_run(
+                    &*engine,
+                    Some(&storage),
+                    &sid,
+                    &config,
+                    Some(&drive_cancel),
+                )
+                .await;
+                tracing::debug!(
+                    session_id = %sid.0,
+                    outcome = ?outcome,
+                    "coordinator recovery drive loop finished"
+                );
+            });
+            drives.insert(session_id.0.clone(), DriveOwner { cancel, join });
+            drop(drives);
+            decisions.push(ResumeDecision::ReDriven {
+                session_id,
+                outcome: PresetRunOutcome::MaxStepsExceeded { steps: 0 },
+            });
+        }
+        decisions
+    }
+
+    /// Explicit public `schedule start` for a legacy never-started row
+    /// (C-3): pending, paused, or admission-only `Running` with no owned
+    /// session. The row's policy is cut over to `driven_v1`
+    /// transactionally, then the row is admitted through the SAME atomic
+    /// admission path as new rows.
+    ///
+    /// `_system.*` rows are always refused (A8). A `Running` row WITH an
+    /// owned session is re-entry — the existing run is driven (single-flight).
+    ///
+    /// # Errors
+    /// Returns [`RunControlError`] on any admission failure.
+    pub async fn start_legacy_schedule(
+        &self,
+        schedule_id: &str,
+        pool: &sqlx::SqlitePool,
+        nexus_home: &std::path::Path,
+        caps: &nexus_orchestration::CapabilityRegistryHolder,
+        daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>,
+        prompt_executor: Option<std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
+    ) -> Result<SessionId, RunControlError> {
+        // Load the schedule row.
+        let row = sqlx::query_as::<_, ScheduleAdmissionRow>(
+            "SELECT schedule_id, creator_id, preset_id, preset_version, status,
+                    current_core_context_version, current_session_id, execution_policy,
+                    work_id, execution_descriptor_json
+             FROM creator_schedules WHERE schedule_id = ?",
+        )
+        .bind(schedule_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?
+        .ok_or_else(|| RunControlError::ScheduleNotFound(schedule_id.to_string()))?;
+
+        // A8 fail-closed: `_system.*` is never opted in by a generic signal.
+        if row.preset_id.starts_with("_system.") {
+            return Err(RunControlError::NotEligible(
+                schedule_id.to_string(),
+                format!("system preset '{}' cannot be started", row.preset_id),
+            ));
+        }
+
+        // Re-entry: the schedule already owns a run — drive it.
+        if let Some(sid) = &row.current_session_id {
+            let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
+                std::sync::Arc::new(pool.clone()),
+            );
+            let run_exists = store
+                .load_run(&nexus_orchestration::SessionId(sid.clone()))
+                .await
+                .map_err(|e| RunControlError::Admission(e.to_string()))?
+                .is_some();
+            if run_exists {
+                let sid = nexus_orchestration::SessionId(sid.clone());
+                self.ensure_driving(&sid).await?;
+                return Ok(sid);
+            }
+            return Err(RunControlError::NotEligible(
+                schedule_id.to_string(),
+                format!(
+                    "schedule has a stale claim on session {sid}; \
+                     boot recovery must classify it before re-admission"
+                ),
+            ));
+        }
+
+        // Admissible states: pending, paused, or admission-only Running
+        // (legacy never-started row with no owned session — C-3).
+        if !matches!(row.status.as_str(), "pending" | "paused" | "running") {
+            return Err(RunControlError::NotEligible(
+                schedule_id.to_string(),
+                format!("status is '{}'", row.status),
+            ));
+        }
+
+        // Cut the policy over transactionally (C-3): a legacy_inert row
+        // becomes driven_v1 in the SAME transaction that admits the run.
+        // The atomic `admit_schedule_run` in the store performs the policy
+        // check + claim + run creation in one transaction; we update the
+        // policy first in a separate transaction ONLY for legacy rows, then
+        // admit. The policy update is fenced on the row still being
+        // un-owned so a concurrent admission cannot race it.
+        if row.execution_policy != "driven_v1" {
+            let now = chrono::Utc::now().timestamp();
+            let updated = sqlx::query(
+                "UPDATE creator_schedules
+                 SET execution_policy = 'driven_v1', updated_at = ?
+                 WHERE schedule_id = ? AND current_session_id IS NULL",
+            )
+            .bind(now)
+            .bind(schedule_id)
+            .execute(pool)
+            .await
+            .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
+            if updated.rows_affected() == 0 {
+                return Err(RunControlError::NotEligible(
+                    schedule_id.to_string(),
+                    "schedule was claimed concurrently during legacy start".to_string(),
+                ));
+            }
+        }
+
+        // Admit through the SAME atomic path as new rows.
+        self.admit_schedule(
+            schedule_id,
+            pool,
+            nexus_home,
+            caps,
+            daemon_tool_dispatch,
+            prompt_executor,
+        )
+        .await
+    }
+
     /// Admit a `driven_v1` schedule as an owned run and drive it (A3).
     ///
-    /// Atomic admission contract:
+    /// Atomic admission contract (C-1/C-2):
     /// 1. Loads the schedule row and verifies eligibility (exists, policy
-    ///    `driven_v1`, status pending/paused).
-    /// 2. Claims the row atomically: `status = 'running'` +
-    ///    `current_session_id = <minted id>` in one UPDATE fenced on
-    ///    `status IN ('pending','paused') AND current_session_id IS NULL`.
-    ///    A concurrent admission loses the claim and returns the winner's
-    ///    owned run (single-session admission).
-    /// 3. Resolves the preset, freezes the descriptor + core-context seed,
-    ///    and creates the v1 run (initial checkpoint + descriptor + seeded
-    ///    context) via the engine — the descriptor/core seed are durable
-    ///    before eligibility is published.
-    /// 4. On run-creation failure the claim is rolled back (row returns to
-    ///    pending, no session) so a failed admission never leaves a
-    ///    `Running`-with-no-session row.
+    ///    `driven_v1`, status pending/paused, no owned session).
+    /// 2. Resolves the preset, freezes the descriptor + core-context seed,
+    ///    and calls the P0 store's atomic `admit_schedule_run` — ONE
+    ///    Creator-DB transaction linearizes the schedule claim
+    ///    (`status='running'`, `current_session_id`, core-context version),
+    ///    the v1 session row (initial checkpoint + descriptor + seeded
+    ///    context), and the schedule→session identity. A concurrent
+    ///    admission loses the claim and returns the winner's owned run
+    ///    (exactly one `SessionId` per schedule).
+    /// 3. A stale claim (schedule `Running` with a `current_session_id`
+    ///    whose run row does not exist) is NOT cleared — boot recovery
+    ///    classifies it; a second admission never mints another session.
+    /// 4. `_system.*` presets are refused regardless of stored policy
+    ///    (A8 fail-closed, C-4).
     /// 5. Only after the run exists does the coordinator register the
     ///    runner and call [`ensure_driving`](Self::ensure_driving).
     ///
@@ -706,11 +1117,12 @@ impl WorkflowRunCoordinator {
         caps: &nexus_orchestration::CapabilityRegistryHolder,
         daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>,
         prompt_executor: Option<std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
-    ) -> Result<String, RunControlError> {
+    ) -> Result<SessionId, RunControlError> {
         // 1. Load the schedule row.
         let row = sqlx::query_as::<_, ScheduleAdmissionRow>(
             "SELECT schedule_id, creator_id, preset_id, preset_version, status,
-                    current_core_context_version, current_session_id, execution_policy
+                    current_core_context_version, current_session_id, execution_policy,
+                    work_id, execution_descriptor_json
              FROM creator_schedules WHERE schedule_id = ?",
         )
         .bind(schedule_id)
@@ -719,6 +1131,14 @@ impl WorkflowRunCoordinator {
         .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?
         .ok_or_else(|| RunControlError::ScheduleNotFound(schedule_id.to_string()))?;
 
+        // A8 fail-closed (C-4): a `_system.*` preset is never driven,
+        // regardless of the stored policy.
+        if row.preset_id.starts_with("_system.") {
+            return Err(RunControlError::NotEligible(
+                schedule_id.to_string(),
+                format!("system preset '{}' cannot be admitted as a driven run", row.preset_id),
+            ));
+        }
         if row.execution_policy != "driven_v1" {
             return Err(RunControlError::NotEligible(
                 schedule_id.to_string(),
@@ -733,9 +1153,8 @@ impl WorkflowRunCoordinator {
         }
         if let Some(sid) = &row.current_session_id {
             // Re-entry: the schedule already owns a run. Verify the run
-            // actually exists (a crash between claim and run creation leaves
-            // a stale claim — clear it and re-admit); otherwise drive the
-            // existing run (single-flight) and return the same identity.
+            // actually exists; a stale claim (crash between claim and run
+            // creation) is NOT cleared — boot recovery classifies it (C-1).
             let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
                 std::sync::Arc::new(pool.clone()),
             );
@@ -747,91 +1166,84 @@ impl WorkflowRunCoordinator {
             if run_exists {
                 let sid = nexus_orchestration::SessionId(sid.clone());
                 self.ensure_driving(&sid).await?;
-                return Ok(sid.0);
+                return Ok(sid);
             }
-            // Stale claim: clear it and fall through to fresh admission.
-            let now = chrono::Utc::now().timestamp();
-            sqlx::query(
-                "UPDATE creator_schedules
-                 SET status = 'pending', current_session_id = NULL, updated_at = ?
-                 WHERE schedule_id = ? AND current_session_id = ?",
-            )
-            .bind(now)
-            .bind(schedule_id)
-            .bind(sid)
-            .execute(pool)
-            .await
-            .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
+            return Err(RunControlError::NotEligible(
+                schedule_id.to_string(),
+                format!(
+                    "schedule has a stale claim on session {sid}; \
+                     boot recovery must classify it before re-admission"
+                ),
+            ));
         }
 
-        // 2. Mint the owned session id and CLAIM the schedule row atomically
-        //    (the linearization point for concurrent admission).
-        let session_id = format!("{}:{}", row.preset_id, uuid::Uuid::new_v4());
-        let now = chrono::Utc::now().timestamp();
-        let claim = sqlx::query(
-            "UPDATE creator_schedules
-             SET status = 'running', current_session_id = ?, updated_at = ?
-             WHERE schedule_id = ? AND status IN ('pending', 'paused')
-               AND current_session_id IS NULL",
-        )
-        .bind(&session_id)
-        .bind(now)
-        .bind(schedule_id)
-        .execute(pool)
-        .await
-        .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
-
-        if claim.rows_affected() == 0 {
-            // A concurrent admission won the claim. Return its owned run.
-            let winner = sqlx::query_as::<_, ScheduleAdmissionRow>(
-                "SELECT schedule_id, creator_id, preset_id, preset_version, status,
-                        current_core_context_version, current_session_id, execution_policy
-                 FROM creator_schedules WHERE schedule_id = ?",
-            )
-            .bind(schedule_id)
-            .fetch_optional(pool)
-            .await
-            .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?
-            .ok_or_else(|| RunControlError::ScheduleNotFound(schedule_id.to_string()))?;
-            let sid = winner.current_session_id.ok_or_else(|| {
-                RunControlError::NotEligible(
-                    schedule_id.to_string(),
-                    "concurrent admission left no owned session".to_string(),
-                )
-            })?;
-            let sid = nexus_orchestration::SessionId(sid);
-            self.ensure_driving(&sid).await?;
-            return Ok(sid.0);
-        }
-
-        // 3. Resolve the preset and freeze the descriptor + core seed.
+        // 2. Resolve the preset and freeze the descriptor + core seed.
         let registry = caps
             .get()
             .ok_or_else(|| RunControlError::NoWorkspace("capability registry unavailable".into()))?;
         let loaded = nexus_orchestration::preset::resolve_preset(&row.preset_id, nexus_home, &registry)
             .map_err(|e| RunControlError::PresetLoad(row.preset_id.clone(), e.to_string()))?;
 
-        let core_context = {
+        // 3. Freeze the core-context seed. A read/migration/corruption error
+        //    FAILS CLOSED (I-6) — a missing expected seed is never silently
+        //    converted to `None`. "No seed exists" (version 0, no rows) is
+        //    distinct from a read failure.
+        let (core_context, core_context_version) = {
             let mgr = nexus_orchestration::schedule::derivation::CoreContextManager::new(
                 std::sync::Arc::new(pool.clone()),
             );
-            match mgr
-                .current_snapshot(&nexus_contracts::local::schedule::ScheduleId(
-                    schedule_id.to_string(),
-                ))
-                .await
-            {
-                Ok(record) => match record.content {
-                    nexus_contracts::local::schedule::CoreContextPayload::Text { body } => {
-                        Some(body)
-                    }
-                    nexus_contracts::local::schedule::CoreContextPayload::Struct { body } => {
-                        Some(serde_json::to_string(&body).unwrap_or_default())
-                    }
-                },
-                Err(_) => None,
+            let sid = nexus_contracts::local::schedule::ScheduleId(schedule_id.to_string());
+            match mgr.current_snapshot(&sid).await {
+                Ok(record) => {
+                    let version = record.version.0;
+                    let body = match record.content {
+                        nexus_contracts::local::schedule::CoreContextPayload::Text { body } => body,
+                        nexus_contracts::local::schedule::CoreContextPayload::Struct { body } => {
+                            serde_json::to_string(&body).map_err(|e| {
+                                RunControlError::Admission(format!(
+                                    "core-context struct serialization failed: {e}"
+                                ))
+                            })?
+                        }
+                    };
+                    (Some(body), version)
+                }
+                Err(nexus_orchestration::schedule::derivation::CoreContextError::NotFound(_)) => {
+                    // No seed exists yet — admissible with no core context.
+                    (None, 0)
+                }
+                Err(e) => {
+                    return Err(RunControlError::Admission(format!(
+                        "core-context snapshot read failed: {e}"
+                    )));
+                }
             }
         };
+
+        // 4. Recover the frozen admission payload (I-5): the schedule's
+        //    work_id, structured input, and agent bindings. The descriptor
+        //    JSON (when present) carries the frozen input/bindings; the
+        //    schedule row carries work_id. New rows created through the
+        //    public add path persist the descriptor at insertion.
+        let (work_id, input, agent_bindings) = match &row.execution_descriptor_json {
+            Some(bytes) => {
+                let descriptor: nexus_orchestration::run_state::RunDescriptorV1 =
+                    serde_json::from_slice(bytes).map_err(|e| {
+                        RunControlError::Admission(format!(
+                            "schedule execution descriptor is corrupt: {e}"
+                        ))
+                    })?;
+                (
+                    descriptor.work_id.clone(),
+                    descriptor.input.clone(),
+                    descriptor.agent_bindings.clone(),
+                )
+            }
+            None => (row.work_id.clone(), serde_json::Map::new(), std::collections::HashMap::new()),
+        };
+
+        // 5. Mint the owned session id and admit atomically (C-1).
+        let session_id = format!("{}:{}", row.preset_id, uuid::Uuid::new_v4());
 
         // Build the wired outer graph (production prompt executor + tool
         // dispatch + cancellation tokens) — mirrors boot.rs.
@@ -845,44 +1257,38 @@ impl WorkflowRunCoordinator {
             self.session_cancels.clone(),
         );
 
-        // 4. Create the v1 run (initial checkpoint + descriptor + seeded
-        //    context). On failure, roll back the claim so the row returns
-        //    to pending with no session.
-        let run = self
+        // 6. One Creator-DB transaction: schedule claim + v1 session row +
+        //    schedule→session identity (C-1/C-2). A concurrent admission
+        //    loses the claim inside the transaction and the run row is
+        //    rolled back with it.
+        let admitted = self
             .engine
-            .start_preset_run_with_input(
+            .admit_schedule_run_with_input(
+                schedule_id,
                 &session_id,
                 &loaded,
                 &row.creator_id,
-                None,
-                serde_json::Map::new(),
+                work_id,
+                input,
                 core_context.as_deref(),
-                std::collections::HashMap::new(),
+                core_context_version,
+                agent_bindings,
                 Arc::new(wired),
             )
             .await;
 
-        if let Err(e) = run {
-            // Roll back the claim: the row must never stay Running without
-            // an owned run.
-            let now = chrono::Utc::now().timestamp();
-            let _ = sqlx::query(
-                "UPDATE creator_schedules
-                 SET status = 'pending', current_session_id = NULL, updated_at = ?
-                 WHERE schedule_id = ? AND current_session_id = ?",
-            )
-            .bind(now)
-            .bind(schedule_id)
-            .bind(&session_id)
-            .execute(pool)
-            .await;
-            return Err(RunControlError::Admission(e.to_string()));
+        match admitted {
+            Ok(sid) => {
+                // 7. Drive the owned run (single-flight).
+                self.ensure_driving(&sid).await?;
+                Ok(sid)
+            }
+            Err(e) => {
+                // The transaction rolled back — the row is never left
+                // `Running` without an owned run (C-1).
+                Err(RunControlError::Admission(e.to_string()))
+            }
         }
-
-        // 5. Drive the owned run (single-flight).
-        let sid = nexus_orchestration::SessionId(session_id);
-        self.ensure_driving(&sid).await?;
-        Ok(sid.0)
     }
 }
 
@@ -893,6 +1299,9 @@ pub enum DriveDisposition {
     Started,
     /// A drive loop was already running for the session; no second driver.
     AlreadyDriving,
+    /// The session's durable state is terminal/interrupted/human-wait —
+    /// no fresh drive is authorized (I-2).
+    NotDriving,
 }
 
 /// Schedule row projection for coordinator admission.
@@ -906,6 +1315,8 @@ struct ScheduleAdmissionRow {
     current_core_context_version: i64,
     current_session_id: Option<String>,
     execution_policy: String,
+    work_id: Option<String>,
+    execution_descriptor_json: Option<Vec<u8>>,
 }
 
 #[cfg(test)]

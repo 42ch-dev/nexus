@@ -255,13 +255,22 @@ pub async fn add_schedule(
         let schedule_id = format!("SCH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
         let now_ts = chrono::Utc::now().timestamp();
         // A3 admission cutover: a new public schedule is drive-enabled
-        // (`driven_v1`); the legacy_inert default only applies to pre-cutover rows.
+        // (`driven_v1`); `_system.*` presets are always `system_inert`
+        // (C-4). The frozen execution descriptor (input/bindings/work_id)
+        // is persisted with the row (C-2/I-5).
+        let execution_policy = if body.preset_id.starts_with("_system.") {
+            "system_inert"
+        } else {
+            "driven_v1"
+        };
+        let descriptor = build_execution_descriptor(&body, &work_id);
         sqlx::query(
             "INSERT INTO creator_schedules \
              (schedule_id, creator_id, preset_id, preset_version, status, \
               concurrency_kind, current_core_context_version, label, \
-              created_at, updated_at, work_id, execution_policy) \
-             VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?, 'driven_v1')",
+              created_at, updated_at, work_id, execution_policy, \
+              execution_descriptor_json) \
+             VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&schedule_id)
         .bind(&body.creator_id)
@@ -270,6 +279,8 @@ pub async fn add_schedule(
         .bind(now_ts)
         .bind(now_ts)
         .bind(&work_id)
+        .bind(execution_policy)
+        .bind(descriptor.as_deref())
         .execute(&mut *tx)
         .await
         .map_err(|e| NexusApiError::Internal {
@@ -290,14 +301,17 @@ pub async fn add_schedule(
             "gate evaluation BYPASSED by --force-gates (audited)"
         );
 
-        // Seed core context if seed/input provided
+        // Seed core context if seed/input provided (I-10: real version).
         let core_version = seed_core_context(&supervisor, &schedule_id, &body, &state).await?;
+
+        // C-5: immediately admit the new row through the single coordinator.
+        let status = admit_new_schedule(&state, &supervisor, &schedule_id).await?;
 
         return Ok((
             StatusCode::CREATED,
             Json(AddScheduleResponse {
                 schedule_id,
-                status: "pending".to_string(),
+                status,
                 core_context_version: core_version,
             }),
         ));
@@ -441,13 +455,23 @@ pub async fn add_schedule(
                             format!("SCH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
                         let now_ts = chrono::Utc::now().timestamp();
                         // A3 admission cutover: a new public schedule is
-                        // drive-enabled (`driven_v1`).
+                        // drive-enabled (`driven_v1`); `_system.*` presets
+                        // are always `system_inert` (C-4). The frozen
+                        // execution descriptor is persisted with the row
+                        // (C-2/I-5).
+                        let execution_policy = if body.preset_id.starts_with("_system.") {
+                            "system_inert"
+                        } else {
+                            "driven_v1"
+                        };
+                        let descriptor = build_execution_descriptor(&body, work_id);
                         sqlx::query(
                             "INSERT INTO creator_schedules \
                              (schedule_id, creator_id, preset_id, preset_version, status, \
                               concurrency_kind, current_core_context_version, label, \
-                              created_at, updated_at, work_id, execution_policy) \
-                             VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?, 'driven_v1')",
+                              created_at, updated_at, work_id, execution_policy, \
+                              execution_descriptor_json) \
+                             VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?, ?, ?)",
                         )
                         .bind(&schedule_id)
                         .bind(&body.creator_id)
@@ -456,6 +480,8 @@ pub async fn add_schedule(
                         .bind(now_ts)
                         .bind(now_ts)
                         .bind(&work_id)
+                        .bind(execution_policy)
+                        .bind(descriptor.as_deref())
                         .execute(&mut *tx)
                         .await
                         .map_err(|e| NexusApiError::Internal {
@@ -468,14 +494,18 @@ pub async fn add_schedule(
                             message: format!("failed to commit schedule transaction: {e}"),
                         })?;
 
+                        // I-10: real core-context version.
                         let core_version =
                             seed_core_context(&supervisor, &schedule_id, &body, &state).await?;
+
+                        // C-5: immediately admit the new row.
+                        let status = admit_new_schedule(&state, &supervisor, &schedule_id).await?;
 
                         return Ok((
                             StatusCode::CREATED,
                             Json(AddScheduleResponse {
                                 schedule_id,
-                                status: "pending".to_string(),
+                                status,
                                 core_context_version: core_version,
                             }),
                         ));
@@ -553,71 +583,207 @@ pub async fn add_schedule(
         terminated_at: None,
     };
 
-    supervisor.insert_pending(schedule).await.map_err(|e| {
-        if matches!(
-            e,
-            nexus_orchestration::schedule::supervisor::SupervisorError::DuplicateSchedule { .. }
-        ) {
-            NexusApiError::Conflict(format!("schedule already exists: {e}"))
-        } else {
-            NexusApiError::Internal {
-                code: "SCHEDULE_CREATE_ERROR".into(),
-                message: format!("failed to create schedule: {e}"),
+    // C-2/I-5: persist the frozen execution descriptor with the row in one
+    // transaction (dependencies included).
+    let work_id = work_id_opt.clone().unwrap_or_default();
+    let descriptor = build_execution_descriptor(&body, &work_id);
+    supervisor
+        .insert_pending_with_descriptor(schedule, descriptor.as_deref())
+        .await
+        .map_err(|e| {
+            if matches!(
+                e,
+                nexus_orchestration::schedule::supervisor::SupervisorError::DuplicateSchedule { .. }
+            ) {
+                NexusApiError::Conflict(format!("schedule already exists: {e}"))
+            } else {
+                NexusApiError::Internal {
+                    code: "SCHEDULE_CREATE_ERROR".into(),
+                    message: format!("failed to create schedule: {e}"),
+                }
             }
-        }
-    })?;
+        })?;
 
+    // I-10: real core-context version.
     let core_version = seed_core_context(&supervisor, &schedule_id, &body, &state).await?;
+
+    // C-5: immediately admit the new row through the single coordinator.
+    let status = admit_new_schedule(&state, &supervisor, &schedule_id).await?;
 
     Ok((
         StatusCode::CREATED,
         Json(AddScheduleResponse {
             schedule_id,
-            status: "pending".to_string(),
+            status,
             core_context_version: core_version,
         }),
     ))
 }
 
 /// Seed core context v0 if seed or input is provided.
+///
+/// Returns the ACTUAL committed version (I-10) — `apply_seed` creates a
+/// real version row; the caller must report that version, never a
+/// synthetic zero.
 async fn seed_core_context(
     supervisor: &Arc<nexus_orchestration::schedule::supervisor::ScheduleSupervisor>,
     schedule_id: &str,
     body: &AddScheduleRequest,
     _state: &WorkspaceState,
 ) -> Result<u32, NexusApiError> {
-    if body.seed.is_some() || body.input.is_some() {
-        let mgr = supervisor.core_context_manager();
-        let sid = ScheduleId(schedule_id.to_string());
-
-        let effective_seed = match (&body.seed, &body.input) {
-            (Some(seed_text), Some(input)) => {
-                let input_json = serde_json::to_string(input).unwrap_or_default();
-                format!("{seed_text}\n---\npreset.input={input_json}")
-            }
-            (Some(seed_text), None) => seed_text.clone(),
-            (None, Some(input)) => {
-                let input_json = serde_json::to_string(input).unwrap_or_default();
-                format!("preset.input={input_json}")
-            }
-            (None, None) => unreachable!("checked outer condition"),
-        };
-
-        let _record = mgr
-            .apply_seed(
-                &sid,
-                &effective_seed,
-                CoreContextAuthor::User {
-                    id: body.creator_id.clone(),
-                },
-            )
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "CORE_CONTEXT_SEED_ERROR".into(),
-                message: format!("failed to seed core context: {e}"),
-            })?;
+    if body.seed.is_none() && body.input.is_none() {
+        return Ok(0);
     }
-    Ok(0)
+    let mgr = supervisor.core_context_manager();
+    let sid = ScheduleId(schedule_id.to_string());
+
+    let effective_seed = match (&body.seed, &body.input) {
+        (Some(seed_text), Some(input)) => {
+            let input_json = serde_json::to_string(input).unwrap_or_default();
+            format!("{seed_text}\n---\npreset.input={input_json}")
+        }
+        (Some(seed_text), None) => seed_text.clone(),
+        (None, Some(input)) => {
+            let input_json = serde_json::to_string(input).unwrap_or_default();
+            format!("preset.input={input_json}")
+        }
+        (None, None) => unreachable!("checked outer condition"),
+    };
+
+    let record = mgr
+        .apply_seed(
+            &sid,
+            &effective_seed,
+            CoreContextAuthor::User {
+                id: body.creator_id.clone(),
+            },
+        )
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "CORE_CONTEXT_SEED_ERROR".into(),
+            message: format!("failed to seed core context: {e}"),
+        })?;
+    Ok(record.version.0)
+}
+
+/// Build the frozen execution descriptor for a new schedule (I-5): the
+/// serialized [`nexus_orchestration::run_state::RunDescriptorV1`] carrying
+/// the schedule's work_id, structured input, and agent bindings. Persisted
+/// with the schedule row (C-2) so admission can freeze the complete
+/// payload into the initial checkpoint.
+fn build_execution_descriptor(
+    body: &AddScheduleRequest,
+    work_id: &str,
+) -> Option<Vec<u8>> {
+    let input = body
+        .input
+        .as_ref()
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+    let agent_bindings = body
+        .agent_bindings
+        .as_ref()
+        .map(|bindings| {
+            bindings
+                .iter()
+                .map(|(role, dto)| {
+                    (
+                        role.clone(),
+                        nexus_orchestration::run_state::AgentBinding {
+                            provider_id: dto.provider_id.clone(),
+                            model: dto.model.clone(),
+                        },
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let descriptor = nexus_orchestration::run_state::RunDescriptorV1 {
+        creator_id: body.creator_id.clone(),
+        work_id: Some(work_id.to_string()),
+        workspace_root: std::path::PathBuf::new(),
+        preset_id: body.preset_id.clone(),
+        preset_version: 1,
+        source: nexus_orchestration::run_state::PresetSourceIdentity::Embedded {
+            preset_id: body.preset_id.clone(),
+            content_hash: [0; 32],
+        },
+        input,
+        agent_bindings,
+        parent_session_id: None,
+        graph_name: None,
+    };
+    serde_json::to_vec(&descriptor).ok()
+}
+
+/// Admit a newly inserted schedule immediately (C-5): after the complete
+/// atomic insertion, invoke the same coordinator/starter for immediately
+/// eligible new public rows. Returns the actual persisted admission status
+/// projection — `"running"` when the coordinator admitted and drove the
+/// run, `"pending"` when the row is not yet eligible (scheduled_at in the
+/// future, dependency/concurrency blocked).
+async fn admit_new_schedule(
+    state: &WorkspaceState,
+    supervisor: &Arc<nexus_orchestration::schedule::supervisor::ScheduleSupervisor>,
+    schedule_id: &str,
+) -> Result<String, NexusApiError> {
+    // A scheduled_at in the future defers admission to the clocked tick.
+    let pool = supervisor.pool();
+    let scheduled_at: Option<i64> = sqlx::query_scalar(
+        "SELECT scheduled_at FROM creator_schedules WHERE schedule_id = ?",
+    )
+    .bind(schedule_id)
+    .fetch_one(&*pool)
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("database error reading scheduled_at: {e}"),
+    })?;
+    if let Some(at) = scheduled_at {
+        if at > chrono::Utc::now().timestamp() {
+            return Ok("pending".to_string());
+        }
+    }
+
+    // Route through the single coordinator/starter (C-5): the same
+    // admission path a tick would use, invoked immediately.
+    let coordinator = state.run_coordinator().ok_or_else(|| {
+        NexusApiError::service_unavailable("run coordinator not configured")
+    })?;
+    let caps = state.capability_registry_holder().ok_or_else(|| {
+        NexusApiError::service_unavailable("capability registry not configured")
+    })?;
+    match coordinator
+        .admit_schedule(
+            schedule_id,
+            &pool,
+            state.nexus_home(),
+            &caps,
+            state.daemon_tool_dispatch(),
+            state.prompt_executor(),
+        )
+        .await
+    {
+        Ok(_sid) => Ok("running".to_string()),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("not eligible") {
+                // Dependency/concurrency blocked or policy refusal — the row
+                // stays pending for a later tick / explicit start.
+                tracing::debug!(
+                    schedule_id = %schedule_id,
+                    error = %msg,
+                    "new schedule not immediately eligible; leaving pending"
+                );
+                Ok("pending".to_string())
+            } else {
+                Err(NexusApiError::Internal {
+                    code: "RUN_CONTROL_ERROR".into(),
+                    message: msg,
+                })
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1014,62 +1180,57 @@ pub async fn signal_schedule(
     }
 
     match body.signal.as_str() {
-        "start" => match current_status_str.as_str() {
-            "pending" => {
-                // A3 (v1.186 P2 T1): explicit public `schedule start` opts a
-                // never-started row in. The coordinator atomically creates
-                // the owned v1 run + schedule→session identity and drives it
-                // (single-flight). Legacy/system-inert rows are refused —
-                // `_system.*` cannot be opted in by a generic signal (A8).
-                let coordinator = state.run_coordinator().ok_or_else(|| {
-                    NexusApiError::service_unavailable("run coordinator not configured")
-                })?;
-                let pool = supervisor.pool();
-                let caps = state.capability_registry_holder().ok_or_else(|| {
-                    NexusApiError::service_unavailable("capability registry not configured")
-                })?;
-                let session_id = coordinator
-                    .admit_schedule(
-                        &schedule_id,
-                        &pool,
-                        state.nexus_home(),
-                        &caps,
-                        state.daemon_tool_dispatch(),
-                        state.prompt_executor(),
-                    )
-                    .await
-                    .map_err(|e| {
-                        let msg = e.to_string();
-                        if msg.contains("not eligible") || msg.contains("execution_policy") {
-                            NexusApiError::Conflict(format!(
-                                "cannot start schedule {schedule_id}: {msg}"
-                            ))
-                        } else {
-                            NexusApiError::Internal {
-                                code: "RUN_CONTROL_ERROR".into(),
-                                message: msg,
-                            }
+        "start" => {
+            // A3 (v1.186 P2 T1) + C-3: explicit public `schedule start` opts
+            // a never-started row in — pending, paused, or admission-only
+            // `Running` with no owned session. The coordinator cuts the
+            // policy over transactionally and atomically creates the owned
+            // v1 run + schedule→session identity, then drives it
+            // (single-flight). Legacy/system-inert rows are refused —
+            // `_system.*` cannot be opted in by a generic signal (A8).
+            let coordinator = state.run_coordinator().ok_or_else(|| {
+                NexusApiError::service_unavailable("run coordinator not configured")
+            })?;
+            let pool = supervisor.pool();
+            let caps = state.capability_registry_holder().ok_or_else(|| {
+                NexusApiError::service_unavailable("capability registry not configured")
+            })?;
+            let session_id = coordinator
+                .start_legacy_schedule(
+                    &schedule_id,
+                    &pool,
+                    state.nexus_home(),
+                    &caps,
+                    state.daemon_tool_dispatch(),
+                    state.prompt_executor(),
+                )
+                .await
+                .map_err(|e| {
+                    let msg = e.to_string();
+                    if msg.contains("not eligible") || msg.contains("execution_policy") {
+                        NexusApiError::Conflict(format!(
+                            "cannot start schedule {schedule_id}: {msg}"
+                        ))
+                    } else {
+                        NexusApiError::Internal {
+                            code: "RUN_CONTROL_ERROR".into(),
+                            message: msg,
                         }
-                    })?;
-                tracing::info!(
-                    schedule_id = %schedule_id,
-                    session_id = %session_id,
-                    "explicit schedule start admitted driven run"
-                );
-                return Ok((
-                    StatusCode::OK,
-                    Json(SignalScheduleResponse {
-                        schedule_id,
-                        status: "running".to_string(),
-                    }),
-                ));
-            }
-            _ => {
-                return Err(NexusApiError::Conflict(format!(
-                    "cannot start schedule {schedule_id}: current status is {current_status_str}"
-                )));
-            }
-        },
+                    }
+                })?;
+            tracing::info!(
+                schedule_id = %schedule_id,
+                session_id = %session_id.0,
+                "explicit schedule start admitted driven run"
+            );
+            return Ok((
+                StatusCode::OK,
+                Json(SignalScheduleResponse {
+                    schedule_id,
+                    status: "running".to_string(),
+                }),
+            ));
+        }
         "pause" => {
             // R1+R4: Use supervisor method for consistent DB + cache update
             let paused = supervisor.pause_schedule(&schedule_id).await.map_err(|e| {

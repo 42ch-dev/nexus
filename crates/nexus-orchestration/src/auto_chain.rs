@@ -1365,6 +1365,14 @@ pub async fn enqueue_auto_chain_schedule(
     );
     let now_ts = chrono::Utc::now().timestamp();
 
+    // I-9: the schedule INSERT and the Work driver-pointer update commit in
+    // ONE transaction so a concurrent tick can never observe a partial
+    // Work-pointer/schedule state. The runtime lock is acquired after
+    // commit (it is a separate resource, not part of the schedule row).
+    let mut tx = nexus_local_db::begin_immediate(pool)
+        .await
+        .map_err(|e| AutoChainError::Database(nexus_local_db::LocalDbError::from(e)))?;
+
     // SAFETY: dynamic SQL — auto-chain schedule insert with derived params.
     // R-V139P5-S4: read preset_version from the manifest mapping instead of
     // hard-coding 1. Keep in sync with embedded-presets/*/preset.yaml `version:`.
@@ -1386,15 +1394,31 @@ pub async fn enqueue_auto_chain_schedule(
     .bind(now_ts)
     .bind(now_ts)
     .bind(work_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "auto-chain: failed to insert schedule");
         AutoChainError::Database(nexus_local_db::LocalDbError::from(e))
     })?;
 
-    // Update the Work checkpoint to point at the new driver schedule.
-    set_driver(pool, creator_id, work_id, &schedule_id, stage).await?;
+    // Update the Work checkpoint to point at the new driver schedule —
+    // atomically with the schedule row (I-9).
+    let now = chrono::Utc::now().to_rfc3339();
+    let patch = WorkPatch {
+        current_stage: Some(stage.to_string()),
+        stage_status: Some("active".to_string()),
+        driver_schedule_id: Some(Some(schedule_id.clone())),
+        auto_chain_interrupted: Some(false),
+        ..Default::default()
+    };
+    works::patch_work_tx(&mut tx, creator_id, work_id, &patch, &now)
+        .await
+        .map_err(AutoChainError::from)?;
+
+    tx.commit().await.map_err(|e| {
+        tracing::error!(error = %e, "auto-chain: failed to commit schedule+driver");
+        AutoChainError::Database(nexus_local_db::LocalDbError::from(e))
+    })?;
 
     // V1.42 P0 (T3): Acquire runtime lock for this schedule.
     // Holder format: `daemon:schedule:<schedule_id>`.

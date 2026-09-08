@@ -52,7 +52,7 @@ pub trait ScheduleRunStarter: Send + Sync {
     /// # Errors
     /// Returns [`SupervisorError`] on any admission failure (not eligible,
     /// inactive creator/workspace, policy refusal, engine/store error).
-    async fn start(&self, schedule_id: &str) -> Result<String, SupervisorError>;
+    async fn start(&self, schedule_id: &str) -> Result<crate::engine::SessionId, SupervisorError>;
 }
 
 /// Error type for supervisor operations.
@@ -381,7 +381,7 @@ impl ScheduleSupervisor {
                         Ok(session_id) => {
                             tracing::debug!(
                                 schedule_id = %sid,
-                                session_id = %session_id,
+                                session_id = %session_id.0,
                                 "tick: admitted driven_v1 schedule via daemon starter"
                             );
                             started.push((creator_id.clone(), sid.clone()));
@@ -913,13 +913,32 @@ impl ScheduleSupervisor {
     ///
     /// The supervisor doesn't do scheduling logic here — that happens on `tick()`.
     ///
-    /// **R2 — Duplicate detection**: Before inserting, checks whether a schedule
+    /// **R2 — Duplicate detection**: Before checking, checks whether a schedule
     /// with the same `(creator_id, preset_id, label)` already exists. If so,
     /// returns [`SupervisorError::DuplicateSchedule`].
     ///
     /// # Errors
     /// Returns [`SupervisorError`] if database insertion fails.
     pub async fn insert_pending(&self, schedule: Schedule) -> Result<(), SupervisorError> {
+        self.insert_pending_with_descriptor(schedule, None).await
+    }
+
+    /// Insert a pending schedule with a frozen execution descriptor (A3,
+    /// C-2/I-5).
+    ///
+    /// The descriptor (serialized [`crate::run_state::RunDescriptorV1`]) is
+    /// persisted in the SAME transaction as the schedule row and dependency
+    /// rows, so a concurrent tick can never observe a `driven_v1` row before
+    /// its descriptor/input/bindings are durable. `_system.*` presets are
+    /// always `system_inert` (C-4).
+    ///
+    /// # Errors
+    /// Returns [`SupervisorError`] if database insertion fails.
+    pub async fn insert_pending_with_descriptor(
+        &self,
+        schedule: Schedule,
+        execution_descriptor: Option<&[u8]>,
+    ) -> Result<(), SupervisorError> {
         let now = chrono::Utc::now().timestamp();
 
         // R2: Check for duplicate (creator_id + preset_id + label)
@@ -987,6 +1006,13 @@ impl ScheduleSupervisor {
             EXECUTION_POLICY_DRIVEN_V1
         };
 
+        // C-2: the schedule row, its dependency rows, and the frozen
+        // execution descriptor commit in ONE transaction so a concurrent
+        // tick can never observe a partially seeded `driven_v1` row.
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(|e| SupervisorError::Database(sqlx::Error::Protocol(e.to_string())))?;
+
         // SAFETY: dynamic SQL — a runtime INSERT matching the historical
         // `insert_pending` shape plus the A3 execution-policy column. The
         // established auto-chain/cron convention uses runtime `sqlx::query`
@@ -998,8 +1024,8 @@ impl ScheduleSupervisor {
                 concurrency_kind, concurrency_whitelist,
                 current_core_context_version, current_session_id,
                 scheduled_at, label, created_at, updated_at, terminated_at,
-                execution_policy)
-               VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, NULL, ?, ?, ?, ?, NULL, ?)"#,
+                execution_policy, execution_descriptor_json)
+               VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?)"#,
         )
         .bind(&schedule_id)
         .bind(creator_id)
@@ -1013,7 +1039,8 @@ impl ScheduleSupervisor {
         .bind(created_at)
         .bind(updated_at)
         .bind(execution_policy)
-        .execute(&*self.pool)
+        .bind(execution_descriptor)
+        .execute(&mut *tx)
         .await?;
 
         // Insert dependencies
@@ -1025,10 +1052,11 @@ impl ScheduleSupervisor {
                 schedule_id,
                 dep_id
             )
-            .execute(&*self.pool)
+            .execute(&mut *tx)
             .await?;
         }
 
+        tx.commit().await?;
         Ok(())
     }
 
@@ -1091,13 +1119,20 @@ impl ScheduleSupervisor {
     /// the user can explicitly resume them. This prevents stale sessions
     /// from continuing after a daemon restart.
     ///
+    /// C-3: legacy never-started `Running` rows (no owned session,
+    /// `legacy_inert` policy) are NOT rewritten — their operator-visible
+    /// historical status is preserved so the explicit-start state machine
+    /// can still opt them in. Only `driven_v1` Running rows (which always
+    /// own a session) are paused.
+    ///
     /// # Errors
     /// Returns [`SupervisorError`] if database update fails.
     pub async fn resume_running_as_paused(&self, reason: &str) -> Result<usize, SupervisorError> {
         let now = chrono::Utc::now().timestamp();
 
-        let rows = sqlx::query_scalar!(
-            "SELECT schedule_id as \"schedule_id!\" FROM creator_schedules WHERE status = 'running'",
+        let rows: Vec<String> = sqlx::query_scalar(
+            "SELECT schedule_id FROM creator_schedules
+             WHERE status = 'running' AND execution_policy = 'driven_v1'",
         )
         .fetch_all(&*self.pool)
         .await?;
@@ -1197,6 +1232,13 @@ impl ScheduleSupervisor {
     /// (skipping Pending). If admission fails, falls back to `Paused → Pending`
     /// so a future `tick()` can pick it up.
     ///
+    /// **I-7 (policy-aware)**: legacy/system-inert rows are refused — they
+    /// can only be opted in by an explicit public `schedule start`. A
+    /// `driven_v1` row with an owned session is routed to the coordinator
+    /// (the caller drives it); a `driven_v1` row without an owned session
+    /// goes through the normal admission path. Never produce `running`
+    /// without an owned session.
+    ///
     /// Returns the new status as a string ("running" or "pending").
     ///
     /// # Errors
@@ -1227,6 +1269,23 @@ impl ScheduleSupervisor {
                     "failed" => ScheduleStatus::Failed,
                     _ => ScheduleStatus::Pending,
                 },
+            ));
+        }
+
+        // I-7: policy-aware — legacy/system-inert rows cannot be resumed
+        // into a driven run; only an explicit public `schedule start` opts
+        // them in (C-3).
+        let policy: String = sqlx::query_scalar(
+            "SELECT execution_policy FROM creator_schedules WHERE schedule_id = ?",
+        )
+        .bind(schedule_id)
+        .fetch_one(&*self.pool)
+        .await?;
+        if policy != EXECUTION_POLICY_DRIVEN_V1 {
+            return Err(SupervisorError::InvalidTransition(
+                schedule_id.to_string(),
+                ScheduleStatus::Paused,
+                ScheduleStatus::Pending,
             ));
         }
 
@@ -1293,6 +1352,43 @@ impl ScheduleSupervisor {
         }
 
         if should_run {
+            // I-7: a driven row with an owned session is routed to the
+            // coordinator (the caller drives it); a driven row without an
+            // owned session goes through the normal admission path. Never
+            // produce `running` without an owned session.
+            let owned_session: Option<String> = sqlx::query_scalar(
+                "SELECT current_session_id FROM creator_schedules WHERE schedule_id = ?",
+            )
+            .bind(schedule_id)
+            .fetch_one(&*self.pool)
+            .await?;
+            if owned_session.is_none() {
+                // No owned session: hand the row to the daemon starter so
+                // the coordinator atomically creates the run + identity.
+                if let Some(starter) = self.schedule_starter.as_ref().clone() {
+                    match starter.start(schedule_id).await {
+                        Ok(_sid) => {
+                            self.inner
+                                .lock()
+                                .await
+                                .running_by_creator
+                                .entry(creator_id)
+                                .or_default()
+                                .insert(ScheduleId(schedule_id.to_string()));
+                            return Ok("running".to_string());
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                schedule_id,
+                                error = %e,
+                                "resume: driven_v1 schedule admission failed; leaving paused"
+                            );
+                            return Ok("paused".to_string());
+                        }
+                    }
+                }
+            }
+
             // R2 fix: Check rows_affected() after UPDATE to handle TOCTOU race.
             // If 0, another caller already transitioned the schedule — return
             // the current status without updating cache. SQLite single-writer

@@ -54,6 +54,21 @@ pub struct AddScheduleRequest {
     /// Audit reason for `force_gates` (required when `force_gates` is `true`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Role → provider binding map (A1, v1.186 P2 T1). Frozen at admission
+    /// into the run descriptor; graph node `agent` selects the role key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_bindings: Option<std::collections::HashMap<String, AgentBindingDto>>,
+}
+
+/// Role → provider binding (A1) — wire form of
+/// [`nexus_orchestration::run_state::AgentBinding`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentBindingDto {
+    /// Provider id.
+    pub provider_id: String,
+    /// Optional model id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -311,6 +326,7 @@ mod tests {
             input: None,
             force_gates: false,
             reason: None,
+            agent_bindings: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         let back: AddScheduleRequest = serde_json::from_str(&json).unwrap();
@@ -338,6 +354,7 @@ mod tests {
             input: Some(input),
             force_gates: false,
             reason: None,
+            agent_bindings: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         let back: AddScheduleRequest = serde_json::from_str(&json).unwrap();
@@ -357,6 +374,7 @@ mod tests {
             input: None,
             force_gates: true,
             reason: Some("testing override".to_string()),
+            agent_bindings: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         let back: AddScheduleRequest = serde_json::from_str(&json).unwrap();
@@ -377,6 +395,7 @@ mod tests {
             input: None,
             force_gates: false,
             reason: None,
+            agent_bindings: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("\"scheduled_at\":\"253402300799\""));

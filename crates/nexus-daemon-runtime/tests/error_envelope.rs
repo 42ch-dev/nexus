@@ -79,6 +79,7 @@ async fn preset_gates_failed_returns_canonical_envelope() {
         scheduled_at: None,
         input: None,
         force_gates: false,
+        agent_bindings: None,
         reason: None,
     };
 

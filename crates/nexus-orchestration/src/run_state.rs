@@ -251,6 +251,37 @@ pub trait WorkflowStateStore: Send + Sync {
         next_state: &RunStateV1,
     ) -> Result<RunRecord, EngineError>;
 
+    /// Atomically admit a schedule as a driven v1 run (A3).
+    ///
+    /// One Creator-DB transaction linearizes: the schedule claim
+    /// (`status='running'`, `current_session_id=<session_id>`,
+    /// `current_core_context_version=<core_context_version>`), the v1
+    /// session row (initial checkpoint + frozen descriptor + seeded
+    /// context), and the schedule→session identity. A concurrent admission
+    /// for the same schedule loses the claim and returns the winner's
+    /// already-owned run (exactly one `SessionId` per schedule).
+    ///
+    /// The schedule row must carry `execution_policy = 'driven_v1'` and be
+    /// in `pending`/`paused` with no owned session. A `_system.*` preset is
+    /// refused regardless of stored policy (A8 fail-closed). A stale claim
+    /// (schedule `Running` with a `current_session_id` whose run row does
+    /// not exist) is NOT cleared here — a crash between claim and run
+    /// creation is recovered by boot recovery, never by a second admission
+    /// minting another session (C-1).
+    ///
+    /// # Errors
+    /// Returns [`EngineError`] on storage failure, policy refusal, or when
+    /// the schedule is not in an admissible state.
+    async fn admit_schedule_run(
+        &self,
+        schedule_id: &str,
+        session_id: &SessionId,
+        descriptor: &RunDescriptorV1,
+        checkpoint: RunCheckpoint<'_>,
+        next_state: &RunStateV1,
+        core_context_version: u32,
+    ) -> Result<RunRecord, EngineError>;
+
     /// Atomically persist a transition under a root revision compare-and-swap.
     ///
     /// Writes the root checkpoint position/context, status and execution

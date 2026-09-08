@@ -2319,6 +2319,106 @@ impl GraphFlowEngine {
         }
     }
 
+    /// Atomically admit a schedule as a driven v1 run (A3, C-1/C-2).
+    ///
+    /// One Creator-DB transaction linearizes the schedule claim
+    /// (`status='running'`, `current_session_id`, core-context version), the
+    /// v1 session row (initial checkpoint + frozen descriptor + seeded
+    /// context), and the schedule→session identity. A concurrent admission
+    /// for the same schedule loses the claim and returns the winner's
+    /// already-owned run (exactly one `SessionId` per schedule).
+    ///
+    /// The schedule row must carry `execution_policy = 'driven_v1'` and be
+    /// in `pending`/`paused` with no owned session. A `_system.*` preset is
+    /// refused regardless of stored policy (A8 fail-closed, C-4). A stale
+    /// claim (schedule `Running` with a `current_session_id` whose run row
+    /// does not exist) is NOT cleared — a crash between claim and run
+    /// creation is recovered by boot recovery, never by a second admission
+    /// minting another session (C-1).
+    ///
+    /// `core_context_version` is the actual committed core-context version
+    /// (I-10) — the caller seeds core context first and passes the returned
+    /// version so the schedule pointer and the version agree.
+    ///
+    /// # Errors
+    /// Returns [`EngineError`] on storage failure, policy refusal, or when
+    /// the schedule is not in an admissible state.
+    pub async fn admit_schedule_run_with_input(
+        &self,
+        schedule_id: &str,
+        session_id: &str,
+        loaded: &crate::preset::LoadedPreset,
+        creator_id: &str,
+        work_id: Option<String>,
+        input: serde_json::Map<String, serde_json::Value>,
+        core_context: Option<&str>,
+        core_context_version: u32,
+        agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
+        graph: Arc<Graph>,
+    ) -> Result<SessionId, EngineError> {
+        let Some(store) = &self.state.workflow_store else {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(
+                    "admit_schedule_run_with_input requires a durable workflow store".to_string(),
+                ),
+            ));
+        };
+        let mut descriptor = self.build_descriptor(loaded, creator_id)?;
+        descriptor.work_id = work_id;
+        descriptor.input = input.clone();
+        descriptor.agent_bindings = agent_bindings;
+        let start_task_id = graph.start_task_id().unwrap_or_default();
+        let session = graph_flow::Session::new_from_task(session_id.to_string(), &start_task_id);
+        session.context.set("_session_id", session_id.to_string()).await;
+        if !creator_id.is_empty() {
+            session.context.set("_creator_id", creator_id.to_string()).await;
+        }
+        // Seed the frozen admission input + core-context seed into the
+        // session context BEFORE the checkpoint is persisted (A3).
+        for (key, value) in &input {
+            session
+                .context
+                .set(format!("preset.input.{key}"), value.clone())
+                .await;
+        }
+        if let Some(cc) = core_context {
+            session.context.set("core_context.text", cc.to_string()).await;
+        }
+        let checkpoint = RunCheckpoint {
+            root: &session,
+            children: &[],
+        };
+        store
+            .admit_schedule_run(
+                schedule_id,
+                &SessionId(session_id.to_string()),
+                &descriptor,
+                checkpoint,
+                &RunStateV1::default(),
+                core_context_version,
+            )
+            .await?;
+        let sid = SessionId(session_id.to_string());
+        // Register the run's coordinator cancellation token (A1): the
+        // run's prompt consumers resolve their token from the shared
+        // per-run map and fail closed when none is registered.
+        self.register_cancellation(&sid);
+        let runner = Arc::new(FlowRunner::new(graph, self.state.storage.clone()));
+        self.state
+            .runners
+            .write()
+            .await
+            .insert(session_id.to_string(), runner);
+        self.state.sessions.write().await.push(SessionSummary {
+            session_id: SessionId(session_id.to_string()),
+            creator_id: creator_id.to_string(),
+            preset_id: loaded.id.clone(),
+            status: SessionStatus::Running,
+            current_task_id: Some(start_task_id),
+        });
+        Ok(SessionId(session_id.to_string()))
+    }
+
     /// Start a session on a specific graph.
     ///
     /// Creates a [`graph_flow::Session`] seeded at the graph's start task,

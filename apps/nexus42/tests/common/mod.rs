@@ -58,17 +58,13 @@ fn wire_orchestration_engine(
     Arc<dyn nexus_orchestration::OrchestrationEngine>,
     Arc<dyn graph_flow::SessionStorage>,
 ) {
+    state
+        .publish_creator_runtime_bundle()
+        .expect("publish Creator-DB runtime bundle");
+    let engine = state.engine().expect("engine after runtime bundle");
     let storage: Arc<dyn graph_flow::SessionStorage> = Arc::new(
         nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(pool.clone())),
     );
-    let holder = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-        nexus_orchestration::CapabilityRegistry::with_builtins(),
-    ));
-    let engine = Arc::new(nexus_orchestration::GraphFlowEngine::new_with_storage(
-        storage.clone(),
-        holder,
-    ));
-    state.set_engine(engine.clone() as Arc<dyn nexus_orchestration::OrchestrationEngine>);
     (engine, storage)
 }
 

@@ -368,6 +368,7 @@ pub fn build_schedule_for_stage(
         input: Some(preset_input),
         force_gates: false,
         reason: None,
+        agent_bindings: None,
     })
 }
 

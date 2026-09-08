@@ -137,6 +137,7 @@ async fn schedule_create_with_correct_dto_shape() {
         scheduled_at: None,
         input: None,
         force_gates: false,
+        agent_bindings: None,
         reason: None,
     };
 
@@ -204,6 +205,7 @@ async fn schedule_create_seeds_core_context_from_preset_input() {
         scheduled_at: None,
         input: None,
         force_gates: false,
+        agent_bindings: None,
         reason: None,
     };
 
@@ -253,6 +255,7 @@ async fn schedule_list_isolation_by_creator() {
         scheduled_at: None,
         input: None,
         force_gates: false,
+        agent_bindings: None,
         reason: None,
     };
     let req_b = AddScheduleRequest {
@@ -265,6 +268,7 @@ async fn schedule_list_isolation_by_creator() {
         scheduled_at: None,
         input: None,
         force_gates: false,
+        agent_bindings: None,
         reason: None,
     };
 
@@ -320,6 +324,7 @@ async fn schedule_create_without_seed_no_core_context() {
         scheduled_at: None,
         input: None,
         force_gates: false,
+        agent_bindings: None,
         reason: None,
     };
 
@@ -378,6 +383,7 @@ async fn schedule_with_empty_creator_id_is_isolated_from_legitimate_creators() {
         scheduled_at: None,
         input: None,
         force_gates: false,
+        agent_bindings: None,
         reason: None,
     };
     let resp_empty = ctx
@@ -400,6 +406,7 @@ async fn schedule_with_empty_creator_id_is_isolated_from_legitimate_creators() {
         scheduled_at: None,
         input: None,
         force_gates: false,
+        agent_bindings: None,
         reason: None,
     };
     let resp_real = ctx
@@ -460,6 +467,7 @@ async fn gated_preset_without_work_id_is_rejected() {
         scheduled_at: None,
         input: None, // no work_id via input
         force_gates: false,
+        agent_bindings: None,
         reason: None,
     };
     let resp = ctx
@@ -495,6 +503,7 @@ async fn create_schedule_with_label(server: &TestServer, creator_id: &str, label
         scheduled_at: None,
         input: None,
         force_gates: false,
+        agent_bindings: None,
         reason: None,
     };
     let resp = server
@@ -597,6 +606,7 @@ async fn force_gates_writes_audit_row() {
             "work_ref": "audit-novel"
         })),
         force_gates: true,
+        agent_bindings: None,
         reason: Some("testing emergency override".to_string()),
     };
 
@@ -651,6 +661,7 @@ async fn force_gates_without_reason_is_rejected() {
         scheduled_at: None,
         input: None,
         force_gates: true,
+        agent_bindings: None,
         reason: Some(String::new()), // empty reason
     };
 
@@ -698,6 +709,7 @@ async fn gate_failure_returns_422_with_structured_body() {
             "work_ref": "gate-novel"
         })),
         force_gates: false,
+        agent_bindings: None,
         reason: None,
     };
 
@@ -759,6 +771,7 @@ async fn force_gates_with_long_reason_rejected() {
         scheduled_at: None,
         input: None,
         force_gates: true,
+        agent_bindings: None,
         reason: Some(long_reason),
     };
 
@@ -786,6 +799,7 @@ async fn force_gates_with_ansi_in_reason_rejected() {
         scheduled_at: None,
         input: None,
         force_gates: true,
+        agent_bindings: None,
         reason: Some("ok \x1b[31mred\x1b[0m text".to_string()),
     };
 

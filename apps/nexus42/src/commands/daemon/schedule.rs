@@ -9,8 +9,8 @@ use crate::config::CliConfig;
 use crate::errors::Result;
 use clap::{Parser, Subcommand};
 use nexus_contracts::local::schedule::http::{
-    AddScheduleRequest, AddScheduleResponse, CoreContextHistoryResponse, CoreContextResponse,
-    DeleteScheduleResponse, EditCoreContextRequest, EditCoreContextResponse,
+    AddScheduleRequest, AddScheduleResponse, AgentBindingDto, CoreContextHistoryResponse,
+    CoreContextResponse, DeleteScheduleResponse, EditCoreContextRequest, EditCoreContextResponse,
     InspectScheduleResponse, ListSchedulesQuery, ListSchedulesResponse, ScheduleConcurrencyRequest,
     SignalScheduleRequest, SignalScheduleResponse,
 };
@@ -212,10 +212,39 @@ pub async fn run(cmd: ScheduleCommand, config: &CliConfig) -> Result<()> {
             parallel_with,
             parallel_any,
             scheduled_at,
-            model: _,
-            role: _,
-            agent_ref: _,
+            model,
+            role,
+            agent_ref,
         } => {
+            // I-5: fold `--model`/`--role` into the agent_bindings map
+            // (role:provider[:model] format), then parse repeatable
+            // `--agent-ref ROLE:AGENT_ID[:MODEL]` entries.
+            let mut bindings: std::collections::HashMap<String, AgentBindingDto> =
+                std::collections::HashMap::new();
+            if let Some(role_id) = role {
+                bindings.insert(
+                    role_id,
+                    AgentBindingDto {
+                        provider_id: model.clone().unwrap_or_default(),
+                        model: None,
+                    },
+                );
+            }
+            for entry in &agent_ref {
+                let parts: Vec<&str> = entry.split(':').collect();
+                if parts.len() < 2 || parts[0].is_empty() || parts[1].is_empty() {
+                    return Err(crate::errors::CliError::Other(format!(
+                        "invalid --agent-ref '{entry}': expected ROLE:AGENT_ID[:MODEL]"
+                    )));
+                }
+                bindings.insert(
+                    parts[0].to_string(),
+                    AgentBindingDto {
+                        provider_id: parts[1].to_string(),
+                        model: parts.get(2).map(|m| (*m).to_string()),
+                    },
+                );
+            }
             add_schedule(
                 &client,
                 AddScheduleParams {
@@ -227,6 +256,11 @@ pub async fn run(cmd: ScheduleCommand, config: &CliConfig) -> Result<()> {
                     parallel_with,
                     parallel_any,
                     scheduled_at,
+                    agent_bindings: if bindings.is_empty() {
+                        None
+                    } else {
+                        Some(bindings)
+                    },
                 },
             )
             .await
@@ -283,6 +317,7 @@ struct AddScheduleParams<'a> {
     parallel_with: Option<String>,
     parallel_any: bool,
     scheduled_at: Option<String>,
+    agent_bindings: Option<std::collections::HashMap<String, AgentBindingDto>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -299,6 +334,7 @@ async fn add_schedule(
         parallel_with,
         parallel_any,
         scheduled_at,
+        agent_bindings,
     } = params;
 
     let concurrency = if parallel_any {
@@ -333,6 +369,7 @@ async fn add_schedule(
         input: None,
         force_gates: false,
         reason: None,
+        agent_bindings,
     };
 
     let resp: AddScheduleResponse = client.post(SCHEDULE_BASE, &body).await?;

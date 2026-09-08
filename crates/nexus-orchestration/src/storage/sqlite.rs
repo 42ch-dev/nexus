@@ -878,6 +878,229 @@ impl WorkflowStateStore for SqliteSessionStorage {
         })
     }
 
+    async fn admit_schedule_run(
+        &self,
+        schedule_id: &str,
+        session_id: &SessionId,
+        descriptor: &RunDescriptorV1,
+        checkpoint: RunCheckpoint<'_>,
+        next_state: &RunStateV1,
+        core_context_version: u32,
+    ) -> Result<RunRecord, EngineError> {
+        let now = chrono::Utc::now().timestamp();
+        let id = session_id.0.clone();
+        let creator_id = descriptor.creator_id.clone();
+        let preset_id = descriptor.preset_id.clone();
+        let preset_version = i64::from(descriptor.preset_version);
+        let parent_session_id = descriptor
+            .parent_session_id
+            .as_ref()
+            .map(|s| s.0.clone());
+        let current_task_id = checkpoint.root.current_task_id.clone();
+        let context_bytes = serde_json::to_vec(&checkpoint.root.context).map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "serialize context: {e}"
+            )))
+        })?;
+        let state_bytes = serialize_blob(next_state)?;
+        let descriptor_bytes = serialize_blob(descriptor)?;
+
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "admit_schedule_run begin tx: {e}"
+                )))
+            })?;
+
+        // 1. Load + verify the schedule row inside the transaction. The
+        //    claim (status/current_session_id) and the v1 run row commit
+        //    together — a concurrent admission loses the claim and returns
+        //    the winner's owned run (C-1).
+        #[derive(sqlx::FromRow)]
+        struct ScheduleClaimRow {
+            execution_policy: String,
+            status: String,
+            current_session_id: Option<String>,
+            preset_id: String,
+        }
+        let row = sqlx::query_as::<_, ScheduleClaimRow>(
+            "SELECT execution_policy, status, current_session_id, preset_id
+             FROM creator_schedules WHERE schedule_id = ?",
+        )
+        .bind(schedule_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "admit_schedule_run '{}': {e}",
+                session_id.0
+            )))
+        })?
+        .ok_or_else(|| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "admit_schedule_run: schedule {schedule_id} not found"
+            )))
+        })?;
+
+        // A8 fail-closed: a `_system.*` preset is never driven, regardless
+        // of the stored policy (C-4).
+        if row.preset_id.starts_with("_system.") {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "admit_schedule_run: system preset '{0}' cannot be admitted as a driven run",
+                    row.preset_id
+                )),
+            ));
+        }
+        if row.execution_policy != "driven_v1" {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "admit_schedule_run: schedule {schedule_id} execution_policy is '{}'",
+                    row.execution_policy
+                )),
+            ));
+        }
+        if row.status != "pending" && row.status != "paused" {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "admit_schedule_run: schedule {schedule_id} status is '{}'",
+                    row.status
+                )),
+            ));
+        }
+        if let Some(existing) = &row.current_session_id {
+            // Re-entry: the schedule already owns a run. Verify the run row
+            // exists; a stale claim (crash between claim and run creation)
+            // is NOT cleared here — boot recovery classifies it (C-1).
+            let existing_version: Option<i64> = sqlx::query_scalar(
+                "SELECT execution_version FROM orchestration_sessions WHERE session_id = ?",
+            )
+            .bind(existing)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "admit_schedule_run '{}': {e}",
+                    session_id.0
+                )))
+            })?;
+            if existing_version.is_some() {
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "admit_schedule_run: schedule {schedule_id} already owns run {existing}"
+                    )),
+                ));
+            }
+            // Stale claim: refuse fresh admission — the caller must route
+            // through recovery, never mint a second session.
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "admit_schedule_run: schedule {schedule_id} has a stale claim on {existing}; \
+                     recovery must classify it before re-admission"
+                )),
+            ));
+        }
+
+        // 2. Insert the v1 session row (initial checkpoint + descriptor +
+        //    seeded context) — the run is durable before the schedule
+        //    pointer is published (C-2).
+        let existing_version: Option<i64> = sqlx::query_scalar(
+            "SELECT execution_version FROM orchestration_sessions WHERE session_id = ?",
+        )
+        .bind(&id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "admit_schedule_run '{}': {e}",
+                session_id.0
+            )))
+        })?;
+        if let Some(version) = existing_version {
+            return Err(EngineError::RunAlreadyExists {
+                session_id: session_id.0.clone(),
+                execution_version: u32::try_from(version).unwrap_or(0),
+            });
+        }
+
+        sqlx::query!(
+            r#"
+            INSERT INTO orchestration_sessions
+                (session_id, creator_id, preset_id, preset_version,
+                 parent_session_id, current_task_id, status,
+                 context_json, chat_history_json, created_at, updated_at,
+                 execution_version, state_revision, run_state_json, run_descriptor_json)
+            VALUES (?, ?, ?, ?, ?, ?, 'running', ?, NULL, ?, ?, 1, 1, ?, ?)
+            "#,
+            id,
+            creator_id,
+            preset_id,
+            preset_version,
+            parent_session_id,
+            current_task_id,
+            context_bytes,
+            now,
+            now,
+            state_bytes,
+            descriptor_bytes
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "admit_schedule_run '{}': {e}",
+                session_id.0
+            )))
+        })?;
+
+        // 3. Claim the schedule row atomically with the run row (C-1).
+        let claim = sqlx::query(
+            "UPDATE creator_schedules
+             SET status = 'running', current_session_id = ?,
+                 current_core_context_version = ?, updated_at = ?
+             WHERE schedule_id = ? AND status IN ('pending', 'paused')
+               AND current_session_id IS NULL",
+        )
+        .bind(&session_id.0)
+        .bind(i64::from(core_context_version))
+        .bind(now)
+        .bind(schedule_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "admit_schedule_run claim '{}': {e}",
+                session_id.0
+            )))
+        })?;
+        if claim.rows_affected() == 0 {
+            // A concurrent admission won the claim between our read and
+            // update. Roll back the run row (the transaction aborts) and
+            // report the conflict — the caller re-reads the winner.
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "admit_schedule_run: schedule {schedule_id} was claimed concurrently"
+                )),
+            ));
+        }
+
+        tx.commit().await.map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "admit_schedule_run commit: {e}"
+            )))
+        })?;
+
+        Ok(RunRecord {
+            session_id: SessionId(session_id.0.clone()),
+            status: SessionStatus::Running,
+            state_revision: 1,
+            execution_version: 1,
+            descriptor: Some(descriptor.clone()),
+            state: Some(next_state.clone()),
+        })
+    }
+
     async fn commit_transition(
         &self,
         session_id: &SessionId,

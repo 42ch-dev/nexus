@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use crate::api;
 use crate::lifecycle::{Event, Lifecycle, StatigLifecycle, SubsystemKind};
-use crate::preset_run::{resume_driven_sessions, PresetRunConfig, WorkflowRunCoordinator};
+use crate::preset_run::WorkflowRunCoordinator;
 use crate::tls;
 use crate::workspace::WorkspaceState;
 
@@ -847,6 +847,42 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // the nexus home.
     concrete_engine.set_nexus_home(state.nexus_home().clone());
 
+    let concrete_engine = Arc::new(concrete_engine);
+    let engine: Arc<dyn OrchestrationEngine> = concrete_engine.clone();
+
+    state.set_engine(engine);
+    state.set_capability_registry(capability_holder.clone());
+    tracing::info!("Orchestration engine wired");
+
+    // --- A3 (v1.186 P2 T1): the single public run coordinator ---
+    // One cancellation/join owner per (Creator DB, session) around the
+    // bounded `drive_preset_run` loop. Newly admitted creator runs and
+    // schedule admissions route through this coordinator; the schedule
+    // supervisor receives a Host-free `ScheduleRunStarter` seam over it.
+    // When no creator DB is present (Tier-0 boot), the coordinator is
+    // absent and pool-backed admission is deferred until Profile attach.
+    //
+    // I-1: the coordinator is constructed BEFORE boot recovery so every
+    // production drive — including recovery that is eligible to step —
+    // registers its owner in the coordinator's drives map. There is exactly
+    // ONE production drive-owner path per Creator DB + session.
+    let run_coordinator: Option<Arc<WorkflowRunCoordinator>> = match &sqlite_boot_storage {
+        Some(_) => {
+            let coordinator = Arc::new(WorkflowRunCoordinator::new(
+                concrete_engine.clone(),
+                session_storage.clone(),
+                Arc::new(state.pool().expect("creator pool present").clone()),
+                session_cancels.clone(),
+            ));
+            state.set_run_coordinator(coordinator.clone());
+            if let Some(executor) = &prompt_executor {
+                state.set_prompt_executor(executor.clone());
+            }
+            Some(coordinator)
+        }
+        None => None,
+    };
+
     // WS2 R1: Recover persisted non-terminal sessions into in-memory tracker.
     if let Some(sqlite_storage) = sqlite_boot_storage.clone() {
         match sqlite_storage.list_non_terminal_sessions().await {
@@ -858,12 +894,13 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                     );
                     concrete_engine.recover_sessions(summaries.clone()).await;
 
-                    // BL-04 slice (T2): resume re-drive — recovered
-                    // converge/merge chain sessions are re-driven from
-                    // their persisted position (completed edges are not
-                    // re-executed). Bounded by `max_steps` and cancellable
-                    // via a token aborted on `request_shutdown` (QC fix
-                    // wave 1, qc2 F-002 / qc3 F-001); runs in the
+                    // BL-04 slice (T2) + I-1: recovered converge/merge chain
+                    // sessions are re-driven from their persisted position
+                    // (completed edges are not re-executed) THROUGH the
+                    // single coordinator owner — the same drives registry
+                    // public admission uses. Bounded by `max_steps` and
+                    // cancellable via a token aborted on `request_shutdown`
+                    // (QC fix wave 1, qc2 F-002 / qc3 F-001); runs in the
                     // background so boot does not block on a long
                     // re-drive. Only sessions whose runner was
                     // reconstructed (embedded presets) are re-driven;
@@ -876,46 +913,44 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                         }
                     }
                     if !drivable.is_empty() {
-                        let resume_engine = concrete_engine.clone();
-                        let resume_storage: Arc<dyn SessionStorage> = sqlite_storage.clone();
-                        // Abort the resume re-drive when the daemon shuts
-                        // down: `request_shutdown` broadcasts on
-                        // `shutdown_notify`, and `drive_preset_run` checks
-                        // the token before every step.
-                        let resume_cancel = tokio_util::sync::CancellationToken::new();
-                        {
-                            let resume_cancel = resume_cancel.clone();
-                            let shutdown_notify = state.shutdown_notify();
-                            tokio::spawn(async move {
-                                shutdown_notify.notified().await;
-                                resume_cancel.cancel();
-                            });
-                        }
-                        tokio::spawn(async move {
-                            let config = PresetRunConfig {
-                                resume_waiting: true,
-                                ..PresetRunConfig::default()
-                            };
-                            // A7 (v1.186 P0 T2): the durable workflow store
-                            // (same SQLite adapter) governs the recovery
-                            // class — interrupted work is never re-driven,
-                            // human waits are never stepped at boot, and only
-                            // the converge/merge chain class reaches the
-                            // bounded join re-drive.
+                        if let Some(coordinator) = &run_coordinator {
+                            let coordinator = coordinator.clone();
                             let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();
-                            let decisions = resume_driven_sessions(
-                                &resume_engine,
-                                &resume_storage,
-                                Some(&workflow_store),
-                                &drivable,
-                                &config,
-                                Some(&resume_cancel),
-                            )
-                            .await;
-                            for d in &decisions {
-                                tracing::info!(decision = ?d, "resume re-drive decision");
+                            // Abort the resume re-drive when the daemon shuts
+                            // down: `request_shutdown` broadcasts on
+                            // `shutdown_notify`, and `drive_preset_run` checks
+                            // the token before every step.
+                            let resume_cancel = tokio_util::sync::CancellationToken::new();
+                            {
+                                let resume_cancel = resume_cancel.clone();
+                                let shutdown_notify = state.shutdown_notify();
+                                tokio::spawn(async move {
+                                    shutdown_notify.notified().await;
+                                    resume_cancel.cancel();
+                                });
                             }
-                        });
+                            tokio::spawn(async move {
+                                let decisions = coordinator
+                                    .recover_driving(
+                                        Some(&workflow_store),
+                                        &drivable,
+                                        Some(&resume_cancel),
+                                    )
+                                    .await;
+                                for d in &decisions {
+                                    tracing::info!(decision = ?d, "resume re-drive decision");
+                                }
+                            });
+                        } else {
+                            // No coordinator (Tier-0 boot without a creator
+                            // DB): no persisted sessions can exist either
+                            // (in-memory storage), so this arm is unreachable
+                            // in practice. Kept for exhaustiveness.
+                            tracing::warn!(
+                                "recovered sessions present but no coordinator wired; \
+                                 skipping resume re-drive"
+                            );
+                        }
                     }
                 }
             }
@@ -933,7 +968,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         Err(e) => tracing::warn!("failed to auto-create _system.maintenance: {}", e),
     }
 
-    let engine_ref: Arc<dyn OrchestrationEngine> = Arc::new(concrete_engine.clone());
+    let engine_ref: Arc<dyn OrchestrationEngine> = concrete_engine.clone();
     let scan_result = system_preset_dir::scan_system_presets(&system_presets_dir, &capabilities);
     for entry in &scan_result.presets {
         let graph = nexus_orchestration::preset::loader::build_wired_outer_graph(
@@ -966,36 +1001,6 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             }
         }
     }
-
-    let concrete_engine = Arc::new(concrete_engine);
-    let engine: Arc<dyn OrchestrationEngine> = concrete_engine.clone();
-
-    state.set_engine(engine);
-    state.set_capability_registry(capability_holder.clone());
-    tracing::info!("Orchestration engine wired");
-
-    // --- A3 (v1.186 P2 T1): the single public run coordinator ---
-    // One cancellation/join owner per (Creator DB, session) around the
-    // bounded `drive_preset_run` loop. Newly admitted creator runs and
-    // schedule admissions route through this coordinator; the schedule
-    // supervisor receives a Host-free `ScheduleRunStarter` seam over it.
-    // When no creator DB is present (Tier-0 boot), the coordinator is
-    // absent and pool-backed admission is deferred until Profile attach.
-    let run_coordinator: Option<Arc<WorkflowRunCoordinator>> = match &sqlite_boot_storage {
-        Some(_) => {
-            let coordinator = Arc::new(WorkflowRunCoordinator::new(
-                concrete_engine.clone(),
-                session_storage.clone(),
-                session_cancels.clone(),
-            ));
-            state.set_run_coordinator(coordinator.clone());
-            if let Some(executor) = &prompt_executor {
-                state.set_prompt_executor(executor.clone());
-            }
-            Some(coordinator)
-        }
-        None => None,
-    };
 
     // --- V1.176 P1 (AR-91/AR-92): user-capability hot-reload watcher ---
     // One background task polls the scan directory every 1 s (poll + digest,
@@ -1807,20 +1812,23 @@ async fn resume_auto_chain_work(
 /// `ScheduleSupervisor` lives in `nexus-orchestration` and must not couple
 /// to daemon internals; this adapter bridges the supervisor's `tick`
 /// admission to the daemon's single `WorkflowRunCoordinator`.
-struct DaemonScheduleRunStarter {
-    coordinator: Arc<WorkflowRunCoordinator>,
-    pool: Arc<sqlx::SqlitePool>,
-    nexus_home: std::path::PathBuf,
-    caps: Option<nexus_orchestration::CapabilityRegistryHolder>,
-    daemon_tool_dispatch: Option<
+///
+/// `pub(crate)` so the lazy Profile-attach bundle in `workspace/mod.rs`
+/// (I-3) can construct the same starter over the attached creator DB.
+pub(crate) struct DaemonScheduleRunStarter {
+    pub(crate) coordinator: Arc<WorkflowRunCoordinator>,
+    pub(crate) pool: Arc<sqlx::SqlitePool>,
+    pub(crate) nexus_home: std::path::PathBuf,
+    pub(crate) caps: Option<nexus_orchestration::CapabilityRegistryHolder>,
+    pub(crate) daemon_tool_dispatch: Option<
         std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>,
     >,
-    prompt_executor: Option<std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
+    pub(crate) prompt_executor: Option<std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
 }
 
 #[async_trait::async_trait]
 impl ScheduleRunStarter for DaemonScheduleRunStarter {
-    async fn start(&self, schedule_id: &str) -> Result<String, SupervisorError> {
+    async fn start(&self, schedule_id: &str) -> Result<nexus_orchestration::SessionId, SupervisorError> {
         let caps = self.caps.clone().ok_or_else(|| {
             SupervisorError::Database(sqlx::Error::Protocol(
                 "capability registry unavailable for schedule admission".to_string(),

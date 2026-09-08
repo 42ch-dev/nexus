@@ -25,39 +25,49 @@ pub async fn create_session(
     State(state): State<WorkspaceState>,
     Json(body): Json<CreateSessionRequest>,
 ) -> Result<(StatusCode, Json<CreateSessionResponse>), NexusApiError> {
-    let engine = state
+    // I-4: a session POST requires a complete Creator-DB runtime bundle
+    // (engine + coordinator). Tier-0 in-memory user runs are never created —
+    // the daemon must have a creator DB (boot or lazy attach) before a
+    // public session can be driven.
+    let coordinator = state
+        .run_coordinator()
+        .ok_or_else(|| NexusApiError::service_unavailable("run coordinator not configured"))?;
+    let _engine = state
         .engine()
         .ok_or_else(|| NexusApiError::service_unavailable("engine not available"))?;
+    let caps = state
+        .capability_registry_holder()
+        .ok_or_else(|| NexusApiError::service_unavailable("capability registry not available"))?;
 
-    // Load the preset by ID.
-    let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
-    let loaded = nexus_orchestration::preset::load_embedded_preset(&body.preset_id, &caps)
-        .map_err(|e| NexusApiError::BadRequest {
-            code: "preset_load_failed".into(),
-            message: format!("failed to load preset '{}': {}", body.preset_id, e),
-        })?;
-
-    // A3 (v1.186 P2 T1): a newly created session is driven by the single
-    // public run coordinator — the same owner schedule admission uses. The
-    // engine creates the v1 run (descriptor + initial checkpoint), then the
-    // coordinator registers the runner and starts the bounded drive loop.
-    let session_id = engine
-        .start_session_with_preset_for_creator(&loaded, &body.creator_id)
+    // I-4: resolve via the shared public resolver (embedded, user, and
+    // system directory presets) — not `load_embedded_preset` only. The
+    // coordinator's `start_session` freezes the supplied seed/input into
+    // the v1 admission path and drives the run — mandatory, never optional.
+    let session_id = coordinator
+        .start_session(
+            &body.preset_id,
+            &body.creator_id,
+            body.seed.as_deref(),
+            state.nexus_home(),
+            &caps,
+            state.daemon_tool_dispatch(),
+            state.prompt_executor(),
+        )
         .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "ENGINE_ERROR".into(),
-            message: e.to_string(),
+        .map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("not eligible") || msg.contains("system preset") {
+                NexusApiError::BadRequest {
+                    code: "invalid_input".into(),
+                    message: msg,
+                }
+            } else {
+                NexusApiError::Internal {
+                    code: "RUN_CONTROL_ERROR".into(),
+                    message: msg,
+                }
+            }
         })?;
-
-    if let Some(coordinator) = state.run_coordinator() {
-        coordinator
-            .ensure_driving(&session_id)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "RUN_CONTROL_ERROR".into(),
-                message: e.to_string(),
-            })?;
-    }
 
     Ok((
         StatusCode::CREATED,
