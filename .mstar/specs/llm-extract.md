@@ -6,14 +6,14 @@
 | --- | --- |
 | **Status** | Normative — V1.51 Shipped (T-A P0). The `nexus.llm.extract` capability, `LlmExtractTask`, and the `kb_extract_jobs` payload extension landed together; review-time extraction in `novel-review-master` swapped from the V1.50 heuristic to this LLM pathway (closes `R-V150KBED-01`). |
 | **Document class** | Master |
-| **Scope** | `nexus.llm.extract` capability contract; `LlmExtractTask` lifecycle; `kb_extract_jobs.proposed_payload` LLM extension; worker-pool reuse; integration with `novel-review-master` review-time extraction |
-| **Last updated** | 2026-06-19 — V1.51 T-A P0 closeout; status confirmed Normative |
+| **Scope** | `nexus.llm.extract` capability contract; `LlmExtractTask` lifecycle; `kb_extract_jobs.proposed_payload` LLM extension; Host-mediated prompt execution; integration with `novel-review-master` review-time extraction |
+| **Last updated** | 2026-09-08 — V1.186 Host prompt cutover; status confirmed Normative |
 | **Related** | [orchestration-engine.md](./orchestration-engine.md) §4.4.1 (`LlmJudgeTask` sibling), [entity-scope-model.md](./entity-scope-model.md) §5.5 (World KB promotion), [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md) §5.5, [cli-spec.md](./cli-spec.md) §6.2G, [local-db-schema.md](./local-db-schema.md) §4.1.2 |
 
 This Master is normative for the `nexus.llm.extract` capability surface. It is a
-sibling to the `judge.llm` capability (`LlmJudgeTask`) — both reuse the V1.32
-LLM worker pool and the `WorkerHandleProvider` seam, but emit different output
-contracts: `judge.llm` emits a GO/NOGO verdict; `nexus.llm.extract` emits a
+sibling to `judge.llm`: both call the injected `PromptExecutor`, whose daemon
+implementation owns a run-scoped Host session. Their output contracts differ:
+`judge.llm` emits a GO/NOGO verdict; `nexus.llm.extract` emits a
 `Vec<KbCandidate>` carrying LLM-judged `block_type`, `canonical_name`,
 `confidence`, and a verbatim `source_quote`.
 
@@ -30,10 +30,10 @@ short name for backward compatibility; no rename.
 **Crate:** `nexus-orchestration` (`capability::builtins::LlmExtract`).
 
 **Registration:** registered in all three `CapabilityRegistry` constructors
-(`with_builtins`, `with_builtins_and_pool`, `with_runtime_deps`). Standalone
-mode (no `WorkerHandleProvider`) returns `CapabilityError::WorkerUnavailable` —
-no heuristic fallback inside the capability itself. The fallback decision lives
-in the review-time hook caller (§5).
+(`with_builtins`, `with_builtins_and_pool`, `with_runtime_deps`). Production
+execution requires an injected `PromptExecutor`, trusted run identity,
+cancellation token, and narrowing permission scope; missing dependencies return
+a typed capability error. The review-time fallback decision remains in the caller (§5).
 
 ### 1.1 Input schema
 
@@ -114,13 +114,14 @@ parsing: a malformed or missing `relationships` array means no relationship
 candidates, not a capability failure. The review-time hook resolves endpoints to
 existing non-deleted KnowledgeEntries before persisting suggestions (see §5.2).
 
-### 1.3 Worker invocation
+### 1.3 Host prompt invocation
 
-The capability builds an extraction prompt (template + chapter prose framing),
-calls `worker/acp_prompt` via `WorkerHandleProvider` with `deny_all` tool policy
-(extraction is read-only — no tools, no side-effect), and parses the LLM
-response JSON into `candidates`. Malformed LLM JSON is logged at `warn!` and
-yields an empty candidate list (best-effort; the caller's hook is non-blocking).
+The capability builds an extraction prompt (template + chapter prose framing)
+and calls the injected `PromptExecutor` with `deny_all` tool policy. The daemon
+executor dispatches through its existing `HostFacade`; extraction cannot access
+tools or side effects. It parses the result JSON into `candidates`. Malformed LLM
+JSON is logged at `warn!` and yields an empty candidate list because the caller's
+review-time hook is non-blocking.
 
 ---
 
@@ -196,16 +197,13 @@ compat with V1.50 rows).
 
 ---
 
-## 4. Worker pool reuse
+## 4. Host execution reuse
 
-`nexus.llm.extract` reuses the V1.32 LLM worker pool via the shared
-`WorkerHandleProvider` trait injected through `CapabilityRuntimeDeps`. No new
-worker pool, no new IPC channel, no new session type. This is compass §0.1 #7
-("reuse the LLM worker pool") and non-goal §3 ("New LLM worker pool" is OUT).
-
-The same `WorkerHandleProvider` instance backs `judge.llm`, `context.summarize`,
-`acp.prompt`, and `nexus.llm.extract` — a single daemon-side worker manager
-serves all LLM capabilities.
+`nexus.llm.extract`, `judge.llm`, `context.summarize`, `acp.prompt`, and graph
+`acp_prompt` share the same injected `PromptExecutor` contract and daemon
+`HostFacade` plane. Each orchestration run owns its Host sessions; different
+runs and Creators never share a subprocess. There is no worker pool, worker IPC
+channel, or second session type.
 
 ---
 

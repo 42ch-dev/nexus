@@ -56,6 +56,12 @@ struct HostSessionKey {
     run_id: String,
     role: String,
 }
+#[derive(Debug, Clone)]
+struct CachedHostSession {
+    id: nexus_agent_host::HostSessionId,
+    process_identity: Option<nexus_agent_host::capability::model::OwnedProcessIdentity>,
+}
+
 
 /// Production prompt executor over the existing `HostFacade` (A1).
 ///
@@ -70,7 +76,7 @@ pub struct HostPromptExecutor {
     /// Host timeouts (prompt bound + shutdown bound for cancel cleanup).
     timeouts: TimeoutConfig,
     /// Lazily-created Host sessions keyed by (run, role).
-    sessions: tokio::sync::RwLock<HashMap<HostSessionKey, nexus_agent_host::HostSessionId>>,
+    sessions: tokio::sync::RwLock<HashMap<HostSessionKey, CachedHostSession>>,
     /// Per-key creation serialization (single-flight): `(run, role)` → lock.
     /// The same key's concurrent creators serialize here, re-check the
     /// session map under their own lock, and publish exactly one session;
@@ -338,8 +344,12 @@ impl HostPromptExecutor {
         // touching the per-key creation lock.
         {
             let sessions = self.sessions.read().await;
-            if let Some(sid) = sessions.get(key) {
-                return Ok((sid.clone(), None, false));
+            if let Some(session) = sessions.get(key) {
+                return Ok((
+                    session.id.clone(),
+                    session.process_identity.clone(),
+                    false,
+                ));
             }
         }
 
@@ -361,8 +371,12 @@ impl HostPromptExecutor {
         // window — either way no second spawn.
         {
             let sessions = self.sessions.read().await;
-            if let Some(sid) = sessions.get(key) {
-                return Ok((sid.clone(), None, false));
+            if let Some(session) = sessions.get(key) {
+                return Ok((
+                    session.id.clone(),
+                    session.process_identity.clone(),
+                    false,
+                ));
             }
         }
         if cancellation.is_cancelled() {
@@ -393,10 +407,13 @@ impl HostPromptExecutor {
 
         let sid = session.id;
         let process_identity = session.process_identity.clone();
-        self.sessions
-            .write()
-            .await
-            .insert(key.clone(), sid.clone());
+        self.sessions.write().await.insert(
+            key.clone(),
+            CachedHostSession {
+                id: sid.clone(),
+                process_identity: process_identity.clone(),
+            },
+        );
         Ok((sid, process_identity, true))
     }
 
@@ -421,7 +438,7 @@ impl HostPromptExecutor {
         }
         let sid = {
             let sessions = self.sessions.read().await;
-            sessions.get(key).cloned()
+            sessions.get(key).map(|session| session.id.clone())
         };
         if let Some(sid) = sid {
             let confirmed = tokio::time::timeout(
@@ -811,11 +828,11 @@ impl PromptExecutor for HostPromptExecutor {
         // entries are evicted ONLY after their shutdown is confirmed; on
         // timeout/error the Host still owns the session, so the entry is
         // kept for a later retry to reap.
-        let sessions: Vec<(HostSessionKey, nexus_agent_host::HostSessionId)> = {
+        let sessions: Vec<(HostSessionKey, CachedHostSession)> = {
             let map = self.sessions.read().await;
             map.iter()
                 .filter(|(k, _)| k.run_id == run_id)
-                .map(|(k, sid)| (k.clone(), sid.clone()))
+                .map(|(k, session)| (k.clone(), session.clone()))
                 .collect()
         };
 
@@ -825,7 +842,8 @@ impl PromptExecutor for HostPromptExecutor {
         // interrupted (never marked/removed as cleanly stopped) and the
         // run must not be persisted terminal.
         let mut unconfirmed: Vec<String> = Vec::new();
-        for (key, sid) in sessions {
+        for (key, session) in sessions {
+            let sid = session.id;
             match tokio::time::timeout(
                 self.timeouts.shutdown_duration(),
                 self.host.shutdown_session(sid.clone()),

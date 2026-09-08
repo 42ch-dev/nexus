@@ -64,10 +64,10 @@ Users need to express creator workflows as configurable, prompt-driven strategie
 
 ### 1.3 Deliverables (end-state of §10 Phase 1–4)
 
-1. New crate `crates/nexus-acp-host`: ACP client logic extracted from `apps/nexus42/src/acp/`, linked by worker only.
-2. New crate `crates/nexus-orchestration`: graph-flow adapter, capability registry, preset loader, SQLite `SessionStorage` impl.
-3. daemon runtime gains: orchestration engine runtime, statig lifecycle HSM, Worker Manager, IPC server.
-4. `nexus42` gains: `acp-worker` hidden subcommand (worker entrypoint); `schedule` command group (B-track — not in A's deliverables except a stub that surfaces engine state).
+1. `crates/nexus-acp-host` owns ACP transport and managed subprocess lifecycle behind the Host provider plane.
+2. `crates/nexus-orchestration` owns graph-flow adaptation, capability registration, preset loading, and SQLite `SessionStorage`.
+3. daemon runtime owns orchestration, lifecycle HSM, and the existing `HostFacade` integration.
+4. `nexus42` retains interactive `acp run` and schedule commands; the obsolete `acp-worker` subcommand is removed.
 5. First built-in preset: `_system.maintenance` (mandatory) and one user-facing sample `novel-writing`.
 6. Knowledge docs revised: [acp-client-tech-spec.md](acp-client-tech-spec.md).
 
@@ -121,49 +121,35 @@ Per [effort-estimation.md](https://github.com/btspoony/mstar-harness/blob/main/d
 
 ### 3.1 Process topology
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
-│                         daemon runtime                                │
-│                                                                 │
-│  ┌────────────────┐   ┌──────────────────────┐   ┌───────────┐  │
-│  │   statig HSM   │   │  Orchestration       │   │Capability │  │
-│  │   (lifecycle)  │   │  Engine              │   │ Registry  │  │
-│  │ Stopped/       │◀──┤ (graph-flow +        │◀──┤ sync/     │  │
-│  │ Starting/      │   │  SQLite              │   │ outbox/   │  │
-│  │ Running/       │   │  SessionStorage)     │   │ workspace │  │
-│  │ Degraded/      │   └──────────┬───────────┘   │ /acp/…    │  │
-│  │ Stopping/      │              │                └───────────┘  │
-│  │ Failed         │              │                              │
-│  └────────────────┘              ▼                              │
-│                        ┌────────────────────────┐               │
-│                        │   Worker Manager       │               │
-│                        │ (per-creator, long-    │               │
-│                        │  lived subprocess)     │               │
-│                        └────────────┬───────────┘               │
-│                                     │ stdin/stdout              │
-│                                     │ JSON-RPC 2.0              │
-└─────────────────────────────────────┼───────────────────────────┘
-                                      ▼
-                     ┌──────────────────────────────────────┐
-                     │ nexus42 acp-worker --creator <id>    │
-                     │ links: crates/nexus-acp-host         │
-                     │                                      │
-                     │ ┌──────────┐     ┌────────────────┐  │
-                     │ │ACP Client│◀───▶│ Agent Process  │  │
-                     │ │(LocalSet)│     │ (Claude/Codex/ │  │
-                     │ └──────────┘     │  …)            │  │
-                     │                  └────────────────┘  │
-                     └──────────────────────────────────────┘
+│ nexus-daemon-runtime                                            │
+│  ┌──────────────┐   ┌──────────────────┐   ┌─────────────────┐ │
+│  │ lifecycle HSM│   │ orchestration    │   │ capability      │ │
+│  │              │◀──┤ engine + SQLite  │◀──┤ registry        │ │
+│  └──────────────┘   └────────┬─────────┘   └─────────────────┘ │
+│                              │ PromptExecutor                    │
+│                              ▼                                   │
+│                     ┌──────────────────┐                         │
+│                     │ HostFacade       │                         │
+│                     │ session manager  │                         │
+│                     └────────┬─────────┘                         │
+└──────────────────────────────┼───────────────────────────────────┘
+                               ▼
+                    nexus-agent-host provider
+                               │
+                               ▼
+                    managed ACP agent process
 ```
 
 ### 3.2 Crate layout (target)
 
 | Crate                                             | New? | Links ACP SDK? | Purpose                                                                                    |
 | ------------------------------------------------- | ---- | -------------- | ------------------------------------------------------------------------------------------ |
-| `crates/nexus-acp-host`                           | New  | Yes            | All ACP client logic; used by worker + CLI interactive commands                            |
-| `crates/nexus-orchestration`                      | New  | No             | graph-flow adapter, capability trait, preset loader, SQLite `SessionStorage`               |
-| `crates/nexus-daemon-runtime`                                 | Ext. | No             | Orchestration engine host, statig lifecycle, Worker Manager, HTTP surface (trigger/query)  |
-| `apps/nexus42`                                  | Ext. | Yes (via host) | Interactive ACP commands, `acp-worker` subcommand, `schedule` command group (B-track stub) |
+| `crates/nexus-acp-host`                           | New  | Yes            | ACP transport and owned-process lifecycle behind the Host ACP provider                       |
+| `crates/nexus-orchestration`                      | New  | No             | graph-flow adapter, capability trait, preset loader, SQLite `SessionStorage`                  |
+| `crates/nexus-daemon-runtime`                     | Ext. | No             | Orchestration engine host, lifecycle HSM, `HostFacade` prompt executor, HTTP trigger/query    |
+| `apps/nexus42`                                    | Ext. | Yes (via host) | Interactive `acp run` and schedule command groups                                             |
 | `crates/nexus-contracts`, `nexus-creator`, `nexus-cloud-domain`, … | Ext. | No | Application crates per [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md); legacy monolith `nexus-domain` retired after V1.21 |
 
 ### 3.3 Data flow for one strategy tick
@@ -173,7 +159,7 @@ Per [effort-estimation.md](https://github.com/btspoony/mstar-harness/blob/main/d
 3. Engine opens or resumes a `Session` for `<creator_id, preset_id, instance_id>` using SQLite `SessionStorage`.
 4. `FlowRunner::run(session_id)` executes one *step*:
    - Task `run()` resolves the task kind (capability call / inner-graph launch / ACP prompt / judge / manual-wait).
-   - For ACP-related tasks: dispatch to Worker Manager → IPC to the creator's worker.
+   - For ACP-related tasks: call the injected `PromptExecutor`, which owns a run-scoped Host session and dispatches through `HostFacade`.
    - For capability tasks: in-process async call into the registry.
    - For inner-graph: engine spawns a child `Session` keyed `<creator_id, preset_id, instance_id, state_id>` and runs to completion.
 5. Task returns `TaskResult { response, next_action }` — engine advances, pauses, or marks done.
@@ -368,13 +354,13 @@ Each capability ships its `input_schema` and `output_schema` as constants (JSON 
 
 `CapabilityError` variants: `InputInvalid`, `TransientExternal`, `PermanentExternal`, `WorkerUnavailable`, `AcpSessionLost`, `Cancelled`, `Internal`. Engine translates these into graph-flow `TaskResult` + Session context `_error` field so presets can fork on error kind.
 
-### 5.5 Runtime dependency injection (V1.31)
+### 5.5 Runtime dependency injection (V1.31; Host cutover V1.186)
 
-Runtime-backed capabilities receive their external handles through `CapabilityRegistry::with_runtime_deps()` or the pool-aware `CapabilityRegistry::with_builtins_and_pool()` factory. The registry owns shared adapters rather than letting individual capabilities discover global state.
+Runtime-backed capabilities receive external dependencies through `CapabilityRegistry::with_runtime_deps()` or the pool-aware `CapabilityRegistry::with_builtins_and_pool()` factory. The registry owns shared adapters rather than letting capabilities discover global state.
 
-- **Creator memory adapter**: `CreatorCapabilityStore` is injected for `creator.read_memory`, `creator.write_memory`, and `creator.inject_prompt`. It uses the orchestration-side SQLite pool and maps capability inputs/session context to creator memory operations.
-- **Worker handle provider**: worker-backed capabilities receive `Arc<dyn WorkerHandleProvider>`. `judge.llm` and `context.summarize` call `WorkerHandleProvider::call_acp_prompt(...)`; `judge.llm` uses `tool_policy = deny_all` and parses explicit GO/NOGO responses.
-- **Standalone/test mode**: constructors without runtime dependencies may still install deterministic fallbacks for isolated unit tests. Those fallbacks are not the daemon/preset runtime path.
+- **Creator memory adapter**: `CreatorCapabilityStore` is injected for `creator.read_memory`, `creator.write_memory`, and `creator.inject_prompt`.
+- **Prompt executor**: `acp.prompt`, `judge.llm`, `context.summarize`, `nexus.llm.extract`, and graph `acp_prompt` call the injected `PromptExecutor`. The daemon implementation uses its existing `HostFacade`, scopes sessions by run and role, narrows tool policy per operation, and persists typed outcomes. Missing executor, run identity, cancellation token, or workflow permission scope fails closed.
+- **Standalone/test mode**: constructors without runtime dependencies return typed unavailability; deterministic behavior belongs in explicit test executors, never a production echo fallback.
 
 ### 5.6 `creator.inject_prompt` queue semantics (V1.31)
 
@@ -402,101 +388,37 @@ The dual-outbox architecture identified in TD-8 (`dual-outbox-architecture.md`) 
 
 ---
 
-## 6. Worker Model and Daemon ↔ Worker IPC
+## 6. Host-owned ACP execution
 
-### 6.1 Worker lifecycle
+### 6.1 Session lifecycle
 
-- **Spawn**: Worker Manager starts `nexus42 acp-worker --creator <id>` when the first ACP-kind capability is invoked for that creator (lazy start) or when the statig HSM enters `Running` **and** a creator has an active Schedule requiring one (eager start — B-track decides policy; A-track defaults to **lazy**).
-- **Supervise**: Worker Manager monitors exit status and writes to `tracing`; on unexpected exit during an active Session, the corresponding engine signal is `AcpSessionLost` — preset may have a retry path; if none, Session flips to `failed`.
-- **Graceful stop**: lifecycle HSM `Stopping` state sends a terminal IPC `shutdown` frame; worker finalises current prompt if any, closes ACP session via `cancel`, exits within 5 s; otherwise `SIGTERM` → `SIGKILL` path per `acp-client-tech-spec.md` §2.3.
-- **Crash recovery**: `daemon` restart reads `orchestration_sessions` table, finds sessions in `running` / `waiting_for_input` state that were owned by a now-dead worker, marks them `paused` with reason `worker_crash`, and exposes them to the user for manual resume (B-track may auto-resume on configured strategies).
-- **V1.186 recovery classes (supersede blanket pause-and-hope for the supported path):** (1) terminal `completed`/`failed`/`cancelled` — persist, never re-drive; (2) human `waiting_for_input` — persist, still waiting, **not** implicit approval; (3) shipped converge/merge join-key resume — keep; (4) in-flight ACP/Host — interrupted/ambiguous, **no blind retry**. Never-started schedules MUST NOT be started as a crash-recovery side effect.
-- **Boot schedule policy (V1.39 — DF-68)**: Today, boot calls `resume_running_as_paused("daemon_restart")` for all running schedules. V1.39 replaces this for **auto-chain driver schedules** tied to a Work continuation checkpoint: those schedules auto-resume when `auto_chain_enabled` and checkpoint `auto_chain_interrupted` is set. Schedules without a checkpoint remain paused. Work checkpoint fields live on `works` or an adjunct table per [creator-workflow.md](creator-workflow.md) §5.4.
-- **on_complete auto-chain (V1.39 — DF-53)**: When a stage driver schedule completes and Work `auto_chain_enabled`, the supervisor enqueues the next FL-E stage preset (or next chapter `produce` after `persist`) without a manual `creator run <preset_id>` dispatch. At most one active stage driver per Work remains enforced.
+- The daemon's `HostPromptExecutor` lazily creates one Host session per `(run_id, role)` and never shares a subprocess across runs or Creators.
+- `HostFacade::create_session` validates the Creator owner and canonical workspace before the provider launches an ACP child in that workspace.
+- Prompt dispatch persists a revision-fenced attempt before the external effect and records the opaque owned-process identity after launch.
+- Terminal completion, failure, and cancellation call bounded `HostFacade::shutdown_session`; cache/token eviction occurs only after cleanup is confirmed.
+- Cancellation persists intent, fires the run token, drains/cancels the Host operation, confirms process-group teardown, and only then persists terminal `cancelled`. Unconfirmed cleanup remains `interrupted`.
+- Restart recovery never blindly replays an ambiguous in-flight ACP/Host effect.
 
-### 6.2 One worker per creator (MVP)
+### 6.2 Transport and ownership boundary
 
-- One long-lived worker subprocess per **active** creator.
-- Worker holds **one** ACP agent subprocess at a time (initial MVP); the choice of *which* ACP agent to run is determined by the preset / Schedule and passed on worker start as `--agent <agent_ref>`.
-- Switching agents within a creator requires **worker restart** in MVP (acceptable for V1.4). Multi-agent workers deferred to V1.5+.
+ACP stdin/stdout transport and process-group control remain internal to `nexus-acp-host` and the Host ACP provider. Orchestration receives only the narrow `PromptExecutor` result and opaque process identity; provider handles and transport clients never enter graph context or checkpoints.
 
-> **Durable roadmap:** DR-13 (multi-agent workers).
+The removed daemon Worker Manager, `nexus42 acp-worker` command, worker JSON-RPC catalogue, and worker tool-upcall lane are not supported execution paths. CLI-only `nexus42 acp run` remains an independent interactive transport entry point.
 
-### 6.3 IPC transport
+### 6.3 Tool policy
 
-Selected transport: **parent↔child stdin/stdout** with **JSON-RPC 2.0** framing.
+Workflow prompt policy is carried as a per-operation narrowing scope:
 
-**Implementation crate selection (closed 2026-04-17)**: `jsonrpsee-core` + proc macros + custom `RpcTransport` trait + newline-delimited framing via `tokio_util::codec::LinesCodec`. Decision SSOT: [`crate-selection-best-practices.md`](../knowledge/crate-selection-best-practices.md) §2.1 + §3.1. The `RpcTransport` trait is the insurance layer if jsonrpsee-core ever needs replacement — callers depend on the trait, not on `jsonrpsee::*` directly.
-
-Rationale:
-
-- Worker is a subprocess of daemon; parent-owned pipes are the most reliable shutdown channel (closing pipe = terminate signal).
-- Consistent with ACP's own choice of framing (we can reuse framing code from `nexus-acp-host`).
-- No port allocation or Unix-socket path management; cross-platform without extra code.
-
-Trade-off accepted: workers cannot outlive the daemon. This is **correct by design** — if the daemon is down, there is no orchestration authority to drive them.
-
-### 6.4 IPC message catalogue (v1)
-
-Requests (daemon → worker):
-
-| Method                   | Params                                                               | Response                                   |
-| ------------------------ | -------------------------------------------------------------------- | ------------------------------------------ |
-| `worker/initialize`      | `{ creator_id, agent_ref, workspace_root, acp_session_id? }`         | `{ capabilities, worker_pid }`             |
-| `worker/acp_prompt`      | `{ prompt, tool_policy, session_id? }`                               | streaming `worker/acp_prompt_chunk` + final `worker/acp_prompt_complete` |
-| `worker/acp_cancel`      | `{ session_id }`                                                     | `{}`                                       |
-| `worker/health`          | `{}`                                                                 | `{ uptime_ms, acp_session_state, last_error? }` |
-| `worker/shutdown`        | `{ grace_ms: u32 }`                                                  | `{}` (no further requests accepted)        |
-
-Notifications (worker → daemon, unsolicited):
-
-| Method                         | Params                                                   |
-| ------------------------------ | -------------------------------------------------------- |
-| `worker/agent_tool_request`    | `{ tool_name, args, request_id }`                        |
-| `worker/agent_tool_request_result` (reply shape) | `{ request_id, grant, output? }`       |
-| `worker/acp_permission_request`| `{ reason, request_id }`                                 |
-| `worker/log`                   | `{ level, message, fields }`                             |
-| `worker/unrecoverable_error`   | `{ kind, detail }` — worker will exit after this frame   |
-
-> 详见 [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) §7 — single dispatch table invariant. `worker/agent_tool_request` values under `nexus.*` and the existing `fs/*` baseline must dispatch through the same registry as daemon HTTP tool execute; implementation 
-
-#### V1.57 P1 update: 3-caller adapter pattern
-
-**Status**: Draft (V1.57 P1)
-
-The `worker/agent_tool_request` notification is one of three caller entry
-points into the host tool registry, alongside CLI `host-call` and HTTP
-`ToolExecuteRequest`. All three normalize to the same internal shape and
-dispatch through `CapabilityRegistry::dispatch(tool_id, input)` — the single
-dispatch table invariant (see [daemon-runtime.md](daemon-runtime.md) host_tool
-section).
-
-The orchestration engine's schedule executor additionally calls
-`HostToolExecutor::dispatch_for_schedule()` (an in-process path with
-`HostToolCallerKind::Schedule`) which feeds into the same dispatch path.
-
-20 registered host tools (18 `nexus.*` + 2 `fs/*`) are dispatchable through all
-three caller paths. Worker IPC extension to all 18 shipped `nexus.*` IDs is
-**complete in V1.57 P3** ().
-The worker `agent_tool_request` path now uses `CapabilityRegistry::lookup()` as
-its dynamic allowlist (V1.57 P3); unknown IDs return `NOT_SUPPORTED`.
-
-### 6.5 Tool policy (connection to permission policy engine)
-
-`tool_policy` is passed per-prompt from engine to worker. V1.4 values:
-
-- `auto_grant_all` (V1.0 behaviour)
-- `auto_grant_read_only` (reads allowed, writes require `worker/acp_permission_request` upcall)
+- `auto_grant_all`
+- `auto_grant_read_only`
 - `deny_all`
-- `request_policy` (every tool triggers upcall)
+- `request_policy` (refused on the non-interactive workflow path until an approval channel exists)
 
-The permission *decision engine* is out-of-scope here; V1.4 ships the plumbing and `auto_grant_read_only` default for preset-driven work. ACP-R7 (permission policy engine) becomes **partially addressed** — see [acp-client-tech-spec.md](acp-client-tech-spec.md) Appendix B.
+The Host provider intersects this scope with its admitted configuration; it never elevates permissions. Schedule tool execution remains an in-process `HostToolExecutor::dispatch_for_schedule()` lane through the single capability registry. Peer and embedded-MCP admission remain separate retained callers.
 
-### 6.6 Backpressure and streaming
+### 6.4 Backpressure and streaming
 
-- Worker streams `acp_prompt_chunk` frames as the agent streams; daemon buffers and feeds into `Context.chat_history` via graph-flow's `add_assistant_message` helper.
-- Buffer size per prompt: 256 KB soft cap; exceeding triggers `worker/log` warning and a `Context` flag `_long_response: true` so preset can fork.
-- Worker backpressure: stdin write blocks are honoured by daemon (no unbounded in-memory queue).
+Host providers emit bounded `HostEvent` streams. Only message deltas followed by `FinishReason::EndTurn` constitute prompt success. EOF, refusal, cancellation, timeout, and provider failure are typed non-success outcomes; partial output is never committed as completed work.
 
 ---
 
@@ -1091,7 +1013,7 @@ Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependen
 - Create `crates/nexus-acp-host/` with modules `client`, `transport`, `skills`, `registry`, `error`, `capabilities` (capability ID constants relocated).
 - `git mv` existing files from `apps/nexus42/src/acp/*` preserving history where possible.
 - Update `apps/nexus42` to `use nexus_acp_host as acp` and re-export for existing call-sites in `commands/agent.rs`.
-- Add `nexus42 acp-worker` subcommand as **hidden** (not in `--help`) entrypoint — minimal body for this phase (echo back `worker/initialize` OK). Full worker logic in Phase 2.
+- Register the ACP provider recipe with the existing Host plane; no worker CLI entry point.
 - `Cargo.toml` workspace updates; update `rust-toolchain`, CI matrix, and `verify-codegen` (no codegen impact expected).
 - Update `acp-client-tech-spec.md` §11 with final crate layout.
 
@@ -1102,7 +1024,7 @@ Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependen
 - [ ] `cargo +nightly fmt --all -- --check` clean
 - [ ] `cargo clippy --all -- -D warnings` clean
 - [ ] `nexus42 agent list`, `show`, `probe --registry`, `run` **functionally unchanged** (manual + existing integration tests)
-- [ ] `nexus42 acp-worker --creator <id>` starts, prints JSON-RPC initialize reply, exits on SIGTERM
+- [ ] Host ACP provider launches lazily in the admitted Creator workspace and reaps its owned process group on shutdown
 
 ### 10.3 Phase 2 — Orchestration skeleton (L; 2–3 agent sessions)
 
@@ -1111,8 +1033,8 @@ Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependen
 - New crate `crates/nexus-orchestration/`.
 - `OrchestrationEngine` trait + `GraphFlowEngine` impl over `graph_flow = "=0.2.3"`.
 - `SqliteSessionStorage` + migration added to `nexus-local-db`.
-- `Capability` trait + registry; register **built-ins listed in §5.2 except `acp.*` and `judge.llm`** (those land Phase 3).
-- Worker Manager (spawn/supervise/shutdown) + stdin/stdout JSON-RPC IPC codec.
+- `Capability` trait + registry; register the initial built-ins.
+- Establish the daemon's Host-owned prompt execution seam and durable run-state boundary.
 - daemon runtime wires engine at startup (outside any HSM state changes — that's Phase 4).
 - New HTTP endpoints (authoritative list added to `acp-client-tech-spec.md` §4.3; current names under the Daemon API namespace):
   - `GET  /v1/daemon/orchestration/sessions`
@@ -1125,7 +1047,7 @@ Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependen
 
 - [ ] Engine can create, step, pause, resume, cancel a hardcoded 3-state test graph
 - [ ] SQLite storage roundtrip test: start session → kill daemon → restart → resume (manual signal) → completes
-- [ ] Worker Manager test: spawn dummy worker (shell script), send `worker/health`, get reply, `worker/shutdown`, observe graceful exit within 5 s
+- [ ] Host lifecycle test: launch a fixture ACP session, execute, cancel, and confirm bounded process-group reap
 - [ ] `GET /v1/daemon/orchestration/sessions` returns at least `_system.maintenance`'s session when daemon is in plain `Running` state (simulated — HSM lands Phase 4)
 - [ ] `cargo test --workspace` green; clippy/fmt clean
 
@@ -1134,8 +1056,8 @@ Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependen
 **Scope**
 
 - `load_preset()` + validation per §7.6.
-- Register `acp.*`, `judge.llm`, `judge.rule`, `creator.*` capabilities.
-- Implement `AcpPromptTask` dispatching to Worker Manager.
+- Register `acp.*`, `judge.llm`, `judge.rule`, and `creator.*` capabilities.
+- Implement `AcpPromptTask` through the injected `PromptExecutor` and Host provider plane.
 - Ship embedded `novel-writing` preset with 4 states + 2 inner graphs (minimum demonstrator).
 - CLI stub: `nexus42 schedule start <preset-id> --creator <id>` (B-track will deepen this).
 - CLI: `nexus42 schedule advance <session-id>` (manual transitions).
@@ -1212,13 +1134,13 @@ If you landed on this section looking for the `schemas/` refactor scope, open th
 | ----------------------------------------------------------------------------- | ---------- | ------ | -------------------------------------------------------------------------------------------------------------------- |
 | `graph-flow` breaking change on 0.3.x / 0.4.x before we reach V1.5             | Medium     | Medium | Adapter trait (§4.2); pin `=0.2.3`; isolated in `nexus-orchestration`; swap impl if needed                           |
 | `statig` breaking change                                                      | Low        | Low    | statig is 0.3.x; HSM description is small (~200 LOC); trivial to re-implement by hand if library diverges            |
-| LocalSet contagion into daemon runtime axum runtime                               | Low        | High   | **Structural**: `nexus-acp-host` never linked from daemon runtime (§3.2 crate matrix); enforced by `Cargo.toml` review   |
-| IPC protocol ambiguity → worker hangs                                          | Medium     | High   | Strict JSON-RPC 2.0; request id matching; `worker/health` heartbeat every 5 s; daemon-side timeout 30 s per request   |
+| Host provider lifecycle leaks into orchestration internals                     | Low        | High   | **Structural**: orchestration depends only on `PromptExecutor`; ACP transport/process handles remain behind `HostFacade` |
+| Host prompt timeout or cancellation leaves an owned process tree               | Medium     | High   | Persist owned identity; bounded Host session shutdown; birth-validated process-group terminate→kill→reap                |
 | SQLite session table growth (many paused sessions)                            | Medium     | Low    | Capability `session.compact`; configurable retention for `completed`/`failed` sessions (default: keep 30 days)        |
 | Preset bundle path traversal                                                  | Low        | High   | Loader validates every `template_file` with `path_clean` + `canonicalize` + "within bundle root" check              |
 | User-authored preset with malicious `prompt` injecting tool requests          | Medium     | Medium | Default `tool_policy: auto_grant_read_only` for user presets; `auto_grant_all` only allowed for embedded system preset |
-| Worker crash during inner-graph mid-run leaves orphan inner session row       | Medium     | Low    | On worker crash signal, engine scans children of the outer session and flips them to `paused` with reason            |
-| ACP registry offline at worker start                                          | Medium     | Medium | Worker Manager retries with backoff; surface `Degraded` to HSM if unresolved for >5 minutes                           |
+| Host failure during inner-graph mid-run leaves ambiguous external work          | Medium     | High   | Persist in-flight attempt and mark interrupted; never blind-replay ambiguous effects                                    |
+| ACP launch recipe unavailable                                                   | Medium     | Medium | Provider probe checks recipe availability without spawning; execution fails closed with a typed provider error          |
 | `_system.maintenance` infinite-loop bug stalls sync                           | Low        | High   | Embedded preset has mandatory unit-test gate in CI; `statig` observability hooks log transitions                     |
 
 ---
