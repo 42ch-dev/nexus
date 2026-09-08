@@ -224,7 +224,7 @@ impl SqliteSessionStorage {
     pub async fn count_checkpoint_rows(&self) -> Result<i64, sqlx::Error> {
         sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM orchestration_sessions
-             WHERE status IN ('running', 'paused', 'waiting_for_input')",
+             WHERE status IN ('running', 'paused', 'waiting_for_input', 'interrupted')",
         )
         .fetch_one(&*self.pool)
         .await

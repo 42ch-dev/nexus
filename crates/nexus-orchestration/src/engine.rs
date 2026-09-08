@@ -493,17 +493,27 @@ impl EngineSharedState {
             .await
             .map_err(EngineError::GraphFlow)?
             .ok_or_else(|| EngineError::SessionNotFound(parent_session_id.0.clone()))?;
-        let active_terminal_children: Vec<String> = serde_json::to_value(&parent.context)
-            .ok()
-            .as_ref()
-            .and_then(crate::resume_rules::context_data)
-            .map(|data| {
-                data.iter()
-                    .filter(|(key, _)| key.starts_with("_inner_child_session_"))
-                    .filter_map(|(_, value)| value.as_str().map(str::to_owned))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let parent_context = match serde_json::to_value(&parent.context) {
+            Ok(context) => context,
+            Err(e) => {
+                self.children.write().await.remove(&parent_session_id.0);
+                return Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+                    format!(
+                        "serialize recovered parent context '{}': {e}",
+                        parent_session_id.0
+                    ),
+                )));
+            }
+        };
+        let active_terminal_children: Vec<String> =
+            crate::resume_rules::context_data(&parent_context)
+                .map(|data| {
+                    data.iter()
+                        .filter(|(key, _)| key.starts_with("_inner_child_session_"))
+                        .filter_map(|(_, value)| value.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default();
         let mut checkpoints = Vec::with_capacity(children.len());
         for child in &children {
             if child.status.is_terminal()

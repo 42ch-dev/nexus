@@ -93,8 +93,8 @@ pub enum RecoveryClass {
 }
 
 /// Classify a v1 run record (authoritative status + durable state) against the
-/// A7 precedence. `chain_class` is the persisted converge/merge evidence
-/// ([`is_converge_merge_chain`]) — the only input not carried by `RunStateV1`.
+/// A7 precedence. `gate_park_live` is the exact current-task
+/// `_gate_park_<task>` marker used for bounded converge/merge resume.
 ///
 /// `state: None` means the v1 row's state blob is missing/unparseable
 /// (corrupt/unsupported) — non-replayable `Unreadable`, except that an
@@ -107,7 +107,7 @@ pub enum RecoveryClass {
 pub fn classify_recovery(
     status: &SessionStatus,
     state: Option<&RunStateV1>,
-    chain_class: bool,
+    gate_park_live: bool,
 ) -> RecoveryClass {
     // 1. Authoritative v1 status wins (A2: status is the SSOT for v1 rows).
     //    Terminal lookup stays authoritative even when the durable state
@@ -146,14 +146,14 @@ pub fn classify_recovery(
     //    bare wait stays conservatively human-wait-shaped and is never
     //    advanced at boot.
     if matches!(status, SessionStatus::WaitingForInput) {
-        return if chain_class {
+        return if gate_park_live {
             RecoveryClass::ConvergeMerge
         } else {
             RecoveryClass::HumanWait
         };
     }
     // 6. Running/paused at a committed boundary.
-    if chain_class {
+    if gate_park_live {
         RecoveryClass::ConvergeMerge
     } else {
         RecoveryClass::SafeBoundary

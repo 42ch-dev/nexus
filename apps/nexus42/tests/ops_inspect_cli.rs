@@ -1053,6 +1053,11 @@ fn inspect_v1_interrupted_wins_over_old_join_keys_and_never_retries() {
         .stdout
         .clone();
     let list: Value = serde_json::from_slice(&list_output).expect("valid list json");
+    assert_eq!(
+        list["total"],
+        json!(1),
+        "interrupted rows count toward the honest list total"
+    );
     let listed = list["rows"]
         .as_array()
         .expect("rows")
