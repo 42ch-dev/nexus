@@ -1506,7 +1506,14 @@ impl ScheduleSupervisor {
 
         for r in &active_rows {
             let s = r.to_schedule();
-            if s.status == ScheduleStatus::Running {
+            // N-16: only `driven_v1` rows count toward execution capacity —
+            // legacy/system-inert `Running` rows (historical admission-only
+            // rows with no owned session) are inert and must not block an
+            // eligible driven schedule's resume. Same invariant as
+            // `tick_inner` and the coordinator admission matrix.
+            if s.status == ScheduleStatus::Running
+                && r.execution_policy == EXECUTION_POLICY_DRIVEN_V1
+            {
                 running_entries.insert((s.creator_id.clone(), s.id.clone()));
             }
             if s.id.0 == schedule_id {

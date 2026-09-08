@@ -794,6 +794,18 @@ impl WorkspaceState {
         if let Some(host) = self.agent_host() {
             coordinator_builder = coordinator_builder.with_agent_host(host);
         }
+        // C-3: the sanctioned default binding provider for explicit legacy
+        // starts — the same config source the supervisor's internal
+        // insertion paths use.
+        if let Some(provider_id) = self
+            .agent_host_config()
+            .providers
+            .iter()
+            .find(|p| p.enabled)
+            .map(|p| p.id.clone())
+        {
+            coordinator_builder = coordinator_builder.with_binding_provider(provider_id);
+        }
         let coordinator = Arc::new(coordinator_builder);
 
         // Schedule supervisor with the daemon admission callback.

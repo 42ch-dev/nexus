@@ -41,6 +41,7 @@
 //! tracker status to `Failed` via a `Cancel` signal — the only failure
 //! status-flip the engine signal surface exposes.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -578,6 +579,12 @@ pub struct WorkflowRunCoordinator {
     /// in agent bindings before enqueue (N-4). `None` when no Host facade
     /// is wired (tests): provider validation is skipped then.
     agent_host: Option<Arc<dyn nexus_agent_host::HostFacade>>,
+    /// The daemon's configured default binding provider (C-3): the
+    /// sanctioned source for deriving agent bindings when an explicit
+    /// legacy start prepares a historical row with no frozen descriptor.
+    /// Mirrors the supervisor's `binding_provider` (the same source the
+    /// internal insertion paths use).
+    binding_provider: Option<String>,
     /// Shared per-run cancellation tokens (A1) — the same map the engine
     /// registers run tokens in and the prompt executor resolves.
     session_cancels: std::sync::Arc<
@@ -592,6 +599,15 @@ pub struct WorkflowRunCoordinator {
     /// until the transition is durable — a failed driver is never silently
     /// re-driven when the failure write itself failed.
     failed_owners: Arc<tokio::sync::Mutex<std::collections::HashSet<String>>>,
+    /// Deterministic production-storage fault seam (N-14): when set, the
+    /// coordinator's durable `Failed` transition write is forced to fail
+    /// (the transition is skipped and reported as uncommittable), so the
+    /// failed-owner fence path is exercised through the REAL coordinator
+    /// and REAL store. Production default `false`; only the acceptance
+    /// fixture flips it. This is the narrowest seam that makes the durable
+    /// transition fail deterministically without a test-only coordinator
+    /// or echo path.
+    fail_drive_failure_write: Arc<AtomicBool>,
     /// Bounds for each drive call.
     config: PresetRunConfig,
 }
@@ -618,9 +634,11 @@ impl WorkflowRunCoordinator {
             storage,
             pool,
             agent_host: None,
+            binding_provider: None,
             session_cancels,
             drives: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             failed_owners: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
+            fail_drive_failure_write: Arc::new(AtomicBool::new(false)),
             config: PresetRunConfig::default(),
         }
     }
@@ -631,6 +649,32 @@ impl WorkflowRunCoordinator {
     pub fn with_agent_host(mut self, host: Arc<dyn nexus_agent_host::HostFacade>) -> Self {
         self.agent_host = Some(host);
         self
+    }
+
+    /// Attach the daemon's configured default binding provider (C-3) so an
+    /// explicit legacy start can derive sanctioned agent bindings for a
+    /// historical row with no frozen descriptor. Mirrors the supervisor's
+    /// `with_binding_provider` (same config source).
+    #[must_use]
+    pub fn with_binding_provider(mut self, provider_id: String) -> Self {
+        self.binding_provider = Some(provider_id);
+        self
+    }
+
+    /// Deterministic production-storage fault seam (N-14): force the
+    /// durable `Failed` transition write to fail for the NEXT drive-loop
+    /// failure, so the failed-owner fence path is exercised through the
+    /// real coordinator and real store. Production default `false`.
+    pub fn fail_next_drive_failure_write(&self) {
+        self.fail_drive_failure_write.store(true, Ordering::SeqCst);
+    }
+
+    /// Read-only fence probe (N-14): whether `session_id` is currently
+    /// fenced against re-entry because its durable failure transition
+    /// could not be committed. Production observability surface.
+    #[must_use]
+    pub async fn is_fenced(&self, session_id: &SessionId) -> bool {
+        self.failed_owners.lock().await.contains(&session_id.0)
     }
 
     /// The engine this coordinator drives (as the trait surface).
@@ -743,6 +787,20 @@ impl WorkflowRunCoordinator {
     /// `ensure_driving` refuses re-entry until the non-replayable
     /// transition is durable (closure 8 fail-closed).
     async fn persist_drive_failure(&self, session_id: &SessionId, error: &str) -> bool {
+        // N-14: deterministic production-storage fault seam — when armed,
+        // the durable `Failed` transition is forced to fail (the write is
+        // skipped and reported as uncommittable) so the failed-owner fence
+        // path is exercised through the real coordinator and real store.
+        if self
+            .fail_drive_failure_write
+            .swap(false, Ordering::SeqCst)
+        {
+            tracing::warn!(
+                session_id = %session_id.0,
+                "coordinator: fault-injection armed; durable drive failure write forced to fail"
+            );
+            return false;
+        }
         let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
             self.pool.clone(),
         );
@@ -1185,6 +1243,19 @@ impl WorkflowRunCoordinator {
             ));
         }
 
+        // C-3: a real historical row (migration default `legacy_inert`,
+        // `execution_descriptor_json IS NULL`, no version-0 core-context
+        // record) has no frozen payload. Prepare it BEFORE the atomic
+        // cutover: resolve the preset through the shared resolver, freeze
+        // the source identity + available structured input, choose the
+        // sanctioned binding source, create the missing version-0 seed,
+        // and persist the frozen descriptor. The row stays inert until
+        // this explicit call; the cutover + owned-session claim remain
+        // atomic inside `admit_schedule`'s store transaction.
+        if row.execution_descriptor_json.is_none() {
+            self.prepare_legacy_row(&row, pool, nexus_home, caps).await?;
+        }
+
         // Policy cutover happens inside admit_schedule_run (same claim
         // transaction). Do not UPDATE execution_policy before the payload
         // and run row exist (C-3).
@@ -1197,6 +1268,167 @@ impl WorkflowRunCoordinator {
             prompt_executor,
         )
         .await
+    }
+
+    /// C-3: prepare a historical never-started row for explicit start.
+    ///
+    /// A pre-cutover row has `execution_descriptor_json IS NULL` and no
+    /// version-0 core-context record. This method fills the missing frozen
+    /// payload from the CURRENT resolver/provider configuration:
+    ///
+    /// 1. Resolves the preset through the shared resolver (same
+    ///    [`nexus_orchestration::preset::resolve_preset`] admission uses).
+    /// 2. Freezes the content-addressed source identity from the loaded
+    ///    preset and the row's `work_id` as the available structured input
+    ///    (a historical row carries no frozen input map — empty).
+    /// 3. Chooses the sanctioned binding source: the coordinator's
+    ///    configured default binding provider (the same source the
+    ///    supervisor/internal insertion paths use), falling back to the
+    ///    Host provider catalog's first entry. A preset with no prompt
+    ///    roles accepts an empty map.
+    /// 4. Creates the missing version-0 seed (idempotent `INSERT OR
+    ///    IGNORE` — the historical row's pointer is already 0, so no
+    ///    pointer update is needed; concurrent explicit starts cannot
+    ///    collide on the PK).
+    /// 5. Persists the frozen descriptor into `execution_descriptor_json`
+    ///    (idempotent `WHERE ... IS NULL`).
+    ///
+    /// The row remains inert across boot/tick/cron until this explicit
+    /// call; the policy cutover + owned-session claim stay atomic in
+    /// `admit_schedule`'s store transaction.
+    async fn prepare_legacy_row(
+        &self,
+        row: &ScheduleAdmissionRow,
+        pool: &sqlx::SqlitePool,
+        nexus_home: &std::path::Path,
+        caps: &nexus_orchestration::CapabilityRegistryHolder,
+    ) -> Result<(), RunControlError> {
+        // 1. Resolve the preset through the shared resolver.
+        let registry = caps
+            .get()
+            .ok_or_else(|| RunControlError::NoWorkspace("capability registry unavailable".into()))?;
+        let loaded = nexus_orchestration::preset::resolve_preset(&row.preset_id, nexus_home, &registry)
+            .map_err(|e| RunControlError::PresetLoad(row.preset_id.clone(), e.to_string()))?;
+
+        // 2. Freeze the source identity (must be present — embedded and
+        //    directory presets both carry it).
+        let source = loaded.source_identity.clone().ok_or_else(|| {
+            RunControlError::Admission(format!(
+                "preset '{}' has no source identity; cannot prepare a legacy start",
+                row.preset_id
+            ))
+        })?;
+
+        // 3. Choose the sanctioned binding source: the configured default
+        //    binding provider first, then the Host catalog's first entry.
+        //    A preset with no prompt roles accepts an empty map.
+        let roles = nexus_orchestration::preset::required_prompt_roles(&loaded);
+        let agent_bindings = if roles.is_empty() {
+            std::collections::HashMap::new()
+        } else {
+            let provider_id = match &self.binding_provider {
+                Some(provider) => provider.clone(),
+                None => match &self.agent_host {
+                    Some(host) => {
+                        let catalog = host
+                            .provider_catalog()
+                            .await
+                            .map_err(|e| {
+                                RunControlError::Admission(format!(
+                                    "provider catalog unavailable for legacy start: {e}"
+                                ))
+                            })?;
+                        catalog
+                            .entries
+                            .first()
+                            .map(|e| e.provider_id.to_string())
+                            .ok_or_else(|| {
+                                RunControlError::Admission(
+                                    "no binding provider configured and no Host provider \
+                                     catalogued; cannot derive sanctioned bindings for legacy start"
+                                        .to_string(),
+                                )
+                            })?
+                    }
+                    None => {
+                        return Err(RunControlError::Admission(
+                            "no binding provider configured; cannot derive sanctioned \
+                             bindings for legacy start"
+                                .to_string(),
+                        ));
+                    }
+                },
+            };
+            roles
+                .into_iter()
+                .map(|role| {
+                    (
+                        role,
+                        nexus_orchestration::run_state::AgentBinding {
+                            provider_id: provider_id.clone(),
+                            model: None,
+                        },
+                    )
+                })
+                .collect()
+        };
+
+        // 4. Create the missing version-0 seed. The historical row's
+        //    `current_core_context_version` is already 0 (migration
+        //    default), so the seed row alone makes the pointer valid.
+        //    `INSERT OR IGNORE` keeps concurrent explicit starts
+        //    idempotent (the PK is (schedule_id, version)).
+        let now = chrono::Utc::now().timestamp();
+        let payload = serde_json::json!({ "kind": "text", "body": "" });
+        let derivation = serde_json::json!({ "kind": "seed", "raw": "" });
+        sqlx::query(
+            "INSERT OR IGNORE INTO core_context_versions
+               (schedule_id, version, payload_kind, content,
+                derivation_kind, derivation_detail,
+                created_at, created_by_kind, created_by_user_id)
+             VALUES (?, 0, 'text', ?, 'seed', ?, ?, 'system', NULL)",
+        )
+        .bind(&row.schedule_id)
+        .bind(serde_json::to_vec(&payload).map_err(|e| {
+            RunControlError::Admission(format!("seed payload serialization failed: {e}"))
+        })?)
+        .bind(serde_json::to_vec(&derivation).map_err(|e| {
+            RunControlError::Admission(format!("seed derivation serialization failed: {e}"))
+        })?)
+        .bind(now)
+        .execute(pool)
+        .await
+        .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
+
+        // 5. Persist the frozen descriptor (idempotent under concurrent
+        //    explicit starts — the winner's identical descriptor wins).
+        let descriptor = nexus_orchestration::run_state::RunDescriptorV1 {
+            creator_id: row.creator_id.clone(),
+            work_id: row.work_id.clone().filter(|id| !id.is_empty()),
+            workspace_root: std::path::PathBuf::new(),
+            preset_id: loaded.id.clone(),
+            preset_version: loaded.version,
+            source,
+            input: serde_json::Map::new(),
+            agent_bindings,
+            parent_session_id: None,
+            graph_name: None,
+        };
+        let descriptor_bytes = serde_json::to_vec(&descriptor).map_err(|e| {
+            RunControlError::Admission(format!("descriptor serialization failed: {e}"))
+        })?;
+        sqlx::query(
+            "UPDATE creator_schedules
+             SET execution_descriptor_json = ?
+             WHERE schedule_id = ? AND execution_descriptor_json IS NULL",
+        )
+        .bind(descriptor_bytes)
+        .bind(&row.schedule_id)
+        .execute(pool)
+        .await
+        .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
+
+        Ok(())
     }
 
     /// Admit a `driven_v1` schedule as an owned run and drive it (A3).

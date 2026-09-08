@@ -929,48 +929,163 @@ async fn concurrent_start_yields_one_owned_session() {
     assert_eq!(row.execution_policy, "driven_v1");
 }
 
+/// C-3: explicit start for REAL historical rows — `execution_descriptor_json
+/// IS NULL`, no version-0 core-context record, `legacy_inert` policy
+/// (the migration default). Pending, paused, and admission-only `Running`
+/// rows stay inert across boot/tick/cron until the explicit public
+/// `schedule start`; the call resolves the preset, freezes the source
+/// identity + sanctioned bindings, creates the missing version-0 seed,
+/// persists the frozen descriptor, and atomically cuts the row over with
+/// exactly one owned session.
 #[tokio::test]
 async fn explicit_legacy_running_without_session_starts() {
-    let daemon = LiveDaemon::start().await;
+    let host = MockHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
     let now = chrono::Utc::now().timestamp();
-    sqlx::query(
-        "INSERT INTO creator_schedules
-           (schedule_id, creator_id, preset_id, preset_version, status,
-            concurrency_kind, current_core_context_version, label,
-            created_at, updated_at, work_id, execution_policy,
-            execution_descriptor_json)
-           VALUES ('SCHLEGACYRUN', 'test_creator', ?, 1, 'running',
-                   'serial', 0, 'p2-t1-legacy-running', ?, ?, NULL, 'legacy_inert', ?)",
-    )
-    .bind(PUBLIC_PRESET)
-    .bind(now)
-    .bind(now)
-    .bind(seeded_descriptor_json())
-    .execute(&daemon.pool)
-    .await
-    .expect("seed legacy running-without-session row");
-    // N-3: seed the durable core-context record so the row is admissible.
-    seed_core_context_record(&daemon, "SCHLEGACYRUN").await;
 
-    let (status, body) = post_json(
-        &daemon,
-        "/v1/daemon/orchestration/schedules/SCHLEGACYRUN/signal",
-        json!({ "signal": "start" }),
+    // Seed three REAL historical rows: NULL descriptor, no version-0
+    // record, `legacy_inert` (migration default), `current_core_context_version`
+    // already 0 (migration default). `parallel_any` so the three rows do
+    // not serial-block each other during the sequential explicit starts.
+    for (id, status) in [
+        ("SCHLEGACY-PENDING", "pending"),
+        ("SCHLEGACY-PAUSED", "paused"),
+        ("SCHLEGACY-RUNNING", "running"),
+    ] {
+        sqlx::query(
+            "INSERT INTO creator_schedules
+               (schedule_id, creator_id, preset_id, preset_version, status,
+                concurrency_kind, current_core_context_version, label,
+                created_at, updated_at, work_id, execution_policy,
+                execution_descriptor_json)
+               VALUES (?, 'test_creator', ?, 1, ?, 'parallel_any', 0, ?, ?, ?, NULL, 'legacy_inert', NULL)",
+        )
+        .bind(id)
+        .bind(PUBLIC_PRESET)
+        .bind(status)
+        .bind(format!("p2-t1-historical-{id}"))
+        .bind(now)
+        .bind(now)
+        .execute(&daemon.pool)
+        .await
+        .expect("seed historical row");
+        // No core_context_versions row is created — the historical shape.
+        let seed_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM core_context_versions WHERE schedule_id = ?",
+        )
+        .bind(id)
+        .fetch_one(&daemon.pool)
+        .await
+        .expect("count seeds");
+        assert_eq!(seed_count, 0, "historical row {id} must have no version-0 seed");
+    }
+
+    // Inertness before the explicit start: boot resume, tick, and cron
+    // must leave every historical row unchanged and unowned.
+    let supervisor = daemon
+        .state
+        .schedule_supervisor()
+        .expect("supervisor wired");
+    let paused = supervisor
+        .resume_running_as_paused("daemon_restart")
+        .await
+        .expect("resume running as paused");
+    assert_eq!(paused, 0, "no driven_v1 running rows to pause");
+    supervisor.tick().await.expect("tick succeeds");
+    nexus_daemon_runtime::cron_supervisor::run_one_tick(
+        &daemon.pool,
+        std::path::Path::new(""),
+        &supervisor,
+        Some(MOCK_PROVIDER),
     )
     .await;
-    assert!(
-        status.is_success(),
-        "legacy start failed: status={status} body={body}"
-    );
+    for (id, status) in [
+        ("SCHLEGACY-PENDING", "pending"),
+        ("SCHLEGACY-PAUSED", "paused"),
+        ("SCHLEGACY-RUNNING", "running"),
+    ] {
+        let row = load_drive_row(&daemon, id).await;
+        assert_eq!(
+            row.status, status,
+            "historical row {id} must keep its status before explicit start"
+        );
+        assert_eq!(
+            row.execution_policy, "legacy_inert",
+            "historical row {id} must stay legacy_inert before explicit start"
+        );
+        assert!(
+            row.current_session_id.is_none(),
+            "historical row {id} must stay unowned before explicit start"
+        );
+    }
 
-    let row = load_drive_row(&daemon, "SCHLEGACYRUN").await;
-    assert_eq!(row.execution_policy, "driven_v1");
-    assert!(
-        row.current_session_id.as_deref().is_some_and(|s| !s.is_empty()),
-        "legacy start must mint an owned session: status={} session={:?}",
-        row.status,
-        row.current_session_id
-    );
+    // Explicit public start for each row: the coordinator prepares the
+    // missing frozen payload (descriptor + version-0 seed + sanctioned
+    // bindings) and atomically cuts the row over with one owned session.
+    for (id, status) in [
+        ("SCHLEGACY-PENDING", "pending"),
+        ("SCHLEGACY-PAUSED", "paused"),
+        ("SCHLEGACY-RUNNING", "running"),
+    ] {
+        let (status_code, body) = post_json(
+            &daemon,
+            &format!("/v1/daemon/orchestration/schedules/{id}/signal"),
+            json!({ "signal": "start" }),
+        )
+        .await;
+        assert!(
+            status_code.is_success(),
+            "historical {status} row {id} start failed: status={status_code} body={body}"
+        );
+
+        let row = load_drive_row(&daemon, id).await;
+        assert_eq!(
+            row.execution_policy, "driven_v1",
+            "historical row {id} must be cut over to driven_v1"
+        );
+        assert!(
+            row.current_session_id.as_deref().is_some_and(|s| !s.is_empty()),
+            "historical row {id} must own exactly one session: status={} session={:?}",
+            row.status,
+            row.current_session_id
+        );
+
+        // The frozen descriptor and version-0 seed were created by the
+        // preparation step.
+        let descriptor: Option<Vec<u8>> = sqlx::query_scalar(
+            "SELECT execution_descriptor_json FROM creator_schedules WHERE schedule_id = ?",
+        )
+        .bind(id)
+        .fetch_one(&daemon.pool)
+        .await
+        .expect("descriptor");
+        assert!(
+            descriptor.is_some(),
+            "historical row {id} must have a frozen descriptor after explicit start"
+        );
+        let seed_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM core_context_versions WHERE schedule_id = ? AND version = 0",
+        )
+        .bind(id)
+        .fetch_one(&daemon.pool)
+        .await
+        .expect("count seeds");
+        assert_eq!(
+            seed_count, 1,
+            "historical row {id} must have exactly one version-0 seed after explicit start"
+        );
+
+        // Exactly one owned session row.
+        let sid = row.current_session_id.expect("session id");
+        let session_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM orchestration_sessions WHERE session_id = ?",
+        )
+        .bind(&sid)
+        .fetch_one(&daemon.pool)
+        .await
+        .expect("count sessions");
+        assert_eq!(session_count, 1, "historical row {id} must own exactly one session");
+    }
 }
 
 #[tokio::test]
@@ -1090,6 +1205,57 @@ async fn admission_lazy_attach_drives_host_prompt() {
     );
 }
 
+/// N-13: the NORMAL boot publication path (`publish_boot_runtime_bundle`)
+/// publishes a pool-backed capability registry — `kb.extract_work` on the
+/// boot aggregate carries the Creator DB dependency and executes real DB
+/// work, never a pool-less placeholder. The lazy-attach assertion above is
+/// a SEPARATE path; this fixture exercises the boot publisher directly.
+#[tokio::test]
+async fn admission_normal_boot_bundle_pool_backed_capability() {
+    let daemon = LiveDaemon::start_normal_boot().await;
+
+    // The boot aggregate is published and every accessor reads it.
+    let bundle = daemon
+        .state
+        .runtime_bundle()
+        .expect("normal boot publishes the aggregate bundle");
+    assert!(
+        daemon.state.engine().is_some(),
+        "engine accessor must read the boot aggregate"
+    );
+    assert!(
+        daemon.state.schedule_supervisor().is_some(),
+        "supervisor accessor must read the boot aggregate"
+    );
+    assert!(
+        daemon.state.run_coordinator().is_some(),
+        "coordinator accessor must read the boot aggregate"
+    );
+    let registry = daemon
+        .state
+        .capability_registry()
+        .expect("capability registry accessor must read the boot aggregate");
+    let _ = bundle;
+
+    // N-13: `kb.extract_work` on the BOOT aggregate is pool-backed — it
+    // must NOT return WorkerUnavailable (the pool-less placeholder mode).
+    // A worldless input is a success no-op in the pool-backed pipeline
+    // (never WorkerUnavailable), proving the Creator DB dependency is
+    // wired into the normal-boot registry.
+    let kb = registry
+        .get("kb.extract_work")
+        .expect("kb.extract_work must be registered on the boot aggregate");
+    let out = kb
+        .run(serde_json::json!({ "creator_id": "test_creator" }))
+        .await
+        .expect("pool-backed kb.extract_work must execute, not return WorkerUnavailable");
+    assert_eq!(
+        out.get("status").and_then(Value::as_str),
+        Some("skipped"),
+        "worldless no-op must be the pool-backed pipeline's response: {out}"
+    );
+}
+
 /// N-7/N-14: legacy never-started rows (pending/running-without-session,
 /// `legacy_inert`) stay inert across boot/tick/cron — the supervisor tick
 /// never admits them, never flips them to Running, and the cron admission
@@ -1174,6 +1340,85 @@ async fn admission_legacy_rows_inert_across_tick() {
             "legacy row {id} must keep its historical status after tick/cron"
         );
     }
+}
+
+/// N-16: `resume_schedule` counts only `driven_v1` rows toward execution
+/// capacity — a historical `legacy_inert` `Running` row must not block an
+/// eligible driven paused row's explicit resume. The driven row is admitted
+/// through the production starter while the legacy row stays unchanged and
+/// unowned.
+#[tokio::test]
+async fn admission_resume_ignores_legacy_running_capacity() {
+    let daemon = LiveDaemon::start().await;
+    let now = chrono::Utc::now().timestamp();
+
+    // Historical legacy `Running` row (no owned session, migration default).
+    sqlx::query(
+        "INSERT INTO creator_schedules
+           (schedule_id, creator_id, preset_id, preset_version, status,
+            concurrency_kind, current_core_context_version, label,
+            created_at, updated_at, work_id, execution_policy)
+           VALUES ('SCHLEGACY-RUN', 'test_creator', ?, 1, 'running',
+                   'serial', 0, 'p2-t1-legacy-run', ?, ?, NULL, 'legacy_inert')",
+    )
+    .bind(PUBLIC_PRESET)
+    .bind(now)
+    .bind(now)
+    .execute(&daemon.pool)
+    .await
+    .expect("seed legacy running row");
+
+    // Driven paused row (same creator, serial) with a frozen descriptor and
+    // version-0 seed — eligible for explicit resume.
+    sqlx::query(
+        "INSERT INTO creator_schedules
+           (schedule_id, creator_id, preset_id, preset_version, status,
+            concurrency_kind, current_core_context_version, label,
+            created_at, updated_at, work_id, execution_policy,
+            execution_descriptor_json)
+           VALUES ('SCHDRIVEN-PAUSED', 'test_creator', ?, 1, 'paused',
+                   'serial', 0, 'p2-t1-driven-paused', ?, ?, NULL, 'driven_v1', ?)",
+    )
+    .bind(PUBLIC_PRESET)
+    .bind(now)
+    .bind(now)
+    .bind(seeded_descriptor_json())
+    .execute(&daemon.pool)
+    .await
+    .expect("seed driven paused row");
+    seed_core_context_record(&daemon, "SCHDRIVEN-PAUSED").await;
+
+    let supervisor = daemon
+        .state
+        .schedule_supervisor()
+        .expect("supervisor wired");
+
+    // Explicit resume: the driven row is admitted through the production
+    // starter (the legacy Running row is excluded from capacity).
+    let new_status = supervisor
+        .resume_schedule("SCHDRIVEN-PAUSED")
+        .await
+        .expect("resume driven paused row");
+    assert_eq!(new_status, "running");
+
+    let driven = load_drive_row(&daemon, "SCHDRIVEN-PAUSED").await;
+    assert_eq!(driven.status, "running");
+    assert!(
+        driven.current_session_id.as_deref().is_some_and(|s| !s.is_empty()),
+        "driven row must own a session after resume"
+    );
+
+    // The legacy row stays unchanged and unowned.
+    let legacy = load_drive_row(&daemon, "SCHLEGACY-RUN").await;
+    assert_eq!(
+        legacy.status, "running",
+        "legacy row keeps its historical status"
+    );
+    assert_eq!(legacy.execution_policy, "legacy_inert");
+    assert!(
+        legacy.current_session_id.is_none(),
+        "legacy row stays unowned"
+    );
 }
 
 /// N-10: auto-chain, cron, and review-master insertion branches are driven
@@ -2068,6 +2313,12 @@ async fn admission_work_linked_vs_general_insertion() {
 /// N-14: failed durable driver transition followed by refused re-entry —
 /// a drive loop whose durable `Failed` transition cannot be committed
 /// fences the owner; `ensure_driving` refuses to re-drive the session.
+///
+/// The deterministic production-storage fault seam
+/// (`WorkflowRunCoordinator::fail_next_drive_failure_write`) forces the
+/// durable `Failed` transition write to fail AFTER the drive outcome is
+/// `Failed`, so the failed-owner fence path is exercised through the REAL
+/// coordinator and REAL store — never a test-only coordinator or echo path.
 #[tokio::test]
 async fn admission_failed_driver_transition_refuses_reentry() {
     let daemon = LiveDaemon::start().await;
@@ -2101,13 +2352,19 @@ async fn admission_failed_driver_transition_refuses_reentry() {
         .expect("supervisor wired")
         .schedule_starter_clone()
         .expect("production starter injected");
+    let coordinator = daemon
+        .state
+        .run_coordinator()
+        .expect("coordinator wired");
+
+    // N-14: arm the deterministic production-storage fault seam — the
+    // durable `Failed` transition write will be forced to fail after the
+    // drive outcome is `Failed`.
+    coordinator.fail_next_drive_failure_write();
 
     // First admission: the drive loop fails (narrative.compute has no
-    // computable entries in the seeded world). The engine's only failure
-    // status-flip surface is `Cancel` → the durable record commits
-    // `cancelled` (terminal, non-replayable) — the coordinator's
-    // `persist_drive_failure` sees the terminal record and the run is
-    // never re-driven.
+    // computable entries in the seeded world). The durable `Failed`
+    // transition write FAILS (seam armed), so the failed owner is fenced.
     let first = starter.start("SCHDRVFAIL").await;
     assert!(
         first.is_ok(),
@@ -2115,9 +2372,25 @@ async fn admission_failed_driver_transition_refuses_reentry() {
     );
     let sid = first.expect("session id").0;
 
-    // The durable record reaches a terminal state (the engine's failure
-    // surface is `cancelled` — `mark_failed` sends `EngineSignal::Cancel`,
-    // the only failure status-flip the engine exposes).
+    // The drive loop finishes and the failed owner is fenced (the seam
+    // made `persist_drive_failure` return false).
+    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            if coordinator
+                .is_fenced(&nexus_orchestration::SessionId(sid.clone()))
+                .await
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("failed owner must be fenced after the failed durable write");
+
+    // The engine's failure surface (`mark_failed` → `EngineSignal::Cancel`)
+    // still persists the terminal `cancelled` record — the fence is
+    // independent of the durable terminal state.
     let (status, state) = wait_for_run_status(&daemon, &sid, "cancelled", 15).await;
     assert_eq!(status, "cancelled");
     assert!(
@@ -2125,19 +2398,32 @@ async fn admission_failed_driver_transition_refuses_reentry() {
         "durable cancel/failure record must be present: {state}"
     );
 
-    // Re-entry: the schedule still owns the session, but the durable
-    // terminal state refuses a fresh drive — `admit_schedule`'s status
-    // gate rejects the owned `running` row (`NotEligible`) before any
-    // fresh drive can start, and no second session is minted.
+    // Re-entry: the fenced owner refuses a fresh drive — `ensure_driving`
+    // returns `NotDriving` (the failed-owner fence, not the durable
+    // terminal gate).
+    let disposition = coordinator
+        .ensure_driving(&nexus_orchestration::SessionId(sid.clone()))
+        .await
+        .expect("ensure_driving must not error");
+    assert_eq!(
+        disposition,
+        nexus_daemon_runtime::preset_run::DriveDisposition::NotDriving,
+        "fenced owner must refuse re-entry"
+    );
+
+    // The starter re-entry is refused (the owned `running` row's status
+    // gate — the equivalent refusal) — no second session is minted and no
+    // second driver starts.
     let reentry = starter.start("SCHDRVFAIL").await;
     let reentry_err = reentry.expect_err(
-        "re-entry must be refused: the durable terminal run is never re-driven",
+        "re-entry must be refused: the fenced owner is never re-driven",
     );
     let reentry_msg = reentry_err.to_string();
     assert!(
         reentry_msg.contains("not eligible"),
         "re-entry refusal must be the eligibility gate: {reentry_msg}"
     );
+
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM orchestration_sessions WHERE session_id = ?",
     )

@@ -886,6 +886,18 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             if let Some(host) = state.agent_host() {
                 coordinator_builder = coordinator_builder.with_agent_host(host);
             }
+            // C-3: the sanctioned default binding provider for explicit
+            // legacy starts — the same config source the supervisor's
+            // internal insertion paths use.
+            if let Some(provider_id) = state
+                .agent_host_config()
+                .providers
+                .iter()
+                .find(|p| p.enabled)
+                .map(|p| p.id.clone())
+            {
+                coordinator_builder = coordinator_builder.with_binding_provider(provider_id);
+            }
             let coordinator = Arc::new(coordinator_builder);
             state.set_run_coordinator(coordinator.clone());
             if let Some(executor) = &prompt_executor {
