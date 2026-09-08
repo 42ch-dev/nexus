@@ -1119,6 +1119,8 @@ async fn admission_internal_insertion_branches_durable() {
         None,
         None,
         &work,
+        nexus_orchestration::preset::default_bindings_for_preset("research", MOCK_PROVIDER)
+            .expect("research preset resolves"),
     )
     .await
     .expect("enqueue auto-chain schedule");
@@ -1165,6 +1167,8 @@ async fn admission_internal_insertion_branches_durable() {
         "wrk_chain",
         "novel-brainstorm",
         "brainstorm",
+        nexus_orchestration::preset::default_bindings_for_preset("novel-brainstorm", MOCK_PROVIDER)
+            .expect("novel-brainstorm preset resolves"),
     )
     .await
     .expect("enqueue cron schedule");
@@ -1184,6 +1188,11 @@ async fn admission_internal_insertion_branches_durable() {
         &daemon.pool,
         "test_creator",
         "wrk_chain",
+        nexus_orchestration::preset::default_bindings_for_preset(
+            "novel-review-master",
+            MOCK_PROVIDER,
+        )
+        .expect("novel-review-master preset resolves"),
     )
     .await
     .expect("enqueue review-master schedule");

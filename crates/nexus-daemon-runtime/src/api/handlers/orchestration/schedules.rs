@@ -42,8 +42,7 @@ use nexus_contracts::local::schedule::http::{
     UpdateWorkCronRequest, WorkCronResponse, WorkCronRoleDto, WorkCronRolesDto,
 };
 use nexus_contracts::local::schedule::{
-    CoreContextAuthor, CoreContextVersion, EditOp, Schedule, ScheduleConcurrency, ScheduleId,
-    ScheduleStatus,
+    CoreContextVersion, EditOp, Schedule, ScheduleConcurrency, ScheduleId, ScheduleStatus,
 };
 use nexus_contracts::PaginationInfo;
 use nexus_orchestration::preset_gates::{
@@ -264,7 +263,7 @@ pub async fn add_schedule(
             "driven_v1"
         };
         let (concurrency_kind, concurrency_whitelist, scheduled_at_ts) = insert_concurrency_and_schedule(&body);
-        let descriptor = build_execution_descriptor(&body, &work_id);
+        let descriptor = build_execution_descriptor(&state, &body, &work_id)?;
         sqlx::query(
             "INSERT INTO creator_schedules \
              (schedule_id, creator_id, preset_id, preset_version, status, \
@@ -307,6 +306,18 @@ pub async fn add_schedule(
             }
         }
 
+        // N-3: persist the durable core-context version-0 seed record in
+        // the SAME transaction — a `driven_v1` row is never observable
+        // before its seed/version is durable, and a seed failure rolls the
+        // whole row back (no orphaned drive-enabled schedule).
+        seed_core_context_in_tx(
+            &mut tx,
+            &schedule_id,
+            &body.creator_id,
+            &effective_seed_text(&body),
+        )
+        .await?;
+
         tx.commit().await.map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".into(),
             message: format!("failed to commit schedule transaction: {e}"),
@@ -320,8 +331,8 @@ pub async fn add_schedule(
             "gate evaluation BYPASSED by --force-gates (audited)"
         );
 
-        // Seed core context if seed/input provided (I-10: real version).
-        let core_version = seed_core_context(&supervisor, &schedule_id, &body, &state).await?;
+        // I-10: the durable version-0 seed record committed with the row.
+        let core_version = 0u32;
 
         // C-5: immediately admit the new row through the single coordinator.
         let status = admit_new_schedule(&state, &supervisor, &schedule_id).await?;
@@ -484,7 +495,7 @@ pub async fn add_schedule(
                             "driven_v1"
                         };
                         let (concurrency_kind, concurrency_whitelist, scheduled_at_ts) = insert_concurrency_and_schedule(&body);
-                        let descriptor = build_execution_descriptor(&body, work_id);
+                        let descriptor = build_execution_descriptor(&state, &body, work_id)?;
                         sqlx::query(
                             "INSERT INTO creator_schedules \
                              (schedule_id, creator_id, preset_id, preset_version, status, \
@@ -527,14 +538,28 @@ pub async fn add_schedule(
                             }
                         }
 
+                        // N-3: persist the durable core-context version-0
+                        // seed record in the SAME transaction — a
+                        // `driven_v1` row is never observable before its
+                        // seed/version is durable, and a seed failure rolls
+                        // the whole row back (no orphaned drive-enabled
+                        // schedule).
+                        seed_core_context_in_tx(
+                            &mut tx,
+                            &schedule_id,
+                            &body.creator_id,
+                            &effective_seed_text(&body),
+                        )
+                        .await?;
+
                         tx.commit().await.map_err(|e| NexusApiError::Internal {
                             code: "DATABASE_ERROR".into(),
                             message: format!("failed to commit schedule transaction: {e}"),
                         })?;
 
-                        // I-10: real core-context version.
-                        let core_version =
-                            seed_core_context(&supervisor, &schedule_id, &body, &state).await?;
+                        // I-10: the durable version-0 seed record committed
+                        // with the row.
+                        let core_version = 0u32;
 
                         // C-5: immediately admit the new row.
                         let status = admit_new_schedule(&state, &supervisor, &schedule_id).await?;
@@ -621,12 +646,19 @@ pub async fn add_schedule(
         terminated_at: None,
     };
 
-    // C-2/I-5: persist the frozen execution descriptor with the row in one
-    // transaction (dependencies included).
+    // C-2/I-5/N-3: persist the frozen execution descriptor AND the durable
+    // core-context version-0 seed record with the row in ONE transaction
+    // (dependencies included) — a `driven_v1` row is never observable
+    // before its seed/version is durable, and a seed failure rolls the
+    // whole row back (no orphaned drive-enabled schedule).
     let work_id = work_id_opt.clone().unwrap_or_default();
-    let descriptor = build_execution_descriptor(&body, &work_id);
+    let descriptor = build_execution_descriptor(&state, &body, &work_id)?;
     supervisor
-        .insert_pending_with_descriptor(schedule, descriptor.as_deref())
+        .insert_pending_with_descriptor_and_seed(
+            schedule,
+            descriptor.as_deref(),
+            &effective_seed_text(&body),
+        )
         .await
         .map_err(|e| {
             if matches!(
@@ -642,8 +674,8 @@ pub async fn add_schedule(
             }
         })?;
 
-    // I-10: real core-context version.
-    let core_version = seed_core_context(&supervisor, &schedule_id, &body, &state).await?;
+    // I-10: the durable version-0 seed record committed with the row.
+    let core_version = 0u32;
 
     // C-5: immediately admit the new row through the single coordinator.
     let status = admit_new_schedule(&state, &supervisor, &schedule_id).await?;
@@ -658,27 +690,11 @@ pub async fn add_schedule(
     ))
 }
 
-/// Seed core context v0 if seed or input is provided.
-///
-/// Returns the ACTUAL committed version (I-10) — `apply_seed` creates a
-/// real version row; the caller must report that version, never a
-/// synthetic zero.
-///
-/// N-3: a version-0 pointer with NO `core_context_versions` row is a
-/// pre-seed row and admission refuses it. Every new public row therefore
-/// gets a durable version-0 record — an empty seed when the request
-/// carries neither `seed` nor `input` — so the row is durably prepared
-/// before it can be admitted.
-async fn seed_core_context(
-    supervisor: &Arc<nexus_orchestration::schedule::supervisor::ScheduleSupervisor>,
-    schedule_id: &str,
-    body: &AddScheduleRequest,
-    _state: &WorkspaceState,
-) -> Result<u32, NexusApiError> {
-    let mgr = supervisor.core_context_manager();
-    let sid = ScheduleId(schedule_id.to_string());
-
-    let effective_seed = match (&body.seed, &body.input) {
+/// Compute the effective seed text for a new schedule (I-10): the request
+/// `seed` text plus the structured `input` serialized as `preset.input=…`
+/// (the same derivation the old post-commit `apply_seed` used).
+fn effective_seed_text(body: &AddScheduleRequest) -> String {
+    match (&body.seed, &body.input) {
         (Some(seed_text), Some(input)) => {
             let input_json = serde_json::to_string(input).unwrap_or_default();
             format!("{seed_text}\n---\npreset.input={input_json}")
@@ -689,22 +705,54 @@ async fn seed_core_context(
             format!("preset.input={input_json}")
         }
         (None, None) => String::new(),
-    };
+    }
+}
 
-    let record = mgr
-        .apply_seed(
-            &sid,
-            &effective_seed,
-            CoreContextAuthor::User {
-                id: body.creator_id.clone(),
-            },
-        )
-        .await
-        .map_err(|e| NexusApiError::Internal {
+/// Persist the durable core-context version-0 seed record INSIDE the
+/// schedule-insert transaction (N-3): a `driven_v1` row is never
+/// observable before its seed/version is durable, and a seed failure
+/// rolls the whole row back — no orphaned drive-enabled schedule. The
+/// public add path is user-initiated, so the record carries the user
+/// author (mirrors `CoreContextManager::apply_seed` with
+/// `CoreContextAuthor::User`).
+async fn seed_core_context_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    schedule_id: &str,
+    creator_id: &str,
+    seed_text: &str,
+) -> Result<(), NexusApiError> {
+    let now = chrono::Utc::now().timestamp();
+    let payload = serde_json::json!({ "kind": "text", "body": seed_text });
+    let content_bytes = serde_json::to_vec(&payload).map_err(|e| NexusApiError::Internal {
+        code: "CORE_CONTEXT_SEED_ERROR".into(),
+        message: format!("failed to serialize core-context seed: {e}"),
+    })?;
+    let derivation = serde_json::json!({ "kind": "seed", "raw": seed_text });
+    let derivation_bytes = serde_json::to_vec(&derivation).map_err(|e| {
+        NexusApiError::Internal {
             code: "CORE_CONTEXT_SEED_ERROR".into(),
-            message: format!("failed to seed core context: {e}"),
-        })?;
-    Ok(record.version.0)
+            message: format!("failed to serialize core-context derivation: {e}"),
+        }
+    })?;
+    sqlx::query(
+        "INSERT INTO core_context_versions
+           (schedule_id, version, payload_kind, content,
+            derivation_kind, derivation_detail,
+            created_at, created_by_kind, created_by_user_id)
+         VALUES (?, 0, 'text', ?, 'seed', ?, ?, 'user', ?)",
+    )
+    .bind(schedule_id)
+    .bind(content_bytes)
+    .bind(derivation_bytes)
+    .bind(now)
+    .bind(creator_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "CORE_CONTEXT_SEED_ERROR".into(),
+        message: format!("failed to seed core context: {e}"),
+    })?;
+    Ok(())
 }
 
 fn insert_concurrency_and_schedule(body: &AddScheduleRequest) -> (String, Option<String>, Option<i64>) {
@@ -726,10 +774,49 @@ fn insert_concurrency_and_schedule(body: &AddScheduleRequest) -> (String, Option
 /// the schedule's work_id, structured input, and agent bindings. Persisted
 /// with the schedule row (C-2) so admission can freeze the complete
 /// payload into the initial checkpoint.
+///
+/// N-8: the descriptor is built from the SAME resolved preset admission
+/// will load — `resolve_preset` over the daemon's nexus home and
+/// capability registry — and stamps the REAL content-addressed source
+/// identity (manifest + referenced template bytes). A zero-hash `Embedded`
+/// fallback is never emitted: an unresolvable preset refuses the add
+/// before any row is inserted. `_system.*` presets are always
+/// `system_inert` and never admitted (C-4), so they carry no descriptor.
 fn build_execution_descriptor(
+    state: &WorkspaceState,
     body: &AddScheduleRequest,
     work_id: &str,
-) -> Option<Vec<u8>> {
+) -> Result<Option<Vec<u8>>, NexusApiError> {
+    // `_system.*` presets are never admitted; no frozen descriptor is
+    // needed (and none can be resolved — they are not embedded).
+    if body.preset_id.starts_with("_system.") {
+        return Ok(None);
+    }
+    let registry = state.capability_registry().ok_or_else(|| {
+        NexusApiError::Internal {
+            code: "CAPABILITY_REGISTRY_UNAVAILABLE".into(),
+            message: "capability registry unavailable; cannot freeze preset source identity".into(),
+        }
+    })?;
+    let loaded = nexus_orchestration::preset::resolve_preset(
+        &body.preset_id,
+        state.nexus_home(),
+        &registry,
+    )
+    .map_err(|e| NexusApiError::Internal {
+        code: "PRESET_LOAD_ERROR".into(),
+        message: format!(
+            "failed to resolve preset '{}' for descriptor freeze: {e}",
+            body.preset_id
+        ),
+    })?;
+    let source = loaded.source_identity.ok_or_else(|| NexusApiError::Internal {
+        code: "PRESET_SOURCE_IDENTITY_MISSING".into(),
+        message: format!(
+            "preset '{}' has no content-addressed source identity",
+            body.preset_id
+        ),
+    })?;
     let input = body
         .input
         .as_ref()
@@ -759,21 +846,24 @@ fn build_execution_descriptor(
         workspace_root: std::path::PathBuf::new(),
         preset_id: body.preset_id.clone(),
         preset_version: 1,
-        // N-5/N-5b: stamp the REAL content-addressed source identity
-        // (manifest + referenced template bytes) — never a zero placeholder.
-        // Admission validates the stored identity against the current load
-        // and builds the runner from the frozen identity.
-        source: nexus_orchestration::preset::embedded_source_identity(&body.preset_id)
-            .unwrap_or(nexus_orchestration::run_state::PresetSourceIdentity::Embedded {
-                preset_id: body.preset_id.clone(),
-                content_hash: [0; 32],
-            }),
+        // N-5/N-5b/N-8: stamp the REAL content-addressed source identity
+        // (manifest + referenced template bytes) of the resolved preset —
+        // never a zero placeholder. Admission validates the stored identity
+        // against the current load and builds the runner from the frozen
+        // identity, so a changed/shadowed preset can never run under a
+        // zero-hash durable descriptor.
+        source,
         input,
         agent_bindings,
         parent_session_id: None,
         graph_name: None,
     };
-    serde_json::to_vec(&descriptor).ok()
+    serde_json::to_vec(&descriptor)
+        .map(Some)
+        .map_err(|e| NexusApiError::Internal {
+            code: "DESCRIPTOR_SERIALIZE_ERROR".into(),
+            message: format!("failed to serialize execution descriptor: {e}"),
+        })
 }
 
 /// Admit a newly inserted schedule immediately (C-5): after the complete

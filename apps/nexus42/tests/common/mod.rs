@@ -51,7 +51,7 @@ pub struct LiveDaemon {
 /// (mirrors `boot.rs`: `SqliteSessionStorage` over the daemon pool +
 /// `GraphFlowEngine`). MUST run before `create_router` so the router's
 /// `WorkspaceState` clone shares the engine slot.
-fn wire_orchestration_engine(
+async fn wire_orchestration_engine(
     state: &mut WorkspaceState,
     pool: &sqlx::SqlitePool,
 ) -> (
@@ -60,6 +60,7 @@ fn wire_orchestration_engine(
 ) {
     state
         .publish_creator_runtime_bundle()
+        .await
         .expect("publish Creator-DB runtime bundle");
     let engine = state.engine().expect("engine after runtime bundle");
     let storage: Arc<dyn graph_flow::SessionStorage> = Arc::new(
@@ -180,7 +181,7 @@ impl LiveDaemon {
         }
         let pool = state.pool().expect("pool").clone();
         test_utils::seed_test_creator_and_world(&pool).await;
-        let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool);
+        let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool).await;
 
         let app = api::create_router(
             state.clone(),
@@ -233,7 +234,7 @@ impl LiveDaemon {
         .await;
         let pool = state.pool().expect("pool").clone();
         test_utils::seed_test_creator_and_world(&pool).await;
-        let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool);
+        let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool).await;
 
         let app = api::create_router(
             state.clone(),

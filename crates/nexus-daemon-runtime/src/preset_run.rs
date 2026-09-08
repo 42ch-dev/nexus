@@ -1665,44 +1665,13 @@ async fn validate_agent_bindings(
     bindings: &std::collections::HashMap<String, nexus_orchestration::run_state::AgentBinding>,
     host: Option<&Arc<dyn nexus_agent_host::HostFacade>>,
 ) -> Result<(), RunControlError> {
-    use nexus_contracts::local::orchestration::preset::{EnterAction, ExitWhen, GraphNodeKind};
-
     let role_ids: std::collections::HashSet<&str> =
         loaded.roles.iter().map(|r| r.id.as_str()).collect();
 
-    // Derive the complete required role set from the resolved graphs (N-4b).
-    let mut required: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for state in &loaded.manifest.states {
-        if let Some(exit_when) = &state.exit_when {
-            if matches!(exit_when, ExitWhen::LlmJudge { .. }) {
-                // The judge capability (`judge.llm`) resolves the `default`
-                // role binding at prompt time.
-                required.insert("default".to_string());
-            }
-        }
-        for action in &state.enter {
-            if let EnterAction::InnerGraph { name } = action {
-                if let Some(graph) = loaded.inner_graphs.get(name) {
-                    // The manifest's node list is the source of truth for
-                    // agent references; the built graph mirrors it.
-                    if let Some(ig) = loaded.manifest.inner_graphs.as_ref().and_then(|igs| igs.get(name)) {
-                        for node in &ig.nodes {
-                            if matches!(node.kind, GraphNodeKind::AcpPrompt) {
-                                match &node.agent {
-                                    Some(agent) => {
-                                        required.insert(agent.clone());
-                                    }
-                                    None => {
-                                        required.insert("default".to_string());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    // N-4b: the COMPLETE prompt-role set is derived from the resolved outer
+    // and inner graphs via the shared helper (same source the daemon's
+    // internal binding builder uses — they can never drift).
+    let required = nexus_orchestration::preset::required_prompt_roles(loaded);
 
     // Every required role must have an effective binding (N-4b). An empty
     // map is accepted ONLY when the preset has no prompt path at all.

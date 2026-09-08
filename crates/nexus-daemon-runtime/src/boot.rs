@@ -1055,6 +1055,21 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         if let Some(reg) = supervisor_registry {
             schedule_supervisor_builder = schedule_supervisor_builder.with_capability_registry(reg);
         }
+        // N-9: the default binding provider for internal schedule insertion
+        // is the first enabled Host provider (config order). Auto-chain
+        // continuation rows built by this supervisor bind every effective
+        // prompt role to this provider so the admission binding-completeness
+        // gate passes.
+        let binding_provider = state
+            .agent_host_config()
+            .providers
+            .iter()
+            .find(|p| p.enabled)
+            .map(|p| p.id.clone());
+        if let Some(provider_id) = &binding_provider {
+            schedule_supervisor_builder =
+                schedule_supervisor_builder.with_binding_provider(provider_id.clone());
+        }
         // A3 (v1.186 P2 T1): inject the daemon admission callback so `tick`
         // admits `driven_v1` pending rows through the single-run owner
         // (atomic schedule→session identity + drive) instead of a
@@ -1149,6 +1164,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                                         next_stage,
                                         None,
                                         &latest,
+                                        binding_provider.as_deref(),
                                     )
                                     .await
                                     {
@@ -1177,6 +1193,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                                         "produce",
                                         Some(*next_chapter),
                                         &latest,
+                                        binding_provider.as_deref(),
                                     )
                                     .await
                                     {
@@ -1284,6 +1301,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                 watcher_pool,
                 watcher_shutdown,
                 watcher_config,
+                binding_provider.clone(),
             );
         }
 
@@ -1311,6 +1329,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                 cron_supervisor,
                 cron_shutdown,
                 cron_config,
+                binding_provider.clone(),
             );
         }
 
@@ -1639,6 +1658,17 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         }
     }
 
+    // N-2: publish ONE immutable aggregate runtime bundle from the
+    // boot-wired slots BEFORE route readiness is exposed — a route can
+    // never observe a mixed/partial bundle. Tier-0 boot (no creator DB)
+    // has no coordinator/supervisor and defers the bundle to Profile
+    // attach (`ensure_creator_pool`).
+    if state.run_coordinator().is_some() {
+        state
+            .publish_boot_runtime_bundle()
+            .map_err(|e| anyhow::anyhow!("failed to publish boot runtime bundle: {e}"))?;
+    }
+
     let app = api::create_router(state, auth_config);
 
     // --- Section 10: Start lifecycle and spawn server ---
@@ -1804,9 +1834,52 @@ async fn resume_auto_chain_work(
     stage: &str,
     chapter: Option<i32>,
     work: &nexus_local_db::works::WorkRecord,
+    binding_provider: Option<&str>,
 ) -> Result<String, String> {
+    // N-9: derive the complete binding map for the stage's preset from the
+    // configured default provider. A preset with prompt roles and no
+    // provider refuses the enqueue (never a drive-enabled row with an empty
+    // binding map); a preset with no prompt roles accepts an empty map.
+    let bindings = match binding_provider {
+        Some(provider_id) => {
+            let Some(preset_id) = nexus_orchestration::stage_gates::preset_for_stage(stage) else {
+                return Err(format!("no preset mapping for stage '{stage}'"));
+            };
+            match nexus_orchestration::preset::default_bindings_for_preset(preset_id, provider_id) {
+                Some(bindings) => bindings,
+                None => {
+                    return Err(format!(
+                        "preset '{preset_id}' not resolvable; refusing to publish a drive-enabled row"
+                    ));
+                }
+            }
+        }
+        None => {
+            let Some(preset_id) = nexus_orchestration::stage_gates::preset_for_stage(stage) else {
+                return Err(format!("no preset mapping for stage '{stage}'"));
+            };
+            let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+            match nexus_orchestration::preset::load_embedded_preset(preset_id, &caps) {
+                Ok(loaded) => {
+                    let roles = nexus_orchestration::preset::required_prompt_roles(&loaded);
+                    if !roles.is_empty() {
+                        return Err(format!(
+                            "preset '{preset_id}' requires prompt roles but no binding \
+                             provider is configured; refusing to publish a drive-enabled row"
+                        ));
+                    }
+                    std::collections::HashMap::new()
+                }
+                Err(e) => {
+                    return Err(format!(
+                        "preset '{preset_id}' not resolvable: {e}; refusing to publish a drive-enabled row"
+                    ));
+                }
+            }
+        }
+    };
     nexus_orchestration::auto_chain::enqueue_auto_chain_schedule(
-        pool, creator_id, work_id, stage, chapter, None, work,
+        pool, creator_id, work_id, stage, chapter, None, work, bindings,
     )
     .await
     .map_err(|e| e.to_string())

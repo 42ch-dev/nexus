@@ -102,6 +102,13 @@ pub struct ScheduleSupervisor {
     /// of a status-only `Running` flip. `None` (tests, non-daemon use) keeps
     /// the pre-driver status-only admission.
     schedule_starter: Arc<Option<Arc<dyn ScheduleRunStarter>>>,
+    /// Default binding provider for internal schedule insertion (N-9): the
+    /// daemon's first enabled Host provider. Auto-chain continuation rows
+    /// built by this supervisor bind every effective prompt role to this
+    /// provider so the admission binding-completeness gate passes. `None`
+    /// (tests, no Host config) means internal insertion refuses to publish
+    /// a drive-enabled row for a preset with prompt roles.
+    binding_provider: Arc<Option<String>>,
 }
 
 struct Inner {
@@ -137,6 +144,7 @@ impl ScheduleSupervisor {
             workspace_dir: Arc::new(workspace_dir),
             registry: Arc::new(None),
             schedule_starter: Arc::new(None),
+            binding_provider: Arc::new(None),
         }
     }
 
@@ -162,6 +170,18 @@ impl ScheduleSupervisor {
     #[must_use]
     pub fn with_schedule_starter(mut self, starter: Arc<dyn ScheduleRunStarter>) -> Self {
         self.schedule_starter = Arc::new(Some(starter));
+        self
+    }
+
+    /// Set the default binding provider for internal schedule insertion
+    /// (N-9): the daemon's first enabled Host provider. Auto-chain
+    /// continuation rows built by this supervisor bind every effective
+    /// prompt role to this provider so the admission binding-completeness
+    /// gate passes. When unset, internal insertion refuses to publish a
+    /// drive-enabled row for a preset with prompt roles.
+    #[must_use]
+    pub fn with_binding_provider(mut self, provider_id: String) -> Self {
+        self.binding_provider = Arc::new(Some(provider_id));
         self
     }
 
@@ -881,8 +901,67 @@ impl ScheduleSupervisor {
     ) -> Result<(), SupervisorError> {
         use crate::auto_chain::{self, AutoChainError};
 
+        // N-9: derive the complete binding map for the stage's preset from
+        // the configured default provider. A preset with prompt roles and
+        // no provider refuses the enqueue (never a drive-enabled row with an
+        // empty binding map); a preset with no prompt roles accepts an empty
+        // map.
+        let bindings = match self.binding_provider.as_ref().as_ref() {
+            Some(provider_id) => {
+                let Some(preset_id) = crate::stage_gates::preset_for_stage(stage) else {
+                    return Ok(());
+                };
+                match crate::preset::default_bindings_for_preset(preset_id, provider_id) {
+                    Some(bindings) => bindings,
+                    None => {
+                        tracing::warn!(
+                            work_id = %work_id,
+                            stage = %stage,
+                            preset_id = %preset_id,
+                            "auto-chain: preset has prompt roles but no binding provider; \
+                             refusing to publish a drive-enabled row"
+                        );
+                        return Ok(());
+                    }
+                }
+            }
+            None => {
+                // No configured provider: only presets WITHOUT prompt roles
+                // may be enqueued (empty map passes the completeness gate).
+                let Some(preset_id) = crate::stage_gates::preset_for_stage(stage) else {
+                    return Ok(());
+                };
+                let caps = crate::capability::CapabilityRegistry::with_builtins();
+                match crate::preset::load_embedded_preset(preset_id, &caps) {
+                    Ok(loaded) => {
+                        let roles = crate::preset::required_prompt_roles(&loaded);
+                        if !roles.is_empty() {
+                            tracing::warn!(
+                                work_id = %work_id,
+                                stage = %stage,
+                                preset_id = %preset_id,
+                                "auto-chain: preset requires prompt roles but no binding \
+                                 provider is configured; refusing to publish a drive-enabled row"
+                            );
+                            return Ok(());
+                        }
+                        std::collections::HashMap::new()
+                    }
+                    Err(_) => {
+                        tracing::warn!(
+                            work_id = %work_id,
+                            stage = %stage,
+                            preset_id = %preset_id,
+                            "auto-chain: preset not resolvable; refusing to publish a drive-enabled row"
+                        );
+                        return Ok(());
+                    }
+                }
+            }
+        };
+
         match auto_chain::enqueue_auto_chain_schedule(
-            &self.pool, creator_id, work_id, stage, chapter, volume, work,
+            &self.pool, creator_id, work_id, stage, chapter, volume, work, bindings,
         )
         .await
         {
@@ -949,6 +1028,37 @@ impl ScheduleSupervisor {
         &self,
         schedule: Schedule,
         execution_descriptor: Option<&[u8]>,
+    ) -> Result<(), SupervisorError> {
+        self.insert_pending_inner(schedule, execution_descriptor, None)
+            .await
+    }
+
+    /// Insert a pending schedule with a frozen execution descriptor AND a
+    /// durable core-context version-0 seed record (A3, C-2/I-5, N-3).
+    ///
+    /// The schedule row, dependency rows, frozen descriptor, and the
+    /// version-0 core-context record commit in ONE transaction, so a
+    /// concurrent tick can never observe a `driven_v1` row before its
+    /// seed/version is durable — a seed failure rolls the whole row back
+    /// and never orphans a drive-enabled schedule.
+    ///
+    /// # Errors
+    /// Returns [`SupervisorError`] if database insertion fails.
+    pub async fn insert_pending_with_descriptor_and_seed(
+        &self,
+        schedule: Schedule,
+        execution_descriptor: Option<&[u8]>,
+        seed_text: &str,
+    ) -> Result<(), SupervisorError> {
+        self.insert_pending_inner(schedule, execution_descriptor, Some(seed_text))
+            .await
+    }
+
+    async fn insert_pending_inner(
+        &self,
+        schedule: Schedule,
+        execution_descriptor: Option<&[u8]>,
+        seed_text: Option<&str>,
     ) -> Result<(), SupervisorError> {
         let now = chrono::Utc::now().timestamp();
 
@@ -1039,8 +1149,8 @@ impl ScheduleSupervisor {
                VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?)"#,
         )
         .bind(&schedule_id)
-        .bind(creator_id)
-        .bind(preset_id)
+        .bind(&creator_id)
+        .bind(&preset_id)
         .bind(preset_version_i64)
         .bind(concurrency_kind)
         .bind(concurrency_whitelist)
@@ -1063,6 +1173,42 @@ impl ScheduleSupervisor {
                 schedule_id,
                 dep_id
             )
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        // N-3: when a seed is supplied, persist the durable version-0
+        // core-context record in the SAME transaction — a `driven_v1` row
+        // is never observable before its seed/version is durable, and a
+        // seed failure rolls the whole row back (no orphaned drive-enabled
+        // schedule). The public add path is user-initiated, so the record
+        // carries the user author (mirrors `CoreContextManager::apply_seed`
+        // with `CoreContextAuthor::User`).
+        if let Some(seed_text) = seed_text {
+            let payload = serde_json::json!({ "kind": "text", "body": seed_text });
+            let content_bytes = serde_json::to_vec(&payload).map_err(|e| {
+                SupervisorError::Database(sqlx::Error::Protocol(format!(
+                    "serialize core-context seed: {e}"
+                )))
+            })?;
+            let derivation = serde_json::json!({ "kind": "seed", "raw": seed_text });
+            let derivation_bytes = serde_json::to_vec(&derivation).map_err(|e| {
+                SupervisorError::Database(sqlx::Error::Protocol(format!(
+                    "serialize core-context derivation: {e}"
+                )))
+            })?;
+            sqlx::query(
+                "INSERT INTO core_context_versions
+                   (schedule_id, version, payload_kind, content,
+                    derivation_kind, derivation_detail,
+                    created_at, created_by_kind, created_by_user_id)
+                 VALUES (?, 0, 'text', ?, 'seed', ?, ?, 'user', ?)",
+            )
+            .bind(&schedule_id)
+            .bind(content_bytes)
+            .bind(derivation_bytes)
+            .bind(now)
+            .bind(&creator_id)
             .execute(&mut *tx)
             .await?;
         }

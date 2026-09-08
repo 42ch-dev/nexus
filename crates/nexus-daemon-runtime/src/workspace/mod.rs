@@ -81,8 +81,6 @@ pub struct RuntimeBundle {
     coordinator: Arc<crate::preset_run::WorkflowRunCoordinator>,
     /// The schedule supervisor with the daemon admission starter.
     supervisor: Arc<ScheduleSupervisor>,
-    /// The shared Creator-DB pool.
-    pool: Arc<sqlx::SqlitePool>,
 }
 
 /// Shared workspace state
@@ -590,19 +588,92 @@ impl WorkspaceState {
         Ok(())
     }
 
-    /// Publish the durable Creator-DB runtime bundle after a lazy Profile
-    /// attach (I-3): storage/engine/prompt-executor/coordinator/supervisor
-    /// all over the SAME attached pool, sharing the SAME cancellation map
-    /// and capability holder. Called only when the daemon booted Tier-0
-    /// (no creator DB at boot) and the pool was just opened.
+    /// Publish the immutable aggregate runtime bundle from the boot-wired
+    /// slots (N-2): called at the END of daemon boot, after the engine,
+    /// capability holder, prompt executor, coordinator, and schedule
+    /// supervisor are all wired, and BEFORE route readiness is exposed.
+    ///
+    /// Production accessors read this single readiness cell; a route can
+    /// never observe a mixed/partial bundle (e.g. a coordinator from one
+    /// wiring phase with a supervisor from another). The individual slots
+    /// remain for the boot path's incremental wiring and as a fallback when
+    /// no aggregate has been published (Tier-0 boot before Profile attach).
+    ///
+    /// # Errors
+    /// Returns an error when a required component is missing (the caller
+    /// must wire every component before publishing).
+    pub fn publish_boot_runtime_bundle(&self) -> anyhow::Result<()> {
+        if self.runtime_bundle().is_some() {
+            return Ok(());
+        }
+        let engine = self
+            .engine
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("engine not wired before boot bundle publish"))?;
+        let capability_holder = self
+            .capability_registry
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("capability registry not wired before boot bundle publish"))?;
+        let coordinator = self
+            .run_coordinator
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("run coordinator not wired before boot bundle publish"))?;
+        let supervisor = self
+            .schedule_supervisor
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("schedule supervisor not wired before boot bundle publish"))?;
+        let prompt_executor = self
+            .prompt_executor
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let bundle = Arc::new(RuntimeBundle {
+            engine,
+            capability_holder,
+            prompt_executor,
+            coordinator,
+            supervisor,
+        });
+        *self
+            .runtime_bundle
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(bundle);
+        tracing::info!("boot: published immutable aggregate runtime bundle");
+        Ok(())
+    }
+
     /// Publish the durable Creator-DB runtime bundle (engine, coordinator,
     /// supervisor, prompt executor) over the currently attached pool.
     ///
     /// Used by lazy Profile attach and by hermetic production-daemon tests.
     ///
+    /// N-2b: routes through the SAME async once/initialization gate as
+    /// [`Self::ensure_creator_pool`] — concurrent callers serialize,
+    /// re-check, and observe the winner's complete bundle; no caller can
+    /// publish a second aggregate over an existing creator runtime.
+    ///
     /// # Errors
     /// Returns an error if the creator pool is missing or engine construction fails.
-    pub fn publish_creator_runtime_bundle(&self) -> anyhow::Result<()> {
+    pub async fn publish_creator_runtime_bundle(&self) -> anyhow::Result<()> {
+        // Fast path: the matching bundle is already published.
+        if self.runtime_bundle().is_some() {
+            return Ok(());
+        }
+        // N-2b: one async initialization gate for the publish sequence.
+        let _gate = self.bundle_gate.lock().await;
+        // Re-check under the gate: the winner may have completed while we
+        // waited.
+        if self.runtime_bundle().is_some() {
+            return Ok(());
+        }
         self.publish_lazy_attach_bundle()
     }
 
@@ -713,6 +784,17 @@ impl WorkspaceState {
         if let Some(reg) = holder.get() {
             supervisor_builder = supervisor_builder.with_capability_registry(reg);
         }
+        // N-9: the default binding provider for internal schedule insertion
+        // is the first enabled Host provider (config order).
+        if let Some(provider_id) = self
+            .agent_host_config()
+            .providers
+            .iter()
+            .find(|p| p.enabled)
+            .map(|p| p.id.clone())
+        {
+            supervisor_builder = supervisor_builder.with_binding_provider(provider_id);
+        }
         let starter = crate::boot::DaemonScheduleRunStarter {
             coordinator: coordinator.clone(),
             pool: pool_arc.clone(),
@@ -733,7 +815,6 @@ impl WorkspaceState {
             prompt_executor: prompt_executor.clone(),
             coordinator: coordinator.clone(),
             supervisor: supervisor.clone(),
-            pool: pool_arc.clone(),
         });
         *self
             .runtime_bundle

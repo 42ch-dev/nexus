@@ -81,6 +81,7 @@ async fn cron_fires_without_workspace_dir_gracefully_skips_file_lock() {
         &pool,
         Some(&ws_dir),
         chrono::Utc::now(),
+        Some("test-provider"),
     )
     .await;
 
@@ -117,6 +118,7 @@ async fn run_one_tick_with_workspace_dir_handles_file_lock() {
         &pool,
         Some(&ws_dir),
         chrono::Utc::now(),
+        Some("test-provider"),
     )
     .await;
 
@@ -155,6 +157,7 @@ async fn file_lock_blocks_cron_fire_when_held() {
         &pool,
         Some(&ws_dir),
         chrono::Utc::now(),
+        Some("test-provider"),
     )
     .await;
 

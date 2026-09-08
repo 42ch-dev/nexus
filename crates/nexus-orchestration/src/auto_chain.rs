@@ -1427,6 +1427,7 @@ pub async fn enqueue_auto_chain_schedule(
     chapter: Option<i32>,
     volume: Option<i32>,
     work: &WorkRecord,
+    agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
 ) -> Result<String, AutoChainError> {
     // V1.48 P1 (overlay §2 Consumer): render the open-findings prompt
     // block when the produce stage targets a selected chapter.
@@ -1482,24 +1483,6 @@ pub async fn enqueue_auto_chain_schedule(
         .input
         .as_ref()
         .and_then(|v| v.as_object().cloned())
-        .unwrap_or_default();
-    let agent_bindings = schedule_req
-        .agent_bindings
-        .as_ref()
-        .map(|bindings| {
-            bindings
-                .iter()
-                .map(|(role, dto)| {
-                    (
-                        role.clone(),
-                        crate::run_state::AgentBinding {
-                            provider_id: dto.provider_id.clone(),
-                            model: dto.model.clone(),
-                        },
-                    )
-                })
-                .collect()
-        })
         .unwrap_or_default();
     sqlx::query(
         "INSERT INTO creator_schedules
@@ -1680,6 +1663,7 @@ pub async fn enqueue_review_master_schedule(
     pool: &SqlitePool,
     creator_id: &str,
     work_id: &str,
+    agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
 ) -> Result<String, AutoChainError> {
     // R-V147P0-05 (hotfix H-1): append a per-process monotonic counter suffix
     // (mirrors `ACH_COUNTER` / R-V139P0-W-B) so two enqueues in the same
@@ -1730,7 +1714,7 @@ pub async fn enqueue_review_master_schedule(
         "novel-review-master",
         preset_version,
         input,
-        std::collections::HashMap::new(),
+        agent_bindings,
     ))
     .execute(&mut *tx)
     .await
@@ -1777,6 +1761,7 @@ pub async fn enqueue_cron_schedule(
     work_id: &str,
     preset_id: &str,
     role: &str,
+    agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
 ) -> Result<String, AutoChainError> {
     // CRON prefix + timestamp + per-process counter (collision-resistant,
     // mirrors `ACH_COUNTER` / `RVM_COUNTER`). Two roles firing in the same
@@ -1826,7 +1811,7 @@ pub async fn enqueue_cron_schedule(
         preset_id,
         preset_version,
         input,
-        std::collections::HashMap::new(),
+        agent_bindings,
     ))
     .execute(&mut *tx)
     .await
@@ -2116,7 +2101,8 @@ mod tests {
 
         let sid = enqueue_auto_chain_schedule(
             &pool, "ctr_test", "wrk_test", "research", None, None, &work,
-        )
+            std::collections::HashMap::new(),
+            )
         .await
         .unwrap();
 
@@ -2176,6 +2162,7 @@ mod tests {
             None,
             None,
             &work,
+        std::collections::HashMap::new(),
         )
         .await;
 
@@ -2217,10 +2204,10 @@ mod tests {
 
         // Fire two enqueues back-to-back. Even if both land in the same ms
         // granule, the counter suffix must keep the PKs distinct.
-        let sid_a = enqueue_review_master_schedule(&pool, "ctr_test", "wrk_test")
+        let sid_a = enqueue_review_master_schedule(&pool, "ctr_test", "wrk_test", std::collections::HashMap::new())
             .await
             .expect("first RVM enqueue must succeed");
-        let sid_b = enqueue_review_master_schedule(&pool, "ctr_test", "wrk_test")
+        let sid_b = enqueue_review_master_schedule(&pool, "ctr_test", "wrk_test", std::collections::HashMap::new())
             .await
             .expect("second RVM enqueue must succeed even in the same ms");
 
