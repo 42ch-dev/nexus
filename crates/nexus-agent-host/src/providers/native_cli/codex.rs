@@ -956,7 +956,7 @@ mod tests {
             cwd: std::path::PathBuf::from("/tmp"),
             model: None,
             mode: None,
-            owner: nexus_agent_host::capability::model::SessionOwner {
+            owner: crate::capability::model::SessionOwner {
                 creator_id: "ctr_test".to_string(),
                 workspace_root: std::path::PathBuf::from("/tmp"),
                 orchestration_run_id: None,

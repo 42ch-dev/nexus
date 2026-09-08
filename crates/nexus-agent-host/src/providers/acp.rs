@@ -1228,7 +1228,8 @@ mod tests {
             TimeoutConfig::default(),
             HostPermissionResolver::new_native_only(&crate::config::PolicyConfig::default()),
         )
-        .expect_err("disabled provider refused");
+        .err()
+        .expect("disabled provider refused");
         assert_eq!(err.category(), "provider_unavailable");
     }
 
@@ -1239,7 +1240,8 @@ mod tests {
             TimeoutConfig::default(),
             HostPermissionResolver::new_native_only(&crate::config::PolicyConfig::default()),
         )
-        .expect_err("missing command refused");
+        .err()
+        .expect("missing command refused");
         assert_eq!(err.category(), "internal_host_error");
     }
 
@@ -1252,7 +1254,8 @@ mod tests {
             TimeoutConfig::default(),
             HostPermissionResolver::new_native_only(&crate::config::PolicyConfig::default()),
         )
-        .expect_err("non-acp protocol refused");
+        .err()
+        .expect("non-acp protocol refused");
         assert_eq!(err.category(), "internal_host_error");
     }
 }
