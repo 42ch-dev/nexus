@@ -1,16 +1,16 @@
 # Orchestration Engine — Design Specification
 
-**Status**: Shipped (V1.4–V1.34 — orchestration engine SSOT, preset loader, worker IPC, capability registry). **V1.39 target**: DF-53 on_complete auto-chain + DF-68 boot resume policy. **V1.62 Shipped**: §5.2 `narrative.compute` capability + §8.4 `combat-engine` preset (deferred from V1.61 P3). FL-D (DF-29/31/56) shipped V1.56. **V1.179 P2 shipped**: DR-06 bounded joins (§7.5 `timeout_ms` / `on_timeout` on `merge:`/`converge:` states — additive fields; normative field table + semantics in [preset-conditional-routing.md](preset-conditional-routing.md) §3.3.3).
+**Status**: Shipped (V1.4–V1.186 — orchestration engine SSOT, preset loader, Host-mediated prompt execution, capability registry). **V1.39 target**: DF-53 on_complete auto-chain + DF-68 boot resume policy. **V1.62 Shipped**: §5.2 `narrative.compute` capability + §8.4 `combat-engine` preset. **V1.179 P2 shipped**: DR-06 bounded joins. **V1.186 shipped**: §15 durable execution completeness and Host cutover.
 **Document class**: Master  
 **Pillar (V1.122)**: **Harness** — this spec is the control-strategy engine contract for the [Harness](../../STRATEGY.md) pillar (orchestration engine + agent host + capability registry + presets). Harness is the "how an author harnesses AI agents to execute creative work" pillar; the user-visible Strategy/Strategies → **Harness** product rename shipped V1.156 P3; internal identifiers remain `strategy`/`preset` (architect LOCKED).
 **Author**: @project-manager (brainstorm consolidation) / to be co-authored by @architect before first implement
-**Date**: 2026-04-17; **Last updated**: 2026-09-07 — V1.186 product lock (Prepare, not shipped): §15 execution completeness overlay
-**Scope**: daemon runtime (daemon), new `crates/nexus-acp-host`, new `crates/nexus-orchestration`, `nexus42` CLI additions, preset bundle format.
+**Date**: 2026-04-17; **Last updated**: 2026-09-08 — V1.186 Host execution cutover
+**Scope**: daemon runtime, `crates/nexus-acp-host`, `crates/nexus-orchestration`, `nexus42` CLI, and preset bundle format.
 **Supersedes**: — (new topic)
 **Coordinates with**:
 
 - [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) — crate owners for sync/memory capabilities (§5.2 target names; legacy `nexus-sync` / `nexus-domain` until V1.21)
-- [acp-client-tech-spec.md](acp-client-tech-spec.md) — §2.3 worker-delegated hosting amendment; §4 Daemon API additions; §11 `nexus-acp-host` crate spec
+- [acp-client-tech-spec.md](acp-client-tech-spec.md) — ACP transport/provider contract and `nexus-acp-host` crate spec
 - TD-9 closed: full 6-state HSM lifecycle (status moves from "gap" to "closed")
 
 **Non-goals** (explicit):
@@ -21,7 +21,7 @@
 - Preset third-party registry / signing / publish — V1.5+.
 - Full `schemas/` vs local-type boundary refactor — **WS5** of V1.4, designed separately in `schemas-boundary.md`; parallel to WS2 of that compass.
 
-> This document is the **orchestration engine design** from the 2026-04-17 brainstorming session. Scope has since expanded: the `schemas/` boundary refactor is tracked as WS5 (`schemas-boundary.md`); the former "B-track" Schedule + core_context work is tracked as WS7 ([creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)). Open questions originally parked in §11 of this document are **now answered** by WS7's spec (see §11 below for the reconciliation table).
+> This document is the orchestration engine design from the 2026-04-17 brainstorming session, updated in place for the shipped Host execution plane. Schedule + core_context work is tracked in [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md); §11 retains the reconciliation table.
 
 ---
 
@@ -32,7 +32,7 @@
 3. [Architecture Overview](#3-architecture-overview)
 4. [Orchestration Engine (graph-flow integration)](#4-orchestration-engine-graph-flow-integration)
 5. [Capability Registry](#5-capability-registry)
-6. [Worker Model and Daemon ↔ Worker IPC](#6-worker-model-and-daemon--worker-ipc)
+6. [Host-owned ACP execution](#6-host-owned-acp-execution)
 7. [Preset Bundle Format](#7-preset-bundle-format)
 8. [Preset Loader (YAML → graph-flow Graph)](#8-preset-loader-yaml--graph-flow-graph)
 9. [System Schedule vs Creator Schedule](#9-system-schedule-vs-creator-schedule)
@@ -57,7 +57,7 @@ Users need to express creator workflows as configurable, prompt-driven strategie
 
 - **Daemon becomes `orchestration engine + capability registry`**: existing HTTP-era capabilities (sync, workspace ops, outbox flush, registry refresh) are **reclassified as first-class capabilities** invokable as graph nodes; HTTP API retreats to a *trigger/query surface* over the same engine.
 - **Strategy shape is hierarchical**: an outer **state machine** (long-lived, cross-session) containing inner **DAG graphs** (short, in-memory prompt/tool call chains) — *graph-of-graphs*.
-- **ACP remains external, but its *execution locus* moves**: the CLI retains interactive `agent run/list/show/probe`; *orchestration-driven* ACP sessions were originally specified as **per-creator long-lived CLI worker subprocesses**. daemon runtime never links the ACP SDK directly (SDK stays in `nexus-acp-host`). **V1.186:** production orchestration prompts use the existing HostFacade / provider plane; echoed worker prompts are not success. See §15.
+- **ACP remains external behind the Host plane**: CLI keeps interactive `acp run`; orchestration prompts use the daemon's existing `HostFacade` through an injected `PromptExecutor`. `nexus-acp-host` owns transport and process lifecycle; orchestration never owns provider handles.
 - **Runtime is `graph-flow` (outer + inner) + custom SQLite `SessionStorage`**: adapted behind a thin trait layer so the upstream `0.2.x` crate is swappable.
 - **Daemon lifecycle is `statig` HSM**: 6-state process lifecycle (`Stopped`/`Starting`/`Running`/`Degraded`/`Stopping`/`Failed`) — closes TD-9.
 - **Presets are filesystem bundles**: YAML manifest + companion Markdown prompt templates; loaded dynamically by name; decoupled from compiled Rust code.
@@ -78,7 +78,7 @@ Per [effort-estimation.md](https://github.com/btspoony/mstar-harness/blob/main/d
 | Phase                                                           | Effort     | Approx. agent sessions |
 | --------------------------------------------------------------- | ---------- | ---------------------- |
 | Phase 1 — `nexus-acp-host` crate extraction                     | M          | 1–2                    |
-| Phase 2 — orchestration skeleton (graph-flow + capability + IPC) | L          | 2–3                    |
+| Phase 2 — orchestration skeleton (graph-flow + capability + Host seam) | L          | 2–3                    |
 | Phase 3 — preset loader + `novel-writing` end-to-end             | M          | 1–2                    |
 | Phase 4 — statig lifecycle HSM (parallelisable with Phase 2)    | S+         | 1                      |
 | Totals (excl. Phase 4 parallel savings; see compass WS5 for schemas refactor effort) | **L → XL** | **6–9** |
@@ -91,7 +91,7 @@ Per [effort-estimation.md](https://github.com/btspoony/mstar-harness/blob/main/d
 
 - Runtime architecture of the orchestration engine and capability registry.
 - `nexus-acp-host` crate extraction (crate boundary and linkage matrix).
-- Per-creator worker process model and daemon ↔ worker IPC protocol.
+- Run-scoped Host session ownership and ACP transport boundary.
 - Preset bundle filesystem layout, YAML manifest schema, prompt reference semantics, loader mapping rules.
 - Adapter layer over `graph-flow`: trait boundary, SQLite `SessionStorage` impl contract, `Task` impls for the standard node kinds.
 - Built-in capabilities catalog (first release).
@@ -256,12 +256,12 @@ Every preset node compiles into one of these Rust `Task` impls:
 | Task impl            | Preset node kind         | Behaviour                                                                 |
 | -------------------- | ------------------------ | ------------------------------------------------------------------------- |
 | `CapabilityTask`     | `capability`             | Resolves to a registered `Capability`, calls its `run(ctx)`, stores output |
-| `AcpPromptTask`      | `acp_prompt`             | Dispatches prompt to worker via IPC; streams response back into `Context` |
+| `AcpPromptTask`      | `acp_prompt`             | Calls the injected `PromptExecutor`; stores typed Host output in `Context` |
 | `InnerGraphTask`     | `inner_graph`            | Launches a child `Session` over a named inner graph; awaits completion    |
-| `JudgeTask`          | `llm_judge` exit_when    | Calls declared `judge_capability` (default `judge.llm`) via worker IPC — **V1.33** fixes stub-only path; see §4.4.1 |
+| `JudgeTask`          | `llm_judge` exit_when    | Calls the declared judge capability (default `judge.llm`) through the same `PromptExecutor` |
 | `ManualWaitTask`     | `manual` exit_when       | Returns `NextAction::WaitForInput`; CLI `advance` resumes                 |
 | `RuleCheckTask`      | rule-based exit_when     | Pure function over `Context`; no external calls                           |
-| `TimerWaitTask`      | `timer` exit_when (opt.) | Returns `WaitForInput` plus schedules a clock signal (B-track integration) |
+| `TimerWaitTask`      | `timer` exit_when (opt.) | Returns `WaitForInput` plus schedules a clock signal                       |
 
 All impls live in `crates/nexus-orchestration/src/tasks/`. Task implementations are **pure** over `Context` + well-typed capability handles — no global state.
 
@@ -273,7 +273,7 @@ All impls live in `crates/nexus-orchestration/src/tasks/`. Task implementations 
 
 1. Read `judge_capability` from state YAML (default `judge.llm`).
 2. Load `template_file` relative to bundle root; pass rendered template + `contextData` to the capability.
-3. Require worker IPC for `judge.llm` (same as `acp.prompt`); without worker → `CapabilityError` / `WaitForInput` per preset policy.
+3. Require an injected `PromptExecutor`, trusted run identity, registered cancellation token, and narrowing permission scope; otherwise fail closed and wait per preset policy.
 4. Parse GO/NOGO from capability output (existing `judge.llm` word-list contract).
 5. Map GO → `NextAction::Continue`; NOGO → `NextAction::WaitForInput` (respect `min_interval` if set).
 6. **Identity**: use schedule-injected `_creator_id` / `_session_id` only — not raw preset args (aligns with V1.32 `SEC-V131-01`).
@@ -298,24 +298,22 @@ All impls live in `crates/nexus-orchestration/src/tasks/`. Task implementations 
 ### 5.1 `Capability` trait
 
 ```rust
-// crates/nexus-orchestration/src/capability.rs
 #[async_trait]
 pub trait Capability: Send + Sync {
-    fn name(&self) -> &'static str;           // e.g. "sync.push"
-    fn input_schema(&self) -> &JsonSchema;
-    fn output_schema(&self) -> &JsonSchema;
-    async fn run(&self, ctx: CapabilityCtx<'_>, input: Value) -> Result<Value, CapabilityError>;
+    fn name(&self) -> &'static str;
+    fn input_schema(&self) -> &'static str;
+    fn output_schema(&self) -> &'static str;
+    async fn run(&self, input: Value) -> Result<Value, CapabilityError>;
 }
 
-pub struct CapabilityCtx<'a> {
-    pub creator_id: Option<&'a CreatorId>,
-    pub workspace: &'a WorkspaceHandle,
-    pub engine: &'a dyn OrchestrationEngine,   // capability may signal engine (rare)
-    pub worker: Option<&'a WorkerHandle>,       // present only for ACP-kind capabilities
-    pub clock: &'a dyn Clock,
-    pub tracing: &'a tracing::Span,
+#[async_trait]
+pub trait PromptExecutor: Send + Sync {
+    async fn execute(&self, request: PromptRequest) -> Result<PromptResult, CapabilityError>;
+    async fn finalize_run(&self, run_id: &str) -> Result<(), CapabilityError>;
 }
 ```
+
+Runtime dependencies are injected through `CapabilityRuntimeDeps`; graph context carries serializable values only. Provider, process, and transport handles remain behind the daemon's `HostFacade`.
 
 ### 5.2 Built-in capabilities (first release)
 
@@ -333,16 +331,16 @@ All capabilities below are registered at daemon runtime startup. Adding a new ca
 | `creator.read_memory`       | Query persisted creator memory fragments                       | `nexus-creator-memory` | **Real** — SQLite-backed query through `CreatorCapabilityStore` (V1.31 DF-30) |
 | `creator.write_memory`      | Persist creator memory fragments and return real `fragment_id` | `nexus-creator-memory` | **Real** — SQLite-backed write through `CreatorCapabilityStore` (V1.31 DF-30) |
 | `creator.inject_prompt`     | Queue a prompt to be sent on next `acp.prompt`                 | `nexus-orchestration`  | **Real** — persisted injection queue in `state.db` (V1.31 DF-30) |
-| `acp.prompt`                | Send a prompt to this creator's active ACP session             | `nexus-orchestration`  | Real for worker-backed preset execution |
+| `acp.prompt`                | Send a run-scoped prompt through the Host plane                 | `nexus-orchestration`  | **Real** — injected `PromptExecutor`; missing dependencies fail closed |
 | `kb.extract_work`           | Extract KB assets from a work entry into a World               | `nexus-orchestration` (preset-driven via `acp_prompt`) | Real |
 | `soul.experience.aggregate` | Aggregate SOUL Experience section from session review items    | `nexus-orchestration` (preset-driven via `acp_prompt`) | Real |
-| `judge.llm`                 | Evaluate a go/nogo prompt using a *judge* agent                | `nexus-orchestration`  | **Real** — worker-backed `acp.prompt` with `deny_all`, GO/NOGO parse (V1.31 DF-33/37) |
-| `judge.rule`                | Evaluate a pure rule over `contextData`                        | `nexus-orchestration`  | **Real** — boolean literals, field equality/inequality, numeric comparisons (V1.31 DF-32) |
-| `context.summarize`         | Summarize context through a worker-backed ACP prompt           | `nexus-orchestration`  | **Real** — returns `{ summary, prompt_hash }` (V1.31 DF-34/37) |
+| `judge.llm`                 | Evaluate a go/nogo prompt using a judge role                   | `nexus-orchestration`  | **Real** — `PromptExecutor` with `deny_all`, GO/NOGO parse |
+| `judge.rule`                | Evaluate a pure rule over `contextData`                        | `nexus-orchestration`  | **Real** — boolean literals, field equality/inequality, numeric comparisons |
+| `context.summarize`         | Summarize context through a Host-mediated prompt               | `nexus-orchestration`  | **Real** — returns `{ summary, prompt_hash }` |
 | `narrative.compute`         | Invoke WASM compute module; apply state_delta, timeline_events, new_key_blocks, return battle_report | `nexus-orchestration`  | **Real** — calls `nexus-wasm-host::compute()` (V1.61 P3; spec-seal V1.62 P2); see §8.4.1 |
 | `timer.wait_until`          | Schedule a wake-up signal (requires B-track clock)             | `nexus-orchestration`  | Deferred clock integration — **Durable roadmap:** DR-12 |
 
-> **V1.31 de-stub note:** `creator.*`, `judge.rule`, `judge.llm`, and `context.summarize` are real runtime capabilities as of V1.31. DF-37 reduces worker-backed fallback to explicit standalone/test construction paths; daemon/preset execution injects runtime dependencies through the registry factory.
+> **V1.186 Host cutover:** all prompt-backed capabilities share the injected `PromptExecutor`; standalone constructors fail closed rather than installing an echo or worker fallback.
 
 ### 5.3 Capability input/output schemas
 
@@ -369,9 +367,9 @@ Runtime-backed capabilities receive external dependencies through `CapabilityReg
 Operational semantics:
 
 1. `creator.inject_prompt` appends a queued prompt row and returns queue metadata.
-2. The next worker-backed `acp.prompt` drains pending injections for that creator session before sending the prompt to the worker.
-3. Consumed rows are marked/drained transactionally with the prompt dispatch path so a daemon restart does not lose unconsumed injections.
-4. The queue is for orchestration-to-worker prompt augmentation only; it does not bypass ACP tool policy or worker permission handling.
+2. The next run-scoped `acp.prompt` drains pending injections before dispatch through `PromptExecutor`.
+3. Consumed rows are marked/drained transactionally with prompt dispatch so restart does not lose unconsumed injections.
+4. Injection augments prompt text only; it does not bypass Host admission or the per-operation permission scope.
 
 ### 5.7 Outbox consolidation (V1.59)
 
@@ -403,7 +401,7 @@ The dual-outbox architecture identified in TD-8 (`dual-outbox-architecture.md`) 
 
 ACP stdin/stdout transport and process-group control remain internal to `nexus-acp-host` and the Host ACP provider. Orchestration receives only the narrow `PromptExecutor` result and opaque process identity; provider handles and transport clients never enter graph context or checkpoints.
 
-The removed daemon Worker Manager, `nexus42 acp-worker` command, worker JSON-RPC catalogue, and worker tool-upcall lane are not supported execution paths. CLI-only `nexus42 acp run` remains an independent interactive transport entry point.
+The retired secondary daemon subprocess/IPC prompt plane is not supported. CLI-only `nexus42 acp run` remains an independent interactive transport entry point.
 
 ### 6.3 Tool policy
 
@@ -971,7 +969,7 @@ A Creator Schedule is a persistent, user-addressable wrapper around zero or one 
 - **Design SSOT**: [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md).
 - **Session relationship**: a Schedule holds `current_session_id: Option<SessionId>` pointing at an active row in `orchestration_sessions` while `Schedule.status == Running`; terminal Schedules retain the Session row for history.
 - **Engine primitives consumed** — `new_session`, `run_step`, `signal`, `list_active` are sufficient for the supervisor module defined in WS7; this spec adds no new engine API.
-- **Concurrency contract** — multi-Schedule per creator is supported; at most one ACP-calling Schedule may touch the worker at any instant (§6.2 "one worker per creator" constraint). Capability-only Schedules may fully parallel.
+- **Concurrency contract** — multi-Schedule per creator is supported; prompt operations serialize per run, while distinct admitted runs own separate Host sessions. Capability-only Schedules may fully parallel.
 - **Supervisor module** — `crates/nexus-orchestration/src/schedule/` (new in WS7) owns the Pending → Running admission logic, dependency resolution, and signal propagation. It is driven by engine session-terminal events.
 
 ### 9.3 Relation between the two
@@ -1066,17 +1064,17 @@ Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependen
 **Acceptance**
 
 - [ ] `nexus42 schedule start novel-writing --creator <id>` returns a session id; `nexus42 schedule status` shows state `gathering`
-- [ ] Daemon sends `creator.inject_prompt` output, which reaches the worker via IPC; mocked agent echoes; `judge.llm` advances state → `brainstorming`
+- [ ] `creator.inject_prompt` output reaches the run-scoped Host prompt; a fixture provider returns non-echo output and `judge.llm` advances state
 - [ ] Inner graph runs all 3 nodes; `output_binding` writes into outer context; state advances to `outlining`
 - [ ] `schedule advance` advances past `outlining` → `drafting` → `done`
-- [ ] Daemon restart mid-`brainstorming` resumes from the last completed inner-graph node
+- [ ] Daemon restart mid-`brainstorming` follows the durable recovery class without blind replay
 - [ ] End-to-end integration test in `crates/nexus-orchestration/tests/e2e_novel_writing.rs`
 
 ### 10.5 Phase 4 — statig daemon lifecycle (S+; 1 agent session; parallel with Phase 2)
 
 Owned by the daemon lifecycle state machine (6-state; see [daemon-runtime.md](daemon-runtime.md) §10); A-track just consumes it. Entry/exit actions, event catalogue, and the HTTP surface migration live with the lifecycle owner (status field exposes real 6-state values).
 
-**Integration point with engine**: HSM `Running.entry` calls `engine.start()`; `Stopping.entry` calls `engine.shutdown(grace_ms)`; `Degraded` is entered when any of `{sync, acp_registry, worker_manager}` report sustained failures (threshold defined in v2 lifecycle doc).
+**Integration point with engine**: HSM `Running.entry` calls `engine.start()`; `Stopping.entry` cancels active runs through the shared token/Host finalization path before `engine.shutdown(grace_ms)`. `Degraded` reflects sustained failures of retained subsystems such as sync, ACP registry, and the Agent Host.
 
 ### 10.6 Phase 5 — Knowledge doc revisions (S; part of each preceding phase)
 

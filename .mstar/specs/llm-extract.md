@@ -134,7 +134,7 @@ review-time hook is non-blocking.
 2. Build capability input: { prompt: <rendered>, chapter_prose, _creator_id, _session_id }.
 3. Resolve `nexus.llm.extract` (or configured capability name) via CapabilityRegistry.
 4. Invoke capability; parse output.candidates into Vec<KbCandidate>.
-5. WorkerUnavailable → return empty Vec (caller decides fallback).
+5. Typed prompt unavailability → return an empty `Vec` so the caller may choose its documented heuristic fallback.
 ```
 
 `LlmExtractTask` is the unit the orchestrator routes a `kind: llm_extract` exit
@@ -177,7 +177,7 @@ columns.
 }
 ```
 
-The heuristic pathway (fallback when no worker) emits the V1.50 shape with
+The heuristic pathway (fallback when Host prompt execution is unavailable) emits the V1.50 shape with
 `tags: ["novel","heuristic-extracted"]` and omits the four LLM keys (or sets
 `confidence: 0.0`, `source_quote: ""`, `block_type: "character"`).
 
@@ -202,8 +202,7 @@ compat with V1.50 rows).
 `nexus.llm.extract`, `judge.llm`, `context.summarize`, `acp.prompt`, and graph
 `acp_prompt` share the same injected `PromptExecutor` contract and daemon
 `HostFacade` plane. Each orchestration run owns its Host sessions; different
-runs and Creators never share a subprocess. There is no worker pool, worker IPC
-channel, or second session type.
+runs and Creators never share a subprocess or a second execution plane.
 
 ---
 
@@ -218,16 +217,15 @@ V1.51 T-A P0 rewires that hook:
 
 ```text
 extract_kb_candidates_for_review(pool, schedule_id, ws_dir, registry: Option<&CapabilityRegistry>)
-  ├─ registry present + worker available → LlmExtractTask::evaluate → Vec<KbCandidate>
+  ├─ registry + PromptExecutor available → LlmExtractTask::evaluate → Vec<KbCandidate>
   │     with block_type + confidence + source_quote from LLM
-  └─ registry None OR WorkerUnavailable → heuristic fallback (extract_candidates_from_text)
+  └─ registry absent OR typed prompt unavailable → heuristic fallback
         with block_type="character", confidence=0.0, source_quote=""
 ```
 
-The supervisor threads its `CapabilityRegistry` (added as an optional field in
-V1.51) into the hook; the daemon boot constructs the registry and passes it
-through. Hermetic tests that invoke the hook with `registry=None` get the
-heuristic fallback, preserving V1.50 no-worker test behavior.
+The supervisor threads its optional `CapabilityRegistry` into the hook; daemon
+boot injects the production `PromptExecutor`. Hermetic callers with
+`registry=None` take the heuristic fallback without constructing a Host session.
 
 Candidates are persisted via `insert_pending_with_llm` (LLM pathway) or
 `insert_pending` (heuristic fallback) into `kb_extract_jobs` with
@@ -239,15 +237,13 @@ Candidates are persisted via `insert_pending_with_llm` (LLM pathway) or
 
 - LLM returns malformed JSON → empty candidate list + `warn!` log; hook
   completes (best-effort, non-blocking).
-- WorkerUnavailable → heuristic fallback (the V1.50 behavior) so a daemon
-  without a configured worker still produces character-name candidates rather
-  than silently extracting nothing.
-- No `nexus.llm.extract` registered → heuristic fallback (defensive; lets
-  partial registries keep working).
+- Typed prompt unavailability → heuristic fallback (the V1.50 behavior), so
+  an explicitly unconfigured environment still produces character-name candidates.
+- No `nexus.llm.extract` registered → heuristic fallback for partial registries.
 
-The fallback is the **only** heuristic code path retained; it exists solely so
-no-worker environments (hermetic tests, daemon-without-worker) remain
-functional. Production daemons with a worker always take the LLM pathway.
+The fallback is the only heuristic path retained. Production daemon registries
+with an admitted `PromptExecutor` take the Host-mediated LLM pathway; missing
+workflow identity, cancellation, or permission scope remains a typed refusal.
 
 ### 5.2 Relationship candidate persistence (V1.76 γ)
 
@@ -296,7 +292,7 @@ excluding `needs_review` rows; `?include_suggested=true` surfaces them.
 | Acceptance criterion (plan §4) | Where satisfied |
 | --- | --- |
 | §4.1 `nexus.llm.extract` registered; `kind: llm_extract` routes to `LlmExtractTask` | §1, `capability/mod.rs`, `tasks/mod.rs` |
-| §4.2 `LlmExtractTask` hermetic tests (golden → golden, mock worker) | `tasks/mod.rs` `llm_extract_task_*` tests |
+| §4.2 `LlmExtractTask` hermetic tests (golden → golden, mock `PromptExecutor`) | `tasks/mod.rs` `llm_extract_task_*` tests |
 | §4.3 `novel-review-master` uses llm_extract; E2E asserts payload carries 4 LLM keys | §5, `tests/novel_review_master.rs` |
 | §4.4 adopt shows confidence + source_quote | cli-spec §6.2G, `creator_world_kb_adopt.rs` |
 | §4.5 R-V150KBED-01 closed | shipped |
