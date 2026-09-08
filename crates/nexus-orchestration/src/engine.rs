@@ -406,6 +406,15 @@ pub struct EngineSharedState {
     /// `commit_transition` — making nested child rows reconstructible after
     /// restart (Important 2). Keyed by root session id.
     pub children: Arc<tokio::sync::RwLock<std::collections::HashMap<String, Vec<ChildCheckpoint>>>>,
+    /// Per-run coordinator cancellation tokens (A1) — the production prompt
+    /// consumers resolve their run token from this shared map and fail
+    /// closed (`CancellationUnavailable`) when none is registered. The
+    /// daemon boot constructs the map, wires it via
+    /// `GraphFlowEngine::set_prompt_executor`, and every run the engine
+    /// admits (start/spawn/recovery) registers a token here.
+    pub session_cancels: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    >,
 }
 
 impl EngineSharedState {
@@ -417,6 +426,9 @@ impl EngineSharedState {
             sessions: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             workflow_store: None,
             children: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
         }
     }
 
@@ -431,7 +443,23 @@ impl EngineSharedState {
             sessions: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             workflow_store: Some(workflow_store),
             children: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
         }
+    }
+
+    /// Register a run's coordinator cancellation token (A1, fail-closed
+    /// contract). Idempotent — every admission path (start, spawn, recovery)
+    /// calls this so the shared map carries one token per run; a prompt for
+    /// an unregistered run fails closed with `CancellationUnavailable`
+    /// rather than minting an uncancellable token.
+    pub fn register_cancellation(&self, session_id: &SessionId) {
+        self.session_cancels
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(session_id.0.clone())
+            .or_insert_with(tokio_util::sync::CancellationToken::new);
     }
 
     /// Recover persisted non-terminal sessions into in-memory tracker (WS2 R1).
@@ -1122,6 +1150,11 @@ impl EngineSharedState {
             self.storage.save(session_mut.clone()).await?;
         }
 
+        // Register the child run's coordinator cancellation token (A1): the
+        // child's `acp_prompt` nodes resolve their token from the shared
+        // per-run map and fail closed when none is registered.
+        self.register_cancellation(&SessionId(child_session_id.clone()));
+
         // Record the child checkpoint so the root transition persists the
         // nested child row atomically (Important 2). The CAS anchor is the
         // child's actual persisted revision: a v1 child created via
@@ -1203,6 +1236,10 @@ impl EngineSharedState {
             let runner = Arc::new(FlowRunner::new(inner_graph, self.storage.clone()));
             self.runners.write().await.insert(child_id.clone(), runner);
         }
+        // Register the reattached child's coordinator cancellation token
+        // (A1): a resumed child's `acp_prompt` nodes must find their token
+        // in the shared map (fail-closed otherwise).
+        self.register_cancellation(&SessionId(child_id.clone()));
         let (parent_creator_id, parent_preset_id) = self
             .sessions
             .read()
@@ -1617,6 +1654,25 @@ impl GraphFlowEngine {
         self.nexus_home = Some(nexus_home);
     }
 
+    /// Register a run's coordinator cancellation token in the shared
+    /// per-run map (A1, fail-closed contract).
+    ///
+    /// Every run the engine admits — preset start, session start, nested
+    /// child spawn, and boot recovery — registers a fresh cancellation
+    /// token so the production prompt consumers (capabilities + graph
+    /// `acp_prompt`) find a cancellable token at dispatch. A prompt invoked
+    /// for a run with NO registered token fails closed with
+    /// `CancellationUnavailable` (never a fresh uncancellable token). The
+    /// future P2 coordinator shares this same map and the executor's
+    /// per-run operation locks.
+    fn register_cancellation(&self, session_id: &SessionId) {
+        self.session_cancels
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(session_id.0.clone())
+            .or_insert_with(tokio_util::sync::CancellationToken::new);
+    }
+
     /// Set the daemon-side tool dispatch adapter (DF-47, V1.42 P3).
     ///
     /// Must be called before any session starts if preset graphs contain
@@ -1644,7 +1700,18 @@ impl GraphFlowEngine {
         >,
     ) {
         self.prompt_executor = Some(executor);
-        self.session_cancels = session_cancels;
+        self.session_cancels = session_cancels.clone();
+        // Unify the shared per-run cancellation map: run-admission
+        // registrations (spawn/attach on `EngineSharedState`) and the
+        // prompt consumers (graph tasks wired with this engine's map,
+        // capabilities wired with the boot map) must read the SAME Arc.
+        // The production boot calls this on a freshly constructed engine
+        // (state refcount 1), so `get_mut` succeeds; engines whose shared
+        // state is aliased keep their own map (test wiring passes the
+        // engine's shared map to the prompt consumers explicitly).
+        if let Some(state) = std::sync::Arc::get_mut(&mut self.state) {
+            state.session_cancels = session_cancels;
+        }
     }
 
     /// Recover persisted sessions into the in-memory tracker (WS2 R1 + R6).
@@ -1662,6 +1729,12 @@ impl GraphFlowEngine {
             if summary.status.is_terminal() {
                 continue;
             }
+
+            // Register the recovered run's coordinator cancellation token
+            // (A1): a resumed run's prompt consumers resolve their token
+            // from the shared per-run map and fail closed when none is
+            // registered.
+            self.register_cancellation(&summary.session_id);
 
             // Important 1: hydrate the in-memory children map from persisted
             // child rows so a restarted parent knows its child checkpoints
@@ -1972,6 +2045,11 @@ impl GraphFlowEngine {
                     &RunStateV1::default(),
                 )
                 .await?;
+            let sid = SessionId(session_id.clone());
+            // Register the run's coordinator cancellation token (A1): the
+            // run's prompt consumers resolve their token from the shared
+            // per-run map and fail closed when none is registered.
+            self.register_cancellation(&sid);
             let runner = Arc::new(FlowRunner::new(graph, self.state.storage.clone()));
             self.state
                 .runners
@@ -2062,6 +2140,7 @@ impl GraphFlowEngine {
                     &RunStateV1::default(),
                 )
                 .await?;
+            self.register_cancellation(&SessionId(session_id.clone()));
         } else {
             self.state.storage.save(session).await?;
         }
@@ -2198,6 +2277,7 @@ impl OrchestrationEngine for GraphFlowEngine {
                     &RunStateV1::default(),
                 )
                 .await?;
+            self.register_cancellation(&SessionId(session_id.clone()));
         } else {
             self.state.storage.save(session).await?;
         }

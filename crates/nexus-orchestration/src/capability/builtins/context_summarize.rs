@@ -155,15 +155,12 @@ impl Capability for ContextSummarize {
         let prompt_hash = blake3::hash(prompt.as_bytes()).to_hex().to_string();
 
         // A1: resolve the coordinator cancellation token for this run from
-        // the shared per-run map (never a fresh token — a coordinator cancel
-        // must be able to interrupt this prompt).
-        let cancellation = self
-            .session_cancels
-            .read()
-            .map_err(|e| CapabilityError::Internal(format!("session cancels lock: {e}")))?
-            .get(session_id)
-            .cloned()
-            .unwrap_or_else(tokio_util::sync::CancellationToken::new);
+        // the shared per-run map. FAIL-CLOSED: a run with no registered
+        // token refuses with `CancellationUnavailable` — a fresh token would
+        // be uncancellable by any coordinator (never mint one here). The run
+        // admission path (engine start/spawn/recovery) registers the token.
+        let cancellation =
+            crate::capability::resolve_session_cancellation(&self.session_cancels, session_id)?;
 
         // Execute through the Host plane.
         let result = executor
@@ -300,6 +297,27 @@ mod tests {
 
     // ── J3: With mock executor ────────────────────────────────────────
 
+    /// Shared cancellation map with coordinator tokens registered for the
+    /// given run ids (fail-closed contract; production registers at run
+    /// admission).
+    fn cancels_with(ids: &[&str]) -> std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    > {
+        let map: std::sync::Arc<
+            std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+        > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        {
+            let mut guard = map.write().unwrap_or_else(|e| e.into_inner());
+            for id in ids {
+                guard.insert(
+                    id.to_string(),
+                    tokio_util::sync::CancellationToken::new(),
+                );
+            }
+        }
+        map
+    }
+
     struct MockSummaryExecutor {
         captured_run_id: std::sync::Mutex<String>,
     }
@@ -329,7 +347,8 @@ mod tests {
 
     #[tokio::test]
     async fn context_summarize_with_mock_executor() {
-        let cap = ContextSummarize::with_prompt_executor(Arc::new(MockSummaryExecutor::new()));
+        let cap = ContextSummarize::with_prompt_executor(Arc::new(MockSummaryExecutor::new()))
+            .with_session_cancels(cancels_with(&["default"]));
         let input = json!({
             "content": "The story is about a brave knight who saves the kingdom from a dragon."
         });
@@ -342,7 +361,8 @@ mod tests {
 
     #[tokio::test]
     async fn context_summarize_with_trace_and_template() {
-        let cap = ContextSummarize::with_prompt_executor(Arc::new(MockSummaryExecutor::new()));
+        let cap = ContextSummarize::with_prompt_executor(Arc::new(MockSummaryExecutor::new()))
+            .with_session_cancels(cancels_with(&["default"]));
         let input = json!({
             "content": "Some context",
             "trace": "User entered state X, performed action Y",
@@ -355,7 +375,8 @@ mod tests {
 
     #[tokio::test]
     async fn context_summarize_missing_content_errors() {
-        let cap = ContextSummarize::with_prompt_executor(Arc::new(MockSummaryExecutor::new()));
+        let cap = ContextSummarize::with_prompt_executor(Arc::new(MockSummaryExecutor::new()))
+            .with_session_cancels(cancels_with(&["default"]));
         let input = json!({});
         let result = cap.run(input).await;
         assert!(result.is_err());
@@ -371,7 +392,8 @@ mod tests {
     #[tokio::test]
     async fn context_summarize_raw_creator_id_ignored_on_spoof_attempt() {
         let executor = Arc::new(MockSummaryExecutor::new());
-        let cap = ContextSummarize::with_prompt_executor(executor.clone());
+        let cap = ContextSummarize::with_prompt_executor(executor.clone())
+            .with_session_cancels(cancels_with(&["default", "legit_session"]));
         let input = json!({
             "content": "Some text",
             // Spoof attempt: raw preset args should be ignored
@@ -391,7 +413,8 @@ mod tests {
     #[tokio::test]
     async fn context_summarize_context_injected_identity_trusted() {
         let executor = Arc::new(MockSummaryExecutor::new());
-        let cap = ContextSummarize::with_prompt_executor(executor.clone());
+        let cap = ContextSummarize::with_prompt_executor(executor.clone())
+            .with_session_cancels(cancels_with(&["default", "legit_session"]));
         let input = json!({
             "content": "Some text",
             "_creator_id": "legit_creator",
@@ -409,7 +432,8 @@ mod tests {
     #[tokio::test]
     async fn context_summarize_context_identity_overrides_raw_spoof() {
         let executor = Arc::new(MockSummaryExecutor::new());
-        let cap = ContextSummarize::with_prompt_executor(executor.clone());
+        let cap = ContextSummarize::with_prompt_executor(executor.clone())
+            .with_session_cancels(cancels_with(&["default", "legit_session"]));
         let input = json!({
             "content": "Some text",
             "creator_id": "spoofed_creator",

@@ -1406,11 +1406,19 @@ impl WorkflowStateStore for SqliteSessionStorage {
     /// checkpoint leaves the attempt persisted and the run recovers as
     /// `Interrupted` (never auto-replayed). The engine's terminal/wait
     /// `commit_transition` clears `in_flight` on success.
+    ///
+    /// **Durable attempt ownership**: when `expected_attempt_id` is `Some`,
+    /// the row must either have no `in_flight` attempt yet (Dispatching
+    /// claims the empty slot) or already carry exactly this operation's
+    /// attempt id (Active updates the SAME operation). Same-anchor
+    /// concurrent prompts can never overwrite or replace the durable
+    /// in-flight attempt with another operation's ids.
     async fn persist_prompt_attempt(
         &self,
         session_id: &SessionId,
         expected_revision: u64,
         expected_step: Option<&str>,
+        expected_attempt_id: Option<&str>,
         attempt: &PromptAttempt,
     ) -> Result<(), EngineError> {
         let id = session_id.0.clone();
@@ -1426,55 +1434,68 @@ impl WorkflowStateStore for SqliteSessionStorage {
         // rows, off rows whose revision moved since the caller loaded it,
         // and (with `expected_step = Some(task)`) off rows whose step
         // marker moved — the same linearization boundary the engine's
-        // control transitions anchor to.
+        // control transitions anchor to. When `expected_attempt_id` names
+        // this request's own admission, the row must either have NO
+        // `in_flight` attempt yet (Dispatching claims an empty slot) or
+        // already carry exactly this operation's attempt id (Active updates
+        // the SAME operation) — a concurrent same-anchor prompt cannot
+        // overwrite another operation's durable attempt.
         let expected_revision_i64 = expected_revision as i64;
-        let result = match expected_step {
-            Some(step) => {
-                sqlx::query(
-                    r#"
-                    UPDATE orchestration_sessions
-                    SET run_state_json = json_set(
-                            COALESCE(run_state_json, '{}'),
-                            '$.in_flight',
-                            json(?)
-                        ),
-                        updated_at = ?
-                    WHERE session_id = ? AND status IN ('running', 'paused')
-                      AND state_revision = ?
-                      AND json_extract(COALESCE(run_state_json, '{}'), '$.step_in_flight') = ?
-                    "#,
-                )
-                .bind(&attempt_json)
-                .bind(chrono::Utc::now().timestamp())
-                .bind(&id)
-                .bind(expected_revision_i64)
-                .bind(step)
-                .execute(&*self.pool)
-                .await
+        // Owner CAS clause: when this request names its own admission, the
+        // row must either have NO `in_flight` attempt yet (Dispatching
+        // claims an empty slot) or already carry exactly this operation's
+        // attempt id (Active updates the SAME operation).
+        let owner_cas_sql = match expected_attempt_id {
+            Some(_) => {
+                " AND (json_extract(COALESCE(run_state_json, '{}'), '$.in_flight') IS NULL \
+                   OR json_extract(COALESCE(run_state_json, '{}'), '$.in_flight.attempt_id') = ?)"
+                    .to_string()
             }
-            None => {
-                sqlx::query(
-                    r#"
-                    UPDATE orchestration_sessions
-                    SET run_state_json = json_set(
-                            COALESCE(run_state_json, '{}'),
-                            '$.in_flight',
-                            json(?)
-                        ),
-                        updated_at = ?
-                    WHERE session_id = ? AND status IN ('running', 'paused')
-                      AND state_revision = ?
-                    "#,
-                )
-                .bind(&attempt_json)
-                .bind(chrono::Utc::now().timestamp())
-                .bind(&id)
-                .bind(expected_revision_i64)
-                .execute(&*self.pool)
-                .await
-            }
+            None => String::new(),
+        };
+        let sql = match expected_step {
+            Some(_) => format!(
+                r#"
+                UPDATE orchestration_sessions
+                SET run_state_json = json_set(
+                        COALESCE(run_state_json, '{{}}'),
+                        '$.in_flight',
+                        json(?)
+                    ),
+                    updated_at = ?
+                WHERE session_id = ? AND status IN ('running', 'paused')
+                  AND state_revision = ?
+                  AND json_extract(COALESCE(run_state_json, '{{}}'), '$.step_in_flight') = ?
+                {owner_cas_sql}
+                "#
+            ),
+            None => format!(
+                r#"
+                UPDATE orchestration_sessions
+                SET run_state_json = json_set(
+                        COALESCE(run_state_json, '{{}}'),
+                        '$.in_flight',
+                        json(?)
+                    ),
+                    updated_at = ?
+                WHERE session_id = ? AND status IN ('running', 'paused')
+                  AND state_revision = ?
+                {owner_cas_sql}
+                "#
+            ),
+        };
+        let mut q = sqlx::query(&sql)
+            .bind(&attempt_json)
+            .bind(chrono::Utc::now().timestamp())
+            .bind(&id)
+            .bind(expected_revision_i64);
+        if let Some(step) = expected_step {
+            q = q.bind(step);
         }
-        .map_err(|e| {
+        if let Some(attempt_id) = expected_attempt_id {
+            q = q.bind(attempt_id);
+        }
+        let result = q.execute(&*self.pool).await.map_err(|e| {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "persist_prompt_attempt '{}': {e}",
                 session_id.0
@@ -1482,16 +1503,20 @@ impl WorkflowStateStore for SqliteSessionStorage {
         })?;
 
         if result.rows_affected() == 0 {
-            // Distinguish a revision/step mismatch from a non-running row.
+            // Distinguish a revision/step mismatch from a non-running row
+            // or an unrelated in-flight owner.
             #[derive(sqlx::FromRow)]
             struct FenceRow {
                 state_revision: i64,
                 step_marker: Option<String>,
+                in_flight_attempt_id: Option<String>,
             }
             let current: Option<FenceRow> = sqlx::query_as(
                 "SELECT state_revision, \
                         json_extract(COALESCE(run_state_json, '{}'), '$.step_in_flight') \
-                        AS step_marker \
+                        AS step_marker, \
+                        json_extract(COALESCE(run_state_json, '{}'), '$.in_flight.attempt_id') \
+                        AS in_flight_attempt_id \
                  FROM orchestration_sessions WHERE session_id = ?",
             )
             .bind(&session_id.0)
@@ -1524,10 +1549,85 @@ impl WorkflowStateStore for SqliteSessionStorage {
                         found: u64::try_from(row.state_revision).unwrap_or(0),
                     }
                 }
+                // The revision and step still match but a DIFFERENT attempt
+                // owns `in_flight`: a concurrent same-anchor prompt claimed
+                // the slot (or updated its own op) before this request — the
+                // durable marker must never be replaced (attempt ownership).
+                Some(row)
+                    if expected_attempt_id.is_some()
+                        && row.in_flight_attempt_id.as_deref() != expected_attempt_id =>
+                {
+                    EngineError::RevisionMismatch {
+                        session_id: session_id.0.clone(),
+                        expected: expected_revision,
+                        found: u64::try_from(row.state_revision).unwrap_or(0),
+                    }
+                }
                 Some(_) => EngineError::TerminalState(session_id.0.clone()),
                 None => EngineError::SessionNotFound(session_id.0.clone()),
             });
         }
+        Ok(())
+    }
+
+    /// Clear the durable `in_flight` prompt-attempt marker (see trait docs).
+    /// Fenced on the admission anchor + owning attempt id; zero-row fence
+    /// misses are benign no-ops (idempotent) — the engine's
+    /// `commit_transition` may already have cleared the marker.
+    async fn clear_prompt_attempt(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_step: Option<&str>,
+        attempt_id: &str,
+    ) -> Result<(), EngineError> {
+        let id = session_id.0.clone();
+        let expected_revision_i64 = expected_revision as i64;
+        let sql = match expected_step {
+            Some(_) => format!(
+                r#"
+                UPDATE orchestration_sessions
+                SET run_state_json = json_set(
+                        COALESCE(run_state_json, '{{}}'),
+                        '$.in_flight',
+                        json('null')
+                    ),
+                    updated_at = ?
+                WHERE session_id = ? AND status IN ('running', 'paused')
+                  AND state_revision = ?
+                  AND json_extract(COALESCE(run_state_json, '{{}}'), '$.step_in_flight') = ?
+                  AND json_extract(COALESCE(run_state_json, '{{}}'), '$.in_flight.attempt_id') = ?
+                "#
+            ),
+            None => format!(
+                r#"
+                UPDATE orchestration_sessions
+                SET run_state_json = json_set(
+                        COALESCE(run_state_json, '{{}}'),
+                        '$.in_flight',
+                        json('null')
+                    ),
+                    updated_at = ?
+                WHERE session_id = ? AND status IN ('running', 'paused')
+                  AND state_revision = ?
+                  AND json_extract(COALESCE(run_state_json, '{{}}'), '$.in_flight.attempt_id') = ?
+                "#
+            ),
+        };
+        let mut q = sqlx::query(&sql)
+            .bind(chrono::Utc::now().timestamp())
+            .bind(&id)
+            .bind(expected_revision_i64);
+        if let Some(step) = expected_step {
+            q = q.bind(step);
+        }
+        q = q.bind(attempt_id);
+        q.execute(&*self.pool).await.map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "clear_prompt_attempt '{}': {e}",
+                session_id.0
+            )))
+        })?;
         Ok(())
     }
 }
@@ -2053,13 +2153,16 @@ mod tests {
 
         // Matching fence: revision 2 + step marker "task_a" → the intent is
         // written and the revision is NOT advanced (the engine's step
-        // transition CAS anchor is preserved).
+        // transition CAS anchor is preserved). The ownership CAS accepts
+        // the claim onto an empty `in_flight` slot.
+        let first = test_attempt("t1", crate::run_state::PromptPhase::Dispatching);
         storage
             .persist_prompt_attempt(
                 &SessionId("sess-cas-ok".into()),
                 2,
                 Some("task_a"),
-                &test_attempt("t1", crate::run_state::PromptPhase::Dispatching),
+                Some(&first.attempt_id),
+                &first,
             )
             .await
             .expect("matching fence must write");
@@ -2071,6 +2174,108 @@ mod tests {
         assert_eq!(record.state_revision, 2, "intent write must not advance the revision");
         let state = record.state.expect("v1 state");
         assert_eq!(state.in_flight.as_ref().expect("in_flight").task_id, "t1");
+
+        // The same operation may update its own Active attempt (same
+        // attempt id — the ownership CAS matches the occupant).
+        let active = test_attempt("t1", crate::run_state::PromptPhase::Active);
+        let mut active = active;
+        active.attempt_id = first.attempt_id.clone();
+        storage
+            .persist_prompt_attempt(
+                &SessionId("sess-cas-ok".into()),
+                2,
+                Some("task_a"),
+                Some(&first.attempt_id),
+                &active,
+            )
+            .await
+            .expect("same-owner Active update must write");
+        let record = storage
+            .load_run(&SessionId("sess-cas-ok".into()))
+            .await
+            .expect("load")
+            .expect("row");
+        let state = record.state.expect("v1 state");
+        assert_eq!(
+            state.in_flight.as_ref().expect("in_flight").attempt_id,
+            first.attempt_id,
+            "Active update must target the SAME durable attempt"
+        );
+        assert_eq!(
+            state.in_flight.as_ref().expect("in_flight").phase,
+            crate::run_state::PromptPhase::Active
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_same_anchor_prompt_cannot_replace_in_flight_owner() {
+        let (pool, _db) = fresh_pool().await;
+        seed_v1_stepped_row(&pool, "sess-owner").await;
+        let storage = SqliteSessionStorage::new(pool.clone());
+
+        // Request A claims the empty slot with its own attempt id.
+        let first = test_attempt("t1", crate::run_state::PromptPhase::Dispatching);
+        storage
+            .persist_prompt_attempt(
+                &SessionId("sess-owner".into()),
+                2,
+                Some("task_a"),
+                Some(&first.attempt_id),
+                &first,
+            )
+            .await
+            .expect("request A claims the empty slot");
+
+        // Request B — same revision, same step marker, same unchanged anchor —
+        // tries to claim the slot with a DIFFERENT attempt id: the durable
+        // `in_flight` owner must never be replaced.
+        let second = test_attempt("t2", crate::run_state::PromptPhase::Dispatching);
+        let err = storage
+            .persist_prompt_attempt(
+                &SessionId("sess-owner".into()),
+                2,
+                Some("task_a"),
+                Some(&second.attempt_id),
+                &second,
+            )
+            .await
+            .expect_err("a different attempt id must not overwrite the in_flight owner");
+        assert!(
+            matches!(err, EngineError::RevisionMismatch { .. }),
+            "expected RevisionMismatch for foreign-owner overwrite, got: {err:?}"
+        );
+
+        // The durable marker still names request A's operation — request B
+        // could not replace nor displace it.
+        let record = storage
+            .load_run(&SessionId("sess-owner".into()))
+            .await
+            .expect("load")
+            .expect("row");
+        let state = record.state.expect("v1 state");
+        let in_flight = state.in_flight.expect("in_flight must remain");
+        assert_eq!(
+            in_flight.attempt_id, first.attempt_id,
+            "the durable in_flight marker must remain request A's operation"
+        );
+
+        // Request B's own Active update must also be refused: it does not
+        // own the slot, so it can never write its Host ids into the marker.
+        let second_active = test_attempt("t2", crate::run_state::PromptPhase::Active);
+        let err = storage
+            .persist_prompt_attempt(
+                &SessionId("sess-owner".into()),
+                2,
+                Some("task_a"),
+                Some(&second_active.attempt_id),
+                &second_active,
+            )
+            .await
+            .expect_err("foreign Active update must fail the ownership CAS");
+        assert!(
+            matches!(err, EngineError::RevisionMismatch { .. }),
+            "expected RevisionMismatch for foreign Active update, got: {err:?}"
+        );
     }
 
     #[tokio::test]
@@ -2093,12 +2298,14 @@ mod tests {
 
         // The stale prompt attempt must be rejected — the post-transition
         // state (revision 3, cancel_requested) is never overwritten.
+        let stale = test_attempt("stale-t1", crate::run_state::PromptPhase::Dispatching);
         let err = storage
             .persist_prompt_attempt(
                 &SessionId("sess-stale".into()),
                 2, // stale anchor
                 Some("task_a"),
-                &test_attempt("stale-t1", crate::run_state::PromptPhase::Dispatching),
+                Some(&stale.attempt_id),
+                &stale,
             )
             .await
             .expect_err("stale revision must fail the CAS");
@@ -2149,12 +2356,14 @@ mod tests {
         .await
         .expect("move step marker");
 
+        let stale = test_attempt("stale-t2", crate::run_state::PromptPhase::Dispatching);
         let err = storage
             .persist_prompt_attempt(
                 &SessionId("sess-step-moved".into()),
                 2, // revision still matches
                 Some("task_a"),
-                &test_attempt("stale-t2", crate::run_state::PromptPhase::Dispatching),
+                Some(&stale.attempt_id),
+                &stale,
             )
             .await
             .expect_err("moved step marker must fail the CAS");

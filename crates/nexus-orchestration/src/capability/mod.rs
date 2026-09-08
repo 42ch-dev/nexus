@@ -34,10 +34,42 @@ pub enum CapabilityError {
     AcpSessionLost,
     #[error("cancelled")]
     Cancelled,
+    #[error("run cancellation unavailable: {0}")]
+    CancellationUnavailable(String),
     #[error("forbidden: {0}")]
     Forbidden(String),
     #[error("internal error: {0}")]
     Internal(String),
+}
+
+/// Resolve a run's coordinator cancellation token from the shared per-run
+/// map (A1).
+///
+/// **Fail-closed**: a run with no registered token returns
+/// [`CapabilityError::CancellationUnavailable`]. Callers MUST never mint a
+/// fresh token — a token that no coordinator knows about can never be
+/// cancelled, so the prompt would execute without a cancellation path.
+/// Registration happens at run admission (engine start/spawn/recovery paths);
+/// the future P2 coordinator shares this map and the per-run admission lock.
+///
+/// # Errors
+/// Returns [`CapabilityError::CancellationUnavailable`] when `session_id` has
+/// no registered coordinator token, or [`CapabilityError::Internal`] when the
+/// shared map lock is poisoned.
+pub fn resolve_session_cancellation(
+    session_cancels: &std::sync::RwLock<
+        std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+    >,
+    session_id: &str,
+) -> Result<tokio_util::sync::CancellationToken, CapabilityError> {
+    let map = session_cancels
+        .read()
+        .map_err(|e| CapabilityError::Internal(format!("session cancels lock: {e}")))?;
+    map.get(session_id).cloned().ok_or_else(|| {
+        CapabilityError::CancellationUnavailable(format!(
+            "no coordinator cancellation token registered for run '{session_id}'"
+        ))
+    })
 }
 
 // ---------------------------------------------------------------------------

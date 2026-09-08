@@ -171,15 +171,12 @@ impl Capability for LlmExtract {
             .ok_or(CapabilityError::WorkerUnavailable)?;
 
         // A1: resolve the coordinator cancellation token for this run from
-        // the shared per-run map (never a fresh token — a coordinator cancel
-        // must be able to interrupt this prompt).
-        let cancellation = self
-            .session_cancels
-            .read()
-            .map_err(|e| CapabilityError::Internal(format!("session cancels lock: {e}")))?
-            .get(session_id)
-            .cloned()
-            .unwrap_or_else(tokio_util::sync::CancellationToken::new);
+        // the shared per-run map. FAIL-CLOSED: a run with no registered
+        // token refuses with `CancellationUnavailable` — a fresh token would
+        // be uncancellable by any coordinator (never mint one here). The run
+        // admission path (engine start/spawn/recovery) registers the token.
+        let cancellation =
+            crate::capability::resolve_session_cancellation(&self.session_cancels, session_id)?;
 
         // Build the extraction prompt: instruction + verbatim prose, framed so
         // the agent returns a JSON object with a `candidates` array (entities)
@@ -363,6 +360,24 @@ fn normalize_relationship(v: &Value) -> Value {
 mod tests {
     use super::*;
 
+    /// Shared cancellation map with coordinator tokens registered for the
+    /// given run ids (fail-closed contract; production registers at run
+    /// admission).
+    fn cancels_with(ids: &[&str]) -> std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    > {
+        let map: std::sync::Arc<
+            std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+        > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        {
+            let mut guard = map.write().unwrap_or_else(|e| e.into_inner());
+            for id in ids {
+                guard.insert(id.to_string(), tokio_util::sync::CancellationToken::new());
+            }
+        }
+        map
+    }
+
     #[test]
     fn llm_extract_name() {
         let cap = LlmExtract::new();
@@ -430,7 +445,8 @@ mod tests {
                 {"canonical_name":"Lin Xia","block_type":"character","summary":"A warrior","confidence":0.9,"source_quote":"Lin Xia drew her blade."},
                 {"canonical_name":"Azure Gate","block_type":"scene","summary":null,"confidence":0.8,"source_quote":"the Azure Gate groaned open"}
             ]}"#,
-        ));
+        ))
+            .with_session_cancels(cancels_with(&["default"]));
         let input = json!({ "prompt": "extract", "chapter_prose": "..." });
         let result = cap.run(input).await.unwrap();
         let candidates = result.get("candidates").and_then(|v| v.as_array()).unwrap();
@@ -444,7 +460,8 @@ mod tests {
     async fn llm_extract_parses_code_fenced_json() {
         let cap = LlmExtract::with_prompt_executor(mock_executor(
             "```json\n{\"candidates\":[{\"canonical_name\":\"X\",\"block_type\":\"item\",\"confidence\":0.5,\"source_quote\":\"q\"}]}\n```",
-        ));
+        ))
+            .with_session_cancels(cancels_with(&["default"]));
         let input = json!({ "prompt": "extract", "chapter_prose": "..." });
         let result = cap.run(input).await.unwrap();
         let candidates = result.get("candidates").and_then(|v| v.as_array()).unwrap();
@@ -454,7 +471,8 @@ mod tests {
 
     #[tokio::test]
     async fn llm_extract_malformed_json_returns_empty_candidates() {
-        let cap = LlmExtract::with_prompt_executor(mock_executor("this is not json at all"));
+        let cap = LlmExtract::with_prompt_executor(mock_executor("this is not json at all"))
+            .with_session_cancels(cancels_with(&["default"]));
         let input = json!({ "prompt": "extract", "chapter_prose": "..." });
         let result = cap.run(input).await.unwrap();
         let candidates = result.get("candidates").and_then(|v| v.as_array()).unwrap();
@@ -552,7 +570,8 @@ mod tests {
                  "relation_type":"allied_with","symmetric":true,"confidence":0.8,
                  "source_quote":"Aria and Kael fought together"}
             ]}"#,
-        ));
+        ))
+            .with_session_cancels(cancels_with(&["default"]));
         let input = json!({ "prompt": "extract", "chapter_prose": "..." });
         let result = cap.run(input).await.unwrap();
         // candidates still present.
@@ -594,7 +613,8 @@ mod tests {
         let executor = Arc::new(CapturingExecutor {
             captured: std::sync::Mutex::new(String::new()),
         });
-        let cap = LlmExtract::with_prompt_executor(executor.clone());
+        let cap = LlmExtract::with_prompt_executor(executor.clone())
+            .with_session_cancels(cancels_with(&["default"]));
         let input = json!({
             "prompt": "extract",
             "chapter_prose": "...",

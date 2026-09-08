@@ -31,11 +31,22 @@ fn empty_session_cancels() -> std::sync::Arc<
 
 #[tokio::test]
 async fn acp_prompt_task_dispatches_to_executor_and_records_output() {
-    let task = AcpPromptTask::new_for_test(
-        std::sync::Arc::new(MockExecutor),
+    // `new_for_test` defaults the session id to "default" and constructs an
+    // empty cancellation map; register the run's coordinator token so the
+    // task's fail-closed token resolution succeeds (production registers at
+    // run admission).
+    let cancels = empty_session_cancels();
+    cancels
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert("default".to_string(), tokio_util::sync::CancellationToken::new());
+    let task = AcpPromptTask::new(
+        Some(std::sync::Arc::new(MockExecutor)),
+        cancels,
         "state-1",
         "hello {{core_context.version}}",
         ToolPolicy::AutoGrantReadOnly,
+        Some("default".to_string()),
     );
 
     let ctx = graph_flow::Context::new();

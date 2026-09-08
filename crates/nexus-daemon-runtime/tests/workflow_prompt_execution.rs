@@ -64,6 +64,9 @@ struct TestWorkspace {
     creator_ws: PathBuf,
     config_path: PathBuf,
     fixture_log: PathBuf,
+    /// Keepalive for the SQLite workflow-store file: the pool holds the
+    /// path open lazily, so the backing temp file must outlive every test.
+    db_file: tempfile::NamedTempFile,
 }
 
 fn setup_workspace() -> TestWorkspace {
@@ -73,12 +76,14 @@ fn setup_workspace() -> TestWorkspace {
     std::fs::create_dir_all(&creator_ws.join("sub")).expect("creator sub dir");
     let config_path = tmp.path().join("config.toml");
     let fixture_log = tmp.path().join("fixture.log");
+    let db_file = tempfile::NamedTempFile::new().expect("db temp file");
     TestWorkspace {
         _tmp: tmp,
         workspace_root,
         creator_ws,
         config_path,
         fixture_log,
+        db_file,
     }
 }
 
@@ -141,17 +146,6 @@ async fn build_host(
     (manager, host)
 }
 
-async fn fresh_pool() -> (Arc<sqlx::SqlitePool>, tempfile::NamedTempFile) {
-    let db = tempfile::NamedTempFile::new().unwrap();
-    let pool = nexus_local_db::open_pool(db.path())
-        .await
-        .expect("open pool");
-    nexus_local_db::run_migrations(&pool)
-        .await
-        .expect("run migrations");
-    (Arc::new(pool), db)
-}
-
 fn read_fixture_log(path: &Path) -> Vec<serde_json::Value> {
     std::fs::read_to_string(path)
         .map(|content| {
@@ -181,7 +175,12 @@ async fn build_stack(
     >,
 ) {
     let (_manager, host) = build_host(ws, provider_cfg).await;
-    let (pool, _db) = fresh_pool().await;
+    let pool = Arc::new(
+        nexus_local_db::open_pool(ws.db_file.path())
+            .await
+            .expect("open pool"),
+    );
+    nexus_local_db::run_migrations(&pool).await.expect("run migrations");
     let storage = Arc::new(SqliteSessionStorage::new(pool));
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
     let executor = Arc::new(HostPromptExecutor::new(
@@ -213,13 +212,25 @@ async fn build_stack(
 }
 
 /// Start a v1 run with a frozen descriptor binding `default` → the fixture
-/// provider, and return the run id.
+/// provider, and return the run id. The run's coordinator cancellation token
+/// is registered in `session_cancels` at admission (the production engine
+/// registrars do the same; without a registered token every prompt consumer
+/// fails closed with `CancellationUnavailable`).
 async fn start_v1_run(
     workflow_store: &Arc<dyn WorkflowStateStore>,
     ws: &TestWorkspace,
     provider_id: &str,
+    session_cancels: &Arc<
+        std::sync::RwLock<
+            std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+        >,
+    >,
 ) -> String {
     let run_id = format!("run:{}", uuid::Uuid::new_v4());
+    session_cancels
+        .write()
+        .expect("session cancels write")
+        .insert(run_id.clone(), tokio_util::sync::CancellationToken::new());
     let session = GraphSession::new_from_task(run_id.clone(), "start");
     session
         .context
@@ -283,7 +294,7 @@ async fn all_five_consumers_observe_non_echo_agent_output() {
     let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log);
     let (host, _storage, workflow_store, executor, registry, session_cancels) =
         build_stack(&ws, provider_cfg).await;
-    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp").await;
+    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp", &session_cancels).await;
 
     // 1. acp.prompt capability.
     let cap = registry.get("acp.prompt").expect("acp.prompt registered");
@@ -374,19 +385,24 @@ async fn all_five_consumers_observe_non_echo_agent_output() {
         "all five consumers must reach the fixture: {log:?}"
     );
 
-    // Durable intent: the run_state_json carries the last in_flight attempt
-    // (the executor persists dispatching + active; the engine is not running
-    // here so the attempt remains — proving intent was persisted before the
-    // fixture effect).
+    // Durable intent: the executor persists Dispatching BEFORE the external
+    // Host effect and Active once the Host ids are known, then clears the
+    // marker at successful terminal (the operation completed and the result
+    // was delivered). Mid-flight presence is proven deterministically by
+    // `concurrent_same_key_second_prompt_reuses_session_not_spawn` (marker
+    // naming the owning operation while the prompt is in flight) and
+    // `cancellation_after_active_before_exec_no_effect_and_no_session_leak`
+    // (Dispatching visible before the fence fires); here we assert the
+    // post-terminal contract: no stale in_flight survives a completed prompt.
     let record = workflow_store
         .load_run(&SessionId(run_id.clone()))
         .await
         .expect("load run");
     let state = record.expect("record").state.expect("v1 state");
-    let in_flight = state.in_flight.expect("in_flight persisted");
-    assert_eq!(in_flight.task_id, "n1");
-    assert!(in_flight.host_session_id.is_some());
-    assert!(in_flight.operation_id.is_some());
+    assert!(
+        state.in_flight.is_none(),
+        "a successfully completed prompt must not leave a durable in_flight marker"
+    );
 
     // No live handle in context: only text + ids.
     let ctx_json = serde_json::to_value(&ctx).unwrap();
@@ -402,9 +418,9 @@ async fn missing_binding_refuses_before_effect() {
     let _lock = env_lock();
     let ws = setup_workspace();
     let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log);
-    let (host, _storage, workflow_store, executor, _registry, _cancels) =
+    let (host, _storage, workflow_store, executor, _registry, session_cancels) =
         build_stack(&ws, provider_cfg).await;
-    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp").await;
+    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp", &session_cancels).await;
 
     // A request with an unresolved role binding refuses before any external
     // effect (A1: explicit provider selection, no implicit fallback).
@@ -441,9 +457,9 @@ async fn eof_after_initialize_is_typed_failure() {
     let ws = setup_workspace();
     let provider_cfg =
         acp_provider_config("mock-acp", &ws.fixture_log).with_env("EOF_AFTER_INIT", "1");
-    let (host, _storage, workflow_store, executor, _registry, _cancels) =
+    let (host, _storage, workflow_store, executor, _registry, session_cancels) =
         build_stack(&ws, provider_cfg).await;
-    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp").await;
+    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp", &session_cancels).await;
 
     // The fixture exits right after initialize; session creation fails with a
     // typed launch error — never a fake success.
@@ -467,9 +483,9 @@ async fn pre_cancelled_request_is_fenced_before_launch() {
     let _lock = env_lock();
     let ws = setup_workspace();
     let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log);
-    let (host, _storage, workflow_store, executor, _registry, _cancels) =
+    let (host, _storage, workflow_store, executor, _registry, session_cancels) =
         build_stack(&ws, provider_cfg).await;
-    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp").await;
+    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp", &session_cancels).await;
 
     // A5 cancellation fence: the token is cancelled BEFORE `execute` — no
     // durable intent write, no Host session launch, no prompt may reach the
@@ -506,9 +522,9 @@ async fn in_stream_cancel_calls_host_cancel_and_bounds_cleanup() {
     let _lock = env_lock();
     let ws = setup_workspace();
     let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log).with_env("BLOCK_PROMPT", "1");
-    let (host, _storage, workflow_store, executor, _registry, _cancels) =
+    let (host, _storage, workflow_store, executor, _registry, session_cancels) =
         build_stack(&ws, provider_cfg).await;
-    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp").await;
+    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp", &session_cancels).await;
 
     // The fixture never responds to the prompt; the coordinator token fires
     // WHILE the prompt is in flight, the executor cancels the owned
@@ -582,12 +598,14 @@ async fn concurrent_same_key_second_prompt_reuses_session_not_spawn() {
     let _lock = env_lock();
     let ws = setup_workspace();
     let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log).with_env("BLOCK_PROMPT", "1");
-    let (host, _storage, workflow_store, executor, _registry, _cancels) =
+    let (host, _storage, workflow_store, executor, _registry, session_cancels) =
         build_stack(&ws, provider_cfg).await;
-    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp").await;
+    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp", &session_cancels).await;
 
     // First prompt blocks in-stream (fixture never answers): the session is
-    // Busy while it runs.
+    // Busy while it runs. The second same-run prompt must serialize on the
+    // executor's per-run operation lock — it can never overlap the first's
+    // Active-CAS→exec window nor replace its durable marker.
     let cancel_first = tokio_util::sync::CancellationToken::new();
     let cancel_first_for_task = cancel_first.clone();
     let executor_first = executor.clone();
@@ -605,7 +623,8 @@ async fn concurrent_same_key_second_prompt_reuses_session_not_spawn() {
             .await
     });
 
-    // Wait until the fixture observes the first prompt (session now Busy).
+    // Wait until the fixture observes the first prompt (session now Busy,
+    // durable Active marker written).
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         let log = read_fixture_log(&ws.fixture_log);
@@ -619,26 +638,52 @@ async fn concurrent_same_key_second_prompt_reuses_session_not_spawn() {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
 
-    // The second same-key prompt MUST NOT create a second owned session: it
-    // reuses the published (run, role) session and fails on the serial-reuse
-    // boundary (session Busy) — the Minor finding's failure mode would have
-    // spawned a second subprocess instead.
-    let result = executor
-        .execute(request(&run_id, "hello-2", ToolPolicy::DenyAll))
-        .await;
-    assert!(result.is_err(), "second same-key prompt must not overlap (serial reuse)");
-    match result.unwrap_err() {
-        CapabilityError::TransientExternal(msg) => {
-            assert!(
-                msg.contains("host exec failed"),
-                "serial-reuse refusal must surface the exec boundary: {msg}"
-            );
-        }
-        other => panic!("expected TransientExternal exec refusal, got: {other:?}"),
-    }
+    // Durable ownership, mid-overlap: the marker names the FIRST operation's
+    // attempt (same-anchor concurrency can never replace in_flight while the
+    // first is still admitted/active).
+    let record = workflow_store
+        .load_run(&SessionId(run_id.clone()))
+        .await
+        .expect("load run")
+        .expect("record");
+    let state = record.state.expect("v1 state");
+    let in_flight = state.in_flight.as_ref().expect("in_flight persisted");
+    assert_eq!(in_flight.task_id, "task-1", "first operation owns the marker");
+    assert!(
+        in_flight.operation_id.is_some(),
+        "first operation's Active write carries its Host op id"
+    );
+    let first_attempt_id = in_flight.attempt_id.clone();
 
-    // Single-flight proof: exactly ONE owned session and ONE fixture
-    // subprocess exist for the (run, role) key.
+    // The second same-key prompt uses the run's SHARED coordinator token:
+    // it parks on the per-run operation lock while the first is in flight
+    // and can never create a second owned session or subprocess.
+    let shared_token = session_cancels
+        .read()
+        .expect("read cancel map")
+        .get(&run_id)
+        .cloned()
+        .expect("shared run token");
+    let executor_second = executor.clone();
+    let run_second = run_id.clone();
+    let second = tokio::spawn(async move {
+        executor_second
+            .execute(PromptRequest {
+                run_id: run_second,
+                task_id: "task-2".to_string(),
+                agent_ref: None,
+                prompt: "hello-2".to_string(),
+                tool_policy: ToolPolicy::DenyAll,
+                cancellation: shared_token,
+            })
+            .await
+    });
+
+    // Give the second request time to reach (and park on) the per-run lock.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    // Single-flight proof, mid-overlap: exactly ONE owned session and ONE
+    // fixture subprocess exist; only the first prompt reached the fixture.
     let sessions = host.list_sessions().await.expect("list sessions");
     assert_eq!(
         sessions.len(),
@@ -662,14 +707,55 @@ async fn concurrent_same_key_second_prompt_reuses_session_not_spawn() {
         "only the first prompt reaches the fixture: {log:?}"
     );
 
-    // Release the blocked prompt via the coordinator token; the first
-    // request then cancels the operation and returns a typed failure.
+    // Release the first prompt via its OWN token, and the second via the
+    // run's shared token: both requests then fail closed with the typed
+    // cancellation — the second, serialized behind the first, is refused at
+    // its post-lock admission fence (the shared token is already cancelled),
+    // never launching a prompt of its own.
     cancel_first.cancel();
     let first_result = first.await.expect("first task joins");
     match first_result {
         Err(CapabilityError::Cancelled) => {}
         other => panic!("expected Cancelled after release, got: {other:?}"),
     }
+    session_cancels
+        .read()
+        .expect("read cancel map")
+        .get(&run_id)
+        .cloned()
+        .expect("shared token")
+        .cancel();
+    let second_result = second.await.expect("second task joins");
+    match second_result {
+        Err(CapabilityError::Cancelled) => {}
+        other => panic!("expected Cancelled for serialized second, got: {other:?}"),
+    }
+
+    // Durable ownership after cancellation: the marker was cleared by the
+    // FIRST operation's terminal handling (classified correctly — the run
+    // is not left with a stale in_flight); the second request never claimed
+    // or replaced it (it failed at admission before any write).
+    let record = workflow_store
+        .load_run(&SessionId(run_id.clone()))
+        .await
+        .expect("load run")
+        .expect("record");
+    let state = record.state.expect("v1 state");
+    match state.in_flight.as_ref() {
+        None => {}
+        Some(marker) => panic!(
+            "the durable in_flight marker must be cleared after cancellation \
+             (first attempt {first_attempt_id}, found {marker:?})"
+        ),
+    }
+
+    // The second request never performed an external effect.
+    let log = read_fixture_log(&ws.fixture_log);
+    assert_eq!(
+        log.iter().filter(|e| e["event"] == "prompt").count(),
+        1,
+        "the serialized second request must never reach the fixture: {log:?}"
+    );
 
     host.shutdown().await.expect("host shutdown");
 }
@@ -681,7 +767,7 @@ async fn capability_route_cancel_uses_shared_coordinator_token() {
     let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log);
     let (host, _storage, workflow_store, _executor, registry, session_cancels) =
         build_stack(&ws, provider_cfg).await;
-    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp").await;
+    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp", &session_cancels).await;
 
     // A1 shared cancellation: the capability route must resolve the run's
     // coordinator token from `session_cancels` (never mint a fresh,
@@ -718,16 +804,250 @@ async fn capability_route_cancel_uses_shared_coordinator_token() {
 }
 
 #[tokio::test]
+async fn capability_route_fails_closed_when_run_token_missing() {
+    let _lock = env_lock();
+    let ws = setup_workspace();
+    let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log);
+    let (host, _storage, workflow_store, _executor, registry, _session_cancels) =
+        build_stack(&ws, provider_cfg).await;
+    // The run is admitted but intentionally has NO registered coordinator
+    // token — the registry map is left empty.
+    let run_id = format!("run:{}", uuid::Uuid::new_v4());
+    let session = GraphSession::new_from_task(run_id.clone(), "start");
+    session.context.set("_session_id", run_id.clone()).await;
+    let mut agent_bindings = HashMap::new();
+    agent_bindings.insert(
+        "default".to_string(),
+        AgentBinding {
+            provider_id: "mock-acp".to_string(),
+            model: None,
+        },
+    );
+    workflow_store
+        .start_run(
+            &SessionId(run_id.clone()),
+            &RunDescriptorV1 {
+                creator_id: "ctr_test".to_string(),
+                work_id: None,
+                workspace_root: ws.creator_ws.clone(),
+                preset_id: "test-preset".to_string(),
+                preset_version: 1,
+                source: PresetSourceIdentity::Embedded {
+                    preset_id: "test-preset".to_string(),
+                    content_hash: [7u8; 32],
+                },
+                input: serde_json::Map::new(),
+                agent_bindings,
+                parent_session_id: None,
+                graph_name: None,
+            },
+            RunCheckpoint {
+                root: &session,
+                children: &[],
+            },
+            &RunStateV1::default(),
+        )
+        .await
+        .expect("start_run");
+
+    // Every LLM-backed capability route must FAIL CLOSED with the typed
+    // `CancellationUnavailable` when the run has no registered coordinator
+    // token — none may silently mint a fresh uncancellable token.
+    for (name, input) in [
+        (
+            "acp.prompt",
+            serde_json::json!({ "prompt": "hello", "tool_policy": "deny_all" }),
+        ),
+        (
+            "judge.llm",
+            serde_json::json!({ "prompt": "Is the task complete?" }),
+        ),
+        (
+            "context.summarize",
+            serde_json::json!({ "content": "The story is about a brave knight." }),
+        ),
+        (
+            "nexus.llm.extract",
+            serde_json::json!({ "prompt": "extract entities", "chapter_prose": "Lin Xia drew her blade." }),
+        ),
+    ] {
+        let cap = registry.get(name).expect("capability registered");
+        let mut payload = serde_json::json!({
+            "_creator_id": "ctr_test",
+            "_session_id": run_id,
+        });
+        for (k, v) in input.as_object().expect("input object") {
+            payload[k.clone()] = v.clone();
+        }
+        let result = cap.run(payload).await;
+        match result.unwrap_err() {
+            CapabilityError::CancellationUnavailable(msg) => {
+                assert!(
+                    msg.contains(&run_id),
+                    "typed missing-token refusal must name the run: {name}: {msg}"
+                );
+            }
+            other => panic!("{name} must fail closed with CancellationUnavailable, got: {other:?}"),
+        }
+    }
+
+    // No fixture process was ever spawned (the fail-closed refusal happens
+    // before any external effect).
+    assert!(
+        !ws.fixture_log.exists(),
+        "missing-token refusals must never spawn the fixture"
+    );
+
+    host.shutdown().await.expect("host shutdown");
+}
+
+#[tokio::test]
+async fn cancellation_after_active_before_exec_no_effect_and_no_session_leak() {
+    let _lock = env_lock();
+    let ws = setup_workspace();
+    // The fixture blocks after receiving the prompt, so the operation stays
+    // admitted (Active CAS won) until the coordinator token fires.
+    let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log).with_env("BLOCK_PROMPT", "1");
+    let (host, _storage, workflow_store, executor, _registry, session_cancels) =
+        build_stack(&ws, provider_cfg).await;
+    let run_id = start_v1_run(&workflow_store, &ws, "mock-acp", &session_cancels).await;
+
+    let cancel = session_cancels
+        .read()
+        .expect("read cancel map")
+        .get(&run_id)
+        .cloned()
+        .expect("registered run token");
+    let executor_for_task = executor.clone();
+    let run_for_task = run_id.clone();
+    let handle = tokio::spawn(async move {
+        executor_for_task
+            .execute(PromptRequest {
+                run_id: run_for_task,
+                task_id: "task-1".to_string(),
+                agent_ref: None,
+                prompt: "never-should-land".to_string(),
+                tool_policy: ToolPolicy::DenyAll,
+                cancellation: cancel,
+            })
+            .await
+    });
+
+    // Deterministic post-Active admission: wait until the durable Active
+    // write is visible (session + op ids persisted, the Active CAS won),
+    // THEN fire the coordinator token. The cancellation lands after the
+    // Active admission boundary — the biased cancel-vs-exec arbitration at
+    // the launch point (and the in-stream cancel loop) must refuse/stop the
+    // operation with a typed failure and clean up the created session.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let record = workflow_store
+            .load_run(&SessionId(run_id.clone()))
+            .await
+            .expect("load run");
+        let state = record.and_then(|r| r.state);
+        let active = state.as_ref().and_then(|s| s.in_flight.as_ref());
+        if active
+            .is_some_and(|a| a.phase == nexus_orchestration::run_state::PromptPhase::Active)
+        {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "Active intent never became durable"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    session_cancels
+        .read()
+        .expect("read cancel map")
+        .get(&run_id)
+        .cloned()
+        .expect("token")
+        .cancel();
+
+    let result = handle.await.expect("task joins");
+    assert!(result.is_err(), "post-Active cancellation must be a typed failure");
+    match result.unwrap_err() {
+        CapabilityError::Cancelled => {}
+        other => panic!("expected Cancelled, got: {other:?}"),
+    }
+
+    // The launch either never started (biased exec-gate admission won, zero
+    // prompt effect) or was cancelled in-stream (prompt arrived, then the
+    // owned operation was cancelled). Either way the observable contract
+    // holds: the fixture observed NO prompt beyond the blocked one, and no
+    // Host session is left behind after the bounded cleanup.
+    let log = read_fixture_log(&ws.fixture_log);
+    let prompts = log.iter().filter(|e| e["event"] == "prompt").count();
+    assert!(
+        prompts <= 1,
+        "the cancelled request must not launch additional prompts: {log:?}"
+    );
+
+    // Zero leaked Host session: the created owned session was shut down and
+    // evicted by the executor's cancellation cleanup.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let sessions = host.list_sessions().await.expect("list sessions");
+        if sessions.is_empty() {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no Host session may leak from a post-fence cancelled request: {sessions:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+
+    // The durable marker was cleared by the cancelled operation's terminal
+    // handling — the run is not left pretending a prompt is in flight.
+    let record = workflow_store
+        .load_run(&SessionId(run_id.clone()))
+        .await
+        .expect("load run")
+        .expect("record");
+    let state = record.state.expect("v1 state");
+    assert!(
+        state.in_flight.is_none(),
+        "the cancelled operation must not leave a durable in_flight marker"
+    );
+
+    host.shutdown().await.expect("host shutdown");
+}
+
+#[tokio::test]
 async fn nested_inner_graph_prompt_executes_with_child_identity() {
     let _lock = env_lock();
     let ws = setup_workspace();
     let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log);
-    let (host, storage, workflow_store, executor, _registry, session_cancels) =
+    let (host, storage, workflow_store, executor, _registry, _session_cancels) =
         build_stack(&ws, provider_cfg).await;
 
     // Parent v1 run with the frozen default binding → mock-acp, positioned
-    // at the `parent_state` task (mirrors `start_preset_run`).
+    // at the `parent_state` task (mirrors `start_preset_run`). The run's
+    // coordinator token is registered at admission in the engine's shared
+    // per-run cancellation map — the SAME map the child-spawn registrar
+    // (`EngineSharedState::register_cancellation`) writes and the graph
+    // prompt nodes read. Production unifies the boot map with the engine's
+    // shared map via `set_prompt_executor`; this test wires the node to the
+    // engine's own shared map directly.
+    let storage_arc: Arc<dyn graph_flow::SessionStorage> = storage.clone();
+    let caps = CapabilityRegistryHolder::with_registry(Arc::new(CapabilityRegistry::empty()));
+    let engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+        storage_arc.clone(),
+        workflow_store.clone(),
+        caps,
+    );
+    let node_cancels = engine.shared_state().session_cancels.clone();
     let parent_sid = format!("run:{}", uuid::Uuid::new_v4());
+    node_cancels
+        .write()
+        .expect("session cancels write")
+        .insert(
+            parent_sid.clone(),
+            tokio_util::sync::CancellationToken::new(),
+        );
     let parent_session = GraphSession::new_from_task(parent_sid.clone(), "parent_state");
     parent_session
         .context
@@ -771,26 +1091,22 @@ async fn nested_inner_graph_prompt_executes_with_child_identity() {
 
     // Inner graph with a production-wired prompt node that has NO explicit
     // session id — it must resolve the child run identity from the child
-    // context (`_session_id` seeded by `spawn_child_session_internal`).
+    // context (`_session_id` seeded by `spawn_child_session_internal`). The
+    // node reads the engine's shared cancellation map (production unifies
+    // the boot map via `set_prompt_executor`).
+    let storage_arc: Arc<dyn graph_flow::SessionStorage> = storage.clone();
     let inner_graph = Arc::new(Graph::new("inner_graph"));
     let prompt_node = nexus_orchestration::tasks::InnerGraphNodeTask::new("n1")
         .with_template("hello from outer")
         .with_tool_policy(ToolPolicy::DenyAll)
         .with_prompt_executor(Some(executor.clone() as Arc<dyn PromptExecutor>))
-        .with_session_cancels(session_cancels.clone());
+        .with_session_cancels(node_cancels.clone());
     inner_graph.add_task(Arc::new(prompt_node));
     inner_graph.add_task(Arc::new(EndTask));
     inner_graph.add_edge("n1", "end_task");
 
     // Parent graph whose start task is an InnerGraphTask over that graph.
     let parent_graph = Arc::new(Graph::new("parent_graph"));
-    let storage_arc: Arc<dyn graph_flow::SessionStorage> = storage.clone();
-    let caps = CapabilityRegistryHolder::with_registry(Arc::new(CapabilityRegistry::empty()));
-    let engine = GraphFlowEngine::new_with_storage_and_workflow_store(
-        storage_arc.clone(),
-        workflow_store.clone(),
-        caps,
-    );
     let engine_shared = engine.shared_state();
     let engine_arc: Arc<dyn OrchestrationEngine> = Arc::new(engine);
     let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(

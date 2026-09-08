@@ -59,6 +59,23 @@ fn empty_session_cancels() -> std::sync::Arc<
     std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()))
 }
 
+/// Shared cancellation map with a coordinator token registered for
+/// `test_session` (the fail-closed contract: capability routes refuse with
+/// `CancellationUnavailable` when a run has no registered token; production
+/// registers at run admission).
+fn session_cancels_with_test_session() -> std::sync::Arc<
+    std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+> {
+    let map = empty_session_cancels();
+    map.write()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(
+            "test_session".to_string(),
+            tokio_util::sync::CancellationToken::new(),
+        );
+    map
+}
+
 // ─── Test 1: with_runtime_deps wiring shape → nexus.llm.extract runs ────────
 
 /// Pure wiring-shape test: the exact `CapabilityRuntimeDeps` shape used by
@@ -72,7 +89,7 @@ async fn with_runtime_deps_wiring_makes_llm_extract_run() {
     let deps = CapabilityRuntimeDeps {
         pool: None,
         prompt_executor: Some(executor),
-        session_cancels: empty_session_cancels(),
+        session_cancels: session_cancels_with_test_session(),
         daemon_tool_dispatch: None,
         cdn_config: None,
     };
@@ -126,7 +143,7 @@ async fn executor_failure_stays_typed_failure() {
     let deps = CapabilityRuntimeDeps {
         pool: None,
         prompt_executor: Some(Arc::new(FailingExecutor) as Arc<dyn PromptExecutor>),
-        session_cancels: empty_session_cancels(),
+        session_cancels: session_cancels_with_test_session(),
         daemon_tool_dispatch: None,
         cdn_config: None,
     };

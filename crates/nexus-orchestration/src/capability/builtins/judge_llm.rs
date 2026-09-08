@@ -132,15 +132,12 @@ impl Capability for JudgeLlm {
             .ok_or(CapabilityError::WorkerUnavailable)?;
 
         // A1: resolve the coordinator cancellation token for this run from
-        // the shared per-run map (never a fresh token — a coordinator cancel
-        // must be able to interrupt this prompt).
-        let cancellation = self
-            .session_cancels
-            .read()
-            .map_err(|e| CapabilityError::Internal(format!("session cancels lock: {e}")))?
-            .get(session_id)
-            .cloned()
-            .unwrap_or_else(tokio_util::sync::CancellationToken::new);
+        // the shared per-run map. FAIL-CLOSED: a run with no registered
+        // token refuses with `CancellationUnavailable` — a fresh token would
+        // be uncancellable by any coordinator (never mint one here). The run
+        // admission path (engine start/spawn/recovery) registers the token.
+        let cancellation =
+            crate::capability::resolve_session_cancellation(&self.session_cancels, session_id)?;
 
         // Build judge prompt with GO/NOGO framing.
         let judge_prompt = format!(
@@ -228,6 +225,24 @@ pub fn parse_judge_response(text: &str) -> (bool, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Shared cancellation map with coordinator tokens registered for the
+    /// given run ids (fail-closed contract; production registers at run
+    /// admission).
+    fn cancels_with(ids: &[&str]) -> std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    > {
+        let map: std::sync::Arc<
+            std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+        > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        {
+            let mut guard = map.write().unwrap_or_else(|e| e.into_inner());
+            for id in ids {
+                guard.insert(id.to_string(), tokio_util::sync::CancellationToken::new());
+            }
+        }
+        map
+    }
 
     #[test]
     fn judge_llm_name() {
@@ -334,7 +349,8 @@ mod tests {
 
     #[tokio::test]
     async fn judge_llm_with_mock_executor_go() {
-        let cap = JudgeLlm::with_prompt_executor(Arc::new(MockGoExecutor::new()));
+        let cap = JudgeLlm::with_prompt_executor(Arc::new(MockGoExecutor::new()))
+            .with_session_cancels(cancels_with(&["default"]));
         let input = json!({ "prompt": "Is the task complete?" });
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["result"], true);
@@ -361,7 +377,8 @@ mod tests {
 
     #[tokio::test]
     async fn judge_llm_with_mock_executor_nogo() {
-        let cap = JudgeLlm::with_prompt_executor(Arc::new(MockNogoExecutor));
+        let cap = JudgeLlm::with_prompt_executor(Arc::new(MockNogoExecutor))
+            .with_session_cancels(cancels_with(&["default"]));
         let input = json!({ "prompt": "Is the task complete?" });
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["result"], false);
@@ -370,7 +387,8 @@ mod tests {
 
     #[tokio::test]
     async fn judge_llm_missing_prompt_errors() {
-        let cap = JudgeLlm::with_prompt_executor(Arc::new(MockNogoExecutor));
+        let cap = JudgeLlm::with_prompt_executor(Arc::new(MockNogoExecutor))
+            .with_session_cancels(cancels_with(&["default"]));
         let input = json!({});
         let result = cap.run(input).await;
         assert!(result.is_err());
@@ -384,7 +402,8 @@ mod tests {
     #[tokio::test]
     async fn judge_llm_raw_creator_id_ignored_on_spoof_attempt() {
         let executor = Arc::new(MockGoExecutor::new());
-        let cap = JudgeLlm::with_prompt_executor(executor.clone());
+        let cap = JudgeLlm::with_prompt_executor(executor.clone())
+            .with_session_cancels(cancels_with(&["default", "legit_session"]));
         let input = json!({
             "prompt": "evaluate",
             // Spoof attempt: raw preset args should be ignored
@@ -405,7 +424,8 @@ mod tests {
     #[tokio::test]
     async fn judge_llm_context_injected_identity_trusted() {
         let executor = Arc::new(MockGoExecutor::new());
-        let cap = JudgeLlm::with_prompt_executor(executor.clone());
+        let cap = JudgeLlm::with_prompt_executor(executor.clone())
+            .with_session_cancels(cancels_with(&["default", "legit_session"]));
         let input = json!({
             "prompt": "evaluate",
             "_creator_id": "legit_creator",
@@ -423,7 +443,8 @@ mod tests {
     #[tokio::test]
     async fn judge_llm_context_identity_overrides_raw_spoof() {
         let executor = Arc::new(MockGoExecutor::new());
-        let cap = JudgeLlm::with_prompt_executor(executor.clone());
+        let cap = JudgeLlm::with_prompt_executor(executor.clone())
+            .with_session_cancels(cancels_with(&["default", "legit_session"]));
         let input = json!({
             "prompt": "evaluate",
             "creator_id": "spoofed_creator",

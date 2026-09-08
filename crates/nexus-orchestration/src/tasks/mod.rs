@@ -2489,17 +2489,17 @@ impl Task for AcpPromptTask {
         // 2. If we have a prompt executor, dispatch through the Host plane.
         let full_text = if let Some(ref executor) = self.executor {
             // Resolve the coordinator cancellation token for this run (A1).
-            let cancellation = self
-                .session_cancels
-                .read()
-                .map_err(|e| {
-                    graph_flow::GraphError::TaskExecutionFailed(format!(
-                        "session cancels lock: {e}"
-                    ))
-                })?
-                .get(&self.session_id)
-                .cloned()
-                .unwrap_or_else(tokio_util::sync::CancellationToken::new);
+            // FAIL-CLOSED: an unregistered run refuses with the typed
+            // `CancellationUnavailable` — a fresh token would be
+            // uncancellable by any coordinator. The run admission path
+            // (engine start/spawn/recovery) registers the token.
+            let cancellation =
+                crate::capability::resolve_session_cancellation(&self.session_cancels, &self.session_id)
+                    .map_err(|e| {
+                        graph_flow::GraphError::TaskExecutionFailed(format!(
+                            "acp_prompt cancellation resolution failed: {e}"
+                        ))
+                    })?;
 
             // Dispatching a prompt to an external agent is an external
             // effect — mark the step so a failed post-effect commit persists
@@ -3102,7 +3102,7 @@ mod tests {
         let deps = CapabilityRuntimeDeps {
             pool: None,
             prompt_executor: Some(std::sync::Arc::new(MockGoProvider)),
-            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            session_cancels: session_cancels_with_default(),
             daemon_tool_dispatch: None,
             cdn_config: None,
         };
@@ -3144,7 +3144,7 @@ mod tests {
         let deps = CapabilityRuntimeDeps {
             pool: None,
             prompt_executor: Some(std::sync::Arc::new(MockNogoProvider)),
-            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            session_cancels: session_cancels_with_default(),
             daemon_tool_dispatch: None,
             cdn_config: None,
         };
@@ -3223,12 +3223,20 @@ mod tests {
 
     fn extract_registry_with_mock(response: &str) -> Arc<CapabilityRegistry> {
         use crate::capability::CapabilityRuntimeDeps;
+        let map = session_cancels_with_default();
+        // The extract regression context sets no `_session_id`, so the
+        // capability resolves run id "" — register its coordinator token
+        // (fail-closed contract) so the prompt reaches the mock executor.
+        map.write()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(String::new())
+            .or_insert_with(tokio_util::sync::CancellationToken::new);
         let deps = CapabilityRuntimeDeps {
             pool: None,
             prompt_executor: Some(std::sync::Arc::new(MockExtractProvider {
                 response: response.to_string(),
             })),
-            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            session_cancels: map,
             daemon_tool_dispatch: None,
             cdn_config: None,
         };
@@ -3464,7 +3472,7 @@ mod tests {
         let deps = CapabilityRuntimeDeps {
             pool: None,
             prompt_executor: Some(provider),
-            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            session_cancels: session_cancels_with_default(),
             daemon_tool_dispatch: None,
             cdn_config: None,
         };
@@ -3516,7 +3524,7 @@ mod tests {
         let deps = CapabilityRuntimeDeps {
             pool: None,
             prompt_executor: Some(provider),
-            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            session_cancels: session_cancels_with_default(),
             daemon_tool_dispatch: None,
             cdn_config: None,
         };
@@ -3801,6 +3809,33 @@ mod tests {
         std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()))
     }
 
+    /// Shared cancellation map with a coordinator token registered for the
+    /// given run id (the fail-closed contract: a prompt consumer with NO
+    /// registered token refuses `CancellationUnavailable`; production runs
+    /// register at admission, tests must do the same).
+    fn session_cancels_with(
+        session_id: &str,
+    ) -> std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    > {
+        let map = empty_session_cancels();
+        map.write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(
+                session_id.to_string(),
+                tokio_util::sync::CancellationToken::new(),
+            );
+        map
+    }
+
+    /// Shared cancellation map registering the `"default"` run (the run id
+    /// unbound capability inputs resolve to when no `_session_id` is set).
+    fn session_cancels_with_default() -> std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    > {
+        session_cancels_with("default")
+    }
+
     #[tokio::test]
     async fn acp_prompt_task_stub_mode_refuses() {
         // A1: no executor — refuse with a typed failure, never a placeholder
@@ -3882,7 +3917,7 @@ mod tests {
 
         let task = AcpPromptTask::new(
             Some(std::sync::Arc::new(MockExecutor)),
-            empty_session_cancels(),
+            session_cancels_with("default"),
             "state-1",
             "test prompt",
             ToolPolicy::AutoGrantReadOnly,
@@ -4073,12 +4108,25 @@ mod tests {
     fn identity_registry(
         executor: Arc<CapturingIdentityExecutor>,
     ) -> Arc<CapabilityRegistry> {
+        let session_cancels: Arc<std::sync::RwLock<
+            std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+        >> = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        // The identity regressions run an unbound capability path whose run
+        // id resolves to the trusted `_session_id` injected by the engine —
+        // register the coordinator tokens for the known test run ids (and
+        // "default" for unbound paths) so the prompt consumer reaches the
+        // executor (fail-closed contract).
+        for sid in ["default", "sess_42ch_001", "real_session"] {
+            session_cancels
+                .write()
+                .unwrap_or_else(|e| e.into_inner())
+                .entry(sid.to_string())
+                .or_insert_with(tokio_util::sync::CancellationToken::new);
+        }
         let deps = crate::capability::CapabilityRuntimeDeps {
             pool: None,
             prompt_executor: Some(executor),
-            session_cancels: Arc::new(std::sync::RwLock::new(
-                std::collections::HashMap::new(),
-            )),
+            session_cancels,
             daemon_tool_dispatch: None,
             cdn_config: None,
         };
