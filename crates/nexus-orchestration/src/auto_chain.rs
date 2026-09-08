@@ -1388,17 +1388,21 @@ fn enqueue_descriptor_json(
     preset_version: i64,
     input: serde_json::Map<String, serde_json::Value>,
     agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
-) -> Vec<u8> {
-    // N-5/N-5b: stamp the REAL content-addressed source identity (manifest +
-    // referenced template bytes) — never a zero placeholder. Admission
-    // validates the stored identity against the current load and builds the
-    // runner from the frozen identity, so a changed/shadowed preset can
-    // never run under a zero-hash durable descriptor.
-    let source = crate::preset::embedded_source_identity(preset_id)
-        .unwrap_or(crate::run_state::PresetSourceIdentity::Embedded {
-            preset_id: preset_id.to_string(),
-            content_hash: [0; 32],
-        });
+) -> Result<Vec<u8>, AutoChainError> {
+    // N-5/N-5b/N-15: stamp the REAL content-addressed source identity
+    // (manifest + referenced template bytes) — never a zero placeholder.
+    // Admission validates the stored identity against the current load and
+    // builds the runner from the frozen identity, so a changed/shadowed
+    // preset can never run under a zero-hash durable descriptor. An
+    // unresolvable (non-embedded/unknown) preset REJECTS the insertion
+    // before any row is published — a drive-enabled row is never emitted
+    // with a placeholder identity.
+    let source = crate::preset::embedded_source_identity(preset_id).ok_or_else(|| {
+        AutoChainError::InvalidState(format!(
+            "preset '{preset_id}' has no embedded source identity; \
+             refusing to publish a drive-enabled row"
+        ))
+    })?;
     let descriptor = crate::run_state::RunDescriptorV1 {
         creator_id: creator_id.to_string(),
         work_id: if work_id.is_empty() {
@@ -1415,7 +1419,9 @@ fn enqueue_descriptor_json(
         parent_session_id: None,
         graph_name: None,
     };
-    serde_json::to_vec(&descriptor).unwrap_or_else(|_| Vec::from(b"{}"))
+    serde_json::to_vec(&descriptor).map_err(|e| {
+        AutoChainError::InvalidState(format!("descriptor serialization failed: {e}"))
+    })
 }
 
 
@@ -1484,6 +1490,16 @@ pub async fn enqueue_auto_chain_schedule(
         .as_ref()
         .and_then(|v| v.as_object().cloned())
         .unwrap_or_default();
+    // N-15: resolve and persist the REAL source identity or reject before
+    // row publication — never a zero-hash placeholder.
+    let descriptor = enqueue_descriptor_json(
+        creator_id,
+        work_id,
+        &schedule_req.preset_id,
+        preset_version,
+        input,
+        agent_bindings,
+    )?;
     sqlx::query(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
@@ -1500,14 +1516,7 @@ pub async fn enqueue_auto_chain_schedule(
     .bind(now_ts)
     .bind(now_ts)
     .bind(work_id)
-    .bind(enqueue_descriptor_json(
-        creator_id,
-        work_id,
-        &schedule_req.preset_id,
-        preset_version,
-        input,
-        agent_bindings,
-    ))
+    .bind(descriptor)
     .execute(&mut *tx)
     .await
     .map_err(|e| {
@@ -1686,8 +1695,29 @@ pub async fn enqueue_review_master_schedule(
     // A3 admission cutover: drive-enabled (`driven_v1`). N-5: the frozen
     // descriptor carries the work_id input so admission reconstructs the
     // run with its work identity.
+    //
+    // N-10/N-14: `novel-review-master` references `work_id`, `work_ref`,
+    // `topic`, `open_findings`, `world_id`, and `body_path` in its
+    // enter-action vars. Strict-mode template rendering fails on MISSING
+    // keys, so every referenced key must be present (empty string is fine —
+    // the preset's `{{#if …}}` guards omit the section). The caller
+    // (stale-findings watcher) has only the Work record, so unpopulated
+    // keys default to empty strings here.
     let mut input = serde_json::Map::new();
     input.insert("work_id".to_string(), serde_json::json!(work_id));
+    for key in ["work_ref", "topic", "open_findings", "world_id", "body_path", "creator_id"] {
+        input.insert(key.to_string(), serde_json::Value::String(String::new()));
+    }
+    // N-15: resolve and persist the REAL source identity or reject before
+    // row publication — never a zero-hash placeholder.
+    let descriptor = enqueue_descriptor_json(
+        creator_id,
+        work_id,
+        "novel-review-master",
+        preset_version,
+        input,
+        agent_bindings,
+    )?;
     // N-3: the row is not admissible until its core-context version record
     // is durable. Insert + seed commit in ONE transaction.
     let mut tx = nexus_local_db::begin_immediate(pool)
@@ -1708,14 +1738,7 @@ pub async fn enqueue_review_master_schedule(
     .bind(now_ts)
     .bind(now_ts)
     .bind(work_id)
-    .bind(enqueue_descriptor_json(
-        creator_id,
-        work_id,
-        "novel-review-master",
-        preset_version,
-        input,
-        agent_bindings,
-    ))
+    .bind(descriptor)
     .execute(&mut *tx)
     .await
     .map_err(|e| {
@@ -1782,8 +1805,29 @@ pub async fn enqueue_cron_schedule(
     // A3 admission cutover: drive-enabled (`driven_v1`). N-5: the frozen
     // descriptor carries the work_id input so admission reconstructs the
     // run with its work identity.
+    //
+    // N-10/N-14: the cron presets (`novel-brainstorm` / `novel-write`)
+    // reference `work_id`, `work_ref`, `topic`, and `open_findings` in
+    // their enter-action vars. Strict-mode template rendering fails on
+    // MISSING keys, so every referenced key must be present (empty string
+    // is fine — the preset's `{{#if …}}` guards omit the section). The
+    // caller (cron supervisor) has only the WorkCronRow projection, so the
+    // unpopulated keys default to empty strings here.
     let mut input = serde_json::Map::new();
     input.insert("work_id".to_string(), serde_json::json!(work_id));
+    for key in ["work_ref", "topic", "open_findings", "vibe", "chapter", "chapter_label"] {
+        input.insert(key.to_string(), serde_json::Value::String(String::new()));
+    }
+    // N-15: resolve and persist the REAL source identity or reject before
+    // row publication — never a zero-hash placeholder.
+    let descriptor = enqueue_descriptor_json(
+        creator_id,
+        work_id,
+        preset_id,
+        preset_version,
+        input,
+        agent_bindings,
+    )?;
     // N-3: the row is not admissible until its core-context version record
     // is durable. Insert + seed commit in ONE transaction.
     let mut tx = nexus_local_db::begin_immediate(pool)
@@ -1805,14 +1849,7 @@ pub async fn enqueue_cron_schedule(
     .bind(now_ts)
     .bind(now_ts)
     .bind(work_id)
-    .bind(enqueue_descriptor_json(
-        creator_id,
-        work_id,
-        preset_id,
-        preset_version,
-        input,
-        agent_bindings,
-    ))
+    .bind(descriptor)
     .execute(&mut *tx)
     .await
     .map_err(|e| {

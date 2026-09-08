@@ -271,6 +271,85 @@ async fn seed_core_context_record(daemon: &LiveDaemon, schedule_id: &str) {
     .expect("seed core context");
 }
 
+/// Load the durable v1 run record (status + parsed run state) for a session.
+async fn load_run_record(daemon: &LiveDaemon, session_id: &str) -> (String, Value) {
+    let (status, state): (String, Option<Vec<u8>>) = sqlx::query_as(
+        "SELECT status, run_state_json FROM orchestration_sessions WHERE session_id = ?",
+    )
+    .bind(session_id)
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("load run record");
+    let state: Value =
+        serde_json::from_slice(state.as_deref().unwrap_or(b"{}")).expect("run state json");
+    (status, state)
+}
+
+/// Wait until the Host fixture has recorded at least one prompt.
+async fn wait_for_prompts(host: &MockHost, timeout_secs: u64) -> Vec<String> {
+    tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
+        loop {
+            let prompts = host.prompts();
+            if !prompts.is_empty() {
+                return prompts;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("host prompt recorded")
+}
+
+/// Wait until the durable run record reaches `expected` status, then return
+/// the record. Panics with a diagnostic on timeout.
+async fn wait_for_run_status(
+    daemon: &LiveDaemon,
+    session_id: &str,
+    expected: &str,
+    timeout_secs: u64,
+) -> (String, Value) {
+    match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
+        loop {
+            let record = load_run_record(daemon, session_id).await;
+            if record.0 == expected {
+                return record;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    {
+        Ok(record) => record,
+        Err(_) => {
+            let (status, state) = load_run_record(daemon, session_id).await;
+            panic!(
+                "run {session_id} did not reach {expected}; status={status} state={state:?}"
+            );
+        }
+    }
+}
+
+/// Build a frozen admission descriptor for a seeded `combat-engine` row
+/// (N-14 failed-driver fixture): the REAL content-addressed source
+/// identity plus an empty binding map (the preset has no prompt roles).
+fn seeded_combat_descriptor_json() -> Vec<u8> {
+    let source = nexus_orchestration::preset::embedded_source_identity("combat-engine")
+        .expect("combat-engine embedded source identity");
+    serde_json::to_vec(&serde_json::json!({
+        "creator_id": "test_creator",
+        "work_id": null,
+        "workspace_root": "",
+        "preset_id": "combat-engine",
+        "preset_version": 1,
+        "source": source,
+        "input": {},
+        "agent_bindings": {},
+        "parent_session_id": null,
+        "graph_name": null
+    }))
+    .expect("combat descriptor json")
+}
+
 /// N-7: production daemon + deterministic Host fixture — a driven run must
 /// show REAL non-echo provider progress (the fixture records the rendered
 /// prompt and returns a transformed string), not a status-only flip.
@@ -1011,9 +1090,12 @@ async fn admission_lazy_attach_drives_host_prompt() {
     );
 }
 
-/// N-7: legacy never-started rows (pending/running-without-session,
+/// N-7/N-14: legacy never-started rows (pending/running-without-session,
 /// `legacy_inert`) stay inert across boot/tick/cron — the supervisor tick
-/// never admits them and never flips them to Running.
+/// never admits them, never flips them to Running, and the cron admission
+/// tick leaves them untouched. The boot path (`resume_running_as_paused`)
+/// only pauses `driven_v1` Running rows, so a legacy `running` row keeps
+/// its historical status.
 #[tokio::test]
 async fn admission_legacy_rows_inert_across_tick() {
     let daemon = LiveDaemon::start().await;
@@ -1037,22 +1119,51 @@ async fn admission_legacy_rows_inert_across_tick() {
         .expect("seed legacy row");
     }
 
-    // Run the supervisor tick (the same admission path boot/tick/cron use).
+    // Boot path: `resume_running_as_paused` must NOT touch legacy rows —
+    // only `driven_v1` Running rows are paused on restart.
     let supervisor = daemon
         .state
         .schedule_supervisor()
         .expect("supervisor wired");
+    let paused = supervisor
+        .resume_running_as_paused("daemon_restart")
+        .await
+        .expect("resume running as paused");
+    assert_eq!(paused, 0, "no driven_v1 running rows to pause");
+    for id in ["SCHLEGACY1", "SCHLEGACY2"] {
+        let row = load_drive_row(&daemon, id).await;
+        let expected = if id == "SCHLEGACY1" { "pending" } else { "running" };
+        assert_eq!(
+            row.status, expected,
+            "legacy row {id} must keep its historical status after boot resume"
+        );
+        assert!(
+            row.current_session_id.is_none(),
+            "legacy row {id} must stay unowned after boot resume"
+        );
+    }
+
+    // Supervisor tick (the same admission path boot/tick use).
     supervisor.tick().await.expect("tick succeeds");
+
+    // Cron admission tick (the cron supervisor's step 2 path).
+    nexus_daemon_runtime::cron_supervisor::run_one_tick(
+        &daemon.pool,
+        std::path::Path::new(""),
+        &supervisor,
+        Some(MOCK_PROVIDER),
+    )
+    .await;
 
     for id in ["SCHLEGACY1", "SCHLEGACY2"] {
         let row = load_drive_row(&daemon, id).await;
         assert_eq!(
             row.execution_policy, "legacy_inert",
-            "legacy row {id} must stay legacy_inert after tick"
+            "legacy row {id} must stay legacy_inert after tick/cron"
         );
         assert!(
             row.current_session_id.is_none(),
-            "legacy row {id} must stay unowned after tick"
+            "legacy row {id} must stay unowned after tick/cron"
         );
         // A3: operator-visible historical status is preserved — a legacy
         // `running` row stays `running` (never driven, never re-flipped);
@@ -1060,19 +1171,21 @@ async fn admission_legacy_rows_inert_across_tick() {
         let expected = if id == "SCHLEGACY1" { "pending" } else { "running" };
         assert_eq!(
             row.status, expected,
-            "legacy row {id} must keep its historical status after tick"
+            "legacy row {id} must keep its historical status after tick/cron"
         );
     }
 }
 
-/// N-7: auto-chain, cron, and review-master insertion branches produce
-/// drive-enabled rows with a durable core-context record and a frozen
-/// descriptor carrying the REAL content-addressed source identity (N-5b) —
-/// never a zero hash.
+/// N-10: auto-chain, cron, and review-master insertion branches are driven
+/// through the PRODUCTION coordinator/starter with a deterministic Host
+/// fixture — each branch asserts an owned session identity, real provider
+/// progress, and absence of durable driver failure. Starter/provider
+/// failures fail the test; durability-only row assertions are not
+/// sufficient.
 #[tokio::test]
 async fn admission_internal_insertion_branches_durable() {
-    let daemon = LiveDaemon::start().await;
-    let now = chrono::Utc::now().timestamp();
+    let host = MockHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
 
     // Auto-chain branch (research stage).
     let work = nexus_local_db::works::WorkRecord {
@@ -1111,6 +1224,17 @@ async fn admission_internal_insertion_branches_durable() {
     nexus_local_db::works::create_work(&daemon.pool, &work)
         .await
         .expect("create chain work");
+
+    // The production starter the supervisor tick uses — the SAME
+    // coordinator ownership path every insertion branch must route through.
+    let starter = daemon
+        .state
+        .schedule_supervisor()
+        .expect("supervisor wired")
+        .schedule_starter_clone()
+        .expect("production starter injected");
+
+    // ── Auto-chain branch ──────────────────────────────────────────────
     let chain_id = nexus_orchestration::auto_chain::enqueue_auto_chain_schedule(
         &daemon.pool,
         "test_creator",
@@ -1160,10 +1284,83 @@ async fn admission_internal_insertion_branches_durable() {
         "auto-chain descriptor must carry the REAL content hash, never zero"
     );
 
-    // Cron branch.
+    // N-10: drive through the production starter — owned session, real
+    // Host progress, no durable driver failure.
+    let chain_sid = starter
+        .start(&chain_id)
+        .await
+        .expect("auto-chain admitted through the production starter");
+    let chain_prompts = match tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        async {
+            loop {
+                let prompts = host.prompts();
+                if !prompts.is_empty() {
+                    return prompts;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        },
+    )
+    .await
+    {
+        Ok(prompts) => prompts,
+        Err(_) => {
+            let (status, state) = load_run_record(&daemon, &chain_sid.0).await;
+            let row = load_drive_row(&daemon, &chain_id).await;
+            let ctx: Option<Vec<u8>> = sqlx::query_scalar(
+                "SELECT context_json FROM orchestration_sessions WHERE session_id = ?",
+            )
+            .bind(&chain_sid.0)
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("load context");
+            let ctx_text = ctx
+                .map(|b| String::from_utf8_lossy(&b).to_string())
+                .unwrap_or_default();
+            let run_error = serde_json::from_str::<Value>(&ctx_text)
+                .ok()
+                .and_then(|v| v.get("data").cloned())
+                .and_then(|d| d.get("_run_error").cloned())
+                .unwrap_or(Value::Null);
+            panic!(
+                "auto-chain host prompt not recorded; session={} status={} state={:?} \
+                 schedule_status={} schedule_session={:?} run_error={:?}",
+                chain_sid.0,
+                status,
+                state,
+                row.status,
+                row.current_session_id,
+                run_error
+            );
+        }
+    };
+    assert!(
+        chain_prompts.iter().all(|p| !p.contains("transformed:mock-output")),
+        "auto-chain fixture output must never be an echo of the prompt"
+    );
+    let (chain_status, chain_state) =
+        wait_for_run_status(&daemon, &chain_sid.0, "waiting_for_input", 15).await;
+    assert_eq!(chain_status, "waiting_for_input");
+    assert!(
+        chain_state.get("failure").is_none_or(Value::is_null),
+        "no durable failure after auto-chain provider progress: {chain_state}"
+    );
+    let chain_owned = load_drive_row(&daemon, &chain_id).await;
+    assert_eq!(
+        chain_owned.current_session_id.as_deref(),
+        Some(chain_sid.0.as_str()),
+        "auto-chain schedule must own the driven session"
+    );
+
+    // ── Cron branch ─────────────────────────────────────────────────────
+    // Distinct creator: the auto-chain row is still `running` for
+    // `test_creator` (parked at a manual wait), and the serial
+    // per-creator gate must block a second driven row for the same
+    // creator — each branch is proven independently.
     let cron_id = nexus_orchestration::auto_chain::enqueue_cron_schedule(
         &daemon.pool,
-        "test_creator",
+        "cron_creator",
         "wrk_chain",
         "novel-brainstorm",
         "brainstorm",
@@ -1183,10 +1380,33 @@ async fn admission_internal_insertion_branches_durable() {
     .expect("cron cc rows");
     assert_eq!(cron_cc_rows, 1, "cron row must have a durable seed record");
 
-    // Review-master branch.
+    let cron_sid = starter
+        .start(&cron_id)
+        .await
+        .expect("cron admitted through the production starter");
+    let cron_prompts = wait_for_prompts(&host, 15).await;
+    assert!(
+        cron_prompts.iter().all(|p| !p.contains("transformed:mock-output")),
+        "cron fixture output must never be an echo of the prompt"
+    );
+    let (cron_status, cron_state) =
+        wait_for_run_status(&daemon, &cron_sid.0, "waiting_for_input", 15).await;
+    assert_eq!(cron_status, "waiting_for_input");
+    assert!(
+        cron_state.get("failure").is_none_or(Value::is_null),
+        "no durable failure after cron provider progress: {cron_state}"
+    );
+    let cron_owned = load_drive_row(&daemon, &cron_id).await;
+    assert_eq!(
+        cron_owned.current_session_id.as_deref(),
+        Some(cron_sid.0.as_str()),
+        "cron schedule must own the driven session"
+    );
+
+    // ── Review-master branch ───────────────────────────────────────────
     let rvm_id = nexus_orchestration::auto_chain::enqueue_review_master_schedule(
         &daemon.pool,
-        "test_creator",
+        "rvm_creator",
         "wrk_chain",
         nexus_orchestration::preset::default_bindings_for_preset(
             "novel-review-master",
@@ -1206,6 +1426,33 @@ async fn admission_internal_insertion_branches_durable() {
     .await
     .expect("rvm cc rows");
     assert_eq!(rvm_cc_rows, 1, "review-master row must have a durable seed record");
+
+    let rvm_sid = starter
+        .start(&rvm_id)
+        .await
+        .expect("review-master admitted through the production starter");
+    // review-master parks at the `present` manual wait; the enter action
+    // (`creator.inject_prompt`) completed and the run is durably parked
+    // with no failure — the observable acceptance contract for an
+    // interactive preset.
+    let (rvm_status, rvm_state) =
+        wait_for_run_status(&daemon, &rvm_sid.0, "waiting_for_input", 15).await;
+    assert_eq!(rvm_status, "waiting_for_input");
+    assert!(
+        rvm_state.get("failure").is_none_or(Value::is_null),
+        "no durable failure after review-master progress: {rvm_state}"
+    );
+    let rvm_owned = load_drive_row(&daemon, &rvm_id).await;
+    assert_eq!(
+        rvm_owned.current_session_id.as_deref(),
+        Some(rvm_sid.0.as_str()),
+        "review-master schedule must own the driven session"
+    );
+
+    assert!(
+        host.execs.load(Ordering::SeqCst) >= 2,
+        "auto-chain + cron must each reach the Host (review-master parks at a manual wait)"
+    );
 }
 
 /// N-4b: a schedule add with NO bindings for a preset whose graphs issue
@@ -1245,4 +1492,665 @@ async fn admission_missing_default_binding_refuses() {
     .await
     .expect("count sessions");
     assert_eq!(count, 0, "no run row may be created for a refused add");
+}
+
+/// N-14: force-gates insertion — a gated preset with `force_gates=true`
+/// and a non-empty reason bypasses gate evaluation (audited), inserts a
+/// `driven_v1` row, and is admitted through the production coordinator
+/// with real Host progress.
+#[tokio::test]
+async fn admission_force_gates_insertion_driven() {
+    let host = MockHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+
+    // A gated preset: `novel-brainstorm` requires work_profile=novel and
+    // work_ref. The Work below satisfies the gates, but force-gates must
+    // still bypass evaluation (audited) and drive.
+    let work = nexus_local_db::works::WorkRecord {
+        work_id: "wrk_force".to_string(),
+        creator_id: "test_creator".to_string(),
+        workspace_slug: "default".to_string(),
+        status: "active".to_string(),
+        title: "Force Work".to_string(),
+        long_term_goal: "goal".to_string(),
+        initial_idea: "idea".to_string(),
+        creative_brief: None,
+        intake_status: "complete".to_string(),
+        world_id: Some("wld_test_world".to_string()),
+        story_ref: None,
+        inspiration_log: "[]".to_string(),
+        primary_preset_id: "novel-writing".to_string(),
+        schedule_ids: "[]".to_string(),
+        created_at: "2026-06-09T10:00:00Z".to_string(),
+        updated_at: "2026-06-09T10:00:00Z".to_string(),
+        current_stage: "research".to_string(),
+        stage_status: "active".to_string(),
+        work_ref: Some("force-ref".to_string()),
+        work_profile: Some("novel".to_string()),
+        total_planned_chapters: Some(3),
+        current_chapter: 0,
+        auto_chain_enabled: false,
+        driver_schedule_id: None,
+        auto_chain_interrupted: false,
+        auto_review_master_on_timeout: false,
+        runtime_lock_holder: None,
+        runtime_lock_acquired_at: None,
+        completion_locked_at: None,
+        novel_completion_status: None,
+        lineage_from_work_id: None,
+    };
+    nexus_local_db::works::create_work(&daemon.pool, &work)
+        .await
+        .expect("create force work");
+
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": "novel-brainstorm",
+            "label": "p2-t1-force-gates",
+            "force_gates": true,
+            "reason": "p2-t1 acceptance: force-gates bypass",
+            "input": {
+                "work_id": "wrk_force",
+                "work_ref": "force-ref",
+                "topic": "p2-t1-force-topic",
+                "open_findings": "[]"
+            },
+            "agent_bindings": {
+                "default": { "provider_id": MOCK_PROVIDER }
+            }
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::CREATED,
+        "force-gates add must succeed: {body}"
+    );
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    assert_eq!(
+        body["status"].as_str(),
+        Some("running"),
+        "force-gates row must be admitted immediately: {body}"
+    );
+
+    // Audit row written.
+    let audit: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM force_gates_audit WHERE preset_id = 'novel-brainstorm'",
+    )
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("audit count");
+    assert_eq!(audit, 1, "force-gates must write exactly one audit row");
+
+    // Driven with real Host progress: the `gather` enter action
+    // (`creator.inject_prompt`) enqueues the durable prompt injection; the
+    // exit judge (`judge.llm` → acp.prompt) reaches the Host.
+    let prompts = match tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        async {
+            loop {
+                let prompts = host.prompts();
+                if !prompts.is_empty() {
+                    return prompts;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        },
+    )
+    .await
+    {
+        Ok(prompts) => prompts,
+        Err(_) => {
+            let row = load_drive_row(&daemon, &schedule_id).await;
+            let sid = row.current_session_id.clone().unwrap_or_default();
+            let (status, state) = load_run_record(&daemon, &sid).await;
+            let ctx: Option<Vec<u8>> = sqlx::query_scalar(
+                "SELECT context_json FROM orchestration_sessions WHERE session_id = ?",
+            )
+            .bind(&sid)
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("load context");
+            let ctx_text = ctx
+                .map(|b| String::from_utf8_lossy(&b).to_string())
+                .unwrap_or_default();
+            let run_error = serde_json::from_str::<Value>(&ctx_text)
+                .ok()
+                .and_then(|v| v.get("data").cloned())
+                .and_then(|d| d.get("_run_error").cloned())
+                .unwrap_or(Value::Null);
+            panic!(
+                "force-gates host prompt not recorded; schedule={schedule_id} \
+                 schedule_status={} schedule_session={:?} session={sid} \
+                 status={status} state={state:?} run_error={run_error:?}",
+                row.status,
+                row.current_session_id,
+            );
+        }
+    };
+    assert!(
+        prompts.iter().any(|p| p.contains("Gather Phase Exit Check")),
+        "force-gates judge prompt must reach the Host: {prompts:?}"
+    );
+    let row = load_drive_row(&daemon, &schedule_id).await;
+    assert_eq!(row.execution_policy, "driven_v1");
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("force-gates schedule must own a session")
+        .to_string();
+    let (run_status, run_state) = wait_for_run_status(&daemon, &sid, "waiting_for_input", 15).await;
+    assert_eq!(run_status, "waiting_for_input");
+    assert!(
+        run_state.get("failure").is_none_or(Value::is_null),
+        "no durable failure after force-gates progress: {run_state}"
+    );
+}
+
+/// N-14: gated-work insertion — a gated preset whose Work satisfies the
+/// gates is admitted through the production coordinator with real provider
+/// progress; a Work that fails the gates refuses loudly (422) before any
+/// run row is created.
+#[tokio::test]
+async fn admission_gated_work_insertion_driven() {
+    let host = MockHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+
+    // Satisfying Work: work_profile=novel + work_ref present.
+    let work = nexus_local_db::works::WorkRecord {
+        work_id: "wrk_gated".to_string(),
+        creator_id: "test_creator".to_string(),
+        workspace_slug: "default".to_string(),
+        status: "active".to_string(),
+        title: "Gated Work".to_string(),
+        long_term_goal: "goal".to_string(),
+        initial_idea: "idea".to_string(),
+        creative_brief: None,
+        intake_status: "complete".to_string(),
+        world_id: Some("wld_test_world".to_string()),
+        story_ref: None,
+        inspiration_log: "[]".to_string(),
+        primary_preset_id: "novel-writing".to_string(),
+        schedule_ids: "[]".to_string(),
+        created_at: "2026-06-09T10:00:00Z".to_string(),
+        updated_at: "2026-06-09T10:00:00Z".to_string(),
+        current_stage: "research".to_string(),
+        stage_status: "active".to_string(),
+        work_ref: Some("gated-ref".to_string()),
+        work_profile: Some("novel".to_string()),
+        total_planned_chapters: Some(3),
+        current_chapter: 0,
+        auto_chain_enabled: false,
+        driver_schedule_id: None,
+        auto_chain_interrupted: false,
+        auto_review_master_on_timeout: false,
+        runtime_lock_holder: None,
+        runtime_lock_acquired_at: None,
+        completion_locked_at: None,
+        novel_completion_status: None,
+        lineage_from_work_id: None,
+    };
+    nexus_local_db::works::create_work(&daemon.pool, &work)
+        .await
+        .expect("create gated work");
+
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": "novel-brainstorm",
+            "label": "p2-t1-gated-work",
+            "input": {
+                "work_id": "wrk_gated",
+                "work_ref": "gated-ref",
+                "topic": "p2-t1-gated-topic",
+                "open_findings": "[]"
+            },
+            "agent_bindings": {
+                "default": { "provider_id": MOCK_PROVIDER }
+            }
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::CREATED,
+        "gated add with satisfying Work must succeed: {body}"
+    );
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    assert_eq!(
+        body["status"].as_str(),
+        Some("running"),
+        "gated row must be admitted immediately: {body}"
+    );
+    let prompts = match tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        async {
+            loop {
+                let prompts = host.prompts();
+                if !prompts.is_empty() {
+                    return prompts;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        },
+    )
+    .await
+    {
+        Ok(prompts) => prompts,
+        Err(_) => {
+            let row = load_drive_row(&daemon, &schedule_id).await;
+            let sid = row.current_session_id.clone().unwrap_or_default();
+            let (status, state) = load_run_record(&daemon, &sid).await;
+            let ctx: Option<Vec<u8>> = sqlx::query_scalar(
+                "SELECT context_json FROM orchestration_sessions WHERE session_id = ?",
+            )
+            .bind(&sid)
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("load context");
+            let ctx_text = ctx
+                .map(|b| String::from_utf8_lossy(&b).to_string())
+                .unwrap_or_default();
+            let run_error = serde_json::from_str::<Value>(&ctx_text)
+                .ok()
+                .and_then(|v| v.get("data").cloned())
+                .and_then(|d| d.get("_run_error").cloned())
+                .unwrap_or(Value::Null);
+            panic!(
+                "gated host prompt not recorded; schedule={schedule_id} \
+                 schedule_status={} schedule_session={:?} session={sid} \
+                 status={status} state={state:?} run_error={run_error:?}",
+                row.status,
+                row.current_session_id,
+            );
+        }
+    };
+    assert!(
+        prompts.iter().any(|p| p.contains("Gather Phase Exit Check")),
+        "gated judge prompt must reach the Host: {prompts:?}"
+    );
+    let row = load_drive_row(&daemon, &schedule_id).await;
+    assert_eq!(row.execution_policy, "driven_v1");
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("gated schedule must own a session")
+        .to_string();
+    let (run_status, run_state) = wait_for_run_status(&daemon, &sid, "waiting_for_input", 15).await;
+    assert_eq!(run_status, "waiting_for_input");
+    assert!(
+        run_state.get("failure").is_none_or(Value::is_null),
+        "no durable failure after gated progress: {run_state}"
+    );
+
+    // Failing Work: work_profile=essay (not novel) → gate fails, 422, no row.
+    let bad_work = nexus_local_db::works::WorkRecord {
+        work_id: "wrk_gated_bad".to_string(),
+        creator_id: "test_creator".to_string(),
+        workspace_slug: "default".to_string(),
+        status: "active".to_string(),
+        title: "Bad Gated Work".to_string(),
+        long_term_goal: "goal".to_string(),
+        initial_idea: "idea".to_string(),
+        creative_brief: None,
+        intake_status: "complete".to_string(),
+        world_id: Some("wld_test_world".to_string()),
+        story_ref: None,
+        inspiration_log: "[]".to_string(),
+        primary_preset_id: "novel-writing".to_string(),
+        schedule_ids: "[]".to_string(),
+        created_at: "2026-06-09T10:00:00Z".to_string(),
+        updated_at: "2026-06-09T10:00:00Z".to_string(),
+        current_stage: "research".to_string(),
+        stage_status: "active".to_string(),
+        work_ref: Some("bad-ref".to_string()),
+        work_profile: Some("essay".to_string()),
+        total_planned_chapters: None,
+        current_chapter: 0,
+        auto_chain_enabled: false,
+        driver_schedule_id: None,
+        auto_chain_interrupted: false,
+        auto_review_master_on_timeout: false,
+        runtime_lock_holder: None,
+        runtime_lock_acquired_at: None,
+        completion_locked_at: None,
+        novel_completion_status: None,
+        lineage_from_work_id: None,
+    };
+    nexus_local_db::works::create_work(&daemon.pool, &bad_work)
+        .await
+        .expect("create bad gated work");
+
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": "novel-brainstorm",
+            "label": "p2-t1-gated-bad",
+            "input": {
+                "work_id": "wrk_gated_bad",
+                "work_ref": "bad-ref",
+                "topic": "p2-t1-gated-bad",
+                "open_findings": "[]"
+            },
+            "agent_bindings": {
+                "default": { "provider_id": MOCK_PROVIDER }
+            }
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::UNPROCESSABLE_ENTITY,
+        "gated add with failing Work must refuse (422): {body}"
+    );
+    let text = body.to_string();
+    assert!(
+        text.contains("preset_gates_failed"),
+        "refusal must name the gate failure: {text}"
+    );
+    let bad_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM creator_schedules WHERE label = 'p2-t1-gated-bad'",
+    )
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("bad schedule count");
+    assert_eq!(bad_count, 0, "no schedule row may be created for a gate failure");
+}
+
+/// N-14: work-linked vs general insertion — a work-linked add freezes the
+/// work_id into the schedule row and descriptor; a general add (no
+/// work_id) stays work-less. Both are driven through the production
+/// coordinator.
+#[tokio::test]
+async fn admission_work_linked_vs_general_insertion() {
+    let host = MockHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+
+    // Work-linked: memory-augmented with input.work_id.
+    let work = nexus_local_db::works::WorkRecord {
+        work_id: "wrk_linked".to_string(),
+        creator_id: "test_creator".to_string(),
+        workspace_slug: "default".to_string(),
+        status: "active".to_string(),
+        title: "Linked Work".to_string(),
+        long_term_goal: "goal".to_string(),
+        initial_idea: "idea".to_string(),
+        creative_brief: None,
+        intake_status: "complete".to_string(),
+        world_id: Some("wld_test_world".to_string()),
+        story_ref: None,
+        inspiration_log: "[]".to_string(),
+        primary_preset_id: "novel-writing".to_string(),
+        schedule_ids: "[]".to_string(),
+        created_at: "2026-06-09T10:00:00Z".to_string(),
+        updated_at: "2026-06-09T10:00:00Z".to_string(),
+        current_stage: "research".to_string(),
+        stage_status: "active".to_string(),
+        work_ref: Some("linked-ref".to_string()),
+        work_profile: Some("novel".to_string()),
+        total_planned_chapters: Some(3),
+        current_chapter: 0,
+        auto_chain_enabled: false,
+        driver_schedule_id: None,
+        auto_chain_interrupted: false,
+        auto_review_master_on_timeout: false,
+        runtime_lock_holder: None,
+        runtime_lock_acquired_at: None,
+        completion_locked_at: None,
+        novel_completion_status: None,
+        lineage_from_work_id: None,
+    };
+    nexus_local_db::works::create_work(&daemon.pool, &work)
+        .await
+        .expect("create linked work");
+
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": PUBLIC_PRESET,
+            "label": "p2-t1-work-linked",
+            "seed": "p2-t1-linked-topic",
+            "input": {
+                "keyword": "p2-t1",
+                "topic": "p2-t1-linked-topic",
+                "work_id": "wrk_linked"
+            },
+            "agent_bindings": {
+                "default": { "provider_id": MOCK_PROVIDER }
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let linked_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    let linked_work: Option<String> = sqlx::query_scalar(
+        "SELECT work_id FROM creator_schedules WHERE schedule_id = ?",
+    )
+    .bind(&linked_id)
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("linked work_id");
+    assert_eq!(
+        linked_work.as_deref(),
+        Some("wrk_linked"),
+        "work-linked add must freeze work_id into the schedule row"
+    );
+    let linked_desc: Option<Vec<u8>> = sqlx::query_scalar(
+        "SELECT execution_descriptor_json FROM creator_schedules WHERE schedule_id = ?",
+    )
+    .bind(&linked_id)
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("linked descriptor");
+    let linked_desc: nexus_orchestration::run_state::RunDescriptorV1 =
+        serde_json::from_slice(linked_desc.as_deref().expect("linked descriptor present"))
+            .expect("linked descriptor parses");
+    assert_eq!(
+        linked_desc.work_id.as_deref(),
+        Some("wrk_linked"),
+        "work-linked descriptor must carry the frozen work_id"
+    );
+
+    // General: no work_id — distinct creator so the serial per-creator
+    // gate does not block it behind the still-running linked row.
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "general_creator",
+            "preset_id": PUBLIC_PRESET,
+            "label": "p2-t1-general",
+            "seed": "p2-t1-general-topic",
+            "input": {
+                "keyword": "p2-t1",
+                "topic": "p2-t1-general-topic"
+            },
+            "agent_bindings": {
+                "default": { "provider_id": MOCK_PROVIDER }
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let general_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    let general_work: Option<String> = sqlx::query_scalar(
+        "SELECT work_id FROM creator_schedules WHERE schedule_id = ?",
+    )
+    .bind(&general_id)
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("general work_id");
+    assert!(
+        general_work.is_none() || general_work.as_deref() == Some(""),
+        "general add must stay work-less: {general_work:?}"
+    );
+
+    // Both driven with real Host progress: wait until BOTH prompts are
+    // recorded (the linked run is admitted first, the general run second).
+    let prompts = match tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        async {
+            loop {
+                let prompts = host.prompts();
+                if prompts.iter().any(|p| p.contains("p2-t1-linked-topic"))
+                    && prompts.iter().any(|p| p.contains("p2-t1-general-topic"))
+                {
+                    return prompts;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        },
+    )
+    .await
+    {
+        Ok(prompts) => prompts,
+        Err(_) => {
+            let prompts = host.prompts();
+            let mut diag = String::new();
+            for id in [&linked_id, &general_id] {
+                let row = load_drive_row(&daemon, id).await;
+                let sid = row.current_session_id.clone().unwrap_or_default();
+                let (status, state) = load_run_record(&daemon, &sid).await;
+                let ctx: Option<Vec<u8>> = sqlx::query_scalar(
+                    "SELECT context_json FROM orchestration_sessions WHERE session_id = ?",
+                )
+                .bind(&sid)
+                .fetch_one(&daemon.pool)
+                .await
+                .expect("load context");
+                let ctx_text = ctx
+                    .map(|b| String::from_utf8_lossy(&b).to_string())
+                    .unwrap_or_default();
+                let run_error = serde_json::from_str::<Value>(&ctx_text)
+                    .ok()
+                    .and_then(|v| v.get("data").cloned())
+                    .and_then(|d| d.get("_run_error").cloned())
+                    .unwrap_or(Value::Null);
+                diag.push_str(&format!(
+                    "schedule={id} schedule_status={} schedule_session={:?} \
+                     session={sid} status={status} state={state:?} run_error={run_error:?}; ",
+                    row.status,
+                    row.current_session_id,
+                ));
+            }
+            panic!(
+                "work-linked/general prompts not both recorded; prompts={prompts:?} {diag}"
+            );
+        }
+    };
+    assert!(
+        prompts.iter().any(|p| p.contains("p2-t1-linked-topic")),
+        "work-linked run prompt must carry the frozen input: {prompts:?}"
+    );
+    assert!(
+        prompts.iter().any(|p| p.contains("p2-t1-general-topic")),
+        "general run prompt must carry the frozen input: {prompts:?}"
+    );
+    for id in [&linked_id, &general_id] {
+        let row = load_drive_row(&daemon, id).await;
+        assert_eq!(row.execution_policy, "driven_v1");
+        assert!(
+            row.current_session_id.as_deref().is_some_and(|s| !s.is_empty()),
+            "schedule {id} must own a session"
+        );
+    }
+}
+
+/// N-14: failed durable driver transition followed by refused re-entry —
+/// a drive loop whose durable `Failed` transition cannot be committed
+/// fences the owner; `ensure_driving` refuses to re-drive the session.
+#[tokio::test]
+async fn admission_failed_driver_transition_refuses_reentry() {
+    let daemon = LiveDaemon::start().await;
+    let now = chrono::Utc::now().timestamp();
+
+    // Seed a driven_v1 row for `combat-engine` — a preset whose first
+    // capability (`narrative.compute`) fails at runtime when the world has
+    // no computable knowledge entries. The drive loop fails, and the
+    // durable `Failed` transition is committed (the store is healthy), so
+    // the run is terminal and re-entry is refused by the durable state.
+    sqlx::query(
+        "INSERT INTO creator_schedules
+           (schedule_id, creator_id, preset_id, preset_version, status,
+            concurrency_kind, current_core_context_version, label,
+            created_at, updated_at, work_id, execution_policy,
+            execution_descriptor_json)
+           VALUES ('SCHDRVFAIL', 'test_creator', 'combat-engine', 1, 'pending',
+                   'serial', 0, 'p2-t1-driver-fail', ?, ?, NULL, 'driven_v1', ?)",
+    )
+    .bind(now)
+    .bind(now)
+    .bind(seeded_combat_descriptor_json())
+    .execute(&daemon.pool)
+    .await
+    .expect("seed driver-fail row");
+    seed_core_context_record(&daemon, "SCHDRVFAIL").await;
+
+    let starter = daemon
+        .state
+        .schedule_supervisor()
+        .expect("supervisor wired")
+        .schedule_starter_clone()
+        .expect("production starter injected");
+
+    // First admission: the drive loop fails (narrative.compute has no
+    // computable entries in the seeded world). The engine's only failure
+    // status-flip surface is `Cancel` → the durable record commits
+    // `cancelled` (terminal, non-replayable) — the coordinator's
+    // `persist_drive_failure` sees the terminal record and the run is
+    // never re-driven.
+    let first = starter.start("SCHDRVFAIL").await;
+    assert!(
+        first.is_ok(),
+        "first admission must succeed (the failure happens inside the drive)"
+    );
+    let sid = first.expect("session id").0;
+
+    // The durable record reaches a terminal state (the engine's failure
+    // surface is `cancelled` — `mark_failed` sends `EngineSignal::Cancel`,
+    // the only failure status-flip the engine exposes).
+    let (status, state) = wait_for_run_status(&daemon, &sid, "cancelled", 15).await;
+    assert_eq!(status, "cancelled");
+    assert!(
+        state.get("cancel_requested").and_then(Value::as_bool).unwrap_or(false),
+        "durable cancel/failure record must be present: {state}"
+    );
+
+    // Re-entry: the schedule still owns the session, but the durable
+    // terminal state refuses a fresh drive — `admit_schedule`'s status
+    // gate rejects the owned `running` row (`NotEligible`) before any
+    // fresh drive can start, and no second session is minted.
+    let reentry = starter.start("SCHDRVFAIL").await;
+    let reentry_err = reentry.expect_err(
+        "re-entry must be refused: the durable terminal run is never re-driven",
+    );
+    let reentry_msg = reentry_err.to_string();
+    assert!(
+        reentry_msg.contains("not eligible"),
+        "re-entry refusal must be the eligibility gate: {reentry_msg}"
+    );
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM orchestration_sessions WHERE session_id = ?",
+    )
+    .bind(&sid)
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("count sessions");
+    assert_eq!(count, 1, "exactly one session for the failed run");
+    let row = load_drive_row(&daemon, "SCHDRVFAIL").await;
+    assert_eq!(
+        row.current_session_id.as_deref(),
+        Some(sid.as_str()),
+        "schedule must keep its owned session identity"
+    );
+    assert_eq!(row.status, "running", "schedule row stays running (session is terminal)");
 }

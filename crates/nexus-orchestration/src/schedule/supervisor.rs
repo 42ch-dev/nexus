@@ -173,6 +173,17 @@ impl ScheduleSupervisor {
         self
     }
 
+    /// Clone the injected daemon admission callback (N-11): lets daemon
+    /// background owners (stale-findings watcher, boot recovery) hand
+    /// their enqueued rows to the SAME production starter the supervisor
+    /// tick uses, so every supported insertion branch shares one
+    /// coordinator ownership path. `None` when no starter is wired
+    /// (tests, standalone supervisor).
+    #[must_use]
+    pub fn schedule_starter_clone(&self) -> Option<Arc<dyn ScheduleRunStarter>> {
+        self.schedule_starter.as_ref().clone()
+    }
+
     /// Set the default binding provider for internal schedule insertion
     /// (N-9): the daemon's first enabled Host provider. Auto-chain
     /// continuation rows built by this supervisor bind every effective
@@ -1134,6 +1145,18 @@ impl ScheduleSupervisor {
             .await
             .map_err(|e| SupervisorError::Database(sqlx::Error::Protocol(e.to_string())))?;
 
+        // N-14: the frozen descriptor carries the schedule's work_id; the
+        // `Schedule` DTO has no work_id field, so the row's `work_id`
+        // column is derived from the descriptor here (work-linked adds
+        // must freeze work_id into the schedule row, not only the
+        // descriptor).
+        let descriptor_work_id: Option<String> = execution_descriptor
+            .and_then(|bytes| {
+                serde_json::from_slice::<crate::run_state::RunDescriptorV1>(bytes).ok()
+            })
+            .and_then(|d| d.work_id)
+            .filter(|id| !id.is_empty());
+
         // SAFETY: dynamic SQL — a runtime INSERT matching the historical
         // `insert_pending` shape plus the A3 execution-policy column. The
         // established auto-chain/cron convention uses runtime `sqlx::query`
@@ -1145,8 +1168,8 @@ impl ScheduleSupervisor {
                 concurrency_kind, concurrency_whitelist,
                 current_core_context_version, current_session_id,
                 scheduled_at, label, created_at, updated_at, terminated_at,
-                execution_policy, execution_descriptor_json)
-               VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?)"#,
+                work_id, execution_policy, execution_descriptor_json)
+               VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?, ?)"#,
         )
         .bind(&schedule_id)
         .bind(&creator_id)
@@ -1159,6 +1182,7 @@ impl ScheduleSupervisor {
         .bind(label)
         .bind(created_at)
         .bind(updated_at)
+        .bind(descriptor_work_id)
         .bind(execution_policy)
         .bind(execution_descriptor)
         .execute(&mut *tx)

@@ -738,8 +738,15 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             None => None,
         };
 
+    // N-13: when a Creator DB is already available at boot, the capability
+    // registry is built with the SAME pool the boot engine/coordinator/
+    // supervisor use — pool-backed capabilities (`kb.extract_work`,
+    // `narrative.compute`, creator memory store) are fully wired in the
+    // normal boot aggregate, never a pool-less placeholder. Tier-0 boot
+    // (no creator DB) keeps `pool: None` and defers the pool-backed
+    // registry to Profile attach (`publish_lazy_attach_bundle`).
     let runtime_deps = CapabilityRuntimeDeps {
-        pool: None,
+        pool: state.pool().cloned(),
         prompt_executor: prompt_executor.clone(),
         session_cancels: session_cancels.clone(),
         daemon_tool_dispatch: None,
@@ -1113,6 +1120,9 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         // the next step and enqueuing a new schedule.
         {
             let recovery_pool = &schedule_pool;
+            // N-11: the boot-recovery auto-chain rows get the SAME guaranteed
+            // post-commit starter handoff as the supervisor terminal path.
+            let recovery_starter = schedule_supervisor.schedule_starter_clone();
             match nexus_orchestration::auto_chain::find_resumable_works(recovery_pool).await {
                 Ok(resumable) => {
                     if !resumable.is_empty() {
@@ -1165,6 +1175,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                                         None,
                                         &latest,
                                         binding_provider.as_deref(),
+                                        recovery_starter.as_deref(),
                                     )
                                     .await
                                     {
@@ -1194,6 +1205,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                                         Some(*next_chapter),
                                         &latest,
                                         binding_provider.as_deref(),
+                                        recovery_starter.as_deref(),
                                     )
                                     .await
                                     {
@@ -1302,6 +1314,12 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                 watcher_shutdown,
                 watcher_config,
                 binding_provider.clone(),
+                // N-11: the review-master rows the watcher enqueues get the
+                // SAME guaranteed post-commit starter handoff as every other
+                // production insertion branch.
+                state
+                    .schedule_supervisor()
+                    .and_then(|s| s.schedule_starter_clone()),
             );
         }
 
@@ -1666,6 +1684,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     if state.run_coordinator().is_some() {
         state
             .publish_boot_runtime_bundle()
+            .await
             .map_err(|e| anyhow::anyhow!("failed to publish boot runtime bundle: {e}"))?;
     }
 
@@ -1835,6 +1854,7 @@ async fn resume_auto_chain_work(
     chapter: Option<i32>,
     work: &nexus_local_db::works::WorkRecord,
     binding_provider: Option<&str>,
+    schedule_starter: Option<&dyn ScheduleRunStarter>,
 ) -> Result<String, String> {
     // N-9: derive the complete binding map for the stage's preset from the
     // configured default provider. A preset with prompt roles and no
@@ -1878,11 +1898,25 @@ async fn resume_auto_chain_work(
             }
         }
     };
-    nexus_orchestration::auto_chain::enqueue_auto_chain_schedule(
+    let schedule_id = nexus_orchestration::auto_chain::enqueue_auto_chain_schedule(
         pool, creator_id, work_id, stage, chapter, None, work, bindings,
     )
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+
+    // N-11: guaranteed post-commit coordinator handoff — the boot-recovery
+    // auto-chain row is admitted through the SAME production starter as the
+    // supervisor terminal path. A starter failure is explicit (returned to
+    // the caller, which logs it); the row stays pending for a later tick /
+    // explicit start, never silently unhanded.
+    if let Some(starter) = schedule_starter {
+        starter
+            .start(&schedule_id)
+            .await
+            .map_err(|e| format!("starter handoff failed for {schedule_id}: {e}"))?;
+    }
+
+    Ok(schedule_id)
 }
 
 /// Host-free daemon admission callback (A3) — the `ScheduleRunStarter`

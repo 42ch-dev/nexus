@@ -599,13 +599,33 @@ impl WorkspaceState {
     /// remain for the boot path's incremental wiring and as a fallback when
     /// no aggregate has been published (Tier-0 boot before Profile attach).
     ///
+    /// N-12: routes through the SAME async once/initialization gate as
+    /// [`Self::publish_creator_runtime_bundle`] — concurrent callers
+    /// serialize, re-check, and observe the winner's aggregate; the
+    /// aggregate is written exactly once and no synchronous ungated
+    /// publication bypass remains.
+    ///
     /// # Errors
     /// Returns an error when a required component is missing (the caller
     /// must wire every component before publishing).
-    pub fn publish_boot_runtime_bundle(&self) -> anyhow::Result<()> {
+    pub async fn publish_boot_runtime_bundle(&self) -> anyhow::Result<()> {
         if self.runtime_bundle().is_some() {
             return Ok(());
         }
+        // N-12: one async initialization gate for the publish sequence.
+        let _gate = self.bundle_gate.lock().await;
+        // Re-check under the gate: the winner may have completed while we
+        // waited.
+        if self.runtime_bundle().is_some() {
+            return Ok(());
+        }
+        self.publish_boot_runtime_bundle_inner()
+    }
+
+    /// The gated boot-bundle publication body (N-12): reads the boot-wired
+    /// slots and writes the aggregate exactly once. Private — the only
+    /// public entry is the async gated [`Self::publish_boot_runtime_bundle`].
+    fn publish_boot_runtime_bundle_inner(&self) -> anyhow::Result<()> {
         let engine = self
             .engine
             .read()
