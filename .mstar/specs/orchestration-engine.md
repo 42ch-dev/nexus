@@ -445,7 +445,6 @@ Requests (daemon → worker):
 | `worker/initialize`      | `{ creator_id, agent_ref, workspace_root, acp_session_id? }`         | `{ capabilities, worker_pid }`             |
 | `worker/acp_prompt`      | `{ prompt, tool_policy, session_id? }`                               | streaming `worker/acp_prompt_chunk` + final `worker/acp_prompt_complete` |
 | `worker/acp_cancel`      | `{ session_id }`                                                     | `{}`                                       |
-| `worker/acp_session_load`| `{ session_id }`                                                     | `{ ok, error? }`                           |
 | `worker/health`          | `{}`                                                                 | `{ uptime_ms, acp_session_state, last_error? }` |
 | `worker/shutdown`        | `{ grace_ms: u32 }`                                                  | `{}` (no further requests accepted)        |
 
