@@ -263,22 +263,26 @@ pub async fn add_schedule(
         } else {
             "driven_v1"
         };
+        let (concurrency_kind, concurrency_whitelist, scheduled_at_ts) = insert_concurrency_and_schedule(&body);
         let descriptor = build_execution_descriptor(&body, &work_id);
         sqlx::query(
             "INSERT INTO creator_schedules \
              (schedule_id, creator_id, preset_id, preset_version, status, \
-              concurrency_kind, current_core_context_version, label, \
-              created_at, updated_at, work_id, execution_policy, \
+              concurrency_kind, concurrency_whitelist, current_core_context_version, label, \
+              created_at, updated_at, work_id, scheduled_at, execution_policy, \
               execution_descriptor_json) \
-             VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?, ?, ?)",
+             VALUES (?, ?, ?, 1, 'paused', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&schedule_id)
         .bind(&body.creator_id)
         .bind(&body.preset_id)
+        .bind(&concurrency_kind)
+        .bind(&concurrency_whitelist)
         .bind(&body.label)
         .bind(now_ts)
         .bind(now_ts)
         .bind(&work_id)
+        .bind(scheduled_at_ts)
         .bind(execution_policy)
         .bind(descriptor.as_deref())
         .execute(&mut *tx)
@@ -287,6 +291,21 @@ pub async fn add_schedule(
             code: "DATABASE_ERROR".into(),
             message: format!("failed to create schedule: {e}"),
         })?;
+        if let Some(deps) = &body.depends_on {
+            for dep in deps {
+                sqlx::query(
+                    "INSERT OR IGNORE INTO schedule_dependencies (schedule_id, depends_on) VALUES (?, ?)",
+                )
+                .bind(&schedule_id)
+                .bind(dep)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    code: "DATABASE_ERROR".into(),
+                    message: format!("failed to insert schedule dependency: {e}"),
+                })?;
+            }
+        }
 
         tx.commit().await.map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".into(),
@@ -464,22 +483,26 @@ pub async fn add_schedule(
                         } else {
                             "driven_v1"
                         };
+                        let (concurrency_kind, concurrency_whitelist, scheduled_at_ts) = insert_concurrency_and_schedule(&body);
                         let descriptor = build_execution_descriptor(&body, work_id);
                         sqlx::query(
                             "INSERT INTO creator_schedules \
                              (schedule_id, creator_id, preset_id, preset_version, status, \
-                              concurrency_kind, current_core_context_version, label, \
-                              created_at, updated_at, work_id, execution_policy, \
+                              concurrency_kind, concurrency_whitelist, current_core_context_version, label, \
+                              created_at, updated_at, work_id, scheduled_at, execution_policy, \
                               execution_descriptor_json) \
-                             VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?, ?, ?)",
+                             VALUES (?, ?, ?, 1, 'paused', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)",
                         )
                         .bind(&schedule_id)
                         .bind(&body.creator_id)
                         .bind(&body.preset_id)
+                        .bind(&concurrency_kind)
+                        .bind(&concurrency_whitelist)
                         .bind(&body.label)
                         .bind(now_ts)
                         .bind(now_ts)
                         .bind(&work_id)
+                        .bind(scheduled_at_ts)
                         .bind(execution_policy)
                         .bind(descriptor.as_deref())
                         .execute(&mut *tx)
@@ -488,6 +511,21 @@ pub async fn add_schedule(
                             code: "DATABASE_ERROR".into(),
                             message: format!("failed to create schedule: {e}"),
                         })?;
+                        if let Some(deps) = &body.depends_on {
+                            for dep in deps {
+                                sqlx::query(
+                                    "INSERT OR IGNORE INTO schedule_dependencies (schedule_id, depends_on) VALUES (?, ?)",
+                                )
+                                .bind(&schedule_id)
+                                .bind(dep)
+                                .execute(&mut *tx)
+                                .await
+                                .map_err(|e| NexusApiError::Internal {
+                                    code: "DATABASE_ERROR".into(),
+                                    message: format!("failed to insert schedule dependency: {e}"),
+                                })?;
+                            }
+                        }
 
                         tx.commit().await.map_err(|e| NexusApiError::Internal {
                             code: "DATABASE_ERROR".into(),
@@ -666,6 +704,20 @@ async fn seed_core_context(
     Ok(record.version.0)
 }
 
+fn insert_concurrency_and_schedule(body: &AddScheduleRequest) -> (String, Option<String>, Option<i64>) {
+    let (kind, whitelist) = match &body.concurrency {
+        None => ("serial".to_string(), None),
+        Some(ScheduleConcurrencyRequest::Serial) => ("serial".to_string(), None),
+        Some(ScheduleConcurrencyRequest::ParallelAny) => ("parallel_any".to_string(), None),
+        Some(ScheduleConcurrencyRequest::ParallelWith { schedule_ids }) => (
+            "parallel_with".to_string(),
+            Some(serde_json::to_string(schedule_ids).unwrap_or_else(|_| "[]".to_string())),
+        ),
+    };
+    let scheduled_at = body.scheduled_at.as_ref().and_then(|s| s.parse::<i64>().ok());
+    (kind, whitelist, scheduled_at)
+}
+
 /// Build the frozen execution descriptor for a new schedule (I-5): the
 /// serialized [`nexus_orchestration::run_state::RunDescriptorV1`] carrying
 /// the schedule's work_id, structured input, and agent bindings. Persisted
@@ -700,7 +752,7 @@ fn build_execution_descriptor(
         .unwrap_or_default();
     let descriptor = nexus_orchestration::run_state::RunDescriptorV1 {
         creator_id: body.creator_id.clone(),
-        work_id: Some(work_id.to_string()),
+        work_id: if work_id.is_empty() { None } else { Some(work_id.to_string()) },
         workspace_root: std::path::PathBuf::new(),
         preset_id: body.preset_id.clone(),
         preset_version: 1,
@@ -741,6 +793,11 @@ async fn admit_new_schedule(
     })?;
     if let Some(at) = scheduled_at {
         if at > chrono::Utc::now().timestamp() {
+            sqlx::query("UPDATE creator_schedules SET status = 'pending' WHERE schedule_id = ? AND status = 'paused'")
+                .bind(schedule_id)
+                .execute(&*pool)
+                .await
+                .ok();
             return Ok("pending".to_string());
         }
     }
@@ -768,11 +825,14 @@ async fn admit_new_schedule(
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("not eligible") {
-                // Dependency/concurrency blocked or policy refusal — the row
-                // stays pending for a later tick / explicit start.
+                sqlx::query("UPDATE creator_schedules SET status = 'pending' WHERE schedule_id = ? AND status = 'paused'")
+                    .bind(schedule_id)
+                    .execute(&*pool)
+                    .await
+                    .ok();
                 tracing::debug!(
-                    schedule_id = %schedule_id,
-                    error = %msg,
+                    schedule_id = schedule_id,
+                    error = msg.as_str(),
                     "new schedule not immediately eligible; leaving pending"
                 );
                 Ok("pending".to_string())

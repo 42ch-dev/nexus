@@ -1326,6 +1326,35 @@ fn promote_outlines_in(
 ///
 /// Returns `AutoChainError::InvalidState` if no schedule mapping exists for the
 /// given stage. Returns `AutoChainError::Database` if any DB operation fails.
+fn enqueue_descriptor_json(
+    creator_id: &str,
+    work_id: &str,
+    preset_id: &str,
+    preset_version: i64,
+) -> Vec<u8> {
+    let descriptor = crate::run_state::RunDescriptorV1 {
+        creator_id: creator_id.to_string(),
+        work_id: if work_id.is_empty() {
+            None
+        } else {
+            Some(work_id.to_string())
+        },
+        workspace_root: std::path::PathBuf::new(),
+        preset_id: preset_id.to_string(),
+        preset_version: u32::try_from(preset_version).unwrap_or(1),
+        source: crate::run_state::PresetSourceIdentity::Embedded {
+            preset_id: preset_id.to_string(),
+            content_hash: [0; 32],
+        },
+        input: serde_json::Map::new(),
+        agent_bindings: std::collections::HashMap::new(),
+        parent_session_id: None,
+        graph_name: None,
+    };
+    serde_json::to_vec(&descriptor).unwrap_or_else(|_| Vec::from(b"{}"))
+}
+
+
 pub async fn enqueue_auto_chain_schedule(
     pool: &SqlitePool,
     creator_id: &str,
@@ -1378,13 +1407,15 @@ pub async fn enqueue_auto_chain_schedule(
     // hard-coding 1. Keep in sync with embedded-presets/*/preset.yaml `version:`.
     // A3 admission cutover: an auto-chain-created schedule is drive-enabled
     // (`driven_v1`).
+
     let preset_version = preset_version_for_id(&schedule_req.preset_id);
     sqlx::query(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
             concurrency_kind, current_core_context_version, label,
-            created_at, updated_at, work_id, execution_policy)
-           VALUES (?, ?, ?, ?, 'pending', 'serial', 0, ?, ?, ?, ?, 'driven_v1')",
+            created_at, updated_at, work_id, execution_policy,
+            execution_descriptor_json)
+           VALUES (?, ?, ?, ?, 'pending', 'serial', 0, ?, ?, ?, ?, 'driven_v1', ?)",
     )
     .bind(&schedule_id)
     .bind(creator_id)
@@ -1394,6 +1425,7 @@ pub async fn enqueue_auto_chain_schedule(
     .bind(now_ts)
     .bind(now_ts)
     .bind(work_id)
+    .bind(enqueue_descriptor_json(creator_id, work_id, &schedule_req.preset_id, preset_version))
     .execute(&mut *tx)
     .await
     .map_err(|e| {
@@ -1563,8 +1595,9 @@ pub async fn enqueue_review_master_schedule(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
             concurrency_kind, current_core_context_version, label,
-            created_at, updated_at, work_id, execution_policy)
-           VALUES (?, ?, 'novel-review-master', ?, 'pending', 'serial', 0, ?, ?, ?, ?, 'driven_v1')",
+            created_at, updated_at, work_id, execution_policy,
+            execution_descriptor_json)
+           VALUES (?, ?, 'novel-review-master', ?, 'pending', 'serial', 0, ?, ?, ?, ?, 'driven_v1', ?)",
     )
     .bind(&schedule_id)
     .bind(creator_id)
@@ -1573,6 +1606,7 @@ pub async fn enqueue_review_master_schedule(
     .bind(now_ts)
     .bind(now_ts)
     .bind(work_id)
+    .bind(enqueue_descriptor_json(creator_id, work_id, "novel-review-master", preset_version))
     .execute(pool)
     .await
     .map_err(|e| {
@@ -1635,8 +1669,9 @@ pub async fn enqueue_cron_schedule(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
             concurrency_kind, current_core_context_version, label,
-            created_at, updated_at, work_id, execution_policy)
-           VALUES (?, ?, ?, ?, 'pending', 'serial', 0, ?, ?, ?, ?, 'driven_v1')",
+            created_at, updated_at, work_id, execution_policy,
+            execution_descriptor_json)
+           VALUES (?, ?, ?, ?, 'pending', 'serial', 0, ?, ?, ?, ?, 'driven_v1', ?)",
     )
     .bind(&schedule_id)
     .bind(creator_id)
@@ -1646,6 +1681,7 @@ pub async fn enqueue_cron_schedule(
     .bind(now_ts)
     .bind(now_ts)
     .bind(work_id)
+    .bind(enqueue_descriptor_json(creator_id, work_id, preset_id, preset_version))
     .execute(pool)
     .await
     .map_err(|e| {

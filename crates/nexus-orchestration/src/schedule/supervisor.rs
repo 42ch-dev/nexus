@@ -886,7 +886,18 @@ impl ScheduleSupervisor {
         )
         .await
         {
-            Ok(_schedule_id) => Ok(()),
+            Ok(schedule_id) => {
+                if let Some(starter) = self.schedule_starter.as_ref().clone() {
+                    if let Err(e) = starter.start(&schedule_id).await {
+                        tracing::warn!(
+                            schedule_id = schedule_id.as_str(),
+                            error = e.to_string(),
+                            "auto-chain: driven_v1 starter handoff failed; leaving pending"
+                        );
+                    }
+                }
+                Ok(())
+            }
             Err(AutoChainError::InvalidState(msg)) => {
                 // No schedule mapping for this stage — not a DB error.
                 tracing::warn!(
@@ -1362,33 +1373,31 @@ impl ScheduleSupervisor {
             .bind(schedule_id)
             .fetch_one(&*self.pool)
             .await?;
-            if owned_session.is_none() {
-                // No owned session: hand the row to the daemon starter so
-                // the coordinator atomically creates the run + identity.
-                if let Some(starter) = self.schedule_starter.as_ref().clone() {
-                    match starter.start(schedule_id).await {
-                        Ok(_sid) => {
-                            self.inner
-                                .lock()
-                                .await
-                                .running_by_creator
-                                .entry(creator_id)
-                                .or_default()
-                                .insert(ScheduleId(schedule_id.to_string()));
-                            return Ok("running".to_string());
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                schedule_id,
-                                error = %e,
-                                "resume: driven_v1 schedule admission failed; leaving paused"
-                            );
-                            return Ok("paused".to_string());
-                        }
+            if let Some(starter) = self.schedule_starter.as_ref().clone() {
+                match starter.start(schedule_id).await {
+                    Ok(_sid) => {
+                        self.inner
+                            .lock()
+                            .await
+                            .running_by_creator
+                            .entry(creator_id)
+                            .or_default()
+                            .insert(ScheduleId(schedule_id.to_string()));
+                        return Ok("running".to_string());
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            schedule_id,
+                            error = %e,
+                            "resume: driven_v1 schedule admission/drive failed; leaving paused"
+                        );
+                        return Ok("paused".to_string());
                     }
                 }
             }
-
+            // No daemon starter (tests / standalone): keep the historical
+            // status-only flip when the row is eligible. Production always
+            // injects a starter, so this arm is not a live drive path.
             // R2 fix: Check rows_affected() after UPDATE to handle TOCTOU race.
             // If 0, another caller already transitioned the schedule — return
             // the current status without updating cache. SQLite single-writer

@@ -953,7 +953,9 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 )),
             ));
         }
-        if row.execution_policy != "driven_v1" {
+        let policy_ok = row.execution_policy == "driven_v1"
+            || row.execution_policy == "legacy_inert";
+        if !policy_ok {
             return Err(EngineError::GraphFlow(
                 graph_flow::GraphError::StorageError(format!(
                     "admit_schedule_run: schedule {schedule_id} execution_policy is '{}'",
@@ -961,7 +963,10 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 )),
             ));
         }
-        if row.status != "pending" && row.status != "paused" {
+        let status_ok = row.status == "pending"
+            || row.status == "paused"
+            || (row.status == "running" && row.current_session_id.is_none());
+        if !status_ok {
             return Err(EngineError::GraphFlow(
                 graph_flow::GraphError::StorageError(format!(
                     "admit_schedule_run: schedule {schedule_id} status is '{}'",
@@ -1058,8 +1063,9 @@ impl WorkflowStateStore for SqliteSessionStorage {
         let claim = sqlx::query(
             "UPDATE creator_schedules
              SET status = 'running', current_session_id = ?,
-                 current_core_context_version = ?, updated_at = ?
-             WHERE schedule_id = ? AND status IN ('pending', 'paused')
+                 current_core_context_version = ?, updated_at = ?,
+                 execution_policy = 'driven_v1'
+             WHERE schedule_id = ? AND status IN ('pending', 'paused', 'running')
                AND current_session_id IS NULL",
         )
         .bind(&session_id.0)

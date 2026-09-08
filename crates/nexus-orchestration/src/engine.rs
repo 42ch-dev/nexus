@@ -2259,7 +2259,7 @@ impl GraphFlowEngine {
     ) -> Result<SessionId, EngineError> {
         if let Some(store) = &self.state.workflow_store {
             let mut descriptor = self.build_descriptor(loaded, creator_id)?;
-            descriptor.work_id = work_id;
+            descriptor.work_id = work_id.filter(|id| !id.is_empty());
             descriptor.input = input.clone();
             descriptor.agent_bindings = agent_bindings;
             let start_task_id = graph.start_task_id().unwrap_or_default();

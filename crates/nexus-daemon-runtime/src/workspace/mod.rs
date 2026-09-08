@@ -482,7 +482,10 @@ impl WorkspaceState {
     /// fails, or pool creation fails.
     pub async fn ensure_creator_pool(&self) -> anyhow::Result<()> {
         if self.creator_pool_ready() {
-            return Ok(()); // already open
+            if self.run_coordinator().is_none() {
+                self.publish_lazy_attach_bundle()?;
+            }
+            return Ok(());
         }
 
         let user_home =
@@ -501,7 +504,13 @@ impl WorkspaceState {
             {
                 let mut slot = self.creator_db_write();
                 if slot.db.is_some() {
-                    return Ok(()); // concurrent attach won the race
+                    drop(slot);
+                    // Concurrent attach already published the pool; wait until
+                    // the matching coordinator bundle is visible (I-3).
+                    if self.run_coordinator().is_none() {
+                        self.publish_lazy_attach_bundle()?;
+                    }
+                    return Ok(());
                 }
                 slot.db = Some(db);
                 slot.db_path = Some(db_path);
@@ -512,11 +521,8 @@ impl WorkspaceState {
                 }
             }
 
-            // I-3: publish the matching runtime bundle over the attached
-            // creator DB. The engine slot is only replaced when the daemon
-            // booted Tier-0 (in-memory engine, no coordinator); a daemon
-            // that booted WITH a creator DB already has the durable bundle
-            // and this is a no-op.
+            // Publish the matching runtime bundle before this attach is
+            // treated as ready by callers that only saw the pool (I-3).
             if self.run_coordinator().is_none() {
                 self.publish_lazy_attach_bundle()?;
             }

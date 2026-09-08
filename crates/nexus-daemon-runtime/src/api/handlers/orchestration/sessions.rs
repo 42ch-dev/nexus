@@ -29,6 +29,11 @@ pub async fn create_session(
     // (engine + coordinator). Tier-0 in-memory user runs are never created —
     // the daemon must have a creator DB (boot or lazy attach) before a
     // public session can be driven.
+    //
+    // I-5: `CreateSessionRequest` has no sanctioned `agent_bindings` field.
+    // Role bindings are frozen on the schedule add/admit path
+    // (`AddScheduleRequest.agent_bindings` -> execution descriptor).
+    // Unknown/empty binding keys on that path are refused before drive.
     let coordinator = state
         .run_coordinator()
         .ok_or_else(|| NexusApiError::service_unavailable("run coordinator not configured"))?;

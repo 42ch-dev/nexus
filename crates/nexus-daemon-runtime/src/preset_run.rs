@@ -715,40 +715,49 @@ impl WorkflowRunCoordinator {
         &self,
         session_id: &SessionId,
     ) -> Result<DriveDisposition, RunControlError> {
+        {
+            let drives = self.drives.lock().await;
+            if let Some(owner) = drives.get(&session_id.0) {
+                if !owner.join.is_finished() {
+                    return Ok(DriveDisposition::AlreadyDriving);
+                }
+            }
+        }
+
+        // Durable-state gate even when no owner exists (I-2): a reconstructed
+        // coordinator must not start a fresh owner for terminal/wait/interrupt.
+        let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
+            self.pool.clone(),
+        );
+        let record = store
+            .load_run(session_id)
+            .await
+            .map_err(|e| RunControlError::Drive(e.to_string()))?;
+        if let Some(record) = record {
+            if record.execution_version >= 1 {
+                let class = nexus_orchestration::resume_rules::classify_recovery(
+                    &record.status,
+                    record.state.as_ref(),
+                    false,
+                );
+                match class {
+                    nexus_orchestration::resume_rules::RecoveryClass::Terminal
+                    | nexus_orchestration::resume_rules::RecoveryClass::Interrupted
+                    | nexus_orchestration::resume_rules::RecoveryClass::HumanWait
+                    | nexus_orchestration::resume_rules::RecoveryClass::Unreadable => {
+                        return Ok(DriveDisposition::NotDriving);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         let mut drives = self.drives.lock().await;
         if let Some(owner) = drives.get(&session_id.0) {
             if !owner.join.is_finished() {
                 return Ok(DriveDisposition::AlreadyDriving);
             }
-            // The previous drive finished. Consult the durable run state
-            // before deciding whether a fresh drive is authorized (I-2):
-            // terminal/interrupted/human-wait states are non-driving.
             drives.remove(&session_id.0);
-            let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
-                self.pool.clone(),
-            );
-            let record = store
-                .load_run(session_id)
-                .await
-                .map_err(|e| RunControlError::Drive(e.to_string()))?;
-            if let Some(record) = record {
-                if record.execution_version >= 1 {
-                    let class = nexus_orchestration::resume_rules::classify_recovery(
-                        &record.status,
-                        record.state.as_ref(),
-                        false,
-                    );
-                    match class {
-                        nexus_orchestration::resume_rules::RecoveryClass::Terminal
-                        | nexus_orchestration::resume_rules::RecoveryClass::Interrupted
-                        | nexus_orchestration::resume_rules::RecoveryClass::HumanWait
-                        | nexus_orchestration::resume_rules::RecoveryClass::Unreadable => {
-                            return Ok(DriveDisposition::NotDriving);
-                        }
-                        _ => {}
-                    }
-                }
-            }
         }
 
         // Register (or refresh) the run's cancellation token in the shared
@@ -799,10 +808,14 @@ impl WorkflowRunCoordinator {
         &self,
         workflow_store: Option<&Arc<dyn WorkflowStateStore>>,
         summaries: &[SessionSummary],
-        _cancel: Option<&CancellationToken>,
+        cancel: Option<&CancellationToken>,
     ) -> Vec<ResumeDecision> {
+        let parent_cancel = cancel.cloned().unwrap_or_default();
         let mut decisions = Vec::with_capacity(summaries.len());
         for summary in summaries {
+            if parent_cancel.is_cancelled() {
+                break;
+            }
             let session_id = summary.session_id.clone();
 
             // Load the persisted session (position + context).
@@ -929,7 +942,7 @@ impl WorkflowRunCoordinator {
                 }
                 drives.remove(&session_id.0);
             }
-            let cancel = tokio_util::sync::CancellationToken::new();
+            let cancel = parent_cancel.child_token();
             self.session_cancels
                 .write()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1042,34 +1055,9 @@ impl WorkflowRunCoordinator {
             ));
         }
 
-        // Cut the policy over transactionally (C-3): a legacy_inert row
-        // becomes driven_v1 in the SAME transaction that admits the run.
-        // The atomic `admit_schedule_run` in the store performs the policy
-        // check + claim + run creation in one transaction; we update the
-        // policy first in a separate transaction ONLY for legacy rows, then
-        // admit. The policy update is fenced on the row still being
-        // un-owned so a concurrent admission cannot race it.
-        if row.execution_policy != "driven_v1" {
-            let now = chrono::Utc::now().timestamp();
-            let updated = sqlx::query(
-                "UPDATE creator_schedules
-                 SET execution_policy = 'driven_v1', updated_at = ?
-                 WHERE schedule_id = ? AND current_session_id IS NULL",
-            )
-            .bind(now)
-            .bind(schedule_id)
-            .execute(pool)
-            .await
-            .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
-            if updated.rows_affected() == 0 {
-                return Err(RunControlError::NotEligible(
-                    schedule_id.to_string(),
-                    "schedule was claimed concurrently during legacy start".to_string(),
-                ));
-            }
-        }
-
-        // Admit through the SAME atomic path as new rows.
+        // Policy cutover happens inside admit_schedule_run (same claim
+        // transaction). Do not UPDATE execution_policy before the payload
+        // and run row exist (C-3).
         self.admit_schedule(
             schedule_id,
             pool,
@@ -1139,13 +1127,18 @@ impl WorkflowRunCoordinator {
                 format!("system preset '{}' cannot be admitted as a driven run", row.preset_id),
             ));
         }
-        if row.execution_policy != "driven_v1" {
+        let policy_ok = row.execution_policy == "driven_v1"
+            || row.execution_policy == "legacy_inert";
+        if !policy_ok {
             return Err(RunControlError::NotEligible(
                 schedule_id.to_string(),
                 format!("execution_policy is '{}'", row.execution_policy),
             ));
         }
-        if row.status != "pending" && row.status != "paused" {
+        let status_ok = row.status == "pending"
+            || row.status == "paused"
+            || (row.status == "running" && row.current_session_id.is_none());
+        if !status_ok {
             return Err(RunControlError::NotEligible(
                 schedule_id.to_string(),
                 format!("status is '{}'", row.status),
@@ -1209,7 +1202,12 @@ impl WorkflowRunCoordinator {
                     (Some(body), version)
                 }
                 Err(nexus_orchestration::schedule::derivation::CoreContextError::NotFound(_)) => {
-                    // No seed exists yet — admissible with no core context.
+                    if row.current_core_context_version > 0 {
+                        return Err(RunControlError::Admission(format!(
+                            "core-context version {} is missing",
+                            row.current_core_context_version
+                        )));
+                    }
                     (None, 0)
                 }
                 Err(e) => {
@@ -1239,8 +1237,20 @@ impl WorkflowRunCoordinator {
                     descriptor.agent_bindings.clone(),
                 )
             }
-            None => (row.work_id.clone(), serde_json::Map::new(), std::collections::HashMap::new()),
+            None => (
+                row.work_id.clone().filter(|id| !id.is_empty()),
+                serde_json::Map::new(),
+                std::collections::HashMap::new(),
+            ),
         };
+        for (role, binding) in &agent_bindings {
+            if role.is_empty() || binding.provider_id.trim().is_empty() {
+                return Err(RunControlError::Admission(format!(
+                    "invalid agent binding for role '{role}'"
+                )));
+            }
+        }
+
 
         // 5. Mint the owned session id and admit atomically (C-1).
         let session_id = format!("{}:{}", row.preset_id, uuid::Uuid::new_v4());
@@ -1284,9 +1294,23 @@ impl WorkflowRunCoordinator {
                 Ok(sid)
             }
             Err(e) => {
-                // The transaction rolled back — the row is never left
-                // `Running` without an owned run (C-1).
-                Err(RunControlError::Admission(e.to_string()))
+                let msg = e.to_string();
+                if msg.contains("claimed concurrently") || msg.contains("already owns run") {
+                    let winner: Option<String> = sqlx::query_scalar(
+                        "SELECT current_session_id FROM creator_schedules WHERE schedule_id = ?",
+                    )
+                    .bind(schedule_id)
+                    .fetch_optional(pool)
+                    .await
+                    .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?
+                    .flatten();
+                    if let Some(sid) = winner {
+                        let sid = SessionId(sid);
+                        self.ensure_driving(&sid).await?;
+                        return Ok(sid);
+                    }
+                }
+                Err(RunControlError::Admission(msg))
             }
         }
     }
