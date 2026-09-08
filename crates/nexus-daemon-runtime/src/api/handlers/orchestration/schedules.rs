@@ -663,15 +663,18 @@ pub async fn add_schedule(
 /// Returns the ACTUAL committed version (I-10) — `apply_seed` creates a
 /// real version row; the caller must report that version, never a
 /// synthetic zero.
+///
+/// N-3: a version-0 pointer with NO `core_context_versions` row is a
+/// pre-seed row and admission refuses it. Every new public row therefore
+/// gets a durable version-0 record — an empty seed when the request
+/// carries neither `seed` nor `input` — so the row is durably prepared
+/// before it can be admitted.
 async fn seed_core_context(
     supervisor: &Arc<nexus_orchestration::schedule::supervisor::ScheduleSupervisor>,
     schedule_id: &str,
     body: &AddScheduleRequest,
     _state: &WorkspaceState,
 ) -> Result<u32, NexusApiError> {
-    if body.seed.is_none() && body.input.is_none() {
-        return Ok(0);
-    }
     let mgr = supervisor.core_context_manager();
     let sid = ScheduleId(schedule_id.to_string());
 
@@ -685,7 +688,7 @@ async fn seed_core_context(
             let input_json = serde_json::to_string(input).unwrap_or_default();
             format!("preset.input={input_json}")
         }
-        (None, None) => unreachable!("checked outer condition"),
+        (None, None) => String::new(),
     };
 
     let record = mgr
@@ -756,10 +759,15 @@ fn build_execution_descriptor(
         workspace_root: std::path::PathBuf::new(),
         preset_id: body.preset_id.clone(),
         preset_version: 1,
-        source: nexus_orchestration::run_state::PresetSourceIdentity::Embedded {
-            preset_id: body.preset_id.clone(),
-            content_hash: [0; 32],
-        },
+        // N-5/N-5b: stamp the REAL content-addressed source identity
+        // (manifest + referenced template bytes) — never a zero placeholder.
+        // Admission validates the stored identity against the current load
+        // and builds the runner from the frozen identity.
+        source: nexus_orchestration::preset::embedded_source_identity(&body.preset_id)
+            .unwrap_or(nexus_orchestration::run_state::PresetSourceIdentity::Embedded {
+                preset_id: body.preset_id.clone(),
+                content_hash: [0; 32],
+            }),
         input,
         agent_bindings,
         parent_session_id: None,
@@ -839,10 +847,11 @@ async fn admit_new_schedule(
             } else if msg.contains("unknown role")
                 || msg.contains("unknown provider")
                 || msg.contains("invalid agent binding")
+                || msg.contains("missing agent binding")
             {
-                // N-4: invalid binding references refuse the add loudly —
-                // the row stays paused and the caller sees a 400, never a
-                // silent pending admission.
+                // N-4/N-4b: invalid or incomplete binding references refuse
+                // the add loudly — the row stays paused and the caller sees
+                // a 400, never a silent pending admission.
                 Err(NexusApiError::BadRequest {
                     code: "invalid_input".into(),
                     message: msg,

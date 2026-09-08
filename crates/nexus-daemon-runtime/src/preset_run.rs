@@ -586,6 +586,12 @@ pub struct WorkflowRunCoordinator {
     /// Active drive owners: session id → cancellation token + join handle.
     /// One owner per session; re-entry returns the same run.
     drives: Arc<tokio::sync::Mutex<std::collections::HashMap<String, DriveOwner>>>,
+    /// Fail-closed fence (closure 8): session ids whose drive loop failed
+    /// AND whose durable non-replayable `Failed` transition could not be
+    /// committed. `ensure_driving` refuses re-entry for these sessions
+    /// until the transition is durable — a failed driver is never silently
+    /// re-driven when the failure write itself failed.
+    failed_owners: Arc<tokio::sync::Mutex<std::collections::HashSet<String>>>,
     /// Bounds for each drive call.
     config: PresetRunConfig,
 }
@@ -614,6 +620,7 @@ impl WorkflowRunCoordinator {
             agent_host: None,
             session_cancels,
             drives: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            failed_owners: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
             config: PresetRunConfig::default(),
         }
     }
@@ -729,15 +736,21 @@ impl WorkflowRunCoordinator {
     /// is never re-driven. This is the Task 1 driver-failure boundary, not
     /// general Task 3 settlement: only the drive-loop failure path writes
     /// here.
-    async fn persist_drive_failure(&self, session_id: &SessionId, error: &str) {
+    ///
+    /// Returns `true` when the durable `Failed` transition committed. When
+    /// the transition cannot be committed (load/get/commit failure), the
+    /// caller registers the session in the `failed_owners` fence so
+    /// `ensure_driving` refuses re-entry until the non-replayable
+    /// transition is durable (closure 8 fail-closed).
+    async fn persist_drive_failure(&self, session_id: &SessionId, error: &str) -> bool {
         let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
             self.pool.clone(),
         );
         let Ok(Some(record)) = store.load_run(session_id).await else {
-            return;
+            return false;
         };
         if record.execution_version < 1 || record.status.is_terminal() {
-            return;
+            return true;
         }
         let expected_revision = record.state_revision;
         let mut next_state = record.state.unwrap_or_default();
@@ -749,13 +762,13 @@ impl WorkflowRunCoordinator {
         });
         let root = match self.storage.get(&session_id.0).await {
             Ok(Some(root)) => root,
-            _ => return,
+            _ => return false,
         };
         let checkpoint = nexus_orchestration::run_state::RunCheckpoint {
             root: &root,
             children: &[],
         };
-        if let Err(e) = store
+        match store
             .commit_transition(
                 session_id,
                 expected_revision,
@@ -765,11 +778,16 @@ impl WorkflowRunCoordinator {
             )
             .await
         {
-            tracing::warn!(
-                session_id = %session_id.0,
-                error = %e,
-                "coordinator: could not persist durable drive failure"
-            );
+            Ok(_) => true,
+            Err(e) => {
+                tracing::warn!(
+                    session_id = %session_id.0,
+                    error = %e,
+                    "coordinator: could not persist durable drive failure; \
+                     fencing the failed owner against re-entry"
+                );
+                false
+            }
         }
     }
 
@@ -798,6 +816,14 @@ impl WorkflowRunCoordinator {
                     return Ok(DriveDisposition::AlreadyDriving);
                 }
             }
+        }
+
+        // Closure 8 fail-closed: a drive loop that failed AND whose durable
+        // non-replayable `Failed` transition could not be committed is
+        // fenced. `ensure_driving` refuses re-entry until the transition is
+        // durable — the failed driver is never silently re-driven.
+        if self.failed_owners.lock().await.contains(&session_id.0) {
+            return Ok(DriveDisposition::NotDriving);
         }
 
         // Durable-state gate even when no owner exists (I-2): a reconstructed
@@ -862,9 +888,17 @@ impl WorkflowRunCoordinator {
             .await;
             // Closure 8: a failed driver persists a durable non-replayable
             // `Failed` transition so the v1 record is never classified
-            // runnable again after owner cleanup.
+            // runnable again after owner cleanup. When the transition
+            // cannot be committed, the failed owner is fenced so
+            // `ensure_driving` refuses re-entry until it is durable.
             if let PresetRunOutcome::Failed { error, .. } = &outcome {
-                coordinator.persist_drive_failure(&sid, error).await;
+                if !coordinator.persist_drive_failure(&sid, error).await {
+                    coordinator
+                        .failed_owners
+                        .lock()
+                        .await
+                        .insert(sid.0.clone());
+                }
             }
             tracing::debug!(
                 session_id = %sid.0,
@@ -1051,9 +1085,15 @@ impl WorkflowRunCoordinator {
                 .await;
                 // Closure 8: a failed recovery drive persists a durable
                 // non-replayable `Failed` transition (same boundary as
-                // `ensure_driving`).
+                // `ensure_driving`); a failed write fences the owner.
                 if let PresetRunOutcome::Failed { error, .. } = &outcome {
-                    coordinator.persist_drive_failure(&sid, error).await;
+                    if !coordinator.persist_drive_failure(&sid, error).await {
+                        coordinator
+                            .failed_owners
+                            .lock()
+                            .await
+                            .insert(sid.0.clone());
+                    }
                 }
                 tracing::debug!(
                     session_id = %sid.0,
@@ -1264,13 +1304,46 @@ impl WorkflowRunCoordinator {
         // decision the supervisor tick uses. A blocked row (unfinished
         // dependency, serial conflict, future scheduled_at) remains pending
         // and unowned — immediate public admission must not bypass the
-        // admission matrix.
+        // admission matrix. The preflight is advisory; the store re-verifies
+        // the matrix inside the claim transaction (N-1).
         if !schedule_eligible(pool, &row).await? {
             return Err(RunControlError::NotEligible(
                 schedule_id.to_string(),
                 "dependency/concurrency/scheduled_at gate not satisfied".to_string(),
             ));
         }
+        // Snapshot the matrix for the store's in-transaction recheck (N-1).
+        let admission_gate = nexus_orchestration::run_state::ScheduleAdmissionGate {
+            creator_id: row.creator_id.clone(),
+            scheduled_at: sqlx::query_scalar(
+                "SELECT scheduled_at FROM creator_schedules WHERE schedule_id = ?",
+            )
+            .bind(schedule_id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?,
+            depends_on: sqlx::query_scalar(
+                "SELECT depends_on FROM schedule_dependencies WHERE schedule_id = ?",
+            )
+            .bind(schedule_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?,
+            concurrency_kind: sqlx::query_scalar(
+                "SELECT concurrency_kind FROM creator_schedules WHERE schedule_id = ?",
+            )
+            .bind(schedule_id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?,
+            concurrency_whitelist: sqlx::query_scalar(
+                "SELECT concurrency_whitelist FROM creator_schedules WHERE schedule_id = ?",
+            )
+            .bind(schedule_id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?,
+        };
 
         // 2. Resolve the preset and freeze the descriptor + core seed.
         let registry = caps
@@ -1283,55 +1356,54 @@ impl WorkflowRunCoordinator {
         //    the schedule row (N-3/I-6): admission reads the frozen version,
         //    never the latest snapshot — a concurrent edit cannot change the
         //    run payload between seed and admission. A read/migration/
-        //    corruption error FAILS CLOSED. "No seed exists" (version 0, no
-        //    rows) is distinct from a read failure.
+        //    corruption error FAILS CLOSED. A missing version record at ANY
+        //    pointer (including 0) is a pre-seed row and is refused — never
+        //    interpreted as a valid empty seed (N-3).
         let (core_context, core_context_version) = {
             let mgr = nexus_orchestration::schedule::derivation::CoreContextManager::new(
                 std::sync::Arc::new(pool.clone()),
             );
             let sid = nexus_contracts::local::schedule::ScheduleId(schedule_id.to_string());
             let frozen_version = u32::try_from(row.current_core_context_version).unwrap_or(0);
-            if frozen_version == 0 {
-                (None, 0)
-            } else {
-                match mgr
-                    .read(&sid, nexus_contracts::local::schedule::CoreContextVersion(frozen_version))
-                    .await
-                {
-                    Ok(record) => {
-                        let version = record.version.0;
-                        let body = match record.content {
-                            nexus_contracts::local::schedule::CoreContextPayload::Text { body } => body,
-                            nexus_contracts::local::schedule::CoreContextPayload::Struct { body } => {
-                                serde_json::to_string(&body).map_err(|e| {
-                                    RunControlError::Admission(format!(
-                                        "core-context struct serialization failed: {e}"
-                                    ))
-                                })?
-                            }
-                        };
-                        (Some(body), version)
-                    }
-                    Err(nexus_orchestration::schedule::derivation::CoreContextError::VersionNotFound(_, version)) => {
-                        return Err(RunControlError::Admission(format!(
-                            "core-context version {version} is missing"
-                        )));
-                    }
-                    Err(e) => {
-                        return Err(RunControlError::Admission(format!(
-                            "core-context snapshot read failed: {e}"
-                        )));
-                    }
+            match mgr
+                .read(&sid, nexus_contracts::local::schedule::CoreContextVersion(frozen_version))
+                .await
+            {
+                Ok(record) => {
+                    let version = record.version.0;
+                    let body = match record.content {
+                        nexus_contracts::local::schedule::CoreContextPayload::Text { body } => body,
+                        nexus_contracts::local::schedule::CoreContextPayload::Struct { body } => {
+                            serde_json::to_string(&body).map_err(|e| {
+                                RunControlError::Admission(format!(
+                                    "core-context struct serialization failed: {e}"
+                                ))
+                            })?
+                        }
+                    };
+                    (Some(body), version)
+                }
+                Err(nexus_orchestration::schedule::derivation::CoreContextError::VersionNotFound(_, version)) => {
+                    return Err(RunControlError::Admission(format!(
+                        "core-context version {version} is missing; \
+                         the schedule row is not durably seeded (pre-seed rows are never admitted)"
+                    )));
+                }
+                Err(e) => {
+                    return Err(RunControlError::Admission(format!(
+                        "core-context snapshot read failed: {e}"
+                    )));
                 }
             }
         };
 
         // 4. Recover the frozen admission payload (I-5): the schedule's
-        //    work_id, structured input, and agent bindings. The descriptor
-        //    JSON (when present) carries the frozen input/bindings; the
-        //    schedule row carries work_id. New rows created through the
-        //    public add path persist the descriptor at insertion.
-        let (work_id, input, agent_bindings) = match &row.execution_descriptor_json {
+        //    work_id, structured input, agent bindings, and content-addressed
+        //    source identity. The descriptor JSON (when present) carries the
+        //    frozen input/bindings/source; the schedule row carries work_id.
+        //    New rows created through the public add path persist the
+        //    descriptor at insertion.
+        let (work_id, input, agent_bindings, frozen_source) = match &row.execution_descriptor_json {
             Some(bytes) => {
                 let descriptor: nexus_orchestration::run_state::RunDescriptorV1 =
                     serde_json::from_slice(bytes).map_err(|e| {
@@ -1343,12 +1415,14 @@ impl WorkflowRunCoordinator {
                     descriptor.work_id.clone(),
                     descriptor.input.clone(),
                     descriptor.agent_bindings.clone(),
+                    Some(descriptor.source.clone()),
                 )
             }
             None => (
                 row.work_id.clone().filter(|id| !id.is_empty()),
                 serde_json::Map::new(),
                 std::collections::HashMap::new(),
+                None,
             ),
         };
         // N-4: validate role/provider references BEFORE enqueue — the same
@@ -1387,7 +1461,10 @@ impl WorkflowRunCoordinator {
                 input,
                 core_context.as_deref(),
                 core_context_version,
+                core_context_version,
                 agent_bindings,
+                frozen_source,
+                Some(admission_gate),
                 Arc::new(wired),
             )
             .await;
@@ -1424,6 +1501,19 @@ impl WorkflowRunCoordinator {
                         self.ensure_driving(&sid).await?;
                         return Ok(sid);
                     }
+                }
+                // N-1: the store's in-transaction matrix recheck refused the
+                // row (dependency not satisfied, not due, or the per-creator
+                // concurrency gate) — the row stays pending and unowned, the
+                // same disposition as a preflight refusal.
+                if msg.contains("fails the per-creator concurrency gate")
+                    || msg.contains("dependency")
+                    || msg.contains("not due")
+                {
+                    return Err(RunControlError::NotEligible(
+                        schedule_id.to_string(),
+                        msg,
+                    ));
                 }
                 Err(RunControlError::Admission(msg))
             }
@@ -1562,13 +1652,70 @@ async fn schedule_eligible(
 /// When no Host facade is wired (tests / Tier-0), provider existence cannot
 /// be verified — only the nonempty shape is enforced (the Host executor
 /// still refuses unknown providers at prompt time).
+///
+/// N-4b: the COMPLETE prompt-role set is derived from the resolved outer
+/// and inner graphs and every effective binding (including `default`) is
+/// REQUIRED before enqueue. A prompt path is any `llm_judge` exit (the
+/// judge capability resolves the `default` role) or any `acp_prompt` inner
+/// node (its `agent` field, or `default` when absent). A preset with NO
+/// prompt path may accept an empty binding map — proven by graph
+/// inspection, never by deferring to the prompt executor.
 async fn validate_agent_bindings(
     loaded: &nexus_orchestration::preset::LoadedPreset,
     bindings: &std::collections::HashMap<String, nexus_orchestration::run_state::AgentBinding>,
     host: Option<&Arc<dyn nexus_agent_host::HostFacade>>,
 ) -> Result<(), RunControlError> {
+    use nexus_contracts::local::orchestration::preset::{EnterAction, ExitWhen, GraphNodeKind};
+
     let role_ids: std::collections::HashSet<&str> =
         loaded.roles.iter().map(|r| r.id.as_str()).collect();
+
+    // Derive the complete required role set from the resolved graphs (N-4b).
+    let mut required: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for state in &loaded.manifest.states {
+        if let Some(exit_when) = &state.exit_when {
+            if matches!(exit_when, ExitWhen::LlmJudge { .. }) {
+                // The judge capability (`judge.llm`) resolves the `default`
+                // role binding at prompt time.
+                required.insert("default".to_string());
+            }
+        }
+        for action in &state.enter {
+            if let EnterAction::InnerGraph { name } = action {
+                if let Some(graph) = loaded.inner_graphs.get(name) {
+                    // The manifest's node list is the source of truth for
+                    // agent references; the built graph mirrors it.
+                    if let Some(ig) = loaded.manifest.inner_graphs.as_ref().and_then(|igs| igs.get(name)) {
+                        for node in &ig.nodes {
+                            if matches!(node.kind, GraphNodeKind::AcpPrompt) {
+                                match &node.agent {
+                                    Some(agent) => {
+                                        required.insert(agent.clone());
+                                    }
+                                    None => {
+                                        required.insert("default".to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Every required role must have an effective binding (N-4b). An empty
+    // map is accepted ONLY when the preset has no prompt path at all.
+    for role in &required {
+        if !bindings.contains_key(role) {
+            return Err(RunControlError::Admission(format!(
+                "missing agent binding for required role '{role}' \
+                 (the preset's graphs issue prompts for this role; \
+                 bind every prompt role before enqueue)"
+            )));
+        }
+    }
+
     for (role, binding) in bindings {
         if role.is_empty() || binding.provider_id.trim().is_empty() {
             return Err(RunControlError::Admission(format!(

@@ -88,6 +88,7 @@ pub async fn create_session(
                 || msg.contains("unknown role")
                 || msg.contains("unknown provider")
                 || msg.contains("invalid agent binding")
+                || msg.contains("missing agent binding")
             {
                 NexusApiError::BadRequest {
                     code: "invalid_input".into(),

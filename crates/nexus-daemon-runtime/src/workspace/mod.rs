@@ -59,6 +59,32 @@ struct CreatorDbOutcome {
     open_error: Option<String>,
 }
 
+/// One immutable aggregate runtime bundle (N-2).
+///
+/// All components — engine, capability registry holder, prompt executor,
+/// coordinator, supervisor, and the shared pool — are constructed off to
+/// the side and published together in a SINGLE readiness cell. Accessors
+/// read the aggregate, so a reader can never observe a mixed/partial bundle
+/// (e.g. a coordinator from one publication phase with a supervisor from
+/// another). The individual slots remain for the boot path (which wires
+/// components incrementally before serving) and are only consulted as a
+/// fallback when no aggregate has been published.
+pub struct RuntimeBundle {
+    /// The orchestration engine over the durable store.
+    engine: Arc<dyn OrchestrationEngine>,
+    /// The capability registry holder (pool-backed + Host prompt executor
+    /// for the lazy path; boot holder for the boot path).
+    capability_holder: CapabilityRegistryHolder,
+    /// The production prompt executor (A1), when a Host facade is wired.
+    prompt_executor: Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
+    /// The single public run coordinator (A3).
+    coordinator: Arc<crate::preset_run::WorkflowRunCoordinator>,
+    /// The schedule supervisor with the daemon admission starter.
+    supervisor: Arc<ScheduleSupervisor>,
+    /// The shared Creator-DB pool.
+    pool: Arc<sqlx::SqlitePool>,
+}
+
 /// Shared workspace state
 #[derive(Clone)]
 pub struct WorkspaceState {
@@ -113,6 +139,11 @@ pub struct WorkspaceState {
     /// exactly one builder and the readiness slot (`run_coordinator`) is
     /// published after its dependencies (engine, prompt executor).
     bundle_gate: Arc<tokio::sync::Mutex<()>>,
+    /// Immutable aggregate runtime bundle (N-2): published as ONE cell after
+    /// every component is wired. Accessors read this aggregate; the
+    /// individual slots are the boot path's incremental wiring and a
+    /// fallback when no aggregate has been published.
+    runtime_bundle: Arc<RwLock<Option<Arc<RuntimeBundle>>>>,
     /// Agent host facade (set at daemon startup when agent host subsystem is wired).
     agent_host: Arc<Option<Arc<dyn nexus_agent_host::HostFacade>>>,
     /// Process-lifetime Actor session indexes over `HostFacade` (v1.184 P2).
@@ -229,6 +260,7 @@ impl WorkspaceState {
             prompt_executor: Arc::new(RwLock::new(None)),
             session_cancels: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             bundle_gate: Arc::new(tokio::sync::Mutex::new(())),
+            runtime_bundle: Arc::new(RwLock::new(None)),
             agent_host: Arc::new(None),
             actor_sessions: ActorSessionRegistry::new(),
             agent_host_config: Arc::new(AgentHostConfig::default()),
@@ -329,6 +361,7 @@ impl WorkspaceState {
             prompt_executor: Arc::new(RwLock::new(None)),
             session_cancels: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             bundle_gate: Arc::new(tokio::sync::Mutex::new(())),
+            runtime_bundle: Arc::new(RwLock::new(None)),
             agent_host: Arc::new(None),
             actor_sessions: ActorSessionRegistry::new(),
             agent_host_config: Arc::new(agent_host_config),
@@ -600,27 +633,41 @@ impl WorkspaceState {
                 None => None,
             };
 
-        // Capability holder: reuse the boot holder when present; otherwise
-        // build a runtime-deps holder over the SAME pool, prompt executor,
-        // cancellation map and tool dispatch (N-7: a lazy-attached creator
-        // must drive LLM-backed capabilities through the production
-        // executor, not a builtins-only placeholder registry).
-        let holder = match self.capability_registry_holder() {
-            Some(holder) => holder,
-            None => {
-                let deps = nexus_orchestration::capability::CapabilityRuntimeDeps {
-                    pool: Some(pool_arc.as_ref().clone()),
-                    prompt_executor: prompt_executor.clone(),
-                    session_cancels: self.session_cancels(),
-                    daemon_tool_dispatch: self.daemon_tool_dispatch(),
-                    cdn_config: None,
-                };
-                let holder = CapabilityRegistryHolder::with_registry(Arc::new(
-                    nexus_orchestration::capability::CapabilityRegistry::with_runtime_deps(&deps),
-                ));
-                self.set_capability_registry(holder.clone());
-                holder
-            }
+        // N-2b: REBUILD the capability registry with the lazy-attach runtime
+        // dependencies (Creator DB pool + production Host prompt executor)
+        // while preserving the existing user-capability/wasm configuration.
+        // A real Tier-0 boot builds the holder with `pool: None` and no
+        // executor; reusing that holder would leave pool-backed and
+        // LLM-backed capabilities without the newly opened pool/executor.
+        // The rebuild runs the SAME scan/admission path as boot
+        // (`with_runtime_deps_and_user_caps`), so user capabilities and the
+        // daemon-wide WASM singleton are preserved.
+        let holder = {
+            let deps = nexus_orchestration::capability::CapabilityRuntimeDeps {
+                pool: Some(pool_arc.as_ref().clone()),
+                prompt_executor: prompt_executor.clone(),
+                session_cancels: self.session_cancels(),
+                daemon_tool_dispatch: self.daemon_tool_dispatch(),
+                cdn_config: None,
+            };
+            let scan_dir = crate::boot::user_capabilities_scan_dir(self);
+            let (registry, _outcome) = match (self.wasm_engine(), self.module_cache()) {
+                (Some(engine), Some(cache)) => {
+                    nexus_orchestration::capability::CapabilityRegistry::with_runtime_deps_and_wasm_and_user_caps(
+                        &deps,
+                        engine,
+                        cache,
+                        &scan_dir,
+                    )
+                }
+                _ => {
+                    nexus_orchestration::capability::CapabilityRegistry::with_runtime_deps_and_user_caps(
+                        &deps,
+                        &scan_dir,
+                    )
+                }
+            };
+            CapabilityRegistryHolder::with_registry(Arc::new(registry))
         };
 
         // Engine over the durable store.
@@ -643,10 +690,6 @@ impl WorkspaceState {
         engine.set_nexus_home(self.nexus_home().clone());
 
         let engine_arc = Arc::new(engine);
-        self.set_engine(engine_arc.clone() as Arc<dyn OrchestrationEngine>);
-        if let Some(executor) = &prompt_executor {
-            self.set_prompt_executor(executor.clone());
-        }
 
         // Coordinator over the same engine/storage/pool. When a Host facade
         // is wired, attach it so admission validates provider references in
@@ -661,27 +704,51 @@ impl WorkspaceState {
             coordinator_builder = coordinator_builder.with_agent_host(host);
         }
         let coordinator = Arc::new(coordinator_builder);
-        self.set_run_coordinator(coordinator.clone());
 
         // Schedule supervisor with the daemon admission callback.
         let mut supervisor_builder = ScheduleSupervisor::new_with_workspace(
             pool_arc.clone(),
             self.workspace_path().map(std::path::PathBuf::from),
         );
-        if let Some(reg) = self.capability_registry() {
+        if let Some(reg) = holder.get() {
             supervisor_builder = supervisor_builder.with_capability_registry(reg);
         }
         let starter = crate::boot::DaemonScheduleRunStarter {
             coordinator: coordinator.clone(),
             pool: pool_arc.clone(),
             nexus_home: self.nexus_home().clone(),
-            caps: self.capability_registry_holder(),
+            caps: Some(holder.clone()),
             daemon_tool_dispatch: self.daemon_tool_dispatch(),
-            prompt_executor,
+            prompt_executor: prompt_executor.clone(),
         };
         supervisor_builder = supervisor_builder.with_schedule_starter(Arc::new(starter));
         let supervisor = Arc::new(supervisor_builder);
-        self.set_schedule_supervisor(supervisor.clone());
+
+        // N-2: publish ONE immutable aggregate after every component is
+        // wired. Accessors read this cell; a reader can never observe a
+        // mixed/partial bundle.
+        let bundle = Arc::new(RuntimeBundle {
+            engine: engine_arc.clone() as Arc<dyn OrchestrationEngine>,
+            capability_holder: holder.clone(),
+            prompt_executor: prompt_executor.clone(),
+            coordinator: coordinator.clone(),
+            supervisor: supervisor.clone(),
+            pool: pool_arc.clone(),
+        });
+        *self
+            .runtime_bundle
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(bundle);
+
+        // Mirror the aggregate into the individual slots so existing
+        // callers (boot-shaped code, health checks) keep working.
+        self.set_engine(engine_arc as Arc<dyn OrchestrationEngine>);
+        self.set_capability_registry(holder);
+        if let Some(executor) = &prompt_executor {
+            self.set_prompt_executor(executor.clone());
+        }
+        self.set_run_coordinator(coordinator);
+        self.set_schedule_supervisor(supervisor);
 
         tracing::info!(
             "lazy Profile attach: published durable Creator-DB runtime bundle \
@@ -815,7 +882,24 @@ impl WorkspaceState {
     /// attach publishes the matching bundle.
     #[must_use]
     pub fn run_coordinator(&self) -> Option<Arc<crate::preset_run::WorkflowRunCoordinator>> {
+        if let Some(bundle) = self.runtime_bundle() {
+            return Some(bundle.coordinator.clone());
+        }
         self.run_coordinator
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Get the immutable aggregate runtime bundle (N-2), if published.
+    ///
+    /// `None` on Tier-0 boot (no creator DB) or before Profile attach
+    /// publishes the matching bundle. All components in the bundle were
+    /// wired together before the single readiness cell was published — a
+    /// reader can never observe a mixed/partial bundle.
+    #[must_use]
+    pub fn runtime_bundle(&self) -> Option<Arc<RuntimeBundle>> {
+        self.runtime_bundle
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
@@ -869,6 +953,9 @@ impl WorkspaceState {
     pub fn prompt_executor(
         &self,
     ) -> Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>> {
+        if let Some(bundle) = self.runtime_bundle() {
+            return bundle.prompt_executor.clone();
+        }
         self.prompt_executor
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -918,6 +1005,9 @@ impl WorkspaceState {
     /// Get the orchestration engine, if set.
     #[must_use]
     pub fn engine(&self) -> Option<Arc<dyn OrchestrationEngine>> {
+        if let Some(bundle) = self.runtime_bundle() {
+            return Some(bundle.engine.clone());
+        }
         self.engine
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -927,6 +1017,9 @@ impl WorkspaceState {
     /// Get the schedule supervisor, if set (WS7).
     #[must_use]
     pub fn schedule_supervisor(&self) -> Option<Arc<ScheduleSupervisor>> {
+        if let Some(bundle) = self.runtime_bundle() {
+            return Some(bundle.supervisor.clone());
+        }
         self.schedule_supervisor
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -940,6 +1033,9 @@ impl WorkspaceState {
     /// hot reloads without holding the lock (AR-92 #7).
     #[must_use]
     pub fn capability_registry(&self) -> Option<Arc<CapabilityRegistry>> {
+        if let Some(bundle) = self.runtime_bundle() {
+            return bundle.capability_holder.get();
+        }
         self.capability_registry
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -956,6 +1052,9 @@ impl WorkspaceState {
     /// admission (V1.176 P1 QC fix, W-A).
     #[must_use]
     pub fn capability_registry_holder(&self) -> Option<CapabilityRegistryHolder> {
+        if let Some(bundle) = self.runtime_bundle() {
+            return Some(bundle.capability_holder.clone());
+        }
         self.capability_registry
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)

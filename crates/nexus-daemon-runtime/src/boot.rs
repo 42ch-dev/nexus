@@ -202,7 +202,7 @@ fn log_scan_outcome(
 /// scan-nothing fallback, not a propagated error. The fallback points the
 /// scanner at a path that cannot exist, so the scan yields the empty
 /// outcome (missing-dir contract, AR-35).
-fn user_capabilities_scan_dir(state: &WorkspaceState) -> PathBuf {
+pub(crate) fn user_capabilities_scan_dir(state: &WorkspaceState) -> PathBuf {
     state.nexus_home().parent().map_or_else(
         || {
             tracing::warn!(

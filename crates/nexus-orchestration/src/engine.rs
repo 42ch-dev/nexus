@@ -2382,7 +2382,10 @@ impl GraphFlowEngine {
         input: serde_json::Map<String, serde_json::Value>,
         core_context: Option<&str>,
         core_context_version: u32,
+        expected_core_context_version: u32,
         agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
+        frozen_source: Option<crate::run_state::PresetSourceIdentity>,
+        admission_gate: Option<crate::run_state::ScheduleAdmissionGate>,
         graph: Arc<Graph>,
     ) -> Result<SessionId, EngineError> {
         let Some(store) = &self.state.workflow_store else {
@@ -2396,6 +2399,29 @@ impl GraphFlowEngine {
         descriptor.work_id = work_id;
         descriptor.input = input.clone();
         descriptor.agent_bindings = agent_bindings;
+        // N-5/N-5b: the runner is built from the FROZEN source identity
+        // persisted with the schedule, never by resolving current registry
+        // precedence and discarding the stored identity. The stored identity
+        // must match the current load's content hash — a changed/shadowed
+        // preset refuses admission instead of running under stale bytes.
+        if let Some(frozen) = frozen_source {
+            let current = loaded.source_identity.as_ref().ok_or_else(|| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "admit_schedule_run_with_input: preset '{}' has no current source identity",
+                    loaded.id
+                )))
+            })?;
+            if current != &frozen {
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "admit_schedule_run_with_input: schedule {schedule_id} frozen \
+                         source identity does not match the current preset load \
+                         (content changed or shadowed); refusing admission"
+                    )),
+                ));
+            }
+            descriptor.source = frozen;
+        }
         let start_task_id = graph.start_task_id().unwrap_or_default();
         let session = graph_flow::Session::new_from_task(session_id.to_string(), &start_task_id);
         session.context.set("_session_id", session_id.to_string()).await;
@@ -2425,6 +2451,8 @@ impl GraphFlowEngine {
                 checkpoint,
                 &RunStateV1::default(),
                 core_context_version,
+                expected_core_context_version,
+                admission_gate.as_ref(),
             )
             .await?;
         let sid = SessionId(session_id.to_string());

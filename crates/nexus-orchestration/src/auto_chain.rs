@@ -1313,6 +1313,61 @@ fn promote_outlines_in(
     Ok(total)
 }
 
+/// Persist the durable core-context version-0 record for an internally
+/// inserted schedule (N-3).
+///
+/// The public add path seeds through `CoreContextManager::apply_seed`; the
+/// internal auto-chain/cron/review-master insertions run inside their own
+/// transactions and must ALSO leave a durable version record before the row
+/// can be admitted — a version-0 pointer with no `core_context_versions`
+/// row is a pre-seed row and admission refuses it. Mirrors `apply_seed`'s
+/// SQL (version 0, `seed` derivation) so the pointer and the record agree.
+///
+/// # Errors
+/// Returns [`AutoChainError::Database`] if the insert or pointer update fails.
+pub async fn seed_core_context_version(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    schedule_id: &str,
+    seed_text: &str,
+) -> Result<(), AutoChainError> {
+    let now = chrono::Utc::now().timestamp();
+    let payload = serde_json::json!({ "kind": "text", "body": seed_text });
+    let content_bytes = serde_json::to_vec(&payload)
+        .map_err(|e| AutoChainError::Database(nexus_local_db::LocalDbError::from(
+            sqlx::Error::Protocol(format!("serialize core-context seed: {e}")),
+        )))?;
+    let derivation = serde_json::json!({ "kind": "seed", "raw": seed_text });
+    let derivation_bytes = serde_json::to_vec(&derivation)
+        .map_err(|e| AutoChainError::Database(nexus_local_db::LocalDbError::from(
+            sqlx::Error::Protocol(format!("serialize core-context derivation: {e}")),
+        )))?;
+    sqlx::query(
+        "INSERT INTO core_context_versions
+           (schedule_id, version, payload_kind, content,
+            derivation_kind, derivation_detail,
+            created_at, created_by_kind, created_by_user_id)
+         VALUES (?, 0, 'text', ?, 'seed', ?, ?, 'system', NULL)",
+    )
+    .bind(schedule_id)
+    .bind(content_bytes)
+    .bind(derivation_bytes)
+    .bind(now)
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| AutoChainError::Database(nexus_local_db::LocalDbError::from(e)))?;
+    sqlx::query(
+        "UPDATE creator_schedules
+         SET current_core_context_version = 0, updated_at = ?
+         WHERE schedule_id = ?",
+    )
+    .bind(now)
+    .bind(schedule_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| AutoChainError::Database(nexus_local_db::LocalDbError::from(e)))?;
+    Ok(())
+}
+
 /// Enqueue a new auto-chain schedule and update the Work checkpoint.
 ///
 /// This is the single shared path for:
@@ -1334,6 +1389,16 @@ fn enqueue_descriptor_json(
     input: serde_json::Map<String, serde_json::Value>,
     agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
 ) -> Vec<u8> {
+    // N-5/N-5b: stamp the REAL content-addressed source identity (manifest +
+    // referenced template bytes) — never a zero placeholder. Admission
+    // validates the stored identity against the current load and builds the
+    // runner from the frozen identity, so a changed/shadowed preset can
+    // never run under a zero-hash durable descriptor.
+    let source = crate::preset::embedded_source_identity(preset_id)
+        .unwrap_or(crate::run_state::PresetSourceIdentity::Embedded {
+            preset_id: preset_id.to_string(),
+            content_hash: [0; 32],
+        });
     let descriptor = crate::run_state::RunDescriptorV1 {
         creator_id: creator_id.to_string(),
         work_id: if work_id.is_empty() {
@@ -1344,10 +1409,7 @@ fn enqueue_descriptor_json(
         workspace_root: std::path::PathBuf::new(),
         preset_id: preset_id.to_string(),
         preset_version: u32::try_from(preset_version).unwrap_or(1),
-        source: crate::run_state::PresetSourceIdentity::Embedded {
-            preset_id: preset_id.to_string(),
-            content_hash: [0; 32],
-        },
+        source,
         input,
         agent_bindings,
         parent_session_id: None,
@@ -1469,6 +1531,16 @@ pub async fn enqueue_auto_chain_schedule(
         tracing::error!(error = %e, "auto-chain: failed to insert schedule");
         AutoChainError::Database(nexus_local_db::LocalDbError::from(e))
     })?;
+
+    // N-3: the row is not admissible until its core-context version record
+    // is durable. Seed version 0 from the prepared seed (the same text the
+    // public add path would persist) inside the SAME transaction.
+    let seed_text = schedule_req
+        .seed
+        .as_deref()
+        .unwrap_or_default()
+        .to_string();
+    seed_core_context_version(&mut tx, &schedule_id, &seed_text).await?;
 
     // Update the Work checkpoint to point at the new driver schedule —
     // atomically with the schedule row (I-9).
@@ -1632,6 +1704,11 @@ pub async fn enqueue_review_master_schedule(
     // run with its work identity.
     let mut input = serde_json::Map::new();
     input.insert("work_id".to_string(), serde_json::json!(work_id));
+    // N-3: the row is not admissible until its core-context version record
+    // is durable. Insert + seed commit in ONE transaction.
+    let mut tx = nexus_local_db::begin_immediate(pool)
+        .await
+        .map_err(|e| AutoChainError::Database(nexus_local_db::LocalDbError::from(e)))?;
     sqlx::query(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
@@ -1655,10 +1732,15 @@ pub async fn enqueue_review_master_schedule(
         input,
         std::collections::HashMap::new(),
     ))
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, work_id, "stale-findings: failed to insert review-master schedule");
+        AutoChainError::Database(nexus_local_db::LocalDbError::from(e))
+    })?;
+    seed_core_context_version(&mut tx, &schedule_id, "").await?;
+    tx.commit().await.map_err(|e| {
+        tracing::error!(error = %e, work_id, "stale-findings: failed to commit review-master schedule");
         AutoChainError::Database(nexus_local_db::LocalDbError::from(e))
     })?;
 
@@ -1717,6 +1799,11 @@ pub async fn enqueue_cron_schedule(
     // run with its work identity.
     let mut input = serde_json::Map::new();
     input.insert("work_id".to_string(), serde_json::json!(work_id));
+    // N-3: the row is not admissible until its core-context version record
+    // is durable. Insert + seed commit in ONE transaction.
+    let mut tx = nexus_local_db::begin_immediate(pool)
+        .await
+        .map_err(|e| AutoChainError::Database(nexus_local_db::LocalDbError::from(e)))?;
     sqlx::query(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
@@ -1741,10 +1828,15 @@ pub async fn enqueue_cron_schedule(
         input,
         std::collections::HashMap::new(),
     ))
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, work_id, preset_id, "cron-supervisor: failed to insert cron-triggered schedule");
+        AutoChainError::Database(nexus_local_db::LocalDbError::from(e))
+    })?;
+    seed_core_context_version(&mut tx, &schedule_id, "").await?;
+    tx.commit().await.map_err(|e| {
+        tracing::error!(error = %e, work_id, preset_id, "cron-supervisor: failed to commit cron-triggered schedule");
         AutoChainError::Database(nexus_local_db::LocalDbError::from(e))
     })?;
 

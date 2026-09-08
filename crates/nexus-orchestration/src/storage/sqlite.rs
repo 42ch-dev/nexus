@@ -886,6 +886,8 @@ impl WorkflowStateStore for SqliteSessionStorage {
         checkpoint: RunCheckpoint<'_>,
         next_state: &RunStateV1,
         core_context_version: u32,
+        expected_core_context_version: u32,
+        admission_gate: Option<&crate::run_state::ScheduleAdmissionGate>,
     ) -> Result<RunRecord, EngineError> {
         let now = chrono::Utc::now().timestamp();
         let id = session_id.0.clone();
@@ -923,9 +925,11 @@ impl WorkflowStateStore for SqliteSessionStorage {
             status: String,
             current_session_id: Option<String>,
             preset_id: String,
+            current_core_context_version: i64,
         }
         let row = sqlx::query_as::<_, ScheduleClaimRow>(
-            "SELECT execution_policy, status, current_session_id, preset_id
+            "SELECT execution_policy, status, current_session_id, preset_id,
+                    current_core_context_version
              FROM creator_schedules WHERE schedule_id = ?",
         )
         .bind(schedule_id)
@@ -942,6 +946,103 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 "admit_schedule_run: schedule {schedule_id} not found"
             )))
         })?;
+
+        // N-3: the admission claim is fenced on the EXACT frozen
+        // core-context version the caller read. A concurrent context edit
+        // that advanced the row after the caller's read fails the fence —
+        // the claim never overwrites a newer pointer with a stale payload.
+        if u32::try_from(row.current_core_context_version).unwrap_or(0)
+            != expected_core_context_version
+        {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "admit_schedule_run: schedule {schedule_id} core-context version \
+                     moved (expected {expected_core_context_version}, found {})",
+                    row.current_core_context_version
+                )),
+            ));
+        }
+
+        // N-1: re-verify the admission matrix INSIDE the claim transaction.
+        // The preflight outside the transaction is advisory; the running set
+        // is only authoritative under the `BEGIN IMMEDIATE` write lock, so
+        // two distinct serial schedules for one creator can never both claim.
+        if let Some(gate) = admission_gate {
+            let now_ts = chrono::Utc::now().timestamp();
+            if gate.scheduled_at.is_some_and(|at| at > now_ts) {
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "admit_schedule_run: schedule {schedule_id} is not due \
+                         (scheduled_at {})",
+                        gate.scheduled_at.unwrap_or_default()
+                    )),
+                ));
+            }
+            for dep in &gate.depends_on {
+                let dep_status: Option<String> = sqlx::query_scalar(
+                    "SELECT status FROM creator_schedules WHERE schedule_id = ?",
+                )
+                .bind(dep)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|e| {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                        "admit_schedule_run '{}': {e}",
+                        session_id.0
+                    )))
+                })?;
+                if !matches!(dep_status.as_deref(), Some("completed" | "cancelled")) {
+                    return Err(EngineError::GraphFlow(
+                        graph_flow::GraphError::StorageError(format!(
+                            "admit_schedule_run: schedule {schedule_id} dependency \
+                             '{dep}' is not completed/cancelled"
+                        )),
+                    ));
+                }
+            }
+            // Per-creator running set: only driven_v1 rows count toward
+            // capacity; the candidate's OWN row is excluded (a concurrent
+            // admission that already claimed it must not look
+            // serial-blocked — the loser re-reads the winner's run).
+            let running: Vec<String> = sqlx::query_scalar(
+                "SELECT schedule_id FROM creator_schedules
+                 WHERE creator_id = ? AND status = 'running'
+                   AND execution_policy = 'driven_v1'
+                   AND schedule_id != ?",
+            )
+            .bind(&gate.creator_id)
+            .bind(schedule_id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "admit_schedule_run '{}': {e}",
+                    session_id.0
+                )))
+            })?;
+            let concurrency_ok = match gate.concurrency_kind.as_str() {
+                "parallel_any" => true,
+                "parallel_with" => {
+                    let whitelist: std::collections::HashSet<String> = gate
+                        .concurrency_whitelist
+                        .as_deref()
+                        .and_then(|json| serde_json::from_str(json).ok())
+                        .unwrap_or_default();
+                    running.iter().all(|id| whitelist.contains(id))
+                }
+                // "serial" (and any unknown kind — conservative fail-closed).
+                _ => running.is_empty(),
+            };
+            if !concurrency_ok {
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "admit_schedule_run: schedule {schedule_id} fails the \
+                         per-creator concurrency gate ({} running)",
+                        running.len()
+                    )),
+                ));
+            }
+        }
 
         // A8 fail-closed: a `_system.*` preset is never driven, regardless
         // of the stored policy (C-4).

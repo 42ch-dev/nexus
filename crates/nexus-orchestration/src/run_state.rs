@@ -76,6 +76,29 @@ pub enum PresetSourceIdentity {
     },
 }
 
+/// Admission matrix snapshot for a schedule (N-1).
+///
+/// The store re-checks due-time, dependency satisfaction, and the
+/// per-creator concurrency rule INSIDE the same `BEGIN IMMEDIATE` claim
+/// transaction as the schedule claim + session insert, so two distinct
+/// serial schedules for one creator can never both pass a preflight and
+/// both claim. The coordinator snapshots these values from the schedule
+/// row/dependency table before admission; the store re-verifies them under
+/// the write lock where the running set is authoritative.
+#[derive(Debug, Clone)]
+pub struct ScheduleAdmissionGate {
+    /// Owning creator id (per-creator concurrency scope).
+    pub creator_id: String,
+    /// `scheduled_at` (Unix seconds) — `None` = on-demand, always due.
+    pub scheduled_at: Option<i64>,
+    /// `depends_on` entries; each must be `completed` or `cancelled`.
+    pub depends_on: Vec<String>,
+    /// `serial` | `parallel_with` | `parallel_any` (unknown → fail closed).
+    pub concurrency_kind: String,
+    /// JSON array of whitelisted schedule ids for `parallel_with`.
+    pub concurrency_whitelist: Option<String>,
+}
+
 /// Durable human-wait record (A4).
 ///
 /// A fresh token is generated on **each** arrival at a human wait, even if
@@ -269,6 +292,16 @@ pub trait WorkflowStateStore: Send + Sync {
     /// creation is recovered by boot recovery, never by a second admission
     /// minting another session (C-1).
     ///
+    /// `expected_core_context_version` fences the claim on the EXACT frozen
+    /// version the caller read (N-3): a concurrent context edit that
+    /// advanced the row after the read fails the fence — the claim never
+    /// overwrites a newer pointer with a stale payload.
+    ///
+    /// `admission_gate` re-verifies the due-time/dependency/concurrency
+    /// matrix INSIDE the claim transaction (N-1): the running set is only
+    /// authoritative under the `BEGIN IMMEDIATE` write lock, so two
+    /// distinct serial schedules for one creator can never both claim.
+    ///
     /// # Errors
     /// Returns [`EngineError`] on storage failure, policy refusal, or when
     /// the schedule is not in an admissible state.
@@ -280,6 +313,8 @@ pub trait WorkflowStateStore: Send + Sync {
         checkpoint: RunCheckpoint<'_>,
         next_state: &RunStateV1,
         core_context_version: u32,
+        expected_core_context_version: u32,
+        admission_gate: Option<&ScheduleAdmissionGate>,
     ) -> Result<RunRecord, EngineError>;
 
     /// Atomically persist a transition under a root revision compare-and-swap.

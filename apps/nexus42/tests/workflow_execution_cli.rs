@@ -208,6 +208,9 @@ async fn add_public(daemon: &LiveDaemon, label: &str) -> (reqwest::StatusCode, V
             "input": {
                 "keyword": "p2-t1",
                 "topic": "p2-t1-topic"
+            },
+            "agent_bindings": {
+                "default": { "provider_id": MOCK_PROVIDER }
             }
         }),
     )
@@ -223,6 +226,49 @@ async fn load_drive_row(daemon: &LiveDaemon, schedule_id: &str) -> ScheduleDrive
     .fetch_one(&daemon.pool)
     .await
     .expect("load schedule drive row")
+}
+
+/// Build a frozen admission descriptor for a seeded row (N-4b/N-5b): the
+/// REAL content-addressed source identity (never a zero hash) plus a valid
+/// `default` binding so admission's binding-completeness gate passes.
+fn seeded_descriptor_json() -> Vec<u8> {
+    let source = nexus_orchestration::preset::embedded_source_identity(PUBLIC_PRESET)
+        .expect("embedded source identity");
+    serde_json::to_vec(&serde_json::json!({
+        "creator_id": "test_creator",
+        "work_id": null,
+        "workspace_root": "",
+        "preset_id": PUBLIC_PRESET,
+        "preset_version": 1,
+        "source": source,
+        "input": {},
+        "agent_bindings": { "default": { "provider_id": MOCK_PROVIDER, "model": null } },
+        "parent_session_id": null,
+        "graph_name": null
+    }))
+    .expect("descriptor json")
+}
+
+/// Seed the durable core-context version-0 record for a raw-seeded row
+/// (N-3: a version-0 pointer with no record is a pre-seed row and refuses).
+async fn seed_core_context_record(daemon: &LiveDaemon, schedule_id: &str) {
+    let now = chrono::Utc::now().timestamp();
+    let payload = serde_json::json!({ "kind": "text", "body": "" });
+    let derivation = serde_json::json!({ "kind": "seed", "raw": "" });
+    sqlx::query(
+        "INSERT INTO core_context_versions
+           (schedule_id, version, payload_kind, content,
+            derivation_kind, derivation_detail,
+            created_at, created_by_kind, created_by_user_id)
+         VALUES (?, 0, 'text', ?, 'seed', ?, ?, 'system', NULL)",
+    )
+    .bind(schedule_id)
+    .bind(serde_json::to_vec(&payload).expect("payload"))
+    .bind(serde_json::to_vec(&derivation).expect("derivation"))
+    .bind(now)
+    .execute(&daemon.pool)
+    .await
+    .expect("seed core context");
 }
 
 /// N-7: production daemon + deterministic Host fixture — a driven run must
@@ -369,16 +415,21 @@ async fn admission_concurrent_pending_row_one_session() {
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
             concurrency_kind, current_core_context_version, label,
-            created_at, updated_at, work_id, execution_policy)
+            created_at, updated_at, work_id, execution_policy,
+            execution_descriptor_json)
            VALUES ('SCHCONCURRENT', 'test_creator', ?, 1, 'pending',
-                   'serial', 0, 'p2-t1-concurrent-pending', ?, ?, NULL, 'driven_v1')",
+                   'serial', 0, 'p2-t1-concurrent-pending', ?, ?, NULL, 'driven_v1', ?)",
     )
     .bind(PUBLIC_PRESET)
     .bind(now)
     .bind(now)
+    .bind(seeded_descriptor_json())
     .execute(&daemon.pool)
     .await
     .expect("seed fresh pending driven_v1 row");
+    // N-3: a version-0 pointer with no core_context_versions record is a
+    // pre-seed row and admission refuses it — seed the durable record.
+    seed_core_context_record(&daemon, "SCHCONCURRENT").await;
 
     let path = "/v1/daemon/orchestration/schedules/SCHCONCURRENT/signal";
     let payload = json!({ "signal": "start" });
@@ -408,6 +459,83 @@ async fn admission_concurrent_pending_row_one_session() {
     .await
     .expect("count sessions");
     assert_eq!(count, 1, "one pending row must mint exactly one session");
+}
+
+/// N-1: TRUE concurrent admission of TWO DISTINCT serial schedules for the
+/// same creator — both preflights see an empty running set, but the store's
+/// in-transaction matrix recheck lets exactly ONE claim; the other stays
+/// pending and unowned.
+#[tokio::test]
+async fn admission_distinct_serial_rows_race_one_owned() {
+    let daemon = LiveDaemon::start().await;
+    let now = chrono::Utc::now().timestamp();
+    for id in ["SCHRACE1", "SCHRACE2"] {
+        sqlx::query(
+            "INSERT INTO creator_schedules
+               (schedule_id, creator_id, preset_id, preset_version, status,
+                concurrency_kind, current_core_context_version, label,
+                created_at, updated_at, work_id, execution_policy,
+                execution_descriptor_json)
+               VALUES (?, 'test_creator', ?, 1, 'pending',
+                       'serial', 0, ?, ?, ?, NULL, 'driven_v1', ?)",
+        )
+        .bind(id)
+        .bind(PUBLIC_PRESET)
+        .bind(format!("p2-t1-race-{id}"))
+        .bind(now)
+        .bind(now)
+        .bind(seeded_descriptor_json())
+        .execute(&daemon.pool)
+        .await
+        .expect("seed race row");
+        // N-3: a version-0 pointer with no record is a pre-seed row and
+        // refuses — seed the durable record.
+        seed_core_context_record(&daemon, id).await;
+    }
+
+    let path = "/v1/daemon/orchestration/schedules/SCHRACE1/signal";
+    let payload = json!({ "signal": "start" });
+    let (a, b) = tokio::join!(
+        post_json(&daemon, path, payload.clone()),
+        post_json(&daemon, "/v1/daemon/orchestration/schedules/SCHRACE2/signal", payload),
+    );
+    // Exactly one admission wins; the loser is refused with a conflict and
+    // its row stays pending and unowned (the store's in-transaction matrix
+    // recheck linearizes the distinct-row serial race).
+    let successes = [a.0.is_success(), b.0.is_success()];
+    assert_eq!(
+        successes.iter().filter(|s| **s).count(),
+        1,
+        "exactly one of the two racing admissions must succeed: {} / {}",
+        a.1,
+        b.1
+    );
+    let loser_body = if a.0.is_success() { &b.1 } else { &a.1 };
+    assert_eq!(
+        loser_body["error"]["code"].as_str(),
+        Some("conflict"),
+        "the serial loser must be refused with a conflict: {loser_body}"
+    );
+
+    let row1 = load_drive_row(&daemon, "SCHRACE1").await;
+    let row2 = load_drive_row(&daemon, "SCHRACE2").await;
+    let owned1 = row1.current_session_id.as_deref().is_some_and(|s| !s.is_empty());
+    let owned2 = row2.current_session_id.as_deref().is_some_and(|s| !s.is_empty());
+    assert!(
+        owned1 ^ owned2,
+        "exactly one of the two distinct serial rows must own a run: \
+         SCHRACE1 owned={owned1} SCHRACE2 owned={owned2}"
+    );
+    let (winner, loser) = if owned1 { ("SCHRACE1", &row2) } else { ("SCHRACE2", &row1) };
+    assert_eq!(
+        loser.status, "pending",
+        "the serial loser must stay pending and unowned: {winner} won, loser status={}",
+        loser.status
+    );
+    assert!(
+        loser.current_session_id.is_none(),
+        "the serial loser must be unowned"
+    );
 }
 
 /// N-7: dependency blocking — a schedule whose dependency is not yet
@@ -441,7 +569,10 @@ async fn admission_dependency_blocked_stays_pending() {
             "label": "p2-t1-dep-blocked",
             "depends_on": ["SCHDEP"],
             "seed": "p2-t1-topic",
-            "input": { "keyword": "p2-t1", "topic": "p2-t1-topic" }
+            "input": { "keyword": "p2-t1", "topic": "p2-t1-topic" },
+            "agent_bindings": {
+                "default": { "provider_id": MOCK_PROVIDER }
+            }
         }),
     )
     .await;
@@ -530,7 +661,9 @@ async fn session_post_bindings_accepted_and_unknown_refused() {
         "session run prompt must carry the frozen seed: {prompts:?}"
     );
 
-    // Unknown role: refused before enqueue (400 invalid_input).
+    // Unknown role: refused before enqueue (422 invalid_input). N-4b: the
+    // completeness gate fires first — the preset's graphs require `default`
+    // and the map supplies only the unknown role.
     let (status, body) = post_json(
         &daemon,
         "/v1/daemon/orchestration/sessions",
@@ -550,8 +683,8 @@ async fn session_post_bindings_accepted_and_unknown_refused() {
     );
     let text = body.to_string();
     assert!(
-        text.contains("unknown role"),
-        "refusal must name the unknown role: {text}"
+        text.contains("missing agent binding") || text.contains("unknown role"),
+        "refusal must name the missing/unknown role: {text}"
     );
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM orchestration_sessions WHERE session_id = ?",
@@ -633,6 +766,8 @@ async fn admission_new_public_schedule_is_driven() {
             "p2-t1-admission-cli",
             "--seed",
             "p2-t1-topic",
+            "--agent-ref",
+            "default:mock-provider",
         ])
         .await;
     assert!(
@@ -723,16 +858,20 @@ async fn explicit_legacy_running_without_session_starts() {
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
             concurrency_kind, current_core_context_version, label,
-            created_at, updated_at, work_id, execution_policy)
+            created_at, updated_at, work_id, execution_policy,
+            execution_descriptor_json)
            VALUES ('SCHLEGACYRUN', 'test_creator', ?, 1, 'running',
-                   'serial', 0, 'p2-t1-legacy-running', ?, ?, NULL, 'legacy_inert')",
+                   'serial', 0, 'p2-t1-legacy-running', ?, ?, NULL, 'legacy_inert', ?)",
     )
     .bind(PUBLIC_PRESET)
     .bind(now)
     .bind(now)
+    .bind(seeded_descriptor_json())
     .execute(&daemon.pool)
     .await
     .expect("seed legacy running-without-session row");
+    // N-3: seed the durable core-context record so the row is admissible.
+    seed_core_context_record(&daemon, "SCHLEGACYRUN").await;
 
     let (status, body) = post_json(
         &daemon,
@@ -771,6 +910,9 @@ async fn future_scheduled_add_stays_pending() {
             "input": {
                 "keyword": "p2-t1",
                 "topic": "p2-t1-topic"
+            },
+            "agent_bindings": {
+                "default": { "provider_id": MOCK_PROVIDER }
             }
         }),
     )
@@ -786,4 +928,312 @@ async fn future_scheduled_add_stays_pending() {
     assert_eq!(row.status, "pending");
     assert!(row.current_session_id.is_none());
     assert_eq!(row.execution_policy, "driven_v1");
+}
+
+/// N-2/N-2b: lazy Profile attach publishes ONE immutable aggregate bundle
+/// (engine + pool-backed capability registry + Host prompt executor +
+/// coordinator + supervisor) and a lazy-attached schedule drives a REAL
+/// Host prompt through the production executor — never a Tier-0
+/// pool-less/executor-less registry.
+#[tokio::test]
+async fn admission_lazy_attach_drives_host_prompt() {
+    let host = MockHost::new();
+    let daemon = LiveDaemon::start_lazy_attach(host.clone()).await;
+
+    // The aggregate bundle is published and every accessor reads it.
+    let bundle = daemon
+        .state
+        .runtime_bundle()
+        .expect("lazy attach publishes the aggregate bundle");
+    assert!(
+        daemon.state.engine().is_some(),
+        "engine accessor must read the aggregate"
+    );
+    assert!(
+        daemon.state.schedule_supervisor().is_some(),
+        "supervisor accessor must read the aggregate"
+    );
+    assert!(
+        daemon.state.capability_registry().is_some(),
+        "capability registry accessor must read the aggregate"
+    );
+    let _ = bundle;
+
+    // A lazy-attached schedule drives a real Host prompt (non-echo).
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": PUBLIC_PRESET,
+            "label": "p2-t1-lazy-attach",
+            "seed": "p2-t1-lazy-topic",
+            "input": {
+                "keyword": "p2-t1",
+                "topic": "p2-t1-lazy-topic"
+            },
+            "agent_bindings": {
+                "default": { "provider_id": MOCK_PROVIDER }
+            }
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::CREATED,
+        "lazy-attached add must succeed: {body}"
+    );
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+
+    let prompts = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            let prompts = host.prompts();
+            if !prompts.is_empty() {
+                return prompts;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("lazy-attached run must reach the Host");
+    assert!(
+        prompts.iter().any(|p| p.contains("p2-t1-lazy-topic")),
+        "lazy-attached run prompt must carry the frozen input: {prompts:?}"
+    );
+    assert!(
+        host.execs.load(Ordering::SeqCst) >= 1,
+        "at least one Host exec must run through the lazy-attached bundle"
+    );
+    let row = load_drive_row(&daemon, &schedule_id).await;
+    assert!(
+        row.current_session_id.as_deref().is_some_and(|s| !s.is_empty()),
+        "lazy-attached schedule must own a session"
+    );
+}
+
+/// N-7: legacy never-started rows (pending/running-without-session,
+/// `legacy_inert`) stay inert across boot/tick/cron — the supervisor tick
+/// never admits them and never flips them to Running.
+#[tokio::test]
+async fn admission_legacy_rows_inert_across_tick() {
+    let daemon = LiveDaemon::start().await;
+    let now = chrono::Utc::now().timestamp();
+    for (id, status) in [("SCHLEGACY1", "pending"), ("SCHLEGACY2", "running")] {
+        sqlx::query(
+            "INSERT INTO creator_schedules
+               (schedule_id, creator_id, preset_id, preset_version, status,
+                concurrency_kind, current_core_context_version, label,
+                created_at, updated_at, work_id, execution_policy)
+               VALUES (?, 'test_creator', ?, 1, ?, 'serial', 0, ?, ?, ?, NULL, 'legacy_inert')",
+        )
+        .bind(id)
+        .bind(PUBLIC_PRESET)
+        .bind(status)
+        .bind(format!("p2-t1-legacy-{id}"))
+        .bind(now)
+        .bind(now)
+        .execute(&daemon.pool)
+        .await
+        .expect("seed legacy row");
+    }
+
+    // Run the supervisor tick (the same admission path boot/tick/cron use).
+    let supervisor = daemon
+        .state
+        .schedule_supervisor()
+        .expect("supervisor wired");
+    supervisor.tick().await.expect("tick succeeds");
+
+    for id in ["SCHLEGACY1", "SCHLEGACY2"] {
+        let row = load_drive_row(&daemon, id).await;
+        assert_eq!(
+            row.execution_policy, "legacy_inert",
+            "legacy row {id} must stay legacy_inert after tick"
+        );
+        assert!(
+            row.current_session_id.is_none(),
+            "legacy row {id} must stay unowned after tick"
+        );
+        // A3: operator-visible historical status is preserved — a legacy
+        // `running` row stays `running` (never driven, never re-flipped);
+        // a legacy `pending` row stays `pending` (never flipped to running).
+        let expected = if id == "SCHLEGACY1" { "pending" } else { "running" };
+        assert_eq!(
+            row.status, expected,
+            "legacy row {id} must keep its historical status after tick"
+        );
+    }
+}
+
+/// N-7: auto-chain, cron, and review-master insertion branches produce
+/// drive-enabled rows with a durable core-context record and a frozen
+/// descriptor carrying the REAL content-addressed source identity (N-5b) —
+/// never a zero hash.
+#[tokio::test]
+async fn admission_internal_insertion_branches_durable() {
+    let daemon = LiveDaemon::start().await;
+    let now = chrono::Utc::now().timestamp();
+
+    // Auto-chain branch (research stage).
+    let work = nexus_local_db::works::WorkRecord {
+        work_id: "wrk_chain".to_string(),
+        creator_id: "test_creator".to_string(),
+        workspace_slug: "default".to_string(),
+        status: "active".to_string(),
+        title: "Chain Work".to_string(),
+        long_term_goal: "goal".to_string(),
+        initial_idea: "idea".to_string(),
+        creative_brief: None,
+        intake_status: "complete".to_string(),
+        world_id: Some("wld_test_world".to_string()),
+        story_ref: None,
+        inspiration_log: "[]".to_string(),
+        primary_preset_id: "novel-writing".to_string(),
+        schedule_ids: "[]".to_string(),
+        created_at: "2026-06-09T10:00:00Z".to_string(),
+        updated_at: "2026-06-09T10:00:00Z".to_string(),
+        current_stage: "research".to_string(),
+        stage_status: "active".to_string(),
+        work_ref: Some("chain-ref".to_string()),
+        work_profile: Some("novel".to_string()),
+        total_planned_chapters: Some(3),
+        current_chapter: 0,
+        auto_chain_enabled: true,
+        driver_schedule_id: None,
+        auto_chain_interrupted: false,
+        auto_review_master_on_timeout: false,
+        runtime_lock_holder: None,
+        runtime_lock_acquired_at: None,
+        completion_locked_at: None,
+        novel_completion_status: None,
+        lineage_from_work_id: None,
+    };
+    nexus_local_db::works::create_work(&daemon.pool, &work)
+        .await
+        .expect("create chain work");
+    let chain_id = nexus_orchestration::auto_chain::enqueue_auto_chain_schedule(
+        &daemon.pool,
+        "test_creator",
+        "wrk_chain",
+        "research",
+        None,
+        None,
+        &work,
+    )
+    .await
+    .expect("enqueue auto-chain schedule");
+    let chain_row = load_drive_row(&daemon, &chain_id).await;
+    assert_eq!(chain_row.execution_policy, "driven_v1");
+    let chain_cc: i64 = sqlx::query_scalar(
+        "SELECT current_core_context_version FROM creator_schedules WHERE schedule_id = ?",
+    )
+    .bind(&chain_id)
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("chain core version");
+    assert_eq!(chain_cc, 0, "auto-chain row must carry a durable seed pointer");
+    let chain_cc_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM core_context_versions WHERE schedule_id = ?",
+    )
+    .bind(&chain_id)
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("chain cc rows");
+    assert_eq!(chain_cc_rows, 1, "auto-chain row must have a durable seed record");
+    let chain_desc: Option<Vec<u8>> = sqlx::query_scalar(
+        "SELECT execution_descriptor_json FROM creator_schedules WHERE schedule_id = ?",
+    )
+    .bind(&chain_id)
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("chain descriptor");
+    let chain_desc: nexus_orchestration::run_state::RunDescriptorV1 =
+        serde_json::from_slice(chain_desc.as_deref().expect("chain descriptor present"))
+            .expect("chain descriptor parses");
+    assert!(
+        chain_desc.source != nexus_orchestration::run_state::PresetSourceIdentity::Embedded {
+            preset_id: "research".to_string(),
+            content_hash: [0; 32],
+        },
+        "auto-chain descriptor must carry the REAL content hash, never zero"
+    );
+
+    // Cron branch.
+    let cron_id = nexus_orchestration::auto_chain::enqueue_cron_schedule(
+        &daemon.pool,
+        "test_creator",
+        "wrk_chain",
+        "novel-brainstorm",
+        "brainstorm",
+    )
+    .await
+    .expect("enqueue cron schedule");
+    let cron_row = load_drive_row(&daemon, &cron_id).await;
+    assert_eq!(cron_row.execution_policy, "driven_v1");
+    let cron_cc_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM core_context_versions WHERE schedule_id = ?",
+    )
+    .bind(&cron_id)
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("cron cc rows");
+    assert_eq!(cron_cc_rows, 1, "cron row must have a durable seed record");
+
+    // Review-master branch.
+    let rvm_id = nexus_orchestration::auto_chain::enqueue_review_master_schedule(
+        &daemon.pool,
+        "test_creator",
+        "wrk_chain",
+    )
+    .await
+    .expect("enqueue review-master schedule");
+    let rvm_row = load_drive_row(&daemon, &rvm_id).await;
+    assert_eq!(rvm_row.execution_policy, "driven_v1");
+    let rvm_cc_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM core_context_versions WHERE schedule_id = ?",
+    )
+    .bind(&rvm_id)
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("rvm cc rows");
+    assert_eq!(rvm_cc_rows, 1, "review-master row must have a durable seed record");
+}
+
+/// N-4b: a schedule add with NO bindings for a preset whose graphs issue
+/// prompts refuses loudly (400 invalid_input) before any run row is created
+/// — the completeness gate, not the prompt executor, is the admission
+/// validator.
+#[tokio::test]
+async fn admission_missing_default_binding_refuses() {
+    let host = MockHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": PUBLIC_PRESET,
+            "label": "p2-t1-missing-binding",
+            "seed": "p2-t1-topic",
+            "input": { "keyword": "p2-t1", "topic": "p2-t1-topic" }
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::UNPROCESSABLE_ENTITY,
+        "missing default binding must refuse before enqueue: {body}"
+    );
+    let text = body.to_string();
+    assert!(
+        text.contains("missing agent binding"),
+        "refusal must name the missing binding: {text}"
+    );
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM orchestration_sessions",
+    )
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("count sessions");
+    assert_eq!(count, 0, "no run row may be created for a refused add");
 }

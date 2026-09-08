@@ -115,6 +115,24 @@ pub fn load_embedded_preset(
     Ok(loaded)
 }
 
+/// Resolve the content-addressed source identity for an EMBEDDED preset
+/// (N-5/N-5b).
+///
+/// The internal insertion paths (auto-chain, cron, review-master) persist a
+/// frozen [`crate::run_state::RunDescriptorV1`] at enqueue time and must
+/// stamp the REAL content hash (manifest + referenced template bytes), not
+/// a zero placeholder — admission then validates the stored identity against
+/// the current load instead of discarding it. `None` when the preset is not
+/// embedded (directory presets are resolved by the caller with a bundle
+/// root).
+#[must_use]
+pub fn embedded_source_identity(preset_id: &str) -> Option<crate::run_state::PresetSourceIdentity> {
+    let caps = crate::capability::CapabilityRegistry::with_builtins();
+    load_embedded_preset(preset_id, &caps)
+        .ok()
+        .and_then(|loaded| loaded.source_identity)
+}
+
 // ---------------------------------------------------------------------------
 // Composable search order: user → system → embedded
 // ---------------------------------------------------------------------------

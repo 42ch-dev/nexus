@@ -80,6 +80,76 @@ impl LiveDaemon {
         Self::start_with_optional_host(Some(host)).await
     }
 
+    /// Boot the daemon WITHOUT publishing the Creator-DB runtime bundle
+    /// (N-2/N-2b lazy-attach path): the pool is open (test fixture) but no
+    /// engine/coordinator/supervisor bundle exists until the test calls
+    /// `state.ensure_creator_pool()`, exactly like a Tier-0 boot followed by
+    /// Profile attach. The router is created after the bundle is published
+    /// so routes observe the complete aggregate.
+    pub async fn start_lazy_attach(host: Arc<dyn HostFacade>) -> Self {
+        let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind daemon port");
+        let port = listener.local_addr().expect("local addr").port();
+        let http_url = format!("http://127.0.0.1:{port}");
+
+        let config_path = nexus_home.join("config.toml");
+        let config = format!(
+            "active_creator_id = \"test_creator\"\n\
+             daemon_url = \"{http_url}\"\n\
+             \n\
+             [active_workspace_slug_by_creator]\n\
+             \"test_creator\" = \"default\"\n"
+        );
+        std::fs::write(&config_path, config).expect("write config.toml");
+
+        let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        state.set_agent_host(host);
+        let pool = state.pool().expect("pool").clone();
+        test_utils::seed_test_creator_and_world(&pool).await;
+
+        // No bundle yet — the lazy-attach path publishes it via
+        // `ensure_creator_pool()` (the Profile-attach middleware seam).
+        assert!(
+            state.run_coordinator().is_none(),
+            "lazy-attach fixture must start without a runtime bundle"
+        );
+        state
+            .ensure_creator_pool()
+            .await
+            .expect("lazy attach publishes the runtime bundle");
+        assert!(
+            state.runtime_bundle().is_some(),
+            "lazy attach must publish the immutable aggregate bundle"
+        );
+
+        let engine = state.engine().expect("engine after lazy attach");
+        let session_storage: Arc<dyn graph_flow::SessionStorage> = Arc::new(
+            nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(
+                pool.clone(),
+            )),
+        );
+        let app = api::create_router(
+            state.clone(),
+            DaemonApiConfig::keyless().with_resolved_listen_addr(port, "127.0.0.1"),
+        );
+        let http_task = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("daemon http serve");
+        });
+
+        Self {
+            home: tmp,
+            pool,
+            state,
+            http_url,
+            engine,
+            session_storage,
+            http_task,
+        }
+    }
+
     async fn start_with_optional_host(host: Option<Arc<dyn HostFacade>>) -> Self {
         let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
 
