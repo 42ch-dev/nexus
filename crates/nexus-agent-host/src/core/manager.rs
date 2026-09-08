@@ -650,7 +650,13 @@ impl crate::HostFacade for HostManager {
             let mut sessions = self.sessions.write().await;
             for session_id in &session_ids {
                 if cleanup_unconfirmed.contains(session_id) {
-                    let _ = sessions.transition_to_error_recoverable(session_id);
+                    if matches!(
+                        sessions.get(session_id).map(|session| &session.state),
+                        Some(crate::core::session::SessionState::Ready)
+                    ) {
+                        sessions.transition_to_stopping(session_id)?;
+                    }
+                    sessions.transition_to_error_recoverable(session_id)?;
                     continue;
                 }
                 let _ = sessions.transition_to_stopping(session_id);
@@ -756,12 +762,20 @@ impl crate::HostFacade for HostManager {
             // Keep the session in the registry as ErrorRecoverable: it must
             // not be reported as cleanly stopped while cleanup is unconfirmed.
             let mut sessions = self.sessions.write().await;
-            let _ = sessions.transition_to_error_recoverable(&session_id);
-            return Err(HostError::internal(format!(
-                "session {session_id} cleanup unconfirmed"
-            ))
-            .with_provider(session.provider_id.clone())
-            .with_session(session_id.clone()));
+            if matches!(
+                sessions.get(&session_id).map(|current| &current.state),
+                Some(crate::core::session::SessionState::Ready)
+            ) {
+                sessions.transition_to_stopping(&session_id)?;
+            }
+            sessions.transition_to_error_recoverable(&session_id)?;
+            return Err(
+                HostError::cleanup_unconfirmed(format!(
+                    "session {session_id} cleanup unconfirmed"
+                ))
+                .with_provider(session.provider_id.clone())
+                .with_session(session_id.clone()),
+            );
         }
 
         // Transition session through Stopping → Stopped
@@ -1440,9 +1454,9 @@ mod tests {
         );
     }
 
-    /// Verify that shutdown does not hang when a provider's shutdown takes too long.
+    /// Verify bounded global shutdown retains cleanup-unconfirmed ownership.
     #[tokio::test]
-    async fn shutdown_respects_timeout_and_does_not_hang() {
+    async fn shutdown_timeout_retains_unconfirmed_session() {
         let provider = Arc::new(HangingMockProvider::new(ProviderId::new("mock")));
         let manager = HostManager::new();
         manager.register_provider(provider.clone(), mock_launch()).await;
@@ -1479,17 +1493,13 @@ mod tests {
             .await
             .expect("create");
 
-        // shutdown should complete within a reasonable total time even though the
-        // provider's shutdown() hangs forever.  The per-session timeout is 100ms,
-        // so the whole thing should finish well within 5s.
+        // The per-session timeout bounds the call, but unconfirmed cleanup is
+        // an error and the owned session must remain visible for recovery.
         let result = tokio::time::timeout(std::time::Duration::from_secs(5), manager.shutdown())
             .await
             .expect("shutdown should not hang");
-
-        assert!(
-            result.is_ok(),
-            "shutdown should succeed even with a hanging provider"
-        );
+        let error = result.expect_err("hanging cleanup must remain unconfirmed");
+        assert_eq!(error.category(), "cleanup_unconfirmed");
         assert!(
             provider.was_shutdown_called(),
             "provider shutdown() should have been invoked"
@@ -1497,7 +1507,13 @@ mod tests {
 
         let health = manager.health().await.expect("health");
         assert!(!health.running);
-        assert_eq!(health.active_sessions, 0);
+        assert_eq!(health.active_sessions, 1);
+        let sessions = manager.list_sessions().await.expect("sessions");
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(
+            sessions[0].state,
+            crate::core::session::SessionState::ErrorRecoverable
+        );
     }
 
     /// Verify shutdown works correctly when there are no active sessions.
