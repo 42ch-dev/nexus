@@ -606,12 +606,14 @@ pub struct AcpSdkAdapter {
     /// selects the matching `PermissionOption` from the request.
     /// If `None`, all permission requests are cancelled (safe default).
     permission_handler: Arc<RwLock<Option<PermissionHandlerFn>>>,
-    /// Receiver for permission result events produced by the SDK's
-    /// `on_receive_request` handler. These events are merged into the
-    /// `stream_prompt` output so the host layer receives `PermissionResult`
-    /// updates alongside `TextDelta` and `Stopped`.
-    permission_events_rx:
-        Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Receiver<AcpStreamUpdate>>>>,
+    /// Broadcast of permission result events produced by the SDK's
+    /// `on_receive_request` handler.
+    ///
+    /// Every `stream_prompt` operation subscribes at its start and forwards
+    /// `PermissionResult` updates into its own output channel, so permission
+    /// results are routed per active operation and remain observable across
+    /// serial prompts on the same session (never one-shot per adapter).
+    permission_events_tx: Arc<tokio::sync::broadcast::Sender<AcpStreamUpdate>>,
 }
 
 impl AcpSdkAdapter {
@@ -643,6 +645,7 @@ impl AcpSdkAdapter {
     /// Use [`with_connection()`] to establish the actual SDK connection.
     #[must_use]
     pub fn new(agent_id: &str, agent_path: PathBuf) -> Self {
+        let (permission_events_tx, _) = tokio::sync::broadcast::channel(64);
         Self {
             agent_path,
             agent_id: agent_id.to_string(),
@@ -651,7 +654,7 @@ impl AcpSdkAdapter {
             control_connection: Arc::new(RwLock::new(None)),
             setup_task: None,
             permission_handler: Arc::new(RwLock::new(None)),
-            permission_events_rx: Arc::new(tokio::sync::Mutex::new(None)),
+            permission_events_tx: Arc::new(permission_events_tx),
         }
     }
 
@@ -675,7 +678,7 @@ impl AcpSdkAdapter {
         let control_connection = Arc::new(RwLock::new(None));
         let permission_handler: Arc<RwLock<Option<PermissionHandlerFn>>> =
             Arc::new(RwLock::new(None));
-        let (permission_events_tx, permission_events_rx) = tokio::sync::mpsc::channel(16);
+        let (permission_events_tx, _) = tokio::sync::broadcast::channel(64);
 
         tracing::info!(
             agent_id = %agent_id,
@@ -686,7 +689,7 @@ impl AcpSdkAdapter {
         let control_connection_clone = control_connection.clone();
         let agent_id_for_log = agent_id.clone();
         let permission_handler_clone = permission_handler.clone();
-        let permission_events_for_handler = permission_events_tx;
+        let permission_events_for_handler = permission_events_tx.clone();
 
         let bridge_clone = bridge.clone();
         let setup_task = tokio::spawn(async move {
@@ -750,7 +753,7 @@ impl AcpSdkAdapter {
                                     "Permission response sent"
                                 );
 
-                                let _ = perm_events.try_send(AcpStreamUpdate::PermissionResult {
+                                let _ = perm_events.send(AcpStreamUpdate::PermissionResult {
                                     session_id: request.session_id.to_string(),
                                     tool_name: tool_name.clone(),
                                     approved: matches!(outcome, AcpPermissionOutcome::Approve),
@@ -819,7 +822,7 @@ impl AcpSdkAdapter {
             control_connection,
             setup_task: Some(setup_task),
             permission_handler,
-            permission_events_rx: Arc::new(tokio::sync::Mutex::new(Some(permission_events_rx))),
+            permission_events_tx: Arc::new(permission_events_tx),
         }
     }
 
@@ -1360,7 +1363,7 @@ impl NexusAcpClient for AcpSdkAdapter {
     ) -> impl Future<Output = AcpResult<tokio::sync::mpsc::Receiver<AcpStreamUpdate>>> + Send {
         let connection = self.connection.clone();
         let bridge = self.bridge.clone();
-        let permission_events_rx = self.permission_events_rx.clone();
+        let permission_events_tx = self.permission_events_tx.clone();
 
         async move {
             let session_id_str = request.session_id.0.clone();
@@ -1382,18 +1385,15 @@ impl NexusAcpClient for AcpSdkAdapter {
             let stream_session_id = session_id_str.clone();
             let (done_tx, mut done_rx) = tokio::sync::oneshot::channel::<()>();
 
+            // Subscribe to the adapter-wide permission broadcast for THIS
+            // operation. Each stream_prompt gets its own subscription, so
+            // permission results route per active operation and remain
+            // observable across serial prompts on the same session.
+            let mut permission_rx = permission_events_tx.subscribe();
             tokio::spawn(async move {
-                let mut perm_rx_guard = permission_events_rx.lock().await;
-                let Some(perm_rx) = perm_rx_guard.take() else {
-                    drop(tx_for_perm);
-                    return;
-                };
-                drop(perm_rx_guard);
-
-                let mut permission_rx = perm_rx;
                 loop {
                     tokio::select! {
-                        Some(update) = permission_rx.recv() => {
+                        Ok(update) = permission_rx.recv() => {
                             if tx_for_perm.send(update).await.is_err() {
                                 break;
                             }

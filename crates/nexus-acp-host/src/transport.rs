@@ -199,6 +199,16 @@ impl AgentSpawner {
             .stderr(Stdio::inherit()) // stderr for agent logs (visible in terminal)
             .kill_on_drop(true); // Ensure subprocess is killed if the handle is dropped
 
+        // Owned process-group identity (A5): on Unix the child becomes a new
+        // process-group leader (PGID == child PID), so the owned process tree
+        // — including any descendants the agent spawns — can be signalled and
+        // reaped as one unit, guarded by the owned child's liveness. A reused
+        // or unowned PID/group is never signalled.
+        #[cfg(unix)]
+        {
+            cmd.process_group(0);
+        }
+
         // Set environment variables
         for (key, value) in env {
             cmd.env(key, value);
@@ -294,16 +304,24 @@ impl ManagedAcpProcess {
     }
 
     /// Bounded owned process-tree shutdown: wait `grace` for cooperative
-    /// exit, then SIGTERM, then SIGKILL, reaping the exact child.
+    /// exit, then signal the owned process group (SIGTERM), then SIGKILL,
+    /// reaping the exact owned child.
+    ///
+    /// Identity safety: the child is a process-group leader (PGID == child
+    /// PID) created at spawn. Every signal targets the owned group via
+    /// `killpg`, guarded by the owned child's liveness; a reused/unowned PID
+    /// or group is never signalled, and the owned child is always reaped.
     ///
     /// # Errors
     ///
-    /// Returns an error if the child cannot be reaped after SIGKILL.
+    /// Returns an error when the owned child cannot be confirmed reaped after
+    /// the final SIGKILL (cleanup unconfirmed must remain visibly
+    /// interrupted, never silently successful).
     pub async fn shutdown(mut self, grace: Duration) -> AcpResult<()> {
         tracing::info!(
             agent_id = %self.agent_id,
             grace_ms = grace.as_millis(),
-            "Initiating owned ACP process shutdown"
+            "Initiating owned ACP process-tree shutdown"
         );
 
         // Step 1: wait up to `grace` for cooperative exit (the caller has
@@ -334,32 +352,41 @@ impl ManagedAcpProcess {
                 tracing::warn!(
                     agent_id = %self.agent_id,
                     timeout = ?grace,
-                    "Owned ACP process did not exit within grace, proceeding to SIGTERM"
+                    "Owned ACP process did not exit within grace, proceeding to group SIGTERM"
                 );
             }
         }
 
         #[cfg(unix)]
         {
-            use nix::sys::signal::{kill, Signal};
+            use nix::sys::signal::{killpg, Signal};
             use nix::unistd::Pid;
 
-            let pid = self.child.id().ok_or_else(|| {
-                AcpError::agent_crashed(
-                    None,
-                    self.agent_path.clone(),
-                    Some("Cannot get PID: process has already exited".into()),
-                )
-            })?;
-            let pid = Pid::from_raw(pid.cast_signed());
-            if let Err(e) = kill(pid, Signal::SIGTERM) {
+            // The owned child must still be alive before we signal its group.
+            // If it exited in the window since `wait`, do not touch the group
+            // (the PID may have been recycled) — just reap and report.
+            let Some(pid) = self.child.id() else {
+                let status = self.child.wait().await.map_err(|e| {
+                    AcpError::agent_crashed(None, self.agent_path, Some(e.to_string()))
+                })?;
+                tracing::info!(
+                    agent_id = %self.agent_id,
+                    exit_code = ?status.code(),
+                    "Owned ACP process exited between grace and group signal"
+                );
+                return Ok(());
+            };
+            let pgrp = Pid::from_raw(pid.cast_signed());
+
+            // Step 2: SIGTERM the owned process group (leader + descendants).
+            if let Err(e) = killpg(pgrp, Signal::SIGTERM) {
                 tracing::warn!(
                     agent_id = %self.agent_id,
                     error = %e,
-                    "Failed to send SIGTERM to owned ACP process"
+                    "Failed to send SIGTERM to owned ACP process group"
                 );
             } else {
-                tracing::debug!(agent_id = %self.agent_id, "SIGTERM sent to owned ACP process");
+                tracing::debug!(agent_id = %self.agent_id, "SIGTERM sent to owned ACP process group");
             }
 
             let wait_result = timeout(grace, self.child.wait()).await;
@@ -368,34 +395,30 @@ impl ManagedAcpProcess {
                     tracing::info!(
                         agent_id = %self.agent_id,
                         exit_code = ?status.code(),
-                        "Owned ACP process exited after SIGTERM"
+                        "Owned ACP process exited after group SIGTERM"
                     );
                     return Ok(());
                 }
                 Err(_) => {
                     tracing::warn!(
                         agent_id = %self.agent_id,
-                        "Owned ACP process did not exit after SIGTERM, proceeding to SIGKILL"
+                        "Owned ACP process did not exit after group SIGTERM, proceeding to SIGKILL"
                     );
-                    let pid = self.child.id().ok_or_else(|| {
-                        AcpError::agent_crashed(
-                            None,
-                            self.agent_path.clone(),
-                            Some("Cannot get PID: process has already exited".into()),
-                        )
-                    })?;
-                    let pid = Pid::from_raw(pid.cast_signed());
-                    if let Err(e) = kill(pid, Signal::SIGKILL) {
-                        tracing::error!(
-                            agent_id = %self.agent_id,
-                            error = %e,
-                            "Failed to send SIGKILL to owned ACP process"
-                        );
-                        return Err(AcpError::agent_crashed(
-                            None,
-                            self.agent_path,
-                            Some(format!("Failed to kill owned ACP process: {e}")),
-                        ));
+                    // Guard again: only signal the group if the exact owned
+                    // child is still alive (PID not recycled).
+                    if self.child.id().is_some() {
+                        if let Err(e) = killpg(pgrp, Signal::SIGKILL) {
+                            tracing::error!(
+                                agent_id = %self.agent_id,
+                                error = %e,
+                                "Failed to send SIGKILL to owned ACP process group"
+                            );
+                            return Err(AcpError::agent_crashed(
+                                None,
+                                self.agent_path,
+                                Some(format!("Failed to kill owned ACP process group: {e}")),
+                            ));
+                        }
                     }
                     let status = self.child.wait().await.map_err(|e| {
                         AcpError::agent_crashed(None, self.agent_path, Some(e.to_string()))
@@ -403,14 +426,14 @@ impl ManagedAcpProcess {
                     tracing::info!(
                         agent_id = %self.agent_id,
                         exit_code = ?status.code(),
-                        "Owned ACP process killed forcefully (SIGKILL)"
+                        "Owned ACP process killed forcefully (group SIGKILL)"
                     );
                 }
                 Ok(Err(e)) => {
                     tracing::error!(
                         agent_id = %self.agent_id,
                         error = %e,
-                        "Failed to wait after SIGTERM"
+                        "Failed to wait after group SIGTERM"
                     );
                     return Err(AcpError::agent_crashed(
                         None,
@@ -438,6 +461,65 @@ impl ManagedAcpProcess {
         }
 
         Ok(())
+    }
+
+    /// Bounded teardown of an owned child that failed to launch/connect.
+    ///
+    /// Used on launch-failure paths: the spawned child has no ACP session to
+    /// cancel cooperatively, so we proceed directly to the owned process-tree
+    /// termination/reap sequence (group SIGTERM → SIGKILL → reap, guarded by
+    /// owned child liveness). Returns an error if the exact owned child
+    /// cannot be confirmed reaped.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the owned child cannot be confirmed reaped.
+    pub async fn terminate(mut self, grace: Duration) -> AcpResult<()> {
+        #[cfg(unix)]
+        {
+            use nix::sys::signal::{killpg, Signal};
+            use nix::unistd::Pid;
+
+            // If the child already exited, reap and report clean teardown.
+            let Some(pid) = self.child.id() else {
+                let _ = self.child.wait().await;
+                return Ok(());
+            };
+            let pgrp = Pid::from_raw(pid.cast_signed());
+            let _ = killpg(pgrp, Signal::SIGTERM);
+            let wait_result = timeout(grace, self.child.wait()).await;
+            match wait_result {
+                Ok(Ok(_)) => return Ok(()),
+                Err(_) => {
+                    if self.child.id().is_some() {
+                        let _ = killpg(pgrp, Signal::SIGKILL);
+                    }
+                    self.child.wait().await.map_err(|e| {
+                        AcpError::agent_crashed(
+                            None,
+                            self.agent_path.clone(),
+                            Some(e.to_string()),
+                        )
+                    })?;
+                    Ok(())
+                }
+                Ok(Err(e)) => Err(AcpError::agent_crashed(
+                    None,
+                    self.agent_path,
+                    Some(e.to_string()),
+                )),
+            }
+        }
+
+        #[cfg(not(unix))]
+        {
+            let agent_path = self.agent_path.clone();
+            let _ = self.child.kill().await;
+            self.child.wait().await.map_err(|e| {
+                AcpError::agent_crashed(None, agent_path, Some(e.to_string()))
+            })?;
+            Ok(())
+        }
     }
 }
 

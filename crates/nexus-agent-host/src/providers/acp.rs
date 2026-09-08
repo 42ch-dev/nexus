@@ -23,7 +23,8 @@ use nexus_acp_host::{
 };
 use nexus_contracts::local::acp::{
     NexusConfigOption, NexusConfigOptionCategory, NexusContentBlock, NexusInitializeRequest,
-    NexusNewSessionRequest, NexusPromptRequest, NexusSessionId, NexusSetConfigOptionRequest,
+    NexusNewSessionRequest, NexusPromptRequest, NexusSessionCreated, NexusSessionId,
+    NexusSetConfigOptionRequest,
 };
 
 use crate::capability::model::{
@@ -198,100 +199,126 @@ impl AcpProvider {
             .set_permission_handler(self.build_permission_handler())
             .await;
 
-        // The SDK connection is established asynchronously by
-        // `with_connection`; wait (bounded by the launch timeout) for it
-        // before issuing the initialize handshake.
-        let connected = tokio::time::timeout(launch_dur, async {
-            loop {
-                if client_arc.is_connected().await {
-                    break;
+        // Any handshake failure below must run the owned teardown/reap
+        // sequence (A5): dropping a plain Child is not an awaited process-tree
+        // reap. `child` stays borrowed during the handshake for EOF watch and
+        // is consumed into `ManagedAcpProcess` only on success or teardown.
+        let session_result: HostResult<NexusSessionCreated> = async {
+            // The SDK connection is established asynchronously by
+            // `with_connection`; wait (bounded by the launch timeout) for it
+            // before issuing the initialize handshake.
+            let connected = tokio::time::timeout(launch_dur, async {
+                loop {
+                    if client_arc.is_connected().await {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                 }
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            })
+            .await;
+            if connected.is_err() {
+                return Err(HostError::launch_failed(
+                    self.provider_id.clone(),
+                    "ACP SDK connection not established within launch timeout",
+                    None,
+                ));
             }
-        })
-        .await;
-        if connected.is_err() {
-            return Err(HostError::launch_failed(
-                self.provider_id.clone(),
-                "ACP SDK connection not established within launch timeout",
-                None,
-            ));
+
+            // Initialize handshake with launch timeout, watching for child
+            // exit (EOF/crash is a launch failure, never a timeout).
+            let init_request = NexusInitializeRequest::new().client_info(
+                nexus_contracts::local::acp::NexusAgentInfo {
+                    name: "nexus42".to_string(),
+                    title: Some("Nexus Agent Host".to_string()),
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                },
+            );
+            let init_result = tokio::select! {
+                biased;
+                result = tokio::time::timeout(launch_dur, client_arc.initialize(init_request)) => {
+                    result
+                        .map_err(|_| {
+                            HostError::timeout(
+                                "launch",
+                                format!(
+                                    "ACP initialize handshake timed out after {}ms",
+                                    self.timeouts.launch_ms
+                                ),
+                            )
+                            .with_provider(self.provider_id.clone())
+                        })?
+                        .map_err(|e| {
+                            HostError::launch_failed(
+                                self.provider_id.clone(),
+                                "ACP initialize handshake failed",
+                                Some(e.to_string()),
+                            )
+                        })?
+                }
+                status = child.wait() => {
+                    return Err(HostError::launch_failed(
+                        self.provider_id.clone(),
+                        "ACP process exited during initialize handshake",
+                        Some(status.map_or_else(|e| e.to_string(), |status| status.to_string())),
+                    ));
+                }
+            };
+            let _ = init_result;
+
+            // Create the ACP session with session timeout, watching for child
+            // exit.
+            let acp_request = NexusNewSessionRequest::new(cwd);
+            tokio::select! {
+                biased;
+                result = tokio::time::timeout(
+                    self.timeouts.session_duration(),
+                    client_arc.create_session(acp_request),
+                ) => {
+                    result
+                        .map_err(|_| {
+                            HostError::timeout(
+                                "launch",
+                                format!(
+                                    "ACP session creation timed out after {}ms",
+                                    self.timeouts.session_ms
+                                ),
+                            )
+                            .with_provider(self.provider_id.clone())
+                        })?
+                        .map_err(|e| {
+                            HostError::launch_failed(
+                                self.provider_id.clone(),
+                                "ACP session creation failed",
+                                Some(e.to_string()),
+                            )
+                        })
+                }
+                status = child.wait() => {
+                    Err(HostError::launch_failed(
+                        self.provider_id.clone(),
+                        "ACP process exited during session creation",
+                        Some(status.map_or_else(|e| e.to_string(), |status| status.to_string())),
+                    ))
+                }
+            }
         }
+        .await;
 
-        // Initialize handshake with launch timeout.
-        let init_request = NexusInitializeRequest::new().client_info(
-            nexus_contracts::local::acp::NexusAgentInfo {
-                name: "nexus42".to_string(),
-                title: Some("Nexus Agent Host".to_string()),
-                version: env!("CARGO_PKG_VERSION").to_string(),
-            },
-        );
-        let init_result = tokio::select! {
-            biased;
-            result = tokio::time::timeout(launch_dur, client_arc.initialize(init_request)) => {
-                result
-                    .map_err(|_| {
-                        HostError::timeout(
-                            "launch",
-                            format!(
-                                "ACP initialize handshake timed out after {}ms",
-                                self.timeouts.launch_ms
-                            ),
-                        )
-                        .with_provider(self.provider_id.clone())
-                    })?
-                    .map_err(|e| {
-                        HostError::launch_failed(
-                            self.provider_id.clone(),
-                            "ACP initialize handshake failed",
-                            Some(e.to_string()),
-                        )
-                    })?
-            }
-            status = child.wait() => {
-                return Err(HostError::launch_failed(
-                    self.provider_id.clone(),
-                    "ACP process exited during initialize handshake",
-                    Some(status.map_or_else(|e| e.to_string(), |status| status.to_string())),
-                ));
-            }
-        };
-        let _ = init_result;
-
-        // Create the ACP session with session timeout while also observing
-        // process exit. EOF/crash is a launch failure, never a timeout.
-        let acp_request = NexusNewSessionRequest::new(cwd);
-        let session_created = tokio::select! {
-            biased;
-            result = tokio::time::timeout(
-                self.timeouts.session_duration(),
-                client_arc.create_session(acp_request),
-            ) => {
-                result
-                    .map_err(|_| {
-                        HostError::timeout(
-                            "launch",
-                            format!(
-                                "ACP session creation timed out after {}ms",
-                                self.timeouts.session_ms
-                            ),
-                        )
-                        .with_provider(self.provider_id.clone())
-                    })?
-                    .map_err(|e| {
-                        HostError::launch_failed(
-                            self.provider_id.clone(),
-                            "ACP session creation failed",
-                            Some(e.to_string()),
-                        )
-                    })?
-            }
-            status = child.wait() => {
-                return Err(HostError::launch_failed(
-                    self.provider_id.clone(),
-                    "ACP process exited during session creation",
-                    Some(status.map_or_else(|e| e.to_string(), |status| status.to_string())),
-                ));
+        let session_created = match session_result {
+            Ok(created) => created,
+            Err(error) => {
+                // Run the owned teardown/reap sequence for the launched child.
+                let owned =
+                    ManagedAcpProcess::new(self.provider_id.0.clone(), child, agent_path);
+                let reap = owned.terminate(self.timeouts.shutdown_duration()).await;
+                if let Err(reap_err) = reap {
+                    tracing::warn!(
+                        provider_id = %self.provider_id,
+                        error = %reap_err,
+                        "launch failure left owned ACP process unconfirmed reaped"
+                    );
+                }
+                return Err(error);
             }
         };
 
@@ -396,24 +423,47 @@ impl AcpProvider {
                 stop_reason: reason,
                 ..
             } => {
-                let finish = match reason {
-                    nexus_contracts::local::acp::NexusStopReason::MaxTokens => {
-                        FinishReason::MaxTokens
-                    }
-                    nexus_contracts::local::acp::NexusStopReason::MaxTurnRequests => {
-                        FinishReason::MaxTurnRequests
-                    }
-                    nexus_contracts::local::acp::NexusStopReason::Refusal => FinishReason::Refusal,
+                // Refusal and resource limits are typed failures for Host
+                // consumers (A5): a caller must never persist refusal or
+                // limit exhaustion as successful workflow output. Only a
+                // genuine EndTurn (or an acknowledged Cancelled, which the
+                // operation-level cancel path handles) is OpFinished.
+                match reason {
                     nexus_contracts::local::acp::NexusStopReason::EndTurn
                     | nexus_contracts::local::acp::NexusStopReason::Cancelled => {
-                        FinishReason::EndTurn
+                        // An acknowledged Cancelled is the terminal of the
+                        // operation-level cancel path and maps to EndTurn.
+                        HostEvent::OpFinished(OperationFinishedEvent {
+                            session_id: session_id.clone(),
+                            op_id: op_id.clone(),
+                            reason: FinishReason::EndTurn,
+                        })
                     }
-                };
-                HostEvent::OpFinished(OperationFinishedEvent {
-                    session_id: session_id.clone(),
-                    op_id: op_id.clone(),
-                    reason: finish,
-                })
+                    nexus_contracts::local::acp::NexusStopReason::Refusal => {
+                        HostEvent::OpFailed(OperationFailedEvent {
+                            session_id: session_id.clone(),
+                            op_id: op_id.clone(),
+                            error_category: "refusal".to_string(),
+                            error_message: "agent refused the request".to_string(),
+                        })
+                    }
+                    nexus_contracts::local::acp::NexusStopReason::MaxTokens => {
+                        HostEvent::OpFailed(OperationFailedEvent {
+                            session_id: session_id.clone(),
+                            op_id: op_id.clone(),
+                            error_category: "max_tokens".to_string(),
+                            error_message: "agent reached the maximum token limit".to_string(),
+                        })
+                    }
+                    nexus_contracts::local::acp::NexusStopReason::MaxTurnRequests => {
+                        HostEvent::OpFailed(OperationFailedEvent {
+                            session_id: session_id.clone(),
+                            op_id: op_id.clone(),
+                            error_category: "max_turn_requests".to_string(),
+                            error_message: "agent reached the maximum turn request limit".to_string(),
+                        })
+                    }
+                }
             }
             AcpStreamUpdate::Failed {
                 error_category,
@@ -878,20 +928,46 @@ impl ProviderAdapter for AcpProvider {
             return Ok(());
         };
 
-        // Cooperative cancel first (drains the owned operation), then bounded
-        // owned process-tree termination and reap. Dropping the map entry is
-        // not teardown — the exact owned child is reaped here.
+        // Cooperative cancel/drain phase, bounded independently (A5): a
+        // stalled control connection must not consume the whole shutdown
+        // budget and skip owned process-tree termination. On timeout or
+        // error, we still proceed to the owned cleanup phase and report
+        // unconfirmed cancellation.
         let shutdown_dur = self.timeouts.shutdown_duration();
-        let _ = connected
-            .client
-            .cancel(connected.acp_session_id.clone())
-            .await;
+        let cancel_result = tokio::time::timeout(
+            shutdown_dur,
+            connected.client.cancel(connected.acp_session_id.clone()),
+        )
+        .await;
+        match cancel_result {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => {
+                tracing::warn!(
+                    session_id = %session.session_id,
+                    provider_id = %self.provider_id,
+                    error = %e,
+                    "cooperative ACP cancel failed; proceeding to owned process-tree cleanup"
+                );
+            }
+            Err(_) => {
+                tracing::warn!(
+                    session_id = %session.session_id,
+                    provider_id = %self.provider_id,
+                    "cooperative ACP cancel timed out; proceeding to owned process-tree cleanup"
+                );
+            }
+        }
+
+        // Owned process-tree termination/reap. A cleanup failure must be
+        // propagated as a typed error so the manager never marks/removes the
+        // session as cleanly stopped while the exact owned process is
+        // unconfirmed reaped (A5: unconfirmed cleanup stays interrupted).
         match connected.process.shutdown(shutdown_dur).await {
             Ok(()) => {
                 tracing::info!(
                     session_id = %session.session_id,
                     provider_id = %self.provider_id,
-                    "ACP session shutdown complete (owned process reaped)"
+                    "ACP session shutdown complete (owned process tree reaped)"
                 );
                 Ok(())
             }
@@ -900,9 +976,14 @@ impl ProviderAdapter for AcpProvider {
                     session_id = %session.session_id,
                     provider_id = %self.provider_id,
                     error = %e,
-                    "ACP owned process shutdown reported error"
+                    "ACP owned process-tree shutdown unconfirmed"
                 );
-                Ok(())
+                Err(HostError::internal(format!(
+                    "ACP session {} cleanup unconfirmed: {e}",
+                    session.session_id
+                ))
+                .with_provider(self.provider_id.clone())
+                .with_session(session.session_id.clone()))
             }
         }
     }

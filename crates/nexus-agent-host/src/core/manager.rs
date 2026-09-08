@@ -671,29 +671,47 @@ impl crate::HostFacade for HostManager {
             |c| c.timeouts.shutdown_duration(),
         );
 
-        // Call provider adapter shutdown with timeout
-        match tokio::time::timeout(shutdown_timeout, adapter.shutdown(handle)).await {
+        // Call provider adapter shutdown with timeout. A typed cleanup
+        // failure/timeout means the exact owned process was not confirmed
+        // reaped: the session must remain visibly interrupted (A5), never be
+        // marked/removed as cleanly stopped.
+        let cleanup_unconfirmed = match tokio::time::timeout(shutdown_timeout, adapter.shutdown(handle)).await {
             Ok(Ok(())) => {
                 tracing::info!(
                     session_id = %session_id,
                     provider_id = %session.provider_id,
                     "Per-session shutdown succeeded"
                 );
+                false
             }
             Ok(Err(e)) => {
                 tracing::warn!(
                     session_id = %session_id,
                     error = %e,
-                    "Per-session provider shutdown returned error"
+                    "Per-session provider shutdown returned error (cleanup unconfirmed)"
                 );
+                true
             }
             Err(_) => {
                 tracing::warn!(
                     session_id = %session_id,
                     timeout_ms = shutdown_timeout.as_millis(),
-                    "Per-session provider shutdown timed out"
+                    "Per-session provider shutdown timed out (cleanup unconfirmed)"
                 );
+                true
             }
+        };
+
+        if cleanup_unconfirmed {
+            // Keep the session in the registry as ErrorRecoverable: it must
+            // not be reported as cleanly stopped while cleanup is unconfirmed.
+            let mut sessions = self.sessions.write().await;
+            let _ = sessions.transition_to_error_recoverable(&session_id);
+            return Err(HostError::internal(format!(
+                "session {session_id} cleanup unconfirmed"
+            ))
+            .with_provider(session.provider_id.clone())
+            .with_session(session_id.clone()));
         }
 
         // Transition session through Stopping → Stopped

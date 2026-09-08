@@ -472,6 +472,52 @@ async fn cancel_reaches_owned_operation_and_shutdown_reaps_exact_process() {
 }
 
 #[tokio::test]
+async fn shutdown_reaps_owned_process_tree_descendants() {
+    let _lock = env_lock();
+    let ws = setup_workspace();
+    let provider_cfg =
+        acp_provider_config("mock-acp", &ws.fixture_log, &[("DESCENDANT", "1")], true);
+    let (_manager, host) = build_host(&ws, provider_cfg).await;
+
+    let session = host
+        .create_session(CreateSessionRequest {
+            provider_id: ProviderId::new("mock-acp"),
+            cwd: ws.creator_ws_a.join("sub"),
+            model: None,
+            mode: None,
+            mcp_servers: vec![],
+            metadata: serde_json::Value::Null,
+            owner: owner("ctr_a", ws.creator_ws_a.clone()),
+        })
+        .await
+        .expect("session created");
+
+    // The fixture spawned an outliving descendant; the owned process-tree
+    // teardown must kill the whole group (leader + descendant).
+    let log = read_fixture_log(&ws.fixture_log);
+    let child_pid = start_events(&log)[0]["pid"].as_u64().expect("pid") as u32;
+    let descendant_pid = log
+        .iter()
+        .find(|e| e["event"] == "descendant_spawned")
+        .expect("descendant spawn recorded")["child_pid"]
+        .as_u64()
+        .expect("descendant pid") as u32;
+
+    host.shutdown_session(session.id.clone())
+        .await
+        .expect("shutdown");
+
+    assert!(
+        !process_alive(child_pid),
+        "owned ACP leader {child_pid} must be reaped after shutdown"
+    );
+    assert!(
+        !process_alive(descendant_pid),
+        "owned process-tree descendant {descendant_pid} must be reaped after shutdown (group kill)"
+    );
+}
+
+#[tokio::test]
 async fn eof_after_initialize_is_typed_failure() {
     let _lock = env_lock();
     let ws = setup_workspace();

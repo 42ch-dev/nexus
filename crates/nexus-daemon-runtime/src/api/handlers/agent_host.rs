@@ -267,7 +267,7 @@ pub async fn create_session(
             )
             .await?;
         let host = get_host(&state)?;
-        let cwd = session_cwd_path(&req);
+        let cwd = session_cwd_path(&req, &state);
         let key = ActorSessionRegistry::key_for(
             &req.provider_id,
             &cwd,
@@ -324,9 +324,9 @@ pub async fn create_session(
     )))
 }
 
-fn session_cwd_path(req: &CreateSessionRequest) -> std::path::PathBuf {
+fn session_cwd_path(req: &CreateSessionRequest, state: &WorkspaceState) -> std::path::PathBuf {
     req.cwd.as_ref().map_or_else(
-        || std::path::PathBuf::from("/tmp"),
+        || verified_workspace_root(state),
         std::path::PathBuf::from,
     )
 }
@@ -355,7 +355,7 @@ fn host_create_request(
 ) -> nexus_agent_host::capability::CreateSessionRequest {
     nexus_agent_host::capability::CreateSessionRequest {
         provider_id: nexus_agent_host::ProviderId::new(&req.provider_id),
-        cwd: session_cwd_path(req),
+        cwd: session_cwd_path(req, state),
         model: req.model.clone(),
         mode: req.mode.clone(),
         mcp_servers: vec![],
