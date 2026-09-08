@@ -657,7 +657,9 @@ mod tests {
         registry.transition_to_starting(&id).unwrap();
         registry.transition_to_ready(&id).unwrap();
 
-        // First cleanup attempt left cleanup unconfirmed → ErrorRecoverable.
+        // First cleanup attempt entered Stopping, then retained ownership as
+        // ErrorRecoverable when process cleanup could not be confirmed.
+        registry.transition_to_stopping(&id).unwrap();
         registry.transition_to_error_recoverable(&id).unwrap();
         assert_eq!(
             registry.get(&id).unwrap().state,

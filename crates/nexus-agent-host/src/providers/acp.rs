@@ -174,7 +174,7 @@ impl AcpProvider {
             .collect();
 
         let spawner = AgentSpawner::new(cwd.clone());
-        let (mut child, stdin, stdout) = spawner
+        let (child, stdin, stdout) = spawner
             .spawn_with_env(&command, &args, &env)
             .map_err(|e| {
                 HostError::launch_failed(
@@ -185,9 +185,13 @@ impl AcpProvider {
             })?;
 
         let agent_path = std::path::PathBuf::from(&command);
+        // Capture the process birth identity immediately after spawn, before
+        // the child can exit during initialize/session negotiation.
+        let mut owned_process =
+            ManagedAcpProcess::new(self.provider_id.0.clone(), child, agent_path.clone());
         let client = AcpSdkAdapter::with_connection(
             self.provider_id.0.clone(),
-            agent_path.clone(),
+            agent_path,
             stdin,
             stdout,
         );
@@ -255,7 +259,7 @@ impl AcpProvider {
                             )
                         })?
                 }
-                status = child.wait() => {
+                status = owned_process.wait() => {
                     return Err(HostError::launch_failed(
                         self.provider_id.clone(),
                         "ACP process exited during initialize handshake",
@@ -293,7 +297,7 @@ impl AcpProvider {
                             )
                         })
                 }
-                status = child.wait() => {
+                status = owned_process.wait() => {
                     Err(HostError::launch_failed(
                         self.provider_id.clone(),
                         "ACP process exited during session creation",
@@ -307,10 +311,10 @@ impl AcpProvider {
         let session_created = match session_result {
             Ok(created) => created,
             Err(error) => {
-                // Run the owned teardown/reap sequence for the launched child.
-                let owned =
-                    ManagedAcpProcess::new(self.provider_id.0.clone(), child, agent_path);
-                match owned.terminate(self.timeouts.shutdown_duration()).await {
+                match owned_process
+                    .terminate(self.timeouts.shutdown_duration())
+                    .await
+                {
                     Ok(()) => return Err(error),
                     Err(reap_err) => {
                         // The caller must distinguish a cleanly torn-down
@@ -335,11 +339,7 @@ impl AcpProvider {
 
         Ok(ConnectedAcpSession {
             client: client_arc,
-            process: ManagedAcpProcess::new(
-                self.provider_id.0.clone(),
-                child,
-                agent_path,
-            ),
+            process: owned_process,
             acp_session_id: session_created.session_id,
             config_options: session_created.config_options,
             active_ops: HashMap::new(),
@@ -682,7 +682,7 @@ impl ProviderAdapter for AcpProvider {
         };
         match self.connect_session(&spec).await {
             Ok(connected) => {
-                let process = connected.process;
+                let mut process = connected.process;
                 let _ = process.shutdown(self.timeouts.shutdown_duration()).await;
                 Ok(ProviderHealth {
                     provider_id: self.provider_id.clone(),
@@ -1009,7 +1009,7 @@ impl ProviderAdapter for AcpProvider {
             let mut sessions = self.sessions.write().await;
             sessions.remove(&session.session_id)
         };
-        let Some(connected) = connected else {
+        let Some(mut connected) = connected else {
             tracing::warn!(
                 session_id = %session.session_id,
                 provider_id = %self.provider_id,

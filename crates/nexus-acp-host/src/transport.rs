@@ -266,12 +266,11 @@ impl AgentSpawner {
 
 /// Platform process-birth identity token.
 ///
-/// Captured at spawn as the numeric PID plus an OS start-time token: on
-/// Linux the `/proc/<pid>/stat` starttime, on macOS the `proc_bsdinfo`
-/// start tick via `proc_pidinfo` (zero subprocesses). The token is
-/// re-validated (PID + start) before every signal, so a recycled PID is
-/// never signalled. The owned Unix process-group identity is
-/// `PGID == PID` (process-group leader created at spawn).
+/// Captured at spawn as the numeric PID plus the operating system process
+/// start time exposed by `sysinfo`. The token is re-validated before every
+/// signal, so a recycled PID with a different birth time is never signalled.
+/// The owned Unix process-group identity is `PGID == PID` (process-group
+/// leader created at spawn).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcessBirthToken {
     /// The numeric PID this token was captured for.
@@ -280,48 +279,19 @@ pub struct ProcessBirthToken {
     pub start_tick: u64,
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn read_start_tick(pid: u32) -> Option<u64> {
-    // /proc/<pid>/stat field 22 is the process start time in clock ticks
-    // since boot. Parse defensively: field 2 (comm) may contain spaces, so
-    // scan past the last ')'.
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    let close = stat.rfind(')')?;
-    let rest = stat.get(close + 1..)?;
-    let fields: Vec<&str> = rest.split_whitespace().collect();
-    // `rest` starts right after ')' with a leading space; field 22 is
-    // index 22 - 3 = 19 in `fields` (fields 0-2 covered "(comm)").
-    fields.get(19)?.parse().ok()
-}
+    use sysinfo::{Pid, System};
 
-#[cfg(target_os = "macos")]
-fn read_start_tick(pid: u32) -> Option<u64> {
-    // Zero-subprocess libc API (nix re-exports libc): proc_pidinfo with
-    // PROC_PIDTBSDINFO returns proc_bsdinfo including the process start
-    // time (seconds + microseconds since boot).
-    use nix::libc::{proc_bsdinfo, proc_pidinfo, PROC_PIDTBSDINFO};
-    let mut info: proc_bsdinfo = unsafe { std::mem::zeroed() };
-    let size = unsafe {
-        proc_pidinfo(
-            pid as libc::c_int,
-            PROC_PIDTBSDINFO,
-            0,
-            &mut info as *mut proc_bsdinfo as *mut libc::c_void,
-            std::mem::size_of::<proc_bsdinfo>() as libc::c_int,
-        )
-    };
-    if size <= 0 {
+    let pid = Pid::from_u32(pid);
+    let mut system = System::new();
+    if !system.refresh_process(pid) {
         return None;
     }
-    // Combine seconds + microseconds into a monotone comparable tick.
-    Some(
-        info.pbi_start_tvsec
-            .wrapping_mul(1_000_000)
-            .wrapping_add(info.pbi_start_tvusec),
-    )
+    system.process(pid).map(sysinfo::Process::start_time)
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(unix))]
 fn read_start_tick(_pid: u32) -> Option<u64> {
     None
 }
@@ -394,6 +364,10 @@ impl ManagedAcpProcess {
     pub fn pid(&self) -> Option<u32> {
         self.child.id()
     }
+    /// Wait for the owned leader while retaining its captured birth identity.
+    pub async fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        self.child.wait().await
+    }
 
     /// The platform process-birth identity (numeric PID + start token).
     #[must_use]
@@ -401,14 +375,6 @@ impl ManagedAcpProcess {
         self.birth.as_ref()
     }
 
-    /// The owned process-group id (Unix: PGID == birth PID).
-    #[cfg(unix)]
-    #[must_use]
-    fn pgrp(&self) -> Option<nix::unistd::Pid> {
-        self.birth
-            .as_ref()
-            .map(|birth| nix::unistd::Pid::from_raw(birth.pid.cast_signed()))
-    }
 
     /// Whether the owned child is still running.
     pub fn is_running(&mut self) -> bool {
@@ -471,6 +437,7 @@ impl ManagedAcpProcess {
     /// Returns an error when the owned child cannot be confirmed reaped after
     /// the final SIGKILL (cleanup unconfirmed must remain visibly
     /// interrupted, never silently successful).
+    #[allow(unreachable_code)]
     pub async fn shutdown(&mut self, grace: Duration) -> AcpResult<()> {
         tracing::info!(
             agent_id = %self.agent_id,
