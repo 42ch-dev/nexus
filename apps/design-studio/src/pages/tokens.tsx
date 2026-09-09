@@ -1682,7 +1682,12 @@ function EnterExitDemo() {
   return (
     <div>
       <div className="flex flex-wrap gap-2 mb-4">
-        <button type="button" data-testid="motion-demo-replay" className={DEMO_BUTTON_CLASS} onClick={replay}>
+        <button
+          type="button"
+          data-testid="motion-demo-replay"
+          className="h-10 rounded-control bg-blue-700 px-3 text-button-14 font-button text-brand-white dark:text-brand-deep-blue hover:bg-blue-800 active:bg-blue-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100 transition-colors duration-state ease-standard motion-reduce:transition-none"
+          onClick={replay}
+        >
           Replay enter
         </button>
         <button
