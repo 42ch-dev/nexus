@@ -762,10 +762,16 @@ impl ScheduleSupervisor {
             }))?;
 
         // 1. Source settlement — only the schedule whose current_session_id
-        //    equals the run is updated.
+        //    equals the run is updated. Any non-terminal status settles
+        //    (running, paused, pending): a paused-after-reconcile-error row
+        //    (P1-1) must still reach its durable terminal, and the live
+        //    terminal callback races nothing here because the row's owned
+        //    session is already terminal. Terminal rows are excluded so a
+        //    duplicate callback never rewrites a settled row.
         sqlx::query(
             "UPDATE creator_schedules SET status = ?, terminated_at = ?, updated_at = ?
-             WHERE schedule_id = ? AND status = 'running' AND current_session_id = ?",
+             WHERE schedule_id = ? AND status NOT IN ('completed', 'failed', 'cancelled')
+               AND current_session_id = ?",
         )
         .bind(status_str)
         .bind(now)
@@ -845,7 +851,8 @@ impl ScheduleSupervisor {
             // transaction already settled it.
             sqlx::query(
                 "UPDATE creator_schedules SET status = ?, terminated_at = ?, updated_at = ?
-                 WHERE schedule_id = ? AND status = 'running' AND current_session_id = ?",
+                 WHERE schedule_id = ? AND status NOT IN ('completed', 'failed', 'cancelled')
+                   AND current_session_id = ?",
             )
             .bind(status_str)
             .bind(now)
@@ -1681,14 +1688,22 @@ impl ScheduleSupervisor {
         Ok(count)
     }
 
-    /// Reconcile checkpoint-before-settlement loss at boot (T3, A3).
+    /// Reconcile checkpoint-before-settlement loss (T3, A3).
     ///
-    /// A driven schedule whose durable session is terminal but whose row is
-    /// still `running` (the drive loop persisted the terminal checkpoint but
-    /// crashed before `on_schedule_terminal` ran) is settled from the
-    /// durable session status — no new session, no second auto-chain child
-    /// (the child INSERT is keyed by `source_run_id`, so a duplicate
-    /// settlement loads the already-created child).
+    /// A driven schedule (`driven_v1`) whose durable session is terminal but
+    /// whose row is not terminal yet (the drive loop persisted the terminal
+    /// checkpoint but crashed before `on_schedule_terminal` ran) is settled
+    /// from the durable session status — no new session, no second
+    /// auto-chain child (the child INSERT is keyed by `source_run_id`, so a
+    /// duplicate settlement loads the already-created child).
+    ///
+    /// The scan covers EVERY non-terminal schedule status (`running`,
+    /// `paused`, `pending`) — a row that an earlier recovery pass paused
+    /// after a failed settlement (P1-1) is re-scanned and settled here.
+    /// A failed settlement never flips the row into a terminal status, so a
+    /// row that could not be settled stays in this scan and is retried on
+    /// every subsequent boot/reconcile. Terminal schedule rows are excluded
+    /// (nothing left to settle).
     ///
     /// MUST run BEFORE `resume_running_as_paused`: a terminal session's
     /// schedule must settle, not pause. Returns the number of schedules
@@ -1699,7 +1714,8 @@ impl ScheduleSupervisor {
     pub async fn reconcile_terminal_schedules(&self) -> Result<usize, SupervisorError> {
         let rows: Vec<(String, String)> = sqlx::query_as(
             "SELECT schedule_id, current_session_id FROM creator_schedules
-             WHERE status = 'running' AND current_session_id IS NOT NULL",
+             WHERE execution_policy = 'driven_v1' AND current_session_id IS NOT NULL
+               AND status NOT IN ('completed', 'failed', 'cancelled')",
         )
         .fetch_all(&*self.pool)
         .await?;
@@ -3205,5 +3221,123 @@ mod tests_t9 {
             sup.status_of("R2-NORMAL-S1").await.unwrap(),
             ScheduleStatus::Running
         );
+    }
+
+    /// T3 fix-1 (P1-1): a schedule PAUSED after a failed settlement pass
+    /// (the boot pause flipped it after a transient reconcile error) is
+    /// settled on the NEXT boot pass. Properties pinned:
+    /// - the reconcile scan covers `paused` (any non-terminal schedule
+    ///   status), not just `running`;
+    /// - a reconcile error (durable run load failure) never flips the row
+    ///   terminal, so the row stays inside the scan and is retried;
+    /// - once the error clears, the paused row settles to the durable
+    ///   terminal status and then leaves the scan.
+    #[tokio::test]
+    async fn reconcile_settles_paused_row_after_prior_load_error() {
+        let sup = test_supervisor_with_db().await;
+        let now = chrono::Utc::now().timestamp();
+
+        // Durable v1 session: terminal `completed` with a CORRUPT run-state
+        // blob — the previous recovery pass hit a transient storage error
+        // while loading it.
+        let descriptor = serde_json::to_vec(&crate::run_state::RunDescriptorV1 {
+            creator_id: "test-creator".to_string(),
+            work_id: None,
+            workspace_root: std::path::PathBuf::new(),
+            preset_id: "test-preset".to_string(),
+            preset_version: 1,
+            source: crate::run_state::PresetSourceIdentity::Embedded {
+                preset_id: "test-preset".to_string(),
+                content_hash: [0u8; 32],
+            },
+            input: serde_json::Map::new(),
+            agent_bindings: std::collections::HashMap::new(),
+            parent_session_id: None,
+            graph_name: None,
+        })
+        .expect("descriptor json");
+        sqlx::query(
+            "INSERT INTO orchestration_sessions
+                (session_id, creator_id, preset_id, preset_version, status,
+                 current_task_id, context_json, created_at, updated_at,
+                 execution_version, state_revision, run_state_json, run_descriptor_json)
+             VALUES ('SES-P1-1', 'test-creator', 'test-preset', 1, 'completed',
+                     NULL, X'7B7D', ?, ?, 1, 5, X'00', ?)",
+        )
+        .bind(now - 10)
+        .bind(now)
+        .bind(&descriptor)
+        .execute(&*sup.pool)
+        .await
+        .expect("insert durable terminal run");
+
+        // driven_v1 schedule owning that session, PAUSED — the boot pause
+        // after the earlier (failed) settlement pass (P1-1 shape).
+        sqlx::query(
+            "INSERT INTO creator_schedules
+                (schedule_id, creator_id, preset_id, preset_version, status,
+                 concurrency_kind, current_core_context_version, current_session_id,
+                 created_at, updated_at, execution_policy)
+             VALUES ('SCH-P1-1', 'test-creator', 'test-preset', 1, 'paused',
+                     'serial', 0, 'SES-P1-1', ?, ?, 'driven_v1')",
+        )
+        .bind(now - 5)
+        .bind(now)
+        .execute(&*sup.pool)
+        .await
+        .expect("insert paused driven schedule");
+
+        // Pass 1 — the durable run cannot be loaded: reconcile skips the
+        // row. The row must NOT be excluded: still paused, still
+        // non-terminal, still inside the scan.
+        let count = sup
+            .reconcile_terminal_schedules()
+            .await
+            .expect("reconcile pass 1");
+        assert_eq!(count, 0, "corrupt durable row is skipped, not settled");
+        assert_eq!(
+            sup.status_of("SCH-P1-1").await.unwrap(),
+            ScheduleStatus::Paused,
+            "a reconcile error must never flip the row terminal"
+        );
+
+        // The storage glitch clears (next boot): the SAME paused row is
+        // retried and settles from the durable terminal — paused rows are
+        // inside the reconcile scan and errors never permanently exclude.
+        let good_state = serde_json::to_vec(&crate::run_state::RunStateV1::default())
+            .expect("run state json");
+        sqlx::query(
+            "UPDATE orchestration_sessions SET run_state_json = ? WHERE session_id = ?",
+        )
+        .bind(&good_state)
+        .bind("SES-P1-1")
+        .execute(&*sup.pool)
+        .await
+        .expect("repair run state");
+        let count = sup
+            .reconcile_terminal_schedules()
+            .await
+            .expect("reconcile pass 2");
+        assert_eq!(count, 1, "paused row settles on the next pass");
+        assert_eq!(
+            sup.status_of("SCH-P1-1").await.unwrap(),
+            ScheduleStatus::Completed,
+            "paused row must settle to the durable terminal status"
+        );
+        let owned: Option<String> = sqlx::query_scalar(
+            "SELECT current_session_id FROM creator_schedules WHERE schedule_id = ?",
+        )
+        .bind("SCH-P1-1")
+        .fetch_one(&*sup.pool)
+        .await
+        .expect("owned session");
+        assert_eq!(owned.as_deref(), Some("SES-P1-1"));
+
+        // Terminal rows leave the scan: a third pass is a no-op.
+        let count = sup
+            .reconcile_terminal_schedules()
+            .await
+            .expect("reconcile pass 3");
+        assert_eq!(count, 0, "settled rows exit the scan");
     }
 }

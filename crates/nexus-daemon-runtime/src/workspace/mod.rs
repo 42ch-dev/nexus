@@ -582,7 +582,7 @@ impl WorkspaceState {
         // exactly one caller reaches this point; a second caller re-checks
         // `run_coordinator().is_some()` above and returns.
         if self.run_coordinator().is_none() {
-            self.publish_lazy_attach_bundle()?;
+            self.publish_lazy_attach_bundle().await?;
         }
 
         Ok(())
@@ -694,10 +694,10 @@ impl WorkspaceState {
         if self.runtime_bundle().is_some() {
             return Ok(());
         }
-        self.publish_lazy_attach_bundle()
+        self.publish_lazy_attach_bundle().await
     }
 
-    fn publish_lazy_attach_bundle(&self) -> anyhow::Result<()> {
+    async fn publish_lazy_attach_bundle(&self) -> anyhow::Result<()> {
         let pool = self
             .pool()
             .ok_or_else(|| anyhow::anyhow!("creator pool not published after attach"))?;
@@ -842,6 +842,17 @@ impl WorkspaceState {
         // (it needs the coordinator's starter), so the handle is attached
         // here once both exist.
         coordinator.set_schedule_supervisor(supervisor.clone());
+
+        // T3 (A3) fix-1 (P1-2): a lazy-attached Profile opens an EXISTING
+        // Creator DB whose schedules may hold checkpoint-before-settlement
+        // rows (a `driven_v1` schedule with a durable terminal
+        // `current_session_id` left by a prior process). Settle them from
+        // the durable session status BEFORE the bundle is published so the
+        // runtime never exposes an unsettled row — same reconciliation and
+        // warn-not-fatal failure handling as the normal boot path.
+        if let Err(e) = supervisor.reconcile_terminal_schedules().await {
+            tracing::warn!("lazy attach: failed to reconcile terminal schedules: {}", e);
+        }
 
         // N-2: publish ONE immutable aggregate after every component is
         // wired. Accessors read this cell; a reader can never observe a
@@ -1662,6 +1673,138 @@ mod tests {
                 "pool visible but session_manager still None"
             );
         }
+
+        match original_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+    }
+
+    /// T3 fix-1 (P1-2): lazy Profile attach publishes the runtime bundle
+    /// through the SAME terminal reconciliation as the normal boot path.
+    ///
+    /// A Tier-0 daemon starts with no active creator; an EXISTING Creator DB
+    /// with a checkpoint-before-settlement row (`paused` driven schedule
+    /// whose durable v1 session is terminal) is opened on Profile attach.
+    /// `ensure_creator_pool` must settle that row from the durable session
+    /// status BEFORE reporting the attached runtime ready — the pre-existing
+    /// unsettled row must never stay visible through the published bundle.
+    #[tokio::test]
+    #[serial]
+    async fn lazy_attach_reconciles_pre_existing_unsettled_row() {
+        const CREATOR_ID: &str = "crt_lazy_reconcile_test";
+
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let user_home = tmp.path();
+        let nexus_home = user_home.join(".nexus42");
+        nexus_home_layout::ensure_system_layout(&nexus_home).expect("system layout");
+
+        let original_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", user_home);
+
+        let state = WorkspaceState::initialize().await.expect("initialize");
+        assert!(state.pool().is_none(), "Tier-0 boot has no creator DB");
+
+        // Profile attach: write the config the middleware would, then open
+        // and seed the EXISTING Creator DB exactly where the daemon will
+        // open it (ADR-014 state.db under the operational workspace).
+        let config_toml = format!(
+            "active_creator_id = \"{CREATOR_ID}\"\n\
+             [active_workspace_slug_by_creator]\n\
+             \"{CREATOR_ID}\" = \"default\"\n"
+        );
+        std::fs::write(nexus_home.join("config.toml"), config_toml).expect("config.toml");
+        let db_path = nexus_home_layout::workspace_state_db_path(user_home, CREATOR_ID, "default");
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent).expect("db parent");
+        }
+        let pool = nexus_local_db::init_pool(&db_path)
+            .await
+            .expect("init existing creator DB");
+
+        // Seed the checkpoint-before-settlement row: a `driven_v1` schedule
+        // PAUSED by an earlier recovery boot whose durable v1 session is
+        // terminal `completed` (the settlement crashed before the flip).
+        let now = chrono::Utc::now().timestamp();
+        let descriptor = serde_json::to_vec(&serde_json::json!({
+            "creator_id": CREATOR_ID,
+            "work_id": null,
+            "workspace_root": "",
+            "preset_id": "memory-augmented",
+            "preset_version": 1,
+            "source": { "Embedded": { "preset_id": "memory-augmented", "content_hash": vec![0u8; 32] } },
+            "input": {},
+            "agent_bindings": {},
+            "parent_session_id": null,
+            "graph_name": null
+        }))
+        .expect("descriptor json");
+        sqlx::query(
+            "INSERT INTO orchestration_sessions
+                (session_id, creator_id, preset_id, preset_version, status,
+                 current_task_id, context_json, created_at, updated_at,
+                 execution_version, state_revision, run_state_json, run_descriptor_json)
+             VALUES ('SES-LAZY-RECON', ?, 'memory-augmented', 1, 'completed',
+                     NULL, X'7B7D', ?, ?, 1, 5, ?, ?)",
+        )
+        .bind(CREATOR_ID)
+        .bind(now - 10)
+        .bind(now)
+        .bind(serde_json::to_vec(&serde_json::json!({
+            "wait": null,
+            "step_in_flight": null,
+            "in_flight": null,
+            "failure": null,
+            "cancel_requested": false
+        }))
+        .expect("run state"))
+        .bind(&descriptor)
+        .execute(&pool)
+        .await
+        .expect("seed durable terminal session");
+        sqlx::query(
+            "INSERT INTO creator_schedules
+                (schedule_id, creator_id, preset_id, preset_version, status,
+                 concurrency_kind, current_core_context_version, current_session_id,
+                 created_at, updated_at, execution_policy)
+             VALUES ('SCH-LAZY-RECON', ?, 'memory-augmented', 1, 'paused',
+                     'serial', 0, 'SES-LAZY-RECON', ?, ?, 'driven_v1')",
+        )
+        .bind(CREATOR_ID)
+        .bind(now - 5)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("seed unsettled driven schedule");
+
+        // The lazy-attach publish runs the terminal reconciliation. The
+        // pre-existing paused row settles from the durable session status
+        // before the bundle is reported ready.
+        state
+            .ensure_creator_pool()
+            .await
+            .expect("ensure_creator_pool after attach");
+        assert!(
+            state.runtime_bundle().is_some(),
+            "lazy attach must publish the runtime bundle"
+        );
+        let row: (String, String) = sqlx::query_as(
+            "SELECT status, current_session_id FROM creator_schedules \
+             WHERE schedule_id = 'SCH-LAZY-RECON'",
+        )
+        .fetch_one(
+            state
+                .pool()
+                .expect("pool published after attach"),
+        )
+        .await
+        .expect("schedule row after attach");
+        assert_eq!(
+            row,
+            ("completed".to_string(), "SES-LAZY-RECON".to_string()),
+            "lazy attach must settle the pre-existing unsettled row from the \
+             durable terminal session before reporting the runtime ready"
+        );
 
         match original_home {
             Some(v) => std::env::set_var("HOME", v),
