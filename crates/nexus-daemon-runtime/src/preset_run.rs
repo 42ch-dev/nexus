@@ -1828,10 +1828,56 @@ impl WorkflowRunCoordinator {
             RunSignal::Resume => EngineSignal::Resume,
         };
 
-        self.engine
-            .signal(session_id, engine_signal)
-            .await
-            .map_err(|e| match e {
+        let engine_result = self.engine.signal(session_id, engine_signal).await;
+        let engine_result = match engine_result {
+            Ok(()) => Ok(()),
+            // Finding 2: a CAS/revision loss is a linearized control race —
+            // the durable winner is safe, but the losing public operation
+            // must be an exact conflict response, never a 500. Reload the
+            // authoritative row and project the exact envelope: a still-
+            // present wait keeps the A4 `workflow_wait_conflict` details
+            // (session_id, current status, current_wait_id); a
+            // cancel-requested/terminal/incompatible state is
+            // `workflow_state_conflict`.
+            Err(nexus_orchestration::engine::EngineError::RevisionMismatch {
+                session_id,
+                ..
+            }) => {
+                let store =
+                    nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
+                        self.pool.clone(),
+                    );
+                match store.load_run(&SessionId(session_id.clone())).await {
+                    Ok(Some(record)) => {
+                        let state = record.state.as_ref();
+                        let cancel_requested =
+                            state.is_some_and(|s| s.cancel_requested);
+                        if record.status == SessionStatus::WaitingForInput
+                            && !cancel_requested
+                        {
+                            let current_wait_id = state
+                                .and_then(|s| s.wait.as_ref())
+                                .map(|w| w.wait_id.clone());
+                            Err(RunControlError::WaitConflict {
+                                session_id,
+                                status: record.status.as_db_str().to_string(),
+                                current_wait_id,
+                            })
+                        } else {
+                            Err(RunControlError::StateConflict(
+                                session_id,
+                                format!(
+                                    "revision moved; current status is {}",
+                                    record.status.as_db_str()
+                                ),
+                            ))
+                        }
+                    }
+                    Ok(None) => Err(RunControlError::ScheduleNotFound(session_id)),
+                    Err(e) => Err(RunControlError::Drive(e.to_string())),
+                }
+            }
+            Err(e) => Err(match e {
                 nexus_orchestration::engine::EngineError::WaitConflict {
                     session_id,
                     status,
@@ -1848,7 +1894,9 @@ impl WorkflowRunCoordinator {
                     RunControlError::ScheduleNotFound(sid)
                 }
                 other => RunControlError::Drive(other.to_string()),
-            })?;
+            }),
+        };
+        engine_result?;
 
         // A successful Continue makes the run runnable: re-drive it through
         // the single coordinator owner (single-flight — a duplicate consumer
@@ -3214,5 +3262,335 @@ mod tests {
             engine.script.lock().is_empty(),
             "exactly one run_step may be consumed for the v1 converge re-drive"
         );
+    }
+
+    // ------------------------------------------------------------------
+    // T2 fix round 1 — Finding 2: continue-v-cancel CAS race → exact 409
+    // ------------------------------------------------------------------
+
+    /// Delegating [`WorkflowStateStore`] that injects a competing transition
+    /// on the first `commit_transition` call (the deterministic race gate):
+    /// the injected write wins the revision CAS, so the delegated call loses
+    /// with [`EngineError::RevisionMismatch`] — exactly the interleaving
+    /// where a control signal loaded the row before a concurrent transition
+    /// committed.
+    struct RaceInjectingStore {
+        inner: Arc<dyn WorkflowStateStore>,
+        storage: Arc<dyn SessionStorage>,
+        injected: AtomicBool,
+    }
+
+    impl RaceInjectingStore {
+        fn new(inner: Arc<dyn WorkflowStateStore>, storage: Arc<dyn SessionStorage>) -> Self {
+            Self {
+                inner,
+                storage,
+                injected: AtomicBool::new(false),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl WorkflowStateStore for RaceInjectingStore {
+        async fn load_run(
+            &self,
+            session_id: &SessionId,
+        ) -> Result<Option<nexus_orchestration::run_state::RunRecord>, EngineError> {
+            self.inner.load_run(session_id).await
+        }
+
+        async fn start_run(
+            &self,
+            session_id: &SessionId,
+            descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            self.inner
+                .start_run(session_id, descriptor, checkpoint, next_state)
+                .await
+        }
+
+        async fn admit_schedule_run(
+            &self,
+            schedule_id: &str,
+            session_id: &SessionId,
+            descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+            core_context_version: u32,
+            expected_core_context_version: u32,
+            admission_gate: Option<&nexus_orchestration::run_state::ScheduleAdmissionGate>,
+        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            self.inner
+                .admit_schedule_run(
+                    schedule_id,
+                    session_id,
+                    descriptor,
+                    checkpoint,
+                    next_state,
+                    core_context_version,
+                    expected_core_context_version,
+                    admission_gate,
+                )
+                .await
+        }
+
+        async fn commit_transition(
+            &self,
+            session_id: &SessionId,
+            expected_revision: u64,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_status: SessionStatus,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            if !self.injected.swap(true, Ordering::SeqCst) {
+                // The competing transition wins the CAS first: a concurrent
+                // cancel fence commits `cancel_requested` at the SAME
+                // revision the delegated call is about to lose.
+                let record = self
+                    .inner
+                    .load_run(session_id)
+                    .await?
+                    .expect("run exists at race gate");
+                let root = self
+                    .storage
+                    .get(&session_id.0)
+                    .await
+                    .expect("root session at race gate")
+                    .expect("root exists at race gate");
+                let mut competing_state = record.state.unwrap_or_default();
+                competing_state.cancel_requested = true;
+                self.inner
+                    .commit_transition(
+                        session_id,
+                        record.state_revision,
+                        nexus_orchestration::run_state::RunCheckpoint {
+                            root: &root,
+                            children: &[],
+                        },
+                        record.status.clone(),
+                        &competing_state,
+                    )
+                    .await
+                    .expect("competing cancel fence wins the CAS");
+            }
+            self.inner
+                .commit_transition(session_id, expected_revision, checkpoint, next_status, next_state)
+                .await
+        }
+
+        async fn settle_cancelled(
+            &self,
+            session_id: &SessionId,
+            expected_revision: u64,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<nexus_orchestration::run_state::RunRecord, EngineError> {
+            self.inner
+                .settle_cancelled(session_id, expected_revision, checkpoint, next_state)
+                .await
+        }
+
+        async fn restore_pre_step(
+            &self,
+            session_id: &SessionId,
+            expected_revision: u64,
+            pre_step: &graph_flow::Session,
+        ) -> Result<(), EngineError> {
+            self.inner
+                .restore_pre_step(session_id, expected_revision, pre_step)
+                .await
+        }
+
+        async fn mark_step_in_flight(
+            &self,
+            session_id: &SessionId,
+            expected_revision: u64,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            step_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<(), EngineError> {
+            self.inner
+                .mark_step_in_flight(session_id, expected_revision, checkpoint, step_state)
+                .await
+        }
+
+        async fn persist_prompt_attempt(
+            &self,
+            session_id: &SessionId,
+            expected_revision: u64,
+            expected_step: Option<&str>,
+            expected_attempt_id: Option<&str>,
+            attempt: &nexus_orchestration::run_state::PromptAttempt,
+        ) -> Result<(), EngineError> {
+            self.inner
+                .persist_prompt_attempt(
+                    session_id,
+                    expected_revision,
+                    expected_step,
+                    expected_attempt_id,
+                    attempt,
+                )
+                .await
+        }
+
+        async fn clear_prompt_attempt(
+            &self,
+            session_id: &SessionId,
+            expected_revision: u64,
+            expected_step: Option<&str>,
+            attempt_id: &str,
+        ) -> Result<(), EngineError> {
+            self.inner
+                .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
+                .await
+        }
+
+        async fn load_children(
+            &self,
+            parent_session_id: &SessionId,
+        ) -> Result<Vec<nexus_orchestration::run_state::RunRecord>, EngineError> {
+            self.inner.load_children(parent_session_id).await
+        }
+    }
+
+    /// Deterministic continue-v-cancel race (Finding 2): the cancel fence
+    /// wins the root revision CAS while the continue holds a stale load. The
+    /// losing continue must surface the exact 409 `workflow_state_conflict`
+    /// (never a 500), the durable winner is the cancel intent, and the run
+    /// stays actionable for a real cancel.
+    #[tokio::test]
+    async fn signal_continue_loses_cas_to_cancel_returns_state_conflict() {
+        let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let _ = &tmp;
+        let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let real_store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let race_store: Arc<dyn WorkflowStateStore> =
+            Arc::new(RaceInjectingStore::new(real_store.clone(), storage.clone()));
+
+        // Real engine over the race-injecting store + real coordinator.
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = Arc::new(nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            race_store.clone(),
+            caps,
+        ));
+        let session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let coordinator = WorkflowRunCoordinator::new(
+            engine.clone(),
+            storage.clone(),
+            pool.clone(),
+            session_cancels,
+        );
+
+        // Start a v1 run and park it at a durable human wait.
+        let graph = Arc::new(graph_flow::Graph::new("race-graph"));
+        graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+        let record = real_store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        let waiting_state = nexus_orchestration::run_state::RunStateV1 {
+            wait: Some(nexus_orchestration::run_state::WaitRecord {
+                wait_id: "wait-tok-1".to_string(),
+                task_id: "persist".to_string(),
+                child_session_id: None,
+                child_task_id: None,
+                kind: nexus_orchestration::run_state::WaitKind::Manual,
+            }),
+            ..nexus_orchestration::run_state::RunStateV1::default()
+        };
+        real_store
+            .commit_transition(
+                &session_id,
+                record.state_revision,
+                nexus_orchestration::run_state::RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                SessionStatus::WaitingForInput,
+                &waiting_state,
+            )
+            .await
+            .expect("park at human wait");
+
+        // Continue with the exact token: the race gate injects the cancel
+        // fence between the continue's load and its commit, so the continue
+        // loses the CAS. The coordinator must map the loss to the exact 409
+        // state conflict — never a 500.
+        let err = coordinator
+            .signal_run(
+                &session_id,
+                RunSignal::Continue {
+                    wait_id: "wait-tok-1".to_string(),
+                },
+            )
+            .await
+            .expect_err("the losing continue must surface a conflict");
+        match &err {
+            RunControlError::StateConflict(sid, msg) => {
+                assert_eq!(sid, &session_id.0);
+                assert!(
+                    msg.contains("revision moved"),
+                    "state conflict must name the revision loss, got {msg}"
+                );
+            }
+            other => panic!("expected StateConflict, got {other:?}"),
+        }
+
+        // Exactly one durable winner: the injected cancel intent. The run is
+        // still waiting with cancel_requested persisted.
+        let after = real_store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(after.status, SessionStatus::WaitingForInput);
+        assert!(
+            after.state.as_ref().is_some_and(|s| s.cancel_requested),
+            "the cancel fence must be the durable winner"
+        );
+        assert_eq!(
+            after
+                .state
+                .as_ref()
+                .and_then(|s| s.wait.as_ref())
+                .map(|w| w.wait_id.as_str()),
+            Some("wait-tok-1"),
+            "the wait is still present (the continue did not consume it)"
+        );
+
+        // The run stays actionable: a real cancel now re-fences at the new
+        // revision and settles cancelled.
+        let result = coordinator
+            .signal_run(&session_id, RunSignal::Cancel)
+            .await
+            .expect("cancel after the race must succeed");
+        assert_eq!(result.status, "cancelled");
+        let final_record = real_store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(final_record.status, SessionStatus::Cancelled);
     }
 }

@@ -334,6 +334,28 @@ pub trait WorkflowStateStore: Send + Sync {
         next_state: &RunStateV1,
     ) -> Result<RunRecord, EngineError>;
 
+    /// Atomically settle a run to terminal `Cancelled` (A5).
+    ///
+    /// The A5 cancel settlement is the ONLY transition that may move an
+    /// `Interrupted` run (a durable cancel intent whose owned-Host cleanup
+    /// was previously unconfirmed) to `Cancelled` — the bounded, owner-scoped
+    /// cleanup retry. The write is revision-fenced and refuses every other
+    /// terminal status (`completed`/`failed`/`cancelled`), so a retry can
+    /// never overwrite a newer terminal outcome. The run is terminal and
+    /// never re-driven; this method is used only by the cancel path after
+    /// `finalize_run` confirms cleanup.
+    ///
+    /// # Errors
+    /// Returns [`EngineError`] on storage failure, revision mismatch, or a
+    /// terminal status other than `Interrupted`.
+    async fn settle_cancelled(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: RunCheckpoint<'_>,
+        next_state: &RunStateV1,
+    ) -> Result<RunRecord, EngineError>;
+
     /// Atomically restore a pre-step root snapshot via ONE revision-fenced
     /// storage operation (Important 3).
     ///

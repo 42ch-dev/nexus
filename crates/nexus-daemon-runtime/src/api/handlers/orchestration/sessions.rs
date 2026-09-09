@@ -17,6 +17,7 @@ use nexus_contracts::local::orchestration::http::{
 };
 use nexus_contracts::PaginationInfo;
 use nexus_orchestration::engine::{EngineSignal, SessionStatus};
+use nexus_orchestration::run_state::WorkflowStateStore;
 use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 use std::sync::Arc;
 
@@ -348,8 +349,9 @@ pub async fn signal_session(
         ));
     }
 
-    engine.signal(&sid, signal).await.map_err(
-        |e: nexus_orchestration::engine::EngineError| match e {
+    let signal_result = engine.signal(&sid, signal).await;
+    if let Err(e) = signal_result {
+        return Err(match e {
             nexus_orchestration::engine::EngineError::SessionNotFound(_) => {
                 NexusApiError::NotFound("session not found".into())
             }
@@ -371,12 +373,73 @@ pub async fn signal_session(
                     message: format!("state conflict for {sid}: run is terminal or not in a signalable state"),
                 }
             }
+            // Finding 2: a CAS/revision loss is a linearized control race —
+            // the durable winner is safe, but the losing public operation
+            // must be an exact conflict response, never a 500. Reload the
+            // authoritative row and project the exact envelope.
+            nexus_orchestration::engine::EngineError::RevisionMismatch {
+                session_id,
+                ..
+            } => {
+                let conflict = match state.pool() {
+                    Some(pool) => {
+                        let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
+                            std::sync::Arc::new(pool.clone()),
+                        );
+                        match store
+                            .load_run(&nexus_orchestration::engine::SessionId(session_id.clone()))
+                            .await
+                        {
+                            Ok(Some(record)) => {
+                                let state_blob = record.state.as_ref();
+                                let cancel_requested =
+                                    state_blob.is_some_and(|s| s.cancel_requested);
+                                if record.status
+                                    == nexus_orchestration::engine::SessionStatus::WaitingForInput
+                                    && !cancel_requested
+                                {
+                                    let current_wait_id = state_blob
+                                        .and_then(|s| s.wait.as_ref())
+                                        .map(|w| w.wait_id.clone());
+                                    NexusApiError::ConflictCoded {
+                                        code: "workflow_wait_conflict".into(),
+                                        message: format!(
+                                            "wait conflict for {session_id}: current status: {}, current_wait_id: {}",
+                                            record.status.as_db_str(),
+                                            current_wait_id.unwrap_or_else(|| "<none>".to_string())
+                                        ),
+                                    }
+                                } else {
+                                    NexusApiError::ConflictCoded {
+                                        code: "workflow_state_conflict".into(),
+                                        message: format!(
+                                            "state conflict for {session_id}: revision moved; current status is {}",
+                                            record.status.as_db_str()
+                                        ),
+                                    }
+                                }
+                            }
+                            _ => NexusApiError::ConflictCoded {
+                                code: "workflow_state_conflict".into(),
+                                message: format!(
+                                    "state conflict for {session_id}: revision moved"
+                                ),
+                            },
+                        }
+                    }
+                    None => NexusApiError::ConflictCoded {
+                        code: "workflow_state_conflict".into(),
+                        message: format!("state conflict for {session_id}: revision moved"),
+                    },
+                };
+                conflict
+            }
             other => NexusApiError::Internal {
                 code: "ENGINE_ERROR".into(),
                 message: other.to_string(),
             },
-        },
-    )?;
+        });
+    }
 
     Ok((
         StatusCode::ACCEPTED,

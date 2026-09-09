@@ -1503,6 +1503,16 @@ pub async fn signal_schedule(
                                     message: format!("state conflict for {sid}: {msg}"),
                                 }
                             }
+                            crate::preset_run::RunControlError::WaitConflict {
+                                session_id,
+                                status,
+                                current_wait_id,
+                            } => NexusApiError::ConflictCoded {
+                                code: "workflow_wait_conflict".into(),
+                                message: format!(
+                                    "wait conflict for {session_id}: current status {status}, current_wait_id {current_wait_id:?}"
+                                ),
+                            },
                             crate::preset_run::RunControlError::ScheduleNotFound(sid) => {
                                 NexusApiError::NotFound(format!("session {sid} not found"))
                             }

@@ -1442,6 +1442,135 @@ impl WorkflowStateStore for SqliteSessionStorage {
         })
     }
 
+    async fn settle_cancelled(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: RunCheckpoint<'_>,
+        next_state: &RunStateV1,
+    ) -> Result<RunRecord, EngineError> {
+        let now = chrono::Utc::now().timestamp();
+        let id = session_id.0.clone();
+        let current_task_id = checkpoint.root.current_task_id.clone();
+        let context_bytes = serde_json::to_vec(&checkpoint.root.context).map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "serialize context: {e}"
+            )))
+        })?;
+        let state_bytes = serialize_blob(next_state)?;
+
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "settle_cancelled begin tx: {e}"
+                )))
+            })?;
+
+        // A5 settlement fence: revision CAS + execution-version fence, and the
+        // current status must be `interrupted` (the cleanup-retry shape) or
+        // non-terminal — a run already settled `cancelled`/`completed`/
+        // `failed` is never overwritten by a retry.
+        let expected_revision_i64 = expected_revision as i64;
+        let result = sqlx::query(
+            r#"
+            UPDATE orchestration_sessions
+            SET status = 'cancelled', current_task_id = ?, context_json = ?,
+                updated_at = ?, state_revision = state_revision + 1,
+                run_state_json = ?
+            WHERE session_id = ? AND state_revision = ?
+              AND execution_version = 1
+              AND status IN ('running', 'paused', 'waiting_for_input', 'interrupted')
+            "#,
+        )
+        .bind(&current_task_id)
+        .bind(&context_bytes)
+        .bind(now)
+        .bind(&state_bytes)
+        .bind(&id)
+        .bind(expected_revision_i64)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "settle_cancelled '{}': {e}", session_id.0
+            )))
+        })?;
+
+        if result.rows_affected() == 0 {
+            let current: Option<(i64, i64)> = sqlx::query_as(
+                "SELECT state_revision, execution_version \
+                 FROM orchestration_sessions WHERE session_id = ?",
+            )
+            .bind(&session_id.0)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "settle_cancelled read revision/version: {e}"
+                )))
+            })?;
+
+            return match current {
+                Some((_revision, version)) if version != 1 => {
+                    Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+                        format!(
+                            "settle_cancelled '{}': execution_version {version} is non-replayable; \
+                             legacy runs cannot transition",
+                            session_id.0
+                        ),
+                    )))
+                }
+                Some((found, _)) if found != expected_revision as i64 => {
+                    Err(EngineError::RevisionMismatch {
+                        session_id: session_id.0.clone(),
+                        expected: expected_revision,
+                        found: u64::try_from(found).unwrap_or(0),
+                    })
+                }
+                _ => Err(EngineError::TerminalState(session_id.0.clone())),
+            };
+        }
+
+        let root_descriptor = read_root_descriptor(&mut tx, &session_id.0).await?;
+        let persisted_version: i64 = sqlx::query_scalar(
+            "SELECT execution_version FROM orchestration_sessions WHERE session_id = ?",
+        )
+        .bind(&session_id.0)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "settle_cancelled read execution_version: {e}"
+            )))
+        })?;
+        if persisted_version != 1 {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "settle_cancelled '{}': unsupported execution_version {persisted_version} \
+                     (non-replayable)",
+                    session_id.0
+                )),
+            ));
+        }
+        let execution_version = persisted_version as u32;
+
+        tx.commit().await.map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "settle_cancelled commit: {e}"
+            )))
+        })?;
+
+        Ok(RunRecord {
+            session_id: SessionId(session_id.0.clone()),
+            status: SessionStatus::Cancelled,
+            state_revision: expected_revision + 1,
+            execution_version,
+            descriptor: root_descriptor,
+            state: Some(next_state.clone()),
+        })
+    }
+
     async fn load_children(
         &self,
         parent_session_id: &SessionId,
