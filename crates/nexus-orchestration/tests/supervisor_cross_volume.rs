@@ -140,7 +140,10 @@ async fn insert_driver_schedule(
 #[tokio::test]
 async fn f001_cross_volume_supervisor_enqueues_vol2_chapter1() {
     let pool = test_pool().await;
-    let sup = Arc::new(ScheduleSupervisor::new(Arc::new(pool.clone())));
+    let sup = Arc::new(
+        ScheduleSupervisor::new(Arc::new(pool.clone()))
+            .with_binding_provider("test-provider".to_string()),
+    );
 
     // Work: 2 volumes × 3 chapters = 6 total
     let mut work = test_work("wrk_xvol_1", 3, 6, true);
