@@ -1648,8 +1648,8 @@ function HoverLiftDemo() {
 
 /**
  * Popover enter/exit recipe: enter opacity + scale(0.98 → 1) with
- * duration-enter (200ms) ease-standard; exit fades with duration-exit
- * (140ms). Reduced motion collapses both to an instant state change.
+ * duration-enter and ease-standard; exit fades with duration-exit.
+ * Reduced motion collapses both to an instant state change.
  */
 function EnterExitDemo() {
   const [visible, setVisible] = useState(true);
@@ -1709,8 +1709,8 @@ function EnterExitDemo() {
       >
         <p className="text-label-14 font-medium text-gray-1000 mb-1">Popover enter / exit</p>
         <p className="text-copy-13 text-gray-600">
-          Enter: opacity + <code>scale(0.98 → 1)</code>, <code>duration-enter</code> (200ms){' '}
-          <code>ease-standard</code>. Exit: opacity out, <code>duration-exit</code> (140ms).
+          Enter: opacity + <code>scale(0.98 → 1)</code>, <code>duration-enter</code>{' '}
+          <code>ease-standard</code>. Exit: opacity out, <code>duration-exit</code>.
         </p>
       </div>
     </div>
