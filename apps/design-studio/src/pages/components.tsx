@@ -78,7 +78,7 @@ function MatrixCard({
 
 function VariantLabel({ label }: { label: string }) {
   return (
-    <span className="text-copy-13 text-gray-600 font-medium shrink-0 min-w-[80px]">
+    <span className="text-copy-13 text-gray-700 font-medium shrink-0 min-w-[80px]">
       {label}
     </span>
   );

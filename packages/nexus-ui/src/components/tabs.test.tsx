@@ -114,6 +114,39 @@ describe('Tabs', () => {
     expect(inactive).toHaveAttribute('tabindex', '-1');
   });
 
+  it('only the selected trigger exposes aria-controls to a mounted panel', () => {
+    renderControlledTabs();
+    const active = screen.getByRole('tab', { name: 'Agent' });
+    const inactive = screen.getByRole('tab', { name: 'Workspace' });
+
+    expect(active).toHaveAttribute('aria-controls');
+    expect(document.getElementById(active.getAttribute('aria-controls')!)).toBeInTheDocument();
+    expect(inactive).not.toHaveAttribute('aria-controls');
+    expect(screen.queryByText('Workspace panel')).not.toBeInTheDocument();
+  });
+
+  it('does not call onValueChange when re-clicking the already selected tab', () => {
+    const onValueChange = vi.fn();
+    renderControlledTabs(onValueChange);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Agent' }));
+    expect(onValueChange).not.toHaveBeenCalled();
+  });
+
+  it('initializes absent defaultValue to an empty string in uncontrolled mode', () => {
+    render(
+      <Tabs>
+        <TabsList>
+          <TabsTrigger value="only">Only</TabsTrigger>
+        </TabsList>
+        <TabsContent value="only">Only panel</TabsContent>
+      </Tabs>,
+    );
+
+    expect(screen.queryByRole('tabpanel')).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Only' })).toHaveAttribute('aria-selected', 'false');
+  });
+
   it('ArrowRight on the tablist selects and focuses the next tab (automatic activation)', () => {
     const onValueChange = vi.fn();
     renderControlledTabs(onValueChange);

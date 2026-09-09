@@ -200,9 +200,11 @@ export function TabsTrigger({ value, children, className }: TabsTriggerProps) {
       role="tab"
       id={triggerId}
       aria-selected={selected}
-      aria-controls={panelId}
+      aria-controls={selected ? panelId : undefined}
       tabIndex={selected ? 0 : -1}
-      onClick={() => onChange(value)}
+      onClick={() => {
+        if (!selected) onChange(value);
+      }}
       className={cn(
         'h-8 rounded-control px-3 text-button-12 transition-colors duration-state ease-standard motion-reduce:transition-none focus-visible:outline-none',
         selected
