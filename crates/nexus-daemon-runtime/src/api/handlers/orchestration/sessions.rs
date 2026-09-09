@@ -210,8 +210,13 @@ pub async fn get_session(
     // fabricated class.
     let execution = match state.pool() {
         Some(pool) => Some(
-            crate::execution_projection::project_for_session(pool, Some(&session_id), "driven_v1")
-                .await,
+            crate::execution_projection::project_for_session(
+                pool,
+                Some(&session_id),
+                "driven_v1",
+                state.capability_registry().as_ref(),
+            )
+            .await,
         ),
         None => None,
     };

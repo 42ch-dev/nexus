@@ -703,7 +703,7 @@ fn frozen_source_reconstructable(bytes: Option<&[u8]>) -> bool {
     else {
         return false;
     };
-    let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+    let caps = ops_capability_registry();
     let loaded = match &descriptor.source {
         PresetSourceIdentity::Embedded { preset_id, .. } => load_embedded_preset(preset_id, &caps),
         PresetSourceIdentity::Directory { root, .. } => load_preset(root, &caps),
@@ -715,6 +715,34 @@ fn frozen_source_reconstructable(bytes: Option<&[u8]>) -> bool {
         }
         Err(_) => false,
     }
+}
+
+/// Capability registry for the daemon-free verification: built-ins plus the
+/// user-installed capabilities under `$HOME/.nexus42/capabilities`, so a
+/// user preset that requires a user capability still verifies (Greptile P1).
+fn ops_capability_registry() -> nexus_orchestration::capability::CapabilityRegistry {
+    use nexus_orchestration::capability::{CapabilityRegistry, CapabilityRuntimeDeps};
+
+    let Ok(nexus_home) = crate::config::nexus_home() else {
+        return CapabilityRegistry::with_builtins();
+    };
+    let Some(user_home) = nexus_home.parent() else {
+        return CapabilityRegistry::with_builtins();
+    };
+    let user_caps_dir = nexus_home_layout::user_capabilities_dir(user_home);
+    if !user_caps_dir.exists() {
+        return CapabilityRegistry::with_builtins();
+    }
+    let deps = CapabilityRuntimeDeps {
+        pool: None,
+        prompt_executor: None,
+        session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
+        daemon_tool_dispatch: None,
+        cdn_config: None,
+    };
+    CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &user_caps_dir).0
 }
 
 fn recovery_class_str(class: RecoveryClass) -> &'static str {
