@@ -96,6 +96,13 @@ impl Cli {
             false
         }
     }
+
+    /// Commands whose stdout is machine-readable data (`--json`, MCP stdio):
+    /// tracing must be routed to stderr so diagnostics never corrupt it.
+    #[must_use]
+    pub const fn is_data_output(&self) -> bool {
+        matches!(&self.command, Some(Commands::Ops { .. })) || self.is_mcp_serve()
+    }
 }
 
 #[derive(Debug, Subcommand)]

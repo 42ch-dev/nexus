@@ -326,8 +326,12 @@ impl WorkspaceState {
         // there is no active creator; the error resurfaces on the first Tier-2
         // request via `ensure_creator_pool`.
 
+        // `load_config` takes the USER home and resolves
+        // `$HOME/.nexus42/agent-host/config.toml` itself; passing the already
+        // resolved `nexus_home` double-nested the path and left the canonical
+        // file unread (tri-QC P1-A).
         let agent_host_config =
-            nexus_agent_host::config::load_config(&nexus_home).unwrap_or_else(|e| {
+            nexus_agent_host::config::load_config(&user_home).unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "failed to load agent host config; using defaults");
                 AgentHostConfig::default()
             });
@@ -1038,6 +1042,25 @@ impl WorkspaceState {
     /// Called from boot.rs after constructing the agent host subsystem.
     pub fn set_agent_host(&mut self, host: Arc<dyn nexus_agent_host::HostFacade>) {
         self.agent_host = Arc::new(Some(host));
+    }
+
+    /// Reset the published runtime aggregate (daemon-level restart seam, A7).
+    ///
+    /// A daemon restart republishes a FRESH engine/coordinator/supervisor
+    /// bundle over the SAME Creator DB and HOME. The prior bundle's drives
+    /// must be quiescent first (callers abort them via
+    /// [`WorkflowRunCoordinator::abort_all_drives`]); this cell is then
+    /// cleared so the gated publishers
+    /// ([`Self::publish_boot_runtime_bundle`] /
+    /// [`Self::publish_creator_runtime_bundle`]) construct a new engine —
+    /// whose `recover_sessions` reattaches existing session/child IDs and
+    /// checkpoints from the frozen descriptors (never re-running recovery
+    /// against a half-wired aggregate).
+    pub fn reset_runtime_bundle(&self) {
+        *self
+            .runtime_bundle
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 
     /// Set the agent host configuration.

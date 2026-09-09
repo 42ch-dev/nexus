@@ -59,6 +59,9 @@ pub struct SessionSummary {
     /// unconfirmed cancel cleanup that left the run `interrupted`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_reason: Option<String>,
+    /// Shared durable execution projection (A2/A7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<ExecutionProjection>,
 }
 
 /// Response body for `GET /v1/daemon/orchestration/sessions/{id}`.
@@ -66,6 +69,44 @@ pub struct SessionSummary {
 #[serde(rename_all = "camelCase")]
 pub struct GetSessionResponse {
     pub session: SessionSummary,
+}
+
+/// Shared durable execution projection (A2/A7) — the single operator-facing
+/// classification used by session and schedule inspection.
+///
+/// Field names are snake_case (the promoted schema SSOT) even inside the
+/// camelCase session DTO; `recovery_class`/`allowed_actions` are the
+/// actionable contract, prose is never parsed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionProjection {
+    /// Durable execution version; `None` when no run exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_version: Option<u32>,
+    /// Durable state revision; `None` when no run exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_revision: Option<u64>,
+    /// Shared A7 recovery classification.
+    pub recovery_class: String,
+    /// Current durable A4 human wait, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait: Option<ExecutionWait>,
+    /// Stable machine reason code for uncertain/terminal outcomes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<String>,
+    /// Legal operator actions in the current durable state.
+    pub allowed_actions: Vec<String>,
+}
+
+/// The current durable A4 human wait token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionWait {
+    pub wait_id: String,
+    pub task_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_task_id: Option<String>,
+    pub kind: String,
 }
 
 /// Role → provider binding (A1) for the camelCase session-create wire

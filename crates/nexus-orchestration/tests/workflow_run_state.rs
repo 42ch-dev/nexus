@@ -2103,9 +2103,230 @@ async fn engine_nested_child_runs_to_completion_then_parent_commits() {
             .shared_state()
             .attach_existing_child_session_internal(&parent_sid.0, inner_graph)
             .await
+            .expect("attach is replayable-safe")
             .is_none(),
         "a later entry into the same inner graph must not reuse the retired terminal child"
     );
+}
+
+/// P3 T1 rereview-2 P1 (A7 rule 2): a parseable but tampered child
+/// descriptor is non-replayable. Both hydration and the reattachment path
+/// must fail closed instead of attaching the row to the root-built graph or
+/// falling back to `spawn_child_session` (which would mint a fresh child id
+/// and replay work).
+#[tokio::test]
+async fn tampered_child_descriptor_is_non_replayable_and_never_reattached() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, engine) = fresh_engine(pool.clone()).await;
+
+    let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
+    inner_graph.add_task(Arc::new(EndTask));
+
+    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
+    let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
+        Arc::new(engine.clone()),
+        inner_graph.clone(),
+        "parent_state",
+        "_session_id",
+        None,
+    );
+    parent_graph.add_task(Arc::new(inner_task));
+    let parent_sid = engine
+        .start_session("novel-writing", parent_graph)
+        .await
+        .expect("start parent session");
+
+    // Spawn a live child through the production admission path (v1 row).
+    let child_sid = engine
+        .shared_state()
+        .spawn_child_session_internal(nexus_orchestration::engine::ChildSessionParams {
+            parent_session_id: parent_sid.0.clone(),
+            inner_graph: inner_graph.clone(),
+            initial_context: graph_flow::Context::new(),
+        })
+        .await
+        .expect("spawn child");
+
+    // Tamper: the descriptor stays parseable, but the frozen identity no
+    // longer matches the trusted root.
+    let descriptor: Vec<u8> = sqlx::query_scalar(
+        "SELECT run_descriptor_json FROM orchestration_sessions WHERE session_id = ?",
+    )
+    .bind(&child_sid.0)
+    .fetch_one(&*pool)
+    .await
+    .expect("child descriptor");
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&descriptor).expect("descriptor json");
+    value["preset_version"] = serde_json::json!(999);
+    let tampered = serde_json::to_vec(&value).expect("tampered descriptor");
+    sqlx::query("UPDATE orchestration_sessions SET run_descriptor_json = ? WHERE session_id = ?")
+        .bind(tampered)
+        .bind(&child_sid.0)
+        .execute(&*pool)
+        .await
+        .expect("tamper child descriptor");
+
+    // Reattachment must fail closed — never `Ok(None)` (which the caller
+    // would treat as "no child" and spawn a fresh one).
+    let err = engine
+        .shared_state()
+        .attach_existing_child_session_internal(&parent_sid.0, inner_graph.clone())
+        .await
+        .expect_err("tampered child must not be attached");
+    assert!(
+        err.to_string().contains("non-replayable"),
+        "attachment refusal must be non-replayable, got {err}"
+    );
+
+    // Recovery hydration must also fail the owned closure.
+    let err = engine
+        .shared_state()
+        .hydrate_children(&parent_sid)
+        .await
+        .expect_err("tampered child must fail hydration");
+    assert!(
+        err.to_string().contains("non-replayable"),
+        "hydration refusal must be non-replayable, got {err}"
+    );
+
+    // Tampering never mints a second child row.
+    let children = storage
+        .load_children(&parent_sid)
+        .await
+        .expect("load children");
+    assert_eq!(
+        children.len(),
+        1,
+        "a tampered child must never be replaced by a freshly minted one"
+    );
+}
+
+/// P3 T1 rereview-3 P1 (A7 rule 2): a parseable child whose `graph_name`
+/// names an inner graph the frozen preset does not define is non-replayable.
+/// Recovery must refuse to reconstruct the root instead of letting
+/// `InnerGraphTask` miss the reattachment lookup and spawn a fresh child.
+#[tokio::test]
+async fn tampered_child_graph_name_is_non_replayable_on_recovery() {
+    let (pool, _db) = fresh_pool().await;
+    let (storage, engine) = fresh_engine(pool.clone()).await;
+
+    let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
+    inner_graph.add_task(Arc::new(EndTask));
+    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
+    parent_graph.add_task(Arc::new(nexus_orchestration::tasks::InnerGraphTask::new(
+        Arc::new(engine.clone()),
+        inner_graph.clone(),
+        "parent_state",
+        "_session_id",
+        None,
+    )));
+    let parent_sid = engine
+        .start_session("novel-writing", parent_graph)
+        .await
+        .expect("start parent session");
+    let child_sid = engine
+        .shared_state()
+        .spawn_child_session_internal(nexus_orchestration::engine::ChildSessionParams {
+            parent_session_id: parent_sid.0.clone(),
+            inner_graph: inner_graph.clone(),
+            initial_context: graph_flow::Context::new(),
+        })
+        .await
+        .expect("spawn child");
+
+    // Tamper only the graph_name: descriptor identity still matches.
+    let descriptor: Vec<u8> = sqlx::query_scalar(
+        "SELECT run_descriptor_json FROM orchestration_sessions WHERE session_id = ?",
+    )
+    .bind(&child_sid.0)
+    .fetch_one(&*pool)
+    .await
+    .expect("child descriptor");
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&descriptor).expect("descriptor json");
+    value["graph_name"] = serde_json::json!("bogus_inner_graph");
+    let tampered = serde_json::to_vec(&value).expect("tampered descriptor");
+    sqlx::query("UPDATE orchestration_sessions SET run_descriptor_json = ? WHERE session_id = ?")
+        .bind(tampered)
+        .bind(&child_sid.0)
+        .execute(&*pool)
+        .await
+        .expect("tamper graph_name");
+
+    // Restart shape: a fresh engine over the same pool must refuse to
+    // reconstruct the root runner over the tampered descendant.
+    let (_storage_b, engine_b) = fresh_engine(pool.clone()).await;
+    let err = engine_b
+        .ensure_recovered_runner_inner(&parent_sid)
+        .await
+        .expect_err("tampered graph_name must block reconstruction");
+    assert!(
+        err.to_string().contains("unknown inner graph"),
+        "refusal must name the unknown inner graph, got {err}"
+    );
+
+    let children = storage
+        .load_children(&parent_sid)
+        .await
+        .expect("load children");
+    assert_eq!(children.len(), 1, "no replacement child may be minted");
+}
+
+/// P3 T1 rereview-3 P1 (A7 rule 2): a v1 child under a parent whose frozen
+/// descriptor is absent is non-replayable — the v0-parent skip must not
+/// exempt it from identity validation.
+#[tokio::test]
+async fn v1_child_under_parent_without_descriptor_is_non_replayable() {
+    let (pool, _db) = fresh_pool().await;
+    let (_storage, engine) = fresh_engine(pool.clone()).await;
+
+    let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
+    inner_graph.add_task(Arc::new(EndTask));
+    let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
+    parent_graph.add_task(Arc::new(nexus_orchestration::tasks::InnerGraphTask::new(
+        Arc::new(engine.clone()),
+        inner_graph.clone(),
+        "parent_state",
+        "_session_id",
+        None,
+    )));
+    let parent_sid = engine
+        .start_session("novel-writing", parent_graph)
+        .await
+        .expect("start parent session");
+    let child_sid = engine
+        .shared_state()
+        .spawn_child_session_internal(nexus_orchestration::engine::ChildSessionParams {
+            parent_session_id: parent_sid.0.clone(),
+            inner_graph: inner_graph.clone(),
+            initial_context: graph_flow::Context::new(),
+        })
+        .await
+        .expect("spawn child");
+
+    // Simulate a legacy-shaped parent (v0 execution version, no descriptor)
+    // owning a v1 child: the child's identity cannot be verified.
+    sqlx::query(
+        "UPDATE orchestration_sessions
+         SET execution_version = 0, run_descriptor_json = NULL
+         WHERE session_id = ?",
+    )
+    .bind(&parent_sid.0)
+    .execute(&*pool)
+    .await
+    .expect("degrade parent identity");
+
+    let err = engine
+        .shared_state()
+        .hydrate_children(&parent_sid)
+        .await
+        .expect_err("v1 child under a descriptor-less parent must be non-replayable");
+    assert!(
+        err.to_string().contains("non-replayable"),
+        "refusal must be non-replayable, got {err}"
+    );
+    let _ = child_sid;
 }
 
 // Important 1: a restarted parent hydrates its children map from persisted
@@ -3564,7 +3785,23 @@ async fn child_effect_propagates_to_parent_interrupted_on_failed_commit() {
         .await
         .insert(parent_sid.0.clone(), vec![child_cp]);
     // Seed the child row then advance it so the submitted (rev 1) stale.
-    let child_descriptor = test_descriptor(&parent_sid.0);
+    // The child descriptor must carry the REAL inherited identity (same
+    // creator/preset/version/source as the parent, naming its parent and
+    // inner graph) — a bare test descriptor is refused as non-replayable.
+    let child_descriptor: RunDescriptorV1 = {
+        let parent_json: Vec<u8> = sqlx::query_scalar(
+            "SELECT run_descriptor_json FROM orchestration_sessions WHERE session_id = ?",
+        )
+        .bind(&parent_sid.0)
+        .fetch_one(&*pool)
+        .await
+        .expect("parent descriptor");
+        let mut descriptor: RunDescriptorV1 =
+            serde_json::from_slice(&parent_json).expect("parent descriptor json");
+        descriptor.parent_session_id = Some(SessionId(parent_sid.0.clone()));
+        descriptor.graph_name = Some("child_graph".to_string());
+        descriptor
+    };
     let child_root = root_session(child_id, "child_task").await;
     storage
         .start_run(

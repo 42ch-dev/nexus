@@ -51,6 +51,7 @@ use nexus_orchestration::engine::{
 };
 use nexus_orchestration::resume_rules;
 use nexus_orchestration::run_state::WorkflowStateStore;
+use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 use tokio_util::sync::CancellationToken;
 /// Bounds and posture for one [`drive_preset_run`] call.
 #[derive(Debug, Clone)]
@@ -419,6 +420,7 @@ pub async fn resume_driven_sessions(
         // suppress the durable A7 converge/merge re-drive. The legacy
         // cascade runs only for v0 / no-store rows.
         let mut v1_converge_merge = false;
+        let mut v1_safe_boundary = false;
         if let Some(store) = workflow_store {
             match store.load_run(&session_id).await {
                 Ok(Some(record)) if record.execution_version >= 1 => {
@@ -455,9 +457,23 @@ pub async fn resume_driven_sessions(
                             decisions.push(ResumeDecision::SkippedHumanWait { session_id });
                             continue;
                         }
+                        // A7 rule 6: a durable v1 run at a fully committed
+                        // safe boundary is reconstructed and re-driven —
+                        // never stranded by a restart (P3 T1 rereview P1).
                         resume_rules::RecoveryClass::SafeBoundary => {
-                            decisions.push(ResumeDecision::SkippedSafeBoundary { session_id });
-                            continue;
+                            if let Err(e) = engine.ensure_recovered_runner(&session_id).await {
+                                tracing::warn!(
+                                    session_id = %session_id.0,
+                                    error = %e,
+                                    "recovery: safe-boundary reconstruction failed; \
+                                     treating as non-replayable metadata"
+                                );
+                                decisions.push(ResumeDecision::SkippedUnreadableMetadata {
+                                    session_id,
+                                });
+                                continue;
+                            }
+                            v1_safe_boundary = true;
                         }
                         // Exact-v0 rows never appear here (`execution_version
                         // >= 1` guard matched); the arms above cover all seven
@@ -477,12 +493,14 @@ pub async fn resume_driven_sessions(
                 }
             }
         }
-
         // 2. Legacy (v0 / no-store) typed-failure filter: never re-tick a
         //    typed-failed join. A v1 ConvergeMerge row was already classified
         //    by the authoritative A7 gate above — stale `_run_status` /
         //    `_run_error` context keys must not suppress its re-drive.
-        if !v1_converge_merge && data.is_some_and(resume_rules::typed_failure_keys_present) {
+        if !v1_converge_merge
+            && !v1_safe_boundary
+            && data.is_some_and(resume_rules::typed_failure_keys_present)
+        {
             decisions.push(ResumeDecision::SkippedTypedFailed { session_id });
             continue;
         }
@@ -490,6 +508,7 @@ pub async fn resume_driven_sessions(
         // 3. Human wait (v0 / no-store): a non-chain wait is never stepped at
         //    boot; the A4 wait token is preserved, not auto-advanced.
         if !v1_converge_merge
+            && !v1_safe_boundary
             && matches!(summary.status, SessionStatus::WaitingForInput)
             && !data.is_some_and(resume_rules::is_converge_merge_chain)
         {
@@ -500,7 +519,7 @@ pub async fn resume_driven_sessions(
         // 4. Converge/merge chain class filter (no-checkpoint default
         //    equivalence): only sessions provably inside a converge/merge
         //    chain are re-driven.
-        if !v1_converge_merge && !data.is_some_and(resume_rules::is_converge_merge_chain) {
+        if !v1_converge_merge && !v1_safe_boundary && !data.is_some_and(resume_rules::is_converge_merge_chain) {
             decisions.push(ResumeDecision::SkippedNotConvergeMergeClass { session_id });
             continue;
         }
@@ -564,6 +583,21 @@ pub enum RunControlError {
     /// The run is in a state that does not accept the requested signal.
     #[error("workflow state conflict for session {0}: {1}")]
     StateConflict(String, String),
+    /// The run's source preset cannot be reconstructed (missing/changed/
+    /// moved source or corrupt child identity — A7 rule 4). The human wait
+    /// is preserved, legal actions are cancel-only, and continue returns
+    /// this conflict instead of driving a session whose frozen source can
+    /// no longer be reattached.
+    #[error(
+        "reconstruction_unavailable for session {session_id}: {reason} — \
+         human wait preserved, cancel-only"
+    )]
+    ReconstructionUnavailable {
+        /// Session id.
+        session_id: String,
+        /// Machine-stable reason (source missing/hash mismatch/child corrupt).
+        reason: String,
+    },
 }
 
 /// Public control signal for a driven run (A4/A5).
@@ -669,6 +703,108 @@ struct DriveOwner {
 }
 
 impl WorkflowRunCoordinator {
+    /// Abort every in-flight drive owner (daemon-level restart seam, A7).
+    ///
+    /// Fires each owner's cancellation token and awaits the drive loops so
+    /// the restart boundary is quiescent: a subsequent
+    /// [`WorkflowRunCoordinator::recover_persisted`] re-registers every
+    /// still-valid owner from the durable records (the A7 recovery order
+    /// decides which runs are re-driven). Idempotent — owners already
+    /// finished are skipped.
+    pub async fn abort_all_drives(&self) {
+        let owners: Vec<(String, tokio_util::sync::CancellationToken, tokio::task::JoinHandle<()>)> = {
+            let mut drives = self.drives.lock().await;
+            drives
+                .drain()
+                .map(|(sid, owner)| (sid, owner.cancel, owner.join))
+                .collect()
+        };
+        for (sid, cancel, join) in owners {
+            cancel.cancel();
+            let _ = join.await;
+            self.session_cancels
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&sid);
+        }
+    }
+
+    /// Recover persisted non-terminal sessions after a daemon-level restart
+    /// (A7) and re-drive the eligible converge/merge class through this
+    /// coordinator.
+    ///
+    /// Identical to the production boot recovery path: the engine's runners
+    /// are reconstructed from the frozen source identity (manifest + every
+    /// referenced template hash verified; changed/missing source or corrupt
+    /// child identity is non-replayable), then the shared A7 classifier
+    /// decides each session's class — terminal/interrupted/human-wait/
+    /// unreadable/safe-boundary skip, only converge/merge is re-driven
+    /// from its persisted position (completed edges never re-executed).
+    ///
+    /// `shutdown_notify` (when present) aborts the background re-drive when
+    /// the daemon shuts down, exactly like the boot path.
+    ///
+    /// Returns every [`ResumeDecision`] so the caller can assert the exact
+    /// A7 outcome per session.
+    pub async fn recover_persisted(
+        &self,
+        sqlite_storage: &Arc<SqliteSessionStorage>,
+        shutdown_notify: Option<Arc<tokio::sync::Notify>>,
+    ) -> Vec<ResumeDecision> {
+        let summaries = sqlite_storage
+            .list_non_terminal_sessions()
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    "recover_persisted: failed to list non-terminal sessions: {}",
+                    e
+                );
+                Vec::new()
+            });
+        if summaries.is_empty() {
+            return Vec::new();
+        }
+        tracing::info!(
+            "recover_persisted: recovering {} persisted session(s) into in-memory tracker",
+            summaries.len()
+        );
+        self.engine
+            .recover_sessions_inner(summaries.clone())
+            .await;
+        let mut drivable = Vec::new();
+        {
+            // One shared read lock for the whole batch (tri-QC P1-E): N
+            // sequential acquisitions on the runners RwLock stall recovery
+            // behind any writer.
+            let shared = self.engine.shared_state();
+            let runners = shared.runners.read().await;
+            for summary in &summaries {
+                if runners.contains_key(&summary.session_id.0) {
+                    drivable.push(summary.clone());
+                }
+            }
+        }
+        if drivable.is_empty() {
+            return Vec::new();
+        }
+        let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();
+        let resume_cancel = tokio_util::sync::CancellationToken::new();
+        if let Some(notify) = shutdown_notify {
+            let resume_cancel = resume_cancel.clone();
+            tokio::spawn(async move {
+                notify.notified().await;
+                resume_cancel.cancel();
+            });
+        }
+        let decisions = self
+            .recover_driving(Some(&workflow_store), &drivable, Some(&resume_cancel))
+            .await;
+        for d in &decisions {
+            tracing::info!(decision = ?d, "recover_persisted re-drive decision");
+        }
+        decisions
+    }
+
     /// Construct the coordinator over the daemon's engine/storage.
     #[must_use]
     pub fn new(
@@ -1265,6 +1401,7 @@ impl WorkflowRunCoordinator {
             // join re-drive; terminal/interrupted/human-wait/unreadable
             // classes skip immediately.
             let mut v1_converge_merge = false;
+            let mut v1_safe_boundary = false;
             if let Some(store) = workflow_store {
                 match store.load_run(&session_id).await {
                     Ok(Some(record)) if record.execution_version >= 1 => {
@@ -1301,9 +1438,26 @@ impl WorkflowRunCoordinator {
                                 decisions.push(ResumeDecision::SkippedHumanWait { session_id });
                                 continue;
                             }
+                            // A7 rule 6: a durable v1 run at a fully
+                            // committed safe boundary is reconstructed and
+                            // re-driven through the single owner — never
+                            // stranded by a restart (P3 T1 rereview P1).
                             resume_rules::RecoveryClass::SafeBoundary => {
-                                decisions.push(ResumeDecision::SkippedSafeBoundary { session_id });
-                                continue;
+                                if let Err(e) =
+                                    self.engine.ensure_recovered_runner(&session_id).await
+                                {
+                                    tracing::warn!(
+                                        session_id = %session_id.0,
+                                        error = %e,
+                                        "recovery: safe-boundary reconstruction failed; \
+                                         treating as non-replayable metadata"
+                                    );
+                                    decisions.push(ResumeDecision::SkippedUnreadableMetadata {
+                                        session_id,
+                                    });
+                                    continue;
+                                }
+                                v1_safe_boundary = true;
                             }
                             resume_rules::RecoveryClass::LegacyUnverified => {
                                 unreachable!("v1 load_run record cannot classify LegacyUnverified")
@@ -1322,13 +1476,17 @@ impl WorkflowRunCoordinator {
             }
 
             // Legacy (v0 / no-store) typed-failure filter.
-            if !v1_converge_merge && data.is_some_and(resume_rules::typed_failure_keys_present) {
+            if !v1_converge_merge
+                && !v1_safe_boundary
+                && data.is_some_and(resume_rules::typed_failure_keys_present)
+            {
                 decisions.push(ResumeDecision::SkippedTypedFailed { session_id });
                 continue;
             }
 
             // Human wait (v0 / no-store).
             if !v1_converge_merge
+                && !v1_safe_boundary
                 && matches!(summary.status, SessionStatus::WaitingForInput)
                 && !data.is_some_and(resume_rules::is_converge_merge_chain)
             {
@@ -1337,7 +1495,7 @@ impl WorkflowRunCoordinator {
             }
 
             // Converge/merge chain class filter.
-            if !v1_converge_merge && !data.is_some_and(resume_rules::is_converge_merge_chain) {
+            if !v1_converge_merge && !v1_safe_boundary && !data.is_some_and(resume_rules::is_converge_merge_chain) {
                 decisions.push(ResumeDecision::SkippedNotConvergeMergeClass { session_id });
                 continue;
             }
@@ -2008,6 +2166,29 @@ impl WorkflowRunCoordinator {
         session_id: &SessionId,
         signal: RunSignal,
     ) -> Result<RunControlResult, RunControlError> {
+        // A7 rule 4: an authorized continuation of a human wait requires the
+        // run's runner to be REATTACHED from the frozen source identity —
+        // attach on demand when recovery did not (or could not) leave a
+        // runner. A changed/missing source, corrupt child identity, or any
+        // other reconstruction failure surfaces `reconstruction_unavailable`
+        // BEFORE any signal mutates the durable wait: the human wait stays
+        // preserved and legal actions become cancel-only. The gate is
+        // evaluated only for Continue (the only signal that would drive a
+        // recovered session); Cancel/Pause/Resume do not require a runner.
+        //
+        // The gate is idempotent and race-safe: a session already being
+        // driven (or reconstructed) by another caller has a runner present
+        // and passes immediately; the durable continue CAS below is still
+        // the single linearization point for consuming the wait.
+        if matches!(signal, RunSignal::Continue { .. }) {
+            if let Err(e) = self.engine.ensure_recovered_runner_inner(session_id).await {
+                return Err(RunControlError::ReconstructionUnavailable {
+                    session_id: session_id.0.clone(),
+                    reason: e.to_string(),
+                });
+            }
+        }
+
         let engine_signal = match &signal {
             RunSignal::Continue { wait_id } => EngineSignal::Continue {
                 wait_id: wait_id.clone(),
@@ -2377,6 +2558,25 @@ mod tests {
             *self.runner_present.lock()
         }
 
+        async fn recover_sessions(&self, _summaries: Vec<SessionSummary>) {
+            unreachable!("not used by driver unit tests")
+        }
+
+        async fn ensure_recovered_runner(
+            &self,
+            session_id: &SessionId,
+        ) -> Result<(), EngineError> {
+            if !*self.runner_present.lock() {
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "scripted engine has no runner for '{}' (reconstruction_unavailable)",
+                        session_id.0
+                    )),
+                ));
+            }
+            Ok(())
+        }
+
         async fn signal(
             &self,
             _session_id: &SessionId,
@@ -2407,7 +2607,7 @@ mod tests {
             &self,
             _: &str,
             _: Arc<graph_flow::Graph>,
-        ) -> Option<SessionId> {
+        ) -> Result<Option<SessionId>, EngineError> {
             unreachable!("not used by driver unit tests")
         }
 

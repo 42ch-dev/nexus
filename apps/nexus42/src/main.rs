@@ -30,7 +30,7 @@ fn main() {
     // The MCP stdio child's stdout is the JSON-RPC transport — logging must
     // go to stderr there (AR-72), so the writer decision happens before
     // the subscriber is initialized.
-    init_logging(cli.verbose(), cli.is_mcp_serve());
+    init_logging(cli.verbose(), cli.is_data_output());
 
     // V1.101 Class B: enrich PATH *before* Tokio starts. GUI-launched desktop
     // sidecars inherit a minimal macOS PATH; `setenv` must not race concurrent

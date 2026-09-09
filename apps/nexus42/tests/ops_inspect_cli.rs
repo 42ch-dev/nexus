@@ -184,6 +184,77 @@ fn failed_context() -> Vec<u8> {
     .into_bytes()
 }
 
+/// tri-QC P1-C: a human wait whose frozen source no longer verifies is
+/// preserved but must not advertise `continue`; the typed reason is exposed.
+#[test]
+fn inspect_v1_human_wait_with_unreconstructable_source_degrades_actions() {
+    let home = tempfile::TempDir::new().unwrap();
+    let db_path = seed_home_config(home.path());
+    let plain = json!({"data": {"_creator_id": CREATOR}})
+        .to_string()
+        .into_bytes();
+    run_async(async {
+        let pool = create_db(&db_path).await;
+        seed_session(
+            &pool,
+            &SeedRow {
+                session_id: "ses_wait_bad_source",
+                preset_id: "preset_x",
+                status: "waiting_for_input",
+                current_task_id: Some("task_7"),
+                context: &plain,
+                updated_at: 1_756_990_300,
+                execution_version: 1,
+                state_revision: 4,
+                run_state_json: Some(run_state(None, false, true)),
+            },
+        )
+        .await;
+        // Valid-shape descriptor whose frozen version no longer matches.
+        let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+        let loaded = nexus_orchestration::preset::load_embedded_preset("memory-augmented", &caps)
+            .expect("embedded preset");
+        let descriptor = serde_json::json!({
+            "creator_id": CREATOR,
+            "work_id": null,
+            "workspace_root": "/tmp",
+            "preset_id": "memory-augmented",
+            "preset_version": loaded.version + 1,
+            "source": loaded.source_identity.clone().expect("source identity"),
+            "input": {},
+            "agent_bindings": {},
+            "parent_session_id": null,
+            "graph_name": null
+        });
+        sqlx::query(
+            "UPDATE orchestration_sessions SET run_descriptor_json = ? WHERE session_id = ?",
+        )
+        .bind(serde_json::to_vec(&descriptor).expect("descriptor json"))
+        .bind("ses_wait_bad_source")
+        .execute(&pool)
+        .await
+        .expect("seed mismatched descriptor");
+        pool.close().await;
+    });
+
+    let output = nexus42(home.path())
+        .args(["ops", "inspect", "ses_wait_bad_source", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid json");
+    assert_eq!(parsed["recovery_class"], json!("human_wait"));
+    assert_eq!(parsed["wait_id"], json!("wait-tok-1"));
+    assert_eq!(
+        parsed["allowed_actions"],
+        json!(["cancel", "new_run"]),
+        "an unreconstructable source must not offer continue"
+    );
+    assert_eq!(parsed["reason_code"], json!("reconstruction_unavailable"));
+}
+
 #[test]
 fn ops_group_is_hidden_from_root_help() {
     let output = nexus42(tempfile::TempDir::new().unwrap().path())
@@ -1091,6 +1162,31 @@ fn inspect_v1_human_wait_stays_distinct_and_preserves_wait_token() {
             },
         )
         .await;
+        // A v1 human wait carries a frozen descriptor; the shared projection
+        // only offers `continue` when that source still verifies (P1-C).
+        let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+        let loaded = nexus_orchestration::preset::load_embedded_preset("memory-augmented", &caps)
+            .expect("embedded preset");
+        let descriptor = serde_json::json!({
+            "creator_id": CREATOR,
+            "work_id": null,
+            "workspace_root": "/tmp",
+            "preset_id": "memory-augmented",
+            "preset_version": loaded.version,
+            "source": loaded.source_identity.clone().expect("source identity"),
+            "input": {},
+            "agent_bindings": {},
+            "parent_session_id": null,
+            "graph_name": null
+        });
+        sqlx::query(
+            "UPDATE orchestration_sessions SET run_descriptor_json = ? WHERE session_id = ?",
+        )
+        .bind(serde_json::to_vec(&descriptor).expect("descriptor json"))
+        .bind("ses_wait")
+        .execute(&pool)
+        .await
+        .expect("seed reconstructable descriptor");
         pool.close().await;
     });
 
@@ -1105,6 +1201,11 @@ fn inspect_v1_human_wait_stays_distinct_and_preserves_wait_token() {
     assert_eq!(parsed["recovery_class"], json!("human_wait"));
     assert_eq!(parsed["wait_id"], json!("wait-tok-1"));
     assert_eq!(parsed["db_status"], json!("waiting_for_input"));
+    assert_eq!(
+        parsed["allowed_actions"],
+        json!(["continue", "cancel"]),
+        "human_wait offers exactly continue/cancel (tri-QC P1-B)"
+    );
     // Legacy resumable verdict stays a hard no for the human wait.
     assert_eq!(parsed["resumable"]["verdict"], json!("no"));
 }
@@ -1370,6 +1471,31 @@ fn inspect_v1_list_mode_recovery_classes_and_read_only() {
             },
         )
         .await;
+        // A v1 human wait carries a frozen descriptor; the shared projection
+        // only offers `continue` when that source still verifies (P1-C).
+        let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+        let loaded = nexus_orchestration::preset::load_embedded_preset("memory-augmented", &caps)
+            .expect("embedded preset");
+        let descriptor = serde_json::json!({
+            "creator_id": CREATOR,
+            "work_id": null,
+            "workspace_root": "/tmp",
+            "preset_id": "memory-augmented",
+            "preset_version": loaded.version,
+            "source": loaded.source_identity.clone().expect("source identity"),
+            "input": {},
+            "agent_bindings": {},
+            "parent_session_id": null,
+            "graph_name": null
+        });
+        sqlx::query(
+            "UPDATE orchestration_sessions SET run_descriptor_json = ? WHERE session_id = ?",
+        )
+        .bind(serde_json::to_vec(&descriptor).expect("descriptor json"))
+        .bind("ses_wait")
+        .execute(&pool)
+        .await
+        .expect("seed reconstructable descriptor");
         pool.close().await;
     });
 

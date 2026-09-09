@@ -23,8 +23,8 @@ use thiserror::Error;
 // Re-export for internal use.
 use crate::capability::{CapabilityError, CapabilityRegistry};
 use crate::run_state::{
-    ChildCheckpoint, PresetSourceIdentity, RunCheckpoint, RunDescriptorV1, RunFailure, RunStateV1,
-    WorkflowStateStore,
+    ChildCheckpoint, PresetSourceIdentity, RunCheckpoint, RunDescriptorV1, RunFailure, RunRecord,
+    RunStateV1, WorkflowStateStore,
 };
 
 /// Context key that effectful tasks set when they perform an external effect
@@ -371,7 +371,7 @@ pub trait OrchestrationEngine: Send + Sync {
         &self,
         parent_session_id: &str,
         inner_graph: Arc<Graph>,
-    ) -> Option<SessionId>;
+    ) -> Result<Option<SessionId>, EngineError>;
 
     /// Retrieve the context for a session.
     async fn get_context(&self, session_id: &SessionId)
@@ -394,6 +394,39 @@ pub trait OrchestrationEngine: Send + Sync {
     /// preset that is not embedded) returns `false` — it stays
     /// tracked-but-not-driven and must not be stepped.
     async fn has_runner(&self, session_id: &SessionId) -> bool;
+
+    /// Recover persisted non-terminal sessions into the in-memory tracker
+    /// (WS2 R1 + R6 + A7).
+    ///
+    /// Called by daemon boot and the daemon-level restart path with the
+    /// persisted non-terminal summaries: registers coordinator tokens,
+    /// hydrates the complete owned-descendant closure, and reconstructs a
+    /// `FlowRunner` per session from the FROZEN source identity (descriptor
+    /// hash + referenced templates verified; changed/missing source or
+    /// corrupt child identity is non-replayable — the session stays
+    /// tracked-but-not-driven). Terminal sessions are skipped. No new IDs
+    /// are minted; existing session/child IDs and checkpoints are attached.
+    async fn recover_sessions(&self, summaries: Vec<SessionSummary>);
+
+    /// Attach a runner for `session_id` ON DEMAND (A7 rule 4).
+    ///
+    /// A human-wait run whose runner was not attached at boot gets its
+    /// runner rebuilt here on a matching continue — the complete
+    /// owned-descendant closure first, then the root runner, using the
+    /// exact same frozen-source verification as boot recovery. Returns the
+    /// concrete [`EngineError`] reason when reconstruction is impossible
+    /// (source missing, hash mismatch, corrupt child identity), so the
+    /// caller can surface `reconstruction_unavailable` while the durable
+    /// human wait stays preserved.
+    ///
+    /// # Errors
+    /// Returns [`EngineError`] when the run has no durable v1 descriptor,
+    /// the frozen source no longer matches, or a persisted child is
+    /// corrupt/unsupported — all non-replayable.
+    async fn ensure_recovered_runner(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), EngineError>;
 
     /// Start a session using a loaded preset (outer graph + inner graphs wired).
     async fn start_session_with_preset(
@@ -557,6 +590,27 @@ impl EngineSharedState {
             .await
             .map_err(EngineError::GraphFlow)?
             .ok_or_else(|| EngineError::SessionNotFound(parent_session_id.0.clone()))?;
+        // A7 rule 2 (P3 T1 rereview-2/3 P1): every persisted child must still
+        // carry the trusted frozen identity. A parseable but tampered child
+        // descriptor makes the whole owned closure non-replayable — the root
+        // must not be reconstructed over it (and a later reattachment must
+        // never fall back to minting a fresh child). Legacy v0 children are
+        // left to the shipped conservative path by the validator itself, so a
+        // v1 child under a v0 parent is still refused.
+        if let Ok(Some(parent_record)) = store.load_run(parent_session_id).await {
+            for child in &children {
+                if let Err(e) = validate_child_descriptor_identity(
+                    parent_session_id,
+                    parent_record.descriptor.as_ref(),
+                    child,
+                ) {
+                    // Mirror the load-error discipline: never leave a stale
+                    // children-map entry behind a failed hydration (Minor 1).
+                    self.children.write().await.remove(&parent_session_id.0);
+                    return Err(e);
+                }
+            }
+        }
         let parent_context = match serde_json::to_value(&parent.context) {
             Ok(context) => context,
             Err(e) => {
@@ -1985,16 +2039,47 @@ impl EngineSharedState {
         &self,
         parent_session_id: &str,
         inner_graph: Arc<Graph>,
-    ) -> Option<SessionId> {
+    ) -> Result<Option<SessionId>, EngineError> {
         let target = {
             let children = self.children.read().await;
-            let parent_children = children.get(parent_session_id)?;
+            let Some(parent_children) = children.get(parent_session_id) else {
+                return Ok(None);
+            };
             parent_children
                 .iter()
                 .find(|c| c.graph_name.as_deref() == Some(inner_graph.id.as_str()))
                 .map(|c| (c.session.id.clone(), c.session.current_task_id.clone(), c.status.clone()))
         };
-        let (child_id, child_task, child_status) = target?;
+        let Some((child_id, child_task, child_status)) = target else {
+            return Ok(None);
+        };
+        // P3 T1 rereview-2 P1 (A7 rule 2): a persisted child row may only be
+        // attached when its frozen descriptor still matches the trusted root
+        // identity. A parseable but tampered child (different parent, graph,
+        // preset, version or source) is non-replayable — failing closed here
+        // also prevents the caller from falling back to `spawn_child_session`
+        // and replaying work under a fresh child id.
+        if let Some(store) = &self.workflow_store {
+            let parent_id = SessionId(parent_session_id.to_string());
+            let parent_record = store
+                .load_run(&parent_id)
+                .await?
+                .ok_or_else(|| EngineError::SessionNotFound(parent_session_id.to_string()))?;
+            if parent_record.execution_version >= 1 {
+                let child_sid = SessionId(child_id.clone());
+                let child_record = store.load_run(&child_sid).await?.ok_or_else(|| {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                        "attach_existing_child_session '{}': child row missing (non-replayable)",
+                        child_id
+                    )))
+                })?;
+                validate_child_descriptor_identity(
+                    &parent_id,
+                    parent_record.descriptor.as_ref(),
+                    &child_record,
+                )?;
+            }
+        }
         // Reconstruct a FlowRunner for the reattached child so it can be
         // stepped from its persisted position (and so the caller can query
         // its durable status via `get_status`).
@@ -2035,8 +2120,155 @@ impl EngineSharedState {
                 });
             }
         }
-        Some(SessionId(child_id))
+        Ok(Some(SessionId(child_id)))
     }
+}
+
+/// A7 rule 2 (P3 T1 rereview-2 P1): a persisted v1 child descriptor must
+/// match the trusted root identity exactly. Parseable but tampered metadata
+/// is non-replayable — never silently reinterpreted by attaching the row to
+/// a root-built graph (which would also let a graph-name mismatch fall back
+/// to spawning a fresh child and replaying work).
+fn validate_child_descriptor_identity(
+    parent_session_id: &SessionId,
+    parent: Option<&RunDescriptorV1>,
+    child: &RunRecord,
+) -> Result<(), EngineError> {
+    let non_replayable = |reason: String| {
+        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            "child '{}' descriptor identity mismatch (non-replayable): {reason}",
+            child.session_id.0
+        )))
+    };
+    // Legacy v0 children keep the shipped conservative classifier; only v1
+    // children carry the frozen identity this validator enforces. A v1 child
+    // under a v0 parent reaches the `parent` check below and is refused.
+    if child.execution_version < 1 {
+        return Ok(());
+    }
+    let Some(parent) = parent else {
+        return Err(non_replayable(format!(
+            "parent '{}' has no frozen v1 descriptor; child identity unverifiable",
+            parent_session_id.0
+        )));
+    };
+    let Some(child_descriptor) = child.descriptor.as_ref() else {
+        return Err(non_replayable(
+            "child has no frozen v1 descriptor".to_string(),
+        ));
+    };
+    if child_descriptor.parent_session_id.as_ref() != Some(parent_session_id) {
+        return Err(non_replayable(format!(
+            "parent_session_id {:?} does not name the recovering root",
+            child_descriptor.parent_session_id
+        )));
+    }
+    if child_descriptor.graph_name.is_none() {
+        return Err(non_replayable("graph_name is absent".to_string()));
+    }
+    if child_descriptor.creator_id != parent.creator_id
+        || child_descriptor.preset_id != parent.preset_id
+        || child_descriptor.preset_version != parent.preset_version
+        || child_descriptor.source != parent.source
+    {
+        return Err(non_replayable(format!(
+            "creator/preset/version/source ({} v{}) do not match the trusted root ({} v{})",
+            child_descriptor.preset_id,
+            child_descriptor.preset_version,
+            parent.preset_id,
+            parent.preset_version
+        )));
+    }
+    Ok(())
+}
+
+/// A7 rule 2 (P3 T1 rereview-4 P1): decide whether a persisted descendant's
+/// `graph_name` is replayable for its parent's current position.
+///
+/// - unknown inner graph name → non-replayable;
+/// - NON-TERMINAL child whose name differs from the inner graph entered by
+///   the parent's current task position → non-replayable (a valid-but-wrong
+///   name would miss reattachment and mint a replacement child);
+/// - terminal children are historical and only need membership.
+fn validate_descendant_position(
+    preset_id: &str,
+    valid_inner: &std::collections::HashSet<&str>,
+    expected_inner: Option<&str>,
+    parent_is_root: bool,
+    recorded_graph: Option<&str>,
+    parent_id: &str,
+    parent_task: &str,
+    child_id: &str,
+    graph_name: Option<&str>,
+    terminal: bool,
+) -> Result<(), EngineError> {
+    let name = graph_name.ok_or_else(|| {
+        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            "R6: child '{child_id}' has no graph_name (non-replayable)"
+        )))
+    })?;
+    if !valid_inner.contains(name) {
+        return Err(EngineError::GraphFlow(
+            graph_flow::GraphError::StorageError(format!(
+                "R6: child '{child_id}' names unknown inner graph '{name}' for preset \
+                 '{preset_id}' (tampered/unsupported metadata, non-replayable)"
+            )),
+        ));
+    }
+    if terminal {
+        return Ok(());
+    }
+    // Inner graph nodes are `acp_prompt` only (no nested inner graphs), so a
+    // child session can never own a live descendant (P3 T1 rereview-5 P1).
+    if !parent_is_root {
+        return Err(EngineError::GraphFlow(
+            graph_flow::GraphError::StorageError(format!(
+                "R6: non-terminal child '{child_id}' under inner-graph session '{parent_id}' \
+                 (position '{parent_task}') — nested inner graphs do not exist \
+                 (tampered/unsupported metadata, non-replayable)"
+            )),
+        ));
+    }
+    match expected_inner {
+        Some(expected) if expected == name => Ok(()),
+        Some(expected) => Err(EngineError::GraphFlow(
+            graph_flow::GraphError::StorageError(format!(
+                "R6: non-terminal child '{child_id}' names inner graph '{name}' but parent \
+                 '{parent_id}' is at position '{parent_task}' which enters '{expected}' \
+                 (tampered/unsupported metadata, non-replayable)"
+            )),
+        )),
+        // The root is past the inner-graph position (e.g. the bounded poller
+        // abandoned the child). Tolerated ONLY when the root context records
+        // this exact child under a state that enters THIS graph — otherwise a
+        // loop-back re-entry would miss attachment and mint a replacement.
+        None if recorded_graph == Some(name) => Ok(()),
+        None => Err(EngineError::GraphFlow(
+            graph_flow::GraphError::StorageError(format!(
+                "R6: non-terminal child '{child_id}' under root '{parent_id}' (position \
+                 '{parent_task}') is not recorded by an inner-graph state entering '{name}' \
+                 (tampered/unsupported metadata, non-replayable)"
+            )),
+        )),
+    }
+}
+
+/// The inner graph a manifest state enters, if any.
+fn inner_graph_entered_by_state<'a>(
+    loaded: &'a crate::preset::LoadedPreset,
+    state_id: &str,
+) -> Option<&'a str> {
+    loaded
+        .manifest
+        .states
+        .iter()
+        .find(|state| state.id == state_id)
+        .and_then(|state| {
+            state.enter.iter().find_map(|action| match action {
+                crate::preset::manifest::EnterAction::InnerGraph { name } => Some(name.as_str()),
+                _ => None,
+            })
+        })
 }
 
 /// Build the durable [`RunStateV1`] for a step outcome (A2/A4).
@@ -2246,7 +2478,7 @@ impl OrchestrationEngine for EngineProxy {
         &self,
         parent_session_id: &str,
         inner_graph: Arc<Graph>,
-    ) -> Option<SessionId> {
+    ) -> Result<Option<SessionId>, EngineError> {
         self.state
             .attach_existing_child_session_internal(parent_session_id, inner_graph)
             .await
@@ -2275,6 +2507,32 @@ impl OrchestrationEngine for EngineProxy {
 
     async fn has_runner(&self, session_id: &SessionId) -> bool {
         self.state.runners.read().await.contains_key(&session_id.0)
+    }
+
+    async fn recover_sessions(&self, summaries: Vec<SessionSummary>) {
+        // EngineProxy is a lightweight constructor-time facade (used by the
+        // preset loader to wire inner graphs); full A7 reconstruction lives
+        // on GraphFlowEngine. The in-memory tracker half is still honored so
+        // a proxy-backed consumer observes recovered sessions.
+        self.state.recover_sessions(summaries).await;
+    }
+
+    async fn ensure_recovered_runner(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), EngineError> {
+        // EngineProxy carries no capability holder/executor wiring, so the
+        // frozen-source reconstruction cannot run through it. GraphFlowEngine
+        // (the daemon's concrete engine) is the only supported path; this
+        // proxy never serves daemon recovery.
+        Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+            format!(
+                "ensure_recovered_runner: EngineProxy cannot reconstruct session '{}' \
+                 (no capability/executor wiring); use the concrete GraphFlowEngine \
+                 (reconstruction_unavailable, non-replayable)",
+                session_id.0
+            ),
+        )))
     }
 
     async fn start_session_with_preset(
@@ -2493,9 +2751,9 @@ impl GraphFlowEngine {
     /// the in-memory tracker.
     ///
     /// **R6 fix**: For each non-terminal session summary, reconstructs the
-    /// `FlowRunner` from the embedded preset so that `run_step` succeeds
-    /// after recovery (previously returned `NoGraphLoaded`).
-    pub async fn recover_sessions(&self, summaries: Vec<SessionSummary>) {
+    /// `FlowRunner` so that `run_step` succeeds after recovery. The trait
+    /// entry point (`OrchestrationEngine::recover_sessions`) delegates here.
+    pub async fn recover_sessions_inner(&self, summaries: Vec<SessionSummary>) {
         for summary in &summaries {
             // Skip terminal sessions — they don't need runners.
             if summary.status.is_terminal() {
@@ -2508,65 +2766,22 @@ impl GraphFlowEngine {
             // registered.
             self.register_cancellation(&summary.session_id);
 
-            // Important 1 (round 4): reconstruct the COMPLETE owned-descendant
-            // closure for a recovered root. `hydrate_children` installs only
-            // the DIRECT children of the requested parent; a child can itself
-            // own nested children (`InnerGraphTask` spawns through the same
-            // engine path), so a restarted root must recursively hydrate the
-            // persisted parent relation breadth-first. A root Cancel after
-            // this recovery can then fire/finalize every owned descendant.
-            //
-            // A corrupt/unsupported child (load_children failure, missing
-            // child session snapshot) must propagate: the parent cannot be
-            // reconstructed over an incomplete children map (A7). We surface
-            // it as a warning and skip runner reconstruction — the session
-            // stays tracked but not driven (non-replayable).
-            let mut hydrate_queue: std::collections::VecDeque<SessionId> =
-                std::collections::VecDeque::new();
-            hydrate_queue.push_back(summary.session_id.clone());
-            let mut hydrate_failed = false;
-            while let Some(parent) = hydrate_queue.pop_front() {
-                if let Err(e) = self.state.hydrate_children(&parent).await {
-                    tracing::warn!(
-                        "recovery: failed to hydrate children for session {}: {}; \
-                         session marked non-replayable (no runner)",
-                        parent.0,
-                        e
-                    );
-                    hydrate_failed = true;
-                    break;
-                }
-                // Every recovered descendant registers its coordinator
-                // cancellation token (A1) and is enqueued for its own
-                // children — the closure is complete only when the whole
-                // persisted tree is hydrated.
-                let children = self
-                    .state
-                    .children
-                    .read()
+            // Store-backed runs: reconstruct the COMPLETE owned-descendant
+            // closure (children hydrated first, then the root runner from
+            // the frozen source). A corrupt/unsupported child propagates as
+            // non-replayable (A7). No-store (in-memory/test) engines keep
+            // the legacy embedded-preset reconstruction directly.
+            let result = if self.state.workflow_store.is_some() {
+                self.attach_runner_with_owned_closure(&summary.session_id)
                     .await
-                    .get(&parent.0)
-                    .cloned()
-                    .unwrap_or_default();
-                for child in &children {
-                    self.register_cancellation(&SessionId(child.session.id.clone()));
-                    hydrate_queue.push_back(SessionId(child.session.id.clone()));
-                }
-            }
-            if hydrate_failed {
-                continue;
-            }
-
-            // R6: Try to reconstruct the FlowRunner from the embedded preset.
-            // The preset_id in the summary corresponds to the preset that was
-            // used to start the session. We load it, wire the outer graph,
-            // and create a FlowRunner pointing at the same storage (which
-            // already has the persisted session data).
-            if let Err(e) = self.reconstruct_runner(summary).await {
+            } else {
+                self.reconstruct_runner_legacy(&summary).await
+            };
+            if let Err(e) = result {
                 tracing::warn!(
                     "R6: failed to reconstruct runner for session {}: {}; \
                      session will remain in tracker but run_step will fail until \
-                     manually re-started",
+                     manually re-started (reconstruction_unavailable, non-replayable)",
                     summary.session_id.0,
                     e
                 );
@@ -2575,6 +2790,85 @@ impl GraphFlowEngine {
 
         // Add all summaries to the in-memory tracker (idempotent).
         self.state.recover_sessions(summaries).await;
+    }
+
+    /// Reconstruct the COMPLETE owned-descendant closure for a recovered
+    /// root — hydrated children map first, then the root runner (A7).
+    ///
+    /// `hydrate_children` installs only the DIRECT children of the requested
+    /// parent; a child can itself own nested children (`InnerGraphTask`
+    /// spawns through the same engine path), so a restarted root must
+    /// recursively hydrate the persisted parent relation breadth-first. A
+    /// root Cancel after this recovery can then fire/finalize every owned
+    /// descendant.
+    ///
+    /// A corrupt/unsupported child (load_children failure, missing child
+    /// session snapshot) must propagate: the parent cannot be reconstructed
+    /// over an incomplete children map (A7). Surface it as non-replayable.
+    async fn attach_runner_with_owned_closure(
+        &self,
+        root_session_id: &SessionId,
+    ) -> Result<(), EngineError> {
+        let mut hydrate_queue: std::collections::VecDeque<SessionId> =
+            std::collections::VecDeque::new();
+        // A cyclic persisted parent relation (corrupt rows) must never hang
+        // recovery: visit each session at most once (tri-QC P1-D).
+        let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+        hydrate_queue.push_back(root_session_id.clone());
+        visited.insert(root_session_id.0.clone());
+        while let Some(parent) = hydrate_queue.pop_front() {
+            self.state.hydrate_children(&parent).await?;
+            // Every recovered descendant registers its coordinator
+            // cancellation token (A1) and is enqueued for its own
+            // children — the closure is complete only when the whole
+            // persisted tree is hydrated.
+            let children = self
+                .state
+                .children
+                .read()
+                .await
+                .get(&parent.0)
+                .cloned()
+                .unwrap_or_default();
+            for child in &children {
+                self.register_cancellation(&SessionId(child.session.id.clone()));
+                if visited.insert(child.session.id.clone()) {
+                    hydrate_queue.push_back(SessionId(child.session.id.clone()));
+                }
+            }
+        }
+        // R6: Try to reconstruct the root FlowRunner from the frozen source
+        // descriptor. The persisted session data in storage preserves the
+        // execution position.
+        self.reconstruct_runner(root_session_id).await
+    }
+
+    /// Attach a runner for `session_id` ON DEMAND (A7 rule 4).
+    ///
+    /// A human-wait run whose runner was not attached at boot (recovery
+    /// skipped it, or this daemon instance never ran recovery for it) gets
+    /// its runner rebuilt here on a matching continue — the complete
+    /// owned-descendant closure first, then the root runner, using the
+    /// exact same frozen-source verification as boot recovery.
+    ///
+    /// Returns the concrete [`EngineError`] reason (source missing, hash
+    /// mismatch, corrupt child identity) when reconstruction is impossible,
+    /// so the caller can surface `reconstruction_unavailable` while the
+    /// durable human wait stays preserved.
+    ///
+    /// # Errors
+    /// Returns [`EngineError`] when the run has no durable v1 descriptor,
+    /// the frozen source no longer matches, or a persisted child is
+    /// corrupt/unsupported — all non-replayable.
+    pub async fn ensure_recovered_runner_inner(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), EngineError> {
+        self.register_cancellation(session_id);
+        if self.has_runner(session_id).await {
+            return Ok(());
+        }
+        self.attach_runner_with_owned_closure(session_id).await
     }
 
     /// Reconstruct a `FlowRunner` for a recovered session (R6).
@@ -2595,7 +2889,7 @@ impl GraphFlowEngine {
             .unwrap_or_else(|| Arc::new(CapabilityRegistry::empty()))
     }
 
-    async fn reconstruct_runner(&self, summary: &SessionSummary) -> Result<(), EngineError> {
+    async fn reconstruct_runner(&self, session_id: &SessionId) -> Result<(), EngineError> {
         // Load the durable descriptor (frozen at admission) so we honour the
         // persisted source identity and preset version (Important 5). A run
         // that has no v1 descriptor is a legacy/unverified row — its runner
@@ -2603,29 +2897,49 @@ impl GraphFlowEngine {
         let descriptor = match &self.state.workflow_store {
             Some(store) => {
                 let record = store
-                    .load_run(&summary.session_id)
+                    .load_run(session_id)
                     .await?
                     .ok_or_else(|| {
                         EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                             "R6: session '{}' has no persisted run record; cannot reconstruct runner \
                              (non-replayable)",
-                            summary.session_id.0
+                            session_id.0
                         )))
                     })?;
                 record.descriptor.ok_or_else(|| {
                     EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                         "R6: session '{}' has no v1 descriptor; cannot reconstruct runner over a \
                          frozen source (non-replayable)",
-                        summary.session_id.0
+                        session_id.0
                     )))
                 })?
             }
             None => {
-                // No workflow store (in-memory/test engine): fall back to the
-                // legacy embedded-preset path (no durable descriptor).
-                return self
-                    .reconstruct_runner_legacy(summary)
-                    .await;
+                // No workflow store (in-memory/test engine): no durable
+                // descriptor exists, so a frozen-source reconstruction is
+                // impossible. The legacy embedded path is used by
+                // `recover_sessions` directly; an on-demand attach without
+                // a store (no durable run) is non-replayable.
+                let summary = self
+                    .state
+                    .sessions
+                    .read()
+                    .await
+                    .iter()
+                    .find(|s| s.session_id == *session_id)
+                    .cloned();
+                match summary.as_ref() {
+                    Some(summary) => return self.reconstruct_runner_legacy(summary).await,
+                    None => {
+                        return Err(EngineError::GraphFlow(
+                            graph_flow::GraphError::StorageError(format!(
+                                "R6: session '{}' has no durable run record and is not tracked; \
+                                 cannot reconstruct runner (non-replayable)",
+                                session_id.0
+                            )),
+                        ));
+                    }
+                }
             }
         };
 
@@ -2643,7 +2957,7 @@ impl GraphFlowEngine {
                             graph_flow::GraphError::StorageError(format!(
                                 "R6: embedded preset '{preset_id}' is missing for session {}: {} \
                                  (reconstruction_unavailable, non-replayable)",
-                                summary.session_id.0, e
+                                session_id.0, e
                             )),
                         ));
                     }
@@ -2657,7 +2971,7 @@ impl GraphFlowEngine {
                             graph_flow::GraphError::StorageError(format!(
                                 "R6: directory preset at '{:?}' is missing/invalid for session {}: {} \
                                  (reconstruction_unavailable, non-replayable)",
-                                root, summary.session_id.0, e
+                                root, session_id.0, e
                             )),
                         ));
                     }
@@ -2673,7 +2987,7 @@ impl GraphFlowEngine {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "R6: reloaded preset '{}' for session {} has no source identity \
                  (reconstruction_unavailable, non-replayable)",
-                loaded.id, summary.session_id.0
+                loaded.id, session_id.0
             )))
         })?;
         if reloaded_identity != &descriptor.source {
@@ -2681,7 +2995,7 @@ impl GraphFlowEngine {
                 graph_flow::GraphError::StorageError(format!(
                     "R6: preset source identity mismatch for session {} (frozen {:?} != reloaded {:?}) \
                      — source changed or moved; reconstruction_unavailable (non-replayable)",
-                    summary.session_id.0, descriptor.source, reloaded_identity
+                    session_id.0, descriptor.source, reloaded_identity
                 )),
             ));
         }
@@ -2694,9 +3008,119 @@ impl GraphFlowEngine {
                 graph_flow::GraphError::StorageError(format!(
                     "R6: preset version mismatch for session {} (frozen {} != current {}) \
                      — reconstruction_unavailable (non-replayable)",
-                    summary.session_id.0, version, loaded.version
+                    session_id.0, version, loaded.version
                 )),
             ));
+        }
+
+        // P3 T1 rereview-3/4 P1 (A7 rule 2): every persisted descendant's
+        // `graph_name` must name an inner graph the frozen preset actually
+        // defines, and every NON-TERMINAL child must additionally name the
+        // inner graph entered by its parent's CURRENT task position. A
+        // parseable but tampered graph_name (unknown, or valid-but-wrong
+        // position) would otherwise miss the reattachment lookup and make
+        // `InnerGraphTask` spawn a fresh child and replay the work.
+        {
+            let valid_inner: std::collections::HashSet<&str> =
+                loaded.inner_graphs.keys().map(String::as_str).collect();
+            // Snapshot the closure first so no children-map lock is held
+            // across the storage awaits below.
+            let snapshot: Vec<(SessionId, Vec<crate::run_state::ChildCheckpoint>)> = {
+                let children_map = self.state.children.read().await;
+                let mut queue: std::collections::VecDeque<SessionId> =
+                    std::collections::VecDeque::new();
+                let mut visited: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
+                queue.push_back(session_id.clone());
+                visited.insert(session_id.0.clone());
+                let mut collected = Vec::new();
+                while let Some(parent) = queue.pop_front() {
+                    let Some(children) = children_map.get(&parent.0) else {
+                        continue;
+                    };
+                    for child in children {
+                        if visited.insert(child.session.id.clone()) {
+                            queue.push_back(SessionId(child.session.id.clone()));
+                        }
+                    }
+                    collected.push((parent, children.clone()));
+                }
+                collected
+            };
+            for (parent, children) in snapshot {
+                let parent_session = self
+                    .state
+                    .storage
+                    .get(&parent.0)
+                    .await
+                    .map_err(EngineError::GraphFlow)?;
+                let parent_task = parent_session
+                    .as_ref()
+                    .map(|session| session.current_task_id.clone())
+                    .unwrap_or_default();
+                let parent_is_root = parent.0 == session_id.0;
+                let expected_inner = if parent_is_root {
+                    inner_graph_entered_by_state(&loaded, &parent_task)
+                } else {
+                    // Inner graph nodes cannot enter inner graphs.
+                    None
+                };
+                // Root context records the child session id per inner-graph
+                // state that owns it (`_inner_child_session_<state>`); a
+                // non-terminal child past the inner-graph position is only
+                // replayable when that record names it consistently.
+                let recorded: std::collections::HashMap<
+                    String,
+                    std::collections::HashSet<Option<String>>,
+                > = if parent_is_root {
+                    let data = parent_session
+                        .as_ref()
+                        .and_then(|session| serde_json::to_value(&session.context).ok())
+                        .and_then(|value| crate::resume_rules::context_data(&value).cloned());
+                    let mut map: std::collections::HashMap<
+                        String,
+                        std::collections::HashSet<Option<String>>,
+                    > = std::collections::HashMap::new();
+                    if let Some(data) = data {
+                        for (key, value) in data {
+                            let Some(state) = key.strip_prefix("_inner_child_session_") else {
+                                continue;
+                            };
+                            let Some(child_id) = value.as_str() else {
+                                continue;
+                            };
+                            map.entry(child_id.to_string()).or_default().insert(
+                                inner_graph_entered_by_state(&loaded, state)
+                                    .map(str::to_owned),
+                            );
+                        }
+                    }
+                    map
+                } else {
+                    std::collections::HashMap::new()
+                };
+                for child in children {
+                    // All markers naming this child must agree on one inner
+                    // graph (duplicate/conflicting markers are tampering).
+                    let recorded_graph: Option<&str> = recorded
+                        .get(&child.session.id)
+                        .filter(|set| set.len() == 1)
+                        .and_then(|set| set.iter().next())
+                        .and_then(|entry| entry.as_deref());
+                    validate_descendant_position(
+                        &loaded.id,
+                        &valid_inner,
+                        expected_inner,
+                        parent_is_root,
+                        recorded_graph,
+                        &parent.0,
+                        &parent_task,
+                        &child.session.id,
+                        child.graph_name.as_deref(),
+                        child.status.is_terminal(),
+                    )?;
+                }
+            }
         }
 
         // Build the wired outer graph using EngineProxy + capabilities.
@@ -2723,12 +3147,12 @@ impl GraphFlowEngine {
             .runners
             .write()
             .await
-            .insert(summary.session_id.0.clone(), runner);
+            .insert(session_id.0.clone(), runner);
 
         tracing::info!(
             "R6: reconstructed runner for session {} (preset: {}, version: {})",
-            summary.session_id.0,
-            summary.preset_id,
+            session_id.0,
+            loaded.id,
             version
         );
 
@@ -3386,7 +3810,7 @@ impl OrchestrationEngine for GraphFlowEngine {
         &self,
         parent_session_id: &str,
         inner_graph: Arc<Graph>,
-    ) -> Option<SessionId> {
+    ) -> Result<Option<SessionId>, EngineError> {
         self.state
             .attach_existing_child_session_internal(parent_session_id, inner_graph)
             .await
@@ -3415,6 +3839,17 @@ impl OrchestrationEngine for GraphFlowEngine {
 
     async fn has_runner(&self, session_id: &SessionId) -> bool {
         self.state.runners.read().await.contains_key(&session_id.0)
+    }
+
+    async fn recover_sessions(&self, summaries: Vec<SessionSummary>) {
+        self.recover_sessions_inner(summaries).await;
+    }
+
+    async fn ensure_recovered_runner(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), EngineError> {
+        self.ensure_recovered_runner_inner(session_id).await
     }
 
     async fn start_session_with_preset(
@@ -3479,6 +3914,76 @@ mod tests {
             CapabilityRegistry::with_builtins(),
         ));
         GraphFlowEngine::new_with_storage(storage, caps)
+    }
+
+    /// P3 T1 rereview-4 P1 (A7 rule 2): a NON-TERMINAL descendant must name
+    /// the inner graph entered by its parent's current position — a valid but
+    /// wrong inner-graph name is non-replayable (it would miss reattachment
+    /// and mint a replacement child).
+    #[test]
+    fn descendant_position_validation_rejects_valid_but_wrong_inner_graph() {
+        use std::collections::HashSet;
+        let valid: HashSet<&str> = ["graph_a", "graph_b"].into_iter().collect();
+
+        validate_descendant_position(
+            "preset", &valid, Some("graph_a"), true, None, "parent", "s1", "child", Some("graph_a"), false,
+        )
+        .expect("matching non-terminal child is replayable");
+
+        let err = validate_descendant_position(
+            "preset", &valid, Some("graph_a"), true, None, "parent", "s1", "child", Some("graph_b"), false,
+        )
+        .expect_err("valid-but-wrong-position must refuse");
+        assert!(
+            err.to_string().contains("non-replayable"),
+            "got {err}"
+        );
+
+        let err = validate_descendant_position(
+            "preset", &valid, None, true, None, "parent", "s1", "child", Some("graph_c"), true,
+        )
+        .expect_err("unknown inner graph must refuse even when terminal");
+        assert!(err.to_string().contains("unknown inner graph"), "got {err}");
+
+        validate_descendant_position(
+            "preset", &valid, Some("graph_a"), true, None, "parent", "s1", "child", Some("graph_b"), true,
+        )
+        .expect("terminal child is historical: membership suffices");
+
+        validate_descendant_position(
+            "preset", &valid, None, true, Some("graph_a"), "parent", "s2", "child", Some("graph_a"), false,
+        )
+        .expect("a child recorded under a state entering its own graph is tolerated");
+
+        let err = validate_descendant_position(
+            "preset", &valid, None, true, Some("graph_a"), "parent", "s2", "child", Some("graph_b"), false,
+        )
+        .expect_err("a recorded state entering a different graph must refuse");
+        assert!(
+            err.to_string().contains("not recorded by an inner-graph state entering"),
+            "got {err}"
+        );
+
+        let err = validate_descendant_position(
+            "preset", &valid, None, true, None, "parent", "s2", "child", Some("graph_a"), false,
+        )
+        .expect_err("an unrecorded past-position child must refuse (loop-back replay)");
+        assert!(
+            err.to_string().contains("not recorded by an inner-graph state entering"),
+            "got {err}"
+        );
+
+        // Inner graph nodes cannot enter inner graphs: a live descendant
+        // under a non-root parent is non-replayable.
+        let err = validate_descendant_position(
+            "preset", &valid, Some("graph_a"), false, None, "child-parent", "n1", "grandchild",
+            Some("graph_a"), false,
+        )
+        .expect_err("live descendant under an inner-graph session must refuse");
+        assert!(
+            err.to_string().contains("nested inner graphs do not exist"),
+            "got {err}"
+        );
     }
 
     #[tokio::test]

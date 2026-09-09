@@ -154,6 +154,7 @@ pub async fn list_sessions(
             status: session_status_to_str(&s.status),
             current_task_id: s.current_task_id,
             failure_reason: None,
+            execution: None,
         })
         .collect();
 
@@ -204,6 +205,16 @@ pub async fn get_session(
         .ok_or_else(|| NexusApiError::service_unavailable("engine not available"))?;
 
     let sid = nexus_orchestration::engine::SessionId(session_id.clone());
+    // Shared durable execution projection (A2/A7): present for terminal rows
+    // with no live runner; a load error projects unreadable, never a
+    // fabricated class.
+    let execution = match state.pool() {
+        Some(pool) => Some(
+            crate::execution_projection::project_for_session(pool, Some(&session_id), "driven_v1")
+                .await,
+        ),
+        None => None,
+    };
     let sessions = engine
         .list_active(nexus_orchestration::engine::SessionFilter::default())
         .await
@@ -245,6 +256,7 @@ pub async fn get_session(
                 status: row.status,
                 current_task_id: row.current_task_id,
                 failure_reason,
+                execution: execution.clone(),
             }
         } else {
             SessionSummary {
@@ -254,6 +266,7 @@ pub async fn get_session(
                 status: session_status_to_str(&active.status),
                 current_task_id: active.current_task_id,
                 failure_reason: None,
+                execution: execution.clone(),
             }
         }
     } else {
@@ -275,6 +288,7 @@ pub async fn get_session(
             status: row.status,
             current_task_id: row.current_task_id,
             failure_reason,
+            execution: execution.clone(),
         }
     };
 
@@ -384,6 +398,21 @@ pub async fn signal_session(
                         message: format!("state conflict for {sid}: {msg}"),
                     }
                 }
+                crate::preset_run::RunControlError::ReconstructionUnavailable {
+                    session_id,
+                    reason,
+                } => NexusApiError::ConflictCodedDetails {
+                    code: "reconstruction_unavailable".into(),
+                    message: format!(
+                        "cannot continue session {session_id}: {reason} — \
+                         human wait preserved, cancel-only"
+                    ),
+                    details: serde_json::json!({
+                        "session_id": session_id,
+                        "reason": reason,
+                        "allowed_actions": ["cancel", "new_run"],
+                    }),
+                },
                 crate::preset_run::RunControlError::ScheduleNotFound(sid) => {
                     NexusApiError::NotFound(format!("session {sid} not found"))
                 }

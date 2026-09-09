@@ -5,11 +5,13 @@
 
 mod agent_host;
 mod db;
+mod engine;
 mod http;
 mod mock_all;
 
 pub use agent_host::AgentHostSubsystem;
 pub use db::DbSubsystem;
+pub use engine::EngineSubsystem;
 pub use http::HttpSubsystem;
 pub use mock_all::MockAllSubsystems;
 

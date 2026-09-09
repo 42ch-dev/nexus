@@ -90,6 +90,13 @@ struct InspectDto {
     /// Durable human-wait token (A4) for v1 `waiting_for_input` rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     wait_id: Option<String>,
+    /// Legal operator actions for the canonical recovery class (shared A2
+    /// projection; tri-QC P1-B).
+    allowed_actions: Vec<String>,
+    /// Stable machine reason for an uncertain/blocked outcome (e.g. a human
+    /// wait whose frozen source can no longer be reconstructed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason_code: Option<String>,
     current_task_id: Option<String>,
     created_at: i64,
     updated_at: i64,
@@ -413,6 +420,9 @@ fn project(row: &CheckpointRow) -> InspectDto {
         .then(|| run_state.as_ref())
         .flatten()
         .and_then(|s| s.wait.as_ref().map(|w| w.wait_id.clone()));
+    // Read-only frozen-source verification (A7): a human wait whose source
+    // can no longer be reconstructed must not advertise continue.
+    let source_ok = frozen_source_reconstructable(row.run_descriptor_json.as_deref());
 
     // For v1 rows the resumable verdict is projected from the canonical A7
     // class (authoritative status/state) — the legacy context-key cascade
@@ -433,6 +443,9 @@ fn project(row: &CheckpointRow) -> InspectDto {
         state_revision: row.state_revision,
         recovery_class,
         wait_id,
+        allowed_actions: allowed_actions_for(recovery_class, source_ok),
+        reason_code: (recovery_class == RecoveryClass::HumanWait && !source_ok)
+            .then(|| "reconstruction_unavailable".to_string()),
         current_task_id: row.current_task_id.clone(),
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -500,6 +513,9 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
         .then(|| run_state.as_ref())
         .flatten()
         .and_then(|s| s.wait.as_ref().map(|w| w.wait_id.clone()));
+    // Read-only frozen-source verification (A7): a human wait whose source
+    // can no longer be reconstructed must not advertise continue.
+    let source_ok = frozen_source_reconstructable(row.run_descriptor_json.as_deref());
 
     let legacy_resumable = verdict_for(
         row.status.as_str(),
@@ -530,6 +546,9 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
         state_revision: row.state_revision,
         recovery_class,
         wait_id,
+        allowed_actions: allowed_actions_for(recovery_class, source_ok),
+        reason_code: (recovery_class == RecoveryClass::HumanWait && !source_ok)
+            .then(|| "reconstruction_unavailable".to_string()),
         current_task_id: row.current_task_id.clone(),
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -668,6 +687,35 @@ fn render_ts(secs: i64) -> String {
 
 /// Stable human word for a [`RecoveryClass`] (same wording as detail and
 /// list output; the DTO `serde` name stays the machine contract).
+/// Read-only frozen-source verification (A7): the persisted descriptor's
+/// source must still resolve and hash-match at its frozen version. No runner
+/// is attached and no state is mutated.
+fn frozen_source_reconstructable(bytes: Option<&[u8]>) -> bool {
+    use nexus_orchestration::preset::{load_embedded_preset, load_preset};
+    use nexus_orchestration::run_state::PresetSourceIdentity;
+
+    let Some(bytes) = bytes else {
+        return false;
+    };
+    let Ok(descriptor) =
+        serde_json::from_slice::<nexus_orchestration::run_state::RunDescriptorV1>(bytes)
+    else {
+        return false;
+    };
+    let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+    let loaded = match &descriptor.source {
+        PresetSourceIdentity::Embedded { preset_id, .. } => load_embedded_preset(preset_id, &caps),
+        PresetSourceIdentity::Directory { root, .. } => load_preset(root, &caps),
+    };
+    match loaded {
+        Ok(loaded) => {
+            loaded.source_identity.as_ref() == Some(&descriptor.source)
+                && loaded.version == descriptor.preset_version
+        }
+        Err(_) => false,
+    }
+}
+
 fn recovery_class_str(class: RecoveryClass) -> &'static str {
     match class {
         RecoveryClass::Terminal => "terminal",
@@ -680,6 +728,22 @@ fn recovery_class_str(class: RecoveryClass) -> &'static str {
     }
 }
 
+/// Legal operator actions for the canonical recovery class — the same
+/// mapping the daemon projection uses (A2; tri-QC P1-B).
+fn allowed_actions_for(class: RecoveryClass, source_reconstructable: bool) -> Vec<String> {
+    let actions: &[&str] = match class {
+        RecoveryClass::Terminal => &["new_run"],
+        // A human wait whose frozen source no longer verifies must not
+        // advertise continue (tri-QC P1-C).
+        RecoveryClass::HumanWait if !source_reconstructable => &["cancel", "new_run"],
+        RecoveryClass::HumanWait => &["continue", "cancel"],
+        RecoveryClass::Interrupted => &["cancel", "new_run"],
+        RecoveryClass::SafeBoundary | RecoveryClass::ConvergeMerge => &["cancel"],
+        RecoveryClass::LegacyUnverified | RecoveryClass::Unreadable => &["cancel", "new_run"],
+    };
+    actions.iter().map(|action| (*action).to_string()).collect()
+}
+
 fn render_detail(dto: &InspectDto) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "session:        {}", dto.session_id);
@@ -688,6 +752,10 @@ fn render_detail(dto: &InspectDto) -> String {
     let _ = writeln!(out, "preset_version: {}", dto.preset_version);
     let _ = writeln!(out, "status:         {}", dto.db_status);
     let _ = writeln!(out, "recovery_class: {}", recovery_class_str(dto.recovery_class));
+    let _ = writeln!(out, "allowed_actions: {}", dto.allowed_actions.join(", "));
+    if let Some(reason) = &dto.reason_code {
+        let _ = writeln!(out, "reason_code:    {reason}");
+    }
     let position = dto.current_task_id.as_deref().unwrap_or("(none recorded)");
     let _ = writeln!(out, "position:       {position}");
     let _ = writeln!(out, "created_at:     {}", render_ts(dto.created_at));

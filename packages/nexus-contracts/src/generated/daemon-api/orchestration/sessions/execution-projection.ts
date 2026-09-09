@@ -5,30 +5,9 @@
  */
 
 /**
- * Response for GET /v1/daemon/orchestration/sessions/{session_id} — full session detail with status.
+ * Shared durable execution projection (A2/A7): recovery class, current human wait, stable reason code and the legal operator actions. Present for schedules without a run (version/revision null, class from policy).
  */
-export interface SessionDetailResponse {
-  session: NexusOrchestrationSessionSummary;
-}
-/**
- * Summary of an active orchestration engine session.
- */
-export interface NexusOrchestrationSessionSummary {
-  session_id: string;
-  creator_id: string;
-  preset_id: string;
-  status: string;
-  current_task_id?: string;
-  /**
-   * Stable reason for terminal/uncertain outcomes (e.g. unconfirmed cancel cleanup).
-   */
-  failure_reason?: string;
-  execution?: NexusExecutionProjection;
-}
-/**
- * Shared recovery/legal-action projection (A2/A7).
- */
-export interface NexusExecutionProjection {
+export interface ExecutionProjection {
   /**
    * Durable execution version; null when no run exists.
    */

@@ -127,6 +127,9 @@ pub struct ScheduleSummary {
     /// The owned run session ID, when the schedule has been admitted (A3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_session_id: Option<String>,
+    /// Shared durable execution projection (A2/A7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<crate::local::orchestration::http::ExecutionProjection>,
     pub label: Option<String>,
     pub current_core_context_version: u32,
     pub created_at: String,

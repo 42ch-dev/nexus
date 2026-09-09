@@ -32,8 +32,20 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
 use assert_cmd::Command;
 use async_trait::async_trait;
+use common::LiveDaemon;
+use nexus_agent_host::capability::model::{
+    CapabilityDescriptor, CreateSessionRequest, FinishReason, HostContentBlock, HostEvent,
+    HostEventStream, HostHealth, HostOperation, HostStartConfig, OperationFinishedEvent,
+    OperationStartedEvent, ProtocolKind, ProviderHealth, TextDeltaEvent,
+};
+use nexus_agent_host::{
+    DiscoverySource, HostError, HostOperationId, HostResult, HostSession, HostSessionId,
+    LaunchStrategy, ProviderCatalog, ProviderCatalogEntry, SessionState, TrustLevel,
+};
 use nexus_daemon_runtime::preset_run::{
     resume_driven_sessions, PresetRunConfig, PresetRunOutcome, ResumeDecision,
 };
@@ -49,9 +61,10 @@ use nexus_orchestration::{
     OrchestrationEngine, PresetSourceIdentity,
 };
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// The REAL `nexus42 ops inspect` binary over the hermetic tmp HOME whose
 /// seeded `config.toml` resolves the SAME `state.db` the pools write to.
@@ -1231,4 +1244,978 @@ async fn restart_durable_status_nested_child_wait_preserved_and_never_auto_resum
 
     pool_b.close().await;
     drop(tmp);
+}
+
+// ---------------------------------------------------------------------------
+// P3 T1 — daemon-level restart matrix (A7): production boot/attach path over
+// the SAME DB/HOME, driven through `LiveDaemon::restart()` (abort drives →
+// republish bundle → run_boot_recovery). Source-verified reattachment: the
+// frozen source identity (manifest + referenced template bytes) is verified
+// at reconstruction; a changed/missing user preset preserves the human wait
+// and makes continue return `reconstruction_unavailable` (cancel-only).
+// ---------------------------------------------------------------------------
+
+/// Deterministic non-echo Host fixture (mirrors the P2 MockHost): every
+/// prompt returns a transformed string, records the rendered prompt, and
+/// advertises `mock-provider` so admission's binding gate validates.
+struct RestartMockHost {
+    prompts: Mutex<Vec<String>>,
+    execs: AtomicUsize,
+}
+
+impl RestartMockHost {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            prompts: Mutex::new(Vec::new()),
+            execs: AtomicUsize::new(0),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl nexus_agent_host::HostFacade for RestartMockHost {
+    async fn start(&self, _config: HostStartConfig) -> HostResult<()> {
+        Ok(())
+    }
+    async fn create_session(
+        &self,
+        request: CreateSessionRequest,
+    ) -> HostResult<HostSession> {
+        Ok(HostSession {
+            id: HostSessionId::new(),
+            provider_id: request.provider_id,
+            state: SessionState::Ready,
+            created_at: chrono::Utc::now(),
+            active_op_id: None,
+            negotiated_capabilities: CapabilityDescriptor::native_cli_limited(),
+            owner: request.owner,
+            process_identity: None,
+        })
+    }
+    async fn exec(
+        &self,
+        session_id: HostSessionId,
+        op: HostOperation,
+    ) -> HostResult<HostEventStream> {
+        self.execs.fetch_add(1, Ordering::SeqCst);
+        let op_id = match op {
+            HostOperation::Prompt { op_id, content, .. } => {
+                let text = match content.as_slice() {
+                    [HostContentBlock::Text { text }] => text.clone(),
+                    other => format!("unexpected content {other:?}"),
+                };
+                self.prompts.lock().expect("prompts").push(text);
+                op_id
+            }
+            other => {
+                return Err(HostError::internal(format!(
+                    "unexpected operation {other:?}"
+                )));
+            }
+        };
+        let started = HostEvent::OpStarted(OperationStartedEvent {
+            op_id: op_id.clone(),
+            session_id: session_id.clone(),
+        });
+        let delta = HostEvent::MessageDelta(TextDeltaEvent {
+            session_id: session_id.clone(),
+            op_id: op_id.clone(),
+            text: "transformed:restart-output".to_string(),
+        });
+        let finished = HostEvent::OpFinished(OperationFinishedEvent {
+            session_id,
+            op_id,
+            reason: FinishReason::EndTurn,
+        });
+        Ok(Box::pin(futures_util::stream::iter(vec![
+            Ok(started),
+            Ok(delta),
+            Ok(finished),
+        ])))
+    }
+    async fn cancel(&self, _op_id: HostOperationId) -> HostResult<()> {
+        Ok(())
+    }
+    async fn health(&self) -> HostResult<HostHealth> {
+        Ok(HostHealth {
+            running: true,
+            active_sessions: 0,
+            active_operations: 0,
+        })
+    }
+    async fn shutdown(&self) -> HostResult<()> {
+        Ok(())
+    }
+    async fn shutdown_session(&self, _session_id: HostSessionId) -> HostResult<()> {
+        Ok(())
+    }
+    async fn list_sessions(&self) -> HostResult<Vec<HostSession>> {
+        Ok(Vec::new())
+    }
+    async fn provider_catalog(&self) -> HostResult<ProviderCatalog> {
+        Ok(ProviderCatalog {
+            entries: vec![ProviderCatalogEntry {
+                provider_id: nexus_agent_host::ProviderId::new("mock-provider"),
+                display_name: "mock-provider".to_string(),
+                protocol_kind: ProtocolKind::NativeCli,
+                launch: LaunchStrategy::NativeCli {
+                    command: "mock".to_string(),
+                    args: vec![],
+                    env: HashMap::new(),
+                },
+                source: DiscoverySource::Config,
+                trust: TrustLevel::Explicit,
+                capabilities: CapabilityDescriptor::native_cli_limited(),
+                health: ProviderHealth {
+                    provider_id: nexus_agent_host::ProviderId::new("mock-provider"),
+                    available: true,
+                    latency_ms: None,
+                    message: None,
+                },
+            }],
+        })
+    }
+    fn subscribe_events(
+        &self,
+        _session_id: HostSessionId,
+    ) -> tokio::sync::broadcast::Receiver<HostEvent> {
+        // The daemon's prompt executor drains its own event stream; an
+        // empty channel is sufficient for this fixture.
+        let (_tx, rx): (
+            tokio::sync::broadcast::Sender<HostEvent>,
+            tokio::sync::broadcast::Receiver<HostEvent>,
+        ) = tokio::sync::broadcast::channel(16);
+        let _ = _tx;
+        rx
+    }
+}
+
+/// Public schedule add through the real HTTP surface (P3 fixture).
+async fn post_schedule(
+    daemon: &LiveDaemon,
+    preset_id: &str,
+    label: &str,
+) -> (reqwest::StatusCode, String, String) {
+    let resp = reqwest::Client::new()
+        .post(format!("{}/v1/daemon/orchestration/schedules", daemon.http_url))
+        .json(&json!({
+            "creator_id": "test_creator",
+            "preset_id": preset_id,
+            "label": label,
+            "seed": "p3-restart",
+            "input": { "topic": "p3-restart" },
+            "agent_bindings": { "default": { "provider_id": "mock-provider" } }
+        }))
+        .send()
+        .await
+        .expect("POST schedule");
+    let status = resp.status();
+    let body: Value = resp.json().await.expect("schedule json");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    (status, schedule_id, body["status"].as_str().unwrap_or("").to_string())
+}
+
+/// Read the durable v1 run state (status + wait token) for a session.
+async fn durable_run_state(
+    pool: &sqlx::SqlitePool,
+    session_id: &str,
+) -> (String, Option<Value>) {
+    let (status, state): (String, Option<Vec<u8>>) = sqlx::query_as(
+        "SELECT status, run_state_json FROM orchestration_sessions WHERE session_id = ?",
+    )
+    .bind(session_id)
+    .fetch_one(pool)
+    .await
+    .expect("load run state");
+    let state: Option<Value> = state.map(|b| {
+        serde_json::from_slice(&b).expect("run state json")
+    });
+    (status, state)
+}
+
+/// Wait until a schedule owns a session and the session reaches `expected`.
+async fn wait_owned_status(
+    daemon: &LiveDaemon,
+    schedule_id: &str,
+    expected: &str,
+    timeout_secs: u64,
+) -> String {
+    tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
+        loop {
+            let (_, current_session_id): (String, Option<String>) = sqlx::query_as(
+                "SELECT status, current_session_id FROM creator_schedules WHERE schedule_id = ?",
+            )
+            .bind(schedule_id)
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("schedule row");
+            if let Some(sid) = current_session_id {
+                let (run_status, _) = durable_run_state(&daemon.pool, &sid).await;
+                if run_status == expected {
+                    return sid;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("owned session reached expected status")
+}
+
+/// Write a user preset bundle (manifest + referenced template) under
+/// `$HOME/.nexus42/presets/<id>/` — the A7 directory-source shape.
+fn write_user_wait_preset(home: &Path, template_body: &str) {
+    let bundle = home.join(".nexus42").join("presets").join("p3-restart-wait");
+    std::fs::create_dir_all(&bundle.join("prompts")).expect("bundle dirs");
+    std::fs::write(
+        bundle.join("preset.yaml"),
+        r#"preset:
+  id: p3-restart-wait
+  version: 1
+  kind: creator
+  description: "P3 restart matrix — inner prompt then human wait"
+  requires_capabilities: []
+  initial: gate
+  terminal: done
+inner_graphs:
+  gen:
+    nodes:
+      - id: n1
+        kind: acp_prompt
+        template_file: prompts/gen.md
+        tool_policy: auto_grant_read_only
+states:
+  - id: gate
+    enter:
+      - kind: inner_graph
+        name: gen
+    exit_when:
+      kind: graph_complete
+    next: wait
+  - id: wait
+    exit_when:
+      kind: manual
+    next: done
+  - id: done
+    terminal: true
+"#,
+    )
+    .expect("preset.yaml");
+    std::fs::write(bundle.join("prompts").join("gen.md"), template_body).expect("gen.md");
+}
+
+/// A7 rule 4 at the daemon level: a user-directory-preset human wait survives
+/// a daemon-level restart over the SAME DB/HOME (production boot/attach
+/// path). The wait token is preserved byte-identical, boot never steps it,
+/// and a matching continue after restart reattaches the runner from the
+/// FROZEN source and completes WITHOUT replaying the completed inner graph
+/// prompt. No auto-approval.
+#[tokio::test]
+async fn daemon_restart_user_wait_reextracts_and_continues() {
+    let host = RestartMockHost::new();
+    let mut daemon = LiveDaemon::start_with_host_provider_and_dispatch(
+        host.clone(),
+        Arc::new(CountingDispatch {
+            calls: Arc::new(AtomicUsize::new(0)),
+        }),
+    )
+    .await;
+    write_user_wait_preset(daemon.home.path(), "template v1 body");
+    let (status, schedule_id, _) = post_schedule(&daemon, "p3-restart-wait", "p3-wait").await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "schedule admitted");
+
+    // The run drives gate → inner prompt (Host) → manual wait.
+    let sid = wait_owned_status(&daemon, &schedule_id, "waiting_for_input", 20).await;
+    let (_, state) = durable_run_state(&daemon.pool, &sid).await;
+    let wait_id = state
+        .as_ref()
+        .and_then(|s| s["wait"]["wait_id"].as_str())
+        .expect("durable wait token")
+        .to_string();
+    let effects_before = host.execs.load(Ordering::SeqCst);
+    // The inner poller steps the single-node child until its bound; the
+    // durable wait parks only after the gate advances. The exact count is
+    // harness-shaped — what matters is the NO-REPLAY guarantee below.
+    assert!(effects_before >= 1, "the inner prompt must have executed");
+
+    // Daemon-level restart over the same DB/HOME: production boot/attach.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    daemon.restart().await;
+
+    // The wait SURVIVES untouched: no auto-approval, no consume.
+    let (run_status, state_after) = durable_run_state(&daemon.pool, &sid).await;
+    assert_eq!(run_status, "waiting_for_input", "still waiting after restart");
+    assert_eq!(
+        state_after.as_ref().and_then(|s| s["wait"]["wait_id"].as_str()),
+        Some(wait_id.as_str()),
+        "the durable A4 wait token survives the daemon-level restart"
+    );
+
+    // A matching continue reattaches the runner from the frozen source and
+    // completes. The re-drive re-attaches the terminal child (never
+    // re-steps the completed prompt) — one more manual-exit step to done.
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "{}/v1/daemon/orchestration/sessions/{sid}/signal",
+            daemon.http_url
+        ))
+        .json(&json!({ "signal": "continue", "waitId": wait_id }))
+        .send()
+        .await
+        .expect("continue");
+    assert_eq!(resp.status(), reqwest::StatusCode::OK, "authorized continue");
+    // The re-drive runs in the background (single-flight owner); wait for
+    // the durable terminal.
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        loop {
+            let (run_status, _) = durable_run_state(&daemon.pool, &sid).await;
+            if run_status == "completed" {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("continued run completes");
+    assert_eq!(
+        host.execs.load(Ordering::SeqCst),
+        effects_before,
+        "the completed inner-graph prompt must NOT replay across restart+continue"
+    );
+}
+
+/// A7 rule 4 changed/missing source at the daemon level: after the wait parks
+/// with a frozen directory identity, the referenced TEMPLATE is changed; the
+/// daemon-level restart preserves the wait, and a matching continue returns
+/// `reconstruction_unavailable` (409, cancel-only) instead of driving a
+/// session whose frozen source no longer matches.
+#[tokio::test]
+async fn daemon_restart_changed_template_continue_refuses_cancel_only() {
+    let host = RestartMockHost::new();
+    let mut daemon = LiveDaemon::start_with_host_provider_and_dispatch(
+        host.clone(),
+        Arc::new(CountingDispatch {
+            calls: Arc::new(AtomicUsize::new(0)),
+        }),
+    )
+    .await;
+    write_user_wait_preset(daemon.home.path(), "template v1 body");
+    let (_status, schedule_id, _) = post_schedule(&daemon, "p3-restart-wait", "p3-changed").await;
+
+    let sid = wait_owned_status(&daemon, &schedule_id, "waiting_for_input", 20).await;
+    let (_, state) = durable_run_state(&daemon.pool, &sid).await;
+    let wait_id = state
+        .as_ref()
+        .and_then(|s| s["wait"]["wait_id"].as_str())
+        .expect("durable wait token")
+        .to_string();
+
+    // Change the referenced template bytes AFTER the frozen identity was
+    // stamped at admission: the source hash no longer matches.
+    write_user_wait_preset(daemon.home.path(), "CHANGED template body");
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    daemon.restart().await;
+
+    // The wait survives (source identity is only verified ON DEMAND, at a
+    // matching continue — boot never steps a human wait).
+    let (run_status, state_after) = durable_run_state(&daemon.pool, &sid).await;
+    assert_eq!(run_status, "waiting_for_input", "wait preserved under changed source");
+    assert_eq!(
+        state_after.as_ref().and_then(|s| s["wait"]["wait_id"].as_str()),
+        Some(wait_id.as_str()),
+        "wait token preserved under changed source"
+    );
+
+    // Matching continue: on-demand reattachment verifies the frozen hash and
+    // refuses with reconstruction_unavailable (409), cancel-only. No drive,
+    // no mutation, no new effects.
+    let effects_before = host.execs.load(Ordering::SeqCst);
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "{}/v1/daemon/orchestration/sessions/{sid}/signal",
+            daemon.http_url
+        ))
+        .json(&json!({ "signal": "continue", "waitId": wait_id }))
+        .send()
+        .await
+        .expect("continue");
+    assert_eq!(resp.status(), reqwest::StatusCode::CONFLICT, "409 conflict");
+    let body: Value = resp.json().await.expect("error json");
+    assert_eq!(
+        body["error"]["code"].as_str(),
+        Some("reconstruction_unavailable"),
+        "{body}"
+    );
+    let actions = body["error"]["details"]["allowed_actions"]
+        .as_array()
+        .expect("details");
+    assert_eq!(
+        serde_json::Value::Array(actions.clone()),
+        json!(["cancel", "new_run"]),
+        "cancel-only actions"
+    );
+    let (run_status, state_now) = durable_run_state(&daemon.pool, &sid).await;
+    assert_eq!(run_status, "waiting_for_input", "wait still preserved after refused continue");
+    assert_eq!(
+        state_now.as_ref().and_then(|s| s["wait"]["wait_id"].as_str()),
+        Some(wait_id.as_str()),
+        "token untouched by the refused continue"
+    );
+    assert_eq!(host.execs.load(Ordering::SeqCst), effects_before, "no effects");
+}
+
+/// A7 rule 4 missing source at the daemon level: deleting the user preset
+/// bundle after admission preserves the wait and continue refuses with
+/// `reconstruction_unavailable` (cancel-only) — never a fallback to current
+/// embedded/other bytes.
+#[tokio::test]
+async fn daemon_restart_missing_source_continue_refuses_cancel_only() {
+    let host = RestartMockHost::new();
+    let mut daemon = LiveDaemon::start_with_host_provider_and_dispatch(
+        host.clone(),
+        Arc::new(CountingDispatch {
+            calls: Arc::new(AtomicUsize::new(0)),
+        }),
+    )
+    .await;
+    write_user_wait_preset(daemon.home.path(), "template v1 body");
+    let (_status, schedule_id, _) = post_schedule(&daemon, "p3-restart-wait", "p3-missing").await;
+
+    let sid = wait_owned_status(&daemon, &schedule_id, "waiting_for_input", 20).await;
+    let (_, state) = durable_run_state(&daemon.pool, &sid).await;
+    let wait_id = state
+        .as_ref()
+        .and_then(|s| s["wait"]["wait_id"].as_str())
+        .expect("durable wait token")
+        .to_string();
+
+    // Delete the user bundle (source moved/gone).
+    let bundle = daemon
+        .home
+        .path()
+        .join(".nexus42")
+        .join("presets")
+        .join("p3-restart-wait");
+    std::fs::remove_dir_all(&bundle).expect("remove bundle");
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    daemon.restart().await;
+
+    // Wait preserved; continue → reconstruction_unavailable, cancel-only.
+    let (run_status, state_after) = durable_run_state(&daemon.pool, &sid).await;
+    assert_eq!(run_status, "waiting_for_input");
+    assert_eq!(
+        state_after.as_ref().and_then(|s| s["wait"]["wait_id"].as_str()),
+        Some(wait_id.as_str())
+    );
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "{}/v1/daemon/orchestration/sessions/{sid}/signal",
+            daemon.http_url
+        ))
+        .json(&json!({ "signal": "continue", "waitId": wait_id }))
+        .send()
+        .await
+        .expect("continue");
+    assert_eq!(resp.status(), reqwest::StatusCode::CONFLICT);
+    let body: Value = resp.json().await.expect("error json");
+    assert_eq!(
+        body["error"]["code"].as_str(),
+        Some("reconstruction_unavailable"),
+        "{body}"
+    );
+    assert_eq!(
+        body["error"]["details"]["allowed_actions"],
+        json!(["cancel", "new_run"]),
+        "cancel-only actions"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// P3 T1 remaining daemon-level restart scenarios (plan matrix):
+//   (a) corrupt child identity → wait preserved, continue reconstruction_unavailable
+//   (b) nested/multiple waits preserved, no auto-approval, no new IDs
+//   (c) dispatch-before-output crash → interrupted, no retry, refuse signals
+//   (d) final-checkpoint-before-settlement crash → schedule settles terminal
+// ---------------------------------------------------------------------------
+
+/// `RunDescriptorV1` for the REAL embedded `memory-augmented` preset (A7
+/// frozen identity that actually resolves at reconstruction — never a zero
+/// hash). `parent` selects the nested-child shape (parent session + inner
+/// graph name).
+fn memory_augmented_descriptor(parent: Option<(&str, &str)>) -> Vec<u8> {
+    let source = nexus_orchestration::preset::embedded_source_identity("memory-augmented")
+        .expect("memory-augmented embedded source identity");
+    let (parent_session_id, graph_name) = match parent {
+        Some((parent_sid, graph)) => (Some(parent_sid.to_string()), Some(graph.to_string())),
+        None => (None, None),
+    };
+    serde_json::to_vec(&json!({
+        "creator_id": "test_creator",
+        "work_id": null,
+        "workspace_root": "",
+        "preset_id": "memory-augmented",
+        "preset_version": 1,
+        "source": source,
+        "input": {},
+        "agent_bindings": {},
+        "parent_session_id": parent_session_id,
+        "graph_name": graph_name
+    }))
+    .expect("memory-augmented descriptor json")
+}
+
+/// The same frozen descriptor with the sanctioned `default` role bound to
+/// the fixture provider — a re-driven run needs a resolvable binding or the
+/// first prompt step refuses (N-9).
+fn memory_augmented_descriptor_bound() -> Vec<u8> {
+    let mut value: Value =
+        serde_json::from_slice(&memory_augmented_descriptor(None)).expect("descriptor json");
+    value["agent_bindings"] = json!({"default": {"provider_id": "mock-provider", "model": null}});
+    serde_json::to_vec(&value).expect("bound descriptor json")
+}
+
+/// Seed a durable v1 session row with an explicit descriptor and optional
+/// parent (daemon-level restart fixtures).
+#[allow(clippy::too_many_arguments)]
+async fn seed_daemon_session(
+    pool: &sqlx::SqlitePool,
+    session_id: &str,
+    status: &str,
+    current_task_id: Option<&str>,
+    context: &[u8],
+    run_state: &[u8],
+    state_revision: i64,
+    descriptor: &[u8],
+    parent_session_id: Option<&str>,
+) {
+    sqlx::query(
+        "INSERT INTO orchestration_sessions
+            (session_id, creator_id, preset_id, preset_version, parent_session_id,
+             current_task_id, status, context_json, created_at, updated_at,
+             execution_version, state_revision, run_state_json, run_descriptor_json)
+         VALUES (?, 'test_creator', 'memory-augmented', 1, ?, ?, ?, ?, 1_756_990_000, 1_756_990_300,
+                 1, ?, ?, ?)",
+    )
+    .bind(session_id)
+    .bind(parent_session_id)
+    .bind(current_task_id)
+    .bind(status)
+    .bind(context)
+    .bind(state_revision)
+    .bind(run_state)
+    .bind(descriptor)
+    .execute(pool)
+    .await
+    .expect("seed daemon session");
+}
+
+/// Durable `RunStateV1` with a human-wait record carrying the exact token
+/// (A4 shape; optional waiting-child cursor for nested waits).
+fn wait_state_with_token(
+    token: &str,
+    task: &str,
+    child_session: Option<&str>,
+    child_task: Option<&str>,
+) -> Vec<u8> {
+    json!({
+        "wait": {
+            "wait_id": token, "task_id": task,
+            "child_session_id": child_session, "child_task_id": child_task, "kind": "manual"
+        },
+        "step_in_flight": null, "in_flight": null, "failure": null, "cancel_requested": false
+    })
+    .to_string()
+    .into_bytes()
+}
+
+/// Durable `RunStateV1` for a dispatch-before-output crash (A2): the prompt
+/// was persisted `dispatching`/`active` before the Host effect completed and
+/// the step never checkpointed past it.
+fn dispatch_crash_state() -> Vec<u8> {
+    json!({
+        "wait": null,
+        "step_in_flight": "generate",
+        "in_flight": {
+            "attempt_id": "attempt-crash", "task_id": "generate", "phase": "active",
+            "host_session_id": "host-crash", "operation_id": "op-crash", "process_identity": null
+        },
+        "failure": null,
+        "cancel_requested": false
+    })
+    .to_string()
+    .into_bytes()
+}
+
+/// Post a session control signal over the live HTTP surface and return
+/// (status, parsed body).
+async fn post_session_signal(
+    daemon: &LiveDaemon,
+    session_id: &str,
+    payload: Value,
+) -> (reqwest::StatusCode, Value) {
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "{}/v1/daemon/orchestration/sessions/{session_id}/signal",
+            daemon.http_url
+        ))
+        .json(&payload)
+        .send()
+        .await
+        .expect("session signal");
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(json!({}));
+    (status, body)
+}
+
+/// (b) Nested/multiple waits at the daemon level: a parent with TWO waiting
+/// children survives the production boot/attach restart with every wait
+/// token preserved, boot never auto-approves either child, and no new
+/// session/child IDs are minted (existing IDs reattached).
+#[tokio::test]
+async fn daemon_restart_nested_multiple_waits_preserved_no_auto_approval() {
+    let host = RestartMockHost::new();
+    let mut daemon = LiveDaemon::start_with_host_provider_and_dispatch(
+        host.clone(),
+        Arc::new(CountingDispatch {
+            calls: Arc::new(AtomicUsize::new(0)),
+        }),
+    )
+    .await;
+
+    let parent = "daemon:nested-parent";
+    let child_a = "daemon:nested-parent::child:a";
+    let child_b = "daemon:nested-parent::child:b";
+    let descriptor = memory_augmented_descriptor(None);
+    let child_descriptor = memory_augmented_descriptor(Some((parent, "generate_graph")));
+    seed_daemon_session(
+        &daemon.pool, parent, "waiting_for_input", Some("persist"), &plain_context(),
+        &wait_state_with_token("parent-tok-p3", "persist", Some(child_a), Some("persist")),
+        8, &descriptor, None,
+    )
+    .await;
+    seed_daemon_session(
+        &daemon.pool, child_a, "waiting_for_input", Some("persist"), &plain_context(),
+        &wait_state_with_token("child-a-tok", "persist", None, None),
+        3, &child_descriptor, Some(parent),
+    )
+    .await;
+    seed_daemon_session(
+        &daemon.pool, child_b, "waiting_for_input", Some("persist"), &plain_context(),
+        &wait_state_with_token("child-b-tok", "persist", None, None),
+        3, &child_descriptor, Some(parent),
+    )
+    .await;
+    let sessions_before: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions")
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("session count before");
+
+    daemon.restart().await;
+
+    // Every wait token survives; all three rows still waiting; no new IDs.
+    for (sid, tok) in [
+        (parent, "parent-tok-p3"),
+        (child_a, "child-a-tok"),
+        (child_b, "child-b-tok"),
+    ] {
+        let (status, state) = durable_run_state(&daemon.pool, sid).await;
+        assert_eq!(status, "waiting_for_input", "{sid} still waiting");
+        assert_eq!(
+            state.and_then(|s| s["wait"]["wait_id"].as_str().map(str::to_string)),
+            Some(tok.to_string()),
+            "{sid} token preserved"
+        );
+    }
+    let sessions_after: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions")
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("session count after");
+    assert_eq!(
+        sessions_after, sessions_before,
+        "daemon restart must not mint new session/child IDs"
+    );
+    assert_eq!(
+        host.execs.load(Ordering::SeqCst),
+        0,
+        "boot never steps nested/multiple waits"
+    );
+}
+
+/// (a) Corrupt child identity at the daemon level: a persisted child with an
+/// unsupported execution version blocks the parent's owned-descendant
+/// reconstruction. The parent's human wait is preserved; a matching continue
+/// refuses with `reconstruction_unavailable` (409, cancel-only); no new
+/// effects are created and the corrupt child row is preserved verbatim.
+#[tokio::test]
+async fn daemon_restart_corrupt_child_identity_wait_preserved_continue_refuses() {
+    let host = RestartMockHost::new();
+    let mut daemon = LiveDaemon::start_with_host_provider_and_dispatch(
+        host.clone(),
+        Arc::new(CountingDispatch {
+            calls: Arc::new(AtomicUsize::new(0)),
+        }),
+    )
+    .await;
+
+    let parent = "daemon:corrupt-parent";
+    let child = "daemon:corrupt-parent::child:bad";
+    seed_daemon_session(
+        &daemon.pool, parent, "waiting_for_input", Some("persist"), &plain_context(),
+        &wait_state_with_token("parent-tok-corr", "persist", Some(child), Some("persist")),
+        8, &memory_augmented_descriptor(None), None,
+    )
+    .await;
+    // Corrupt child: unsupported execution_version 2 → load_children refuses
+    // (A7 non-replayable).
+    sqlx::query(
+        "INSERT INTO orchestration_sessions
+            (session_id, creator_id, preset_id, preset_version, parent_session_id,
+             current_task_id, status, context_json, created_at, updated_at,
+             execution_version, state_revision, run_state_json, run_descriptor_json)
+         VALUES (?, 'test_creator', 'memory-augmented', 1, ?, 'persist', 'waiting_for_input',
+                 ?, 1_756_990_000, 1_756_990_300, 2, 3, ?, ?)",
+    )
+    .bind(child)
+    .bind(parent)
+    .bind(&plain_context())
+    .bind(&wait_state_with_token("child-bad-tok", "persist", None, None))
+    .bind(&memory_augmented_descriptor(Some((parent, "generate_graph"))))
+    .execute(&daemon.pool)
+    .await
+    .expect("seed corrupt child");
+
+    daemon.restart().await;
+
+    // The wait is preserved (recovery surfaces the corrupt child as
+    // non-replayable but never steps the human wait).
+    let (status, state) = durable_run_state(&daemon.pool, parent).await;
+    assert_eq!(status, "waiting_for_input", "parent wait preserved");
+    assert_eq!(
+        state.as_ref().and_then(|s| s["wait"]["wait_id"].as_str()),
+        Some("parent-tok-corr"),
+        "parent token preserved under corrupt child identity"
+    );
+    // The corrupt child row is preserved verbatim (never reinterpreted).
+    let (child_status, _) = durable_run_state(&daemon.pool, child).await;
+    assert_eq!(child_status, "waiting_for_input", "corrupt child row preserved");
+
+    // Matching continue: the on-demand reattachment hydrates the owned
+    // closure, hits the corrupt child, and refuses reconstruction_unavailable
+    // (cancel-only) — no mutation, no effects.
+    let effects_before = host.execs.load(Ordering::SeqCst);
+    let (code, body) = post_session_signal(
+        &daemon,
+        parent,
+        json!({ "signal": "continue", "waitId": "parent-tok-corr" }),
+    )
+    .await;
+    assert_eq!(code, reqwest::StatusCode::CONFLICT, "{body}");
+    assert_eq!(
+        body["error"]["code"].as_str(),
+        Some("reconstruction_unavailable"),
+        "{body}"
+    );
+    assert_eq!(
+        body["error"]["details"]["allowed_actions"],
+        json!(["cancel", "new_run"]),
+        "cancel-only actions"
+    );
+    let (status, state_now) = durable_run_state(&daemon.pool, parent).await;
+    assert_eq!(status, "waiting_for_input", "wait untouched by refused continue");
+    assert_eq!(
+        state_now.as_ref().and_then(|s| s["wait"]["wait_id"].as_str()),
+        Some("parent-tok-corr"),
+        "token untouched"
+    );
+    assert_eq!(host.execs.load(Ordering::SeqCst), effects_before, "no effects");
+}
+
+/// (c) Dispatch-before-output crash at the daemon level: the durable record
+/// carries a dispatching/active prompt with an unfinished step mark (the
+/// crash happened after the external effect but before the result
+/// checkpoint). The restart classifies interrupted, NEVER re-drives (zero
+/// Host effects), never rewrites the row, and refuses control signals with
+/// workflow_state_conflict.
+#[tokio::test]
+async fn daemon_restart_dispatch_before_output_crash_interrupted_no_retry() {
+    let host = RestartMockHost::new();
+    let mut daemon = LiveDaemon::start_with_host_provider_and_dispatch(
+        host.clone(),
+        Arc::new(CountingDispatch {
+            calls: Arc::new(AtomicUsize::new(0)),
+        }),
+    )
+    .await;
+
+    let sid = "daemon:dispatch-crash";
+    seed_daemon_session(
+        &daemon.pool, sid, "running", Some("generate"), &plain_context(),
+        &dispatch_crash_state(), 5, &memory_augmented_descriptor(None), None,
+    )
+    .await;
+
+    daemon.restart().await;
+
+    // Never retried: the durable row is untouched (status + interrupted
+    // marks), zero Host effects even after a grace window.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let (status, state) = durable_run_state(&daemon.pool, sid).await;
+    assert_eq!(status, "running", "durable row never rewritten by recovery");
+    let state = state.expect("durable state present");
+    assert_eq!(state["step_in_flight"], json!("generate"), "step mark preserved");
+    assert!(
+        state["in_flight"].is_object(),
+        "the unfinished prompt attempt is preserved (never cleared/retried)"
+    );
+    assert_eq!(
+        host.execs.load(Ordering::SeqCst),
+        0,
+        "interrupted in-flight work must NOT retry across daemon restart"
+    );
+
+    // Advance cannot resurrect the interrupted run: 409 workflow_state_conflict.
+    let (code, body) = post_session_signal(&daemon, sid, json!({ "signal": "advance" })).await;
+    assert_eq!(code, reqwest::StatusCode::CONFLICT, "{body}");
+    assert_eq!(
+        body["error"]["code"].as_str(),
+        Some("workflow_state_conflict"),
+        "{body}"
+    );
+
+    // Scoped public evidence: inspect projects the interrupted recovery class
+    // (never a retryable verdict).
+    let output = nexus42(daemon.home.path())
+        .args(["ops", "inspect", sid, "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid inspect json");
+    assert_eq!(parsed["recovery_class"], json!("interrupted"));
+    assert_eq!(parsed["resumable"]["verdict"], json!("no"));
+}
+
+/// (d) Final-checkpoint-before-settlement crash at the daemon level: the
+/// durable session is terminal `completed` but the schedule row still reads
+/// `running` (the settlement crashed before the flip). The restart's
+/// production bundle publication reconciles the schedule from the durable
+/// terminal session (settles to completed), and recovery never re-drives the
+/// completed session — zero effects, one session, owned-identity preserved.
+#[tokio::test]
+async fn daemon_restart_final_checkpoint_before_settlement_settles_terminal() {
+    let host = RestartMockHost::new();
+    let mut daemon = LiveDaemon::start_with_host_provider_and_dispatch(
+        host.clone(),
+        Arc::new(CountingDispatch {
+            calls: Arc::new(AtomicUsize::new(0)),
+        }),
+    )
+    .await;
+
+    let sid = "daemon:settle-crash";
+    seed_daemon_session(
+        &daemon.pool, sid, "completed", Some("done"), &plain_context(),
+        &run_state_v1(false, None, false, false), 6, &memory_augmented_descriptor(None), None,
+    )
+    .await;
+    let now = chrono::Utc::now().timestamp();
+    sqlx::query(
+        "INSERT INTO creator_schedules
+           (schedule_id, creator_id, preset_id, preset_version, status,
+            concurrency_kind, current_core_context_version, label,
+            created_at, updated_at, work_id, execution_policy,
+            execution_descriptor_json, current_session_id)
+           VALUES ('SCHSETTLECRASH', 'test_creator', 'memory-augmented', 1, 'running',
+                   'serial', 0, 'p3-final-checkpoint', ?, ?, NULL, 'driven_v1', ?, ?)",
+    )
+    .bind(now)
+    .bind(now)
+    .bind(&memory_augmented_descriptor(None))
+    .bind(sid)
+    .execute(&daemon.pool)
+    .await
+    .expect("seed pre-settlement schedule row");
+
+    daemon.restart().await;
+
+    // The production bundle publication reconciles the schedule from the
+    // durable terminal session BEFORE recovery runs; the terminal session is
+    // never re-driven.
+    let (status, current_sid): (String, Option<String>) = sqlx::query_as(
+        "SELECT status, current_session_id FROM creator_schedules \
+         WHERE schedule_id = 'SCHSETTLECRASH'",
+    )
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("settled schedule row");
+    assert_eq!(status, "completed", "schedule settles from the durable terminal");
+    assert_eq!(
+        current_sid.as_deref(),
+        Some(sid),
+        "schedule keeps its owned run identity"
+    );
+    let (run_status, _) = durable_run_state(&daemon.pool, sid).await;
+    assert_eq!(run_status, "completed", "the terminal session stays terminal");
+    assert_eq!(
+        host.execs.load(Ordering::SeqCst),
+        0,
+        "a settled terminal run is never re-driven after restart"
+    );
+}
+
+/// A7 rule 6 (P3 T1 rereview P1): a durable v1 run parked at a fully
+/// committed safe boundary (no wait / in-flight / step mark / cancel) is
+/// reconstructed from its frozen source identity and re-driven through the
+/// production recovery seam — never stranded by the explicit
+/// `SkippedSafeBoundary` skip that previously dropped it.
+#[tokio::test]
+async fn daemon_restart_safe_boundary_is_reconstructed_and_redriven() {
+    let host = RestartMockHost::new();
+    let dispatch = Arc::new(CountingDispatch {
+        calls: Arc::new(AtomicUsize::new(0)),
+    });
+    let daemon = LiveDaemon::start_with_host_provider_and_dispatch(
+        host.clone(),
+        dispatch.clone(),
+    )
+    .await;
+
+    let sid = "daemon:safe-boundary";
+    // Running at a committed boundary: plain context (no join keys), no
+    // durable wait, no in-flight/step/cancel evidence → SafeBoundary.
+    seed_daemon_session(
+        &daemon.pool,
+        sid,
+        "running",
+        Some("generate"),
+        &plain_context(),
+        &run_state_v1(false, None, false, false),
+        4,
+        &memory_augmented_descriptor_bound(),
+        None,
+    )
+    .await;
+
+    // The exact production recovery seam boot/restart runs
+    // (`run_boot_recovery` → `recover_persisted`): reconstruction from the
+    // frozen source, classification, then the single-owner re-drive.
+    let coordinator = daemon
+        .state
+        .run_coordinator()
+        .expect("coordinator wired");
+    let sqlite = Arc::new(SqliteSessionStorage::new(Arc::new(daemon.pool.clone())));
+    let decisions = coordinator.recover_persisted(&sqlite, None).await;
+
+    let redriven = decisions.iter().any(|d| match d {
+        ResumeDecision::ReDriven { session_id, .. } => session_id.0 == sid,
+        _ => false,
+    });
+    assert!(
+        redriven,
+        "a safe-boundary v1 run must be reconstructed and re-driven (A7 rule 6), \
+         got decisions {decisions:?}"
+    );
 }

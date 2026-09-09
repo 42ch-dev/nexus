@@ -480,19 +480,25 @@ async fn list_schedules(
     }
 
     println!(
-        "{:<25} {:<15} {:<12} {:<10} {:<6} {}",
-        "SCHEDULE_ID", "CREATOR", "PRESET", "STATUS", "CTX_V", "LABEL"
+        "{:<25} {:<15} {:<12} {:<10} {:<6} {:<14} {}",
+        "SCHEDULE_ID", "CREATOR", "PRESET", "STATUS", "CTX_V", "RECOVERY", "LABEL"
     );
-    println!("{}", "-".repeat(85));
+    println!("{}", "-".repeat(100));
     for s in &resp.items {
         let label = s.label.as_deref().unwrap_or("-");
+        let recovery = s
+            .execution
+            .as_ref()
+            .map(|execution| execution.recovery_class.as_str())
+            .unwrap_or("-");
         println!(
-            "{:<25} {:<15} {:<12} {:<10} {:<6} {}",
+            "{:<25} {:<15} {:<12} {:<10} {:<6} {:<14} {}",
             s.schedule_id,
             s.creator_id,
             s.preset_id,
             s.status,
             s.current_core_context_version,
+            recovery,
             label,
         );
     }
@@ -514,6 +520,23 @@ async fn inspect_schedule(client: &crate::api::DaemonClient, id: &str) -> Result
     println!("label:          {}", s.label.as_deref().unwrap_or("-"));
     println!("created_at:     {}", s.created_at);
     println!("updated_at:     {}", s.updated_at);
+    println!("execution_policy: {}", s.execution_policy);
+    if let Some(sid) = &s.current_session_id {
+        println!("current_session_id: {sid}");
+    }
+    if let Some(execution) = &s.execution {
+        println!("recovery_class: {}", execution.recovery_class);
+        if let Some(reason) = &execution.reason_code {
+            println!("reason_code:    {reason}");
+        }
+        if let Some(wait) = &execution.wait {
+            println!("wait_id:        {}", wait.wait_id);
+        }
+        println!(
+            "allowed_actions: {}",
+            execution.allowed_actions.join(", ")
+        );
+    }
     if !resp.depends_on.is_empty() {
         println!("depends_on:     {}", resp.depends_on.join(", "));
     }

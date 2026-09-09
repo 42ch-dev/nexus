@@ -1931,7 +1931,7 @@ states:
             &self,
             _: &str,
             _: std::sync::Arc<graph_flow::Graph>,
-        ) -> Option<crate::engine::SessionId> {
+        ) -> Result<Option<crate::engine::SessionId>, crate::engine::EngineError> {
             unimplemented!("wiring test must not execute engine steps")
         }
         async fn start_session_with_preset(
@@ -1954,6 +1954,18 @@ states:
         }
         async fn has_runner(&self, _: &crate::engine::SessionId) -> bool {
             unimplemented!("wiring test must not query runner existence")
+        }
+        async fn recover_sessions(
+            &self,
+            _: Vec<crate::engine::SessionSummary>,
+        ) {
+            unimplemented!("wiring test must not recover sessions")
+        }
+        async fn ensure_recovered_runner(
+            &self,
+            _: &crate::engine::SessionId,
+        ) -> Result<(), crate::engine::EngineError> {
+            unimplemented!("wiring test must not reattach runners")
         }
         async fn start_session_with_preset_for_creator(
             &self,

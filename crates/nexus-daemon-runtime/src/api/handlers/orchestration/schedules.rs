@@ -48,6 +48,7 @@ use nexus_contracts::PaginationInfo;
 use nexus_orchestration::preset_gates::{
     GateEvalError, PreviousPresetLookup, PreviousPresetResult,
 };
+use nexus_orchestration::run_state::WorkflowStateStore;
 use nexus_orchestration::schedule::work_schedule::{validate_cron_expr, validate_tz, WorkSchedule};
 use sqlx::Row;
 use std::sync::Arc;
@@ -1073,10 +1074,20 @@ pub async fn list_schedules(
         message: format!("database error: {e}"),
     })?;
 
-    let items: Vec<ScheduleSummary> = rows
+    let mut items: Vec<ScheduleSummary> = rows
         .into_iter()
         .map(ListRow::into_summary)
         .collect::<Result<Vec<_>, _>>()?;
+    for summary in &mut items {
+        summary.execution = Some(
+            crate::execution_projection::project_for_session(
+                &pool,
+                summary.current_session_id.as_deref(),
+                &summary.execution_policy,
+            )
+            .await,
+        );
+    }
 
     let has_more = u64::from(total) > u64::from(offset).saturating_add(u64::from(limit));
     let next_cursor = if has_more {
@@ -1151,12 +1162,24 @@ pub async fn inspect_schedule(
 
     let concurrency_kind = row.concurrency_kind.clone();
 
+    let mut summary = row.into_summary()?;
+    summary.execution = Some(
+        crate::execution_projection::project_for_session(
+            &pool,
+            summary.current_session_id.as_deref(),
+            &summary.execution_policy,
+        )
+        .await,
+    );
+
     Ok(Json(InspectScheduleResponse {
-        schedule: row.into_summary()?,
+        schedule: summary,
         depends_on: deps,
         concurrency_kind,
     }))
 }
+
+
 
 // ---------------------------------------------------------------------------
 // PATCH /schedules/{id}/core-context — Apply EditOp
@@ -1787,6 +1810,23 @@ pub async fn signal_schedule(
                             message: format!("state conflict for {sid}: {msg}"),
                         }
                     }
+                    crate::preset_run::RunControlError::ReconstructionUnavailable {
+                        session_id,
+                        reason,
+                    } => {
+                        NexusApiError::ConflictCodedDetails {
+                            code: "reconstruction_unavailable".into(),
+                            message: format!(
+                                "cannot continue schedule {schedule_id} (session {session_id}): \
+                                 {reason} — human wait preserved, cancel-only"
+                            ),
+                            details: serde_json::json!({
+                                "session_id": session_id,
+                                "reason": reason,
+                                "allowed_actions": ["cancel", "new_run"],
+                            }),
+                        }
+                    }
                     crate::preset_run::RunControlError::ScheduleNotFound(sid) => {
                         NexusApiError::NotFound(format!("session {sid} not found"))
                     }
@@ -2397,6 +2437,7 @@ impl ListRow {
             status: self.status,
             execution_policy: self.execution_policy,
             current_session_id: self.current_session_id,
+            execution: None,
             label: self.label,
             current_core_context_version: u32::try_from(self.current_core_context_version)
                 .map_err(|_| NexusApiError::Internal {
@@ -2440,6 +2481,7 @@ impl InspectRow {
             status: self.status,
             execution_policy: self.execution_policy,
             current_session_id: self.current_session_id,
+            execution: None,
             label: self.label,
             current_core_context_version: u32::try_from(self.current_core_context_version)
                 .map_err(|_| NexusApiError::Internal {
