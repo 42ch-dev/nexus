@@ -1764,6 +1764,16 @@ fn memory_augmented_descriptor(parent: Option<(&str, &str)>) -> Vec<u8> {
     .expect("memory-augmented descriptor json")
 }
 
+/// The same frozen descriptor with the sanctioned `default` role bound to
+/// the fixture provider — a re-driven run needs a resolvable binding or the
+/// first prompt step refuses (N-9).
+fn memory_augmented_descriptor_bound() -> Vec<u8> {
+    let mut value: Value =
+        serde_json::from_slice(&memory_augmented_descriptor(None)).expect("descriptor json");
+    value["agent_bindings"] = json!({"default": {"provider_id": "mock-provider", "model": null}});
+    serde_json::to_vec(&value).expect("bound descriptor json")
+}
+
 /// Seed a durable v1 session row with an explicit descriptor and optional
 /// parent (daemon-level restart fixtures).
 #[allow(clippy::too_many_arguments)]
@@ -2153,5 +2163,59 @@ async fn daemon_restart_final_checkpoint_before_settlement_settles_terminal() {
         host.execs.load(Ordering::SeqCst),
         0,
         "a settled terminal run is never re-driven after restart"
+    );
+}
+
+/// A7 rule 6 (P3 T1 rereview P1): a durable v1 run parked at a fully
+/// committed safe boundary (no wait / in-flight / step mark / cancel) is
+/// reconstructed from its frozen source identity and re-driven through the
+/// production recovery seam — never stranded by the explicit
+/// `SkippedSafeBoundary` skip that previously dropped it.
+#[tokio::test]
+async fn daemon_restart_safe_boundary_is_reconstructed_and_redriven() {
+    let host = RestartMockHost::new();
+    let dispatch = Arc::new(CountingDispatch {
+        calls: Arc::new(AtomicUsize::new(0)),
+    });
+    let daemon = LiveDaemon::start_with_host_provider_and_dispatch(
+        host.clone(),
+        dispatch.clone(),
+    )
+    .await;
+
+    let sid = "daemon:safe-boundary";
+    // Running at a committed boundary: plain context (no join keys), no
+    // durable wait, no in-flight/step/cancel evidence → SafeBoundary.
+    seed_daemon_session(
+        &daemon.pool,
+        sid,
+        "running",
+        Some("generate"),
+        &plain_context(),
+        &run_state_v1(false, None, false, false),
+        4,
+        &memory_augmented_descriptor_bound(),
+        None,
+    )
+    .await;
+
+    // The exact production recovery seam boot/restart runs
+    // (`run_boot_recovery` → `recover_persisted`): reconstruction from the
+    // frozen source, classification, then the single-owner re-drive.
+    let coordinator = daemon
+        .state
+        .run_coordinator()
+        .expect("coordinator wired");
+    let sqlite = Arc::new(SqliteSessionStorage::new(Arc::new(daemon.pool.clone())));
+    let decisions = coordinator.recover_persisted(&sqlite, None).await;
+
+    let redriven = decisions.iter().any(|d| match d {
+        ResumeDecision::ReDriven { session_id, .. } => session_id.0 == sid,
+        _ => false,
+    });
+    assert!(
+        redriven,
+        "a safe-boundary v1 run must be reconstructed and re-driven (A7 rule 6), \
+         got decisions {decisions:?}"
     );
 }

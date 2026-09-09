@@ -420,6 +420,7 @@ pub async fn resume_driven_sessions(
         // suppress the durable A7 converge/merge re-drive. The legacy
         // cascade runs only for v0 / no-store rows.
         let mut v1_converge_merge = false;
+        let mut v1_safe_boundary = false;
         if let Some(store) = workflow_store {
             match store.load_run(&session_id).await {
                 Ok(Some(record)) if record.execution_version >= 1 => {
@@ -456,9 +457,23 @@ pub async fn resume_driven_sessions(
                             decisions.push(ResumeDecision::SkippedHumanWait { session_id });
                             continue;
                         }
+                        // A7 rule 6: a durable v1 run at a fully committed
+                        // safe boundary is reconstructed and re-driven —
+                        // never stranded by a restart (P3 T1 rereview P1).
                         resume_rules::RecoveryClass::SafeBoundary => {
-                            decisions.push(ResumeDecision::SkippedSafeBoundary { session_id });
-                            continue;
+                            if let Err(e) = engine.ensure_recovered_runner(&session_id).await {
+                                tracing::warn!(
+                                    session_id = %session_id.0,
+                                    error = %e,
+                                    "recovery: safe-boundary reconstruction failed; \
+                                     treating as non-replayable metadata"
+                                );
+                                decisions.push(ResumeDecision::SkippedUnreadableMetadata {
+                                    session_id,
+                                });
+                                continue;
+                            }
+                            v1_safe_boundary = true;
                         }
                         // Exact-v0 rows never appear here (`execution_version
                         // >= 1` guard matched); the arms above cover all seven
@@ -478,12 +493,14 @@ pub async fn resume_driven_sessions(
                 }
             }
         }
-
         // 2. Legacy (v0 / no-store) typed-failure filter: never re-tick a
         //    typed-failed join. A v1 ConvergeMerge row was already classified
         //    by the authoritative A7 gate above — stale `_run_status` /
         //    `_run_error` context keys must not suppress its re-drive.
-        if !v1_converge_merge && data.is_some_and(resume_rules::typed_failure_keys_present) {
+        if !v1_converge_merge
+            && !v1_safe_boundary
+            && data.is_some_and(resume_rules::typed_failure_keys_present)
+        {
             decisions.push(ResumeDecision::SkippedTypedFailed { session_id });
             continue;
         }
@@ -491,6 +508,7 @@ pub async fn resume_driven_sessions(
         // 3. Human wait (v0 / no-store): a non-chain wait is never stepped at
         //    boot; the A4 wait token is preserved, not auto-advanced.
         if !v1_converge_merge
+            && !v1_safe_boundary
             && matches!(summary.status, SessionStatus::WaitingForInput)
             && !data.is_some_and(resume_rules::is_converge_merge_chain)
         {
@@ -501,7 +519,7 @@ pub async fn resume_driven_sessions(
         // 4. Converge/merge chain class filter (no-checkpoint default
         //    equivalence): only sessions provably inside a converge/merge
         //    chain are re-driven.
-        if !v1_converge_merge && !data.is_some_and(resume_rules::is_converge_merge_chain) {
+        if !v1_converge_merge && !v1_safe_boundary && !data.is_some_and(resume_rules::is_converge_merge_chain) {
             decisions.push(ResumeDecision::SkippedNotConvergeMergeClass { session_id });
             continue;
         }
@@ -1376,6 +1394,7 @@ impl WorkflowRunCoordinator {
             // join re-drive; terminal/interrupted/human-wait/unreadable
             // classes skip immediately.
             let mut v1_converge_merge = false;
+            let mut v1_safe_boundary = false;
             if let Some(store) = workflow_store {
                 match store.load_run(&session_id).await {
                     Ok(Some(record)) if record.execution_version >= 1 => {
@@ -1412,9 +1431,26 @@ impl WorkflowRunCoordinator {
                                 decisions.push(ResumeDecision::SkippedHumanWait { session_id });
                                 continue;
                             }
+                            // A7 rule 6: a durable v1 run at a fully
+                            // committed safe boundary is reconstructed and
+                            // re-driven through the single owner — never
+                            // stranded by a restart (P3 T1 rereview P1).
                             resume_rules::RecoveryClass::SafeBoundary => {
-                                decisions.push(ResumeDecision::SkippedSafeBoundary { session_id });
-                                continue;
+                                if let Err(e) =
+                                    self.engine.ensure_recovered_runner(&session_id).await
+                                {
+                                    tracing::warn!(
+                                        session_id = %session_id.0,
+                                        error = %e,
+                                        "recovery: safe-boundary reconstruction failed; \
+                                         treating as non-replayable metadata"
+                                    );
+                                    decisions.push(ResumeDecision::SkippedUnreadableMetadata {
+                                        session_id,
+                                    });
+                                    continue;
+                                }
+                                v1_safe_boundary = true;
                             }
                             resume_rules::RecoveryClass::LegacyUnverified => {
                                 unreachable!("v1 load_run record cannot classify LegacyUnverified")
@@ -1433,13 +1469,17 @@ impl WorkflowRunCoordinator {
             }
 
             // Legacy (v0 / no-store) typed-failure filter.
-            if !v1_converge_merge && data.is_some_and(resume_rules::typed_failure_keys_present) {
+            if !v1_converge_merge
+                && !v1_safe_boundary
+                && data.is_some_and(resume_rules::typed_failure_keys_present)
+            {
                 decisions.push(ResumeDecision::SkippedTypedFailed { session_id });
                 continue;
             }
 
             // Human wait (v0 / no-store).
             if !v1_converge_merge
+                && !v1_safe_boundary
                 && matches!(summary.status, SessionStatus::WaitingForInput)
                 && !data.is_some_and(resume_rules::is_converge_merge_chain)
             {
@@ -1448,7 +1488,7 @@ impl WorkflowRunCoordinator {
             }
 
             // Converge/merge chain class filter.
-            if !v1_converge_merge && !data.is_some_and(resume_rules::is_converge_merge_chain) {
+            if !v1_converge_merge && !v1_safe_boundary && !data.is_some_and(resume_rules::is_converge_merge_chain) {
                 decisions.push(ResumeDecision::SkippedNotConvergeMergeClass { session_id });
                 continue;
             }
