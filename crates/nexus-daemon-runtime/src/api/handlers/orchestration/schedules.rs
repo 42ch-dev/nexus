@@ -265,26 +265,27 @@ pub async fn add_schedule(
         let (concurrency_kind, concurrency_whitelist, scheduled_at_ts) =
             insert_concurrency_and_schedule(&body);
         let descriptor = build_execution_descriptor(&state, &body, &work_id)?;
-        sqlx::query(
+        let descriptor_ref = descriptor.as_deref();
+        sqlx::query!(
             "INSERT INTO creator_schedules \
              (schedule_id, creator_id, preset_id, preset_version, status, \
               concurrency_kind, concurrency_whitelist, current_core_context_version, label, \
               created_at, updated_at, work_id, scheduled_at, execution_policy, \
               execution_descriptor_json) \
              VALUES (?, ?, ?, 1, 'paused', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)",
+            schedule_id,
+            body.creator_id,
+            body.preset_id,
+            concurrency_kind,
+            concurrency_whitelist,
+            body.label,
+            now_ts,
+            now_ts,
+            work_id,
+            scheduled_at_ts,
+            execution_policy,
+            descriptor_ref,
         )
-        .bind(&schedule_id)
-        .bind(&body.creator_id)
-        .bind(&body.preset_id)
-        .bind(&concurrency_kind)
-        .bind(&concurrency_whitelist)
-        .bind(&body.label)
-        .bind(now_ts)
-        .bind(now_ts)
-        .bind(&work_id)
-        .bind(scheduled_at_ts)
-        .bind(execution_policy)
-        .bind(descriptor.as_deref())
         .execute(&mut *tx)
         .await
         .map_err(|e| NexusApiError::Internal {
@@ -293,11 +294,13 @@ pub async fn add_schedule(
         })?;
         if let Some(deps) = &body.depends_on {
             for dep in deps {
-                sqlx::query(
-                    "INSERT OR IGNORE INTO schedule_dependencies (schedule_id, depends_on) VALUES (?, ?)",
+                let dep_str = dep.as_str();
+                sqlx::query!(
+                    "INSERT OR IGNORE INTO schedule_dependencies (schedule_id, depends_on) \
+                     VALUES (?, ?)",
+                    schedule_id,
+                    dep_str,
                 )
-                .bind(&schedule_id)
-                .bind(dep)
                 .execute(&mut *tx)
                 .await
                 .map_err(|e| NexusApiError::Internal {
@@ -498,26 +501,27 @@ pub async fn add_schedule(
                         let (concurrency_kind, concurrency_whitelist, scheduled_at_ts) =
                             insert_concurrency_and_schedule(&body);
                         let descriptor = build_execution_descriptor(&state, &body, work_id)?;
-                        sqlx::query(
+                        let descriptor_ref = descriptor.as_deref();
+                        sqlx::query!(
                             "INSERT INTO creator_schedules \
                              (schedule_id, creator_id, preset_id, preset_version, status, \
                               concurrency_kind, concurrency_whitelist, current_core_context_version, label, \
                               created_at, updated_at, work_id, scheduled_at, execution_policy, \
                               execution_descriptor_json) \
                              VALUES (?, ?, ?, 1, 'paused', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)",
+                            schedule_id,
+                            body.creator_id,
+                            body.preset_id,
+                            concurrency_kind,
+                            concurrency_whitelist,
+                            body.label,
+                            now_ts,
+                            now_ts,
+                            work_id,
+                            scheduled_at_ts,
+                            execution_policy,
+                            descriptor_ref,
                         )
-                        .bind(&schedule_id)
-                        .bind(&body.creator_id)
-                        .bind(&body.preset_id)
-                        .bind(&concurrency_kind)
-                        .bind(&concurrency_whitelist)
-                        .bind(&body.label)
-                        .bind(now_ts)
-                        .bind(now_ts)
-                        .bind(work_id)
-                        .bind(scheduled_at_ts)
-                        .bind(execution_policy)
-                        .bind(descriptor.as_deref())
                         .execute(&mut *tx)
                         .await
                         .map_err(|e| NexusApiError::Internal {
@@ -526,11 +530,13 @@ pub async fn add_schedule(
                         })?;
                         if let Some(deps) = &body.depends_on {
                             for dep in deps {
-                                sqlx::query(
-                                    "INSERT OR IGNORE INTO schedule_dependencies (schedule_id, depends_on) VALUES (?, ?)",
+                                let dep_str = dep.as_str();
+                                sqlx::query!(
+                                    "INSERT OR IGNORE INTO schedule_dependencies (schedule_id, depends_on) \
+                                     VALUES (?, ?)",
+                                    schedule_id,
+                                    dep_str,
                                 )
-                                .bind(&schedule_id)
-                                .bind(dep)
                                 .execute(&mut *tx)
                                 .await
                                 .map_err(|e| NexusApiError::Internal {
