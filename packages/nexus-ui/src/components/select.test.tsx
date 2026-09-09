@@ -176,4 +176,12 @@ describe('Select', () => {
 
   // --- disabled state ---
 
+  it('exposes the native disabled state', () => {
+    render(
+      <Select disabled data-testid="test-select">
+        <option value="a">A</option>
+      </Select>,
+    );
+    expect(screen.getByTestId('test-select')).toBeDisabled();
+  });
 });

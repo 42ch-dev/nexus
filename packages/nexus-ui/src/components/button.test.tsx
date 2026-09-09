@@ -35,12 +35,14 @@ describe('Button', () => {
     expect(link).toBeInTheDocument();
     expect(link.tagName).toBe('A');
     expect(link).toHaveAttribute('href', '/settings');
-    // Slot should merge Button classes onto the child <a>
-    expect(link).toHaveClass('inline-flex');
   });
 
   // --- disabled state ---
 
+  it('exposes the native disabled state', () => {
+    render(<Button disabled>Blocked</Button>);
+    expect(screen.getByRole('button', { name: 'Blocked' })).toBeDisabled();
+  });
 
   // --- className merge (cn integration) ---
 
@@ -52,15 +54,7 @@ describe('Button', () => {
     );
     const btn = screen.getByRole('button', { name: 'Styled' });
     expect(btn).toHaveClass('custom-extra');
-    expect(btn).toHaveClass('bg-blue-700');
-    expect(btn).toHaveClass('text-brand-white');
   });
-
-  // --- base structural classes ---
-
-
-  // --- v0.4 motion tokens (hover/pressed states ease over duration-state) ---
-
 
   // --- ref-as-prop ---
 

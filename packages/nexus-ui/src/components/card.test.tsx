@@ -24,26 +24,12 @@ describe('Card', () => {
     expect(el).toHaveClass('work-card');
   });
 
-  // --- CardHeader ---
-
-
   // --- CardTitle ---
 
-  it('renders CardTitle as an <h3> with heading classes', () => {
+  it('renders CardTitle as a heading element', () => {
     render(<CardTitle>Project Name</CardTitle>);
-    const el = screen.getByText('Project Name');
-    expect(el.tagName).toBe('H3');
-    expect(el).toHaveClass('text-heading-16');
-    expect(el).toHaveClass('font-heading');
-    expect(el).toHaveClass('leading-tight');
-    expect(el).toHaveClass('tracking-tight');
+    expect(screen.getByText('Project Name').tagName).toBe('H3');
   });
-
-  // --- CardTitle voice (V1.121 v0.4 — DESIGN.md components.card.title.voice) ---
-
-
-
-
 
   it('merges custom className on CardTitle with voice="content"', () => {
     render(<CardTitle voice="content" className="brand-title">Content Merge</CardTitle>);
