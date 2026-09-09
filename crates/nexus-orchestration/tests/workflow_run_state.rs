@@ -5120,13 +5120,22 @@ impl nexus_orchestration::capability::PromptExecutor for GoJudgeProvider {
 }
 
 /// Registry with the mock judge provider (deterministic labeled routing).
-fn judge_registry_holder() -> nexus_orchestration::CapabilityRegistryHolder {
+///
+/// A1: the `judge.llm` prompt consumer resolves the run's coordinator
+/// cancellation token from the SAME shared per-run map the engine registers
+/// into at run admission. Production (daemon boot) shares one map between
+/// the registry and the engine; the fixture must mirror that — otherwise the
+/// fail-closed `resolve_session_cancellation` refuses with
+/// `CancellationUnavailable` for the engine-created run id.
+fn judge_registry_holder(
+    session_cancels: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    >,
+) -> nexus_orchestration::CapabilityRegistryHolder {
     let deps = nexus_orchestration::capability::CapabilityRuntimeDeps {
         pool: None,
         prompt_executor: Some(std::sync::Arc::new(GoJudgeProvider)),
-        session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
+        session_cancels,
         daemon_tool_dispatch: None,
         cdn_config: None,
     };
@@ -5154,10 +5163,23 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
-    let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+    // A1: one SHARED per-run cancellation map. The registry's `judge.llm`
+    // consumer resolves the run's coordinator token from this map; the
+    // engine registers it at admission. Production (daemon boot) shares a
+    // single map between the registry and the engine.
+    let session_cancels: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+    let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
         storage_arc.clone(),
         workflow_store.clone(),
-        judge_registry_holder(),
+        judge_registry_holder(session_cancels.clone()),
+    );
+    // Unify the engine's per-run map with the one the registry's judge
+    // resolves from (the same contract daemon boot establishes).
+    engine.set_prompt_executor(
+        std::sync::Arc::new(GoJudgeProvider),
+        session_cancels.clone(),
     );
 
     // Hand-built graph over the REAL `StateCompositeTask` labeled-routing
@@ -5177,7 +5199,7 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
             on_timeout: None,
         })
     };
-    let registry = judge_registry_holder().get();
+    let registry = judge_registry_holder(session_cancels).get();
     let start = mk_state(
         "start",
         ExitWhen::LlmJudge {
