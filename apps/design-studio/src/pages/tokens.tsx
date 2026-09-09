@@ -329,7 +329,7 @@ const CANVAS_TOKEN_GROUPS: CanvasTokenGroup[] = [
   {
     title: 'Canvas — Timeline accent spine',
     hint:
-      'Surface-level Timeline identity — cyan signal (blue-700 ≡ brand-cyan). Distinct from per-layer accents.',
+      'Surface-level Timeline identity — cobalt signal (blue-700 ≡ brand-cyan). Distinct from per-layer accents.',
     tokens: [
       { label: 'canvas-timeline-accent', varName: '--color-canvas-timeline-accent' },
     ],
@@ -1029,7 +1029,7 @@ function ColorsSection() {
         data-testid="tokens-chronos-note"
         className="text-copy-14 text-gray-700 mb-6 max-w-prose"
       >
-        Chronos dual-role: <strong className="font-medium text-gray-1000">cyan signal</strong>{' '}
+        Chronos dual-role: <strong className="font-medium text-gray-1000">cobalt signal</strong>{' '}
         (<code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">blue-1000</code> /{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">brand-cyan-1000</code> on
         light fills; <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">blue-700</code> /{' '}
@@ -1037,7 +1037,8 @@ function ColorsSection() {
         for interactive affordances;{' '}
         <strong className="font-medium text-gray-1000">deep ink</strong> (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">brand-deep-blue</code>) for
-        structure and light-theme body links. Toggle light/dark — blue-* stays cyan on light.
+        structure and light-theme body links. Toggle light/dark — blue-* stays cobalt in both
+        themes (lighter in dark).
       </p>
       {COLOR_GROUPS.map((group) => (
         <div
@@ -1287,9 +1288,9 @@ export function TokensPage() {
       <p className="text-copy-16 text-gray-700 mb-6">
         All scalar design scales from the DESIGN SSOT — colors, typography (incl. the display tier),
         spacing, radius, elevation, and motion. Values are read live from CSS custom properties and
-        rendered utility classes, and update when the theme toggles. Chronos projects light{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">blue-*</code> as the cyan
-        interactive scale — see Colors for the ink-vs-signal split.
+        generated utility classes, and update when the theme toggles. Chronos projects{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">blue-*</code> as the
+        cobalt interactive scale — see Colors for the ink-vs-signal split.
       </p>
       <SubNav />
 

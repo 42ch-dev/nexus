@@ -1,5 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 
+import { useTheme } from '@/components/theme-provider';
+
 import {
   NexusLogo,
   NexusMark,
@@ -60,7 +62,7 @@ const LOGO_DISPLAYS: LogoDisplay[] = [
     label: 'Primary (plain)',
     fileName: logoVariants.primary,
     description:
-      'Plain timeline mark — bright cyan gradient, no plate. Use inline on ink or paired with structure; square plate lockups use logo-primary-square.svg.',
+      'Plain timeline mark — cobalt gradient, no plate. Use inline on ink or paired with structure; square plate lockups use logo-primary-square.svg.',
     panelBgClass: 'bg-brand-deep-blue',
   },
   {
@@ -68,7 +70,7 @@ const LOGO_DISPLAYS: LogoDisplay[] = [
     label: 'White-bg (plain)',
     fileName: logoVariants.whiteBg,
     description:
-      'Plain deep→cyan gradient mark for light surfaces. Plated lockups use logo-white-bg-square.svg.',
+      'Plain deep→cobalt gradient mark for light surfaces. Plated lockups use logo-white-bg-square.svg.',
     panelBgClass: 'bg-white',
   },
   {
@@ -310,7 +312,7 @@ function ChronosShellMini({
   return (
     <div
       className={`border border-gray-alpha-300 rounded-card overflow-hidden ${
-        isDark ? 'bg-[#08141C]' : 'bg-background-100'
+        isDark ? 'dark dark:bg-background-100' : 'bg-background-100'
       }`}
       data-testid={`chronos-mini-${mode}`}
     >
@@ -320,7 +322,7 @@ function ChronosShellMini({
       >
         <span
           className={`text-label-14 font-medium ${
-            isDark ? 'text-brand-cyan' : 'text-white'
+            isDark ? 'text-brand-cyan dark:text-brand-cyan' : 'text-white'
           }`}
         >
           {isDark ? 'Chronos Dark' : 'Chronos Light'}
@@ -329,13 +331,13 @@ function ChronosShellMini({
       </div>
       <div
         className={`min-h-[72px] p-4 ${
-          isDark ? 'bg-[#08141C]' : 'bg-background-100'
+          isDark ? 'bg-background-100 dark:bg-background-100' : 'bg-background-100'
         }`}
       >
         <div
           className={`h-8 rounded-control border ${
             isDark
-              ? 'border-white/10 bg-[#0D1B26]'
+              ? 'border-white/10 bg-background-200 dark:bg-background-200'
               : 'border-gray-alpha-200 bg-background-200'
           }`}
         />
@@ -355,7 +357,7 @@ function ChronosContextSection() {
         Chronos identity: ink titlebar uses the compact bright mark (
         <code className="font-mono bg-gray-alpha-100 px-1 rounded">logo-white.svg</code> at{' '}
         <code className="font-mono bg-gray-alpha-100 px-1 rounded">logoCompactMarkHeightPx</code>
-        ), label white on light / cyan on dark. Sidebar shell uses the square primary plate (
+        ), label white on light / cobalt on dark. Sidebar shell uses the square primary plate (
         <code className="font-mono bg-gray-alpha-100 px-1 rounded">logo-primary-square.svg</code>
         ). Use{' '}
         <code className="font-mono bg-gray-alpha-100 px-1 rounded">logo-white-bg-square.svg</code>{' '}
@@ -464,19 +466,19 @@ function MarkSection() {
           </div>
         </div>
 
-        <div className="border border-gray-alpha-300 rounded-card bg-[#08141C] overflow-hidden">
+        <div className="border border-gray-alpha-300 rounded-card overflow-hidden dark dark:bg-background-100">
           <div className="p-8 flex flex-col items-center justify-center gap-3 min-h-[120px]">
-            <NexusMark size={32} className="w-auto text-brand-cyan" />
-            <span className="text-copy-13 text-gray-300 text-center">
+            <NexusMark size={32} className="w-auto text-brand-cyan dark:text-brand-cyan" />
+            <span className="text-copy-13 dark:text-gray-800">
               Dark surface —{' '}
-              <code className="text-copy-13-mono bg-gray-alpha-200 px-1 rounded">
+              <code className="text-copy-13-mono bg-gray-alpha-200 px-1 rounded dark:text-gray-800">
                 text-brand-cyan
-              </code>
-              .
+              </code>{' '}
+              (dark `#8EB1F4`).
             </span>
           </div>
-          <div className="px-4 py-2 border-t border-white/10 bg-[#0D1B26]">
-            <span className="text-label-14 text-gray-300">Dark theme</span>
+          <div className="px-4 py-2 border-t border-white/10 bg-[#0D1B26] dark:bg-background-200">
+            <span className="text-label-14 dark:text-gray-800">Dark theme</span>
           </div>
         </div>
       </div>
@@ -543,13 +545,14 @@ function SpecimensSection() {
 /* ---------- Theme CSS swatches ---------- */
 
 function ThemeCssSwatches() {
+  const { resolvedTheme } = useTheme();
   const [values, setValues] = useState<Record<string, string>>({});
   useEffect(() => {
     const cs = getComputedStyle(document.documentElement);
     setValues(
       Object.fromEntries(THEME_CSS_SWATCHES.map((s) => [s.varName, cs.getPropertyValue(s.varName).trim()])),
     );
-  }, []);
+  }, [resolvedTheme]);
 
   return (
     <section>
@@ -631,7 +634,7 @@ function ClearSpaceSection() {
             clearance
           </span>
           <span className="text-copy-13 text-gray-600">
-            Dashed cyan box = exclusion zone ({clearancePx}px on each side at this size).
+            Dashed cobalt box = exclusion zone ({clearancePx}px on each side at this size).
           </span>
         </div>
       </div>
@@ -650,7 +653,7 @@ export function BrandPage() {
       <p className="text-copy-16 text-gray-700 mb-6">
         <code className="font-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code> VI —
         Chronos timeline logo system (wide mark, no N-network lockup), shell placement, theme
-        specimens, and clear-space guidance. Cyan is signal; deep blue is ink structure. Toggle
+        specimens, and clear-space guidance. Cobalt is signal; deep blue is ink structure. Toggle
         light/dark to verify theme-aware shell fixtures.
       </p>
       <SubNav />

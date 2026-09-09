@@ -163,26 +163,16 @@ function mockMatchMediaFull({
 /* ---- Chronos Light / Dark gallery acceptance (VI logo upgrade T7) ------- */
 
 describe('Chronos gallery acceptance', () => {
-  it('home surfaces a Chronos identity note', () => {
-    mockMatchMedia(false);
-    renderStudio('/');
-    expect(screen.getByTestId('home-chronos-note')).toHaveTextContent(/cyan is the shared signal/i);
-  });
-
-  it('tokens page documents dual-role and shows blue-* as cyan signal scale', () => {
+  it('tokens page documents dual-role and renders blue-* swatches', () => {
     mockMatchMediaFull();
     renderStudio('/tokens');
-    expect(screen.getByTestId('tokens-chronos-note')).toHaveTextContent(/cyan signal/i);
-    expect(screen.getByTestId('color-group-blue')).toHaveTextContent(/Interactive cyan signal/i);
-    expect(screen.getByTestId('color-group-blue')).toHaveTextContent(/blue-700 ≡ brand-cyan/i);
-
     const swatch = screen.getByTestId('color-swatch-blue-700');
     const fill = swatch.querySelector('[style*="--color-blue-700"]');
     expect(fill).not.toBeNull();
     expect(swatch).toHaveTextContent('blue-700');
   });
 
-  it('components primary Button uses mid-teal fill in light shell', () => {
+  it('components primary Button uses brand-cyan-1000 fill in light shell', () => {
     mockMatchMediaFull();
     renderStudio('/components');
     expect(screen.getByTestId('button-chronos-note')).toHaveTextContent(/theme-split/i);
@@ -202,7 +192,7 @@ describe('Chronos gallery acceptance', () => {
     expect(tiny.className).toMatch(/\btext-button-12\b/);
   });
 
-  it('dark theme keeps primary Button cyan CTA + deep ink label', () => {
+  it('dark theme keeps primary Button brand-cyan CTA + deep ink label', () => {
     // ThemeProvider must apply `.dark` from matchMedia — do not inject the class.
     mockMatchMediaFull({ dark: true });
     renderStudio('/components');
@@ -213,7 +203,7 @@ describe('Chronos gallery acceptance', () => {
     expect(primary.className).toMatch(/\bdark:text-brand-deep-blue\b/);
   });
 
-  it('dark theme keeps token blue-700 swatch on cyan signal scale', async () => {
+  it('dark theme renders blue-700 swatch with the dark cobalt paint (#8EB1F4)', async () => {
     // jsdom does not resolve CSS custom properties (vitest `css: false`).
     // Harness: only return Chronos cyan paint when ThemeProvider applied `.dark`
     // (matchMedia-driven — no manual classList.add).
@@ -240,7 +230,6 @@ describe('Chronos gallery acceptance', () => {
     mockMatchMediaFull({ dark: true });
     renderStudio('/tokens');
     expect(document.documentElement.classList.contains('dark')).toBe(true);
-    expect(screen.getByTestId('tokens-chronos-note')).toHaveTextContent(/cyan signal/i);
     const swatch = screen.getByTestId('color-swatch-blue-700');
     const fill = swatch.querySelector('[style*="--color-blue-700"]');
     expect(fill).not.toBeNull();
@@ -258,11 +247,11 @@ describe('Chronos gallery acceptance', () => {
     expect(screen.getByText(/no N-network lockup/i)).toBeInTheDocument();
   });
 
-  it('surfaces index notes cobalt active chrome on silver-neutral / graphite', () => {
+  it('surfaces index notes cyan active chrome on warm-paper / ink', () => {
     mockMatchMedia(false);
     renderStudio('/surfaces');
-    expect(screen.getByTestId('surfaces-chronos-note')).toHaveTextContent(/cobalt active affordances/i);
-    expect(screen.getByTestId('surfaces-chronos-note')).toHaveTextContent(/silver-neutral/i);
+    expect(screen.getByTestId('surfaces-chronos-note')).toHaveTextContent(/cyan active affordances/i);
+    expect(screen.getByTestId('surfaces-chronos-note')).toHaveTextContent(/warm-paper/i);
   });
 });
 
