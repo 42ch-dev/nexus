@@ -55,6 +55,10 @@ pub struct SessionSummary {
     pub status: String,
     /// Task the session is currently executing (if any).
     pub current_task_id: Option<String>,
+    /// Actionable failure reason for terminal/uncertain outcomes (e.g. an
+    /// unconfirmed cancel cleanup that left the run `interrupted`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_reason: Option<String>,
 }
 
 /// Response body for `GET /v1/daemon/orchestration/sessions/{id}`.

@@ -3593,4 +3593,165 @@ mod tests {
             .expect("run exists");
         assert_eq!(final_record.status, SessionStatus::Cancelled);
     }
+
+    /// Deterministic continue-after-cancel-fence proof (Finding 1, public
+    /// surface): once the durable cancel intent is committed, a matching
+    /// Continue through the coordinator is refused with the exact 409
+    /// `workflow_state_conflict` — the wait is never consumed, the cancel
+    /// fence stays intact, and `ensure_driving` is never called (no new
+    /// work is created while cancellation is in flight).
+    #[tokio::test]
+    async fn continue_after_cancel_fence_returns_state_conflict_without_driving() {
+        let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let _ = &tmp;
+        let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = Arc::new(nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        ));
+        let session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let coordinator = WorkflowRunCoordinator::new(
+            engine.clone(),
+            storage.clone(),
+            pool.clone(),
+            session_cancels,
+        );
+
+        // Start a v1 run and park it at a durable human wait.
+        let graph = Arc::new(graph_flow::Graph::new("fence-graph"));
+        graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        let waiting_state = nexus_orchestration::run_state::RunStateV1 {
+            wait: Some(nexus_orchestration::run_state::WaitRecord {
+                wait_id: "wait-tok-1".to_string(),
+                task_id: "persist".to_string(),
+                child_session_id: None,
+                child_task_id: None,
+                kind: nexus_orchestration::run_state::WaitKind::Manual,
+            }),
+            ..nexus_orchestration::run_state::RunStateV1::default()
+        };
+        store
+            .commit_transition(
+                &session_id,
+                record.state_revision,
+                nexus_orchestration::run_state::RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                SessionStatus::WaitingForInput,
+                &waiting_state,
+            )
+            .await
+            .expect("park at human wait");
+
+        // The cancel winner commits the durable cancel intent (phase 1):
+        // `cancel_requested = true` while the status stays non-terminal.
+        let fenced = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let fenced_root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        let mut fenced_state = fenced.state.unwrap_or_default();
+        fenced_state.cancel_requested = true;
+        store
+            .commit_transition(
+                &session_id,
+                fenced.state_revision,
+                nexus_orchestration::run_state::RunCheckpoint {
+                    root: &fenced_root,
+                    children: &[],
+                },
+                SessionStatus::WaitingForInput,
+                &fenced_state,
+            )
+            .await
+            .expect("cancel fence wins the CAS");
+
+        // A matching Continue after the fence is refused with the exact 409
+        // state conflict — the cancel winner is the ONLY durable control
+        // winner.
+        let err = coordinator
+            .signal_run(
+                &session_id,
+                RunSignal::Continue {
+                    wait_id: "wait-tok-1".to_string(),
+                },
+            )
+            .await
+            .expect_err("continue after the cancel fence must be refused");
+        match &err {
+            RunControlError::StateConflict(sid, msg) => {
+                assert_eq!(sid, &session_id.0);
+                assert!(
+                    msg.contains("terminal or not in a signalable state"),
+                    "state conflict must name the fence, got {msg}"
+                );
+            }
+            other => panic!("expected StateConflict, got {other:?}"),
+        }
+
+        // The wait and the cancel fence are both intact.
+        let after = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(after.status, SessionStatus::WaitingForInput);
+        assert!(
+            after.state.as_ref().is_some_and(|s| s.cancel_requested),
+            "the cancel fence must remain durable"
+        );
+        assert_eq!(
+            after
+                .state
+                .as_ref()
+                .and_then(|s| s.wait.as_ref())
+                .map(|w| w.wait_id.as_str()),
+            Some("wait-tok-1"),
+            "the wait must not be consumed by the refused continue"
+        );
+
+        // `ensure_driving` was never called: no drive owner exists for the
+        // session (no new work was created while cancellation is in flight).
+        assert!(
+            !coordinator
+                .drives
+                .lock()
+                .await
+                .contains_key(&session_id.0),
+            "the refused continue must not start a drive owner"
+        );
+    }
 }

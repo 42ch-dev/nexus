@@ -23,7 +23,7 @@ use thiserror::Error;
 // Re-export for internal use.
 use crate::capability::{CapabilityError, CapabilityRegistry};
 use crate::run_state::{
-    ChildCheckpoint, PresetSourceIdentity, RunCheckpoint, RunDescriptorV1, RunStateV1,
+    ChildCheckpoint, PresetSourceIdentity, RunCheckpoint, RunDescriptorV1, RunFailure, RunStateV1,
     WorkflowStateStore,
 };
 
@@ -714,6 +714,14 @@ impl EngineSharedState {
             }
         }
         let mut next_state = record.state.unwrap_or_default();
+        // A5 cancel-intent fence (Finding 1): once the durable cancel
+        // intent is committed, the cancel winner is the ONLY durable
+        // control winner. Every other signal — Continue included — is
+        // refused with a state conflict and the wait is never consumed:
+        // no new work is created while cancellation is in flight.
+        if next_state.cancel_requested && !matches!(signal, EngineSignal::Cancel) {
+            return Err(EngineError::TerminalState(session_id.0.clone()));
+        }
         // Continue is the ONLY non-cancel signal that may act on a waiting
         // run; all other non-cancel signals are fenced against waits and
         // in-flight markers (A4: advance/resume/force-transition cannot
@@ -924,57 +932,128 @@ impl EngineSharedState {
             // sessions with their OWN registered tokens (A4 nested child
             // propagation) — fire those too so a cancel reaches the exact
             // waiting descendant.
+            let child_ids: Vec<String> = {
+                let children = self.children.read().await;
+                children
+                    .get(&session_id.0)
+                    .map(|entries| {
+                        entries
+                            .iter()
+                            .map(|c| c.session.id.clone())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            };
             {
-                let child_ids: Vec<String> = {
-                    let children = self.children.read().await;
-                    children
-                        .get(&session_id.0)
-                        .map(|entries| {
-                            entries
-                                .iter()
-                                .map(|c| c.session.id.clone())
-                                .collect::<Vec<_>>()
-                        })
-                        .unwrap_or_default()
-                };
                 let cancels = self.session_cancels.read().unwrap_or_else(|e| e.into_inner());
                 if let Some(token) = cancels.get(&session_id.0).cloned() {
                     token.cancel();
                 }
-                for child_id in child_ids {
-                    if let Some(token) = cancels.get(&child_id).cloned() {
+                for child_id in &child_ids {
+                    if let Some(token) = cancels.get(child_id).cloned() {
                         token.cancel();
                     }
                 }
             }
 
-            // Await the prompt executor's bounded owned-Host teardown.
+            // Await the prompt executor's bounded owned-Host teardown for
+            // the root AND every owned descendant run (Finding 3): Host
+            // sessions are keyed by the request run id, and nested prompt
+            // tasks pass their own child session id — a child parked at a
+            // human wait has a cached Host session with no active operation
+            // to observe the fired token, so the root finalize alone never
+            // visits it. All owned cleanup must be confirmed before the run
+            // settles `Cancelled`; failed entries are retained for the
+            // owner-scoped retry.
             if let Some(executor) = &self.prompt_executor {
+                let mut cleanup_error: Option<CapabilityError> = None;
                 if let Err(e) = executor.finalize_run(&session_id.0).await {
+                    cleanup_error = Some(e);
+                }
+                if cleanup_error.is_none() {
+                    for child_id in &child_ids {
+                        if let Err(e) = executor.finalize_run(child_id).await {
+                            cleanup_error = Some(e);
+                            break;
+                        }
+                    }
+                }
+                if let Some(e) = cleanup_error {
                     // Cleanup unconfirmed: persist Interrupted (actionable,
                     // never false successful cancellation) and surface the
-                    // error. The run stays visibly interrupted.
-                    let Some(current) = store.load_run(session_id).await? else {
-                        return Err(EngineError::GraphFlow(
-                            graph_flow::GraphError::StorageError(format!(
-                                "run '{}' disappeared during cancel cleanup",
-                                session_id.0
-                            )),
-                        ));
-                    };
-                    let current_revision = current.state_revision;
-                    let mut interrupted_state = current.state.unwrap_or_default();
-                    interrupted_state.cancel_requested = true;
-                    interrupted_state.in_flight = None;
-                    let _ = store
-                        .commit_transition(
-                            session_id,
-                            current_revision,
-                            checkpoint,
-                            SessionStatus::Interrupted,
-                            &interrupted_state,
-                        )
-                        .await;
+                    // error. The run stays visibly interrupted. The
+                    // transition is revision-fenced and bounded like the
+                    // other cancellation transitions (Finding 2): a
+                    // concurrent transition that wins the CAS is reloaded
+                    // and re-committed against the new revision; the write
+                    // result is never discarded, and the in-memory summary
+                    // is updated only after the durable write succeeds.
+                    let reason = format!(
+                        "cancel cleanup unconfirmed for run '{}': {e}",
+                        session_id.0
+                    );
+                    let mut interrupted_attempts: u32 = 0;
+                    loop {
+                        let Some(current) = store.load_run(session_id).await? else {
+                            return Err(EngineError::GraphFlow(
+                                graph_flow::GraphError::StorageError(format!(
+                                    "run '{}' disappeared during cancel cleanup",
+                                    session_id.0
+                                )),
+                            ));
+                        };
+                        let current_revision = current.state_revision;
+                        let mut interrupted_state = current.state.unwrap_or_default();
+                        interrupted_state.cancel_requested = true;
+                        interrupted_state.in_flight = None;
+                        interrupted_state.failure = Some(RunFailure {
+                            code: "cancel_cleanup_unconfirmed".to_string(),
+                            message: reason.clone(),
+                        });
+                        // Re-read the root snapshot so the Interrupted
+                        // checkpoint never clobbers a position/context a
+                        // concurrent transition advanced.
+                        let interrupted_root = self
+                            .storage
+                            .get(&session_id.0)
+                            .await
+                            .map_err(EngineError::GraphFlow)?
+                            .ok_or_else(|| {
+                                EngineError::SessionNotFound(session_id.0.clone())
+                            })?;
+                        let interrupted_checkpoint = RunCheckpoint {
+                            root: &interrupted_root,
+                            children: &[],
+                        };
+                        match store
+                            .commit_transition(
+                                session_id,
+                                current_revision,
+                                interrupted_checkpoint,
+                                SessionStatus::Interrupted,
+                                &interrupted_state,
+                            )
+                            .await
+                        {
+                            Ok(_) => break,
+                            Err(EngineError::RevisionMismatch { .. }) => {
+                                interrupted_attempts += 1;
+                                if interrupted_attempts >= CANCEL_FENCE_RETRY_BOUND {
+                                    return Err(EngineError::RevisionMismatch {
+                                        session_id: session_id.0.clone(),
+                                        expected: current_revision,
+                                        found: current_revision,
+                                    });
+                                }
+                                // Reload and re-commit against the new
+                                // revision.
+                            }
+                            Err(err) => return Err(err),
+                        }
+                    }
+                    // Durable Interrupted confirmed: only now update the
+                    // in-memory summary (Finding 2 — never before durable
+                    // success).
                     if let Some(s) = self
                         .sessions
                         .write()
@@ -985,10 +1064,7 @@ impl EngineSharedState {
                         s.status = SessionStatus::Interrupted;
                     }
                     return Err(EngineError::GraphFlow(
-                        graph_flow::GraphError::TaskExecutionFailed(format!(
-                            "cancel cleanup unconfirmed for run '{}': {e}",
-                            session_id.0
-                        )),
+                        graph_flow::GraphError::TaskExecutionFailed(reason),
                     ));
                 }
             }
@@ -3379,11 +3455,18 @@ mod tests {
         let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
-        let engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+        let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
             storage.clone(),
             store.clone(),
             caps,
         );
+        // Production-shaped Host executor (Finding 4): the cancel path must
+        // invoke `finalize_run` (bounded owned-Host teardown) after the
+        // re-fenced cancel intent — the token-only check below is the
+        // lower-level fence assertion, and the executor call is the
+        // load-bearing external side effect.
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Ok(())]));
+        engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
 
         // Start a v1 run through the engine (registers the run token in the
         // shared map the cancel path reads).
@@ -3453,6 +3536,11 @@ mod tests {
         assert!(
             token.is_cancelled(),
             "the coordinator token must fire after the re-fenced cancel intent"
+        );
+        assert_eq!(
+            executor.finalized_runs(),
+            vec![session_id.0.clone()],
+            "the production-shaped Host executor must reap the run after the re-fenced cancel"
         );
 
         // The run is durably cancelled with the cancel intent persisted.
@@ -3749,28 +3837,427 @@ mod tests {
         );
         assert_eq!(executor.calls(), 2, "both retries invoked finalize_run");
     }
+
+    // ------------------------------------------------------------------
+    // T2 fix round 2 — Finding 1: Continue is fenced after the
+    // cancel-intent winner
+    // ------------------------------------------------------------------
+
+    /// Deterministic continue-after-cancel-fence proof (Finding 1): once the
+    /// durable cancel intent is committed, a matching Continue must be
+    /// refused with a state conflict — the wait is never consumed, the
+    /// cancel fence stays intact, and no new work is created while
+    /// cancellation is in flight.
+    #[tokio::test]
+    async fn continue_after_cancel_fence_is_state_conflict() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+
+        let graph = Arc::new(Graph::new("continue-fence"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // Park the run at a durable human wait.
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        let waiting_state = RunStateV1 {
+            wait: Some(crate::run_state::WaitRecord {
+                wait_id: "wait-tok-1".to_string(),
+                task_id: "persist".to_string(),
+                child_session_id: None,
+                child_task_id: None,
+                kind: crate::run_state::WaitKind::Manual,
+            }),
+            ..RunStateV1::default()
+        };
+        store
+            .commit_transition(
+                &session_id,
+                record.state_revision,
+                RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                SessionStatus::WaitingForInput,
+                &waiting_state,
+            )
+            .await
+            .expect("park at human wait");
+
+        // The cancel winner commits the durable cancel intent (phase 1):
+        // `cancel_requested = true` while the status stays non-terminal.
+        let fenced = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let fenced_root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        let mut fenced_state = fenced.state.unwrap_or_default();
+        fenced_state.cancel_requested = true;
+        store
+            .commit_transition(
+                &session_id,
+                fenced.state_revision,
+                RunCheckpoint {
+                    root: &fenced_root,
+                    children: &[],
+                },
+                SessionStatus::WaitingForInput,
+                &fenced_state,
+            )
+            .await
+            .expect("cancel fence wins the CAS");
+
+        // A matching Continue after the fence is refused: the cancel winner
+        // is the ONLY durable control winner. The wait is never consumed.
+        let err = engine
+            .state
+            .persist_signal_transition(
+                &session_id,
+                &EngineSignal::Continue {
+                    wait_id: "wait-tok-1".to_string(),
+                },
+            )
+            .await
+            .expect_err("continue after the cancel fence must be refused");
+        assert!(
+            matches!(err, EngineError::TerminalState(_)),
+            "continue after the cancel fence is a state conflict, got {err:?}"
+        );
+
+        // The wait and the cancel fence are both intact.
+        let after = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(after.status, SessionStatus::WaitingForInput);
+        assert!(
+            after.state.as_ref().is_some_and(|s| s.cancel_requested),
+            "the cancel fence must remain durable"
+        );
+        assert_eq!(
+            after
+                .state
+                .as_ref()
+                .and_then(|s| s.wait.as_ref())
+                .map(|w| w.wait_id.as_str()),
+            Some("wait-tok-1"),
+            "the wait must not be consumed by the refused continue"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // T2 fix round 2 — Finding 2: Interrupted persistence is
+    // revision-fenced, bounded, and never discarded
+    // ------------------------------------------------------------------
+
+    /// Deterministic interruption-write CAS failure proof (Finding 2): the
+    /// `Interrupted` commit loses a revision CAS to a competing transition;
+    /// the bounded retry reloads and re-commits against the new revision.
+    /// The durable row AND the in-memory summary both land on
+    /// `Interrupted`, and the actionable failure record is persisted.
+    #[tokio::test]
+    async fn interrupted_write_cas_loss_retries_and_persists() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let real_store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let store: Arc<dyn WorkflowStateStore> = Arc::new(InterruptedCasInjectingStore::new(
+            real_store.clone(),
+            storage.clone(),
+        ));
+
+        // The first finalize fails (cleanup unconfirmed) — the Interrupted
+        // write then loses its CAS once and must retry.
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Err(
+            CapabilityError::Internal("shutdown timeout".to_string()),
+        )]));
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
+
+        let graph = Arc::new(Graph::new("interrupted-cas"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // First cancel: cleanup unconfirmed → the Interrupted write loses
+        // the CAS once, the bounded retry re-commits, and the error is
+        // surfaced with the actionable reason.
+        let err = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect_err("unconfirmed cleanup surfaces the error");
+        assert!(
+            matches!(err, EngineError::GraphFlow(_)),
+            "unconfirmed cleanup surfaces the error, got {err:?}"
+        );
+
+        // Durable row: Interrupted with the cancel intent and the failure
+        // record (the write result was never discarded).
+        let record = real_store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(record.status, SessionStatus::Interrupted);
+        assert!(
+            record.state.as_ref().is_some_and(|s| s.cancel_requested),
+            "interrupted run must carry the durable cancel intent"
+        );
+        let failure = record
+            .state
+            .as_ref()
+            .and_then(|s| s.failure.as_ref())
+            .expect("interrupted run must carry the actionable failure record");
+        assert_eq!(failure.code, "cancel_cleanup_unconfirmed");
+        assert!(
+            failure.message.contains("cancel cleanup unconfirmed"),
+            "failure message must be actionable, got: {}",
+            failure.message
+        );
+
+        // In-memory summary: updated ONLY after the durable write succeeded
+        // (Finding 2 — never before).
+        let sessions = engine.state.sessions.read().await;
+        let in_memory = sessions
+            .iter()
+            .find(|s| s.session_id == session_id)
+            .expect("session tracked in memory");
+        assert_eq!(
+            in_memory.status,
+            SessionStatus::Interrupted,
+            "in-memory summary must reflect the durable interrupted outcome"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // T2 fix round 2 — Finding 3: child Host sessions are finalized
+    // ------------------------------------------------------------------
+
+    /// Deterministic child-wait cancellation proof (Finding 3): a child
+    /// parked at a human wait (cached Host session, no active operation)
+    /// is reaped via its OWN `finalize_run` call — the root finalize alone
+    /// never visits the child-keyed cache entry. On root cleanup failure the
+    /// run is `Interrupted`; the retry finalizes root AND child and settles
+    /// `Cancelled`.
+    #[tokio::test]
+    async fn cancel_finalizes_child_host_sessions() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+
+        // First cancel: root finalize fails (cleanup unconfirmed). Retry:
+        // root finalize succeeds, then the child's OWN finalize succeeds.
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![
+            Err(CapabilityError::Internal("shutdown timeout".to_string())),
+            Ok(()),
+            Ok(()),
+        ]));
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
+
+        let graph = Arc::new(Graph::new("child-cancel"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // Spawn a child (inner graph) — registered in the children map with
+        // its own cancellation token and v1 run row.
+        let inner = Arc::new(Graph::new("inner"));
+        inner.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let child_id = engine
+            .state
+            .spawn_child_session_internal(ChildSessionParams {
+                parent_session_id: session_id.0.clone(),
+                inner_graph: inner,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect("spawn child");
+
+        // Park the child at a durable human wait: its Host session is cached
+        // but no child operation is active to observe a fired token.
+        let child_record = store
+            .load_run(&child_id)
+            .await
+            .expect("load child")
+            .expect("child exists");
+        let child_root = storage
+            .get(&child_id.0)
+            .await
+            .expect("get child root")
+            .expect("child root exists");
+        let child_waiting = RunStateV1 {
+            wait: Some(crate::run_state::WaitRecord {
+                wait_id: "child-wait-tok".to_string(),
+                task_id: "persist".to_string(),
+                child_session_id: None,
+                child_task_id: None,
+                kind: crate::run_state::WaitKind::Manual,
+            }),
+            ..RunStateV1::default()
+        };
+        store
+            .commit_transition(
+                &child_id,
+                child_record.state_revision,
+                RunCheckpoint {
+                    root: &child_root,
+                    children: &[],
+                },
+                SessionStatus::WaitingForInput,
+                &child_waiting,
+            )
+            .await
+            .expect("park child at human wait");
+
+        // First cancel: root finalize fails → Interrupted. The child was
+        // NOT finalized (root failure short-circuits before descendants).
+        let err = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect_err("first cancel must surface the unconfirmed cleanup");
+        assert!(matches!(err, EngineError::GraphFlow(_)));
+        assert_eq!(
+            executor.finalized_runs(),
+            vec![session_id.0.clone()],
+            "root finalize attempted first; child not reached on root failure"
+        );
+        let interrupted = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(interrupted.status, SessionStatus::Interrupted);
+
+        // Retry cancel: root finalize succeeds, then the child's OWN
+        // finalize reaps the child-keyed Host session, and the run settles
+        // Cancelled.
+        let status = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect("retry cancel must settle cancelled");
+        assert_eq!(status, SessionStatus::Cancelled);
+        assert_eq!(
+            executor.finalized_runs(),
+            vec![
+                session_id.0.clone(),
+                session_id.0.clone(),
+                child_id.0.clone(),
+            ],
+            "retry finalizes the root then the child by its own run id"
+        );
+        let final_record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(final_record.status, SessionStatus::Cancelled);
+    }
 }
 
 /// Scripted [`PromptExecutor`] for the A5 cleanup-retry tests: `finalize_run`
-/// pops from a scripted queue of outcomes.
+/// pops from a scripted queue of outcomes and records every call's run id.
+#[cfg(test)]
 struct ScriptedFinalizeExecutor {
     outcomes: std::sync::Mutex<std::collections::VecDeque<Result<(), CapabilityError>>>,
     calls: std::sync::atomic::AtomicU64,
+    finalized_runs: std::sync::Mutex<Vec<String>>,
 }
 
+#[cfg(test)]
 impl ScriptedFinalizeExecutor {
     fn new(outcomes: Vec<Result<(), CapabilityError>>) -> Self {
         Self {
             outcomes: std::sync::Mutex::new(outcomes.into()),
             calls: std::sync::atomic::AtomicU64::new(0),
+            finalized_runs: std::sync::Mutex::new(Vec::new()),
         }
     }
 
     fn calls(&self) -> u64 {
         self.calls.load(std::sync::atomic::Ordering::SeqCst)
     }
+
+    /// Run ids passed to `finalize_run`, in call order.
+    fn finalized_runs(&self) -> Vec<String> {
+        self.finalized_runs.lock().expect("finalized_runs").clone()
+    }
 }
 
+#[cfg(test)]
 #[async_trait]
 impl crate::capability::PromptExecutor for ScriptedFinalizeExecutor {
     async fn execute(
@@ -3780,12 +4267,205 @@ impl crate::capability::PromptExecutor for ScriptedFinalizeExecutor {
         unreachable!("not used by cancel-path tests")
     }
 
-    async fn finalize_run(&self, _run_id: &str) -> Result<(), CapabilityError> {
+    async fn finalize_run(&self, run_id: &str) -> Result<(), CapabilityError> {
         self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.finalized_runs
+            .lock()
+            .expect("finalized_runs")
+            .push(run_id.to_string());
         self.outcomes
             .lock()
             .expect("outcomes")
             .pop_front()
             .unwrap_or(Ok(()))
+    }
+}
+
+/// Store wrapper that makes the FIRST `Interrupted` commit lose its revision
+/// CAS to a competing transition (Finding 2): the competing transition wins
+/// the same revision first, so the engine's bounded retry must reload and
+/// re-commit against the new revision. Every later commit passes through.
+#[cfg(test)]
+struct InterruptedCasInjectingStore {
+    inner: Arc<dyn WorkflowStateStore>,
+    storage: Arc<dyn SessionStorage>,
+    injected: std::sync::atomic::AtomicBool,
+}
+
+#[cfg(test)]
+impl InterruptedCasInjectingStore {
+    fn new(inner: Arc<dyn WorkflowStateStore>, storage: Arc<dyn SessionStorage>) -> Self {
+        Self {
+            inner,
+            storage,
+            injected: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+}
+
+#[cfg(test)]
+#[async_trait]
+impl WorkflowStateStore for InterruptedCasInjectingStore {
+    async fn load_run(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<crate::run_state::RunRecord>, EngineError> {
+        self.inner.load_run(session_id).await
+    }
+
+    async fn start_run(
+        &self,
+        session_id: &SessionId,
+        descriptor: &crate::run_state::RunDescriptorV1,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .start_run(session_id, descriptor, checkpoint, next_state)
+            .await
+    }
+
+    async fn admit_schedule_run(
+        &self,
+        schedule_id: &str,
+        session_id: &SessionId,
+        descriptor: &crate::run_state::RunDescriptorV1,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+        core_context_version: u32,
+        expected_core_context_version: u32,
+        admission_gate: Option<&crate::run_state::ScheduleAdmissionGate>,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .admit_schedule_run(
+                schedule_id,
+                session_id,
+                descriptor,
+                checkpoint,
+                next_state,
+                core_context_version,
+                expected_core_context_version,
+                admission_gate,
+            )
+            .await
+    }
+
+    async fn commit_transition(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_status: SessionStatus,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        if next_status == SessionStatus::Interrupted
+            && !self.injected.swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            // The competing transition wins the CAS first: a concurrent
+            // transition commits at the SAME revision the Interrupted write
+            // is about to lose.
+            let record = self
+                .inner
+                .load_run(session_id)
+                .await?
+                .expect("run exists at interrupted race gate");
+            let root = self
+                .storage
+                .get(&session_id.0)
+                .await
+                .expect("root session at interrupted race gate")
+                .expect("root exists at interrupted race gate");
+            let mut competing_state = record.state.unwrap_or_default();
+            competing_state.cancel_requested = true;
+            self.inner
+                .commit_transition(
+                    session_id,
+                    record.state_revision,
+                    crate::run_state::RunCheckpoint {
+                        root: &root,
+                        children: &[],
+                    },
+                    record.status.clone(),
+                    &competing_state,
+                )
+                .await
+                .expect("competing transition wins the CAS");
+        }
+        self.inner
+            .commit_transition(session_id, expected_revision, checkpoint, next_status, next_state)
+            .await
+    }
+
+    async fn settle_cancelled(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .settle_cancelled(session_id, expected_revision, checkpoint, next_state)
+            .await
+    }
+
+    async fn restore_pre_step(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        pre_step: &graph_flow::Session,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .restore_pre_step(session_id, expected_revision, pre_step)
+            .await
+    }
+
+    async fn mark_step_in_flight(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        step_state: &crate::run_state::RunStateV1,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .mark_step_in_flight(session_id, expected_revision, checkpoint, step_state)
+            .await
+    }
+
+    async fn persist_prompt_attempt(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_step: Option<&str>,
+        expected_attempt_id: Option<&str>,
+        attempt: &crate::run_state::PromptAttempt,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .persist_prompt_attempt(
+                session_id,
+                expected_revision,
+                expected_step,
+                expected_attempt_id,
+                attempt,
+            )
+            .await
+    }
+
+    async fn clear_prompt_attempt(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_step: Option<&str>,
+        attempt_id: &str,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
+            .await
+    }
+
+    async fn load_children(
+        &self,
+        parent_session_id: &SessionId,
+    ) -> Result<Vec<crate::run_state::RunRecord>, EngineError> {
+        self.inner.load_children(parent_session_id).await
     }
 }

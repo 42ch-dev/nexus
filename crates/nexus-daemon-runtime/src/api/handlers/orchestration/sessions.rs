@@ -153,6 +153,7 @@ pub async fn list_sessions(
             preset_id: s.preset_id,
             status: session_status_to_str(&s.status),
             current_task_id: s.current_task_id,
+            failure_reason: None,
         })
         .collect();
 
@@ -211,13 +212,49 @@ pub async fn get_session(
             message: e.to_string(),
         })?;
 
-    let session = if let Some(session) = sessions.into_iter().find(|s| s.session_id == sid) {
-        SessionSummary {
-            session_id: session.session_id.0,
-            creator_id: session.creator_id,
-            preset_id: session.preset_id,
-            status: session_status_to_str(&session.status),
-            current_task_id: session.current_task_id,
+    let session = if let Some(active) = sessions.into_iter().find(|s| s.session_id == sid) {
+        // The in-memory active summary is a fast path, but it is NOT the
+        // authoritative projection (Finding 2): after an unconfirmed cancel
+        // cleanup the durable row is `interrupted` while the in-memory
+        // summary may still say `running` (the engine updates the summary
+        // only after the durable write succeeds, and the first failed
+        // cancel returns the cleanup error before any summary flip). When a
+        // creator DB is present, cross-check the durable row and prefer it
+        // whenever it is terminal — the durable row is the SSOT.
+        let durable_terminal = match state.pool() {
+            Some(pool) => {
+                let storage = SqliteSessionStorage::new(Arc::new(pool.clone()));
+                match storage.get_checkpoint_row(&session_id).await {
+                    Ok(Some(row))
+                        if SessionStatus::from_db_str(&row.status)
+                            .is_some_and(|s| s.is_terminal()) =>
+                    {
+                        Some(row)
+                    }
+                    _ => None,
+                }
+            }
+            None => None,
+        };
+        if let Some(row) = durable_terminal {
+            let failure_reason = failure_reason_for(&row);
+            SessionSummary {
+                session_id: row.session_id,
+                creator_id: row.creator_id,
+                preset_id: row.preset_id,
+                status: row.status,
+                current_task_id: row.current_task_id,
+                failure_reason,
+            }
+        } else {
+            SessionSummary {
+                session_id: active.session_id.0,
+                creator_id: active.creator_id,
+                preset_id: active.preset_id,
+                status: session_status_to_str(&active.status),
+                current_task_id: active.current_task_id,
+                failure_reason: None,
+            }
         }
     } else {
         let pool = state.pool_or_uninit()?;
@@ -230,16 +267,32 @@ pub async fn get_session(
                 message: e.to_string(),
             })?
             .ok_or_else(|| NexusApiError::NotFound(format!("session {session_id}")))?;
+        let failure_reason = failure_reason_for(&row);
         SessionSummary {
             session_id: row.session_id,
             creator_id: row.creator_id,
             preset_id: row.preset_id,
             status: row.status,
             current_task_id: row.current_task_id,
+            failure_reason,
         }
     };
 
     Ok(Json(GetSessionResponse { session }))
+}
+
+/// Actionable failure reason from the durable v1 run state (e.g. an
+/// unconfirmed cancel cleanup that left the run `interrupted`).
+fn failure_reason_for(
+    row: &nexus_orchestration::storage::CheckpointRow,
+) -> Option<String> {
+    row.run_state_json
+        .as_deref()
+        .and_then(|blob| {
+            serde_json::from_slice::<nexus_orchestration::run_state::RunStateV1>(blob).ok()
+        })
+        .and_then(|state| state.failure)
+        .map(|f| f.message)
 }
 
 /// `POST /v1/daemon/orchestration/sessions/{session_id}/signal`
@@ -552,6 +605,104 @@ mod tests {
             body.items.is_empty(),
             "idle daemon (only _system.* sessions) must yield zero rows, got: {:?}",
             body.items.iter().map(|s| &s.preset_id).collect::<Vec<_>>()
+        );
+    }
+
+    /// Finding 2 (public projection): the durable row is the SSOT. When the
+    /// durable row is terminal (`interrupted`) but the in-memory summary is
+    /// stale non-terminal (`running`) — e.g. a durable write that succeeded
+    /// outside the engine's summary-update path — `get_session` must project
+    /// the authoritative durable status with the actionable cleanup reason,
+    /// never the stale in-memory `running`.
+    #[tokio::test]
+    async fn get_session_projects_durable_interrupted_after_failed_cleanup() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let pool = state.pool().expect("test pool").clone();
+        let sqlite = Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
+        let store: Arc<dyn nexus_orchestration::run_state::WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn graph_flow::SessionStorage> = sqlite.clone();
+
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        state.set_engine(Arc::new(engine));
+
+        // Start a v1 run (in-memory summary: `running`).
+        let engine = state.engine().expect("engine set");
+        let graph = manual_wait_graph("public-interrupted");
+        let session_id = engine
+            .start_session_with_graph("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // The durable row becomes `interrupted` with the actionable cleanup
+        // failure record — written directly through the store, as an
+        // unconfirmed cancel cleanup would (the engine's summary-update path
+        // is bypassed, leaving the in-memory summary stale `running`).
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        let interrupted_state = nexus_orchestration::run_state::RunStateV1 {
+            cancel_requested: true,
+            in_flight: None,
+            failure: Some(nexus_orchestration::run_state::RunFailure {
+                code: "cancel_cleanup_unconfirmed".to_string(),
+                message: "cancel cleanup unconfirmed for run 'x': shutdown timeout".to_string(),
+            }),
+            ..nexus_orchestration::run_state::RunStateV1::default()
+        };
+        store
+            .commit_transition(
+                &session_id,
+                record.state_revision,
+                nexus_orchestration::run_state::RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                nexus_orchestration::engine::SessionStatus::Interrupted,
+                &interrupted_state,
+            )
+            .await
+            .expect("durable interrupted write");
+
+        // The in-memory summary is stale `running` (the engine's signal path
+        // updates it only after a durable success through that path).
+        let in_memory = engine
+            .list_active(nexus_orchestration::engine::SessionFilter::default())
+            .await
+            .expect("list active");
+        assert!(
+            in_memory.iter().any(|s| s.status == SessionStatus::Running),
+            "in-memory summary is stale running (durable write bypassed the summary path)"
+        );
+
+        // The public projection must expose the durable `interrupted` status
+        // with the actionable reason — never the stale in-memory `running`.
+        let Json(body) = get_session(State(state), Path(session_id.0.clone()))
+            .await
+            .expect("get_session should succeed");
+        assert_eq!(body.session.status, "interrupted");
+        assert!(
+            body.session
+                .failure_reason
+                .as_deref()
+                .is_some_and(|r| r.contains("cancel cleanup unconfirmed")),
+            "public projection must carry the actionable cleanup reason, got: {:?}",
+            body.session.failure_reason
         );
     }
 }
