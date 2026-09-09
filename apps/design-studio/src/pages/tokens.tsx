@@ -1014,6 +1014,8 @@ function sharedProbe(): HTMLDivElement {
     probeEl.style.left = '-9999px';
     probeEl.style.top = '0';
     probeEl.style.pointerEvents = 'none';
+    // Motion metadata is also measured here; property writes must never animate.
+    probeEl.style.transitionProperty = 'none';
     document.body.appendChild(probeEl);
   }
   return probeEl;
@@ -1052,21 +1054,9 @@ function resolveBoxShadow(varName: string): string {
  * can surface "unavailable" instead of inventing a fallback pixel.
  */
 function resolveSwatchLength(varName: string): string {
-  // Length reads are property-appropriate: a laid-out off-screen element (NOT
-  // display:none) so calc/min/%/viewport resolve against a real box. Each call
-  // uses its own positioned element because sharing one probe across many
-  // readers that run in the same frame would cross-clobber the inline width
-  // (stale layout cache). Color/shadow/opacity reads reuse the shared probe
-  // (single property, no stale-layout risk).
-  const el = document.createElement('div');
-  el.style.position = 'fixed';
-  el.style.left = '-9999px';
-  el.style.top = '0';
-  el.style.pointerEvents = 'none';
+  const el = sharedProbe();
   el.style.width = `var(${varName})`;
-  document.body.appendChild(el);
   const computed = getComputedStyle(el).width;
-  el.remove();
   if (!computed || computed === '0px' || computed === 'auto') return '';
   return computed;
 }

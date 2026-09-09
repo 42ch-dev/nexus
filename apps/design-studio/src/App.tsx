@@ -100,7 +100,7 @@ export function App() {
 
       {/* Footer — SSOT hint */}
       <footer className="border-t border-gray-alpha-200 py-2 px-4">
-        <div className="max-w-6xl mx-auto flex items-center justify-between text-copy-13 text-gray-500">
+        <div className="max-w-6xl mx-auto flex items-center justify-between text-copy-13 text-gray-700">
           <span>
             Read-only · edit{' '}
             <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">DESIGN.md</code>
