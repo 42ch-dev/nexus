@@ -32,14 +32,16 @@ pub fn project_no_run(execution_policy: &str) -> ExecutionProjection {
         "legacy_inert" => ("legacy_inert", vec!["start".to_string()]),
         // A driven_v1 row without a run is a durable v1 initial state:
         // A7 rule 6 reconstructs and drives it.
-        _ => ("safe_boundary", vec!["start".to_string()]),
+        "driven_v1" => ("safe_boundary", vec!["start".to_string()]),
+        // Unknown policy is corrupt metadata: never a fabricated class.
+        _ => ("unreadable", vec!["cancel".to_string(), "new_run".to_string()]),
     };
     ExecutionProjection {
         execution_version: None,
         state_revision: None,
         recovery_class: recovery_class.to_string(),
         wait: None,
-        reason_code: None,
+        reason_code: (recovery_class == "unreadable").then(|| "unknown_execution_policy".to_string()),
         allowed_actions,
     }
 }
@@ -64,25 +66,29 @@ pub async fn project_for_session(
     let store = SqliteSessionStorage::new(std::sync::Arc::new(pool.clone()));
     let record = match store.load_run(&SessionId(session_id.to_string())).await {
         Ok(Some(record)) => record,
-        Ok(None) => return project_no_run(execution_policy),
+        // A schedule claiming an owned run whose row is absent is corrupt.
+        Ok(None) => return unreadable_projection("owned run row missing"),
         Err(e) => return unreadable_projection(&e.to_string()),
     };
     // A7 rule 5: the converge/merge park is identified by the exact
-    // `_gate_park_<current_task>` marker on the durable context.
+    // `_gate_park_<current_task>` marker on the durable context. A context
+    // that cannot be read/serialized is non-replayable — never projected as
+    // a fabricated safe_boundary.
     let gate_park_live = match store.get(session_id).await {
         Ok(Some(session)) => {
-            let context = serde_json::to_value(&session.context).ok();
-            context
-                .as_ref()
-                .and_then(|value| nexus_orchestration::resume_rules::context_data(value))
-                .is_some_and(|data| {
-                    nexus_orchestration::resume_rules::gate_park_live(
-                        data,
-                        &session.current_task_id,
-                    )
-                })
+            let context = match serde_json::to_value(&session.context) {
+                Ok(context) => context,
+                Err(e) => return unreadable_projection(&format!("context unreadable: {e}")),
+            };
+            nexus_orchestration::resume_rules::context_data(&context).is_some_and(|data| {
+                nexus_orchestration::resume_rules::gate_park_live(
+                    data,
+                    &session.current_task_id,
+                )
+            })
         }
-        _ => false,
+        Ok(None) => return unreadable_projection("owned session row missing"),
+        Err(e) => return unreadable_projection(&e.to_string()),
     };
     project_execution(&record, gate_park_live)
 }
@@ -158,6 +164,17 @@ mod tests {
     }
 
     #[test]
+    fn unknown_policy_projects_unreadable_not_start() {
+        let projection = project_no_run("bogus_policy");
+        assert_eq!(projection.recovery_class, "unreadable");
+        assert_eq!(projection.allowed_actions, vec!["cancel", "new_run"]);
+        assert_eq!(
+            projection.reason_code.as_deref(),
+            Some("unknown_execution_policy")
+        );
+    }
+
+    #[test]
     fn interrupted_never_offers_continue_or_retry() {
         let state = RunStateV1 {
             cancel_requested: true,
@@ -171,6 +188,28 @@ mod tests {
             .allowed_actions
             .iter()
             .any(|a| a == "continue" || a == "resume"));
+    }
+
+    #[test]
+    fn stale_wait_is_not_exposed_for_non_wait_classes() {
+        let state = RunStateV1 {
+            wait: Some(WaitRecord {
+                wait_id: "stale".to_string(),
+                task_id: "t".to_string(),
+                child_session_id: None,
+                child_task_id: None,
+                kind: WaitKind::Manual,
+            }),
+            cancel_requested: true,
+            ..RunStateV1::default()
+        };
+        let projection =
+            project_execution(&record(SessionStatus::Interrupted, 1, Some(state)), false);
+        assert_eq!(projection.recovery_class, "interrupted");
+        assert!(
+            projection.wait.is_none(),
+            "a stale wait token must not be offered for a non-wait class"
+        );
     }
 }
 
@@ -215,15 +254,19 @@ pub fn project_execution(record: &RunRecord, gate_park_live: bool) -> ExecutionP
             vec!["cancel".to_string(), "new_run".to_string()]
         }
     };
-    let wait = record.state.as_ref().and_then(|state| {
-        state.wait.as_ref().map(|wait| ExecutionWait {
-            wait_id: wait.wait_id.clone(),
-            task_id: wait.task_id.clone(),
-            child_session_id: wait.child_session_id.clone(),
-            child_task_id: wait.child_task_id.clone(),
-            kind: format!("{:?}", wait.kind).to_lowercase(),
+    // The wait token is only operator-actionable for a human wait; exposing a
+    // stale token for another class would invite an invalid continue.
+    let wait = (class == RecoveryClass::HumanWait).then(|| {
+        record.state.as_ref().and_then(|state| {
+            state.wait.as_ref().map(|wait| ExecutionWait {
+                wait_id: wait.wait_id.clone(),
+                task_id: wait.task_id.clone(),
+                child_session_id: wait.child_session_id.clone(),
+                child_task_id: wait.child_task_id.clone(),
+                kind: format!("{:?}", wait.kind).to_lowercase(),
+            })
         })
-    });
+    }).flatten();
     let reason_code = match (&record.status, record.state.as_ref()) {
         (SessionStatus::Interrupted, _) => Some("interrupted".to_string()),
         (_, Some(state)) => state.failure.as_ref().map(|failure| failure.code.clone()),
