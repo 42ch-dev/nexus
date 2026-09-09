@@ -2811,7 +2811,11 @@ impl GraphFlowEngine {
     ) -> Result<(), EngineError> {
         let mut hydrate_queue: std::collections::VecDeque<SessionId> =
             std::collections::VecDeque::new();
+        // A cyclic persisted parent relation (corrupt rows) must never hang
+        // recovery: visit each session at most once (tri-QC P1-D).
+        let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
         hydrate_queue.push_back(root_session_id.clone());
+        visited.insert(root_session_id.0.clone());
         while let Some(parent) = hydrate_queue.pop_front() {
             self.state.hydrate_children(&parent).await?;
             // Every recovered descendant registers its coordinator
@@ -2828,7 +2832,9 @@ impl GraphFlowEngine {
                 .unwrap_or_default();
             for child in &children {
                 self.register_cancellation(&SessionId(child.session.id.clone()));
-                hydrate_queue.push_back(SessionId(child.session.id.clone()));
+                if visited.insert(child.session.id.clone()) {
+                    hydrate_queue.push_back(SessionId(child.session.id.clone()));
+                }
             }
         }
         // R6: Try to reconstruct the root FlowRunner from the frozen source
@@ -3023,14 +3029,19 @@ impl GraphFlowEngine {
                 let children_map = self.state.children.read().await;
                 let mut queue: std::collections::VecDeque<SessionId> =
                     std::collections::VecDeque::new();
+                let mut visited: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
                 queue.push_back(session_id.clone());
+                visited.insert(session_id.0.clone());
                 let mut collected = Vec::new();
                 while let Some(parent) = queue.pop_front() {
                     let Some(children) = children_map.get(&parent.0) else {
                         continue;
                     };
                     for child in children {
-                        queue.push_back(SessionId(child.session.id.clone()));
+                        if visited.insert(child.session.id.clone()) {
+                            queue.push_back(SessionId(child.session.id.clone()));
+                        }
                     }
                     collected.push((parent, children.clone()));
                 }
