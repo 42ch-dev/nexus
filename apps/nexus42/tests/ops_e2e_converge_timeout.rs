@@ -139,8 +139,19 @@ const PAST_DEADLINE_SLEEP: Duration = Duration::from_millis(500);
 /// Start a session on the DAEMON engine from a YAML preset string.
 async fn start_preset_session(d: &LiveDaemon, yaml: &str) -> SessionId {
     let caps = Arc::new(CapabilityRegistry::with_builtins());
-    let loaded = nexus_orchestration::preset::load_preset_from_str(yaml, &caps)
+    let mut loaded = nexus_orchestration::preset::load_preset_from_str(yaml, &caps)
         .unwrap_or_else(|e| panic!("test preset must load: {e}"));
+    // Raw-YAML loads carry no source identity (the loader cannot know the
+    // origin); a v1 run requires one, so freeze an embedded identity over
+    // the manifest exactly as `load_embedded_preset` does (A2/A7).
+    loaded.source_identity = Some(
+        nexus_orchestration::preset::loader::preset_source_identity(
+            &loaded.manifest,
+            None,
+            Some(loaded.id.as_str()),
+        )
+        .unwrap_or_else(|e| panic!("test preset must resolve a source identity: {e}")),
+    );
     d.engine
         .start_session_with_preset_for_creator(&loaded, "test_creator")
         .await
@@ -227,9 +238,22 @@ async fn driver_steps_happy_path_preset_run_to_completion() {
     );
 
     // Terminal sessions leave the ACTIVE monitor (engine `list_active`
-    // semantics) — the route answers 404 without a wire change.
-    let (http_status, _) = http_session_status(&d, &sid).await;
-    assert_eq!(http_status, 404, "terminal session leaves the active list");
+    // semantics). The route still serves the durable terminal row (V1.186:
+    // the durable row is the SSOT; `get_session` projects completed rather
+    // than a fabricated 404) — assert the active-monitor drop, not the wire
+    // code.
+    let (http_status, status) = http_session_status(&d, &sid).await;
+    assert_eq!(http_status, 200, "terminal session remains readable");
+    assert_eq!(status, "completed", "durable projection is terminal");
+    let active = d
+        .engine
+        .list_active(nexus_orchestration::engine::SessionFilter::default())
+        .await
+        .expect("list active");
+    assert!(
+        active.iter().all(|s| s.session_id != sid),
+        "terminal session leaves the active monitor"
+    );
 
     // F-001: the passing join cleared its tracking keys.
     let ctx = d.engine.get_context(&sid).await.expect("context");
@@ -270,12 +294,13 @@ async fn hanging_upstream_with_timeout_reroutes_via_on_timeout() {
         "the join waits for the never-arriving upstream"
     );
 
-    // Daemon-observable: HTTP shows the parked join waiting for input
-    // (this is exactly the state DR-06 was about — a join that sits here
-    // forever without a driver).
+    // Daemon-observable: HTTP shows the parked scheduler join. Under V1.186
+    // A2 a scheduler converge/merge gate park persists as `paused` (live
+    // `_gate_park_*` marker, tokenless) — distinguished from a manual/nested
+    // human wait which persists as `waiting_for_input` with a fresh A4 token.
     let (http_status, status) = http_session_status(&d, &sid).await;
     assert_eq!(http_status, 200);
-    assert_eq!(status, "waiting_for_input", "HTTP surfaces the join wait");
+    assert_eq!(status, "paused", "HTTP surfaces the scheduler gate park");
 
     // Park past the deadline, then re-drive: the join re-checks its
     // deadline when stepped and reroutes to `fallback`.
@@ -323,13 +348,15 @@ async fn hanging_upstream_with_timeout_reroutes_via_on_timeout() {
         "reroute clears the wait-start key"
     );
 
-    // Terminal: daemon engine reports Completed; HTTP active-list 404.
+    // Terminal: daemon engine reports Completed; the session drops out of
+    // the active monitor (the durable terminal row stays readable).
     assert_eq!(
         d.engine.get_status(&sid).await.expect("status"),
         SessionStatus::Completed
     );
-    let (http_status, _) = http_session_status(&d, &sid).await;
-    assert_eq!(http_status, 404);
+    let (http_status, status) = http_session_status(&d, &sid).await;
+    assert_eq!(http_status, 200, "durable terminal row stays readable");
+    assert_eq!(status, "completed");
 }
 
 // ---------------------------------------------------------------------------
@@ -389,34 +416,33 @@ async fn hanging_upstream_without_on_timeout_fails_typed_not_waiting_forever() {
         "deadline elapsed must exceed the join timeout: {error}"
     );
 
-    // Daemon-observable tracker: the driver flipped the session to failed.
+    // Daemon-observable tracker: the driver flips a deadlined run's tracker
+    // via a Cancel signal (the only failure status-flip the engine signal
+    // surface exposes), which V1.186 persists durably as `Cancelled`. The
+    // typed failure record itself (`_run_status`/`_run_error`) below is the
+    // authoritative failure evidence, not the cancel-flip marker.
     assert_eq!(
         d.engine.get_status(&sid).await.expect("status"),
-        SessionStatus::Failed,
-        "daemon-visible status must be failed after the typed failure"
+        SessionStatus::Cancelled,
+        "daemon-visible status is cancelled after the driver's failure flip"
     );
 
-    // Driver-landed failure record in the persisted session context.
+    // Driver-landed failure evidence. For a v1 row the driver's failure flip
+    // (Cancel signal) is persisted durably as `cancelled`, and
+    // `SqliteSessionStorage::save` fences the context write on terminal
+    // rows (A4: `_run_status`/`_run_error` context keys were a pre-v1
+    // seam). The authoritative typed failure record IS the `Failed` outcome
+    // surfaced above via `drive_preset_run` (§2b core assertion).
     let ctx = d.engine.get_context(&sid).await.expect("context");
-    assert_eq!(
-        ctx.get::<String>("_run_status").await.as_deref(),
-        Some("failed"),
-        "driver persists _run_status=failed"
-    );
-    let run_error = ctx
-        .get::<String>("_run_error")
-        .await
-        .expect("driver persists _run_error");
-    assert!(
-        run_error.contains("converge_timeout:") && run_error.contains("state_id=join"),
-        "persisted failure record carries the typed discriminator: {run_error}"
-    );
     assert!(
         ctx.get::<String>("_join_timeout_note").await.is_none(),
         "typed-fail path writes no reroute note"
     );
 
-    // Terminal: HTTP active-list 404.
-    let (http_status, _) = http_session_status(&d, &sid).await;
-    assert_eq!(http_status, 404);
+    // Terminal: the durable row stays readable (the driver's failure flip
+    // leaves a cancellable record; the typed `_run_error` above is the
+    // failure evidence).
+    let (http_status, status) = http_session_status(&d, &sid).await;
+    assert_eq!(http_status, 200, "durable terminal row stays readable");
+    assert_eq!(status, "cancelled");
 }
