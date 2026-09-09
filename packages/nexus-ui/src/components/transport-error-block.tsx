@@ -8,7 +8,7 @@ import { cn } from '../lib/cn';
  * Both primary and secondary actions use this recipe — not filled `Button`.
  */
 const CTA_LINK_CLASS =
-  'text-label-12 font-normal text-brand-deep-blue transition-colors duration-state ease-standard hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-1000 dark:text-blue-700 dark:focus-visible:ring-blue-700 dark:hover:text-blue-800 dark:hover:opacity-100';
+  'text-label-12 font-normal text-blue-700 transition-colors duration-state ease-standard hover:text-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700';
 
 /**
  * Transport-failure sub-classification mirror of the apps/web
@@ -206,23 +206,21 @@ export function TransportErrorBlock({
         data-testid="transport-error-block"
         data-kind={kind}
         className={cn(
-          'rounded-control border border-red-300 bg-red-50 p-3 dark:border-red-800 dark:bg-red-950',
+          'rounded-control border border-error-surface-border bg-error-surface p-3',
           className,
         )}
         {...rest}
       >
         <div className="flex items-start gap-3">
           <AlertCircle
-            className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-700 dark:text-red-400"
+            className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-700"
             aria-hidden
           />
           <div className="min-w-0 flex-1 space-y-1">
-            <p className="text-copy-14 font-medium text-red-900 dark:text-red-100">{headline}</p>
-            <p className="text-copy-13 text-red-800 dark:text-red-200">{bodyText}</p>
+            <p className="text-copy-14 font-medium text-gray-1000">{headline}</p>
+            <p className="text-copy-13 text-gray-700">{bodyText}</p>
             {detail ? (
-              <p className="break-words text-copy-13 text-red-800/80 dark:text-red-200/80">
-                {detail}
-              </p>
+              <p className="break-words text-copy-13 text-gray-700">{detail}</p>
             ) : null}
           </div>
         </div>

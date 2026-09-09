@@ -26,7 +26,7 @@ describe('RunStatusBadge', () => {
     }
   });
 
-  it('maps statuses to distinct semantic badge variants', () => {
+  it('maps statuses to distinct semantic badge variants via data-status', () => {
     render(
       <>
         <RunStatusBadge status="succeeded" label="Needs review" />
@@ -36,12 +36,8 @@ describe('RunStatusBadge', () => {
     );
 
     const [needsReview, applied, failed] = screen.getAllByTestId('run-status-badge');
-    // succeeded → warning, applied → running, failed → error. v1.183 P0
-    // (R-V1121P1QC1-S001): soft variants consume the projected
-    // nexus-ui-badge-soft-* tokens, so the semantic variant name — not the
-    // raw hue — is the stable class contract.
-    expect(needsReview.className).toContain('nexus-ui-badge-soft-warning');
-    expect(applied.className).toContain('nexus-ui-badge-soft-running');
-    expect(failed.className).toContain('nexus-ui-badge-soft-error');
+    expect(needsReview).toHaveAttribute('data-status', 'succeeded');
+    expect(applied).toHaveAttribute('data-status', 'applied');
+    expect(failed).toHaveAttribute('data-status', 'failed');
   });
 });

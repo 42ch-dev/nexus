@@ -418,7 +418,7 @@ export function ViButtonAcceptanceFixtures() {
       id="vi-002-primary-button"
       ledgerId="VI-002"
       title="Theme-aware primary Button"
-      description="Light-shell primary uses mid-teal cyan-1000 fill + white label; dark shell keeps the strong cyan CTA."
+      description="Primary uses the P0 blue-700/800/900 recipe — white label in light, deep-blue label in dark. Toggle the document theme to verify both shells."
     >
       <ThemeFollowSpecimen testId="vi-002-primary-button">
         <Button variant="primary" data-testid="vi-002-primary">

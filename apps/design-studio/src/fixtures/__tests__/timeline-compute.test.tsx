@@ -175,6 +175,17 @@ describe('TimelineComputeFixtures render', () => {
     );
   });
 
+  it('renders the read-only inspector with Run id but no Open Run affordance', () => {
+    mockMatchMedia(false);
+    render(<TimelineComputeFixtures />);
+
+    const readonly = screen.getByTestId('timeline-compute-inspector-readonly');
+    expect(within(readonly).getByTestId('compute-inspector-run-id')).toHaveTextContent(
+      'run_9f3a2c',
+    );
+    expect(within(readonly).queryByTestId('compute-inspector-open-run')).not.toBeInTheDocument();
+  });
+
   it('renders the preset inspector with provenance but no Run section', () => {
     mockMatchMedia(false);
     render(<TimelineComputeFixtures />);

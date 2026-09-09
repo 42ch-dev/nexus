@@ -589,17 +589,21 @@ function DialogSection() {
     <section data-testid="dialog-fixtures">
       <SectionHeading id="comp-dialog">Dialog</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
-        Modal dialog — built on Radix for focus trap, escape close, and ARIA.
+        Modal dialog — built on Radix for focus trap, Escape close, and ARIA.
         The overlay uses the{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">bg-scrim</code>{' '}
         token and the panel{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">shadow-elevation-4</code>{' '}
-        (V1.121 scrim convergence). Click the trigger to open.
+        (V1.121 scrim convergence). Open the dialog, press{' '}
+        <kbd className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">Escape</kbd>{' '}
+        to close, and focus returns to the trigger.
       </p>
       <MatrixCard>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
-            <Button variant="primary">Open dialog</Button>
+            <Button variant="primary" data-testid="dialog-open-trigger">
+              Open dialog
+            </Button>
           </DialogTrigger>
           <DialogContent
             title="Example dialog"
@@ -622,8 +626,10 @@ function DialogSection() {
           </DialogContent>
         </Dialog>
         <p className="text-copy-13 text-gray-500 mt-4">
-          Uses Radix <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">Dialog.Portal</code> for
-          body-level overlay and scroll lock.
+          Transitional{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-ui/dialog</code>{' '}
+          — Radix portal, focus trap, and scroll lock. Keyboard: Tab cycles
+          trapped controls; Escape closes and restores focus to the trigger.
         </p>
       </MatrixCard>
     </section>
@@ -988,41 +994,54 @@ function TableSection() {
     { id: 'work-01', title: 'The Lost City', profile: 'Novel', status: 'Active' },
     { id: 'work-02', title: 'Echo Protocol', profile: 'Script', status: 'Archived' },
     { id: 'work-03', title: 'Starfall', profile: 'Novel', status: 'Draft' },
+    {
+      id: 'work-04-very-long-correlation-id-for-overflow',
+      title:
+        'A deliberately long work title that exercises horizontal scroll inside the table wrapper without forcing document-wide overflow',
+      profile: 'Novel with an extended profile label',
+      status: 'Active',
+    },
   ];
 
   return (
-    <section>
+    <section data-testid="table-fixtures">
       <SectionHeading id="comp-table">Table</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
         Data table — header with label-12 font, body with copy-14, hover row
-        highlighting, and overflow-x scroll container.
+        highlighting, and a local{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">overflow-x-auto</code>{' '}
+        scroll container. Wide rows scroll inside the matrix card; the page
+        itself must not gain horizontal overflow.
       </p>
-      <MatrixCard className="p-0">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>ID</TableHead>
-              <TableHead>Title</TableHead>
-              <TableHead>Profile</TableHead>
-              <TableHead>Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((r) => (
-              <TableRow key={r.id}>
-                <TableCell className="text-copy-13-mono text-gray-700">
-                  {r.id}
-                </TableCell>
-                <TableCell>{r.title}</TableCell>
-                <TableCell>{r.profile}</TableCell>
-                <TableCell>{r.status}</TableCell>
+      <MatrixCard className="p-0 overflow-hidden" data-testid="table-overflow-wrapper">
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>ID</TableHead>
+                <TableHead>Title</TableHead>
+                <TableHead>Profile</TableHead>
+                <TableHead>Status</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell className="text-copy-13-mono text-gray-700 whitespace-nowrap">
+                    {r.id}
+                  </TableCell>
+                  <TableCell className="min-w-[280px]">{r.title}</TableCell>
+                  <TableCell className="whitespace-nowrap">{r.profile}</TableCell>
+                  <TableCell>{r.status}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
         <p className="text-copy-13 text-gray-500 p-4">
           Row hover triggers background-200; header uses background-200 with
-          bottom border gray-alpha-400.
+          bottom border gray-alpha-400. The last row carries long copy to prove
+          local horizontal scroll.
         </p>
       </MatrixCard>
     </section>
@@ -1274,12 +1293,16 @@ function ToastSection() {
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @42ch/nexus-ui
         </code>{' '}
-        Toast primitives. Variants: success, error, warning, info. Each toast
-        shows a title and optional description; error toasts use{' '}
+        Toast primitives. Variants: success, error, warning, info. Use the
+        fixture controls to queue toasts through the public{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">toast()</code>{' '}
+        API and dismiss via the close button or{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">dismiss(id)</code>.
+        Error toasts use{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           role=&quot;alert&quot;
         </code>
-        .
+        . There is no action-CTA field or update operation on the public contract.
       </p>
       <ToastFixtures />
     </section>
