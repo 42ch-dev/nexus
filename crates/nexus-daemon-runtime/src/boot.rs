@@ -394,8 +394,7 @@ fn hot_rebuild_and_swap(
 /// so every restart runs the SAME A7 recovery order: each recovered session
 /// is classified by the durable v1 record (Terminal / Unreadable /
 /// Interrupted / `HumanWait` / `SafeBoundary` skip immediately; only
-/// `ConvergeMerge` is re-driven from its persisted position — completed
-/// edges are never re-executed).
+/// `ConvergeMerge` is re-driven from its persisted position).
 ///
 /// Runner reconstruction covers embedded AND user-directory presets through
 /// the frozen source identity (A7): a changed/missing source or corrupt
@@ -409,6 +408,7 @@ fn hot_rebuild_and_swap(
 /// [`WorkflowRunCoordinator::recover_persisted`]; without one (Tier-0 boot
 /// with no Creator DB) only the engine-side tracker reconstruction runs —
 /// there is nothing to re-drive.
+#[allow(clippy::too_long_first_doc_paragraph)] // recovery ordering contract spans many invariants; compact phrasing is clearer than fragmenting
 pub async fn run_boot_recovery(
     engine: &Arc<dyn OrchestrationEngine>,
     sqlite_boot_storage: &Arc<SqliteSessionStorage>,
@@ -780,20 +780,17 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     state.set_session_cancels(session_cancels.clone());
     let prompt_executor: Option<
         std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>,
-    > = match &sqlite_boot_storage {
-        Some(sqlite_storage) => {
-            let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();
-            let host_config = state.agent_host_config();
-            Some(std::sync::Arc::new(
-                crate::prompt_executor::HostPromptExecutor::new(
-                    agent_host_facade.clone(),
-                    workflow_store,
-                    host_config.timeouts.clone(),
-                ),
-            ))
-        }
-        None => None,
-    };
+    > = sqlite_boot_storage.as_ref().map(|sqlite_storage| {
+        let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();
+        let host_config = state.agent_host_config();
+        let executor: std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor> =
+            std::sync::Arc::new(crate::prompt_executor::HostPromptExecutor::new(
+                agent_host_facade.clone(),
+                workflow_store,
+                host_config.timeouts.clone(),
+            ));
+        executor
+    });
 
     // N-13: when a Creator DB is already available at boot, the capability
     // registry is built with the SAME pool the boot engine/coordinator/
@@ -879,8 +876,9 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // commit_transition). The workspace root is frozen into every v1
     // descriptor. When no creator DB is present (Tier-0 boot), fall back to
     // the in-memory engine (no v1 persistence).
-    let mut concrete_engine = match &sqlite_boot_storage {
-        Some(sqlite_storage) => {
+    let mut concrete_engine = sqlite_boot_storage.as_ref().map_or_else(
+        || GraphFlowEngine::new_with_storage(session_storage.clone(), capability_holder.clone()),
+        |sqlite_storage| {
             let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();
             let workspace_root = state
                 .workspace_path()
@@ -892,11 +890,8 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                 capability_holder.clone(),
                 workspace_root,
             )
-        }
-        None => {
-            GraphFlowEngine::new_with_storage(session_storage.clone(), capability_holder.clone())
-        }
-    };
+        },
+    );
 
     // DF-47 (V1.42 P3): wire the daemon tool dispatch into the engine so
     // HostTool enter actions in preset graphs can invoke nexus.* tools.
@@ -1890,6 +1885,7 @@ fn create_subsystems(
 /// Delegates to the shared `auto_chain::enqueue_auto_chain_schedule` helper
 /// (Fix A / W-A) so that the ID-mint + INSERT + `set_driver` logic is not
 /// duplicated between the boot and supervisor paths.
+#[allow(clippy::too_many_arguments)] // one boot seam packing all enqueue inputs; grouping would add a throwaway struct
 async fn resume_auto_chain_work(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
@@ -1904,10 +1900,10 @@ async fn resume_auto_chain_work(
     // configured default provider. A preset with prompt roles and no
     // provider refuses the enqueue (never a drive-enabled row with an empty
     // binding map); a preset with no prompt roles accepts an empty map.
+    let Some(preset_id) = nexus_orchestration::stage_gates::preset_for_stage(stage) else {
+        return Err(format!("no preset mapping for stage '{stage}'"));
+    };
     let bindings = if let Some(provider_id) = binding_provider {
-        let Some(preset_id) = nexus_orchestration::stage_gates::preset_for_stage(stage) else {
-            return Err(format!("no preset mapping for stage '{stage}'"));
-        };
         match nexus_orchestration::preset::default_bindings_for_preset(preset_id, provider_id) {
             Some(bindings) => bindings,
             None => {
@@ -1917,9 +1913,6 @@ async fn resume_auto_chain_work(
             }
         }
     } else {
-        let Some(preset_id) = nexus_orchestration::stage_gates::preset_for_stage(stage) else {
-            return Err(format!("no preset mapping for stage '{stage}'"));
-        };
         let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
         match nexus_orchestration::preset::load_embedded_preset(preset_id, &caps) {
             Ok(loaded) => {

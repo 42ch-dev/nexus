@@ -766,9 +766,10 @@ fn allowed_actions_for(class: RecoveryClass, source_reconstructable: bool) -> Ve
         // advertise continue (tri-QC P1-C).
         RecoveryClass::HumanWait if !source_reconstructable => &["cancel", "new_run"],
         RecoveryClass::HumanWait => &["continue", "cancel"],
-        RecoveryClass::Interrupted => &["cancel", "new_run"],
+        RecoveryClass::Interrupted
+        | RecoveryClass::LegacyUnverified
+        | RecoveryClass::Unreadable => &["cancel", "new_run"],
         RecoveryClass::SafeBoundary | RecoveryClass::ConvergeMerge => &["cancel"],
-        RecoveryClass::LegacyUnverified | RecoveryClass::Unreadable => &["cancel", "new_run"],
     };
     actions.iter().map(|action| (*action).to_string()).collect()
 }
@@ -832,13 +833,14 @@ fn render_detail(dto: &InspectDto) -> String {
         ResumeRule::HumanWait => "no — human wait (A4) token preserved; never stepped or approved at boot".to_string(),
         ResumeRule::SafeBoundary => "no — fully committed boundary with no in-flight work; boot does not auto-drive outside the chain class".to_string(),
         // A7 unreadable metadata (round-2): explicit non-replayable reason —
-        // distinct from a corrupt/unshaped session context.
-        ResumeRule::UnreadableMetadata => format!("unknown — {}", dto.resumable.explanation),
-        // Contract §5 wording split (qc3 S1): corrupt bytes vs parseable-but-
-        // unexpected shape — the DTO explanation already distinguishes the two
-        // honest wordings, so the human line mirrors the JSON explanation
-        // instead of always claiming a corrupt context_json.
-        ResumeRule::ContextUnreadable => format!("unknown — {}", dto.resumable.explanation),
+        // distinct from a corrupt/unshaped session context. Contract §5
+        // wording split (qc3 S1): corrupt bytes vs parseable-but-unexpected
+        // shape — the DTO explanation already distinguishes the two honest
+        // wordings, so the human line mirrors the JSON explanation instead of
+        // always claiming a corrupt context_json.
+        ResumeRule::UnreadableMetadata | ResumeRule::ContextUnreadable => {
+            format!("unknown — {}", dto.resumable.explanation)
+        }
     };
     let _ = writeln!(out, "resumable:      {verdict_line}");
     out

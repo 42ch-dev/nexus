@@ -100,11 +100,7 @@ fn map_host_error(e: &nexus_agent_host::HostError) -> NexusApiError {
             field: "operation".into(),
             reason: e.to_string(),
         },
-        "policy_denied" => NexusApiError::Forbidden {
-            resource: "agent_host".into(),
-            reason: e.to_string(),
-        },
-        "owner_workspace_mismatch" => NexusApiError::Forbidden {
+        "policy_denied" | "owner_workspace_mismatch" => NexusApiError::Forbidden {
             resource: "agent_host".into(),
             reason: e.to_string(),
         },

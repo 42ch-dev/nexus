@@ -247,6 +247,7 @@ XDG_CACHE_HOME = "{omp_home}/.cache"
 
     /// Seed the Creator workspace DB under `$NEXUS_HOME` (schema + creator row
     /// + world) so the real daemon attaches it and admission passes FK gates.
+    ///
     /// Must run inside the ambient tokio runtime (the harness test body).
     async fn seed_creator_db(&self) {
         let op_dir = nexus_home_layout::operational_workspace_dir(
@@ -564,7 +565,7 @@ async fn wait_for_provider_available(qa: &IsolatedQa, timeout: Duration) -> Resu
 /// preset through the `omp-qa` ACP provider, non-echo output captured,
 /// `completed` durable before and after a daemon-process restart.
 #[tokio::test]
-#[ignore]
+#[ignore = "explicit live omp acceptance gate (A6); requires NEXUS_OMP_BIN"]
 #[allow(clippy::too_many_lines)]
 async fn isolated_public_success() {
     // 1. Gate on the isolated omp binary FIRST — typed refusal before any work.
@@ -779,7 +780,7 @@ async fn capture_agent_output(qa: &IsolatedQa, session_id: &str) -> String {
         } else {
             2
         };
-        (priority, -(k.len() as i64))
+        (priority, -(i64::try_from(k.len()).unwrap_or(i64::MAX)))
     });
     // The highest-priority entry after sorting IS the output-key value; do
     // not discard the ordering by re-selecting the longest arbitrary string.

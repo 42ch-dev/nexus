@@ -1436,6 +1436,7 @@ fn inspect_v1_legacy_v0_chain_row_is_legacy_unverified() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)] // CLI inspect list-mode regression covering all recovery classes in one test
 fn inspect_v1_list_mode_recovery_classes_and_read_only() {
     let home = tempfile::TempDir::new().unwrap();
     let db_path = seed_home_config(home.path());

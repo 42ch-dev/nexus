@@ -47,6 +47,7 @@ impl SubsystemBootstrap for EngineSubsystem {
         // `WorkspaceState` before the lifecycle starts; nothing to spawn here.
         let mut state = self.state.lock().await;
         *state = EngineState::Running;
+        drop(state);
         tracing::info!("Engine subsystem started");
         Ok(())
     }
@@ -54,6 +55,7 @@ impl SubsystemBootstrap for EngineSubsystem {
     async fn shutdown(&self, _grace_ms: u64) -> anyhow::Result<()> {
         let mut state = self.state.lock().await;
         *state = EngineState::Shutdown;
+        drop(state);
         tracing::info!("Engine subsystem shutdown complete");
         Ok(())
     }

@@ -280,8 +280,8 @@ impl NexusApiError {
                 StatusCode::BAD_REQUEST
             }
             Self::ServiceUnavailable { .. } => StatusCode::SERVICE_UNAVAILABLE,
-            Self::BadRequestCodedDetails { .. } => StatusCode::UNPROCESSABLE_ENTITY,
-            Self::PresetGatesFailed { .. }
+            Self::BadRequestCodedDetails { .. }
+            | Self::PresetGatesFailed { .. }
             | Self::StrategyValidationFailed { .. }
             | Self::OutlineValidationFailed { .. }
             | Self::WorldKbValidationFailed { .. }
@@ -411,8 +411,8 @@ impl NexusApiError {
             | Self::StrategyValidationFailed { details }
             | Self::OutlineValidationFailed { details }
             | Self::WorldKbValidationFailed { details }
-            | Self::InputValidationFailed { details } => Some(details.clone()),
-            Self::ConflictCodedDetails { details, .. }
+            | Self::InputValidationFailed { details }
+            | Self::ConflictCodedDetails { details, .. }
             | Self::BadRequestCodedDetails { details, .. } => Some(details.clone()),
             Self::StrategyConflict {
                 current_revision,

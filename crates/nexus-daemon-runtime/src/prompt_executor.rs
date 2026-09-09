@@ -226,6 +226,7 @@ impl HostPromptExecutor {
     /// `in_flight` slot and the Active write updates only the same
     /// operation's attempt id. A concurrent same-anchor prompt can never
     /// replace the durable in-flight operation with another attempt's ids.
+    #[allow(clippy::too_many_arguments)] // each argument is a distinct durable field of the attempt write; grouping into one struct would hide field provenance
     async fn persist_attempt(
         &self,
         run_id: &str,
@@ -466,6 +467,7 @@ impl HostPromptExecutor {
 
 #[async_trait]
 impl PromptExecutor for HostPromptExecutor {
+    #[allow(clippy::too_many_lines)] // the full prompt lifecycle is one sequential flow; per-phase helpers would re-enter shared state
     async fn execute(&self, request: PromptRequest) -> Result<PromptResult, CapabilityError> {
         // 1. Resolve the trusted frozen run metadata (A1/A2) — refuses
         //    before any external effect when the binding is missing.
@@ -838,7 +840,6 @@ impl PromptExecutor for HostPromptExecutor {
                         run_id = %request.run_id,
                         "post-cancel stream drain timed out; abandoning cooperative drain"
                     );
-                    cancel_unconfirmed = true;
                 }
             }
             let confirmed = tokio::time::timeout(
@@ -1142,7 +1143,8 @@ mod tests {
             // Release the parked operation stream so the executor's drain
             // observes the terminal `OpFinished(Cancelled)` event — the
             // bounded stream/operation termination the cancel path awaits.
-            if let Some((_, release)) = self.active_ops.lock().expect("active_ops").remove(&op_id) {
+            let removed = self.active_ops.lock().expect("active_ops").remove(&op_id);
+            if let Some((_, release)) = removed {
                 let _ = release.send(());
             }
             Ok(())
@@ -1356,6 +1358,7 @@ mod tests {
     /// immediately before Cancel receives out-of-band Host cancellation,
     /// drains/terminates, and is then reaped.
     #[tokio::test]
+    #[allow(clippy::too_many_lines)] // full cancel-path integration scenario in one linear flow
     async fn real_executor_active_operation_cancel_reaches_host_and_reaps() {
         let host = ScriptedHost::new();
         let (executor, sqlite, storage, pool, _db) = test_executor(host.clone()).await;
@@ -1552,6 +1555,7 @@ mod tests {
     /// the run must land `Interrupted` (cleanup unconfirmed) — never a false
     /// successful `Cancelled`.
     #[tokio::test]
+    #[allow(clippy::too_many_lines)] // bounded cancel-path integration scenario in one linear flow
     async fn non_cooperative_host_cancel_is_bounded_and_never_falsely_cancelled() {
         let host = ScriptedHost::new();
         let (executor, sqlite, storage, pool, _db) = test_executor(host.clone()).await;

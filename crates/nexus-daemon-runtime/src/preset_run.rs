@@ -352,6 +352,7 @@ pub enum ResumeDecision {
 /// The caller passes `config`; the resume posture requires
 /// `resume_waiting: true` so a parked join re-checks its `timeout_ms`
 /// deadline on the first re-step (the DR-06 recovery seam).
+#[allow(clippy::too_many_lines)] // linear recovery sweep classifying each persisted session; per-class helpers would fragment the order
 pub async fn resume_driven_sessions(
     engine: &dyn OrchestrationEngine,
     storage: &Arc<dyn SessionStorage>,
@@ -918,6 +919,7 @@ impl WorkflowRunCoordinator {
     ///
     /// # Errors
     /// Returns [`RunControlError`] on any admission failure.
+    #[allow(clippy::too_many_arguments)] // one public admission seam forwarding every runner dependency; a struct would obscure call sites
     pub async fn start_session(
         &self,
         preset_id: &str,
@@ -958,20 +960,13 @@ impl WorkflowRunCoordinator {
 
         // Freeze the supplied seed: JSON object → structured `preset.input.*`;
         // anything else → core-context text.
-        let (input, core_context) = match seed {
-            Some(seed_text) => {
-                if let Ok(value) = serde_json::from_str::<serde_json::Value>(seed_text) {
-                    if let serde_json::Value::Object(map) = value {
-                        (map, None)
-                    } else {
-                        (serde_json::Map::new(), Some(seed_text.to_string()))
-                    }
-                } else {
-                    (serde_json::Map::new(), Some(seed_text.to_string()))
-                }
-            }
-            None => (serde_json::Map::new(), None),
-        };
+        let (input, core_context) = seed.map_or_else(
+            || (serde_json::Map::new(), None),
+            |seed_text| match serde_json::from_str::<serde_json::Value>(seed_text) {
+                Ok(serde_json::Value::Object(map)) => (map, None),
+                _ => (serde_json::Map::new(), Some(seed_text.to_string())),
+            },
+        );
 
         let session_id = format!("{}:{}", preset_id, uuid::Uuid::new_v4());
         let engine_proxy: Arc<dyn OrchestrationEngine> = self.engine.clone();
@@ -1048,9 +1043,8 @@ impl WorkflowRunCoordinator {
             code: "driver_failed".to_string(),
             message: error.to_string(),
         });
-        let root = match self.storage.get(&session_id.0).await {
-            Ok(Some(root)) => root,
-            _ => return false,
+        let Ok(Some(root)) = self.storage.get(&session_id.0).await else {
+            return false;
         };
         let checkpoint = nexus_orchestration::run_state::RunCheckpoint {
             root: &root,
@@ -1238,6 +1232,10 @@ impl WorkflowRunCoordinator {
     /// `session_cancels` map (idempotent — the engine already registers it
     /// at admission) so prompt consumers and out-of-band cancellation share
     /// one token.
+    ///
+    /// # Errors
+    /// Returns [`RunControlError`] if the durable state cannot be loaded or
+    /// the fresh drive owner cannot be spawned.
     pub async fn ensure_driving(
         &self,
         session_id: &SessionId,
@@ -1335,6 +1333,7 @@ impl WorkflowRunCoordinator {
             );
         });
         drives.insert(session_id.0.clone(), DriveOwner { cancel, join });
+        drop(drives);
         Ok(DriveDisposition::Started)
     }
 
@@ -1349,6 +1348,7 @@ impl WorkflowRunCoordinator {
     ///
     /// Returns the same [`ResumeDecision`]s as the legacy
     /// [`resume_driven_sessions`] so boot observability is unchanged.
+    #[allow(clippy::too_many_lines)] // linear recovery sweep with per-session classification + spawn; per-class helpers would hide ordering
     pub async fn recover_driving(
         &self,
         workflow_store: Option<&Arc<dyn WorkflowStateStore>>,
@@ -1584,7 +1584,7 @@ impl WorkflowRunCoordinator {
     ) -> Result<SessionId, RunControlError> {
         // Load the schedule row.
         let row = sqlx::query_as::<_, ScheduleAdmissionRow>(
-            "SELECT schedule_id, creator_id, preset_id, preset_version, status,
+            "SELECT schedule_id, creator_id, preset_id, status,
                     current_core_context_version, current_session_id, execution_policy,
                     work_id, execution_descriptor_json
              FROM creator_schedules WHERE schedule_id = ?",
@@ -1834,6 +1834,7 @@ impl WorkflowRunCoordinator {
     /// # Errors
     /// Returns [`RunControlError`] on any admission failure. A failed
     /// admission never marks the row `Running` without a session.
+    #[allow(clippy::too_many_lines)] // a single eligibility + admission + drive handoff sequence; splitting obscures ordering
     pub async fn admit_schedule(
         &self,
         schedule_id: &str,
@@ -1849,7 +1850,7 @@ impl WorkflowRunCoordinator {
     ) -> Result<SessionId, RunControlError> {
         // 1. Load the schedule row.
         let row = sqlx::query_as::<_, ScheduleAdmissionRow>(
-            "SELECT schedule_id, creator_id, preset_id, preset_version, status,
+            "SELECT schedule_id, creator_id, preset_id, status,
                     current_core_context_version, current_session_id, execution_policy,
                     work_id, execution_descriptor_json
              FROM creator_schedules WHERE schedule_id = ?",
@@ -2311,7 +2312,6 @@ struct ScheduleAdmissionRow {
     schedule_id: String,
     creator_id: String,
     preset_id: String,
-    preset_version: i64,
     status: String,
     current_core_context_version: i64,
     current_session_id: Option<String>,
@@ -3885,6 +3885,7 @@ mod tests {
     /// (never a 500), the durable winner is the cancel intent, and the run
     /// stays actionable for a real cancel.
     #[tokio::test]
+    #[allow(clippy::too_many_lines)] // deterministic race scenario needs full setup + assertions in one flow
     async fn signal_continue_loses_cas_to_cancel_returns_state_conflict() {
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
@@ -4030,6 +4031,7 @@ mod tests {
     /// fence stays intact, and `ensure_driving` is never called (no new
     /// work is created while cancellation is in flight).
     #[tokio::test]
+    #[allow(clippy::too_many_lines)] // deterministic fence scenario needs full setup + assertions in one flow
     async fn continue_after_cancel_fence_returns_state_conflict_without_driving() {
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;

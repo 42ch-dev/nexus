@@ -16,6 +16,7 @@
 //!   context (only `full_text` + host/op ids).
 
 #![allow(clippy::unwrap_used)]
+#![allow(clippy::await_holding_lock)] // tests hold PROCESS_ENV_LOCK (std sync mutex) across awaits to serialize env mutation
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -279,6 +280,7 @@ fn request(run_id: &str, prompt: &str, tool_policy: ToolPolicy) -> PromptRequest
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)] // all five consumers asserted in one integration scenario
 async fn all_five_consumers_observe_non_echo_agent_output() {
     let _lock = env_lock();
     let ws = setup_workspace();
@@ -373,9 +375,8 @@ async fn all_five_consumers_observe_non_echo_agent_output() {
 
     // The fixture log proves real agent output flowed (non-echo).
     let log = read_fixture_log(&ws.fixture_log);
-    let prompts: Vec<&serde_json::Value> = log.iter().filter(|e| e["event"] == "prompt").collect();
     assert!(
-        prompts.len() >= 5,
+        log.iter().filter(|e| e["event"] == "prompt").count() >= 5,
         "all five consumers must reach the fixture: {log:?}"
     );
 
@@ -597,6 +598,7 @@ async fn in_stream_cancel_calls_host_cancel_and_bounds_cleanup() {
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)] // concurrent single-flight scenario needs setup + both request paths in one flow
 async fn concurrent_same_key_second_prompt_reuses_session_not_spawn() {
     let _lock = env_lock();
     let ws = setup_workspace();
@@ -1029,6 +1031,7 @@ async fn cancellation_after_active_before_exec_no_effect_and_no_session_leak() {
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)] // nested graph + prompt execution integration in one flow
 async fn nested_inner_graph_prompt_executes_with_child_identity() {
     let _lock = env_lock();
     let ws = setup_workspace();
