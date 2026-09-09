@@ -1105,6 +1105,11 @@ fn inspect_v1_human_wait_stays_distinct_and_preserves_wait_token() {
     assert_eq!(parsed["recovery_class"], json!("human_wait"));
     assert_eq!(parsed["wait_id"], json!("wait-tok-1"));
     assert_eq!(parsed["db_status"], json!("waiting_for_input"));
+    assert_eq!(
+        parsed["allowed_actions"],
+        json!(["continue", "cancel"]),
+        "human_wait offers exactly continue/cancel (tri-QC P1-B)"
+    );
     // Legacy resumable verdict stays a hard no for the human wait.
     assert_eq!(parsed["resumable"]["verdict"], json!("no"));
 }

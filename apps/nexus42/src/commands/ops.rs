@@ -90,6 +90,9 @@ struct InspectDto {
     /// Durable human-wait token (A4) for v1 `waiting_for_input` rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     wait_id: Option<String>,
+    /// Legal operator actions for the canonical recovery class (shared A2
+    /// projection; tri-QC P1-B).
+    allowed_actions: Vec<String>,
     current_task_id: Option<String>,
     created_at: i64,
     updated_at: i64,
@@ -433,6 +436,7 @@ fn project(row: &CheckpointRow) -> InspectDto {
         state_revision: row.state_revision,
         recovery_class,
         wait_id,
+        allowed_actions: allowed_actions_for(recovery_class),
         current_task_id: row.current_task_id.clone(),
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -530,6 +534,7 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
         state_revision: row.state_revision,
         recovery_class,
         wait_id,
+        allowed_actions: allowed_actions_for(recovery_class),
         current_task_id: row.current_task_id.clone(),
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -680,6 +685,19 @@ fn recovery_class_str(class: RecoveryClass) -> &'static str {
     }
 }
 
+/// Legal operator actions for the canonical recovery class — the same
+/// mapping the daemon projection uses (A2; tri-QC P1-B).
+fn allowed_actions_for(class: RecoveryClass) -> Vec<String> {
+    let actions: &[&str] = match class {
+        RecoveryClass::Terminal => &["new_run"],
+        RecoveryClass::HumanWait => &["continue", "cancel"],
+        RecoveryClass::Interrupted => &["cancel", "new_run"],
+        RecoveryClass::SafeBoundary | RecoveryClass::ConvergeMerge => &["cancel"],
+        RecoveryClass::LegacyUnverified | RecoveryClass::Unreadable => &["cancel", "new_run"],
+    };
+    actions.iter().map(|action| (*action).to_string()).collect()
+}
+
 fn render_detail(dto: &InspectDto) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "session:        {}", dto.session_id);
@@ -688,6 +706,7 @@ fn render_detail(dto: &InspectDto) -> String {
     let _ = writeln!(out, "preset_version: {}", dto.preset_version);
     let _ = writeln!(out, "status:         {}", dto.db_status);
     let _ = writeln!(out, "recovery_class: {}", recovery_class_str(dto.recovery_class));
+    let _ = writeln!(out, "allowed_actions: {}", dto.allowed_actions.join(", "));
     let position = dto.current_task_id.as_deref().unwrap_or("(none recorded)");
     let _ = writeln!(out, "position:       {position}");
     let _ = writeln!(out, "created_at:     {}", render_ts(dto.created_at));
