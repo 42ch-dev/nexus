@@ -71,10 +71,10 @@ pub struct GetSessionResponse {
     pub session: SessionSummary,
 }
 
-/// Shared durable execution projection (A2/A7) — the single operator-facing
+/// Shared durable execution projection (`A2/A7`) — the single operator-facing
 /// classification used by session and schedule inspection.
 ///
-/// Field names are snake_case (the promoted schema SSOT) even inside the
+/// Field names are `snake_case` (the promoted schema SSOT) even inside the
 /// camelCase session DTO; `recovery_class`/`allowed_actions` are the
 /// actionable contract, prose is never parsed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,8 +109,10 @@ pub struct ExecutionWait {
     pub kind: String,
 }
 
-/// Role → provider binding (A1) for the camelCase session-create wire
-/// contract (`agentBindings`). The schedule path uses the snake_case
+/// Role → provider binding (`A1`) for the camelCase session-create wire
+/// contract (`agentBindings`).
+///
+/// The schedule path uses the `snake_case`
 /// [`crate::local::schedule::http::AgentBindingDto`]; session creation
 /// preserves its existing camelCase convention (`presetId`, `creatorId`,
 /// `agentBindings` → `providerId`, `model`).
