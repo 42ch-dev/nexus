@@ -3058,12 +3058,18 @@ impl GraphFlowEngine {
                 // state that owns it (`_inner_child_session_<state>`); a
                 // non-terminal child past the inner-graph position is only
                 // replayable when that record names it consistently.
-                let recorded: std::collections::HashMap<String, Option<String>> = if parent_is_root {
+                let recorded: std::collections::HashMap<
+                    String,
+                    std::collections::HashSet<Option<String>>,
+                > = if parent_is_root {
                     let data = parent_session
                         .as_ref()
                         .and_then(|session| serde_json::to_value(&session.context).ok())
                         .and_then(|value| crate::resume_rules::context_data(&value).cloned());
-                    let mut map = std::collections::HashMap::new();
+                    let mut map: std::collections::HashMap<
+                        String,
+                        std::collections::HashSet<Option<String>>,
+                    > = std::collections::HashMap::new();
                     if let Some(data) = data {
                         for (key, value) in data {
                             let Some(state) = key.strip_prefix("_inner_child_session_") else {
@@ -3072,8 +3078,7 @@ impl GraphFlowEngine {
                             let Some(child_id) = value.as_str() else {
                                 continue;
                             };
-                            map.insert(
-                                child_id.to_string(),
+                            map.entry(child_id.to_string()).or_default().insert(
                                 inner_graph_entered_by_state(&loaded, state)
                                     .map(str::to_owned),
                             );
@@ -3084,14 +3089,19 @@ impl GraphFlowEngine {
                     std::collections::HashMap::new()
                 };
                 for child in children {
+                    // All markers naming this child must agree on one inner
+                    // graph (duplicate/conflicting markers are tampering).
+                    let recorded_graph: Option<&str> = recorded
+                        .get(&child.session.id)
+                        .filter(|set| set.len() == 1)
+                        .and_then(|set| set.iter().next())
+                        .and_then(|entry| entry.as_deref());
                     validate_descendant_position(
                         &loaded.id,
                         &valid_inner,
                         expected_inner,
                         parent_is_root,
-                        recorded
-                            .get(&child.session.id)
-                            .and_then(|entry| entry.as_deref()),
+                        recorded_graph,
                         &parent.0,
                         &parent_task,
                         &child.session.id,
