@@ -342,22 +342,44 @@ const preset: Partial<Config> = {
       fontFamily: {
         sans: 'var(--font-sans)',
         mono: 'var(--font-mono)',
-        // V1.121 v0.4 — content-voice editorial serif (DESIGN.md typography.font-display).
+        // V1.121 v0.4 — content-voice display tier (DESIGN.md typography.font-display).
         display: 'var(--font-display)',
+        // Per-role family projection (supported Tailwind fontFamily keys). Each
+        // role's family follows the generated --text-<role>--font-family var so
+        // a DESIGN family edit re-projects through the same single chain. The
+        // fontSize tuple only carries supported options (lineHeight /
+        // letterSpacing / fontWeight); family lives here, not in the tuple.
+        'display-32': sv('text-display-32--font-family'),
+        'display-24': sv('text-display-24--font-family'),
+        'display-20': sv('text-display-20--font-family'),
+        'heading-32': sv('text-heading-32--font-family'),
+        'heading-24': sv('text-heading-24--font-family'),
+        'heading-20': sv('text-heading-20--font-family'),
+        'heading-16': sv('text-heading-16--font-family'),
+        'label-14': sv('text-label-14--font-family'),
+        'label-12': sv('text-label-12--font-family'),
+        'copy-16': sv('text-copy-16--font-family'),
+        'copy-14': sv('text-copy-14--font-family'),
+        'copy-13': sv('text-copy-13--font-family'),
+        'copy-12': sv('text-copy-12--font-family'),
+        'button-14': sv('text-button-14--font-family'),
+        'button-12': sv('text-button-12--font-family'),
+        'label-12-mono': sv('text-label-12-mono--font-family'),
+        'copy-13-mono': sv('text-copy-13-mono--font-family'),
       },
       fontSize: {
         // All typography roles project from repo-root DESIGN.md frontmatter
         // typography:* through tooling/design-tokens (generate-tokens.mjs →
         // project-tokens.mjs → generated tokens.css --text-<role> / metric
-        // tuples). Every role consumes the generated vars — no handwritten
-        // duplicate literals here (single projection chain).
+        // tuples). fontSize tuples carry only the supported options; each
+        // role's font-family is projected via the fontFamily theme above —
+        // no handwritten duplicate literals here (single projection chain).
         'display-32': [
           sv('text-display-32'),
           {
             lineHeight: sv('text-display-32--line-height'),
             letterSpacing: sv('text-display-32--letter-spacing'),
             fontWeight: sv('text-display-32--font-weight'),
-            fontFamily: sv('text-display-32--font-family'),
           },
         ],
         'display-24': [
@@ -366,7 +388,6 @@ const preset: Partial<Config> = {
             lineHeight: sv('text-display-24--line-height'),
             letterSpacing: sv('text-display-24--letter-spacing'),
             fontWeight: sv('text-display-24--font-weight'),
-            fontFamily: sv('text-display-24--font-family'),
           },
         ],
         'display-20': [
@@ -375,7 +396,6 @@ const preset: Partial<Config> = {
             lineHeight: sv('text-display-20--line-height'),
             letterSpacing: sv('text-display-20--letter-spacing'),
             fontWeight: sv('text-display-20--font-weight'),
-            fontFamily: sv('text-display-20--font-family'),
           },
         ],
         'heading-32': [
@@ -384,7 +404,6 @@ const preset: Partial<Config> = {
             lineHeight: sv('text-heading-32--line-height'),
             letterSpacing: sv('text-heading-32--letter-spacing'),
             fontWeight: sv('text-heading-32--font-weight'),
-            fontFamily: sv('text-heading-32--font-family'),
           },
         ],
         'heading-24': [
@@ -393,7 +412,6 @@ const preset: Partial<Config> = {
             lineHeight: sv('text-heading-24--line-height'),
             letterSpacing: sv('text-heading-24--letter-spacing'),
             fontWeight: sv('text-heading-24--font-weight'),
-            fontFamily: sv('text-heading-24--font-family'),
           },
         ],
         'heading-20': [
@@ -402,7 +420,6 @@ const preset: Partial<Config> = {
             lineHeight: sv('text-heading-20--line-height'),
             letterSpacing: sv('text-heading-20--letter-spacing'),
             fontWeight: sv('text-heading-20--font-weight'),
-            fontFamily: sv('text-heading-20--font-family'),
           },
         ],
         'heading-16': [
@@ -411,7 +428,6 @@ const preset: Partial<Config> = {
             lineHeight: sv('text-heading-16--line-height'),
             letterSpacing: sv('text-heading-16--letter-spacing'),
             fontWeight: sv('text-heading-16--font-weight'),
-            fontFamily: sv('text-heading-16--font-family'),
           },
         ],
         'label-14': [
@@ -420,7 +436,6 @@ const preset: Partial<Config> = {
             lineHeight: sv('text-label-14--line-height'),
             letterSpacing: sv('text-label-14--letter-spacing'),
             fontWeight: sv('text-label-14--font-weight'),
-            fontFamily: sv('text-label-14--font-family'),
           },
         ],
         'label-12': [
@@ -429,7 +444,6 @@ const preset: Partial<Config> = {
             lineHeight: sv('text-label-12--line-height'),
             letterSpacing: sv('text-label-12--letter-spacing'),
             fontWeight: sv('text-label-12--font-weight'),
-            fontFamily: sv('text-label-12--font-family'),
           },
         ],
         'copy-16': [
@@ -438,7 +452,6 @@ const preset: Partial<Config> = {
             lineHeight: sv('text-copy-16--line-height'),
             letterSpacing: sv('text-copy-16--letter-spacing'),
             fontWeight: sv('text-copy-16--font-weight'),
-            fontFamily: sv('text-copy-16--font-family'),
           },
         ],
         'copy-14': [
@@ -447,7 +460,6 @@ const preset: Partial<Config> = {
             lineHeight: sv('text-copy-14--line-height'),
             letterSpacing: sv('text-copy-14--letter-spacing'),
             fontWeight: sv('text-copy-14--font-weight'),
-            fontFamily: sv('text-copy-14--font-family'),
           },
         ],
         'copy-13': [
@@ -456,7 +468,6 @@ const preset: Partial<Config> = {
             lineHeight: sv('text-copy-13--line-height'),
             letterSpacing: sv('text-copy-13--letter-spacing'),
             fontWeight: sv('text-copy-13--font-weight'),
-            fontFamily: sv('text-copy-13--font-family'),
           },
         ],
         'copy-12': [
@@ -465,7 +476,6 @@ const preset: Partial<Config> = {
             lineHeight: sv('text-copy-12--line-height'),
             letterSpacing: sv('text-copy-12--letter-spacing'),
             fontWeight: sv('text-copy-12--font-weight'),
-            fontFamily: sv('text-copy-12--font-family'),
           },
         ],
         'button-14': [
@@ -474,7 +484,6 @@ const preset: Partial<Config> = {
             lineHeight: sv('text-button-14--line-height'),
             letterSpacing: sv('text-button-14--letter-spacing'),
             fontWeight: sv('text-button-14--font-weight'),
-            fontFamily: sv('text-button-14--font-family'),
           },
         ],
         'button-12': [
@@ -483,7 +492,6 @@ const preset: Partial<Config> = {
             lineHeight: sv('text-button-12--line-height'),
             letterSpacing: sv('text-button-12--letter-spacing'),
             fontWeight: sv('text-button-12--font-weight'),
-            fontFamily: sv('text-button-12--font-family'),
           },
         ],
         'label-12-mono': [
@@ -492,7 +500,6 @@ const preset: Partial<Config> = {
             lineHeight: sv('text-label-12-mono--line-height'),
             letterSpacing: sv('text-label-12-mono--letter-spacing'),
             fontWeight: sv('text-label-12-mono--font-weight'),
-            fontFamily: sv('text-label-12-mono--font-family'),
           },
         ],
         'copy-13-mono': [
@@ -501,7 +508,6 @@ const preset: Partial<Config> = {
             lineHeight: sv('text-copy-13-mono--line-height'),
             letterSpacing: sv('text-copy-13-mono--letter-spacing'),
             fontWeight: sv('text-copy-13-mono--font-weight'),
-            fontFamily: sv('text-copy-13-mono--font-family'),
           },
         ],
         'setup-wizard-step-label-typography': [

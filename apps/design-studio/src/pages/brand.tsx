@@ -62,7 +62,7 @@ const LOGO_DISPLAYS: LogoDisplay[] = [
     label: 'Primary (plain)',
     fileName: logoVariants.primary,
     description:
-      'Plain timeline mark — cobalt gradient, no plate. Use inline on ink or paired with structure; square plate lockups use logo-primary-square.svg.',
+      'Plain timeline mark — frozen bright-cyan gradient (logo-primary.svg), no plate. Use inline on ink or paired with structure; square plate lockups use logo-primary-square.svg.',
     panelBgClass: 'bg-brand-deep-blue',
   },
   {
@@ -70,7 +70,7 @@ const LOGO_DISPLAYS: LogoDisplay[] = [
     label: 'White-bg (plain)',
     fileName: logoVariants.whiteBg,
     description:
-      'Plain deep→cobalt gradient mark for light surfaces. Plated lockups use logo-white-bg-square.svg.',
+      'Plain deep→cyan gradient mark (logo-white-bg.svg, frozen) for light surfaces. Plated lockups use logo-white-bg-square.svg.',
     panelBgClass: 'bg-white',
   },
   {

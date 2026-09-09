@@ -137,6 +137,8 @@ const COLOR_GROUPS: TokenGroup[] = [
  * Voice discipline (DESIGN.md §Design Concept): the display tier is the
  * content voice (offline system sans, `font-display`) — creative-entity titles
  * only; everything else stays interface voice (`font-sans` / `font-mono`).
+ * Each specimen's family resolves via its role-scoped `font-<role>` utility,
+ * which reads the generated `--text-<role>--font-family` var.
  */
 
 interface TypoSpecimen {
@@ -144,8 +146,14 @@ interface TypoSpecimen {
   role: string;
   /** Literal text-* size class from the shared preset. */
   textClass: string;
-  /** Literal font family utility. */
-  familyClass: 'font-display' | 'font-sans' | 'font-mono';
+  /**
+   * Literal per-role font family utility (`font-<role>`), which resolves
+   * through the generated `--text-<role>--font-family` var. Using the
+   * role-scoped utility (not the coarse `font-sans`/`font-mono`) means a
+   * DESIGN family edit to one role re-projects that specimen only — the
+   * actual family is observable live from the rendered row.
+   */
+  familyClass: string;
   /** Literal weight utility; display tier bakes weight 600 into text-display-*. */
   weightClass?: 'font-heading' | 'font-semibold' | 'font-medium' | 'font-button';
   sampleText: string;
@@ -153,24 +161,24 @@ interface TypoSpecimen {
 
 const TYPO_SPECIMENS: TypoSpecimen[] = [
   // ── Content voice (V1.121 v0.4 display tier — sans) ──
-  { label: 'display-32', role: 'Content voice · page-level creative titles', textClass: 'text-display-32', familyClass: 'font-display', sampleText: 'The Orchard of Small Hours' },
-  { label: 'display-24', role: 'Content voice · work / world titles', textClass: 'text-display-24', familyClass: 'font-display', sampleText: 'Chapter Six — The Long Descent' },
-  { label: 'display-20', role: 'Content voice · card & chapter titles', textClass: 'text-display-20', familyClass: 'font-display', sampleText: 'A Field Guide to Tidal Magic' },
+  { label: 'display-32', role: 'Content voice · page-level creative titles', textClass: 'text-display-32', familyClass: 'font-display-32', sampleText: 'The Orchard of Small Hours' },
+  { label: 'display-24', role: 'Content voice · work / world titles', textClass: 'text-display-24', familyClass: 'font-display-24', sampleText: 'Chapter Six — The Long Descent' },
+  { label: 'display-20', role: 'Content voice · card & chapter titles', textClass: 'text-display-20', familyClass: 'font-display-20', sampleText: 'A Field Guide to Tidal Magic' },
   // ── Interface voice (sans) ──
-  { label: 'heading-32', role: 'Page / view title', textClass: 'text-heading-32', familyClass: 'font-sans', weightClass: 'font-heading', sampleText: 'Heading 32 — The quick brown fox' },
-  { label: 'heading-24', role: 'Section title', textClass: 'text-heading-24', familyClass: 'font-sans', weightClass: 'font-heading', sampleText: 'Heading 24 — The quick brown fox' },
-  { label: 'heading-20', role: 'Card title / dense section', textClass: 'text-heading-20', familyClass: 'font-sans', weightClass: 'font-heading', sampleText: 'Heading 20 — The quick brown fox' },
-  { label: 'heading-16', role: 'Inline heading', textClass: 'text-heading-16', familyClass: 'font-sans', weightClass: 'font-heading', sampleText: 'Heading 16 — The quick brown fox' },
-  { label: 'label-14', role: 'Form labels, nav items, table headers', textClass: 'text-label-14', familyClass: 'font-sans', weightClass: 'font-medium', sampleText: 'Label 14 — The quick brown fox' },
-  { label: 'label-12', role: 'Badge labels, compact headers', textClass: 'text-label-12', familyClass: 'font-sans', weightClass: 'font-semibold', sampleText: 'LABEL 12 — THE QUICK BROWN FOX' },
-  { label: 'copy-16', role: 'Primary body copy', textClass: 'text-copy-16', familyClass: 'font-sans', sampleText: 'Body 16 — The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.' },
-  { label: 'copy-14', role: 'Default UI copy', textClass: 'text-copy-14', familyClass: 'font-sans', sampleText: 'Body 14 — The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.' },
-  { label: 'copy-13', role: 'Dense helper text', textClass: 'text-copy-13', familyClass: 'font-sans', sampleText: 'Body 13 — The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.' },
-  { label: 'button-14', role: 'Default button label', textClass: 'text-button-14', familyClass: 'font-sans', weightClass: 'font-button', sampleText: 'Button 14 — Continue' },
-  { label: 'button-12', role: 'Compact button label', textClass: 'text-button-12', familyClass: 'font-sans', weightClass: 'font-semibold', sampleText: 'BUTTON 12 — SAVE' },
+  { label: 'heading-32', role: 'Page / view title', textClass: 'text-heading-32', familyClass: 'font-heading-32', weightClass: 'font-heading', sampleText: 'Heading 32 — The quick brown fox' },
+  { label: 'heading-24', role: 'Section title', textClass: 'text-heading-24', familyClass: 'font-heading-24', weightClass: 'font-heading', sampleText: 'Heading 24 — The quick brown fox' },
+  { label: 'heading-20', role: 'Card title / dense section', textClass: 'text-heading-20', familyClass: 'font-heading-20', weightClass: 'font-heading', sampleText: 'Heading 20 — The quick brown fox' },
+  { label: 'heading-16', role: 'Inline heading', textClass: 'text-heading-16', familyClass: 'font-heading-16', weightClass: 'font-heading', sampleText: 'Heading 16 — The quick brown fox' },
+  { label: 'label-14', role: 'Form labels, nav items, table headers', textClass: 'text-label-14', familyClass: 'font-label-14', weightClass: 'font-medium', sampleText: 'Label 14 — The quick brown fox' },
+  { label: 'label-12', role: 'Badge labels, compact headers', textClass: 'text-label-12', familyClass: 'font-label-12', weightClass: 'font-semibold', sampleText: 'LABEL 12 — THE QUICK BROWN FOX' },
+  { label: 'copy-16', role: 'Primary body copy', textClass: 'text-copy-16', familyClass: 'font-copy-16', sampleText: 'Body 16 — The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.' },
+  { label: 'copy-14', role: 'Default UI copy', textClass: 'text-copy-14', familyClass: 'font-copy-14', sampleText: 'Body 14 — The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.' },
+  { label: 'copy-13', role: 'Dense helper text', textClass: 'text-copy-13', familyClass: 'font-copy-13', sampleText: 'Body 13 — The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.' },
+  { label: 'button-14', role: 'Default button label', textClass: 'text-button-14', familyClass: 'font-button-14', weightClass: 'font-button', sampleText: 'Button 14 — Continue' },
+  { label: 'button-12', role: 'Compact button label', textClass: 'text-button-12', familyClass: 'font-button-12', weightClass: 'font-semibold', sampleText: 'BUTTON 12 — SAVE' },
   // ── Interface voice (mono) ──
-  { label: 'label-12-mono', role: 'IDs, table figures, code-like values', textClass: 'text-label-12-mono', familyClass: 'font-mono', weightClass: 'font-medium', sampleText: 'mono-12 — 0xDEAD_BEEF_2024' },
-  { label: 'copy-13-mono', role: 'Dense mono body', textClass: 'text-copy-13-mono', familyClass: 'font-mono', sampleText: 'mono-13 — const answer = 42; // the quick brown fox' },
+  { label: 'label-12-mono', role: 'IDs, table figures, code-like values', textClass: 'text-label-12-mono', familyClass: 'font-label-12-mono', weightClass: 'font-medium', sampleText: 'mono-12 — 0xDEAD_BEEF_2024' },
+  { label: 'copy-13-mono', role: 'Dense mono body', textClass: 'text-copy-13-mono', familyClass: 'font-copy-13-mono', sampleText: 'mono-13 — const answer = 42; // the quick brown fox' },
 ];
 
 /* ---------- Spacing scale (DESIGN.md frontmatter spacing:) ----------
@@ -502,8 +510,8 @@ function ColorSwatch({ token }: { token: ColorToken }) {
 
 /**
  * Typography specimen row. Renders the specimen with the literal token
- * classes and reads font-size / weight / line-height / letter-spacing back
- * from the computed style (live) for the metrics line.
+ * classes and reads font-size / weight / font-family / line-height /
+ * letter-spacing back from the computed style (live) for the metrics line.
  */
 function TypoRow({ specimen }: { specimen: TypoSpecimen }) {
   const specimenRef = useRef<HTMLDivElement>(null);
@@ -521,6 +529,8 @@ function TypoRow({ specimen }: { specimen: TypoSpecimen }) {
     }
     const parts: string[] = [fontSize];
     if (cs.fontWeight) parts.push(`weight ${cs.fontWeight}`);
+    const family = cs.fontFamily ?? '';
+    if (family) parts.push(`family ${family}`);
     const lineHeight = cs.lineHeight ?? '';
     if (lineHeight.endsWith('px')) {
       parts.push(`line-height ${trimRatio(parseFloat(lineHeight) / sizePx, 2)} (${lineHeight})`);

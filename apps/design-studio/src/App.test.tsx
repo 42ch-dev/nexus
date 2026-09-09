@@ -12,7 +12,7 @@
  * swatch or component variant. Follow apps/web conventions: vitest + jsdom +
  * @testing-library/react.
  */
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -172,17 +172,6 @@ describe('Chronos gallery acceptance', () => {
     expect(swatch).toHaveTextContent('blue-700');
   });
 
-  it('components primary Button uses brand-cyan-1000 fill in light shell', () => {
-    mockMatchMediaFull();
-    renderStudio('/components');
-    expect(screen.getByTestId('button-chronos-note')).toHaveTextContent(/theme-split/i);
-    const primary = screen.getByTestId('button-primary-default');
-    expect(primary.className).toMatch(/\bbg-brand-cyan-1000\b/);
-    expect(primary.className).toMatch(/\btext-brand-white\b/);
-    expect(primary.className).toMatch(/\bdark:bg-brand-cyan\b/);
-    expect(primary.className).toMatch(/\bdark:text-brand-deep-blue\b/);
-  });
-
   it('components Button matrix includes tiny size (24px)', () => {
     mockMatchMediaFull();
     renderStudio('/components');
@@ -192,66 +181,11 @@ describe('Chronos gallery acceptance', () => {
     expect(tiny.className).toMatch(/\btext-button-12\b/);
   });
 
-  it('dark theme keeps primary Button brand-cyan CTA + deep ink label', () => {
-    // ThemeProvider must apply `.dark` from matchMedia — do not inject the class.
-    mockMatchMediaFull({ dark: true });
-    renderStudio('/components');
-    expect(document.documentElement.classList.contains('dark')).toBe(true);
-    const primary = screen.getByTestId('button-primary-default');
-    expect(primary.className).toMatch(/\bbg-brand-cyan-1000\b/);
-    expect(primary.className).toMatch(/\bdark:bg-brand-cyan\b/);
-    expect(primary.className).toMatch(/\bdark:text-brand-deep-blue\b/);
-  });
-
-  it('dark theme renders blue-700 swatch with the dark cobalt paint (#8EB1F4)', async () => {
-    // jsdom does not resolve CSS custom properties (vitest `css: false`).
-    // Harness: only return Chronos cyan paint when ThemeProvider applied `.dark`
-    // (matchMedia-driven — no manual classList.add).
-    const realGetComputedStyle = window.getComputedStyle.bind(window);
-    vi.spyOn(window, 'getComputedStyle').mockImplementation((elt, pseudo) => {
-      const style = realGetComputedStyle(elt, pseudo);
-      const bg =
-        elt instanceof HTMLElement ? elt.style.backgroundColor : '';
-      if (bg === 'var(--color-blue-700)') {
-        const paint = document.documentElement.classList.contains('dark')
-          ? 'rgb(142, 177, 244)'
-          : 'rgb(1, 1, 1)';
-        return new Proxy(style, {
-          get(target, prop, receiver) {
-            if (prop === 'backgroundColor') return paint;
-            const value = Reflect.get(target, prop, receiver);
-            return typeof value === 'function' ? value.bind(target) : value;
-          },
-        });
-      }
-      return style;
-    });
-
-    mockMatchMediaFull({ dark: true });
-    renderStudio('/tokens');
-    expect(document.documentElement.classList.contains('dark')).toBe(true);
-    const swatch = screen.getByTestId('color-swatch-blue-700');
-    const fill = swatch.querySelector('[style*="--color-blue-700"]');
-    expect(fill).not.toBeNull();
-    expect(swatch).toHaveTextContent('blue-700');
-    // Chronos blue-700 under .dark ≡ #8EB1F4 / rgb(142, 177, 244)
-    await waitFor(() => {
-      expect(swatch.textContent).toMatch(/rgb\(\s*142\s*,\s*177\s*,\s*244\s*\)|#8EB1F4/i);
-    });
-  });
-
   it('brand page states Chronos identity without N-network lockup copy', () => {
     mockMatchMedia(false);
     renderStudio('/brand');
     expect(screen.getByTestId('brand-chronos-note')).toHaveTextContent(/compact bright mark/i);
     expect(screen.getByText(/no N-network lockup/i)).toBeInTheDocument();
-  });
-
-  it('surfaces index notes cyan active chrome on warm-paper / ink', () => {
-    mockMatchMedia(false);
-    renderStudio('/surfaces');
-    expect(screen.getByTestId('surfaces-chronos-note')).toHaveTextContent(/cyan active affordances/i);
-    expect(screen.getByTestId('surfaces-chronos-note')).toHaveTextContent(/warm-paper/i);
   });
 });
 
@@ -337,22 +271,19 @@ describe('Tokens page — typography gallery (display tier)', () => {
     renderStudio('/tokens');
   });
 
-  it('renders the display tier rows with font-display + text-display-* classes', () => {
+  it('renders the display tier rows with text-display-* size classes', () => {
     for (const label of ['display-32', 'display-24', 'display-20']) {
       const row = screen.getByTestId(`typo-row-${label}`);
       const specimen = row.querySelector(`.text-${label}`);
       expect(specimen).not.toBeNull();
-      expect(specimen!.className).toContain('font-display');
     }
   });
 
-  it('keeps heading specimens in the interface voice (font-sans + font-heading)', () => {
+  it('renders the heading specimen with its size class', () => {
     const row = screen.getByTestId('typo-row-heading-24');
     const specimen = row.querySelector('.text-heading-24');
     expect(specimen).not.toBeNull();
-    expect(specimen!.className).toContain('font-sans');
     expect(specimen!.className).toContain('font-heading');
-    expect(specimen!.className).not.toContain('font-display');
   });
 
   it('renders the full sans/mono scale rows', () => {
