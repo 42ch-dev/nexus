@@ -17,8 +17,8 @@ on 5173).
 
 | Section | Route | Content |
 | --- | --- | --- |
-| **Tokens** | `/tokens` | Colors (brand, gray, blue, red, amber, green, teal), typography scale, spacing, radius, elevation |
-| **Brand VI** | `/brand` | All five `@42ch/nexus-ui` logo variants + `NexusMark` + theme.css swatches + clear-space guidance |
+| **Tokens** | `/tokens` | Full scalar inventory: brand core/extended/alpha + blue-1100, backgrounds, gray solid/alpha, semantic hues, scrim, state surface fills/borders, finding/memory/reading/badge status families, typography (incl. reading metrics + bilingual), spacing, radius, elevation + aliases, motion/easing/reduced-motion, disabled wash, canvas/soul/layer/pin/width families, and structural scalars (footer/setup/sidebar/dialog/sheet/reading-chrome) |
+| **Brand VI** | `/brand` | All five `@42ch/nexus-ui` logo variants + square plates + `NexusMark` + theme.css swatches + clear-space guidance + four historical `NexusLogoVariant` specimens + VI acceptance fixtures. Frozen assets and historical palettes are explicitly labeled references, separate from live theme tokens. |
 | **Components** | `/components` | All 11 `apps/web/src/components/ui/*` primitives with variant/state matrices — promoted primitives (Button, Badge, Card, Input, Label, Textarea, Select, Tabs, Toast, TransportErrorBlock, RunFormFields, EntityPickerField, ProposalSections, RunStatusBadge, RunsTable) imported from `@42ch/nexus-ui`; unpromoted remain on `@web-ui/*` (Dialog, States, Table) |
 | **Voice & Content** | `/voice` | Labeled writing-pattern specimens from `DESIGN.md` §Voice & Content |
 | **Surfaces** | `/surfaces` | Setup wizard, App shell, AgentPicker, Settings shell chrome fixtures (studio-local; no daemon data) |
@@ -47,17 +47,47 @@ decisions before they enter `apps/web`:
 
 The theme toggle in the header switches between `DESIGN.md` (light) and
 `DESIGN.dark.md` (dark) values. The active theme is reflected in the `.dark`
-class on `<html>` (Tailwind `class` strategy). No localStorage persistence in
-V1.98 — the toggle is session-scoped.
+class on `<html>` (Tailwind `class` strategy). The last-selected theme persists
+in `localStorage` under `nexus-studio-theme` (`light` / `dark` / `system`),
+defaulting to the OS `prefers-color-scheme`.
+
+## Frozen assets vs live theme tokens
+
+On `/brand`, install-identity logo assets (`logo-primary.svg`,
+`logo-white-bg.svg`, square plates) are **frozen baked-gradient references** —
+they are labeled as installed/historical and are never presented as the active
+cobalt palette. The four `NexusLogoVariant` palettes are explicitly marked
+**historical geometry/pigment references**. Live theme tokens (`--nexus-brand-*`,
+`--color-brand-*`, `NexusMark` `currentColor`) render under the current document
+theme (light or dark) and re-resolve on theme flip. Frozen cyan pixels are not
+claimed to equal `brandColors.cyan`, and assets are never recolored with CSS
+filters.
 
 ## Token-tuning workflow
 
-1. **Open studio** — `pnpm --filter design-studio dev`
-2. **Baseline** — toggle light/dark; scan token tables and component matrix
-3. **Edit SSOT** — change values in root `DESIGN.md` / `DESIGN.dark.md`
-4. **Refresh** — reload studio (HMR picks up CSS variable changes automatically)
-5. **Validate** — confirm Brand VI, Components, Voice, and Surfaces still look correct in both themes
-6. **Verify product** — run `pnpm --filter web test` and `pnpm --filter web run build` to ensure `apps/web` consumers still resolve tokens
+`DESIGN.md` / `DESIGN.dark.md` are the sole token SSOT. Editing them drives the
+gallery, the shared CSS, and the checked-in generated outputs.
+
+1. **Open studio** — `pnpm --filter design-studio dev` (port 5174; `apps/web`
+   stays on 5173)
+2. **Baseline** — toggle light/dark; scan token tables, Brand, Components,
+   Voice, and Surfaces
+3. **Edit SSOT** — change a value in root `DESIGN.md` or `DESIGN.dark.md`
+4. **Refresh** — the Studio dev plugin re-reads both DESIGN files in memory:
+   editing either triggers a full reload so computed-value labels and CSS both
+   reflect the change. A malformed YAML surfaces a Vite error overlay instead
+   of silently keeping the last-good tokens.
+5. **Regenerate checked-in outputs** — the build-time compiler also writes the
+   shared artifacts. After DESIGN edits, run:
+   ```bash
+   pnpm --filter @nexus/design-tokens generate   # writes tokens.css + theme.css + generated-brand.ts
+   pnpm --filter @nexus/design-tokens check      # verifies no drift / parity
+   ```
+6. **Validate** — confirm Brand VI, Components, Voice, and Surfaces still look
+   correct in both themes
+7. **Verify product** — run `pnpm --filter @42ch/nexus-ui build`, then
+   `pnpm --filter web typecheck` and `pnpm --filter web build` to ensure
+   `apps/web` consumers still resolve tokens (no web source edits)
 
 ## Commands
 

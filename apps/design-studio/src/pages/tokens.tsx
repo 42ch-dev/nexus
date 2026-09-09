@@ -21,13 +21,28 @@ const COLOR_GROUPS: TokenGroup[] = [
   {
     title: 'Brand',
     hint:
-      'Chronos dual-role anchors: deep-blue is ink structure (titlebar, light text links); brand-cyan is the cobalt signal — light primary fill (blue-700 ≡ brand-cyan), dark brightens to blue-700 on dark.',
+      'Chronos dual-role anchors: deep-blue is ink structure (titlebar, light text links); brand-cyan is the cobalt signal — light primary fill (blue-700 ≡ brand-cyan), dark brightens to blue-700 on dark. Extended steps and alphas recalibrated for the new signal.',
     tokens: [
       { label: 'brand-deep-blue', varName: '--color-brand-deep-blue' },
+      { label: 'brand-deep-blue-800', varName: '--color-brand-deep-blue-800' },
+      { label: 'brand-deep-blue-900', varName: '--color-brand-deep-blue-900' },
+      { label: 'brand-deep-blue-1000', varName: '--color-brand-deep-blue-1000' },
       { label: 'brand-cyan', varName: '--color-brand-cyan' },
+      { label: 'brand-cyan-800', varName: '--color-brand-cyan-800' },
+      { label: 'brand-cyan-900', varName: '--color-brand-cyan-900' },
       { label: 'brand-cyan-1000', varName: '--color-brand-cyan-1000' },
+      { label: 'brand-deep-blue-alpha-100', varName: '--color-brand-deep-blue-alpha-100' },
+      { label: 'brand-deep-blue-alpha-200', varName: '--color-brand-deep-blue-alpha-200' },
+      { label: 'brand-cyan-alpha-100', varName: '--color-brand-cyan-alpha-100' },
+      { label: 'brand-cyan-alpha-200', varName: '--color-brand-cyan-alpha-200' },
       { label: 'brand-white', varName: '--color-brand-white' },
     ],
+  },
+  {
+    title: 'Overlay scrim',
+    hint:
+      'Backdrop fill only — text never lives directly on scrim; an opaque dialog/popover plane sits above it (DESIGN.md §Colors).',
+    tokens: [{ label: 'scrim', varName: '--color-scrim' }],
   },
   {
     title: 'Background',
@@ -125,6 +140,70 @@ const COLOR_GROUPS: TokenGroup[] = [
       { label: 'main-banner-background', varName: '--color-main-banner-background' },
     ],
   },
+  {
+    title: 'State surface fills & borders',
+    hint:
+      'Semantic state surfaces (DESIGN.md components.states.{error,success,warning,info}) — translucent tint fills with matching 30% borders. Error/empty/loading and validation states consume these; each has an opaque text plane over the fill.',
+    tokens: [
+      { label: 'error-surface', varName: '--color-error-surface' },
+      { label: 'error-surface-border', varName: '--color-error-surface-border' },
+      { label: 'success-surface', varName: '--color-success-surface' },
+      { label: 'success-surface-border', varName: '--color-success-surface-border' },
+      { label: 'warning-surface', varName: '--color-warning-surface' },
+      { label: 'warning-surface-border', varName: '--color-warning-surface-border' },
+      { label: 'info-surface', varName: '--color-info-surface' },
+      { label: 'info-surface-border', varName: '--color-info-surface-border' },
+    ],
+  },
+  {
+    title: 'Finding status pills',
+    hint:
+      'Finding-status pill fills/text/borders (DESIGN.md components.finding-status-pill) — open/triaged/in-review/resolved/wont-fix/duplicate. Semantics preserved; values resolve from the semantic scales.',
+    tokens: [
+      ...['open', 'triaged', 'in-review', 'resolved', 'wont-fix', 'duplicate'].flatMap((s) => [
+        { label: `finding-status-${s}-bg`, varName: `--color-finding-status-${s}-bg` },
+        { label: `finding-status-${s}-text`, varName: `--color-finding-status-${s}-text` },
+        { label: `finding-status-${s}-border`, varName: `--color-finding-status-${s}-border` },
+      ]),
+    ],
+  },
+  {
+    title: 'Memory task-kind chips',
+    hint:
+      'Memory task-kind chip fills/text/borders (DESIGN.md components.memory-task-kind-*) — brainstorm/outline/chapter/research/unknown.',
+    tokens: [
+      ...['brainstorm', 'outline', 'chapter', 'research', 'unknown'].flatMap((s) => [
+        { label: `memory-task-kind-${s}-bg`, varName: `--color-memory-task-kind-${s}-bg` },
+        { label: `memory-task-kind-${s}-text`, varName: `--color-memory-task-kind-${s}-text` },
+        { label: `memory-task-kind-${s}-border`, varName: `--color-memory-task-kind-${s}-border` },
+      ]),
+    ],
+  },
+  {
+    title: 'Reading maturation badges',
+    hint:
+      'Reading-maturation count badges (DESIGN.md components.reading-maturation-badge) — world-KB density (teal) and open-findings (amber) counts.',
+    tokens: [
+      { label: 'reading-maturation-kb-density-bg', varName: '--color-reading-maturation-kb-density-bg' },
+      { label: 'reading-maturation-kb-density-text', varName: '--color-reading-maturation-kb-density-text' },
+      { label: 'reading-maturation-kb-density-border', varName: '--color-reading-maturation-kb-density-border' },
+      { label: 'reading-maturation-open-findings-bg', varName: '--color-reading-maturation-open-findings-bg' },
+      { label: 'reading-maturation-open-findings-text', varName: '--color-reading-maturation-open-findings-text' },
+      { label: 'reading-maturation-open-findings-border', varName: '--color-reading-maturation-open-findings-border' },
+    ],
+  },
+  {
+    title: 'nexus-ui Badge soft variants',
+    hint:
+      'nexus-ui Badge soft fills/text/borders (DESIGN.md components.badge-status-pill.soft) — running/queued/warning/error/preset. Neutral uses gray-alpha directly.',
+    tokens: [
+      ...['running', 'queued', 'warning', 'error', 'preset'].flatMap((s) => [
+        { label: `nexus-ui-badge-soft-${s}-bg`, varName: `--color-nexus-ui-badge-soft-${s}-bg` },
+        { label: `nexus-ui-badge-soft-${s}-text`, varName: `--color-nexus-ui-badge-soft-${s}-text` },
+        { label: `nexus-ui-badge-soft-${s}-border`, varName: `--color-nexus-ui-badge-soft-${s}-border` },
+      ]),
+    ],
+  },
 ];
 
 /* ---------- Typography specimens (DESIGN.md frontmatter typography:) ----------
@@ -174,6 +253,7 @@ const TYPO_SPECIMENS: TypoSpecimen[] = [
   { label: 'copy-16', role: 'Primary body copy', textClass: 'text-copy-16', familyClass: 'font-copy-16', sampleText: 'Body 16 — The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.' },
   { label: 'copy-14', role: 'Default UI copy', textClass: 'text-copy-14', familyClass: 'font-copy-14', sampleText: 'Body 14 — The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.' },
   { label: 'copy-13', role: 'Dense helper text', textClass: 'text-copy-13', familyClass: 'font-copy-13', sampleText: 'Body 13 — The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.' },
+  { label: 'copy-12', role: 'Footnotes, dense metadata, existing utility', textClass: 'text-copy-12', familyClass: 'font-copy-12', sampleText: 'Body 12 — The quick brown fox jumps over the lazy dog. (copy-12 formalizes an existing Tailwind utility.)' },
   { label: 'button-14', role: 'Default button label', textClass: 'text-button-14', familyClass: 'font-button-14', weightClass: 'font-button', sampleText: 'Button 14 — Continue' },
   { label: 'button-12', role: 'Compact button label', textClass: 'text-button-12', familyClass: 'font-button-12', weightClass: 'font-semibold', sampleText: 'BUTTON 12 — SAVE' },
   // ── Interface voice (mono) ──
@@ -371,6 +451,122 @@ const CANVAS_TOKEN_GROUPS: CanvasTokenGroup[] = [
       { label: 'soul-viz-timeline-axis-label', varName: '--color-soul-viz-timeline-axis-label' },
     ],
   },
+  {
+    title: 'Canvas — Write states',
+    hint:
+      'Live write-back indicators (dirty / conflict / success) and the stale background wash (DESIGN.md §Canvas Surface).',
+    tokens: [
+      { label: 'canvas-write-dirty', varName: '--color-canvas-write-dirty' },
+      { label: 'canvas-write-conflict', varName: '--color-canvas-write-conflict' },
+      { label: 'canvas-write-success', varName: '--color-canvas-write-success' },
+      { label: 'canvas-write-stale-bg', varName: '--color-canvas-write-stale-bg' },
+    ],
+  },
+  {
+    title: 'Canvas — Outline surface',
+    hint:
+      'Outline canvas scene/beat/chapter chrome and volume fill (DESIGN.md §Canvas Outline Tokens).',
+    tokens: [
+      { label: 'canvas-outline-volume-fill', varName: '--color-canvas-outline-volume-fill' },
+      { label: 'canvas-outline-chapter-card-status-pending', varName: '--color-canvas-outline-chapter-card-status-pending' },
+      { label: 'canvas-outline-chapter-card-status-drafted', varName: '--color-canvas-outline-chapter-card-status-drafted' },
+      { label: 'canvas-outline-chapter-card-status-completed', varName: '--color-canvas-outline-chapter-card-status-completed' },
+      { label: 'canvas-outline-foreshadow-edge', varName: '--color-canvas-outline-foreshadow-edge' },
+      { label: 'canvas-outline-conflict-marker', varName: '--color-canvas-outline-conflict-marker' },
+      { label: 'canvas-outline-scene-fill', varName: '--color-canvas-outline-scene-fill' },
+      { label: 'canvas-outline-scene-border', varName: '--color-canvas-outline-scene-border' },
+      { label: 'canvas-outline-scene-status-drafted', varName: '--color-canvas-outline-scene-status-drafted' },
+      { label: 'canvas-outline-scene-status-completed', varName: '--color-canvas-outline-scene-status-completed' },
+      { label: 'canvas-outline-beat-fill', varName: '--color-canvas-outline-beat-fill' },
+      { label: 'canvas-outline-beat-border', varName: '--color-canvas-outline-beat-border' },
+    ],
+  },
+  {
+    title: 'Canvas — World KB entity cards',
+    hint:
+      'World KB entity-card fill/stroke pairs including selected states (DESIGN.md components.canvas.worldkb-*).',
+    tokens: [
+      { label: 'canvas-worldkb-entity-card-fill-default', varName: '--color-canvas-worldkb-entity-card-fill-default' },
+      { label: 'canvas-worldkb-entity-card-fill-hover', varName: '--color-canvas-worldkb-entity-card-fill-hover' },
+      { label: 'canvas-worldkb-entity-card-fill-selected', varName: '--color-canvas-worldkb-entity-card-fill-selected' },
+      { label: 'canvas-worldkb-entity-card-stroke-default', varName: '--color-canvas-worldkb-entity-card-stroke-default' },
+      { label: 'canvas-worldkb-entity-card-stroke-selected', varName: '--color-canvas-worldkb-entity-card-stroke-selected' },
+      { label: 'canvas-worldkb-focus-ring', varName: '--color-canvas-worldkb-focus-ring' },
+      { label: 'canvas-worldkb-nonspatial-row-highlight', varName: '--color-canvas-worldkb-nonspatial-row-highlight' },
+    ],
+  },
+  {
+    title: 'Canvas — World KB promotion & anchors',
+    hint:
+      'World KB promotion states and source-anchor edge/node fills (DESIGN.md components.canvas.worldkb-*).',
+    tokens: [
+      { label: 'canvas-worldkb-promotion-pending', varName: '--color-canvas-worldkb-promotion-pending' },
+      { label: 'canvas-worldkb-promotion-confirmed', varName: '--color-canvas-worldkb-promotion-confirmed' },
+      { label: 'canvas-worldkb-promotion-rejected', varName: '--color-canvas-worldkb-promotion-rejected' },
+      { label: 'canvas-worldkb-promotion-merged', varName: '--color-canvas-worldkb-promotion-merged' },
+      { label: 'canvas-worldkb-source-anchor-edge', varName: '--color-canvas-worldkb-source-anchor-edge' },
+      { label: 'canvas-worldkb-source-anchor-node', varName: '--color-canvas-worldkb-source-anchor-node' },
+      { label: 'canvas-worldkb-computable-badge', varName: '--color-canvas-worldkb-computable-badge' },
+    ],
+  },
+  {
+    title: 'Canvas — World KB relationships',
+    hint:
+      'World KB relationship edges (default / symmetric / custom), confidence tints, and grounded/asserted badges (DESIGN.md components.canvas.worldkb-relationship-*).',
+    tokens: [
+      { label: 'canvas-worldkb-relationship-edge', varName: '--color-canvas-worldkb-relationship-edge' },
+      { label: 'canvas-worldkb-relationship-edge-default', varName: '--color-canvas-worldkb-relationship-edge-default' },
+      { label: 'canvas-worldkb-relationship-edge-symmetric', varName: '--color-canvas-worldkb-relationship-edge-symmetric' },
+      { label: 'canvas-worldkb-relationship-edge-custom', varName: '--color-canvas-worldkb-relationship-edge-custom' },
+      { label: 'canvas-worldkb-relationship-confidence-low', varName: '--color-canvas-worldkb-relationship-confidence-low' },
+      { label: 'canvas-worldkb-relationship-confidence-mid', varName: '--color-canvas-worldkb-relationship-confidence-mid' },
+      { label: 'canvas-worldkb-relationship-confidence-high', varName: '--color-canvas-worldkb-relationship-confidence-high' },
+      { label: 'canvas-worldkb-relationship-grounded-badge', varName: '--color-canvas-worldkb-relationship-grounded-badge' },
+      { label: 'canvas-worldkb-relationship-asserted-badge', varName: '--color-canvas-worldkb-relationship-asserted-badge' },
+      { label: 'canvas-worldkb-relationship-inspector-fill', varName: '--color-canvas-worldkb-relationship-inspector-fill' },
+    ],
+  },
+  {
+    title: 'Canvas — World KB conflict markers',
+    hint:
+      'World KB conflict marker + its translucent fill (DESIGN.md components.canvas.worldkb-*).',
+    tokens: [
+      { label: 'canvas-worldkb-conflict-marker', varName: '--color-canvas-worldkb-conflict-marker' },
+      { label: 'canvas-worldkb-conflict-marker-fill', varName: '--color-canvas-worldkb-conflict-marker-fill' },
+    ],
+  },
+  {
+    title: 'Soul Viz — Keyword cluster nodes',
+    hint:
+      'Soul keyword-cluster node fill/stroke/label (DESIGN.md components.soul-viz-keyword-cluster-node).',
+    tokens: [
+      { label: 'soul-viz-keyword-cluster-node-fill', varName: '--color-soul-viz-keyword-cluster-node-fill' },
+      { label: 'soul-viz-keyword-cluster-node-stroke', varName: '--color-soul-viz-keyword-cluster-node-stroke' },
+      { label: 'soul-viz-keyword-cluster-node-label', varName: '--color-soul-viz-keyword-cluster-node-label' },
+    ],
+  },
+  {
+    title: 'Soul Viz — Drift band',
+    hint:
+      'Soul drift-band fills (six hue bands), step stroke and label (DESIGN.md components.soul-viz-drift-band).',
+    tokens: [
+      ...['', '-2', '-3', '-4', '-5', '-6'].map((s) => ({
+        label: `soul-viz-drift-band-fill${s}`,
+        varName: `--color-soul-viz-drift-band-fill${s}`,
+      })),
+      { label: 'soul-viz-drift-band-step-stroke', varName: '--color-soul-viz-drift-band-step-stroke' },
+      { label: 'soul-viz-drift-band-label', varName: '--color-soul-viz-drift-band-label' },
+    ],
+  },
+  {
+    title: 'Soul narrative & growth curve',
+    hint:
+      'Soul narrative prose color and growth-curve stroke (DESIGN.md §Canvas Surface / SOUL).',
+    tokens: [
+      { label: 'soul-narrative-prose', varName: '--color-soul-narrative-prose' },
+      { label: 'soul-growth-curve-stroke', varName: '--color-soul-growth-curve-stroke' },
+    ],
+  },
 ];
 
 /** Node-width family (P0 + P3) — five --canvas-node-width-* slots. */
@@ -387,6 +583,174 @@ const CANVAS_NODE_WIDTHS: CanvasWidthToken[] = [
   { label: 'strategy-secondary', utilityClass: 'min-w-canvas-node-strategy-secondary', varName: '--canvas-node-width-strategy-secondary' },
   { label: 'outline-scene-beat', utilityClass: 'min-w-canvas-node-outline-scene-beat', varName: '--canvas-node-width-outline-scene-beat' },
   { label: 'default', utilityClass: 'min-w-canvas-node-default', varName: '--canvas-node-width-default' },
+];
+
+/* ---------- Structural scalars (DESIGN.md components.*) ----------
+ *
+ * Non-color sizing/geometry projections: footer-profile, setup-wizard,
+ * sidebar-nav, dialog/sheet/listbox, reading-annotation/chrome. Read live via
+ * probe elements so the reader sees the actual generated value per theme.
+ */
+
+interface ScalarToken {
+  label: string;
+  varName: string;
+  usage: string;
+}
+
+const FOOTER_PROFILE_SCALARS: ScalarToken[] = [
+  { label: 'avatar-size', varName: '--color-footer-profile-avatar-size', usage: 'Avatar diameter (px)' },
+  { label: 'avatar-rounded', varName: '--color-footer-profile-avatar-rounded', usage: 'Avatar corner radius' },
+  { label: 'avatar-bg', varName: '--color-footer-profile-avatar-bg', usage: 'Avatar resting fill' },
+  { label: 'avatar-bg-hover', varName: '--color-footer-profile-avatar-bg-hover', usage: 'Avatar hover fill' },
+  { label: 'avatar-bg-active', varName: '--color-footer-profile-avatar-bg-active', usage: 'Avatar selected fill' },
+  { label: 'avatar-text', varName: '--color-footer-profile-avatar-text', usage: 'Avatar label text' },
+  { label: 'avatar-text-active', varName: '--color-footer-profile-avatar-text-active', usage: 'Avatar selected text' },
+  { label: 'avatar-fallback-bg', varName: '--color-footer-profile-avatar-fallback-bg', usage: 'Avatar fallback initials fill' },
+  { label: 'avatar-fallback-text', varName: '--color-footer-profile-avatar-fallback-text', usage: 'Avatar fallback initials text' },
+  { label: 'add-button-bg', varName: '--color-footer-profile-add-button-bg', usage: 'Add-profile button fill' },
+  { label: 'add-button-border', varName: '--color-footer-profile-add-button-border', usage: 'Add-profile button border' },
+  { label: 'add-button-text', varName: '--color-footer-profile-add-button-text', usage: 'Add-profile button text' },
+  { label: 'add-button-hover-bg', varName: '--color-footer-profile-add-button-hover-bg', usage: 'Add-profile hover fill' },
+  { label: 'add-button-hover-border', varName: '--color-footer-profile-add-button-hover-border', usage: 'Add-profile hover border' },
+  { label: 'add-button-hover-text', varName: '--color-footer-profile-add-button-hover-text', usage: 'Add-profile hover text' },
+  { label: 'gap', varName: '--color-footer-profile-gap', usage: 'Inter-avatar gap' },
+];
+
+const SETUP_WIZARD_STEP_SCALARS: ScalarToken[] = [
+  { label: 'step-row-height', varName: '--color-setup-wizard-step-row-height', usage: 'Step row height' },
+  { label: 'step-circle-size', varName: '--color-setup-wizard-step-circle-size', usage: 'Status circle diameter' },
+  { label: 'step-circle-active-bg', varName: '--color-setup-wizard-step-circle-active-bg', usage: 'Active step circle fill' },
+  { label: 'step-circle-active-text', varName: '--color-setup-wizard-step-circle-active-text', usage: 'Active step circle text' },
+  { label: 'step-circle-complete-bg', varName: '--color-setup-wizard-step-circle-complete-bg', usage: 'Complete step fill' },
+  { label: 'step-circle-complete-text', varName: '--color-setup-wizard-step-circle-complete-text', usage: 'Complete step text' },
+  { label: 'step-circle-pending-bg', varName: '--color-setup-wizard-step-circle-pending-bg', usage: 'Pending step fill' },
+  { label: 'step-circle-pending-text', varName: '--color-setup-wizard-step-circle-pending-text', usage: 'Pending step text' },
+  { label: 'step-connector', varName: '--color-setup-wizard-step-connector', usage: 'Step connector stroke' },
+  { label: 'step-label-active-color', varName: '--color-setup-wizard-step-label-active-color', usage: 'Active step label' },
+  { label: 'step-label-pending-color', varName: '--color-setup-wizard-step-label-pending-color', usage: 'Pending step label' },
+  { label: 'step-label-typography', varName: '--color-setup-wizard-step-label-typography', usage: 'Step label font-size' },
+];
+
+const SETUP_WIZARD_SURFACE_SCALARS: ScalarToken[] = [
+  { label: 'card-bg', varName: '--color-setup-wizard-surface-card-bg', usage: 'Wizard card fill' },
+  { label: 'card-border', varName: '--color-setup-wizard-surface-card-border', usage: 'Wizard card border' },
+  { label: 'step-panel-width', varName: '--color-setup-wizard-surface-step-panel-width', usage: 'Left step-panel width' },
+  { label: 'step-panel-right-divider', varName: '--color-setup-wizard-surface-step-panel-right-divider', usage: 'Step-panel divider' },
+  { label: 'step-panel-padding-x', varName: '--color-setup-wizard-surface-step-panel-padding-x', usage: 'Step-panel horizontal padding' },
+  { label: 'step-panel-padding-y', varName: '--color-setup-wizard-surface-step-panel-padding-y', usage: 'Step-panel vertical padding' },
+  { label: 'content-panel-padding-x', varName: '--color-setup-wizard-surface-content-panel-padding-x', usage: 'Content-panel horizontal padding' },
+  { label: 'content-panel-padding-y', varName: '--color-setup-wizard-surface-content-panel-padding-y', usage: 'Content-panel vertical padding' },
+  { label: 'input-row-bg', varName: '--color-setup-wizard-surface-input-row-bg', usage: 'Path/input row fill' },
+  { label: 'input-row-border', varName: '--color-setup-wizard-surface-input-row-border', usage: 'Path/input row border' },
+  { label: 'input-row-gap', varName: '--color-setup-wizard-surface-input-row-gap', usage: 'Input-row gap' },
+  { label: 'input-row-min-height', varName: '--color-setup-wizard-surface-input-row-min-height', usage: 'Input-row min height' },
+  { label: 'input-row-rounded', varName: '--color-setup-wizard-surface-input-row-rounded', usage: 'Input-row radius' },
+  { label: 'input-row-label-color', varName: '--color-setup-wizard-surface-input-row-label-color', usage: 'Input-row label' },
+  { label: 'input-row-path-color', varName: '--color-setup-wizard-surface-input-row-path-color', usage: 'Input-row path text' },
+  { label: 'input-row-icon-color', varName: '--color-setup-wizard-surface-input-row-icon-color', usage: 'Input-row icon' },
+  { label: 'input-row-padding-x', varName: '--color-setup-wizard-surface-input-row-padding-x', usage: 'Input-row horizontal padding' },
+  { label: 'input-row-padding-y', varName: '--color-setup-wizard-surface-input-row-padding-y', usage: 'Input-row vertical padding' },
+  { label: 'cta-primary-max-width', varName: '--color-setup-wizard-surface-cta-primary-max-width', usage: 'Primary CTA max width' },
+  { label: 'cta-container-gap', varName: '--color-setup-wizard-surface-cta-container-gap', usage: 'CTA container gap' },
+];
+
+const CHROME_SCALARS: ScalarToken[] = [
+  { label: 'sidebar-nav-width', varName: '--sidebar-nav-width', usage: 'App sidebar width' },
+  { label: 'sidebar-nav-item-height', varName: '--sidebar-nav-item-height', usage: 'Sidebar nav item height' },
+  { label: 'dialog-width', varName: '--dialog-width', usage: 'Dialog width (calc-based)' },
+  { label: 'dialog-max-height', varName: '--dialog-max-height', usage: 'Dialog max height' },
+  { label: 'dialog-max-width', varName: '--color-dialog-max-width', usage: 'Dialog max width' },
+  { label: 'sheet-width', varName: '--sheet-width', usage: 'Sheet width (min-based)' },
+  { label: 'listbox-max-height', varName: '--color-listbox-max-height', usage: 'Listbox max height' },
+];
+
+const READING_CHROME_SCALARS: ScalarToken[] = [
+  { label: 'reading-annotation-inspector-background', varName: '--color-reading-annotation-inspector-background', usage: 'Annotation inspector surface' },
+  { label: 'reading-annotation-inspector-border', varName: '--color-reading-annotation-inspector-border', usage: 'Annotation inspector border' },
+  { label: 'reading-annotation-inspector-text', varName: '--color-reading-annotation-inspector-text', usage: 'Annotation inspector text' },
+  { label: 'reading-selection-toolbar-background', varName: '--color-reading-selection-toolbar-background', usage: 'Selection toolbar surface' },
+  { label: 'reading-selection-toolbar-border', varName: '--color-reading-selection-toolbar-border', usage: 'Selection toolbar border' },
+  { label: 'reading-selection-toolbar-text', varName: '--color-reading-selection-toolbar-text', usage: 'Selection toolbar text' },
+  { label: 'reading-annotation-highlight-yellow-background', varName: '--color-reading-annotation-highlight-yellow-background', usage: 'Yellow highlight fill' },
+  { label: 'reading-annotation-highlight-yellow-text', varName: '--color-reading-annotation-highlight-yellow-text', usage: 'Yellow highlight text' },
+  { label: 'reading-annotation-highlight-blue-background', varName: '--color-reading-annotation-highlight-blue-background', usage: 'Blue highlight fill' },
+  { label: 'reading-annotation-highlight-blue-text', varName: '--color-reading-annotation-highlight-blue-text', usage: 'Blue highlight text' },
+  { label: 'reading-annotation-highlight-green-background', varName: '--color-reading-annotation-highlight-green-background', usage: 'Green highlight fill' },
+  { label: 'reading-annotation-highlight-green-text', varName: '--color-reading-annotation-highlight-green-text', usage: 'Green highlight text' },
+  { label: 'reading-annotation-highlight-pink-background', varName: '--color-reading-annotation-highlight-pink-background', usage: 'Pink highlight fill' },
+  { label: 'reading-annotation-highlight-pink-text', varName: '--color-reading-annotation-highlight-pink-text', usage: 'Pink highlight text' },
+];
+
+interface ReadingChromeSpecimen {
+  label: string;
+  /** Flattened --reading-chrome-* property name in generated tokens.css. */
+  varName: string;
+  sample: string;
+  className: string;
+}
+
+const READING_CHROME_SPECIMENS: ReadingChromeSpecimen[] = [
+  {
+    label: 'novel · chapter-title',
+    varName: '--reading-chrome-novel-chapter-title-color',
+    sample: 'Chapter Twelve — The Tidal Gate',
+    className: 'font-display text-[28px] font-semibold',
+  },
+  {
+    label: 'novel · epigraph',
+    varName: '--reading-chrome-novel-epigraph-color',
+    sample: '“Water remembers every shore.”',
+    className: 'italic text-right',
+  },
+  {
+    label: 'essay · section-heading',
+    varName: '--reading-chrome-essay-section-heading-color',
+    sample: 'The Long Descent',
+    className: 'font-medium',
+  },
+  {
+    label: 'essay · blockquote',
+    varName: '--reading-chrome-essay-blockquote-color',
+    sample: '“Precision is patience, applied.”',
+    className: 'italic',
+  },
+  {
+    label: 'essay · footnote-marker',
+    varName: '--reading-chrome-essay-footnote-marker-color',
+    sample: '1',
+    className: 'align-super text-xs',
+  },
+  {
+    label: 'script · character-name',
+    varName: '--reading-chrome-script-character-name-color',
+    sample: 'MARSH',
+    className: 'font-bold text-sm uppercase',
+  },
+  {
+    label: 'script · parenthetical',
+    varName: '--reading-chrome-script-parenthetical-color',
+    sample: '(glances at the folded chart)',
+    className: 'italic',
+  },
+  {
+    label: 'script · scene-heading',
+    varName: '--reading-chrome-script-scene-heading-color',
+    sample: 'EXT. TIDEPOOL — NIGHT',
+    className: 'font-bold text-sm uppercase',
+  },
+  {
+    label: 'game-bible · term-link',
+    varName: '--reading-chrome-game-bible-term-link-color',
+    sample: 'tide-mark',
+    className: 'underline decoration-dotted',
+  },
+  {
+    label: 'game-bible · category-badge',
+    varName: '--reading-chrome-game-bible-category-badge-color',
+    sample: 'FLORA',
+    className: 'font-semibold',
+  },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -1024,6 +1388,170 @@ function DisabledWashDemo() {
   );
 }
 
+/**
+ * Scalar token row — reads the live computed value of a structural CSS var
+ * (length / color / radius) via a probe element, re-resolving on theme flip.
+ */
+function ScalarRow({ token }: { token: ScalarToken }) {
+  const { resolvedTheme } = useTheme();
+  const [computed, setComputed] = useState('');
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const el = document.createElement('div');
+    el.style.backgroundColor = `var(${token.varName})`;
+    el.style.display = 'none';
+    document.body.appendChild(el);
+    const bg = getComputedStyle(el).backgroundColor;
+    document.body.removeChild(el);
+    let value = '';
+    if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') {
+      value = bg;
+    } else {
+      const el2 = document.createElement('div');
+      el2.style.width = `var(${token.varName})`;
+      el2.style.display = 'none';
+      document.body.appendChild(el2);
+      const w = getComputedStyle(el2).width;
+      document.body.removeChild(el2);
+      if (w.endsWith('px')) value = w;
+    }
+    const rafId = requestAnimationFrame(() => setComputed(value || ''));
+    return () => cancelAnimationFrame(rafId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedTheme, token.varName]);
+
+  return (
+    <div
+      className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3 py-2 border-b border-gray-alpha-200 last:border-b-0"
+      data-testid={`scalar-row-${token.label}`}
+    >
+      <span className="text-label-14 font-medium text-gray-1000 w-56 shrink-0 truncate">{token.label}</span>
+      <span className="text-copy-13-mono font-mono text-gray-600 w-56 shrink-0 break-all">
+        {computed || token.varName}
+      </span>
+      <span className="text-copy-13 text-gray-600">{token.usage}</span>
+    </div>
+  );
+}
+
+/** Reading-chrome specimen — sample text styled with the flattened css var. */
+function ReadingChromeSpecimenRow({ spec }: { spec: ReadingChromeSpecimen }) {
+  const { resolvedTheme } = useTheme();
+  const [color, setColor] = useState('');
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const rafId = requestAnimationFrame(() => setColor(getComputedStyle(el).color));
+    return () => cancelAnimationFrame(rafId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedTheme]);
+
+  return (
+    <div
+      className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3 py-2 border-b border-gray-alpha-200 last:border-b-0"
+      data-testid={`reading-chrome-specimen-${spec.label.replace(/[^a-z0-9]/gi, '-')}`}
+    >
+      <div className="w-60 shrink-0 flex flex-col gap-0.5">
+        <span className="text-label-14 font-medium text-gray-1000">{spec.label}</span>
+        <span className="text-copy-13-mono font-mono text-gray-500 break-all">{spec.varName}</span>
+      </div>
+      <div className="flex-1 min-w-0 flex items-baseline gap-2">
+        <span
+          ref={ref}
+          className={spec.className}
+          style={{ color: `var(${spec.varName})` }}
+        >
+          {spec.sample}
+        </span>
+        {color && <span className="text-copy-13-mono font-mono text-gray-500 ml-auto shrink-0">{color}</span>}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Structural scalar section (DESIGN.md components.*) — footer-profile,
+ * setup-wizard step/surface, sidebar-nav/dialog/sheet/listbox chrome metrics,
+ * and reading annotation/chrome scalar families. Rows read live generated
+ * values so both themes are observable in one gallery.
+ */
+function StructuralSection() {
+  return (
+    <section data-testid="tokens-structural">
+      <SectionHeading id="tokens-structural">Structural scalars & reading chrome</SectionHeading>
+      <p className="text-copy-14 text-gray-700 mb-4 max-w-prose">
+        Non-color component scalars and flattened reading/annotation chrome families from DESIGN.md
+        components.*. Values are the actual generated CSS custom properties, read live per theme.
+      </p>
+
+      <div className="mb-8 border border-gray-alpha-300 rounded-card bg-background-100 p-6">
+        <h4 className="text-heading-16 font-semibold text-gray-900 mb-1">Footer profile</h4>
+        <p className="text-copy-13 text-gray-600 mb-3 max-w-prose">
+          Avatar and add-profile chrome scalars (DESIGN.md components.footer-profile).
+        </p>
+        {FOOTER_PROFILE_SCALARS.map((t) => (
+          <ScalarRow key={t.varName} token={t} />
+        ))}
+      </div>
+
+      <div className="mb-8 border border-gray-alpha-300 rounded-card bg-background-100 p-6">
+        <h4 className="text-heading-16 font-semibold text-gray-900 mb-1">Setup wizard — step</h4>
+        <p className="text-copy-13 text-gray-600 mb-3 max-w-prose">
+          Step circle/row/label scalars (DESIGN.md components.setup-wizard-step).
+        </p>
+        {SETUP_WIZARD_STEP_SCALARS.map((t) => (
+          <ScalarRow key={t.varName} token={t} />
+        ))}
+      </div>
+
+      <div className="mb-8 border border-gray-alpha-300 rounded-card bg-background-100 p-6">
+        <h4 className="text-heading-16 font-semibold text-gray-900 mb-1">Setup wizard — surface</h4>
+        <p className="text-copy-13 text-gray-600 mb-3 max-w-prose">
+          Wizard card / step-panel / content-panel / input-row scalars (DESIGN.md
+          components.setup-wizard-surface).
+        </p>
+        {SETUP_WIZARD_SURFACE_SCALARS.map((t) => (
+          <ScalarRow key={t.varName} token={t} />
+        ))}
+      </div>
+
+      <div className="mb-8 border border-gray-alpha-300 rounded-card bg-background-100 p-6">
+        <h4 className="text-heading-16 font-semibold text-gray-900 mb-1">Chrome metrics</h4>
+        <p className="text-copy-13 text-gray-600 mb-3 max-w-prose">
+          Sidebar-nav width/item-height, dialog width/max-height/max-width, sheet width, listbox
+          max-height (DESIGN.md components.sidebar-nav / dialog / sheet / listbox).
+        </p>
+        {CHROME_SCALARS.map((t) => (
+          <ScalarRow key={t.varName} token={t} />
+        ))}
+      </div>
+
+      <div className="mb-8 border border-gray-alpha-300 rounded-card bg-background-100 p-6">
+        <h4 className="text-heading-16 font-semibold text-gray-900 mb-1">Reading annotations & toolbar</h4>
+        <p className="text-copy-13 text-gray-600 mb-3 max-w-prose">
+          Annotation inspector / selection toolbar surfaces and four highlight fills + text
+          (DESIGN.md components.reading-annotation-* / reading-selection-toolbar).
+        </p>
+        {READING_CHROME_SCALARS.map((t) => (
+          <ScalarRow key={t.varName} token={t} />
+        ))}
+      </div>
+
+      <div className="border border-gray-alpha-300 rounded-card bg-background-100 p-6">
+        <h4 className="text-heading-16 font-semibold text-gray-900 mb-1">Reading chrome specimens</h4>
+        <p className="text-copy-13 text-gray-600 mb-3 max-w-prose">
+          Flattened reading-chrome family colors applied to representative prose (DESIGN.md
+          components.reading-chrome-*).
+        </p>
+        {READING_CHROME_SPECIMENS.map((s) => (
+          <ReadingChromeSpecimenRow key={s.varName} spec={s} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Sections                                                            */
 /* ------------------------------------------------------------------ */
@@ -1038,6 +1566,7 @@ function SubNav() {
     { label: 'Motion', href: '#tokens-motion' },
     { label: 'Canvas', href: '#tokens-canvas' },
     { label: 'States', href: '#tokens-states' },
+    { label: 'Structural', href: '#tokens-structural' },
   ];
 
   return (
@@ -1110,8 +1639,89 @@ function TypographySection() {
           <TypoRow key={s.label} specimen={s} />
         ))}
       </div>
+
+      <h4 className="text-heading-16 font-semibold text-gray-900 mt-8 mb-2">Reading metrics</h4>
+      <p className="text-copy-13 text-gray-600 mb-4 max-w-prose">
+        Main reading-prose constraints from DESIGN.md typography — the reading prose measure (66ch)
+        and paragraph spacing/line-height, applied live so a DESIGN edit re-reads it.
+      </p>
+      <div className="border border-gray-alpha-300 rounded-card bg-background-100 p-6">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3">
+            <span className="text-label-14 font-medium text-gray-1000 w-44 shrink-0">reading-prose-measure</span>
+            <span className="text-copy-13-mono font-mono text-gray-600" data-testid="reading-prose-measure">
+              <ReadingMetricValue varName="--reading-prose-measure" />
+            </span>
+          </div>
+          <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3">
+            <span className="text-label-14 font-medium text-gray-1000 w-44 shrink-0">reading-prose-line-height</span>
+            <span className="text-copy-13-mono font-mono text-gray-600">
+              <ReadingMetricValue varName="--reading-prose-line-height" />
+            </span>
+          </div>
+          <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3">
+            <span className="text-label-14 font-medium text-gray-1000 w-44 shrink-0">reading-prose-paragraph-spacing</span>
+            <span className="text-copy-13-mono font-mono text-gray-600">
+              <ReadingMetricValue varName="--reading-prose-paragraph-spacing" />
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <h4 className="text-heading-16 font-semibold text-gray-900 mt-8 mb-2">Bilingual long text</h4>
+      <p className="text-copy-13 text-gray-600 mb-4 max-w-prose">
+        Latin + CJK in the same specimen with the shared offline system sans stack. No network font
+        request — Latin and Simplified Chinese both render from the named system fallbacks (PingFang
+        SC / Hiragino Sans GB / Microsoft YaHei UI / Noto Sans CJK SC).
+      </p>
+      <div className="border border-gray-alpha-300 rounded-card bg-background-100 p-6 space-y-5">
+        <div>
+          <div className="text-display-24 font-display-24 text-gray-1000">
+            The Orchard of Small Hours · 时间的果园
+          </div>
+          <div className="text-copy-14 text-gray-700 mt-2">
+            故事从一场深夜的雷雨开始。The story begins with a thunderstorm past midnight — the
+            quick brown fox jumps over the lazy dog, 中文排版与西文在同一行流畅混排，标点与基线对齐。
+          </div>
+        </div>
+        <div>
+          <div className="text-display-20 font-display-20 text-gray-1000">
+            精密创作工作台 · Precision Creative Tool
+          </div>
+          <div className="text-copy-16 text-gray-800 mt-2 max-w-prose" style={{ maxWidth: 'var(--reading-prose-measure)' }}>
+            中性平面、石墨暗面、钴蓝交互构成了工作台的视觉语言。Neutral planes, graphite dark
+            surfaces, and cobalt interaction define the workbench language — 长句连续阅读时保持
+            一致的度量与行距，标点不因字体回退而跳动。
+          </div>
+        </div>
+        <div>
+          <div className="text-copy-13-mono font-mono text-gray-700">
+            mono-13 — const 中文 = 「变量名」 // the quick brown fox · CJK falls back to the named sans in the mono stack
+          </div>
+          <div className="text-label-12-mono font-mono text-gray-600 mt-1">
+            LABEL-12-MONO — 0xDEAD_BEEF_2024 · 中文 id 亦可读
+          </div>
+        </div>
+      </div>
     </section>
   );
+}
+
+/** Read a CSS custom property's declared value from the document root, live per theme. */
+function ReadingMetricValue({ varName }: { varName: string }) {
+  const { resolvedTheme } = useTheme();
+  const [value, setValue] = useState('');
+  useEffect(() => {
+    const rafId = requestAnimationFrame(() => {
+      const v = getComputedStyle(window.document.documentElement)
+        .getPropertyValue(varName)
+        .trim();
+      setValue(v);
+    });
+    return () => cancelAnimationFrame(rafId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedTheme, varName]);
+  return <>{value || varName}</>;
 }
 
 function SpacingSection() {
@@ -1334,8 +1944,9 @@ export function TokensPage() {
       <RadiusSection />
       <ElevationSection />
       <MotionSection />
-      <StatesSection />
       <CanvasSection />
+      <StatesSection />
+      <StructuralSection />
 
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
         Every gallery reads live values: colors, shadows, spacing, radius, motion, and canvas

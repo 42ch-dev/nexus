@@ -498,10 +498,12 @@ function SpecimensSection() {
     <section>
       <SectionHeading id="brand-specimens">Theme specimens</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
+        <strong className="font-medium text-gray-1000">Historical geometry/pigment references.</strong>{' '}
         Studio-only <code className="font-mono bg-gray-alpha-100 px-1 rounded">&lt;NexusLogoVariant&gt;</code>{' '}
         specimens driven by palette props (defaults in{' '}
-        <code className="font-mono bg-gray-alpha-100 px-1 rounded">logoVariantPalettes</code>). Not a
-        product theme switcher — gallery reference only.
+        <code className="font-mono bg-gray-alpha-100 px-1 rounded">logoVariantPalettes</code>). The four
+        elegant / nature / parchment / scifi palettes are <em>frozen historical references</em>, not the
+        active document theme — they sit on a fixed reference plate and are not live token swatches.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -667,16 +669,18 @@ export function BrandPage() {
 
       <section id="brand-vi-acceptance" className="scroll-mt-16">
         <h3 className="text-heading-20 font-semibold text-gray-1000 mb-2 pt-8">
-          VI acceptance (P2)
+          VI acceptance fixtures
         </h3>
         <p
           data-testid="brand-vi-acceptance-note"
           className="text-copy-16 text-gray-700 mb-6"
         >
-          Target states for VI-003, VI-004, and VI-005 — compact timeline mark scale, app icon
-          opaque full-bleed compose, and plain vs{' '}
+          Shipped acceptance specimens for VI-003, VI-004, and VI-005 — compact timeline mark
+          scale, app icon opaque full-bleed compose, and plain vs{' '}
           <code className="font-mono bg-gray-alpha-100 px-1 rounded">*-square</code> asset split.
-          Toggle light/dark in the chrome. App wiring follows Studio acceptance (T3+).
+          These use a scoped dark reference panel (fixed, not the session theme) so each asset
+          split is inspectable on both a light and a dark backing without wrapping the whole
+          document in a second theme.
         </p>
         <ViBrandAcceptanceFixtures />
       </section>
