@@ -2819,13 +2819,13 @@ mod tests {
             .expect("load")
             .expect("row");
         assert_eq!(record.state_revision, 3, "newer state must be untouched");
-        let state = record.state.as_ref().expect("state");
+        let run_state = record.state.as_ref().expect("state");
         assert!(
-            state.cancel_requested,
+            run_state.cancel_requested,
             "post-transition cancel_requested must survive the stale prompt"
         );
         assert!(
-            state.in_flight.is_none(),
+            run_state.in_flight.is_none(),
             "stale prompt must never install an in_flight attempt"
         );
     }

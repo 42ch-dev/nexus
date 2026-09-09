@@ -389,6 +389,7 @@ async fn b2_rejects_arbitrary_nonexistent_volume_via_chapter_patch() {
 
 /// Helper: run a timeline patch op, threading `base_revision` and returning the
 /// new revision (or the validation error).
+#[allow(clippy::result_large_err)] // test helper returning the API error for assertion; boxing would obscure failure diffs
 async fn timeline_patch(
     state: &WorkspaceState,
     work_id: &str,
@@ -608,6 +609,7 @@ async fn b4_allows_move_chapter_on_draft_chapter() {
 // behavior + the body-ownership invariant.
 
 /// Invoke `patch_outline_chapter`, returning the new revision or the error.
+#[allow(clippy::result_large_err)] // test helper returning the API error for assertion; boxing would obscure failure diffs
 async fn chapter_patch(
     state: &WorkspaceState,
     work_id: &str,

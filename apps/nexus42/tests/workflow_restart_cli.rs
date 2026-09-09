@@ -31,6 +31,8 @@
 //!    edge re-fires.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::too_many_lines)] // reopen-acceptance scenarios hold setup+assertions linear
+#![allow(clippy::used_underscore_binding)] // fixture channels with intentionally unused tx
 
 mod common;
 

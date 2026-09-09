@@ -760,8 +760,7 @@ fn insert_concurrency_and_schedule(
     body: &AddScheduleRequest,
 ) -> (String, Option<String>, Option<i64>) {
     let (kind, whitelist) = match &body.concurrency {
-        None => ("serial".to_string(), None),
-        Some(ScheduleConcurrencyRequest::Serial) => ("serial".to_string(), None),
+        None | Some(ScheduleConcurrencyRequest::Serial) => ("serial".to_string(), None),
         Some(ScheduleConcurrencyRequest::ParallelAny) => ("parallel_any".to_string(), None),
         Some(ScheduleConcurrencyRequest::ParallelWith { schedule_ids }) => (
             "parallel_with".to_string(),
@@ -1533,19 +1532,18 @@ pub async fn signal_schedule(
                     NexusApiError::NotFound(format!("schedule {schedule_id} not found"))
                 })?;
 
-                let mut terminal_status = "cancelled".to_string();
-                if let Some(sid) = &snapshot_session {
+                let terminal_status = if let Some(sid) = &snapshot_session {
                     let coordinator = state.run_coordinator().ok_or_else(|| {
                         NexusApiError::service_unavailable("run coordinator not configured")
                     })?;
-                    let result = match coordinator
+                    match coordinator
                         .signal_run(
                             &nexus_orchestration::engine::SessionId(sid.clone()),
                             crate::preset_run::RunSignal::Cancel,
                         )
                         .await
                     {
-                        Ok(result) => result,
+                        Ok(result) => result.status,
                         Err(crate::preset_run::RunControlError::StateConflict(sid, msg)) => {
                             return Err(NexusApiError::ConflictCoded {
                                 code: "workflow_state_conflict".into(),
@@ -1599,9 +1597,10 @@ pub async fn signal_schedule(
                                 message: msg,
                             });
                         }
-                    };
-                    terminal_status = result.status;
-                }
+                    }
+                } else {
+                    "cancelled".to_string()
+                };
 
                 // qc2 F-002: an unconfirmed cancel/cleanup (`interrupted`) is
                 // NOT a successful cancel. `creator_schedules.status` has no

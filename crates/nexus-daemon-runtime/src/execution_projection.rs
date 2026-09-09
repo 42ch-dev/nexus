@@ -166,13 +166,8 @@ pub fn project_execution(
     // cancel/new-run and the reason names the reconstruction failure.
     let (allowed_actions, source_unavailable) = if class == RecoveryClass::HumanWait
         && !record.descriptor.as_ref().is_some_and(|descriptor| {
-            let builtin;
-            let registry = if let Some(caps) = caps {
-                &**caps
-            } else {
-                builtin = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
-                &builtin
-            };
+            let builtin = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+            let registry = caps.map_or(&builtin, |caps| &**caps);
             frozen_source_reconstructable(descriptor, registry)
         }) {
         (vec!["cancel".to_string(), "new_run".to_string()], true)

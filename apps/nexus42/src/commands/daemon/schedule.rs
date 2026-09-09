@@ -209,6 +209,7 @@ struct ScheduleCli {
 /// - Daemon API calls fail
 /// - Invalid schedule parameters
 /// - CLI configuration cannot be loaded/saved
+#[allow(clippy::too_many_lines)] // one CLI command dispatch covering many subcommands; splitting adds indirection
 pub async fn run(cmd: ScheduleCommand, config: &CliConfig) -> Result<()> {
     let client = crate::api::DaemonClient::from_config(config)?;
 

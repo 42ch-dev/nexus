@@ -16,6 +16,9 @@
 //!
 //! Run: `SQLX_OFFLINE=true cargo test -p nexus-orchestration --test workflow_run_state`
 
+#![allow(clippy::too_many_lines)] // deterministic run-state scenarios keep setup+assertions in one flow
+#![allow(clippy::significant_drop_tightening)] // tests read state snapshots; early-drop noise without contention value
+
 use graph_flow::{Session, SessionStorage};
 use nexus_orchestration::engine::{SessionId, SessionStatus};
 use nexus_orchestration::run_state::{
@@ -789,7 +792,7 @@ async fn engine_start_creates_v1_run() {
 #[tokio::test]
 async fn engine_new_session_creates_v1_run() {
     let (pool, _db) = fresh_pool().await;
-    let (storage, engine) = fresh_engine(pool).await;
+    let (storage, engine) = fresh_engine(pool);
     let sid = engine
         .new_session(
             nexus_orchestration::engine::SessionKey {
@@ -2084,7 +2087,7 @@ impl graph_flow::Task for ContinueTask {
 }
 
 /// Build a fresh engine over a temp SQLite pool (helper for round-3 tests).
-async fn fresh_engine(
+fn fresh_engine(
     pool: Arc<sqlx::SqlitePool>,
 ) -> (
     Arc<SqliteSessionStorage>,
@@ -2110,7 +2113,7 @@ async fn fresh_engine(
 #[tokio::test]
 async fn engine_nested_child_runs_to_completion_then_parent_commits() {
     let (pool, _db) = fresh_pool().await;
-    let (storage, engine) = fresh_engine(pool).await;
+    let (storage, engine) = fresh_engine(pool);
 
     // Build a child graph that completes in one step (EndTask).
     let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
@@ -2200,7 +2203,7 @@ async fn engine_nested_child_runs_to_completion_then_parent_commits() {
 #[tokio::test]
 async fn tampered_child_descriptor_is_non_replayable_and_never_reattached() {
     let (pool, _db) = fresh_pool().await;
-    let (storage, engine) = fresh_engine(pool.clone()).await;
+    let (storage, engine) = fresh_engine(pool.clone());
 
     let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
     inner_graph.add_task(Arc::new(EndTask));
@@ -2292,7 +2295,7 @@ async fn tampered_child_descriptor_is_non_replayable_and_never_reattached() {
 #[tokio::test]
 async fn tampered_child_graph_name_is_non_replayable_on_recovery() {
     let (pool, _db) = fresh_pool().await;
-    let (storage, engine) = fresh_engine(pool.clone()).await;
+    let (storage, engine) = fresh_engine(pool.clone());
 
     let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
     inner_graph.add_task(Arc::new(EndTask));
@@ -2339,7 +2342,7 @@ async fn tampered_child_graph_name_is_non_replayable_on_recovery() {
 
     // Restart shape: a fresh engine over the same pool must refuse to
     // reconstruct the root runner over the tampered descendant.
-    let (_storage_b, engine_b) = fresh_engine(pool.clone()).await;
+    let (_storage_b, engine_b) = fresh_engine(pool.clone());
     let err = engine_b
         .ensure_recovered_runner_inner(&parent_sid)
         .await
@@ -2362,7 +2365,7 @@ async fn tampered_child_graph_name_is_non_replayable_on_recovery() {
 #[tokio::test]
 async fn v1_child_under_parent_without_descriptor_is_non_replayable() {
     let (pool, _db) = fresh_pool().await;
-    let (_storage, engine) = fresh_engine(pool.clone()).await;
+    let (_storage, engine) = fresh_engine(pool.clone());
 
     let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
     inner_graph.add_task(Arc::new(EndTask));
@@ -2427,7 +2430,7 @@ async fn restart_hydrates_child_checkpoints() {
         nexus_local_db::run_migrations(&pool)
             .await
             .expect("run migrations (first)");
-        let (storage, engine) = fresh_engine(Arc::new(pool)).await;
+        let (storage, engine) = fresh_engine(Arc::new(pool));
 
         let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
         inner_graph.add_task(Arc::new(EndTask));
@@ -2462,7 +2465,7 @@ async fn restart_hydrates_child_checkpoints() {
         nexus_local_db::run_migrations(&pool)
             .await
             .expect("run migrations (second)");
-        let (_storage, engine) = fresh_engine(Arc::new(pool)).await;
+        let (_storage, engine) = fresh_engine(Arc::new(pool));
 
         // Recover the parent session — this must hydrate the children map.
         let summary = nexus_orchestration::engine::SessionSummary {
@@ -2501,7 +2504,7 @@ async fn restart_hydrates_child_checkpoints() {
 #[tokio::test]
 async fn failed_child_cas_restores_root_position() {
     let (pool, _db) = fresh_pool().await;
-    let (storage, engine) = fresh_engine(pool.clone()).await;
+    let (storage, engine) = fresh_engine(pool.clone());
 
     // Build a parent graph: task "continue_task" → task "end_task".
     let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
@@ -2607,7 +2610,7 @@ async fn failed_child_cas_restores_root_position() {
 #[tokio::test]
 async fn child_ids_are_collision_resistant() {
     let (pool, _db) = fresh_pool().await;
-    let (_storage, engine) = fresh_engine(pool).await;
+    let (_storage, engine) = fresh_engine(pool);
 
     let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
     parent_graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
@@ -2690,7 +2693,7 @@ impl graph_flow::Task for DeterministicContinueTask {
 #[tokio::test]
 async fn corrupt_child_is_non_replayable_during_recovery() {
     let (pool, _db) = fresh_pool().await;
-    let (storage, engine) = fresh_engine(pool.clone()).await;
+    let (storage, engine) = fresh_engine(pool.clone());
     let parent_sid = SessionId("par-corrupt-child".to_string());
 
     // Start a parent run.
@@ -2766,7 +2769,7 @@ async fn corrupt_child_is_non_replayable_during_recovery() {
 #[tokio::test]
 async fn child_missing_session_snapshot_is_non_replayable() {
     let (pool, _db) = fresh_pool().await;
-    let (storage, engine) = fresh_engine(pool.clone()).await;
+    let (storage, engine) = fresh_engine(pool.clone());
     let parent_sid = SessionId("par-missing-child".to_string());
 
     let descriptor = test_descriptor(&parent_sid.0);
@@ -2852,7 +2855,7 @@ impl graph_flow::Task for ConcurrentBumpRootTask {
 #[tokio::test]
 async fn failed_cas_restore_is_revision_fenced() {
     let (pool, _db) = fresh_pool().await;
-    let (storage, engine) = fresh_engine(pool.clone()).await;
+    let (storage, engine) = fresh_engine(pool.clone());
 
     // Parent graph: concurrent-bump → deterministic-continue → end.
     let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
@@ -2990,7 +2993,7 @@ async fn failed_cas_restore_is_revision_fenced() {
 #[tokio::test]
 async fn post_effect_failure_persists_interrupted() {
     let (pool, _db) = fresh_pool().await;
-    let (storage, engine) = fresh_engine(pool.clone()).await;
+    let (storage, engine) = fresh_engine(pool.clone());
 
     // Parent graph whose start is an EffectTask (sets the external-effect
     // marker) → end.
@@ -3097,7 +3100,7 @@ async fn post_effect_failure_persists_interrupted() {
 #[tokio::test]
 async fn deterministic_failure_restores_pre_step_position() {
     let (pool, _db) = fresh_pool().await;
-    let (storage, engine) = fresh_engine(pool.clone()).await;
+    let (storage, engine) = fresh_engine(pool.clone());
 
     let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
     parent_graph.add_task(Arc::new(DeterministicContinueTask));
@@ -3207,7 +3210,7 @@ async fn recovered_parent_drives_existing_inner_child() {
         nexus_local_db::run_migrations(&pool)
             .await
             .expect("run migrations (first)");
-        let (_storage, engine) = fresh_engine(Arc::new(pool)).await;
+        let (_storage, engine) = fresh_engine(Arc::new(pool));
 
         let inner_graph = Arc::new(graph_flow::Graph::new("ig"));
         inner_graph.add_task(Arc::new(EndTask));
@@ -3251,7 +3254,7 @@ async fn recovered_parent_drives_existing_inner_child() {
         nexus_local_db::run_migrations(&pool)
             .await
             .expect("run migrations (second)");
-        let (storage, engine) = fresh_engine(Arc::new(pool)).await;
+        let (storage, engine) = fresh_engine(Arc::new(pool));
 
         // Hydrate the children map from persisted child rows (the recovery
         // step that finding 4 relies on) for the Running parent.
@@ -3604,7 +3607,7 @@ async fn terminal_child_is_reattached_not_respawned() {
         nexus_local_db::run_migrations(&pool)
             .await
             .expect("run migrations (first)");
-        let (storage, engine) = fresh_engine(Arc::new(pool)).await;
+        let (storage, engine) = fresh_engine(Arc::new(pool));
 
         let inner_graph = Arc::new(graph_flow::Graph::new("ig"));
         inner_graph.add_task(Arc::new(EndTask));
@@ -3645,7 +3648,7 @@ async fn terminal_child_is_reattached_not_respawned() {
         nexus_local_db::run_migrations(&pool)
             .await
             .expect("run migrations (second)");
-        let (storage, engine) = fresh_engine(Arc::new(pool)).await;
+        let (storage, engine) = fresh_engine(Arc::new(pool));
 
         // Hydrate the children map (recovery) — the terminal child is present.
         engine
@@ -3712,7 +3715,7 @@ async fn terminal_child_is_reattached_not_respawned() {
 #[tokio::test]
 async fn missing_child_session_clears_stale_children_entry() {
     let (pool, _db) = fresh_pool().await;
-    let (storage, engine) = fresh_engine(pool.clone()).await;
+    let (storage, engine) = fresh_engine(pool.clone());
     let parent_sid = SessionId("par-missing-clear".to_string());
 
     // Seed a parent run + a VALID child row but NO session row (missing
@@ -3790,7 +3793,7 @@ async fn missing_child_session_clears_stale_children_entry() {
 #[tokio::test]
 async fn child_effect_propagates_to_parent_interrupted_on_failed_commit() {
     let (pool, _db) = fresh_pool().await;
-    let (storage, engine) = fresh_engine(pool.clone()).await;
+    let (storage, engine) = fresh_engine(pool.clone());
 
     // Parent graph whose start is an InnerGraphTask (drives a child end task).
     let child_graph = Arc::new(graph_flow::Graph::new("child_graph"));
@@ -4061,7 +4064,7 @@ async fn unsupported_forward_execution_version_is_non_replayable() {
 #[tokio::test]
 async fn step_in_flight_persisted_before_effect_dispatch() {
     let (pool, _db) = fresh_pool().await;
-    let (storage, engine) = fresh_engine(pool.clone()).await;
+    let (storage, engine) = fresh_engine(pool.clone());
 
     // Parent graph: manual-wait start (Running) then end.
     let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
@@ -4121,7 +4124,7 @@ async fn step_in_flight_persisted_before_effect_dispatch() {
 #[tokio::test]
 async fn crash_after_effect_with_pre_step_mark_lands_interrupted() {
     let (pool, _db) = fresh_pool().await;
-    let (storage, engine) = fresh_engine(pool.clone()).await;
+    let (storage, engine) = fresh_engine(pool.clone());
 
     // Parent graph: EffectTask (external effect) → end.
     let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));
@@ -4198,7 +4201,7 @@ async fn crash_after_effect_with_pre_step_mark_lands_interrupted() {
 #[tokio::test]
 async fn external_effect_marker_cleared_per_step() {
     let (pool, _db) = fresh_pool().await;
-    let (storage, engine) = fresh_engine(pool.clone()).await;
+    let (storage, engine) = fresh_engine(pool.clone());
 
     // Parent graph: effectful continue (EffectTask → Continue, sets marker) →
     // deterministic continue (DeterministicContinueTask) → end.
@@ -4419,7 +4422,7 @@ async fn v0_child_is_non_replayable_and_preserved() {
 #[tokio::test]
 async fn negative_child_revision_is_non_replayable() {
     let (pool, _db) = fresh_pool().await;
-    let (storage, engine) = fresh_engine(pool.clone()).await;
+    let (storage, engine) = fresh_engine(pool.clone());
     let parent_sid = SessionId("par-neg-child-rev".to_string());
 
     // Start a parent run.
@@ -4696,7 +4699,7 @@ async fn stale_restore_pre_step_against_waiting_row_leaves_wait_untouched() {
 #[tokio::test]
 async fn engine_effectful_task_does_not_dispatch_before_in_flight_mark() {
     let (pool, _db) = fresh_pool().await;
-    let (storage, engine) = fresh_engine(pool.clone()).await;
+    let (storage, engine) = fresh_engine(pool.clone());
 
     // Parent graph: marker-effect task (external effect) → end.
     let parent_graph = Arc::new(graph_flow::Graph::new("parent_graph"));

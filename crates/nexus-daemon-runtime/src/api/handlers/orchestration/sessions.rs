@@ -313,6 +313,7 @@ fn failure_reason_for(row: &nexus_orchestration::storage::CheckpointRow) -> Opti
 }
 
 /// `POST /v1/daemon/orchestration/sessions/{session_id}/signal`
+#[allow(clippy::too_many_lines)] // handler covers many signal variants + per-variant error mapping; splitting adds indirection
 pub async fn signal_session(
     State(state): State<WorkspaceState>,
     Path(session_id): Path<String>,

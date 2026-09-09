@@ -5,6 +5,10 @@
 //! and is not treated as JSON. No live omp.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::too_many_lines)] // CLI integration scenarios keep setup+assertions in one flow
+#![allow(clippy::similar_names)] // session/step fixture ids intentionally cluster
+#![allow(clippy::manual_let_else)] // test fixtures prefer explicit match arms over let-else
+#![allow(clippy::format_push_string)] // assertion text built incrementally in one place
 
 mod common;
 

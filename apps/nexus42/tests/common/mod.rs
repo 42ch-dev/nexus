@@ -52,7 +52,7 @@ pub struct LiveDaemon {
 /// `GraphFlowEngine`). MUST run before `create_router` so the router's
 /// `WorkspaceState` clone shares the engine slot.
 async fn wire_orchestration_engine(
-    state: &mut WorkspaceState,
+    state: &WorkspaceState,
     pool: &sqlx::SqlitePool,
 ) -> (
     Arc<dyn nexus_orchestration::OrchestrationEngine>,
@@ -127,7 +127,7 @@ impl LiveDaemon {
         });
         let pool = state.pool().expect("pool").clone();
         test_utils::seed_test_creator_and_world(&pool).await;
-        let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool).await;
+        let (engine, session_storage) = wire_orchestration_engine(&state, &pool).await;
 
         let app = api::create_router(
             state.clone(),
@@ -190,7 +190,7 @@ impl LiveDaemon {
         state.set_daemon_tool_dispatch(dispatch.clone());
         let pool = state.pool().expect("pool").clone();
         test_utils::seed_test_creator_and_world(&pool).await;
-        let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool).await;
+        let (engine, session_storage) = wire_orchestration_engine(&state, &pool).await;
 
         let app = api::create_router(
             state.clone(),
@@ -517,7 +517,7 @@ impl LiveDaemon {
         }
         let pool = state.pool().expect("pool").clone();
         test_utils::seed_test_creator_and_world(&pool).await;
-        let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool).await;
+        let (engine, session_storage) = wire_orchestration_engine(&state, &pool).await;
 
         let app = api::create_router(
             state.clone(),
@@ -562,7 +562,7 @@ impl LiveDaemon {
         );
         std::fs::write(&config_path, config).expect("write config.toml");
 
-        let mut state = WorkspaceState::new_for_testing(
+        let state = WorkspaceState::new_for_testing(
             nexus_home,
             db_path,
             Some(workspace_dir.to_string_lossy().to_string()),
@@ -570,7 +570,7 @@ impl LiveDaemon {
         .await;
         let pool = state.pool().expect("pool").clone();
         test_utils::seed_test_creator_and_world(&pool).await;
-        let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool).await;
+        let (engine, session_storage) = wire_orchestration_engine(&state, &pool).await;
 
         let app = api::create_router(
             state.clone(),

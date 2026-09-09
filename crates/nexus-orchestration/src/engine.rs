@@ -4601,6 +4601,10 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::too_many_lines)] // deterministic race/settlement scenarios keep setup+assertions linear
+    #![allow(clippy::await_holding_lock)] // test fixtures hold sync mutex guards across awaits to freeze state
+    #![allow(clippy::significant_drop_tightening)] // tests read state snapshots; early-drop noise without contention value
+
     use super::*;
     use crate::storage::SqliteSessionStorage;
     use graph_flow::InMemorySessionStorage;

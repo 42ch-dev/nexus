@@ -708,6 +708,7 @@ impl WorkspaceState {
         self.publish_lazy_attach_bundle().await
     }
 
+    #[allow(clippy::too_many_lines)] // single atomic aggregate publish; extracting stages adds cross-struct invariants
     async fn publish_lazy_attach_bundle(&self) -> anyhow::Result<()> {
         let pool = self
             .pool()
@@ -723,17 +724,16 @@ impl WorkspaceState {
         // Host facade (A1). When no Host facade is wired (tests), the
         // executor is absent and LLM-backed capabilities fail closed.
         let prompt_executor: Option<Arc<dyn nexus_orchestration::capability::PromptExecutor>> =
-            match self.agent_host() {
-                Some(host) => {
-                    let host_config = self.agent_host_config();
-                    Some(Arc::new(crate::prompt_executor::HostPromptExecutor::new(
+            self.agent_host().map(|host| {
+                let host_config = self.agent_host_config();
+                let executor: Arc<dyn nexus_orchestration::capability::PromptExecutor> =
+                    Arc::new(crate::prompt_executor::HostPromptExecutor::new(
                         host,
                         workflow_store.clone(),
                         host_config.timeouts.clone(),
-                    )))
-                }
-                None => None,
-            };
+                    ));
+                executor
+            });
 
         // N-2b: REBUILD the capability registry with the lazy-attach runtime
         // dependencies (Creator DB pool + production Host prompt executor)
