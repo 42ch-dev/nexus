@@ -395,6 +395,39 @@ pub trait OrchestrationEngine: Send + Sync {
     /// tracked-but-not-driven and must not be stepped.
     async fn has_runner(&self, session_id: &SessionId) -> bool;
 
+    /// Recover persisted non-terminal sessions into the in-memory tracker
+    /// (WS2 R1 + R6 + A7).
+    ///
+    /// Called by daemon boot and the daemon-level restart path with the
+    /// persisted non-terminal summaries: registers coordinator tokens,
+    /// hydrates the complete owned-descendant closure, and reconstructs a
+    /// `FlowRunner` per session from the FROZEN source identity (descriptor
+    /// hash + referenced templates verified; changed/missing source or
+    /// corrupt child identity is non-replayable — the session stays
+    /// tracked-but-not-driven). Terminal sessions are skipped. No new IDs
+    /// are minted; existing session/child IDs and checkpoints are attached.
+    async fn recover_sessions(&self, summaries: Vec<SessionSummary>);
+
+    /// Attach a runner for `session_id` ON DEMAND (A7 rule 4).
+    ///
+    /// A human-wait run whose runner was not attached at boot gets its
+    /// runner rebuilt here on a matching continue — the complete
+    /// owned-descendant closure first, then the root runner, using the
+    /// exact same frozen-source verification as boot recovery. Returns the
+    /// concrete [`EngineError`] reason when reconstruction is impossible
+    /// (source missing, hash mismatch, corrupt child identity), so the
+    /// caller can surface `reconstruction_unavailable` while the durable
+    /// human wait stays preserved.
+    ///
+    /// # Errors
+    /// Returns [`EngineError`] when the run has no durable v1 descriptor,
+    /// the frozen source no longer matches, or a persisted child is
+    /// corrupt/unsupported — all non-replayable.
+    async fn ensure_recovered_runner(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), EngineError>;
+
     /// Start a session using a loaded preset (outer graph + inner graphs wired).
     async fn start_session_with_preset(
         &self,
@@ -2277,6 +2310,32 @@ impl OrchestrationEngine for EngineProxy {
         self.state.runners.read().await.contains_key(&session_id.0)
     }
 
+    async fn recover_sessions(&self, summaries: Vec<SessionSummary>) {
+        // EngineProxy is a lightweight constructor-time facade (used by the
+        // preset loader to wire inner graphs); full A7 reconstruction lives
+        // on GraphFlowEngine. The in-memory tracker half is still honored so
+        // a proxy-backed consumer observes recovered sessions.
+        self.state.recover_sessions(summaries).await;
+    }
+
+    async fn ensure_recovered_runner(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), EngineError> {
+        // EngineProxy carries no capability holder/executor wiring, so the
+        // frozen-source reconstruction cannot run through it. GraphFlowEngine
+        // (the daemon's concrete engine) is the only supported path; this
+        // proxy never serves daemon recovery.
+        Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+            format!(
+                "ensure_recovered_runner: EngineProxy cannot reconstruct session '{}' \
+                 (no capability/executor wiring); use the concrete GraphFlowEngine \
+                 (reconstruction_unavailable, non-replayable)",
+                session_id.0
+            ),
+        )))
+    }
+
     async fn start_session_with_preset(
         &self,
         _loaded: &crate::preset::LoadedPreset,
@@ -2493,9 +2552,9 @@ impl GraphFlowEngine {
     /// the in-memory tracker.
     ///
     /// **R6 fix**: For each non-terminal session summary, reconstructs the
-    /// `FlowRunner` from the embedded preset so that `run_step` succeeds
-    /// after recovery (previously returned `NoGraphLoaded`).
-    pub async fn recover_sessions(&self, summaries: Vec<SessionSummary>) {
+    /// `FlowRunner` so that `run_step` succeeds after recovery. The trait
+    /// entry point (`OrchestrationEngine::recover_sessions`) delegates here.
+    pub async fn recover_sessions_inner(&self, summaries: Vec<SessionSummary>) {
         for summary in &summaries {
             // Skip terminal sessions — they don't need runners.
             if summary.status.is_terminal() {
@@ -2508,65 +2567,22 @@ impl GraphFlowEngine {
             // registered.
             self.register_cancellation(&summary.session_id);
 
-            // Important 1 (round 4): reconstruct the COMPLETE owned-descendant
-            // closure for a recovered root. `hydrate_children` installs only
-            // the DIRECT children of the requested parent; a child can itself
-            // own nested children (`InnerGraphTask` spawns through the same
-            // engine path), so a restarted root must recursively hydrate the
-            // persisted parent relation breadth-first. A root Cancel after
-            // this recovery can then fire/finalize every owned descendant.
-            //
-            // A corrupt/unsupported child (load_children failure, missing
-            // child session snapshot) must propagate: the parent cannot be
-            // reconstructed over an incomplete children map (A7). We surface
-            // it as a warning and skip runner reconstruction — the session
-            // stays tracked but not driven (non-replayable).
-            let mut hydrate_queue: std::collections::VecDeque<SessionId> =
-                std::collections::VecDeque::new();
-            hydrate_queue.push_back(summary.session_id.clone());
-            let mut hydrate_failed = false;
-            while let Some(parent) = hydrate_queue.pop_front() {
-                if let Err(e) = self.state.hydrate_children(&parent).await {
-                    tracing::warn!(
-                        "recovery: failed to hydrate children for session {}: {}; \
-                         session marked non-replayable (no runner)",
-                        parent.0,
-                        e
-                    );
-                    hydrate_failed = true;
-                    break;
-                }
-                // Every recovered descendant registers its coordinator
-                // cancellation token (A1) and is enqueued for its own
-                // children — the closure is complete only when the whole
-                // persisted tree is hydrated.
-                let children = self
-                    .state
-                    .children
-                    .read()
+            // Store-backed runs: reconstruct the COMPLETE owned-descendant
+            // closure (children hydrated first, then the root runner from
+            // the frozen source). A corrupt/unsupported child propagates as
+            // non-replayable (A7). No-store (in-memory/test) engines keep
+            // the legacy embedded-preset reconstruction directly.
+            let result = if self.state.workflow_store.is_some() {
+                self.attach_runner_with_owned_closure(&summary.session_id)
                     .await
-                    .get(&parent.0)
-                    .cloned()
-                    .unwrap_or_default();
-                for child in &children {
-                    self.register_cancellation(&SessionId(child.session.id.clone()));
-                    hydrate_queue.push_back(SessionId(child.session.id.clone()));
-                }
-            }
-            if hydrate_failed {
-                continue;
-            }
-
-            // R6: Try to reconstruct the FlowRunner from the embedded preset.
-            // The preset_id in the summary corresponds to the preset that was
-            // used to start the session. We load it, wire the outer graph,
-            // and create a FlowRunner pointing at the same storage (which
-            // already has the persisted session data).
-            if let Err(e) = self.reconstruct_runner(summary).await {
+            } else {
+                self.reconstruct_runner_legacy(&summary).await
+            };
+            if let Err(e) = result {
                 tracing::warn!(
                     "R6: failed to reconstruct runner for session {}: {}; \
                      session will remain in tracker but run_step will fail until \
-                     manually re-started",
+                     manually re-started (reconstruction_unavailable, non-replayable)",
                     summary.session_id.0,
                     e
                 );
@@ -2575,6 +2591,79 @@ impl GraphFlowEngine {
 
         // Add all summaries to the in-memory tracker (idempotent).
         self.state.recover_sessions(summaries).await;
+    }
+
+    /// Reconstruct the COMPLETE owned-descendant closure for a recovered
+    /// root — hydrated children map first, then the root runner (A7).
+    ///
+    /// `hydrate_children` installs only the DIRECT children of the requested
+    /// parent; a child can itself own nested children (`InnerGraphTask`
+    /// spawns through the same engine path), so a restarted root must
+    /// recursively hydrate the persisted parent relation breadth-first. A
+    /// root Cancel after this recovery can then fire/finalize every owned
+    /// descendant.
+    ///
+    /// A corrupt/unsupported child (load_children failure, missing child
+    /// session snapshot) must propagate: the parent cannot be reconstructed
+    /// over an incomplete children map (A7). Surface it as non-replayable.
+    async fn attach_runner_with_owned_closure(
+        &self,
+        root_session_id: &SessionId,
+    ) -> Result<(), EngineError> {
+        let mut hydrate_queue: std::collections::VecDeque<SessionId> =
+            std::collections::VecDeque::new();
+        hydrate_queue.push_back(root_session_id.clone());
+        while let Some(parent) = hydrate_queue.pop_front() {
+            self.state.hydrate_children(&parent).await?;
+            // Every recovered descendant registers its coordinator
+            // cancellation token (A1) and is enqueued for its own
+            // children — the closure is complete only when the whole
+            // persisted tree is hydrated.
+            let children = self
+                .state
+                .children
+                .read()
+                .await
+                .get(&parent.0)
+                .cloned()
+                .unwrap_or_default();
+            for child in &children {
+                self.register_cancellation(&SessionId(child.session.id.clone()));
+                hydrate_queue.push_back(SessionId(child.session.id.clone()));
+            }
+        }
+        // R6: Try to reconstruct the root FlowRunner from the frozen source
+        // descriptor. The persisted session data in storage preserves the
+        // execution position.
+        self.reconstruct_runner(root_session_id).await
+    }
+
+    /// Attach a runner for `session_id` ON DEMAND (A7 rule 4).
+    ///
+    /// A human-wait run whose runner was not attached at boot (recovery
+    /// skipped it, or this daemon instance never ran recovery for it) gets
+    /// its runner rebuilt here on a matching continue — the complete
+    /// owned-descendant closure first, then the root runner, using the
+    /// exact same frozen-source verification as boot recovery.
+    ///
+    /// Returns the concrete [`EngineError`] reason (source missing, hash
+    /// mismatch, corrupt child identity) when reconstruction is impossible,
+    /// so the caller can surface `reconstruction_unavailable` while the
+    /// durable human wait stays preserved.
+    ///
+    /// # Errors
+    /// Returns [`EngineError`] when the run has no durable v1 descriptor,
+    /// the frozen source no longer matches, or a persisted child is
+    /// corrupt/unsupported — all non-replayable.
+    pub async fn ensure_recovered_runner_inner(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), EngineError> {
+        self.register_cancellation(session_id);
+        if self.has_runner(session_id).await {
+            return Ok(());
+        }
+        self.attach_runner_with_owned_closure(session_id).await
     }
 
     /// Reconstruct a `FlowRunner` for a recovered session (R6).
@@ -2595,7 +2684,7 @@ impl GraphFlowEngine {
             .unwrap_or_else(|| Arc::new(CapabilityRegistry::empty()))
     }
 
-    async fn reconstruct_runner(&self, summary: &SessionSummary) -> Result<(), EngineError> {
+    async fn reconstruct_runner(&self, session_id: &SessionId) -> Result<(), EngineError> {
         // Load the durable descriptor (frozen at admission) so we honour the
         // persisted source identity and preset version (Important 5). A run
         // that has no v1 descriptor is a legacy/unverified row — its runner
@@ -2603,29 +2692,49 @@ impl GraphFlowEngine {
         let descriptor = match &self.state.workflow_store {
             Some(store) => {
                 let record = store
-                    .load_run(&summary.session_id)
+                    .load_run(session_id)
                     .await?
                     .ok_or_else(|| {
                         EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                             "R6: session '{}' has no persisted run record; cannot reconstruct runner \
                              (non-replayable)",
-                            summary.session_id.0
+                            session_id.0
                         )))
                     })?;
                 record.descriptor.ok_or_else(|| {
                     EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                         "R6: session '{}' has no v1 descriptor; cannot reconstruct runner over a \
                          frozen source (non-replayable)",
-                        summary.session_id.0
+                        session_id.0
                     )))
                 })?
             }
             None => {
-                // No workflow store (in-memory/test engine): fall back to the
-                // legacy embedded-preset path (no durable descriptor).
-                return self
-                    .reconstruct_runner_legacy(summary)
-                    .await;
+                // No workflow store (in-memory/test engine): no durable
+                // descriptor exists, so a frozen-source reconstruction is
+                // impossible. The legacy embedded path is used by
+                // `recover_sessions` directly; an on-demand attach without
+                // a store (no durable run) is non-replayable.
+                let summary = self
+                    .state
+                    .sessions
+                    .read()
+                    .await
+                    .iter()
+                    .find(|s| s.session_id == *session_id)
+                    .cloned();
+                match summary.as_ref() {
+                    Some(summary) => return self.reconstruct_runner_legacy(summary).await,
+                    None => {
+                        return Err(EngineError::GraphFlow(
+                            graph_flow::GraphError::StorageError(format!(
+                                "R6: session '{}' has no durable run record and is not tracked; \
+                                 cannot reconstruct runner (non-replayable)",
+                                session_id.0
+                            )),
+                        ));
+                    }
+                }
             }
         };
 
@@ -2643,7 +2752,7 @@ impl GraphFlowEngine {
                             graph_flow::GraphError::StorageError(format!(
                                 "R6: embedded preset '{preset_id}' is missing for session {}: {} \
                                  (reconstruction_unavailable, non-replayable)",
-                                summary.session_id.0, e
+                                session_id.0, e
                             )),
                         ));
                     }
@@ -2657,7 +2766,7 @@ impl GraphFlowEngine {
                             graph_flow::GraphError::StorageError(format!(
                                 "R6: directory preset at '{:?}' is missing/invalid for session {}: {} \
                                  (reconstruction_unavailable, non-replayable)",
-                                root, summary.session_id.0, e
+                                root, session_id.0, e
                             )),
                         ));
                     }
@@ -2673,7 +2782,7 @@ impl GraphFlowEngine {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "R6: reloaded preset '{}' for session {} has no source identity \
                  (reconstruction_unavailable, non-replayable)",
-                loaded.id, summary.session_id.0
+                loaded.id, session_id.0
             )))
         })?;
         if reloaded_identity != &descriptor.source {
@@ -2681,7 +2790,7 @@ impl GraphFlowEngine {
                 graph_flow::GraphError::StorageError(format!(
                     "R6: preset source identity mismatch for session {} (frozen {:?} != reloaded {:?}) \
                      — source changed or moved; reconstruction_unavailable (non-replayable)",
-                    summary.session_id.0, descriptor.source, reloaded_identity
+                    session_id.0, descriptor.source, reloaded_identity
                 )),
             ));
         }
@@ -2694,7 +2803,7 @@ impl GraphFlowEngine {
                 graph_flow::GraphError::StorageError(format!(
                     "R6: preset version mismatch for session {} (frozen {} != current {}) \
                      — reconstruction_unavailable (non-replayable)",
-                    summary.session_id.0, version, loaded.version
+                    session_id.0, version, loaded.version
                 )),
             ));
         }
@@ -2723,12 +2832,12 @@ impl GraphFlowEngine {
             .runners
             .write()
             .await
-            .insert(summary.session_id.0.clone(), runner);
+            .insert(session_id.0.clone(), runner);
 
         tracing::info!(
             "R6: reconstructed runner for session {} (preset: {}, version: {})",
-            summary.session_id.0,
-            summary.preset_id,
+            session_id.0,
+            loaded.id,
             version
         );
 
@@ -3415,6 +3524,17 @@ impl OrchestrationEngine for GraphFlowEngine {
 
     async fn has_runner(&self, session_id: &SessionId) -> bool {
         self.state.runners.read().await.contains_key(&session_id.0)
+    }
+
+    async fn recover_sessions(&self, summaries: Vec<SessionSummary>) {
+        self.recover_sessions_inner(summaries).await;
+    }
+
+    async fn ensure_recovered_runner(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), EngineError> {
+        self.ensure_recovered_runner_inner(session_id).await
     }
 
     async fn start_session_with_preset(

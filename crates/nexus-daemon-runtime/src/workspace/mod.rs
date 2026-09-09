@@ -1040,6 +1040,25 @@ impl WorkspaceState {
         self.agent_host = Arc::new(Some(host));
     }
 
+    /// Reset the published runtime aggregate (daemon-level restart seam, A7).
+    ///
+    /// A daemon restart republishes a FRESH engine/coordinator/supervisor
+    /// bundle over the SAME Creator DB and HOME. The prior bundle's drives
+    /// must be quiescent first (callers abort them via
+    /// [`WorkflowRunCoordinator::abort_all_drives`]); this cell is then
+    /// cleared so the gated publishers
+    /// ([`Self::publish_boot_runtime_bundle`] /
+    /// [`Self::publish_creator_runtime_bundle`]) construct a new engine —
+    /// whose `recover_sessions` reattaches existing session/child IDs and
+    /// checkpoints from the frozen descriptors (never re-running recovery
+    /// against a half-wired aggregate).
+    pub fn reset_runtime_bundle(&self) {
+        *self
+            .runtime_bundle
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
+
     /// Set the agent host configuration.
     /// Called from boot.rs after loading the config from disk.
     pub fn set_agent_host_config(&mut self, config: AgentHostConfig) {

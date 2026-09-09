@@ -32,8 +32,20 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
 use assert_cmd::Command;
 use async_trait::async_trait;
+use common::LiveDaemon;
+use nexus_agent_host::capability::model::{
+    CapabilityDescriptor, CreateSessionRequest, FinishReason, HostContentBlock, HostEvent,
+    HostEventStream, HostHealth, HostOperation, HostStartConfig, OperationFinishedEvent,
+    OperationStartedEvent, ProtocolKind, ProviderHealth, TextDeltaEvent,
+};
+use nexus_agent_host::{
+    DiscoverySource, HostError, HostOperationId, HostResult, HostSession, HostSessionId,
+    LaunchStrategy, ProviderCatalog, ProviderCatalogEntry, SessionState, TrustLevel,
+};
 use nexus_daemon_runtime::preset_run::{
     resume_driven_sessions, PresetRunConfig, PresetRunOutcome, ResumeDecision,
 };
@@ -49,9 +61,10 @@ use nexus_orchestration::{
     OrchestrationEngine, PresetSourceIdentity,
 };
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// The REAL `nexus42 ops inspect` binary over the hermetic tmp HOME whose
 /// seeded `config.toml` resolves the SAME `state.db` the pools write to.
@@ -1231,4 +1244,488 @@ async fn restart_durable_status_nested_child_wait_preserved_and_never_auto_resum
 
     pool_b.close().await;
     drop(tmp);
+}
+
+// ---------------------------------------------------------------------------
+// P3 T1 — daemon-level restart matrix (A7): production boot/attach path over
+// the SAME DB/HOME, driven through `LiveDaemon::restart()` (abort drives →
+// republish bundle → run_boot_recovery). Source-verified reattachment: the
+// frozen source identity (manifest + referenced template bytes) is verified
+// at reconstruction; a changed/missing user preset preserves the human wait
+// and makes continue return `reconstruction_unavailable` (cancel-only).
+// ---------------------------------------------------------------------------
+
+/// Deterministic non-echo Host fixture (mirrors the P2 MockHost): every
+/// prompt returns a transformed string, records the rendered prompt, and
+/// advertises `mock-provider` so admission's binding gate validates.
+struct RestartMockHost {
+    prompts: Mutex<Vec<String>>,
+    execs: AtomicUsize,
+}
+
+impl RestartMockHost {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            prompts: Mutex::new(Vec::new()),
+            execs: AtomicUsize::new(0),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl nexus_agent_host::HostFacade for RestartMockHost {
+    async fn start(&self, _config: HostStartConfig) -> HostResult<()> {
+        Ok(())
+    }
+    async fn create_session(
+        &self,
+        request: CreateSessionRequest,
+    ) -> HostResult<HostSession> {
+        Ok(HostSession {
+            id: HostSessionId::new(),
+            provider_id: request.provider_id,
+            state: SessionState::Ready,
+            created_at: chrono::Utc::now(),
+            active_op_id: None,
+            negotiated_capabilities: CapabilityDescriptor::native_cli_limited(),
+            owner: request.owner,
+            process_identity: None,
+        })
+    }
+    async fn exec(
+        &self,
+        session_id: HostSessionId,
+        op: HostOperation,
+    ) -> HostResult<HostEventStream> {
+        self.execs.fetch_add(1, Ordering::SeqCst);
+        let op_id = match op {
+            HostOperation::Prompt { op_id, content, .. } => {
+                let text = match content.as_slice() {
+                    [HostContentBlock::Text { text }] => text.clone(),
+                    other => format!("unexpected content {other:?}"),
+                };
+                self.prompts.lock().expect("prompts").push(text);
+                op_id
+            }
+            other => {
+                return Err(HostError::internal(format!(
+                    "unexpected operation {other:?}"
+                )));
+            }
+        };
+        let started = HostEvent::OpStarted(OperationStartedEvent {
+            op_id: op_id.clone(),
+            session_id: session_id.clone(),
+        });
+        let delta = HostEvent::MessageDelta(TextDeltaEvent {
+            session_id: session_id.clone(),
+            op_id: op_id.clone(),
+            text: "transformed:restart-output".to_string(),
+        });
+        let finished = HostEvent::OpFinished(OperationFinishedEvent {
+            session_id,
+            op_id,
+            reason: FinishReason::EndTurn,
+        });
+        Ok(Box::pin(futures_util::stream::iter(vec![
+            Ok(started),
+            Ok(delta),
+            Ok(finished),
+        ])))
+    }
+    async fn cancel(&self, _op_id: HostOperationId) -> HostResult<()> {
+        Ok(())
+    }
+    async fn health(&self) -> HostResult<HostHealth> {
+        Ok(HostHealth {
+            running: true,
+            active_sessions: 0,
+            active_operations: 0,
+        })
+    }
+    async fn shutdown(&self) -> HostResult<()> {
+        Ok(())
+    }
+    async fn shutdown_session(&self, _session_id: HostSessionId) -> HostResult<()> {
+        Ok(())
+    }
+    async fn list_sessions(&self) -> HostResult<Vec<HostSession>> {
+        Ok(Vec::new())
+    }
+    async fn provider_catalog(&self) -> HostResult<ProviderCatalog> {
+        Ok(ProviderCatalog {
+            entries: vec![ProviderCatalogEntry {
+                provider_id: nexus_agent_host::ProviderId::new("mock-provider"),
+                display_name: "mock-provider".to_string(),
+                protocol_kind: ProtocolKind::NativeCli,
+                launch: LaunchStrategy::NativeCli {
+                    command: "mock".to_string(),
+                    args: vec![],
+                    env: HashMap::new(),
+                },
+                source: DiscoverySource::Config,
+                trust: TrustLevel::Explicit,
+                capabilities: CapabilityDescriptor::native_cli_limited(),
+                health: ProviderHealth {
+                    provider_id: nexus_agent_host::ProviderId::new("mock-provider"),
+                    available: true,
+                    latency_ms: None,
+                    message: None,
+                },
+            }],
+        })
+    }
+    fn subscribe_events(
+        &self,
+        _session_id: HostSessionId,
+    ) -> tokio::sync::broadcast::Receiver<HostEvent> {
+        // The daemon's prompt executor drains its own event stream; an
+        // empty channel is sufficient for this fixture.
+        let (_tx, rx): (
+            tokio::sync::broadcast::Sender<HostEvent>,
+            tokio::sync::broadcast::Receiver<HostEvent>,
+        ) = tokio::sync::broadcast::channel(16);
+        let _ = _tx;
+        rx
+    }
+}
+
+/// Public schedule add through the real HTTP surface (P3 fixture).
+async fn post_schedule(
+    daemon: &LiveDaemon,
+    preset_id: &str,
+    label: &str,
+) -> (reqwest::StatusCode, String, String) {
+    let resp = reqwest::Client::new()
+        .post(format!("{}/v1/daemon/orchestration/schedules", daemon.http_url))
+        .json(&json!({
+            "creator_id": "test_creator",
+            "preset_id": preset_id,
+            "label": label,
+            "seed": "p3-restart",
+            "input": { "topic": "p3-restart" },
+            "agent_bindings": { "default": { "provider_id": "mock-provider" } }
+        }))
+        .send()
+        .await
+        .expect("POST schedule");
+    let status = resp.status();
+    let body: Value = resp.json().await.expect("schedule json");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    (status, schedule_id, body["status"].as_str().unwrap_or("").to_string())
+}
+
+/// Read the durable v1 run state (status + wait token) for a session.
+async fn durable_run_state(
+    pool: &sqlx::SqlitePool,
+    session_id: &str,
+) -> (String, Option<Value>) {
+    let (status, state): (String, Option<Vec<u8>>) = sqlx::query_as(
+        "SELECT status, run_state_json FROM orchestration_sessions WHERE session_id = ?",
+    )
+    .bind(session_id)
+    .fetch_one(pool)
+    .await
+    .expect("load run state");
+    let state: Option<Value> = state.map(|b| {
+        serde_json::from_slice(&b).expect("run state json")
+    });
+    (status, state)
+}
+
+/// Wait until a schedule owns a session and the session reaches `expected`.
+async fn wait_owned_status(
+    daemon: &LiveDaemon,
+    schedule_id: &str,
+    expected: &str,
+    timeout_secs: u64,
+) -> String {
+    tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
+        loop {
+            let (_, current_session_id): (String, Option<String>) = sqlx::query_as(
+                "SELECT status, current_session_id FROM creator_schedules WHERE schedule_id = ?",
+            )
+            .bind(schedule_id)
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("schedule row");
+            if let Some(sid) = current_session_id {
+                let (run_status, _) = durable_run_state(&daemon.pool, &sid).await;
+                if run_status == expected {
+                    return sid;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("owned session reached expected status")
+}
+
+/// Write a user preset bundle (manifest + referenced template) under
+/// `$HOME/.nexus42/presets/<id>/` — the A7 directory-source shape.
+fn write_user_wait_preset(home: &Path, template_body: &str) {
+    let bundle = home.join(".nexus42").join("presets").join("p3-restart-wait");
+    std::fs::create_dir_all(&bundle.join("prompts")).expect("bundle dirs");
+    std::fs::write(
+        bundle.join("preset.yaml"),
+        r#"preset:
+  id: p3-restart-wait
+  version: 1
+  kind: creator
+  description: "P3 restart matrix — inner prompt then human wait"
+  requires_capabilities: []
+  initial: gate
+  terminal: done
+inner_graphs:
+  gen:
+    nodes:
+      - id: n1
+        kind: acp_prompt
+        template_file: prompts/gen.md
+        tool_policy: auto_grant_read_only
+states:
+  - id: gate
+    enter:
+      - kind: inner_graph
+        name: gen
+    exit_when:
+      kind: graph_complete
+    next: wait
+  - id: wait
+    exit_when:
+      kind: manual
+    next: done
+  - id: done
+    terminal: true
+"#,
+    )
+    .expect("preset.yaml");
+    std::fs::write(bundle.join("prompts").join("gen.md"), template_body).expect("gen.md");
+}
+
+/// A7 rule 4 at the daemon level: a user-directory-preset human wait survives
+/// a daemon-level restart over the SAME DB/HOME (production boot/attach
+/// path). The wait token is preserved byte-identical, boot never steps it,
+/// and a matching continue after restart reattaches the runner from the
+/// FROZEN source and completes WITHOUT replaying the completed inner graph
+/// prompt. No auto-approval.
+#[tokio::test]
+async fn daemon_restart_user_wait_reextracts_and_continues() {
+    let host = RestartMockHost::new();
+    let mut daemon = LiveDaemon::start_with_host_provider_and_dispatch(
+        host.clone(),
+        Arc::new(CountingDispatch {
+            calls: Arc::new(AtomicUsize::new(0)),
+        }),
+    )
+    .await;
+    write_user_wait_preset(daemon.home.path(), "template v1 body");
+    let (status, schedule_id, _) = post_schedule(&daemon, "p3-restart-wait", "p3-wait").await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "schedule admitted");
+
+    // The run drives gate → inner prompt (Host) → manual wait.
+    let sid = wait_owned_status(&daemon, &schedule_id, "waiting_for_input", 20).await;
+    let (_, state) = durable_run_state(&daemon.pool, &sid).await;
+    let wait_id = state
+        .as_ref()
+        .and_then(|s| s["wait"]["wait_id"].as_str())
+        .expect("durable wait token")
+        .to_string();
+    let effects_before = host.execs.load(Ordering::SeqCst);
+    // The inner poller steps the single-node child until its bound; the
+    // durable wait parks only after the gate advances. The exact count is
+    // harness-shaped — what matters is the NO-REPLAY guarantee below.
+    assert!(effects_before >= 1, "the inner prompt must have executed");
+
+    // Daemon-level restart over the same DB/HOME: production boot/attach.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    daemon.restart().await;
+
+    // The wait SURVIVES untouched: no auto-approval, no consume.
+    let (run_status, state_after) = durable_run_state(&daemon.pool, &sid).await;
+    assert_eq!(run_status, "waiting_for_input", "still waiting after restart");
+    assert_eq!(
+        state_after.as_ref().and_then(|s| s["wait"]["wait_id"].as_str()),
+        Some(wait_id.as_str()),
+        "the durable A4 wait token survives the daemon-level restart"
+    );
+
+    // A matching continue reattaches the runner from the frozen source and
+    // completes. The re-drive re-attaches the terminal child (never
+    // re-steps the completed prompt) — one more manual-exit step to done.
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "{}/v1/daemon/orchestration/sessions/{sid}/signal",
+            daemon.http_url
+        ))
+        .json(&json!({ "signal": "continue", "waitId": wait_id }))
+        .send()
+        .await
+        .expect("continue");
+    assert_eq!(resp.status(), reqwest::StatusCode::OK, "authorized continue");
+    // The re-drive runs in the background (single-flight owner); wait for
+    // the durable terminal.
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        loop {
+            let (run_status, _) = durable_run_state(&daemon.pool, &sid).await;
+            if run_status == "completed" {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("continued run completes");
+    assert_eq!(
+        host.execs.load(Ordering::SeqCst),
+        effects_before,
+        "the completed inner-graph prompt must NOT replay across restart+continue"
+    );
+}
+
+/// A7 rule 4 changed/missing source at the daemon level: after the wait parks
+/// with a frozen directory identity, the referenced TEMPLATE is changed; the
+/// daemon-level restart preserves the wait, and a matching continue returns
+/// `reconstruction_unavailable` (409, cancel-only) instead of driving a
+/// session whose frozen source no longer matches.
+#[tokio::test]
+async fn daemon_restart_changed_template_continue_refuses_cancel_only() {
+    let host = RestartMockHost::new();
+    let mut daemon = LiveDaemon::start_with_host_provider_and_dispatch(
+        host.clone(),
+        Arc::new(CountingDispatch {
+            calls: Arc::new(AtomicUsize::new(0)),
+        }),
+    )
+    .await;
+    write_user_wait_preset(daemon.home.path(), "template v1 body");
+    let (_status, schedule_id, _) = post_schedule(&daemon, "p3-restart-wait", "p3-changed").await;
+
+    let sid = wait_owned_status(&daemon, &schedule_id, "waiting_for_input", 20).await;
+    let (_, state) = durable_run_state(&daemon.pool, &sid).await;
+    let wait_id = state
+        .as_ref()
+        .and_then(|s| s["wait"]["wait_id"].as_str())
+        .expect("durable wait token")
+        .to_string();
+
+    // Change the referenced template bytes AFTER the frozen identity was
+    // stamped at admission: the source hash no longer matches.
+    write_user_wait_preset(daemon.home.path(), "CHANGED template body");
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    daemon.restart().await;
+
+    // The wait survives (source identity is only verified ON DEMAND, at a
+    // matching continue — boot never steps a human wait).
+    let (run_status, state_after) = durable_run_state(&daemon.pool, &sid).await;
+    assert_eq!(run_status, "waiting_for_input", "wait preserved under changed source");
+    assert_eq!(
+        state_after.as_ref().and_then(|s| s["wait"]["wait_id"].as_str()),
+        Some(wait_id.as_str()),
+        "wait token preserved under changed source"
+    );
+
+    // Matching continue: on-demand reattachment verifies the frozen hash and
+    // refuses with reconstruction_unavailable (409), cancel-only. No drive,
+    // no mutation, no new effects.
+    let effects_before = host.execs.load(Ordering::SeqCst);
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "{}/v1/daemon/orchestration/sessions/{sid}/signal",
+            daemon.http_url
+        ))
+        .json(&json!({ "signal": "continue", "waitId": wait_id }))
+        .send()
+        .await
+        .expect("continue");
+    assert_eq!(resp.status(), reqwest::StatusCode::CONFLICT, "409 conflict");
+    let body: Value = resp.json().await.expect("error json");
+    assert_eq!(
+        body["error"]["code"].as_str(),
+        Some("reconstruction_unavailable"),
+        "{body}"
+    );
+    let actions = body["error"]["details"]["allowed_actions"]
+        .as_array()
+        .expect("details");
+    assert_eq!(
+        serde_json::Value::Array(actions.clone()),
+        json!(["cancel", "new_run"]),
+        "cancel-only actions"
+    );
+    let (run_status, state_now) = durable_run_state(&daemon.pool, &sid).await;
+    assert_eq!(run_status, "waiting_for_input", "wait still preserved after refused continue");
+    assert_eq!(
+        state_now.as_ref().and_then(|s| s["wait"]["wait_id"].as_str()),
+        Some(wait_id.as_str()),
+        "token untouched by the refused continue"
+    );
+    assert_eq!(host.execs.load(Ordering::SeqCst), effects_before, "no effects");
+}
+
+/// A7 rule 4 missing source at the daemon level: deleting the user preset
+/// bundle after admission preserves the wait and continue refuses with
+/// `reconstruction_unavailable` (cancel-only) — never a fallback to current
+/// embedded/other bytes.
+#[tokio::test]
+async fn daemon_restart_missing_source_continue_refuses_cancel_only() {
+    let host = RestartMockHost::new();
+    let mut daemon = LiveDaemon::start_with_host_provider_and_dispatch(
+        host.clone(),
+        Arc::new(CountingDispatch {
+            calls: Arc::new(AtomicUsize::new(0)),
+        }),
+    )
+    .await;
+    write_user_wait_preset(daemon.home.path(), "template v1 body");
+    let (_status, schedule_id, _) = post_schedule(&daemon, "p3-restart-wait", "p3-missing").await;
+
+    let sid = wait_owned_status(&daemon, &schedule_id, "waiting_for_input", 20).await;
+    let (_, state) = durable_run_state(&daemon.pool, &sid).await;
+    let wait_id = state
+        .as_ref()
+        .and_then(|s| s["wait"]["wait_id"].as_str())
+        .expect("durable wait token")
+        .to_string();
+
+    // Delete the user bundle (source moved/gone).
+    let bundle = daemon
+        .home
+        .path()
+        .join(".nexus42")
+        .join("presets")
+        .join("p3-restart-wait");
+    std::fs::remove_dir_all(&bundle).expect("remove bundle");
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    daemon.restart().await;
+
+    // Wait preserved; continue → reconstruction_unavailable, cancel-only.
+    let (run_status, state_after) = durable_run_state(&daemon.pool, &sid).await;
+    assert_eq!(run_status, "waiting_for_input");
+    assert_eq!(
+        state_after.as_ref().and_then(|s| s["wait"]["wait_id"].as_str()),
+        Some(wait_id.as_str())
+    );
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "{}/v1/daemon/orchestration/sessions/{sid}/signal",
+            daemon.http_url
+        ))
+        .json(&json!({ "signal": "continue", "waitId": wait_id }))
+        .send()
+        .await
+        .expect("continue");
+    assert_eq!(resp.status(), reqwest::StatusCode::CONFLICT);
+    let body: Value = resp.json().await.expect("error json");
+    assert_eq!(
+        body["error"]["code"].as_str(),
+        Some("reconstruction_unavailable"),
+        "{body}"
+    );
+    assert_eq!(
+        body["error"]["details"]["allowed_actions"],
+        json!(["cancel", "new_run"]),
+        "cancel-only actions"
+    );
 }

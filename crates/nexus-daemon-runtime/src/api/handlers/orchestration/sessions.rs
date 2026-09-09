@@ -384,6 +384,21 @@ pub async fn signal_session(
                         message: format!("state conflict for {sid}: {msg}"),
                     }
                 }
+                crate::preset_run::RunControlError::ReconstructionUnavailable {
+                    session_id,
+                    reason,
+                } => NexusApiError::ConflictCodedDetails {
+                    code: "reconstruction_unavailable".into(),
+                    message: format!(
+                        "cannot continue session {session_id}: {reason} — \
+                         human wait preserved, cancel-only"
+                    ),
+                    details: serde_json::json!({
+                        "session_id": session_id,
+                        "reason": reason,
+                        "allowed_actions": ["cancel", "new_run"],
+                    }),
+                },
                 crate::preset_run::RunControlError::ScheduleNotFound(sid) => {
                     NexusApiError::NotFound(format!("session {sid} not found"))
                 }

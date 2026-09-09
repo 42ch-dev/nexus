@@ -386,6 +386,65 @@ fn hot_rebuild_and_swap(
     outcome.admitted
 }
 
+/// WS2 R1 + A7: recover persisted non-terminal sessions into the in-memory
+/// tracker (runner reconstruction from the frozen source) and re-drive the
+/// eligible converge/merge class through the single coordinator owner.
+///
+/// Shared by the production boot path and the daemon-level restart helper
+/// so every restart runs the SAME A7 recovery order: each recovered session
+/// is classified by the durable v1 record (Terminal / Unreadable /
+/// Interrupted / HumanWait / SafeBoundary skip immediately; only
+/// ConvergeMerge is re-driven from its persisted position — completed
+/// edges are never re-executed).
+///
+/// Runner reconstruction covers embedded AND user-directory presets through
+/// the frozen source identity (A7): a changed/missing source or corrupt
+/// child identity leaves the session runnerless (tracked-but-not-driven;
+/// on-demand reattachment is refused as `reconstruction_unavailable`).
+///
+/// The re-drive is bounded by `max_steps`, runs in the background so boot
+/// does not block, and is cancelled when `shutdown_notify` fires.
+///
+/// With a coordinator the work delegates to
+/// [`WorkflowRunCoordinator::recover_persisted`]; without one (Tier-0 boot
+/// with no Creator DB) only the engine-side tracker reconstruction runs —
+/// there is nothing to re-drive.
+pub async fn run_boot_recovery(
+    engine: &Arc<dyn OrchestrationEngine>,
+    sqlite_boot_storage: &Arc<SqliteSessionStorage>,
+    run_coordinator: Option<&Arc<WorkflowRunCoordinator>>,
+    shutdown_notify: Arc<tokio::sync::Notify>,
+) {
+    // Single production recovery seam (A7): reconstruct runners from the
+    // frozen source identity, classify every non-terminal session by the
+    // durable v1 record, and re-drive only the converge/merge class through
+    // the single coordinator owner. When no coordinator is wired (Tier-0
+    // boot without a Creator DB), the engine-side reconstruction still runs
+    // so recovered sessions are tracked; there is nothing to re-drive.
+    let Some(coordinator) = run_coordinator else {
+        match sqlite_boot_storage.list_non_terminal_sessions().await {
+            Ok(summaries) if !summaries.is_empty() => {
+                tracing::info!(
+                    "recovering {} persisted session(s) into in-memory tracker",
+                    summaries.len()
+                );
+                engine.recover_sessions(summaries).await;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!("failed to recover persisted sessions: {}", e);
+            }
+        }
+        return;
+    };
+    let decisions = coordinator
+        .recover_persisted(sqlite_boot_storage, Some(shutdown_notify))
+        .await;
+    for d in &decisions {
+        tracing::info!(decision = ?d, "resume re-drive decision");
+    }
+}
+
 /// Run the daemon runtime to completion.
 ///
 /// This is the main daemon entry point, extracted from the former standalone daemon
@@ -909,80 +968,18 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     };
 
     // WS2 R1: Recover persisted non-terminal sessions into in-memory tracker.
+    // Shared A7 recovery (runner reconstruction from frozen source + bounded
+    // converge/merge re-drive through the single coordinator owner) — the
+    // same production path the daemon-level restart helper invokes.
     if let Some(sqlite_storage) = sqlite_boot_storage.clone() {
-        match sqlite_storage.list_non_terminal_sessions().await {
-            Ok(summaries) => {
-                if !summaries.is_empty() {
-                    tracing::info!(
-                        "recovering {} persisted session(s) into in-memory tracker",
-                        summaries.len()
-                    );
-                    concrete_engine.recover_sessions(summaries.clone()).await;
-
-                    // BL-04 slice (T2) + I-1: recovered converge/merge chain
-                    // sessions are re-driven from their persisted position
-                    // (completed edges are not re-executed) THROUGH the
-                    // single coordinator owner — the same drives registry
-                    // public admission uses. Bounded by `max_steps` and
-                    // cancellable via a token aborted on `request_shutdown`
-                    // (QC fix wave 1, qc2 F-002 / qc3 F-001); runs in the
-                    // background so boot does not block on a long
-                    // re-drive. Only sessions whose runner was
-                    // reconstructed (embedded presets) are re-driven;
-                    // user-preset sessions that failed reconstruction
-                    // stay tracked-but-not-driven.
-                    let mut drivable = Vec::new();
-                    for s in &summaries {
-                        if concrete_engine.has_runner(&s.session_id).await {
-                            drivable.push(s.clone());
-                        }
-                    }
-                    if !drivable.is_empty() {
-                        if let Some(coordinator) = &run_coordinator {
-                            let coordinator = coordinator.clone();
-                            let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();
-                            // Abort the resume re-drive when the daemon shuts
-                            // down: `request_shutdown` broadcasts on
-                            // `shutdown_notify`, and `drive_preset_run` checks
-                            // the token before every step.
-                            let resume_cancel = tokio_util::sync::CancellationToken::new();
-                            {
-                                let resume_cancel = resume_cancel.clone();
-                                let shutdown_notify = state.shutdown_notify();
-                                tokio::spawn(async move {
-                                    shutdown_notify.notified().await;
-                                    resume_cancel.cancel();
-                                });
-                            }
-                            tokio::spawn(async move {
-                                let decisions = coordinator
-                                    .recover_driving(
-                                        Some(&workflow_store),
-                                        &drivable,
-                                        Some(&resume_cancel),
-                                    )
-                                    .await;
-                                for d in &decisions {
-                                    tracing::info!(decision = ?d, "resume re-drive decision");
-                                }
-                            });
-                        } else {
-                            // No coordinator (Tier-0 boot without a creator
-                            // DB): no persisted sessions can exist either
-                            // (in-memory storage), so this arm is unreachable
-                            // in practice. Kept for exhaustiveness.
-                            tracing::warn!(
-                                "recovered sessions present but no coordinator wired; \
-                                 skipping resume re-drive"
-                            );
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                tracing::warn!("failed to recover persisted sessions: {}", e);
-            }
-        }
+        let engine_ref: Arc<dyn OrchestrationEngine> = concrete_engine.clone();
+        run_boot_recovery(
+            &engine_ref,
+            &sqlite_storage,
+            run_coordinator.as_ref(),
+            state.shutdown_notify(),
+        )
+        .await;
     }
 
     // --- WS-D: Discover and start system presets from directory ---

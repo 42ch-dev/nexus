@@ -51,6 +51,7 @@ use nexus_orchestration::engine::{
 };
 use nexus_orchestration::resume_rules;
 use nexus_orchestration::run_state::WorkflowStateStore;
+use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
 use tokio_util::sync::CancellationToken;
 /// Bounds and posture for one [`drive_preset_run`] call.
 #[derive(Debug, Clone)]
@@ -564,6 +565,21 @@ pub enum RunControlError {
     /// The run is in a state that does not accept the requested signal.
     #[error("workflow state conflict for session {0}: {1}")]
     StateConflict(String, String),
+    /// The run's source preset cannot be reconstructed (missing/changed/
+    /// moved source or corrupt child identity — A7 rule 4). The human wait
+    /// is preserved, legal actions are cancel-only, and continue returns
+    /// this conflict instead of driving a session whose frozen source can
+    /// no longer be reattached.
+    #[error(
+        "reconstruction_unavailable for session {session_id}: {reason} — \
+         human wait preserved, cancel-only"
+    )]
+    ReconstructionUnavailable {
+        /// Session id.
+        session_id: String,
+        /// Machine-stable reason (source missing/hash mismatch/child corrupt).
+        reason: String,
+    },
 }
 
 /// Public control signal for a driven run (A4/A5).
@@ -669,6 +685,101 @@ struct DriveOwner {
 }
 
 impl WorkflowRunCoordinator {
+    /// Abort every in-flight drive owner (daemon-level restart seam, A7).
+    ///
+    /// Fires each owner's cancellation token and awaits the drive loops so
+    /// the restart boundary is quiescent: a subsequent
+    /// [`WorkflowRunCoordinator::recover_persisted`] re-registers every
+    /// still-valid owner from the durable records (the A7 recovery order
+    /// decides which runs are re-driven). Idempotent — owners already
+    /// finished are skipped.
+    pub async fn abort_all_drives(&self) {
+        let owners: Vec<(String, tokio_util::sync::CancellationToken, tokio::task::JoinHandle<()>)> = {
+            let mut drives = self.drives.lock().await;
+            drives
+                .drain()
+                .map(|(sid, owner)| (sid, owner.cancel, owner.join))
+                .collect()
+        };
+        for (sid, cancel, join) in owners {
+            cancel.cancel();
+            let _ = join.await;
+            self.session_cancels
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&sid);
+        }
+    }
+
+    /// Recover persisted non-terminal sessions after a daemon-level restart
+    /// (A7) and re-drive the eligible converge/merge class through this
+    /// coordinator.
+    ///
+    /// Identical to the production boot recovery path: the engine's runners
+    /// are reconstructed from the frozen source identity (manifest + every
+    /// referenced template hash verified; changed/missing source or corrupt
+    /// child identity is non-replayable), then the shared A7 classifier
+    /// decides each session's class — terminal/interrupted/human-wait/
+    /// unreadable/safe-boundary skip, only converge/merge is re-driven
+    /// from its persisted position (completed edges never re-executed).
+    ///
+    /// `shutdown_notify` (when present) aborts the background re-drive when
+    /// the daemon shuts down, exactly like the boot path.
+    ///
+    /// Returns every [`ResumeDecision`] so the caller can assert the exact
+    /// A7 outcome per session.
+    pub async fn recover_persisted(
+        &self,
+        sqlite_storage: &Arc<SqliteSessionStorage>,
+        shutdown_notify: Option<Arc<tokio::sync::Notify>>,
+    ) -> Vec<ResumeDecision> {
+        let summaries = sqlite_storage
+            .list_non_terminal_sessions()
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    "recover_persisted: failed to list non-terminal sessions: {}",
+                    e
+                );
+                Vec::new()
+            });
+        if summaries.is_empty() {
+            return Vec::new();
+        }
+        tracing::info!(
+            "recover_persisted: recovering {} persisted session(s) into in-memory tracker",
+            summaries.len()
+        );
+        self.engine
+            .recover_sessions_inner(summaries.clone())
+            .await;
+        let mut drivable = Vec::new();
+        for s in &summaries {
+            if self.engine.has_runner(&s.session_id).await {
+                drivable.push(s.clone());
+            }
+        }
+        if drivable.is_empty() {
+            return Vec::new();
+        }
+        let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();
+        let resume_cancel = tokio_util::sync::CancellationToken::new();
+        if let Some(notify) = shutdown_notify {
+            let resume_cancel = resume_cancel.clone();
+            tokio::spawn(async move {
+                notify.notified().await;
+                resume_cancel.cancel();
+            });
+        }
+        let decisions = self
+            .recover_driving(Some(&workflow_store), &drivable, Some(&resume_cancel))
+            .await;
+        for d in &decisions {
+            tracing::info!(decision = ?d, "recover_persisted re-drive decision");
+        }
+        decisions
+    }
+
     /// Construct the coordinator over the daemon's engine/storage.
     #[must_use]
     pub fn new(
@@ -2008,6 +2119,29 @@ impl WorkflowRunCoordinator {
         session_id: &SessionId,
         signal: RunSignal,
     ) -> Result<RunControlResult, RunControlError> {
+        // A7 rule 4: an authorized continuation of a human wait requires the
+        // run's runner to be REATTACHED from the frozen source identity —
+        // attach on demand when recovery did not (or could not) leave a
+        // runner. A changed/missing source, corrupt child identity, or any
+        // other reconstruction failure surfaces `reconstruction_unavailable`
+        // BEFORE any signal mutates the durable wait: the human wait stays
+        // preserved and legal actions become cancel-only. The gate is
+        // evaluated only for Continue (the only signal that would drive a
+        // recovered session); Cancel/Pause/Resume do not require a runner.
+        //
+        // The gate is idempotent and race-safe: a session already being
+        // driven (or reconstructed) by another caller has a runner present
+        // and passes immediately; the durable continue CAS below is still
+        // the single linearization point for consuming the wait.
+        if matches!(signal, RunSignal::Continue { .. }) {
+            if let Err(e) = self.engine.ensure_recovered_runner_inner(session_id).await {
+                return Err(RunControlError::ReconstructionUnavailable {
+                    session_id: session_id.0.clone(),
+                    reason: e.to_string(),
+                });
+            }
+        }
+
         let engine_signal = match &signal {
             RunSignal::Continue { wait_id } => EngineSignal::Continue {
                 wait_id: wait_id.clone(),
@@ -2375,6 +2509,25 @@ mod tests {
 
         async fn has_runner(&self, _session_id: &SessionId) -> bool {
             *self.runner_present.lock()
+        }
+
+        async fn recover_sessions(&self, _summaries: Vec<SessionSummary>) {
+            unreachable!("not used by driver unit tests")
+        }
+
+        async fn ensure_recovered_runner(
+            &self,
+            session_id: &SessionId,
+        ) -> Result<(), EngineError> {
+            if !*self.runner_present.lock() {
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "scripted engine has no runner for '{}' (reconstruction_unavailable)",
+                        session_id.0
+                    )),
+                ));
+            }
+            Ok(())
         }
 
         async fn signal(
