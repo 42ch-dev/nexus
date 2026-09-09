@@ -111,8 +111,8 @@ def main():
                 # Never respond to the prompt, but keep reading stdin so a
                 # session/cancel notification is observed and recorded.
                 log({"event": "prompt_blocked"})
-                for line in sys.stdin:
-                    line = line.strip()
+                for raw_line in sys.stdin:
+                    line = raw_line.strip()
                     if not line:
                         continue
                     try:
@@ -151,6 +151,7 @@ def main():
         try:
             _descendant.kill()
         except OSError:
+            # The descendant already exited; nothing to reap.
             pass
 
 
@@ -158,4 +159,5 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
+        # Interactive Ctrl-C during a manual run is a normal exit.
         pass
