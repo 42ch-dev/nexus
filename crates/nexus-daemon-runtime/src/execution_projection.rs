@@ -46,6 +46,25 @@ pub fn project_no_run(execution_policy: &str) -> ExecutionProjection {
     }
 }
 
+/// Read-only check that the frozen source identity still resolves and
+/// matches (A7): no runner is attached, no state mutated.
+fn frozen_source_reconstructable(descriptor: &nexus_orchestration::run_state::RunDescriptorV1) -> bool {
+    use nexus_orchestration::preset::{load_embedded_preset, load_preset};
+    use nexus_orchestration::run_state::PresetSourceIdentity;
+    let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+    let loaded = match &descriptor.source {
+        PresetSourceIdentity::Embedded { preset_id, .. } => load_embedded_preset(preset_id, &caps),
+        PresetSourceIdentity::Directory { root, .. } => load_preset(root, &caps),
+    };
+    match loaded {
+        Ok(loaded) => {
+            loaded.source_identity.as_ref() == Some(&descriptor.source)
+                && loaded.version == descriptor.preset_version
+        }
+        Err(_) => false,
+    }
+}
+
 /// Build the projection for an owned session id (schedule or session surface).
 ///
 /// A load error is projected as `unreadable` (non-replayable), never silently
@@ -153,14 +172,50 @@ mod tests {
             }),
             ..RunStateV1::default()
         };
-        let projection =
-            project_execution(&record(SessionStatus::WaitingForInput, 1, Some(state)), false);
+        // A reconstructable frozen source keeps `continue` legal.
+        let mut with_source =
+            record(SessionStatus::WaitingForInput, 1, Some(state.clone()));
+        with_source.descriptor = Some(reconstructable_descriptor());
+        let projection = project_execution(&with_source, false);
         assert_eq!(projection.recovery_class, "human_wait");
         assert_eq!(
             projection.wait.as_ref().map(|w| w.wait_id.as_str()),
             Some("wait-1")
         );
         assert_eq!(projection.allowed_actions, vec!["continue", "cancel"]);
+
+        // Without a verifiable frozen source the wait is preserved but
+        // `continue` is not offered (tri-QC P1-C).
+        let degraded = project_execution(
+            &record(SessionStatus::WaitingForInput, 1, Some(state)),
+            false,
+        );
+        assert_eq!(degraded.recovery_class, "human_wait");
+        assert_eq!(degraded.allowed_actions, vec!["cancel", "new_run"]);
+        assert_eq!(
+            degraded.reason_code.as_deref(),
+            Some("reconstruction_unavailable")
+        );
+    }
+
+    /// A descriptor whose embedded source resolves and matches.
+    fn reconstructable_descriptor() -> nexus_orchestration::run_state::RunDescriptorV1 {
+        let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+        let loaded =
+            nexus_orchestration::preset::load_embedded_preset("memory-augmented", &caps)
+                .expect("embedded preset");
+        nexus_orchestration::run_state::RunDescriptorV1 {
+            creator_id: "c".to_string(),
+            work_id: None,
+            workspace_root: std::path::PathBuf::from("/tmp"),
+            preset_id: "memory-augmented".to_string(),
+            preset_version: loaded.version,
+            source: loaded.source_identity.clone().expect("source identity"),
+            input: serde_json::Map::new(),
+            agent_bindings: std::collections::HashMap::new(),
+            parent_session_id: None,
+            graph_name: None,
+        }
     }
 
     #[test]
@@ -254,6 +309,22 @@ pub fn project_execution(record: &RunRecord, gate_park_live: bool) -> ExecutionP
             vec!["cancel".to_string(), "new_run".to_string()]
         }
     };
+    // A human wait whose frozen source can no longer be reconstructed must
+    // not advertise `continue` (tri-QC P1-C): legal actions degrade to
+    // cancel/new-run and the reason names the reconstruction failure.
+    let (allowed_actions, source_unavailable) = if class == RecoveryClass::HumanWait
+        && !record
+            .descriptor
+            .as_ref()
+            .is_some_and(frozen_source_reconstructable)
+    {
+        (
+            vec!["cancel".to_string(), "new_run".to_string()],
+            true,
+        )
+    } else {
+        (allowed_actions, false)
+    };
     // The wait token is only operator-actionable for a human wait; exposing a
     // stale token for another class would invite an invalid continue.
     let wait = (class == RecoveryClass::HumanWait).then(|| {
@@ -267,10 +338,14 @@ pub fn project_execution(record: &RunRecord, gate_park_live: bool) -> ExecutionP
             })
         })
     }).flatten();
-    let reason_code = match (&record.status, record.state.as_ref()) {
-        (SessionStatus::Interrupted, _) => Some("interrupted".to_string()),
-        (_, Some(state)) => state.failure.as_ref().map(|failure| failure.code.clone()),
-        _ => None,
+    let reason_code = if source_unavailable {
+        Some("reconstruction_unavailable".to_string())
+    } else {
+        match (&record.status, record.state.as_ref()) {
+            (SessionStatus::Interrupted, _) => Some("interrupted".to_string()),
+            (_, Some(state)) => state.failure.as_ref().map(|failure| failure.code.clone()),
+            _ => None,
+        }
     };
 
     ExecutionProjection {
