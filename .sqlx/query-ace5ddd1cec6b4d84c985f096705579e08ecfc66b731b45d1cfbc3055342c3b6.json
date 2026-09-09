@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO schedule_dependencies (schedule_id, depends_on) VALUES (?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "ace5ddd1cec6b4d84c985f096705579e08ecfc66b731b45d1cfbc3055342c3b6"
+}
