@@ -302,6 +302,7 @@ impl ProcessBirthToken {
     /// Returns `None` when the platform cannot provide a birth token or the
     /// process has already exited; callers must treat cleanup as unconfirmed
     /// rather than signalling on a PID alone.
+    #[must_use]
     pub fn capture(pid: u32) -> Option<Self> {
         read_start_tick(pid).map(|start_tick| Self { pid, start_tick })
     }
@@ -312,6 +313,7 @@ impl ProcessBirthToken {
     /// still matches (a recycled PID with a different start time returns
     /// `false`). On platforms without birth-token support, verification
     /// fails closed (never signal on PID alone).
+    #[must_use]
     pub fn verify(&self) -> bool {
         read_start_tick(self.pid) == Some(self.start_tick)
     }
@@ -363,14 +365,17 @@ impl ManagedAcpProcess {
     /// The owned child's current PID, if it is still running.
     #[must_use]
     pub fn pid(&self) -> Option<u32> {
-        self.child.as_ref().and_then(|c| c.id())
+        self.child.as_ref().and_then(tokio::process::Child::id)
     }
     /// Wait for the owned leader while retaining its captured birth identity.
+    ///
+    /// # Errors
+    /// Returns the child's `wait` error, or a typed error when the child was
+    /// already taken for teardown.
     pub async fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
         match self.child.as_mut() {
             Some(child) => child.wait().await,
-            None => Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            None => Err(std::io::Error::other(
                 "owned ACP child already taken for teardown",
             )),
         }
@@ -384,7 +389,10 @@ impl ManagedAcpProcess {
 
     /// Whether the owned child is still running.
     pub fn is_running(&mut self) -> bool {
-        self.child.as_ref().and_then(|c| c.id()).is_some()
+        self.child
+            .as_ref()
+            .and_then(tokio::process::Child::id)
+            .is_some()
     }
 
     /// The owned child handle, or a typed error when it was already taken
@@ -453,7 +461,9 @@ impl ManagedAcpProcess {
     /// Returns an error when the owned child cannot be confirmed reaped after
     /// the final SIGKILL (cleanup unconfirmed must remain visibly
     /// interrupted, never silently successful).
-    #[allow(unreachable_code)]
+    // Bounded teardown is a single linear sequence (signal → escalate →
+    // reap → group quiescence); splitting it would obscure the ordering.
+    #[allow(unreachable_code, clippy::too_many_lines)]
     pub async fn shutdown(&mut self, grace: Duration) -> AcpResult<()> {
         tracing::info!(
             agent_id = %self.agent_id,
@@ -554,7 +564,9 @@ impl ManagedAcpProcess {
             }
 
             // Step 2: SIGTERM the owned process group (leader + descendants).
-            if !Self::signal_group_guarded(&birth, Signal::SIGTERM) {
+            if Self::signal_group_guarded(&birth, Signal::SIGTERM) {
+                tracing::debug!(agent_id = %self.agent_id, "SIGTERM sent to owned ACP process group");
+            } else {
                 tracing::warn!(
                     agent_id = %self.agent_id,
                     "birth token invalidated or SIGTERM failed; owned group not signalled"
@@ -569,8 +581,6 @@ impl ManagedAcpProcess {
                         Some("Owned ACP process group cleanup unconfirmed (signal refused)".into()),
                     ));
                 }
-            } else {
-                tracing::debug!(agent_id = %self.agent_id, "SIGTERM sent to owned ACP process group");
             }
 
             let wait_result = timeout(grace, self.child_mut()?.wait()).await;
@@ -591,15 +601,15 @@ impl ManagedAcpProcess {
                         agent_id = %self.agent_id,
                         "Descendants remain after group SIGTERM, proceeding to group SIGKILL"
                     );
-                    if Self::signal_group_guarded(&birth, Signal::SIGKILL) {
-                        if Self::wait_group_quiescent(pgrp, grace).await {
-                            tracing::info!(
-                                agent_id = %self.agent_id,
-                                exit_code = ?status.code(),
-                                "Owned ACP process group quiescent after group SIGKILL"
-                            );
-                            return Ok(());
-                        }
+                    if Self::signal_group_guarded(&birth, Signal::SIGKILL)
+                        && Self::wait_group_quiescent(pgrp, grace).await
+                    {
+                        tracing::info!(
+                            agent_id = %self.agent_id,
+                            exit_code = ?status.code(),
+                            "Owned ACP process group quiescent after group SIGKILL"
+                        );
+                        return Ok(());
                     }
                     tracing::error!(
                         agent_id = %self.agent_id,
@@ -691,6 +701,8 @@ impl ManagedAcpProcess {
     ///
     /// Returns an error when the owned child/group cannot be confirmed
     /// reaped.
+    // Single linear teardown sequence; see `shutdown`.
+    #[allow(clippy::too_many_lines)]
     pub async fn terminate(mut self, grace: Duration) -> AcpResult<()> {
         // I-005: take the owned child out so `Drop` does not re-run
         // teardown on the already-reaped handle after this consumes self.
@@ -826,7 +838,7 @@ impl ManagedAcpProcess {
 
 impl Drop for ManagedAcpProcess {
     /// I-005: ownership-guarded group teardown when the launch future is
-    /// dropped mid-`connect_session` (e.g. the HostManager launch timeout
+    /// dropped mid-`connect_session` (e.g. the `HostManager` launch timeout
     /// drops the future, dropping this handle). A plain `tokio::process::Child`
     /// drop kills only the leader; the owned process GROUP (leader +
     /// descendants) would be orphaned. This `Drop` takes the child and runs
@@ -846,7 +858,7 @@ impl Drop for ManagedAcpProcess {
         // SIGTERM → SIGKILL → reap → group quiescence).
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                let owned = ManagedAcpProcess {
+                let owned = Self {
                     agent_id: agent_id.clone(),
                     child: Some(child),
                     agent_path,
