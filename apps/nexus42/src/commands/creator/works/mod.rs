@@ -1238,6 +1238,7 @@ async fn handle_intake(
         input: Some(serde_json::json!({ "work_id": resolved_id })),
         force_gates: false,
         reason: None,
+        agent_bindings: None,
     };
 
     let resp: serde_json::Value = client

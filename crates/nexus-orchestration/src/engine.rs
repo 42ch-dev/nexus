@@ -21,9 +21,9 @@ use std::sync::Arc;
 use thiserror::Error;
 
 // Re-export for internal use.
-use crate::capability::CapabilityRegistry;
+use crate::capability::{CapabilityError, CapabilityRegistry};
 use crate::run_state::{
-    ChildCheckpoint, PresetSourceIdentity, RunCheckpoint, RunDescriptorV1, RunStateV1,
+    ChildCheckpoint, PresetSourceIdentity, RunCheckpoint, RunDescriptorV1, RunFailure, RunStateV1,
     WorkflowStateStore,
 };
 
@@ -36,6 +36,15 @@ use crate::run_state::{
 /// blind rewind to a seemingly safe boundary — A2/A7); if the step was
 /// deterministic (no marker), a CAS-fenced restore is acceptable (Important 3).
 pub const EXTERNAL_EFFECT_MARKER: &str = "__external_effect_ran";
+
+/// Upper bound on cancel-intent fence reload/retry attempts (Finding 1).
+///
+/// A cancel that loses the phase-1 revision CAS to a concurrent transition
+/// (e.g. `mark_step_in_flight`) reloads the authoritative row and re-fences
+/// against the new revision while the run is still cancellable. The bound
+/// keeps the retry bounded: after it is exhausted the CAS loss is surfaced
+/// so the caller projects the exact public conflict after reloading.
+pub const CANCEL_FENCE_RETRY_BOUND: u32 = 8;
 
 /// Whether the post-step root context carries the [`EXTERNAL_EFFECT_MARKER`],
 /// indicating that one or more external effects executed during the step.
@@ -200,6 +209,11 @@ pub enum EngineSignal {
     Resume,
     Cancel,
     Advance,
+    /// Authorized continuation of a human wait (A4). Carries the exact
+    /// durable wait token; a stale/consumed/wrong token loses the CAS and
+    /// is refused with [`EngineError::WaitConflict`] — never a second
+    /// driver and never an auto-approval.
+    Continue { wait_id: String },
 }
 
 /// Parameters for spawning a child session (inner graph).
@@ -280,6 +294,22 @@ pub enum EngineError {
         session_id: String,
         /// Persisted execution version of the existing row.
         execution_version: u32,
+    },
+    /// A human-wait continuation token was stale, consumed, or wrong (A4).
+    ///
+    /// The caller must surface the current persisted status and current
+    /// wait id (null when none) so the operator can re-issue the exact
+    /// token. No mutation occurred and no second driver was started.
+    #[error(
+        "wait conflict for session {session_id}: token does not match the current wait"
+    )]
+    WaitConflict {
+        /// Session id.
+        session_id: String,
+        /// Current persisted status.
+        status: SessionStatus,
+        /// Current durable wait id (null when the run is not waiting).
+        current_wait_id: Option<String>,
     },
 }
 
@@ -627,6 +657,14 @@ impl EngineSharedState {
     /// - `Resume`/`Advance` → `Running`, **fenced against terminal states**
     ///   (Critical 3): a terminal session must never be flipped back to
     ///   `Running` by a resume signal.
+    /// - `Continue { wait_id }` → `Running`, **fenced against the exact
+    ///   durable wait token** (A4): the run must be waiting with a
+    ///   `WaitRecord` whose `wait_id` matches. A stale/consumed/wrong token
+    ///   loses the CAS and returns [`EngineError::WaitConflict`] — no
+    ///   mutation, no second driver. A nested child wait clears the child's
+    ///   durable wait record in the SAME root `commit_transition` (one
+    ///   atomic CAS), so a duplicate consumer can never clear the child
+    ///   without winning the root.
     ///
     /// Returns the target status on success. When the store is absent
     /// (in-memory test storage) this is a no-op returning the target status.
@@ -648,6 +686,7 @@ impl EngineSharedState {
             EngineSignal::Pause => SessionStatus::Paused,
             EngineSignal::Resume | EngineSignal::Advance => SessionStatus::Running,
             EngineSignal::Cancel => SessionStatus::Cancelled,
+            EngineSignal::Continue { .. } => SessionStatus::Running,
         };
 
         let Some(store) = &self.workflow_store else {
@@ -659,12 +698,35 @@ impl EngineSharedState {
             .await?
             .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
         let expected_revision = record.state_revision;
-        let mut next_state = record.state.unwrap_or_default();
 
         if record.status.is_terminal() {
+            // A5 cleanup retry: an `Interrupted` run with a durable cancel
+            // intent accepts a further `Cancel` as the bounded, owner-scoped
+            // cleanup retry — the run is terminal and never re-driven, but
+            // the owned Host sessions may still be unconfirmed and must
+            // remain reapeable. All other signals on a terminal run are
+            // refused.
+            let interrupted_cancel_retry = matches!(signal, EngineSignal::Cancel)
+                && record.status == SessionStatus::Interrupted
+                && record.state.as_ref().is_some_and(|s| s.cancel_requested);
+            if !interrupted_cancel_retry {
+                return Err(EngineError::TerminalState(session_id.0.clone()));
+            }
+        }
+        let mut next_state = record.state.unwrap_or_default();
+        // A5 cancel-intent fence (Finding 1): once the durable cancel
+        // intent is committed, the cancel winner is the ONLY durable
+        // control winner. Every other signal — Continue included — is
+        // refused with a state conflict and the wait is never consumed:
+        // no new work is created while cancellation is in flight.
+        if next_state.cancel_requested && !matches!(signal, EngineSignal::Cancel) {
             return Err(EngineError::TerminalState(session_id.0.clone()));
         }
-        if !matches!(signal, EngineSignal::Cancel)
+        // Continue is the ONLY non-cancel signal that may act on a waiting
+        // run; all other non-cancel signals are fenced against waits and
+        // in-flight markers (A4: advance/resume/force-transition cannot
+        // bypass a human wait).
+        if !matches!(signal, EngineSignal::Cancel | EngineSignal::Continue { .. })
             && (matches!(record.status, SessionStatus::WaitingForInput)
                 || next_state.wait.is_some()
                 || next_state.step_in_flight.is_some()
@@ -679,66 +741,366 @@ impl EngineSharedState {
             .await
             .map_err(EngineError::GraphFlow)?
             .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
+
+        // A4: authorized continuation of a human wait.
+        if let EngineSignal::Continue { wait_id } = signal {
+            // The run must be waiting with a durable wait record.
+            let Some(wait) = &next_state.wait else {
+                return Err(EngineError::WaitConflict {
+                    session_id: session_id.0.clone(),
+                    status: record.status.clone(),
+                    current_wait_id: None,
+                });
+            };
+            if wait.wait_id != *wait_id {
+                return Err(EngineError::WaitConflict {
+                    session_id: session_id.0.clone(),
+                    status: record.status.clone(),
+                    current_wait_id: Some(wait.wait_id.clone()),
+                });
+            }
+
+            // Nested child wait: the child's durable wait record must also
+            // be cleared so the child can be re-stepped (A4 "propagate one
+            // authorized token to the exact waiting descendant"). The child
+            // checkpoint is carried in the SAME root `commit_transition`
+            // so the root+child wait clear is one atomic CAS — a duplicate
+            // consumer loses the root CAS and never clears the child.
+            let mut children: Vec<ChildCheckpoint> = Vec::new();
+            if let Some(child_session_id) = &wait.child_session_id {
+                let child_sid = SessionId(child_session_id.clone());
+                let child_record = store
+                    .load_run(&child_sid)
+                    .await?
+                    .ok_or_else(|| EngineError::SessionNotFound(child_session_id.clone()))?;
+                let child_session = self
+                    .storage
+                    .get(child_session_id)
+                    .await
+                    .map_err(EngineError::GraphFlow)?
+                    .ok_or_else(|| EngineError::SessionNotFound(child_session_id.clone()))?;
+                let mut child_state = child_record.state.unwrap_or_default();
+                child_state.wait = None;
+                let graph_name = child_record
+                    .descriptor
+                    .as_ref()
+                    .and_then(|d| d.graph_name.clone());
+                children.push(ChildCheckpoint {
+                    session: child_session,
+                    status: SessionStatus::Running,
+                    state: child_state,
+                    state_revision: child_record.state_revision,
+                    graph_name,
+                });
+            }
+
+            // Clear the root wait and make the run runnable. The child
+            // checkpoint (when nested) is committed atomically with the
+            // root under the root revision CAS.
+            next_state.wait = None;
+            let checkpoint = RunCheckpoint {
+                root: &root,
+                children: &children,
+            };
+            store
+                .commit_transition(
+                    session_id,
+                    expected_revision,
+                    checkpoint,
+                    SessionStatus::Running,
+                    &next_state,
+                )
+                .await?;
+
+            // The root commit advanced each carried child's persisted
+            // revision by one; synchronize the in-memory children map so
+            // the parent's next `commit_transition` submits the correct
+            // child CAS anchor (N-7).
+            if !children.is_empty() {
+                let mut child_map = self.children.write().await;
+                if let Some(entries) = child_map.get_mut(&session_id.0) {
+                    for child in entries.iter_mut() {
+                        if children.iter().any(|c| c.session.id == child.session.id) {
+                            child.state_revision = child.state_revision.saturating_add(1);
+                        }
+                    }
+                }
+            }
+            return Ok(SessionStatus::Running);
+        }
+
         let checkpoint = RunCheckpoint {
             root: &root,
             children: &[],
         };
 
         if matches!(target_status, SessionStatus::Cancelled) {
+            // A5 cleanup retry (Finding 3): an `Interrupted` run with a
+            // durable cancel intent re-enters the cancel path as the
+            // bounded, owner-scoped cleanup retry. The cancel-intent fence
+            // is already durable — skip phase 1 and go straight to token
+            // fire + bounded Host teardown. The run is terminal, so no step
+            // is ever re-driven (the drive loop and `ensure_driving` refuse
+            // `Interrupted`).
+            let interrupted_retry = record.status == SessionStatus::Interrupted;
+
             // C-001 phase 1: durable cancel-intent fence. Persist
             // `cancel_requested = true` while keeping the status
-            // non-terminal — the run is not yet confirmed cancelled.
-            next_state.cancel_requested = true;
-            store
-                .commit_transition(
-                    session_id,
-                    expected_revision,
-                    checkpoint.clone(),
-                    record.status.clone(),
-                    &next_state,
-                )
-                .await?;
+            // non-terminal — the run is not yet confirmed cancelled. The
+            // fence is a revision CAS: a concurrent `mark_step_in_flight`
+            // (or any other transition) that wins the CAS is reloaded and
+            // the fence is retried against the new revision while the run
+            // is still cancellable (Finding 1) — the cancel intent is
+            // persisted BEFORE the token fires, so active Host work is
+            // always reached. A terminal observation is a deliberate
+            // conflict, never silent success.
+            if !interrupted_retry {
+                let mut fence_revision = expected_revision;
+                let mut fence_status = record.status.clone();
+                let mut fence_state = next_state.clone();
+                fence_state.cancel_requested = true;
+                let mut attempts: u32 = 0;
+                loop {
+                    // Re-read the root snapshot each attempt so a retry
+                    // never clobbers the winner's position/context with a
+                    // stale checkpoint.
+                    let fence_root = self
+                        .storage
+                        .get(&session_id.0)
+                        .await
+                        .map_err(EngineError::GraphFlow)?
+                        .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
+                    let fence_checkpoint = RunCheckpoint {
+                        root: &fence_root,
+                        children: &[],
+                    };
+                    match store
+                        .commit_transition(
+                            session_id,
+                            fence_revision,
+                            fence_checkpoint,
+                            fence_status.clone(),
+                            &fence_state,
+                        )
+                        .await
+                    {
+                        Ok(_) => break,
+                        Err(EngineError::RevisionMismatch { .. }) => {
+                            attempts += 1;
+                            if attempts >= CANCEL_FENCE_RETRY_BOUND {
+                                // The run is still cancellable but the fence
+                                // could not win within the bound — surface
+                                // the CAS loss so the caller projects the
+                                // exact public conflict after reloading.
+                                return Err(EngineError::RevisionMismatch {
+                                    session_id: session_id.0.clone(),
+                                    expected: fence_revision,
+                                    found: fence_revision,
+                                });
+                            }
+                            // Reload the authoritative row and re-fence
+                            // against the new revision while the run is
+                            // still cancellable.
+                            let Some(current) = store.load_run(session_id).await? else {
+                                return Err(EngineError::GraphFlow(
+                                    graph_flow::GraphError::StorageError(format!(
+                                        "run '{}' disappeared during cancel fence",
+                                        session_id.0
+                                    )),
+                                ));
+                            };
+                            if current.status.is_terminal() {
+                                // The run reached a terminal state while the
+                                // cancel fence was in flight — a deliberate
+                                // conflict, never silent success.
+                                return Err(EngineError::TerminalState(session_id.0.clone()));
+                            }
+                            fence_revision = current.state_revision;
+                            fence_status = current.status.clone();
+                            fence_state = current.state.unwrap_or_default();
+                            fence_state.cancel_requested = true;
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
+            }
 
             // Fire the run's coordinator cancellation token so the
             // in-flight prompt operation observes cancellation and begins
-            // its bounded Host cleanup.
-            if let Some(token) = self
-                .session_cancels
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .get(&session_id.0)
-                .cloned()
+            // its bounded Host cleanup. The root token covers root-level
+            // prompt nodes; nested inner-graph prompt nodes run in child
+            // sessions with their OWN registered tokens (A4 nested child
+            // propagation) — fire those too so a cancel reaches the exact
+            // waiting descendant.
+            //
+            // Finding 2 (round 3): the owned-descendant closure is built
+            // RECURSIVELY from the in-memory parent relationship — a child
+            // can itself own nested children (`InnerGraphTask` spawns
+            // through the same engine path), so the closure walks the
+            // children map breadth-first from the root and covers
+            // children, grandchildren, and deeper. Every descendant token
+            // is fired and every descendant run is finalized under the
+            // per-run ownership lock; failed entries are retained for the
+            // owner-scoped retry, and descendant tokens are reclaimed only
+            // at their confirmed cleanup boundary (after the whole closure
+            // is confirmed).
+            //
+            // P1 (rereview-4): the closure is reconciled against the
+            // AUTHORITATIVE persisted parent relation. The in-memory
+            // children map is the admission-time snapshot; a child admitted
+            // by an in-flight `InnerGraphTask` after the fence (or a child
+            // whose map entry was dropped) is still a durable owned
+            // descendant that must be fired and finalized. `load_children`
+            // reads the persisted `parent_session_id` rows, so the closure
+            // covers every durable descendant — mapped or not — and no
+            // child can be admitted after the fence and escape the closure.
+            let descendant_ids: Vec<String> = {
+                let children = self.children.read().await;
+                let mut ids: Vec<String> = Vec::new();
+                let mut queue: std::collections::VecDeque<String> =
+                    std::collections::VecDeque::new();
+                queue.push_back(session_id.0.clone());
+                while let Some(parent) = queue.pop_front() {
+                    if let Some(entries) = children.get(&parent) {
+                        for child in entries {
+                            let child_id = child.session.id.clone();
+                            if child_id != session_id.0 {
+                                ids.push(child_id.clone());
+                                queue.push_back(child_id);
+                            }
+                        }
+                    }
+                    // Reconcile the persisted parent relation: every durable
+                    // child row of this parent joins the closure (and is
+                    // enqueued for its own persisted descendants), even when
+                    // the in-memory map entry is absent or stale. A
+                    // load failure is non-replayable (A7) — propagate rather
+                    // than settle a cancellation over an incomplete closure.
+                    if let Some(store) = &self.workflow_store {
+                        let persisted = store
+                            .load_children(&SessionId(parent.clone()))
+                            .await?;
+                        for child in persisted {
+                            let child_id = child.session_id.0.clone();
+                            if child_id != session_id.0 && !ids.contains(&child_id) {
+                                ids.push(child_id.clone());
+                                queue.push_back(child_id);
+                            }
+                        }
+                    }
+                }
+                ids
+            };
             {
-                token.cancel();
+                let cancels = self.session_cancels.read().unwrap_or_else(|e| e.into_inner());
+                if let Some(token) = cancels.get(&session_id.0).cloned() {
+                    token.cancel();
+                }
+                for child_id in &descendant_ids {
+                    if let Some(token) = cancels.get(child_id).cloned() {
+                        token.cancel();
+                    }
+                }
             }
 
-            // Await the prompt executor's bounded owned-Host teardown.
+            // Await the prompt executor's bounded owned-Host teardown for
+            // the root AND every owned descendant run (Finding 3): Host
+            // sessions are keyed by the request run id, and nested prompt
+            // tasks pass their own child session id — a child parked at a
+            // human wait has a cached Host session with no active operation
+            // to observe the fired token, so the root finalize alone never
+            // visits it. All owned cleanup must be confirmed before the run
+            // settles `Cancelled`; failed entries are retained for the
+            // owner-scoped retry.
             if let Some(executor) = &self.prompt_executor {
+                let mut cleanup_error: Option<CapabilityError> = None;
                 if let Err(e) = executor.finalize_run(&session_id.0).await {
+                    cleanup_error = Some(e);
+                }
+                if cleanup_error.is_none() {
+                    for child_id in &descendant_ids {
+                        if let Err(e) = executor.finalize_run(child_id).await {
+                            cleanup_error = Some(e);
+                            break;
+                        }
+                    }
+                }
+                if let Some(e) = cleanup_error {
                     // Cleanup unconfirmed: persist Interrupted (actionable,
                     // never false successful cancellation) and surface the
-                    // error. The run stays visibly interrupted.
-                    let Some(current) = store.load_run(session_id).await? else {
-                        return Err(EngineError::GraphFlow(
-                            graph_flow::GraphError::StorageError(format!(
-                                "run '{}' disappeared during cancel cleanup",
-                                session_id.0
-                            )),
-                        ));
-                    };
-                    let current_revision = current.state_revision;
-                    let mut interrupted_state = current.state.unwrap_or_default();
-                    interrupted_state.cancel_requested = true;
-                    interrupted_state.in_flight = None;
-                    let _ = store
-                        .commit_transition(
-                            session_id,
-                            current_revision,
-                            checkpoint,
-                            SessionStatus::Interrupted,
-                            &interrupted_state,
-                        )
-                        .await;
+                    // error. The run stays visibly interrupted. The
+                    // transition is revision-fenced and bounded like the
+                    // other cancellation transitions (Finding 2): a
+                    // concurrent transition that wins the CAS is reloaded
+                    // and re-committed against the new revision; the write
+                    // result is never discarded, and the in-memory summary
+                    // is updated only after the durable write succeeds.
+                    let reason = format!(
+                        "cancel cleanup unconfirmed for run '{}': {e}",
+                        session_id.0
+                    );
+                    let mut interrupted_attempts: u32 = 0;
+                    loop {
+                        let Some(current) = store.load_run(session_id).await? else {
+                            return Err(EngineError::GraphFlow(
+                                graph_flow::GraphError::StorageError(format!(
+                                    "run '{}' disappeared during cancel cleanup",
+                                    session_id.0
+                                )),
+                            ));
+                        };
+                        let current_revision = current.state_revision;
+                        let mut interrupted_state = current.state.unwrap_or_default();
+                        interrupted_state.cancel_requested = true;
+                        interrupted_state.in_flight = None;
+                        interrupted_state.failure = Some(RunFailure {
+                            code: "cancel_cleanup_unconfirmed".to_string(),
+                            message: reason.clone(),
+                        });
+                        // Re-read the root snapshot so the Interrupted
+                        // checkpoint never clobbers a position/context a
+                        // concurrent transition advanced.
+                        let interrupted_root = self
+                            .storage
+                            .get(&session_id.0)
+                            .await
+                            .map_err(EngineError::GraphFlow)?
+                            .ok_or_else(|| {
+                                EngineError::SessionNotFound(session_id.0.clone())
+                            })?;
+                        let interrupted_checkpoint = RunCheckpoint {
+                            root: &interrupted_root,
+                            children: &[],
+                        };
+                        match store
+                            .commit_transition(
+                                session_id,
+                                current_revision,
+                                interrupted_checkpoint,
+                                SessionStatus::Interrupted,
+                                &interrupted_state,
+                            )
+                            .await
+                        {
+                            Ok(_) => break,
+                            Err(EngineError::RevisionMismatch { .. }) => {
+                                interrupted_attempts += 1;
+                                if interrupted_attempts >= CANCEL_FENCE_RETRY_BOUND {
+                                    return Err(EngineError::RevisionMismatch {
+                                        session_id: session_id.0.clone(),
+                                        expected: current_revision,
+                                        found: current_revision,
+                                    });
+                                }
+                                // Reload and re-commit against the new
+                                // revision.
+                            }
+                            Err(err) => return Err(err),
+                        }
+                    }
+                    // Durable Interrupted confirmed: only now update the
+                    // in-memory summary (Finding 2 — never before durable
+                    // success).
                     if let Some(s) = self
                         .sessions
                         .write()
@@ -749,42 +1111,106 @@ impl EngineSharedState {
                         s.status = SessionStatus::Interrupted;
                     }
                     return Err(EngineError::GraphFlow(
-                        graph_flow::GraphError::TaskExecutionFailed(format!(
-                            "cancel cleanup unconfirmed for run '{}': {e}",
-                            session_id.0
-                        )),
+                        graph_flow::GraphError::TaskExecutionFailed(reason),
                     ));
                 }
             }
 
             // C-001 phase 2: confirmed cleanup — persist terminal Cancelled.
-            let Some(current) = store.load_run(session_id).await? else {
-                return Err(EngineError::GraphFlow(
-                    graph_flow::GraphError::StorageError(format!(
-                        "run '{}' disappeared before cancelled settlement",
-                        session_id.0
-                    )),
-                ));
-            };
-            let current_revision = current.state_revision;
-            let mut cancelled_state = current.state.unwrap_or_default();
-            cancelled_state.cancel_requested = true;
-            cancelled_state.in_flight = None;
-            store
-                .commit_transition(
-                    session_id,
-                    current_revision,
-                    checkpoint,
-                    SessionStatus::Cancelled,
-                    &cancelled_state,
-                )
-                .await?;
+            // `settle_cancelled` is the A5 settlement fence: it admits the
+            // `Interrupted` cleanup-retry shape (and non-terminal rows) but
+            // refuses every other terminal status, so a retry can never
+            // overwrite a newer terminal outcome. The settlement is itself
+            // revision-fenced and retried on a CAS loss while the run is
+            // still cancellable — a concurrent cancel (e.g. the drive loop's
+            // best-effort failure flip) that wins the fence between our
+            // reload and commit must not turn this confirmed cleanup into a
+            // spurious conflict; both cancels settle to `cancelled`.
+            let mut settle_attempts: u32 = 0;
+            loop {
+                let Some(current) = store.load_run(session_id).await? else {
+                    return Err(EngineError::GraphFlow(
+                        graph_flow::GraphError::StorageError(format!(
+                            "run '{}' disappeared before cancelled settlement",
+                            session_id.0
+                        )),
+                    ));
+                };
+                if current.status == SessionStatus::Cancelled {
+                    // A concurrent cancel already settled the run — the
+                    // confirmed cleanup outcome is identical.
+                    return Ok(SessionStatus::Cancelled);
+                }
+                // The `Interrupted` cleanup-retry shape (durable cancel
+                // intent) is the A5 settlement target — it must pass through
+                // to `settle_cancelled`. Every other terminal status is a
+                // deliberate conflict.
+                let interrupted_retry_shape = current.status == SessionStatus::Interrupted
+                    && current
+                        .state
+                        .as_ref()
+                        .is_some_and(|s| s.cancel_requested);
+                if current.status.is_terminal() && !interrupted_retry_shape {
+                    return Err(EngineError::TerminalState(session_id.0.clone()));
+                }
+                let current_revision = current.state_revision;
+                let mut cancelled_state = current.state.unwrap_or_default();
+                cancelled_state.cancel_requested = true;
+                cancelled_state.in_flight = None;
+                // Finding 1 (round 3): every settlement attempt reloads the
+                // authoritative root snapshot together with the current run
+                // record. The `root` loaded before the phase-1 fence may
+                // predate a concurrent control winner (e.g. a Continue that
+                // consumed the wait and advanced the position/context); the
+                // terminal checkpoint must carry the NEWEST durable root so
+                // the Cancelled row never clobbers the winner's position.
+                let settle_root = self
+                    .storage
+                    .get(&session_id.0)
+                    .await
+                    .map_err(EngineError::GraphFlow)?
+                    .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
+                let settle_checkpoint = RunCheckpoint {
+                    root: &settle_root,
+                    children: &[],
+                };
+                match store
+                    .settle_cancelled(
+                        session_id,
+                        current_revision,
+                        settle_checkpoint,
+                        &cancelled_state,
+                    )
+                    .await
+                {
+                    Ok(_) => break,
+                    Err(EngineError::RevisionMismatch { .. }) => {
+                        settle_attempts += 1;
+                        if settle_attempts >= CANCEL_FENCE_RETRY_BOUND {
+                            return Err(EngineError::RevisionMismatch {
+                                session_id: session_id.0.clone(),
+                                expected: current_revision,
+                                found: current_revision,
+                            });
+                        }
+                        // Reload and re-settle against the new revision.
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
             // M-004: reclaim the run's coordinator cancellation token at
-            // the same confirmed run-terminal ownership boundary.
-            self.session_cancels
-                .write()
-                .unwrap_or_else(|e| e.into_inner())
-                .remove(&session_id.0);
+            // the same confirmed run-terminal ownership boundary. Finding 2
+            // (round 3): every owned descendant token is reclaimed at the
+            // same confirmed-cleanup boundary — the whole closure was
+            // finalized successfully above, so no descendant can still be
+            // driving work.
+            {
+                let mut cancels = self.session_cancels.write().unwrap_or_else(|e| e.into_inner());
+                cancels.remove(&session_id.0);
+                for child_id in &descendant_ids {
+                    cancels.remove(child_id);
+                }
+            }
             return Ok(SessionStatus::Cancelled);
         }
 
@@ -798,6 +1224,12 @@ impl EngineSharedState {
                 &next_state,
             )
             .await?;
+        // A signal that advanced a CHILD's revision must synchronize the
+        // parent's children map (N-7): the inner poller resumes a paused
+        // child via `EngineSignal::Resume`, which commits +1 revision here;
+        // without the sync the parent's next `commit_transition` submits a
+        // stale child CAS anchor and the run is misclassified Interrupted.
+        self.sync_child_checkpoint_after_step(session_id).await?;
         Ok(target_status)
     }
 
@@ -1075,6 +1507,29 @@ impl EngineSharedState {
                     .await;
                 match commit_result {
                     Ok(_) => {
+                        // The parent's `commit_transition` persisted each
+                        // child checkpoint with `state_revision + 1` (the
+                        // store's ON CONFLICT bump). Synchronize the
+                        // in-memory children map to the persisted revisions
+                        // for exactly the children THIS commit carried —
+                        // otherwise the stale pre-commit revision fails the
+                        // child CAS on the parent's next step and the run is
+                        // misclassified Interrupted (N-7: multi-step inner
+                        // graphs after a child step).
+                        {
+                            let mut child_map = self.children.write().await;
+                            if let Some(entries) = child_map.get_mut(&session_id.0) {
+                                for child in entries.iter_mut() {
+                                    if children
+                                        .iter()
+                                        .any(|c| c.session.id == child.session.id)
+                                    {
+                                        child.state_revision =
+                                            child.state_revision.saturating_add(1);
+                                    }
+                                }
+                            }
+                        }
                         if parent_advanced
                             && children.iter().any(|child| child.status.is_terminal())
                         {
@@ -1325,12 +1780,170 @@ impl EngineSharedState {
             state_revision: child_revision,
             graph_name: Some(params.inner_graph.id.clone()),
         };
-        self.children
-            .write()
-            .await
-            .entry(params.parent_session_id.clone())
-            .or_default()
-            .push(child_checkpoint);
+
+        // P1 (rereview-4): child admission is cancellation-aware and
+        // revision-linearized with the parent. The child row is now durable,
+        // but an in-flight `InnerGraphTask` can race the root cancel fence:
+        // the fence may commit (durable `cancel_requested`) or the root may
+        // reach a terminal state while this admission was in flight. Re-check
+        // the AUTHORITATIVE parent record AFTER the child row is persisted,
+        // atomically with the children-map push (the cancel closure snapshots
+        // the map under the read lock, so a fence that commits after this
+        // recheck is guaranteed to observe the child in the closure). A parent
+        // that is terminal or carries durable `cancel_requested` refuses the
+        // admission: the child is rolled back — its coordinator token is
+        // fired, its row is settled durably `cancelled` (A5 settlement fence;
+        // never runnable, never replayed), and every in-memory entry is
+        // dropped — so no descendant can escape a root cancellation closure
+        // (A5: no downstream effects after the fence, complete owned-work
+        // cleanup).
+        {
+            let mut child_map = self.children.write().await;
+            if let Some(store) = &self.workflow_store {
+                let parent_record = store
+                    .load_run(&SessionId(params.parent_session_id.clone()))
+                    .await?
+                    .ok_or_else(|| {
+                        EngineError::SessionNotFound(params.parent_session_id.clone())
+                    })?;
+                if parent_record.status.is_terminal()
+                    || parent_record
+                        .state
+                        .as_ref()
+                        .is_some_and(|s| s.cancel_requested)
+                {
+                    // Roll back the just-persisted child: fire its token so
+                    // no prompt can ever admit under it, settle the child row
+                    // terminal `cancelled` (the row is `running` at revision
+                    // 1 — an admissible A5 settlement source), and drop every
+                    // in-memory entry so no late child remains mapped,
+                    // driven, or awaiting a closure reap.
+                    {
+                        let cancels = self
+                            .session_cancels
+                            .read()
+                            .unwrap_or_else(|e| e.into_inner());
+                        if let Some(token) = cancels.get(&child_session_id).cloned() {
+                            token.cancel();
+                        }
+                    }
+                    // P1 (fix round 6): the rollback must confirm the durable
+                    // Cancelled settlement BEFORE any in-memory ownership is
+                    // dropped. The settlement is revision-fenced and retried
+                    // on a CAS loss against the current child record (the
+                    // same cancel-settlement retry shape as the confirmed
+                    // cleanup path): a concurrent transition that wins the
+                    // fence between our reload and commit is reloaded and
+                    // re-settled against the new revision (or confirmed
+                    // already-Cancelled — the rollback outcome is identical).
+                    // Other storage/settlement errors propagate: the token
+                    // stays registered so the parent-cancel persisted-closure
+                    // reconciliation remains the owner-scoped fallback, and
+                    // no `TerminalState` is returned as if the rollback
+                    // completed.
+                    let child_sid = SessionId(child_session_id.clone());
+                    let mut settle_attempts: u32 = 0;
+                    loop {
+                        let Some(current) = store.load_run(&child_sid).await? else {
+                            return Err(EngineError::GraphFlow(
+                                graph_flow::GraphError::StorageError(format!(
+                                    "child '{}' disappeared before cancelled settlement",
+                                    child_session_id
+                                )),
+                            ));
+                        };
+                        if current.status == SessionStatus::Cancelled {
+                            // A concurrent cancel already settled the child —
+                            // the rollback outcome is identical.
+                            break;
+                        }
+                        // The `Interrupted` cleanup-retry shape (durable
+                        // cancel intent) is an A5 settlement target; every
+                        // other terminal status is a deliberate conflict.
+                        let interrupted_retry_shape = current.status == SessionStatus::Interrupted
+                            && current
+                                .state
+                                .as_ref()
+                                .is_some_and(|s| s.cancel_requested);
+                        if current.status.is_terminal() && !interrupted_retry_shape {
+                            return Err(EngineError::TerminalState(
+                                child_session_id.clone(),
+                            ));
+                        }
+                        let current_revision = current.state_revision;
+                        let mut cancelled_state = current.state.unwrap_or_default();
+                        cancelled_state.cancel_requested = true;
+                        cancelled_state.in_flight = None;
+                        // Reload the authoritative root snapshot together
+                        // with the current run record so the terminal
+                        // checkpoint never clobbers a position/context a
+                        // concurrent transition advanced.
+                        let settle_root = self
+                            .storage
+                            .get(&child_session_id)
+                            .await
+                            .map_err(EngineError::GraphFlow)?
+                            .ok_or_else(|| {
+                                EngineError::SessionNotFound(child_session_id.clone())
+                            })?;
+                        let settle_checkpoint = RunCheckpoint {
+                            root: &settle_root,
+                            children: &[],
+                        };
+                        match store
+                            .settle_cancelled(
+                                &child_sid,
+                                current_revision,
+                                settle_checkpoint,
+                                &cancelled_state,
+                            )
+                            .await
+                        {
+                            Ok(_) => break,
+                            Err(EngineError::RevisionMismatch { .. }) => {
+                                settle_attempts += 1;
+                                if settle_attempts >= CANCEL_FENCE_RETRY_BOUND {
+                                    return Err(EngineError::RevisionMismatch {
+                                        session_id: child_session_id.clone(),
+                                        expected: current_revision,
+                                        found: current_revision,
+                                    });
+                                }
+                                // Reload and re-settle against the new
+                                // revision.
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    }
+                    child_map
+                        .entry(params.parent_session_id.clone())
+                        .or_default()
+                        .retain(|c| c.session.id != child_session_id);
+                    if child_map
+                        .get(&params.parent_session_id)
+                        .is_some_and(Vec::is_empty)
+                    {
+                        child_map.remove(&params.parent_session_id);
+                    }
+                    self.runners.write().await.remove(&child_session_id);
+                    self.sessions
+                        .write()
+                        .await
+                        .retain(|s| s.session_id.0 != child_session_id);
+                    self.session_cancels
+                        .write()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&child_session_id);
+                    return Err(EngineError::TerminalState(
+                        params.parent_session_id.clone(),
+                    ));
+                }
+            }
+            child_map
+                .entry(params.parent_session_id.clone())
+                .or_default()
+                .push(child_checkpoint);
+        }
 
         // WS2 R3: Store Arc<FlowRunner> instead of FlowRunner.
         let runner = Arc::new(FlowRunner::new(
@@ -1895,22 +2508,52 @@ impl GraphFlowEngine {
             // registered.
             self.register_cancellation(&summary.session_id);
 
-            // Important 1: hydrate the in-memory children map from persisted
-            // child rows so a restarted parent knows its child checkpoints
-            // (with current revisions) for its next commit_transition.
+            // Important 1 (round 4): reconstruct the COMPLETE owned-descendant
+            // closure for a recovered root. `hydrate_children` installs only
+            // the DIRECT children of the requested parent; a child can itself
+            // own nested children (`InnerGraphTask` spawns through the same
+            // engine path), so a restarted root must recursively hydrate the
+            // persisted parent relation breadth-first. A root Cancel after
+            // this recovery can then fire/finalize every owned descendant.
             //
             // A corrupt/unsupported child (load_children failure, missing
             // child session snapshot) must propagate: the parent cannot be
             // reconstructed over an incomplete children map (A7). We surface
             // it as a warning and skip runner reconstruction — the session
             // stays tracked but not driven (non-replayable).
-            if let Err(e) = self.state.hydrate_children(&summary.session_id).await {
-                tracing::warn!(
-                    "recovery: failed to hydrate children for session {}: {}; \
-                     session marked non-replayable (no runner)",
-                    summary.session_id.0,
-                    e
-                );
+            let mut hydrate_queue: std::collections::VecDeque<SessionId> =
+                std::collections::VecDeque::new();
+            hydrate_queue.push_back(summary.session_id.clone());
+            let mut hydrate_failed = false;
+            while let Some(parent) = hydrate_queue.pop_front() {
+                if let Err(e) = self.state.hydrate_children(&parent).await {
+                    tracing::warn!(
+                        "recovery: failed to hydrate children for session {}: {}; \
+                         session marked non-replayable (no runner)",
+                        parent.0,
+                        e
+                    );
+                    hydrate_failed = true;
+                    break;
+                }
+                // Every recovered descendant registers its coordinator
+                // cancellation token (A1) and is enqueued for its own
+                // children — the closure is complete only when the whole
+                // persisted tree is hydrated.
+                let children = self
+                    .state
+                    .children
+                    .read()
+                    .await
+                    .get(&parent.0)
+                    .cloned()
+                    .unwrap_or_default();
+                for child in &children {
+                    self.register_cancellation(&SessionId(child.session.id.clone()));
+                    hydrate_queue.push_back(SessionId(child.session.id.clone()));
+                }
+            }
+            if hydrate_failed {
                 continue;
             }
 
@@ -2227,6 +2870,224 @@ impl GraphFlowEngine {
             self.start_session_with_creator(&loaded.id, graph, Some(creator_id))
                 .await
         }
+    }
+
+    /// Start a v1 run for a loaded preset with frozen admission input (A3).
+    ///
+    /// Mirrors [`start_preset_run`] but freezes the schedule admission's
+    /// input map, agent bindings and work id into the descriptor AND seeds
+    /// the session context (`preset.input.*`, `core_context.text`) before
+    /// the initial checkpoint is persisted — so the first step renders real
+    /// input and the descriptor/core seed are durable before eligibility is
+    /// published (A3: persist descriptor/core seed before enqueue).
+    ///
+    /// `session_id` is caller-minted: the schedule admission claims the
+    /// schedule row with this exact id BEFORE the run is created, so a
+    /// concurrent admission can never mint a second session for the same
+    /// schedule (A3 single-session admission).
+    ///
+    /// # Errors
+    /// Returns [`EngineError`] if session creation, preset loading, or the
+    /// initial checkpoint write fails.
+    pub async fn start_preset_run_with_input(
+        &self,
+        session_id: &str,
+        loaded: &crate::preset::LoadedPreset,
+        creator_id: &str,
+        work_id: Option<String>,
+        input: serde_json::Map<String, serde_json::Value>,
+        core_context: Option<&str>,
+        agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
+        graph: Arc<Graph>,
+    ) -> Result<SessionId, EngineError> {
+        if let Some(store) = &self.state.workflow_store {
+            let mut descriptor = self.build_descriptor(loaded, creator_id)?;
+            descriptor.work_id = work_id.filter(|id| !id.is_empty());
+            descriptor.input = input.clone();
+            descriptor.agent_bindings = agent_bindings;
+            let start_task_id = graph.start_task_id().unwrap_or_default();
+            let session = graph_flow::Session::new_from_task(session_id.to_string(), &start_task_id);
+            session.context.set("_session_id", session_id.to_string()).await;
+            if !creator_id.is_empty() {
+                session.context.set("_creator_id", creator_id.to_string()).await;
+            }
+            // Seed the frozen admission input + core-context seed into the
+            // session context BEFORE the checkpoint is persisted (A3).
+            for (key, value) in &input {
+                session
+                    .context
+                    .set(format!("preset.input.{key}"), value.clone())
+                    .await;
+            }
+            if let Some(cc) = core_context {
+                session.context.set("core_context.text", cc.to_string()).await;
+            }
+            let checkpoint = RunCheckpoint {
+                root: &session,
+                children: &[],
+            };
+            store
+                .start_run(
+                    &SessionId(session_id.to_string()),
+                    &descriptor,
+                    checkpoint,
+                    &RunStateV1::default(),
+                )
+                .await?;
+            let sid = SessionId(session_id.to_string());
+            // Register the run's coordinator cancellation token (A1): the
+            // run's prompt consumers resolve their token from the shared
+            // per-run map and fail closed when none is registered.
+            self.register_cancellation(&sid);
+            let runner = Arc::new(FlowRunner::new(graph, self.state.storage.clone()));
+            self.state
+                .runners
+                .write()
+                .await
+                .insert(session_id.to_string(), runner);
+            self.state.sessions.write().await.push(SessionSummary {
+                session_id: SessionId(session_id.to_string()),
+                creator_id: creator_id.to_string(),
+                preset_id: loaded.id.clone(),
+                status: SessionStatus::Running,
+                current_task_id: Some(start_task_id),
+            });
+            Ok(SessionId(session_id.to_string()))
+        } else {
+            // No workflow store (Tier-0/test): fall back to the raw-graph
+            // path. Input seeding is a v1-run concern; the raw path has no
+            // durable descriptor to freeze.
+            self.start_session_with_creator(&loaded.id, graph, Some(creator_id))
+                .await
+        }
+    }
+
+    /// Atomically admit a schedule as a driven v1 run (A3, C-1/C-2).
+    ///
+    /// One Creator-DB transaction linearizes the schedule claim
+    /// (`status='running'`, `current_session_id`, core-context version), the
+    /// v1 session row (initial checkpoint + frozen descriptor + seeded
+    /// context), and the schedule→session identity. A concurrent admission
+    /// for the same schedule loses the claim and returns the winner's
+    /// already-owned run (exactly one `SessionId` per schedule).
+    ///
+    /// The schedule row must carry `execution_policy = 'driven_v1'` and be
+    /// in `pending`/`paused` with no owned session. A `_system.*` preset is
+    /// refused regardless of stored policy (A8 fail-closed, C-4). A stale
+    /// claim (schedule `Running` with a `current_session_id` whose run row
+    /// does not exist) is NOT cleared — a crash between claim and run
+    /// creation is recovered by boot recovery, never by a second admission
+    /// minting another session (C-1).
+    ///
+    /// `core_context_version` is the actual committed core-context version
+    /// (I-10) — the caller seeds core context first and passes the returned
+    /// version so the schedule pointer and the version agree.
+    ///
+    /// # Errors
+    /// Returns [`EngineError`] on storage failure, policy refusal, or when
+    /// the schedule is not in an admissible state.
+    pub async fn admit_schedule_run_with_input(
+        &self,
+        schedule_id: &str,
+        session_id: &str,
+        loaded: &crate::preset::LoadedPreset,
+        creator_id: &str,
+        work_id: Option<String>,
+        input: serde_json::Map<String, serde_json::Value>,
+        core_context: Option<&str>,
+        core_context_version: u32,
+        expected_core_context_version: u32,
+        agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
+        frozen_source: Option<crate::run_state::PresetSourceIdentity>,
+        admission_gate: Option<crate::run_state::ScheduleAdmissionGate>,
+        graph: Arc<Graph>,
+    ) -> Result<SessionId, EngineError> {
+        let Some(store) = &self.state.workflow_store else {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(
+                    "admit_schedule_run_with_input requires a durable workflow store".to_string(),
+                ),
+            ));
+        };
+        let mut descriptor = self.build_descriptor(loaded, creator_id)?;
+        descriptor.work_id = work_id;
+        descriptor.input = input.clone();
+        descriptor.agent_bindings = agent_bindings;
+        // N-5/N-5b: the runner is built from the FROZEN source identity
+        // persisted with the schedule, never by resolving current registry
+        // precedence and discarding the stored identity. The stored identity
+        // must match the current load's content hash — a changed/shadowed
+        // preset refuses admission instead of running under stale bytes.
+        if let Some(frozen) = frozen_source {
+            let current = loaded.source_identity.as_ref().ok_or_else(|| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "admit_schedule_run_with_input: preset '{}' has no current source identity",
+                    loaded.id
+                )))
+            })?;
+            if current != &frozen {
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "admit_schedule_run_with_input: schedule {schedule_id} frozen \
+                         source identity does not match the current preset load \
+                         (content changed or shadowed); refusing admission"
+                    )),
+                ));
+            }
+            descriptor.source = frozen;
+        }
+        let start_task_id = graph.start_task_id().unwrap_or_default();
+        let session = graph_flow::Session::new_from_task(session_id.to_string(), &start_task_id);
+        session.context.set("_session_id", session_id.to_string()).await;
+        if !creator_id.is_empty() {
+            session.context.set("_creator_id", creator_id.to_string()).await;
+        }
+        // Seed the frozen admission input + core-context seed into the
+        // session context BEFORE the checkpoint is persisted (A3).
+        for (key, value) in &input {
+            session
+                .context
+                .set(format!("preset.input.{key}"), value.clone())
+                .await;
+        }
+        if let Some(cc) = core_context {
+            session.context.set("core_context.text", cc.to_string()).await;
+        }
+        let checkpoint = RunCheckpoint {
+            root: &session,
+            children: &[],
+        };
+        store
+            .admit_schedule_run(
+                schedule_id,
+                &SessionId(session_id.to_string()),
+                &descriptor,
+                checkpoint,
+                &RunStateV1::default(),
+                core_context_version,
+                expected_core_context_version,
+                admission_gate.as_ref(),
+            )
+            .await?;
+        let sid = SessionId(session_id.to_string());
+        // Register the run's coordinator cancellation token (A1): the
+        // run's prompt consumers resolve their token from the shared
+        // per-run map and fail closed when none is registered.
+        self.register_cancellation(&sid);
+        let runner = Arc::new(FlowRunner::new(graph, self.state.storage.clone()));
+        self.state
+            .runners
+            .write()
+            .await
+            .insert(session_id.to_string(), runner);
+        self.state.sessions.write().await.push(SessionSummary {
+            session_id: SessionId(session_id.to_string()),
+            creator_id: creator_id.to_string(),
+            preset_id: loaded.id.clone(),
+            status: SessionStatus::Running,
+            current_task_id: Some(start_task_id),
+        });
+        Ok(SessionId(session_id.to_string()))
     }
 
     /// Start a session on a specific graph.
@@ -2608,6 +3469,7 @@ pub use EngineSharedState as SharedState;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::SqliteSessionStorage;
     use graph_flow::InMemorySessionStorage;
 
     /// Helper: create a test engine with in-memory storage and built-in caps.
@@ -2820,5 +3682,2923 @@ mod tests {
                 .contains_key(&terminal_summary.session_id.0),
             "terminal session should not have a reconstructed runner"
         );
+    }
+
+    // ------------------------------------------------------------------
+    // T2 fix round 1 — Finding 1: cancel fence reload/retry
+    // ------------------------------------------------------------------
+
+    /// Deterministic mark-step/cancel race (Finding 1): the step loop wins
+    /// `mark_step_in_flight` immediately before the cancel fence commits.
+    /// The cancel must reload the authoritative row, re-fence against the
+    /// new revision, fire the token, and settle `cancelled` — the active
+    /// Host work is always reached.
+    #[tokio::test]
+    async fn cancel_fence_reloads_after_mark_step_in_flight_wins() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        // Production-shaped Host executor (Finding 4): the cancel path must
+        // invoke `finalize_run` (bounded owned-Host teardown) after the
+        // re-fenced cancel intent — the token-only check below is the
+        // lower-level fence assertion, and the executor call is the
+        // load-bearing external side effect.
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Ok(())]));
+        engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
+
+        // Start a v1 run through the engine (registers the run token in the
+        // shared map the cancel path reads).
+        let graph = Arc::new(Graph::new("cancel-race"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // The step loop captures revision R and wins `mark_step_in_flight`
+        // (advancing to R+1) BEFORE the cancel fence commits against R.
+        // Simulate the winner's write directly through the store.
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let pre_step_root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        let in_flight_state = RunStateV1 {
+            step_in_flight: Some(pre_step_root.current_task_id.clone()),
+            ..RunStateV1::default()
+        };
+        store
+            .mark_step_in_flight(
+                &session_id,
+                record.state_revision,
+                RunCheckpoint {
+                    root: &pre_step_root,
+                    children: &[],
+                },
+                &in_flight_state,
+            )
+            .await
+            .expect("mark_step_in_flight wins the CAS");
+
+        // Register a token in the shared map so the cancel path can fire it.
+        engine
+            .state
+            .session_cancels
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(session_id.0.clone())
+            .or_insert_with(tokio_util::sync::CancellationToken::new);
+        let token = engine
+            .state
+            .session_cancels
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&session_id.0)
+            .cloned()
+            .expect("token registered");
+
+        // Cancel: the phase-1 fence loses the CAS (revision moved), reloads
+        // the authoritative row, re-fences against the new revision, fires
+        // the token, and settles cancelled.
+        let status = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect("cancel must reload and retry the fence");
+        assert_eq!(status, SessionStatus::Cancelled);
+        assert!(
+            token.is_cancelled(),
+            "the coordinator token must fire after the re-fenced cancel intent"
+        );
+        assert_eq!(
+            executor.finalized_runs(),
+            vec![session_id.0.clone()],
+            "the production-shaped Host executor must reap the run after the re-fenced cancel"
+        );
+
+        // The run is durably cancelled with the cancel intent persisted.
+        let final_record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(final_record.status, SessionStatus::Cancelled);
+        assert!(
+            final_record
+                .state
+                .as_ref()
+                .is_some_and(|s| s.cancel_requested),
+            "cancelled run must carry cancel_requested"
+        );
+    }
+
+    /// Deterministic terminal-v-cancel race (Finding 1): the run reaches a
+    /// terminal state while the cancel fence is in flight. The cancel must
+    /// surface a deliberate conflict, never silent success.
+    #[tokio::test]
+    async fn cancel_fence_terminal_observation_is_conflict() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+
+        let graph = Arc::new(Graph::new("cancel-terminal"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // The step loop wins `mark_step_in_flight` (revision R → R+1) and
+        // then completes the run (R+1 → R+2, terminal `completed`) before
+        // the cancel fence commits against R.
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let pre_step_root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        store
+            .mark_step_in_flight(
+                &session_id,
+                record.state_revision,
+                RunCheckpoint {
+                    root: &pre_step_root,
+                    children: &[],
+                },
+                &RunStateV1 {
+                    step_in_flight: Some(pre_step_root.current_task_id.clone()),
+                    ..RunStateV1::default()
+                },
+            )
+            .await
+            .expect("mark_step_in_flight wins the CAS");
+        let stepped = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let completed_root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        store
+            .commit_transition(
+                &session_id,
+                stepped.state_revision,
+                RunCheckpoint {
+                    root: &completed_root,
+                    children: &[],
+                },
+                SessionStatus::Completed,
+                &RunStateV1::default(),
+            )
+            .await
+            .expect("run completes");
+
+        // Cancel: the phase-1 fence loses the CAS, reloads, observes the
+        // terminal state, and returns a deliberate conflict.
+        let err = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect_err("cancel must refuse a terminal observation");
+        assert!(
+            matches!(err, EngineError::TerminalState(_)),
+            "terminal observation must be a deliberate conflict, got {err:?}"
+        );
+        let final_record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(
+            final_record.status,
+            SessionStatus::Completed,
+            "completed remains completed"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // T2 fix round 1 — Finding 3: interrupted-cancel cleanup retry
+    // ------------------------------------------------------------------
+
+    /// Deterministic faulted-shutdown proof (Finding 3): the first cancel
+    /// yields `Interrupted` (cleanup unconfirmed), a subsequent cancel
+    /// re-enters the cancel path as the owner-scoped cleanup retry, reaps
+    /// the owned Host session, and settles `Cancelled` — no step is
+    /// re-driven.
+    #[tokio::test]
+    async fn interrupted_cancel_retry_reaps_and_settles_cancelled() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+
+        // Scripted executor: the first finalize fails (cleanup unconfirmed),
+        // the retry succeeds (reaps the owned Host session).
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![
+            Err(CapabilityError::Internal("shutdown timeout".to_string())),
+            Ok(()),
+        ]));
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
+
+        let graph = Arc::new(Graph::new("cancel-retry"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // First cancel: cleanup unconfirmed → Interrupted (actionable, never
+        // false successful cancellation).
+        let err = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect_err("first cancel must surface the unconfirmed cleanup");
+        assert!(
+            matches!(err, EngineError::GraphFlow(_)),
+            "unconfirmed cleanup surfaces the error, got {err:?}"
+        );
+        let interrupted = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(interrupted.status, SessionStatus::Interrupted);
+        assert!(
+            interrupted
+                .state
+                .as_ref()
+                .is_some_and(|s| s.cancel_requested),
+            "interrupted run must carry the durable cancel intent"
+        );
+        assert_eq!(executor.calls(), 1, "first finalize attempted");
+
+        // A non-cancel signal on the interrupted run is refused (terminal).
+        let err = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Resume)
+            .await
+            .expect_err("resume on interrupted must refuse");
+        assert!(matches!(err, EngineError::TerminalState(_)));
+
+        // Retry cancel: the terminal fence admits the owner-scoped cleanup
+        // retry, finalize_run reaps the session, and the run settles
+        // Cancelled — no step is re-driven.
+        let status = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect("retry cancel must settle cancelled");
+        assert_eq!(status, SessionStatus::Cancelled);
+        assert_eq!(executor.calls(), 2, "retry re-invokes finalize_run");
+        let final_record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(final_record.status, SessionStatus::Cancelled);
+        assert!(
+            final_record
+                .state
+                .as_ref()
+                .is_some_and(|s| s.cancel_requested),
+            "settled cancelled run must carry cancel_requested"
+        );
+    }
+
+    /// Deterministic repeated-failure proof (Finding 3): a retry that still
+    /// cannot confirm cleanup keeps the run `Interrupted` and retains the
+    /// owned Host session for a later retry.
+    #[tokio::test]
+    async fn interrupted_cancel_retry_retains_on_repeated_failure() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+
+        // Both finalize attempts fail: the run stays interrupted and the
+        // owned session is retained.
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![
+            Err(CapabilityError::Internal("shutdown timeout".to_string())),
+            Err(CapabilityError::Internal("shutdown timeout".to_string())),
+        ]));
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
+
+        let graph = Arc::new(Graph::new("cancel-retry-fail"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        let _ = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect_err("first cancel unconfirmed");
+        let _ = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect_err("retry cancel still unconfirmed");
+
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(
+            record.status,
+            SessionStatus::Interrupted,
+            "repeated failure keeps the run interrupted (actionable)"
+        );
+        assert_eq!(executor.calls(), 2, "both retries invoked finalize_run");
+    }
+
+    // ------------------------------------------------------------------
+    // T2 fix round 2 — Finding 1: Continue is fenced after the
+    // cancel-intent winner
+    // ------------------------------------------------------------------
+
+    /// Deterministic continue-after-cancel-fence proof (Finding 1): once the
+    /// durable cancel intent is committed, a matching Continue must be
+    /// refused with a state conflict — the wait is never consumed, the
+    /// cancel fence stays intact, and no new work is created while
+    /// cancellation is in flight.
+    #[tokio::test]
+    async fn continue_after_cancel_fence_is_state_conflict() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+
+        let graph = Arc::new(Graph::new("continue-fence"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // Park the run at a durable human wait.
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        let waiting_state = RunStateV1 {
+            wait: Some(crate::run_state::WaitRecord {
+                wait_id: "wait-tok-1".to_string(),
+                task_id: "persist".to_string(),
+                child_session_id: None,
+                child_task_id: None,
+                kind: crate::run_state::WaitKind::Manual,
+            }),
+            ..RunStateV1::default()
+        };
+        store
+            .commit_transition(
+                &session_id,
+                record.state_revision,
+                RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                SessionStatus::WaitingForInput,
+                &waiting_state,
+            )
+            .await
+            .expect("park at human wait");
+
+        // The cancel winner commits the durable cancel intent (phase 1):
+        // `cancel_requested = true` while the status stays non-terminal.
+        let fenced = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let fenced_root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        let mut fenced_state = fenced.state.unwrap_or_default();
+        fenced_state.cancel_requested = true;
+        store
+            .commit_transition(
+                &session_id,
+                fenced.state_revision,
+                RunCheckpoint {
+                    root: &fenced_root,
+                    children: &[],
+                },
+                SessionStatus::WaitingForInput,
+                &fenced_state,
+            )
+            .await
+            .expect("cancel fence wins the CAS");
+
+        // A matching Continue after the fence is refused: the cancel winner
+        // is the ONLY durable control winner. The wait is never consumed.
+        let err = engine
+            .state
+            .persist_signal_transition(
+                &session_id,
+                &EngineSignal::Continue {
+                    wait_id: "wait-tok-1".to_string(),
+                },
+            )
+            .await
+            .expect_err("continue after the cancel fence must be refused");
+        assert!(
+            matches!(err, EngineError::TerminalState(_)),
+            "continue after the cancel fence is a state conflict, got {err:?}"
+        );
+
+        // The wait and the cancel fence are both intact.
+        let after = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(after.status, SessionStatus::WaitingForInput);
+        assert!(
+            after.state.as_ref().is_some_and(|s| s.cancel_requested),
+            "the cancel fence must remain durable"
+        );
+        assert_eq!(
+            after
+                .state
+                .as_ref()
+                .and_then(|s| s.wait.as_ref())
+                .map(|w| w.wait_id.as_str()),
+            Some("wait-tok-1"),
+            "the wait must not be consumed by the refused continue"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // T2 fix round 3 — Finding 1: settlement reloads the authoritative
+    // root; a concurrent Continue winner's position/context survives
+    // ------------------------------------------------------------------
+
+    /// Deterministic Continue-wins-before-cancel proof (Finding 1, round 3):
+    /// the run is waiting at revision R; Continue consumes the wait and
+    /// commits a NEWER root position/context at R+1; Cancel's phase-1 fence
+    /// loses the CAS, reloads the R+1 row/root, re-fences at R+2, and the
+    /// terminal Cancelled settlement must carry the NEWEST root — the
+    /// pre-Continue stale root must never clobber the winner's position.
+    #[tokio::test]
+    async fn cancel_settlement_keeps_continue_winner_root() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Ok(())]));
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
+
+        let graph = Arc::new(Graph::new("continue-wins"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // Park the run at a durable human wait (revision R).
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        let waiting_state = RunStateV1 {
+            wait: Some(crate::run_state::WaitRecord {
+                wait_id: "wait-tok-1".to_string(),
+                task_id: "persist".to_string(),
+                child_session_id: None,
+                child_task_id: None,
+                kind: crate::run_state::WaitKind::Manual,
+            }),
+            ..RunStateV1::default()
+        };
+        store
+            .commit_transition(
+                &session_id,
+                record.state_revision,
+                RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                SessionStatus::WaitingForInput,
+                &waiting_state,
+            )
+            .await
+            .expect("park at human wait");
+
+        // Continue wins BEFORE the cancel fence: it consumes the wait and
+        // commits a NEWER root position/context at R+1 (the durable winner).
+        let continued = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let mut winner_root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        winner_root.current_task_id = "winner-task".to_string();
+        winner_root
+            .context
+            .set("winner.marker", "continue-won")
+            .await;
+        let winner_state = RunStateV1::default();
+        store
+            .commit_transition(
+                &session_id,
+                continued.state_revision,
+                RunCheckpoint {
+                    root: &winner_root,
+                    children: &[],
+                },
+                SessionStatus::Running,
+                &winner_state,
+            )
+            .await
+            .expect("continue wins the CAS");
+
+        // Cancel: the phase-1 fence loses the CAS (revision moved), reloads
+        // the authoritative row AND root, re-fences against the new
+        // revision, and settles Cancelled. The terminal checkpoint must
+        // carry the winner's root — never the stale pre-Continue root.
+        let status = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect("cancel must reload and retry the fence");
+        assert_eq!(status, SessionStatus::Cancelled);
+
+        // The final Cancelled row retains the newest root position/context.
+        let final_record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(final_record.status, SessionStatus::Cancelled);
+        assert!(
+            final_record
+                .state
+                .as_ref()
+                .is_some_and(|s| s.cancel_requested),
+            "cancelled run must carry cancel_requested"
+        );
+        let final_root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        assert_eq!(
+            final_root.current_task_id, "winner-task",
+            "the terminal checkpoint must carry the Continue winner's position"
+        );
+        assert_eq!(
+            final_root.context.get::<String>("winner.marker").await.as_deref(),
+            Some("continue-won"),
+            "the terminal checkpoint must carry the Continue winner's context"
+        );
+    }
+
+    /// Deterministic Continue-v-cancel interleaving proof (Finding 3,
+    /// round 4): the run is waiting at revision R; Cancel loads the record
+    /// and root at R; a competing Continue consumes the wait and commits a
+    /// NEWER root position/context at R (the SAME revision) BEFORE Cancel's
+    /// phase-1 fence commits. The fence loses the CAS, reloads the winner
+    /// row/root, re-fences at R+1, and the terminal Cancelled settlement
+    /// must carry the Continue winner's task/context — the stale pre-fence
+    /// root must never clobber the winner. This is the exact interleaving
+    /// the round-3 regression did not create (it committed the Continue
+    /// before invoking Cancel, so Cancel's initial read already saw the
+    /// winner).
+    #[tokio::test]
+    async fn cancel_fence_loses_to_continue_and_settlement_keeps_winner() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let race_store = Arc::new(ContinueWinsBeforeCancelFenceStore::new(store, storage.clone()));
+        let store: Arc<dyn WorkflowStateStore> = race_store.clone();
+
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Ok(())]));
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
+
+        let graph = Arc::new(Graph::new("continue-wins-race"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // Park the run at a durable human wait (revision R).
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        let waiting_state = RunStateV1 {
+            wait: Some(crate::run_state::WaitRecord {
+                wait_id: "wait-tok-1".to_string(),
+                task_id: "persist".to_string(),
+                child_session_id: None,
+                child_task_id: None,
+                kind: crate::run_state::WaitKind::Manual,
+            }),
+            ..RunStateV1::default()
+        };
+        store
+            .commit_transition(
+                &session_id,
+                record.state_revision,
+                RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                SessionStatus::WaitingForInput,
+                &waiting_state,
+            )
+            .await
+            .expect("park at human wait");
+
+        // Cancel: the phase-1 fence loses the CAS to the injected Continue
+        // winner (same revision), reloads the winner row/root, re-fences
+        // against the new revision, and settles Cancelled. The terminal
+        // checkpoint must carry the winner's root — never the stale
+        // pre-fence root.
+        let status = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect("cancel must reload and retry the fence after the Continue winner");
+        assert_eq!(status, SessionStatus::Cancelled);
+        assert!(
+            race_store.injected(),
+            "the Continue winner must have been injected between Cancel's read and its fence"
+        );
+
+        // The final Cancelled row retains the newest root position/context.
+        let final_record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(final_record.status, SessionStatus::Cancelled);
+        assert!(
+            final_record
+                .state
+                .as_ref()
+                .is_some_and(|s| s.cancel_requested),
+            "cancelled run must carry cancel_requested"
+        );
+        let final_root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        assert_eq!(
+            final_root.current_task_id, "winner-task",
+            "the terminal checkpoint must carry the Continue winner's position"
+        );
+        assert_eq!(
+            final_root.context.get::<String>("winner.marker").await.as_deref(),
+            Some("continue-won"),
+            "the terminal checkpoint must carry the Continue winner's context"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // T2 fix round 3 — Finding 2: recursive owned-descendant closure
+    // ------------------------------------------------------------------
+
+    /// Deterministic nested child/grandchild cancellation proof (Finding 2,
+    /// round 3): a root with child A and grandchild A:child:* — the cancel
+    /// fires EVERY descendant token, finalizes EVERY descendant run (root,
+    /// child, grandchild), and reclaims every descendant token only after
+    /// the whole closure is confirmed. A parked grandchild with no active
+    /// operation is still reaped by its own run id.
+    #[tokio::test]
+    async fn cancel_finalizes_recursive_descendant_closure() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+
+        // All finalizes succeed: root, child, grandchild.
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![
+            Ok(()),
+            Ok(()),
+            Ok(()),
+        ]));
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
+
+        let graph = Arc::new(Graph::new("nested-cancel"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // Spawn child A (inner graph).
+        let inner = Arc::new(Graph::new("inner-a"));
+        inner.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let child_id = engine
+            .state
+            .spawn_child_session_internal(ChildSessionParams {
+                parent_session_id: session_id.0.clone(),
+                inner_graph: inner,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect("spawn child");
+
+        // Spawn grandchild A:child:* (nested inner graph under the child).
+        let inner2 = Arc::new(Graph::new("inner-b"));
+        inner2.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let grandchild_id = engine
+            .state
+            .spawn_child_session_internal(ChildSessionParams {
+                parent_session_id: child_id.0.clone(),
+                inner_graph: inner2,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect("spawn grandchild");
+
+        // Park the grandchild at a durable human wait: its Host session is
+        // cached but no grandchild operation is active to observe a fired
+        // token — the recursive finalize must still reach it by run id.
+        let grandchild_record = store
+            .load_run(&grandchild_id)
+            .await
+            .expect("load grandchild")
+            .expect("grandchild exists");
+        let grandchild_root = storage
+            .get(&grandchild_id.0)
+            .await
+            .expect("get grandchild root")
+            .expect("grandchild root exists");
+        let grandchild_waiting = RunStateV1 {
+            wait: Some(crate::run_state::WaitRecord {
+                wait_id: "grandchild-wait-tok".to_string(),
+                task_id: "persist".to_string(),
+                child_session_id: None,
+                child_task_id: None,
+                kind: crate::run_state::WaitKind::Manual,
+            }),
+            ..RunStateV1::default()
+        };
+        store
+            .commit_transition(
+                &grandchild_id,
+                grandchild_record.state_revision,
+                RunCheckpoint {
+                    root: &grandchild_root,
+                    children: &[],
+                },
+                SessionStatus::WaitingForInput,
+                &grandchild_waiting,
+            )
+            .await
+            .expect("park grandchild at human wait");
+
+        // Register tokens for the child and grandchild (spawn registers
+        // them; assert they exist and are not yet cancelled).
+        let cancels = engine
+            .state
+            .session_cancels
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        let child_token = cancels
+            .get(&child_id.0)
+            .cloned()
+            .expect("child token registered");
+        let grandchild_token = cancels
+            .get(&grandchild_id.0)
+            .cloned()
+            .expect("grandchild token registered");
+        drop(cancels);
+        assert!(!child_token.is_cancelled());
+        assert!(!grandchild_token.is_cancelled());
+
+        // Cancel: fires root + child + grandchild tokens, finalizes root +
+        // child + grandchild, and settles Cancelled.
+        let status = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect("cancel must settle cancelled");
+        assert_eq!(status, SessionStatus::Cancelled);
+
+        // Every descendant token fired.
+        assert!(child_token.is_cancelled(), "child token must fire");
+        assert!(
+            grandchild_token.is_cancelled(),
+            "grandchild token must fire"
+        );
+
+        // Every descendant run finalized by its own run id.
+        assert_eq!(
+            executor.finalized_runs(),
+            vec![
+                session_id.0.clone(),
+                child_id.0.clone(),
+                grandchild_id.0.clone(),
+            ],
+            "root, child, and grandchild each finalized by their own run id"
+        );
+
+        // Every descendant token reclaimed at the confirmed boundary.
+        let cancels = engine
+            .state
+            .session_cancels
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        assert!(
+            !cancels.contains_key(&session_id.0),
+            "root token reclaimed"
+        );
+        assert!(!cancels.contains_key(&child_id.0), "child token reclaimed");
+        assert!(
+            !cancels.contains_key(&grandchild_id.0),
+            "grandchild token reclaimed"
+        );
+        drop(cancels);
+
+        let final_record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(final_record.status, SessionStatus::Cancelled);
+    }
+
+    /// Deterministic late-child admission race proof (P1, rereview-4): a
+    /// child is admitted (durable row + coordinator token) but its in-memory
+    /// children-map entry is dropped BEFORE the root cancel — the exact
+    /// shape of an in-flight `InnerGraphTask` racing the cancel fence. The
+    /// cancel closure reconciles the AUTHORITATIVE persisted parent
+    /// relation, so the late child's token is fired and its run is finalized
+    /// by its own run id — no descendant can be admitted after the fence and
+    /// escape the closure (A5: no downstream effects after the fence,
+    /// complete owned-work cleanup).
+    #[tokio::test]
+    async fn cancel_reconciles_persisted_late_child_into_closure() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+
+        // Root + mapped child + late (persisted, unmapped) child all
+        // finalize successfully.
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![
+            Ok(()),
+            Ok(()),
+            Ok(()),
+        ]));
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
+
+        let graph = Arc::new(Graph::new("late-child-cancel"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // Spawn child A (mapped).
+        let inner = Arc::new(Graph::new("inner-a"));
+        inner.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let child_id = engine
+            .state
+            .spawn_child_session_internal(ChildSessionParams {
+                parent_session_id: session_id.0.clone(),
+                inner_graph: inner,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect("spawn child");
+
+        // Spawn the LATE child (durable row + token), then drop its
+        // in-memory entries — the shape of an admission whose map entry was
+        // lost before the cancel closure snapshot.
+        let inner2 = Arc::new(Graph::new("inner-late"));
+        inner2.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let late_id = engine
+            .state
+            .spawn_child_session_internal(ChildSessionParams {
+                parent_session_id: session_id.0.clone(),
+                inner_graph: inner2,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect("spawn late child");
+        {
+            let mut child_map = engine.state.children.write().await;
+            if let Some(entries) = child_map.get_mut(&session_id.0) {
+                entries.retain(|c| c.session.id != late_id.0);
+            }
+            engine.state.runners.write().await.remove(&late_id.0);
+            engine
+                .state
+                .sessions
+                .write()
+                .await
+                .retain(|s| s.session_id.0 != late_id.0);
+        }
+
+        // The late child's token is registered but not yet fired.
+        let late_token = {
+            let cancels = engine
+                .state
+                .session_cancels
+                .read()
+                .unwrap_or_else(|e| e.into_inner());
+            cancels
+                .get(&late_id.0)
+                .cloned()
+                .expect("late child token registered")
+        };
+        assert!(!late_token.is_cancelled());
+
+        // Cancel: the closure reconciles the persisted parent relation,
+        // fires the late child's token, finalizes root + child + late child,
+        // and settles Cancelled.
+        let status = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect("cancel must settle cancelled");
+        assert_eq!(status, SessionStatus::Cancelled);
+
+        // The late child's token fired — no Host admission can occur under
+        // it after the fence.
+        assert!(late_token.is_cancelled(), "late child token must fire");
+
+        // Every owned run finalized by its own run id — the late child is
+        // reaped even though its map entry was gone.
+        assert_eq!(
+            executor.finalized_runs(),
+            vec![
+                session_id.0.clone(),
+                child_id.0.clone(),
+                late_id.0.clone(),
+            ],
+            "root, mapped child, and persisted late child each finalized by their own run id"
+        );
+
+        // No late child remains mapped, tracked, driven, or token-registered.
+        {
+            let child_map = engine.state.children.read().await;
+            assert!(
+                !child_map.get(&session_id.0).is_some_and(|entries| {
+                    entries.iter().any(|c| c.session.id == late_id.0)
+                }),
+                "late child must not remain in the children map"
+            );
+            let sessions = engine.state.sessions.read().await;
+            assert!(
+                !sessions.iter().any(|s| s.session_id.0 == late_id.0),
+                "late child must not remain in the session tracker"
+            );
+            let runners = engine.state.runners.read().await;
+            assert!(
+                !runners.contains_key(&late_id.0),
+                "late child runner must be dropped"
+            );
+            let cancels = engine
+                .state
+                .session_cancels
+                .read()
+                .unwrap_or_else(|e| e.into_inner());
+            assert!(
+                !cancels.contains_key(&late_id.0),
+                "late child token reclaimed at the confirmed boundary"
+            );
+        }
+
+        let final_record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(final_record.status, SessionStatus::Cancelled);
+    }
+
+    /// Deterministic child-admission-vs-cancel-fence proof (P1, rereview-4):
+    /// the parent's durable `cancel_requested` fence is committed BEFORE the
+    /// child admission's post-persistence recheck. The admission must refuse
+    /// (revision-linearized with the parent), roll the child back — token
+    /// fired, durable row settled `cancelled`, every in-memory entry dropped
+    /// — and no child Host admission can occur after the root fence.
+    #[tokio::test]
+    async fn child_admission_after_parent_cancel_fence_is_rolled_back() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Ok(())]));
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
+
+        let graph = Arc::new(Graph::new("child-after-fence"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // Commit the durable cancel-intent fence on the parent (the phase-1
+        // fence of the cancel path) BEFORE the child admission recheck.
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        let mut fenced_state = record.state.unwrap_or_default();
+        fenced_state.cancel_requested = true;
+        store
+            .commit_transition(
+                &session_id,
+                record.state_revision,
+                RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                SessionStatus::Running,
+                &fenced_state,
+            )
+            .await
+            .expect("cancel-intent fence commits");
+
+        // The child admission must refuse: the parent carries durable
+        // `cancel_requested`, so no child may be created/registered after the
+        // fence.
+        let inner = Arc::new(Graph::new("inner-late"));
+        inner.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let err = engine
+            .state
+            .spawn_child_session_internal(ChildSessionParams {
+                parent_session_id: session_id.0.clone(),
+                inner_graph: inner,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect_err("child admission after the cancel fence must refuse");
+        assert!(
+            matches!(err, EngineError::TerminalState(_)),
+            "refusal must be the terminal-state conflict, got {err:?}"
+        );
+
+        // The rolled-back child row is durably terminal `Cancelled` — never
+        // runnable, never replayed (A5 settlement fence).
+        let children = store
+            .load_children(&session_id)
+            .await
+            .expect("load children");
+        assert_eq!(children.len(), 1, "exactly one child row remains");
+        assert_eq!(
+            children[0].status,
+            SessionStatus::Cancelled,
+            "the rolled-back child must be durably cancelled, got {:?}",
+            children[0].status
+        );
+        assert!(
+            children[0]
+                .state
+                .as_ref()
+                .is_some_and(|s| s.cancel_requested),
+            "the rolled-back child must carry the durable cancel intent"
+        );
+
+        // No child remains in any in-memory structure.
+        {
+            let child_map = engine.state.children.read().await;
+            assert!(
+                !child_map.contains_key(&session_id.0),
+                "no child may remain in the children map"
+            );
+            let sessions = engine.state.sessions.read().await;
+            assert_eq!(
+                sessions.len(),
+                1,
+                "only the root may remain in the session tracker"
+            );
+            let runners = engine.state.runners.read().await;
+            assert_eq!(runners.len(), 1, "only the root runner may remain");
+            let cancels = engine
+                .state
+                .session_cancels
+                .read()
+                .unwrap_or_else(|e| e.into_inner());
+            assert_eq!(
+                cancels.len(),
+                1,
+                "only the root coordinator token may remain registered"
+            );
+        }
+
+        // The root cancel settles Cancelled. The closure reconciles the
+        // persisted parent relation, so the rolled-back child's durable row
+        // (terminal `cancelled`) is also finalized — idempotent, and any
+        // Host session it might have created is reaped.
+        let status = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect("cancel must settle cancelled");
+        assert_eq!(status, SessionStatus::Cancelled);
+        let finalized = executor.finalized_runs();
+        assert_eq!(finalized.len(), 2, "root and the rolled-back child row");
+        assert_eq!(finalized[0], session_id.0, "root finalized first");
+        assert!(
+            finalized[1].starts_with(&format!("{}:child:", session_id.0)),
+            "the rolled-back child's durable row is finalized, got {:?}",
+            finalized[1]
+        );
+    }
+
+    /// Deterministic child-rollback settlement CAS-loss proof (P1, fix
+    /// round 6): the child admission's rollback settle loses its revision
+    /// CAS to a competing transition (the child row advanced between the
+    /// rollback's reload and its settle). The rollback must reload the child
+    /// record and re-settle against the CURRENT revision — never discard the
+    /// settlement result and drop ownership over an unconfirmed row. After
+    /// the parent cancel fence, no running child row and no unregistered
+    /// late child may remain.
+    #[tokio::test]
+    async fn child_rollback_settle_cas_loss_reloads_and_retries() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let race_store = Arc::new(ChildSettleCasLossStore::new(store, storage.clone()));
+        let store: Arc<dyn WorkflowStateStore> = race_store.clone();
+
+        // Root + rolled-back child both finalize successfully.
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Ok(()), Ok(())]));
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
+
+        let graph = Arc::new(Graph::new("child-settle-cas-loss"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // Commit the durable cancel-intent fence on the parent BEFORE the
+        // child admission recheck.
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        let mut fenced_state = record.state.unwrap_or_default();
+        fenced_state.cancel_requested = true;
+        store
+            .commit_transition(
+                &session_id,
+                record.state_revision,
+                RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                SessionStatus::Running,
+                &fenced_state,
+            )
+            .await
+            .expect("cancel-intent fence commits");
+
+        // The child admission must refuse; the rollback's settle loses its
+        // CAS to the injected competing transition, reloads the child
+        // record, and re-settles against the current revision.
+        let inner = Arc::new(Graph::new("inner-late"));
+        inner.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let err = engine
+            .state
+            .spawn_child_session_internal(ChildSessionParams {
+                parent_session_id: session_id.0.clone(),
+                inner_graph: inner,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect_err("child admission after the cancel fence must refuse");
+        assert!(
+            matches!(err, EngineError::TerminalState(_)),
+            "refusal must be the terminal-state conflict, got {err:?}"
+        );
+        assert!(
+            race_store.injected(),
+            "the competing transition must have been injected before the child settle"
+        );
+
+        // The rolled-back child row is durably terminal `Cancelled` — the
+        // reload/retry settled against the CURRENT revision, never a stale
+        // one, and no running child row remains.
+        let children = store
+            .load_children(&session_id)
+            .await
+            .expect("load children");
+        assert_eq!(children.len(), 1, "exactly one child row remains");
+        assert_eq!(
+            children[0].status,
+            SessionStatus::Cancelled,
+            "the rolled-back child must be durably cancelled, got {:?}",
+            children[0].status
+        );
+        assert!(
+            children[0]
+                .state
+                .as_ref()
+                .is_some_and(|s| s.cancel_requested),
+            "the rolled-back child must carry the durable cancel intent"
+        );
+
+        // No child remains in any in-memory structure — ownership was
+        // dropped only after the confirmed Cancelled settlement, so no
+        // unregistered late child remains.
+        {
+            let child_map = engine.state.children.read().await;
+            assert!(
+                !child_map.contains_key(&session_id.0),
+                "no child may remain in the children map"
+            );
+            let sessions = engine.state.sessions.read().await;
+            assert_eq!(
+                sessions.len(),
+                1,
+                "only the root may remain in the session tracker"
+            );
+            let runners = engine.state.runners.read().await;
+            assert_eq!(runners.len(), 1, "only the root runner may remain");
+            let cancels = engine
+                .state
+                .session_cancels
+                .read()
+                .unwrap_or_else(|e| e.into_inner());
+            assert_eq!(
+                cancels.len(),
+                1,
+                "only the root coordinator token may remain registered"
+            );
+        }
+
+        // The root cancel settles Cancelled; the closure reconciles the
+        // persisted parent relation and finalizes the rolled-back child's
+        // durable row (idempotent).
+        let status = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect("cancel must settle cancelled");
+        assert_eq!(status, SessionStatus::Cancelled);
+        let finalized = executor.finalized_runs();
+        assert_eq!(finalized.len(), 2, "root and the rolled-back child row");
+        assert_eq!(finalized[0], session_id.0, "root finalized first");
+        assert!(
+            finalized[1].starts_with(&format!("{}:child:", session_id.0)),
+            "the rolled-back child's durable row is finalized, got {:?}",
+            finalized[1]
+        );
+    }
+
+    /// Deterministic descendant retry-retention proof (Finding 2, round 3):
+    /// the grandchild's finalize fails on the first cancel → the run is
+    /// `Interrupted` and the grandchild's token is retained (not reclaimed);
+    /// the retry finalizes root + child + grandchild and settles Cancelled,
+    /// reclaiming every token only at the confirmed boundary.
+    #[tokio::test]
+    async fn cancel_descendant_retry_retains_failed_entries() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+
+        // First cancel: root OK, child OK, grandchild FAILS (cleanup
+        // unconfirmed). Retry: root OK, child OK, grandchild OK.
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![
+            Ok(()),
+            Ok(()),
+            Err(CapabilityError::Internal("shutdown timeout".to_string())),
+            Ok(()),
+            Ok(()),
+            Ok(()),
+        ]));
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
+
+        let graph = Arc::new(Graph::new("nested-retry"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        let inner = Arc::new(Graph::new("inner-a"));
+        inner.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let child_id = engine
+            .state
+            .spawn_child_session_internal(ChildSessionParams {
+                parent_session_id: session_id.0.clone(),
+                inner_graph: inner,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect("spawn child");
+
+        let inner2 = Arc::new(Graph::new("inner-b"));
+        inner2.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let grandchild_id = engine
+            .state
+            .spawn_child_session_internal(ChildSessionParams {
+                parent_session_id: child_id.0.clone(),
+                inner_graph: inner2,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect("spawn grandchild");
+
+        // First cancel: grandchild finalize fails → Interrupted. The
+        // grandchild token must be RETAINED (not reclaimed) because its
+        // cleanup is unconfirmed.
+        let err = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect_err("first cancel must surface the unconfirmed cleanup");
+        assert!(matches!(err, EngineError::GraphFlow(_)));
+        let interrupted = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(interrupted.status, SessionStatus::Interrupted);
+        assert_eq!(
+            executor.finalized_runs(),
+            vec![
+                session_id.0.clone(),
+                child_id.0.clone(),
+                grandchild_id.0.clone(),
+            ],
+            "root and child finalized before the grandchild failure"
+        );
+        let cancels = engine
+            .state
+            .session_cancels
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        assert!(
+            cancels.contains_key(&grandchild_id.0),
+            "grandchild token retained for retry after unconfirmed cleanup"
+        );
+        assert!(
+            cancels.contains_key(&child_id.0),
+            "child token retained (closure unconfirmed)"
+        );
+        assert!(
+            cancels.contains_key(&session_id.0),
+            "root token retained (closure unconfirmed)"
+        );
+        drop(cancels);
+
+        // Retry cancel: root + child + grandchild all finalize, the run
+        // settles Cancelled, and every token is reclaimed.
+        let status = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect("retry cancel must settle cancelled");
+        assert_eq!(status, SessionStatus::Cancelled);
+        assert_eq!(
+            executor.finalized_runs(),
+            vec![
+                session_id.0.clone(),
+                child_id.0.clone(),
+                grandchild_id.0.clone(),
+                session_id.0.clone(),
+                child_id.0.clone(),
+                grandchild_id.0.clone(),
+            ],
+            "retry finalizes the whole closure again"
+        );
+        let cancels = engine
+            .state
+            .session_cancels
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        assert!(
+            !cancels.contains_key(&session_id.0),
+            "root token reclaimed after confirmed closure"
+        );
+        assert!(
+            !cancels.contains_key(&child_id.0),
+            "child token reclaimed after confirmed closure"
+        );
+        assert!(
+            !cancels.contains_key(&grandchild_id.0),
+            "grandchild token reclaimed after confirmed closure"
+        );
+        drop(cancels);
+    }
+
+    // ------------------------------------------------------------------
+    // T2 fix round 4 — Important 1: restarted roots reconstruct the
+    // COMPLETE owned-descendant closure from the persisted parent relation
+    // ------------------------------------------------------------------
+
+    /// Restart-shaped nested root/child/grandchild cancellation proof
+    /// (Important 1, round 4): a root with child A and grandchild A:child:*
+    /// is persisted, then a FRESH engine (restart) recovers ONLY the root
+    /// summary (the boot shape — `list_non_terminal_sessions` returns root
+    /// rows only). Recovery must recursively hydrate the persisted parent
+    /// relation so the root Cancel fires/finalizes every owned descendant
+    /// — the grandchild is never left outside the closure. A failed
+    /// descendant cleanup on the retry remains reachable.
+    #[tokio::test]
+    async fn recovered_root_cancel_reaches_persisted_grandchild() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+
+        // Phase 1: a live engine spawns the nested tree and parks the
+        // grandchild at a durable human wait (non-terminal, recoverable).
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let live = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        let graph = Arc::new(Graph::new("restart-nested"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = live
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        let inner = Arc::new(Graph::new("inner-a"));
+        inner.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let child_id = live
+            .state
+            .spawn_child_session_internal(ChildSessionParams {
+                parent_session_id: session_id.0.clone(),
+                inner_graph: inner,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect("spawn child");
+
+        let inner2 = Arc::new(Graph::new("inner-b"));
+        inner2.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let grandchild_id = live
+            .state
+            .spawn_child_session_internal(ChildSessionParams {
+                parent_session_id: child_id.0.clone(),
+                inner_graph: inner2,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect("spawn grandchild");
+
+        // Park the grandchild at a durable human wait so it is a
+        // non-terminal persisted descendant after "restart".
+        let grandchild_record = store
+            .load_run(&grandchild_id)
+            .await
+            .expect("load grandchild")
+            .expect("grandchild exists");
+        let grandchild_root = storage
+            .get(&grandchild_id.0)
+            .await
+            .expect("get grandchild root")
+            .expect("grandchild root exists");
+        let grandchild_waiting = RunStateV1 {
+            wait: Some(crate::run_state::WaitRecord {
+                wait_id: "restart-grandchild-wait".to_string(),
+                task_id: "persist".to_string(),
+                child_session_id: None,
+                child_task_id: None,
+                kind: crate::run_state::WaitKind::Manual,
+            }),
+            ..RunStateV1::default()
+        };
+        store
+            .commit_transition(
+                &grandchild_id,
+                grandchild_record.state_revision,
+                RunCheckpoint {
+                    root: &grandchild_root,
+                    children: &[],
+                },
+                SessionStatus::WaitingForInput,
+                &grandchild_waiting,
+            )
+            .await
+            .expect("park grandchild at human wait");
+
+        // Phase 2: a FRESH engine (restart) recovers ONLY the root summary
+        // — the boot shape (`list_non_terminal_sessions` returns root rows
+        // only). The child/grandchild rows are never supplied as summaries.
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let mut restarted = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![
+            Ok(()),
+            Ok(()),
+            Ok(()),
+        ]));
+        restarted.set_prompt_executor(executor.clone(), restarted.state.session_cancels.clone());
+
+        let root_summary = SessionSummary {
+            session_id: session_id.clone(),
+            creator_id: String::new(),
+            preset_id: "novel-writing".to_string(),
+            status: SessionStatus::Running,
+            current_task_id: Some("persist".to_string()),
+        };
+        restarted.recover_sessions(vec![root_summary]).await;
+
+        // The complete owned-descendant closure is reconstructed: the
+        // children map carries root→child AND child→grandchild, and every
+        // descendant has a registered coordinator token.
+        {
+            let children = restarted.state.children.read().await;
+            let root_children = children
+                .get(&session_id.0)
+                .expect("root children hydrated after restart");
+            assert_eq!(
+                root_children.iter().map(|c| c.session.id.as_str()).collect::<Vec<_>>(),
+                vec![child_id.0.as_str()],
+                "root's direct child hydrated"
+            );
+            let child_children = children
+                .get(&child_id.0)
+                .expect("child children hydrated after restart");
+            assert_eq!(
+                child_children.iter().map(|c| c.session.id.as_str()).collect::<Vec<_>>(),
+                vec![grandchild_id.0.as_str()],
+                "grandchild hydrated under the child (recursive closure)"
+            );
+        }
+        let cancels = restarted
+            .state
+            .session_cancels
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        let child_token = cancels
+            .get(&child_id.0)
+            .cloned()
+            .expect("child token registered by recovery");
+        let grandchild_token = cancels
+            .get(&grandchild_id.0)
+            .cloned()
+            .expect("grandchild token registered by recovery");
+        drop(cancels);
+        assert!(!child_token.is_cancelled());
+        assert!(!grandchild_token.is_cancelled());
+
+        // Root Cancel after restart: fires root + child + grandchild
+        // tokens, finalizes every owned descendant by its own run id, and
+        // settles Cancelled — the grandchild is never left outside the
+        // closure.
+        let status = restarted
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect("restarted root cancel must settle cancelled");
+        assert_eq!(status, SessionStatus::Cancelled);
+        assert!(child_token.is_cancelled(), "child token must fire");
+        assert!(grandchild_token.is_cancelled(), "grandchild token must fire");
+        assert_eq!(
+            executor.finalized_runs(),
+            vec![
+                session_id.0.clone(),
+                child_id.0.clone(),
+                grandchild_id.0.clone(),
+            ],
+            "restarted root cancel finalizes the whole persisted closure"
+        );
+        let final_record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(final_record.status, SessionStatus::Cancelled);
+    }
+
+    /// Restart-shaped failed-descendant retry proof (Important 1, round 4):
+    /// after recovery, the grandchild's finalize fails on the first cancel
+    /// → the run is `Interrupted` and the grandchild's token is retained;
+    /// the retry finalizes the whole closure and settles Cancelled. This
+    /// proves failed descendant cleanup remains retryable for a restarted
+    /// root, not only for an in-process engine.
+    #[tokio::test]
+    async fn recovered_root_cancel_retry_retains_failed_grandchild() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let live = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        let graph = Arc::new(Graph::new("restart-retry"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = live
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        let inner = Arc::new(Graph::new("inner-a"));
+        inner.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let child_id = live
+            .state
+            .spawn_child_session_internal(ChildSessionParams {
+                parent_session_id: session_id.0.clone(),
+                inner_graph: inner,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect("spawn child");
+
+        let inner2 = Arc::new(Graph::new("inner-b"));
+        inner2.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let grandchild_id = live
+            .state
+            .spawn_child_session_internal(ChildSessionParams {
+                parent_session_id: child_id.0.clone(),
+                inner_graph: inner2,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect("spawn grandchild");
+
+        // Restart: fresh engine recovers only the root summary. First
+        // cancel: root OK, child OK, grandchild FAILS. Retry: all OK.
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let mut restarted = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![
+            Ok(()),
+            Ok(()),
+            Err(CapabilityError::Internal("shutdown timeout".to_string())),
+            Ok(()),
+            Ok(()),
+            Ok(()),
+        ]));
+        restarted.set_prompt_executor(executor.clone(), restarted.state.session_cancels.clone());
+
+        let root_summary = SessionSummary {
+            session_id: session_id.clone(),
+            creator_id: String::new(),
+            preset_id: "novel-writing".to_string(),
+            status: SessionStatus::Running,
+            current_task_id: Some("persist".to_string()),
+        };
+        restarted.recover_sessions(vec![root_summary]).await;
+
+        // First cancel: the grandchild's finalize fails → Interrupted; the
+        // grandchild token is retained for the owner-scoped retry.
+        let err = restarted
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect_err("first cancel must surface the unconfirmed cleanup");
+        assert!(matches!(err, EngineError::GraphFlow(_)));
+        let interrupted = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(interrupted.status, SessionStatus::Interrupted);
+        assert_eq!(
+            executor.finalized_runs(),
+            vec![
+                session_id.0.clone(),
+                child_id.0.clone(),
+                grandchild_id.0.clone(),
+            ],
+            "root and child finalized before the grandchild failure"
+        );
+        let cancels = restarted
+            .state
+            .session_cancels
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        assert!(
+            cancels.contains_key(&grandchild_id.0),
+            "grandchild token retained for retry after unconfirmed cleanup"
+        );
+        assert!(
+            cancels.contains_key(&child_id.0),
+            "child token retained (closure unconfirmed)"
+        );
+        assert!(
+            cancels.contains_key(&session_id.0),
+            "root token retained (closure unconfirmed)"
+        );
+        drop(cancels);
+
+        // Retry cancel: the whole closure finalizes, the run settles
+        // Cancelled, and every token is reclaimed.
+        let status = restarted
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect("retry cancel must settle cancelled");
+        assert_eq!(status, SessionStatus::Cancelled);
+        assert_eq!(
+            executor.finalized_runs(),
+            vec![
+                session_id.0.clone(),
+                child_id.0.clone(),
+                grandchild_id.0.clone(),
+                session_id.0.clone(),
+                child_id.0.clone(),
+                grandchild_id.0.clone(),
+            ],
+            "retry finalizes the whole closure again"
+        );
+        let cancels = restarted
+            .state
+            .session_cancels
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        assert!(
+            !cancels.contains_key(&session_id.0),
+            "root token reclaimed after confirmed closure"
+        );
+        assert!(
+            !cancels.contains_key(&child_id.0),
+            "child token reclaimed after confirmed closure"
+        );
+        assert!(
+            !cancels.contains_key(&grandchild_id.0),
+            "grandchild token reclaimed after confirmed closure"
+        );
+        drop(cancels);
+    }
+
+    // ------------------------------------------------------------------
+    // T2 fix round 2 — Finding 2: Interrupted persistence is
+    // revision-fenced, bounded, and never discarded
+    // ------------------------------------------------------------------
+
+    /// Deterministic interruption-write CAS failure proof (Finding 2): the
+    /// `Interrupted` commit loses a revision CAS to a competing transition;
+    /// the bounded retry reloads and re-commits against the new revision.
+    /// The durable row AND the in-memory summary both land on
+    /// `Interrupted`, and the actionable failure record is persisted.
+    #[tokio::test]
+    async fn interrupted_write_cas_loss_retries_and_persists() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let real_store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let store: Arc<dyn WorkflowStateStore> = Arc::new(InterruptedCasInjectingStore::new(
+            real_store.clone(),
+            storage.clone(),
+        ));
+
+        // The first finalize fails (cleanup unconfirmed) — the Interrupted
+        // write then loses its CAS once and must retry.
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Err(
+            CapabilityError::Internal("shutdown timeout".to_string()),
+        )]));
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
+
+        let graph = Arc::new(Graph::new("interrupted-cas"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // First cancel: cleanup unconfirmed → the Interrupted write loses
+        // the CAS once, the bounded retry re-commits, and the error is
+        // surfaced with the actionable reason.
+        let err = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect_err("unconfirmed cleanup surfaces the error");
+        assert!(
+            matches!(err, EngineError::GraphFlow(_)),
+            "unconfirmed cleanup surfaces the error, got {err:?}"
+        );
+
+        // Durable row: Interrupted with the cancel intent and the failure
+        // record (the write result was never discarded).
+        let record = real_store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(record.status, SessionStatus::Interrupted);
+        assert!(
+            record.state.as_ref().is_some_and(|s| s.cancel_requested),
+            "interrupted run must carry the durable cancel intent"
+        );
+        let failure = record
+            .state
+            .as_ref()
+            .and_then(|s| s.failure.as_ref())
+            .expect("interrupted run must carry the actionable failure record");
+        assert_eq!(failure.code, "cancel_cleanup_unconfirmed");
+        assert!(
+            failure.message.contains("cancel cleanup unconfirmed"),
+            "failure message must be actionable, got: {}",
+            failure.message
+        );
+
+        // In-memory summary: updated ONLY after the durable write succeeded
+        // (Finding 2 — never before).
+        let sessions = engine.state.sessions.read().await;
+        let in_memory = sessions
+            .iter()
+            .find(|s| s.session_id == session_id)
+            .expect("session tracked in memory");
+        assert_eq!(
+            in_memory.status,
+            SessionStatus::Interrupted,
+            "in-memory summary must reflect the durable interrupted outcome"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // T2 fix round 2 — Finding 3: child Host sessions are finalized
+    // ------------------------------------------------------------------
+
+    /// Deterministic child-wait cancellation proof (Finding 3): a child
+    /// parked at a human wait (cached Host session, no active operation)
+    /// is reaped via its OWN `finalize_run` call — the root finalize alone
+    /// never visits the child-keyed cache entry. On root cleanup failure the
+    /// run is `Interrupted`; the retry finalizes root AND child and settles
+    /// `Cancelled`.
+    #[tokio::test]
+    async fn cancel_finalizes_child_host_sessions() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+
+        // First cancel: root finalize fails (cleanup unconfirmed). Retry:
+        // root finalize succeeds, then the child's OWN finalize succeeds.
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![
+            Err(CapabilityError::Internal("shutdown timeout".to_string())),
+            Ok(()),
+            Ok(()),
+        ]));
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
+
+        let graph = Arc::new(Graph::new("child-cancel"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // Spawn a child (inner graph) — registered in the children map with
+        // its own cancellation token and v1 run row.
+        let inner = Arc::new(Graph::new("inner"));
+        inner.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let child_id = engine
+            .state
+            .spawn_child_session_internal(ChildSessionParams {
+                parent_session_id: session_id.0.clone(),
+                inner_graph: inner,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect("spawn child");
+
+        // Park the child at a durable human wait: its Host session is cached
+        // but no child operation is active to observe a fired token.
+        let child_record = store
+            .load_run(&child_id)
+            .await
+            .expect("load child")
+            .expect("child exists");
+        let child_root = storage
+            .get(&child_id.0)
+            .await
+            .expect("get child root")
+            .expect("child root exists");
+        let child_waiting = RunStateV1 {
+            wait: Some(crate::run_state::WaitRecord {
+                wait_id: "child-wait-tok".to_string(),
+                task_id: "persist".to_string(),
+                child_session_id: None,
+                child_task_id: None,
+                kind: crate::run_state::WaitKind::Manual,
+            }),
+            ..RunStateV1::default()
+        };
+        store
+            .commit_transition(
+                &child_id,
+                child_record.state_revision,
+                RunCheckpoint {
+                    root: &child_root,
+                    children: &[],
+                },
+                SessionStatus::WaitingForInput,
+                &child_waiting,
+            )
+            .await
+            .expect("park child at human wait");
+
+        // First cancel: root finalize fails → Interrupted. The child was
+        // NOT finalized (root failure short-circuits before descendants).
+        let err = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect_err("first cancel must surface the unconfirmed cleanup");
+        assert!(matches!(err, EngineError::GraphFlow(_)));
+        assert_eq!(
+            executor.finalized_runs(),
+            vec![session_id.0.clone()],
+            "root finalize attempted first; child not reached on root failure"
+        );
+        let interrupted = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(interrupted.status, SessionStatus::Interrupted);
+
+        // Retry cancel: root finalize succeeds, then the child's OWN
+        // finalize reaps the child-keyed Host session, and the run settles
+        // Cancelled.
+        let status = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect("retry cancel must settle cancelled");
+        assert_eq!(status, SessionStatus::Cancelled);
+        assert_eq!(
+            executor.finalized_runs(),
+            vec![
+                session_id.0.clone(),
+                session_id.0.clone(),
+                child_id.0.clone(),
+            ],
+            "retry finalizes the root then the child by its own run id"
+        );
+        let final_record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(final_record.status, SessionStatus::Cancelled);
+    }
+}
+
+/// Scripted [`PromptExecutor`] for the A5 cleanup-retry tests: `finalize_run`
+/// pops from a scripted queue of outcomes and records every call's run id.
+#[cfg(test)]
+struct ScriptedFinalizeExecutor {
+    outcomes: std::sync::Mutex<std::collections::VecDeque<Result<(), CapabilityError>>>,
+    calls: std::sync::atomic::AtomicU64,
+    finalized_runs: std::sync::Mutex<Vec<String>>,
+}
+
+#[cfg(test)]
+impl ScriptedFinalizeExecutor {
+    fn new(outcomes: Vec<Result<(), CapabilityError>>) -> Self {
+        Self {
+            outcomes: std::sync::Mutex::new(outcomes.into()),
+            calls: std::sync::atomic::AtomicU64::new(0),
+            finalized_runs: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn calls(&self) -> u64 {
+        self.calls.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Run ids passed to `finalize_run`, in call order.
+    fn finalized_runs(&self) -> Vec<String> {
+        self.finalized_runs.lock().expect("finalized_runs").clone()
+    }
+}
+
+#[cfg(test)]
+#[async_trait]
+impl crate::capability::PromptExecutor for ScriptedFinalizeExecutor {
+    async fn execute(
+        &self,
+        _request: crate::capability::PromptRequest,
+    ) -> Result<crate::capability::PromptResult, CapabilityError> {
+        unreachable!("not used by cancel-path tests")
+    }
+
+    async fn finalize_run(&self, run_id: &str) -> Result<(), CapabilityError> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.finalized_runs
+            .lock()
+            .expect("finalized_runs")
+            .push(run_id.to_string());
+        self.outcomes
+            .lock()
+            .expect("outcomes")
+            .pop_front()
+            .unwrap_or(Ok(()))
+    }
+}
+
+/// Store wrapper that makes the FIRST `Interrupted` commit lose its revision
+/// CAS to a competing transition (Finding 2): the competing transition wins
+/// the same revision first, so the engine's bounded retry must reload and
+/// re-commit against the new revision. Every later commit passes through.
+#[cfg(test)]
+struct InterruptedCasInjectingStore {
+    inner: Arc<dyn WorkflowStateStore>,
+    storage: Arc<dyn SessionStorage>,
+    injected: std::sync::atomic::AtomicBool,
+}
+
+#[cfg(test)]
+impl InterruptedCasInjectingStore {
+    fn new(inner: Arc<dyn WorkflowStateStore>, storage: Arc<dyn SessionStorage>) -> Self {
+        Self {
+            inner,
+            storage,
+            injected: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+}
+
+#[cfg(test)]
+#[async_trait]
+impl WorkflowStateStore for InterruptedCasInjectingStore {
+    async fn load_run(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<crate::run_state::RunRecord>, EngineError> {
+        self.inner.load_run(session_id).await
+    }
+
+    async fn start_run(
+        &self,
+        session_id: &SessionId,
+        descriptor: &crate::run_state::RunDescriptorV1,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .start_run(session_id, descriptor, checkpoint, next_state)
+            .await
+    }
+
+    async fn admit_schedule_run(
+        &self,
+        schedule_id: &str,
+        session_id: &SessionId,
+        descriptor: &crate::run_state::RunDescriptorV1,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+        core_context_version: u32,
+        expected_core_context_version: u32,
+        admission_gate: Option<&crate::run_state::ScheduleAdmissionGate>,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .admit_schedule_run(
+                schedule_id,
+                session_id,
+                descriptor,
+                checkpoint,
+                next_state,
+                core_context_version,
+                expected_core_context_version,
+                admission_gate,
+            )
+            .await
+    }
+
+    async fn commit_transition(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_status: SessionStatus,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        if next_status == SessionStatus::Interrupted
+            && !self.injected.swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            // The competing transition wins the CAS first: a concurrent
+            // transition commits at the SAME revision the Interrupted write
+            // is about to lose.
+            let record = self
+                .inner
+                .load_run(session_id)
+                .await?
+                .expect("run exists at interrupted race gate");
+            let root = self
+                .storage
+                .get(&session_id.0)
+                .await
+                .expect("root session at interrupted race gate")
+                .expect("root exists at interrupted race gate");
+            let mut competing_state = record.state.unwrap_or_default();
+            competing_state.cancel_requested = true;
+            self.inner
+                .commit_transition(
+                    session_id,
+                    record.state_revision,
+                    crate::run_state::RunCheckpoint {
+                        root: &root,
+                        children: &[],
+                    },
+                    record.status.clone(),
+                    &competing_state,
+                )
+                .await
+                .expect("competing transition wins the CAS");
+        }
+        self.inner
+            .commit_transition(session_id, expected_revision, checkpoint, next_status, next_state)
+            .await
+    }
+
+    async fn settle_cancelled(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .settle_cancelled(session_id, expected_revision, checkpoint, next_state)
+            .await
+    }
+
+    async fn restore_pre_step(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        pre_step: &graph_flow::Session,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .restore_pre_step(session_id, expected_revision, pre_step)
+            .await
+    }
+
+    async fn mark_step_in_flight(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        step_state: &crate::run_state::RunStateV1,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .mark_step_in_flight(session_id, expected_revision, checkpoint, step_state)
+            .await
+    }
+
+    async fn persist_prompt_attempt(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_step: Option<&str>,
+        expected_attempt_id: Option<&str>,
+        attempt: &crate::run_state::PromptAttempt,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .persist_prompt_attempt(
+                session_id,
+                expected_revision,
+                expected_step,
+                expected_attempt_id,
+                attempt,
+            )
+            .await
+    }
+
+    async fn clear_prompt_attempt(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_step: Option<&str>,
+        attempt_id: &str,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
+            .await
+    }
+
+    async fn load_children(
+        &self,
+        parent_session_id: &SessionId,
+    ) -> Result<Vec<crate::run_state::RunRecord>, EngineError> {
+        self.inner.load_children(parent_session_id).await
+    }
+}
+
+/// Store wrapper that injects a Continue winner BETWEEN Cancel's initial
+/// read and its phase-1 fence commit (Finding 3, round 4): the FIRST
+/// `commit_transition` carrying the durable cancel intent (the phase-1
+/// fence) is pre-empted by a competing Continue that consumes the wait and
+/// commits a NEWER root position/context at the SAME revision. Cancel's
+/// fence then loses the CAS, reloads the winner row/root, and re-fences
+/// against the new revision. Every later commit passes through.
+///
+/// This is the deterministic Continue-v-cancel interleaving the round-3
+/// regression did not create: the Continue genuinely wins BEFORE the cancel
+/// fence, so the settlement must reload the authoritative root — the stale
+/// pre-fence root would clobber the winner's position/context.
+#[cfg(test)]
+struct ContinueWinsBeforeCancelFenceStore {
+    inner: Arc<dyn WorkflowStateStore>,
+    storage: Arc<dyn SessionStorage>,
+    injected: std::sync::atomic::AtomicBool,
+}
+
+#[cfg(test)]
+impl ContinueWinsBeforeCancelFenceStore {
+    fn new(inner: Arc<dyn WorkflowStateStore>, storage: Arc<dyn SessionStorage>) -> Self {
+        Self {
+            inner,
+            storage,
+            injected: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Whether the Continue winner was injected (the interleaving actually
+    /// happened — the cancel fence genuinely lost the CAS).
+    fn injected(&self) -> bool {
+        self.injected.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+#[async_trait]
+impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
+    async fn load_run(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<crate::run_state::RunRecord>, EngineError> {
+        self.inner.load_run(session_id).await
+    }
+
+    async fn start_run(
+        &self,
+        session_id: &SessionId,
+        descriptor: &crate::run_state::RunDescriptorV1,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .start_run(session_id, descriptor, checkpoint, next_state)
+            .await
+    }
+
+    async fn admit_schedule_run(
+        &self,
+        schedule_id: &str,
+        session_id: &SessionId,
+        descriptor: &crate::run_state::RunDescriptorV1,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+        core_context_version: u32,
+        expected_core_context_version: u32,
+        admission_gate: Option<&crate::run_state::ScheduleAdmissionGate>,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .admit_schedule_run(
+                schedule_id,
+                session_id,
+                descriptor,
+                checkpoint,
+                next_state,
+                core_context_version,
+                expected_core_context_version,
+                admission_gate,
+            )
+            .await
+    }
+
+    async fn commit_transition(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_status: SessionStatus,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        // The phase-1 cancel fence is the first commit carrying the durable
+        // cancel intent on a non-terminal status. Inject the Continue winner
+        // at the SAME revision BEFORE the fence commits, so the fence loses
+        // the CAS and must reload/re-fence against the winner.
+        if next_state.cancel_requested
+            && next_status != SessionStatus::Interrupted
+            && !self.injected.swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            let record = self
+                .inner
+                .load_run(session_id)
+                .await?
+                .expect("run exists at continue-v-cancel gate");
+            let mut winner_root = self
+                .storage
+                .get(&session_id.0)
+                .await
+                .expect("root session at continue-v-cancel gate")
+                .expect("root exists at continue-v-cancel gate");
+            winner_root.current_task_id = "winner-task".to_string();
+            winner_root
+                .context
+                .set("winner.marker", "continue-won")
+                .await;
+            self.inner
+                .commit_transition(
+                    session_id,
+                    record.state_revision,
+                    crate::run_state::RunCheckpoint {
+                        root: &winner_root,
+                        children: &[],
+                    },
+                    SessionStatus::Running,
+                    &crate::run_state::RunStateV1::default(),
+                )
+                .await
+                .expect("Continue wins the CAS before the cancel fence");
+        }
+        self.inner
+            .commit_transition(session_id, expected_revision, checkpoint, next_status, next_state)
+            .await
+    }
+
+    async fn settle_cancelled(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .settle_cancelled(session_id, expected_revision, checkpoint, next_state)
+            .await
+    }
+
+    async fn restore_pre_step(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        pre_step: &graph_flow::Session,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .restore_pre_step(session_id, expected_revision, pre_step)
+            .await
+    }
+
+    async fn mark_step_in_flight(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        step_state: &crate::run_state::RunStateV1,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .mark_step_in_flight(session_id, expected_revision, checkpoint, step_state)
+            .await
+    }
+
+    async fn persist_prompt_attempt(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_step: Option<&str>,
+        expected_attempt_id: Option<&str>,
+        attempt: &crate::run_state::PromptAttempt,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .persist_prompt_attempt(
+                session_id,
+                expected_revision,
+                expected_step,
+                expected_attempt_id,
+                attempt,
+            )
+            .await
+    }
+
+    async fn clear_prompt_attempt(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_step: Option<&str>,
+        attempt_id: &str,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
+            .await
+    }
+
+    async fn load_children(
+        &self,
+        parent_session_id: &SessionId,
+    ) -> Result<Vec<crate::run_state::RunRecord>, EngineError> {
+        self.inner.load_children(parent_session_id).await
+    }
+}
+
+/// Store wrapper that makes the FIRST child-rollback `settle_cancelled`
+/// lose its revision CAS to a competing transition (P1, fix round 6): the
+/// competing transition advances the child row at the SAME revision BEFORE
+/// the rollback settle commits, so the settle returns `RevisionMismatch`
+/// and the engine's rollback retry must reload the child record and
+/// re-settle against the CURRENT revision. Every later call passes through.
+#[cfg(test)]
+struct ChildSettleCasLossStore {
+    inner: Arc<dyn WorkflowStateStore>,
+    storage: Arc<dyn SessionStorage>,
+    injected: std::sync::atomic::AtomicBool,
+}
+
+#[cfg(test)]
+impl ChildSettleCasLossStore {
+    fn new(inner: Arc<dyn WorkflowStateStore>, storage: Arc<dyn SessionStorage>) -> Self {
+        Self {
+            inner,
+            storage,
+            injected: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Whether the competing transition was injected (the rollback settle
+    /// genuinely lost the CAS).
+    fn injected(&self) -> bool {
+        self.injected.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+#[async_trait]
+impl WorkflowStateStore for ChildSettleCasLossStore {
+    async fn load_run(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<crate::run_state::RunRecord>, EngineError> {
+        self.inner.load_run(session_id).await
+    }
+
+    async fn start_run(
+        &self,
+        session_id: &SessionId,
+        descriptor: &crate::run_state::RunDescriptorV1,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .start_run(session_id, descriptor, checkpoint, next_state)
+            .await
+    }
+
+    async fn admit_schedule_run(
+        &self,
+        schedule_id: &str,
+        session_id: &SessionId,
+        descriptor: &crate::run_state::RunDescriptorV1,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+        core_context_version: u32,
+        expected_core_context_version: u32,
+        admission_gate: Option<&crate::run_state::ScheduleAdmissionGate>,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .admit_schedule_run(
+                schedule_id,
+                session_id,
+                descriptor,
+                checkpoint,
+                next_state,
+                core_context_version,
+                expected_core_context_version,
+                admission_gate,
+            )
+            .await
+    }
+
+    async fn commit_transition(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_status: SessionStatus,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .commit_transition(session_id, expected_revision, checkpoint, next_status, next_state)
+            .await
+    }
+
+    async fn settle_cancelled(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        // The child-rollback settle is the first `settle_cancelled` on the
+        // freshly started child row. Inject a competing transition at the
+        // SAME revision BEFORE the settle commits, so the settle loses the
+        // CAS and the engine's rollback retry must reload and re-settle
+        // against the new revision.
+        if !self.injected.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            let record = self
+                .inner
+                .load_run(session_id)
+                .await?
+                .expect("child exists at rollback settle gate");
+            let mut winner_root = self
+                .storage
+                .get(&session_id.0)
+                .await
+                .expect("child session at rollback settle gate")
+                .expect("child session exists at rollback settle gate");
+            winner_root.current_task_id = "competing-winner".to_string();
+            winner_root
+                .context
+                .set("competing.marker", "advanced")
+                .await;
+            self.inner
+                .commit_transition(
+                    session_id,
+                    record.state_revision,
+                    crate::run_state::RunCheckpoint {
+                        root: &winner_root,
+                        children: &[],
+                    },
+                    SessionStatus::Running,
+                    &crate::run_state::RunStateV1::default(),
+                )
+                .await
+                .expect("competing transition wins the CAS before the child settle");
+        }
+        self.inner
+            .settle_cancelled(session_id, expected_revision, checkpoint, next_state)
+            .await
+    }
+
+    async fn restore_pre_step(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        pre_step: &graph_flow::Session,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .restore_pre_step(session_id, expected_revision, pre_step)
+            .await
+    }
+
+    async fn mark_step_in_flight(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        step_state: &crate::run_state::RunStateV1,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .mark_step_in_flight(session_id, expected_revision, checkpoint, step_state)
+            .await
+    }
+
+    async fn persist_prompt_attempt(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_step: Option<&str>,
+        expected_attempt_id: Option<&str>,
+        attempt: &crate::run_state::PromptAttempt,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .persist_prompt_attempt(
+                session_id,
+                expected_revision,
+                expected_step,
+                expected_attempt_id,
+                attempt,
+            )
+            .await
+    }
+
+    async fn clear_prompt_attempt(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_step: Option<&str>,
+        attempt_id: &str,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
+            .await
+    }
+
+    async fn load_children(
+        &self,
+        parent_session_id: &SessionId,
+    ) -> Result<Vec<crate::run_state::RunRecord>, EngineError> {
+        self.inner.load_children(parent_session_id).await
     }
 }

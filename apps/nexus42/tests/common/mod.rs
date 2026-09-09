@@ -51,24 +51,21 @@ pub struct LiveDaemon {
 /// (mirrors `boot.rs`: `SqliteSessionStorage` over the daemon pool +
 /// `GraphFlowEngine`). MUST run before `create_router` so the router's
 /// `WorkspaceState` clone shares the engine slot.
-fn wire_orchestration_engine(
+async fn wire_orchestration_engine(
     state: &mut WorkspaceState,
     pool: &sqlx::SqlitePool,
 ) -> (
     Arc<dyn nexus_orchestration::OrchestrationEngine>,
     Arc<dyn graph_flow::SessionStorage>,
 ) {
+    state
+        .publish_creator_runtime_bundle()
+        .await
+        .expect("publish Creator-DB runtime bundle");
+    let engine = state.engine().expect("engine after runtime bundle");
     let storage: Arc<dyn graph_flow::SessionStorage> = Arc::new(
         nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(pool.clone())),
     );
-    let holder = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
-        nexus_orchestration::CapabilityRegistry::with_builtins(),
-    ));
-    let engine = Arc::new(nexus_orchestration::GraphFlowEngine::new_with_storage(
-        storage.clone(),
-        holder,
-    ));
-    state.set_engine(engine.clone() as Arc<dyn nexus_orchestration::OrchestrationEngine>);
     (engine, storage)
 }
 
@@ -82,6 +79,267 @@ impl LiveDaemon {
     /// Boot the daemon with a deterministic `HostFacade` (Character run E2E).
     pub async fn start_with_agent_host(host: Arc<dyn HostFacade>) -> Self {
         Self::start_with_optional_host(Some(host)).await
+    }
+
+    /// Boot the daemon with a `HostFacade` AND an enabled default provider
+    /// in the agent-host config (T3 settlement tests).
+    ///
+    /// A real daemon derives its supervisor binding provider from the first
+    /// enabled `agent_host_config().providers` entry. The default fixture
+    /// leaves `providers` empty, so the supervisor's internal insertion
+    /// paths (auto-chain child enqueue) refuse presets that require prompt
+    /// roles — e.g. `kb-extract` (persist stage) whose `acp_prompt` node
+    /// has no `agent:` field and therefore requires the `default` role.
+    /// This fixture mirrors the production config so the persist-stage
+    /// child enqueue passes the N-9 binding gate.
+    pub async fn start_with_agent_host_and_provider(host: Arc<dyn HostFacade>) -> Self {
+        let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind daemon port");
+        let port = listener.local_addr().expect("local addr").port();
+        let http_url = format!("http://127.0.0.1:{port}");
+
+        let config_path = nexus_home.join("config.toml");
+        let config = format!(
+            "active_creator_id = \"test_creator\"\n\
+             daemon_url = \"{http_url}\"\n\
+             \n\
+             [active_workspace_slug_by_creator]\n\
+             \"test_creator\" = \"default\"\n"
+        );
+        std::fs::write(&config_path, config).expect("write config.toml");
+
+        let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        state.set_agent_host(host);
+        // Mirror a production agent-host config: one enabled provider.
+        state.set_agent_host_config(nexus_agent_host::config::AgentHostConfig {
+            providers: vec![nexus_agent_host::config::ProviderConfig {
+                id: "mock-provider".to_string(),
+                protocol: "native_cli".to_string(),
+                command: Some("mock".to_string()),
+                args: vec![],
+                env: std::collections::HashMap::new(),
+                enabled: true,
+            }],
+            ..nexus_agent_host::config::AgentHostConfig::default()
+        });
+        let pool = state.pool().expect("pool").clone();
+        test_utils::seed_test_creator_and_world(&pool).await;
+        let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool).await;
+
+        let app = api::create_router(
+            state.clone(),
+            DaemonApiConfig::keyless().with_resolved_listen_addr(port, "127.0.0.1"),
+        );
+        let http_task = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("daemon http serve");
+        });
+
+        Self {
+            home: tmp,
+            pool,
+            state,
+            http_url,
+            engine,
+            session_storage,
+            http_task,
+        }
+    }
+
+    /// Boot the daemon WITHOUT publishing the Creator-DB runtime bundle
+    /// (N-2/N-2b lazy-attach path): the pool is open (test fixture) but no
+    /// engine/coordinator/supervisor bundle exists until the test calls
+    /// `state.ensure_creator_pool()`, exactly like a Tier-0 boot followed by
+    /// Profile attach. The router is created after the bundle is published
+    /// so routes observe the complete aggregate.
+    pub async fn start_lazy_attach(host: Arc<dyn HostFacade>) -> Self {
+        let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind daemon port");
+        let port = listener.local_addr().expect("local addr").port();
+        let http_url = format!("http://127.0.0.1:{port}");
+
+        let config_path = nexus_home.join("config.toml");
+        let config = format!(
+            "active_creator_id = \"test_creator\"\n\
+             daemon_url = \"{http_url}\"\n\
+             \n\
+             [active_workspace_slug_by_creator]\n\
+             \"test_creator\" = \"default\"\n"
+        );
+        std::fs::write(&config_path, config).expect("write config.toml");
+
+        let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        state.set_agent_host(host);
+        let pool = state.pool().expect("pool").clone();
+        test_utils::seed_test_creator_and_world(&pool).await;
+
+        // No bundle yet — the lazy-attach path publishes it via
+        // `ensure_creator_pool()` (the Profile-attach middleware seam).
+        assert!(
+            state.run_coordinator().is_none(),
+            "lazy-attach fixture must start without a runtime bundle"
+        );
+        state
+            .ensure_creator_pool()
+            .await
+            .expect("lazy attach publishes the runtime bundle");
+        assert!(
+            state.runtime_bundle().is_some(),
+            "lazy attach must publish the immutable aggregate bundle"
+        );
+
+        let engine = state.engine().expect("engine after lazy attach");
+        let session_storage: Arc<dyn graph_flow::SessionStorage> = Arc::new(
+            nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(
+                pool.clone(),
+            )),
+        );
+        let app = api::create_router(
+            state.clone(),
+            DaemonApiConfig::keyless().with_resolved_listen_addr(port, "127.0.0.1"),
+        );
+        let http_task = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("daemon http serve");
+        });
+
+        Self {
+            home: tmp,
+            pool,
+            state,
+            http_url,
+            engine,
+            session_storage,
+            http_task,
+        }
+    }
+
+    /// Boot the daemon through the NORMAL boot publication path (N-13):
+    /// wire the boot slots (engine + pool-backed capability registry +
+    /// coordinator + supervisor) exactly like `boot.rs`, then call
+    /// `publish_boot_runtime_bundle()` BEFORE creating the router. This is
+    /// the production boot aggregate — distinct from the lazy-attach
+    /// bundle `start_lazy_attach` exercises.
+    pub async fn start_normal_boot() -> Self {
+        let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind daemon port");
+        let port = listener.local_addr().expect("local addr").port();
+        let http_url = format!("http://127.0.0.1:{port}");
+
+        let config_path = nexus_home.join("config.toml");
+        let config = format!(
+            "active_creator_id = \"test_creator\"\n\
+             daemon_url = \"{http_url}\"\n\
+             \n\
+             [active_workspace_slug_by_creator]\n\
+             \"test_creator\" = \"default\"\n"
+        );
+        std::fs::write(&config_path, config).expect("write config.toml");
+
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let pool = state.pool().expect("pool").clone();
+        test_utils::seed_test_creator_and_world(&pool).await;
+
+        // N-13: normal-boot wiring — mirrors `boot.rs`: durable storage +
+        // workflow store over the Creator DB pool, a POOL-BACKED capability
+        // registry (never a pool-less placeholder), the single run
+        // coordinator, and the schedule supervisor. The boot bundle is
+        // published from these slots before route readiness.
+        let pool_arc = Arc::new(pool.clone());
+        let sqlite_storage = Arc::new(
+            nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(pool_arc.clone()),
+        );
+        let storage: Arc<dyn graph_flow::SessionStorage> = sqlite_storage.clone();
+        let workflow_store: Arc<dyn nexus_orchestration::run_state::WorkflowStateStore> =
+            sqlite_storage.clone();
+
+        let deps = nexus_orchestration::capability::CapabilityRuntimeDeps {
+            pool: Some(pool.clone()),
+            prompt_executor: None,
+            session_cancels: state.session_cancels(),
+            daemon_tool_dispatch: None,
+            cdn_config: None,
+        };
+        let scan_dir = state
+            .nexus_home()
+            .parent()
+            .expect("nexus home parent")
+            .join("capabilities");
+        let (registry, _outcome) =
+            nexus_orchestration::capability::CapabilityRegistry::with_runtime_deps_and_user_caps(
+                &deps,
+                &scan_dir,
+            );
+        let holder =
+            nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(registry));
+
+        let mut engine =
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store_and_workspace(
+                storage.clone(),
+                workflow_store.clone(),
+                holder.clone(),
+                std::path::PathBuf::new(),
+            );
+        engine.set_nexus_home(state.nexus_home().clone());
+        let engine_arc = Arc::new(engine);
+        state.set_engine(engine_arc.clone() as Arc<dyn nexus_orchestration::OrchestrationEngine>);
+        state.set_capability_registry(holder.clone());
+
+        let coordinator = Arc::new(
+            nexus_daemon_runtime::preset_run::WorkflowRunCoordinator::new(
+                engine_arc.clone(),
+                storage.clone(),
+                pool_arc.clone(),
+                state.session_cancels(),
+            ),
+        );
+        state.set_run_coordinator(coordinator.clone());
+
+        let mut supervisor_builder =
+            nexus_orchestration::schedule::supervisor::ScheduleSupervisor::new_with_workspace(
+                pool_arc.clone(),
+                None,
+            );
+        if let Some(reg) = holder.get() {
+            supervisor_builder = supervisor_builder.with_capability_registry(reg);
+        }
+        let supervisor = Arc::new(supervisor_builder);
+        state.set_schedule_supervisor(supervisor.clone());
+        // T3 (A3): the coordinator settles terminal runs through the
+        // supervisor (mirrors boot.rs wiring).
+        coordinator.set_schedule_supervisor(supervisor.clone());
+
+        // N-13: the BOOT publisher (not the lazy-attach publisher) — the
+        // production boot aggregate is published before the router exists.
+        state
+            .publish_boot_runtime_bundle()
+            .await
+            .expect("publish boot runtime bundle");
+
+        let app = api::create_router(
+            state.clone(),
+            DaemonApiConfig::keyless().with_resolved_listen_addr(port, "127.0.0.1"),
+        );
+        let http_task = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("daemon http serve");
+        });
+
+        Self {
+            home: tmp,
+            pool,
+            state,
+            http_url,
+            engine: engine_arc.clone() as Arc<dyn nexus_orchestration::OrchestrationEngine>,
+            session_storage: storage,
+            http_task,
+        }
     }
 
     async fn start_with_optional_host(host: Option<Arc<dyn HostFacade>>) -> Self {
@@ -114,7 +372,7 @@ impl LiveDaemon {
         }
         let pool = state.pool().expect("pool").clone();
         test_utils::seed_test_creator_and_world(&pool).await;
-        let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool);
+        let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool).await;
 
         let app = api::create_router(
             state.clone(),
@@ -167,7 +425,7 @@ impl LiveDaemon {
         .await;
         let pool = state.pool().expect("pool").clone();
         test_utils::seed_test_creator_and_world(&pool).await;
-        let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool);
+        let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool).await;
 
         let app = api::create_router(
             state.clone(),

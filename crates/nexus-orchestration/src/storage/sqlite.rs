@@ -878,6 +878,336 @@ impl WorkflowStateStore for SqliteSessionStorage {
         })
     }
 
+    async fn admit_schedule_run(
+        &self,
+        schedule_id: &str,
+        session_id: &SessionId,
+        descriptor: &RunDescriptorV1,
+        checkpoint: RunCheckpoint<'_>,
+        next_state: &RunStateV1,
+        core_context_version: u32,
+        expected_core_context_version: u32,
+        admission_gate: Option<&crate::run_state::ScheduleAdmissionGate>,
+    ) -> Result<RunRecord, EngineError> {
+        let now = chrono::Utc::now().timestamp();
+        let id = session_id.0.clone();
+        let creator_id = descriptor.creator_id.clone();
+        let preset_id = descriptor.preset_id.clone();
+        let preset_version = i64::from(descriptor.preset_version);
+        let parent_session_id = descriptor
+            .parent_session_id
+            .as_ref()
+            .map(|s| s.0.clone());
+        let current_task_id = checkpoint.root.current_task_id.clone();
+        let context_bytes = serde_json::to_vec(&checkpoint.root.context).map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "serialize context: {e}"
+            )))
+        })?;
+        let state_bytes = serialize_blob(next_state)?;
+        let descriptor_bytes = serialize_blob(descriptor)?;
+
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "admit_schedule_run begin tx: {e}"
+                )))
+            })?;
+
+        // 1. Load + verify the schedule row inside the transaction. The
+        //    claim (status/current_session_id) and the v1 run row commit
+        //    together — a concurrent admission loses the claim and returns
+        //    the winner's owned run (C-1).
+        #[derive(sqlx::FromRow)]
+        struct ScheduleClaimRow {
+            execution_policy: String,
+            status: String,
+            current_session_id: Option<String>,
+            preset_id: String,
+            current_core_context_version: i64,
+        }
+        let row = sqlx::query_as::<_, ScheduleClaimRow>(
+            "SELECT execution_policy, status, current_session_id, preset_id,
+                    current_core_context_version
+             FROM creator_schedules WHERE schedule_id = ?",
+        )
+        .bind(schedule_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "admit_schedule_run '{}': {e}",
+                session_id.0
+            )))
+        })?
+        .ok_or_else(|| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "admit_schedule_run: schedule {schedule_id} not found"
+            )))
+        })?;
+
+        // N-3: the admission claim is fenced on the EXACT frozen
+        // core-context version the caller read. A concurrent context edit
+        // that advanced the row after the caller's read fails the fence —
+        // the claim never overwrites a newer pointer with a stale payload.
+        if u32::try_from(row.current_core_context_version).unwrap_or(0)
+            != expected_core_context_version
+        {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "admit_schedule_run: schedule {schedule_id} core-context version \
+                     moved (expected {expected_core_context_version}, found {})",
+                    row.current_core_context_version
+                )),
+            ));
+        }
+
+        // N-1: re-verify the admission matrix INSIDE the claim transaction.
+        // The preflight outside the transaction is advisory; the running set
+        // is only authoritative under the `BEGIN IMMEDIATE` write lock, so
+        // two distinct serial schedules for one creator can never both claim.
+        if let Some(gate) = admission_gate {
+            let now_ts = chrono::Utc::now().timestamp();
+            if gate.scheduled_at.is_some_and(|at| at > now_ts) {
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "admit_schedule_run: schedule {schedule_id} is not due \
+                         (scheduled_at {})",
+                        gate.scheduled_at.unwrap_or_default()
+                    )),
+                ));
+            }
+            for dep in &gate.depends_on {
+                let dep_status: Option<String> = sqlx::query_scalar(
+                    "SELECT status FROM creator_schedules WHERE schedule_id = ?",
+                )
+                .bind(dep)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|e| {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                        "admit_schedule_run '{}': {e}",
+                        session_id.0
+                    )))
+                })?;
+                if !matches!(dep_status.as_deref(), Some("completed" | "cancelled")) {
+                    return Err(EngineError::GraphFlow(
+                        graph_flow::GraphError::StorageError(format!(
+                            "admit_schedule_run: schedule {schedule_id} dependency \
+                             '{dep}' is not completed/cancelled"
+                        )),
+                    ));
+                }
+            }
+            // Per-creator running set: only driven_v1 rows count toward
+            // capacity; the candidate's OWN row is excluded (a concurrent
+            // admission that already claimed it must not look
+            // serial-blocked — the loser re-reads the winner's run).
+            let running: Vec<String> = sqlx::query_scalar(
+                "SELECT schedule_id FROM creator_schedules
+                 WHERE creator_id = ? AND status = 'running'
+                   AND execution_policy = 'driven_v1'
+                   AND schedule_id != ?",
+            )
+            .bind(&gate.creator_id)
+            .bind(schedule_id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "admit_schedule_run '{}': {e}",
+                    session_id.0
+                )))
+            })?;
+            let concurrency_ok = match gate.concurrency_kind.as_str() {
+                "parallel_any" => true,
+                "parallel_with" => {
+                    let whitelist: std::collections::HashSet<String> = gate
+                        .concurrency_whitelist
+                        .as_deref()
+                        .and_then(|json| serde_json::from_str(json).ok())
+                        .unwrap_or_default();
+                    running.iter().all(|id| whitelist.contains(id))
+                }
+                // "serial" (and any unknown kind — conservative fail-closed).
+                _ => running.is_empty(),
+            };
+            if !concurrency_ok {
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "admit_schedule_run: schedule {schedule_id} fails the \
+                         per-creator concurrency gate ({} running)",
+                        running.len()
+                    )),
+                ));
+            }
+        }
+
+        // A8 fail-closed: a `_system.*` preset is never driven, regardless
+        // of the stored policy (C-4).
+        if row.preset_id.starts_with("_system.") {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "admit_schedule_run: system preset '{0}' cannot be admitted as a driven run",
+                    row.preset_id
+                )),
+            ));
+        }
+        let policy_ok = row.execution_policy == "driven_v1"
+            || row.execution_policy == "legacy_inert";
+        if !policy_ok {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "admit_schedule_run: schedule {schedule_id} execution_policy is '{}'",
+                    row.execution_policy
+                )),
+            ));
+        }
+        let status_ok = row.status == "pending"
+            || row.status == "paused"
+            || (row.status == "running" && row.current_session_id.is_none());
+        if !status_ok {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "admit_schedule_run: schedule {schedule_id} status is '{}'",
+                    row.status
+                )),
+            ));
+        }
+        if let Some(existing) = &row.current_session_id {
+            // Re-entry: the schedule already owns a run. Verify the run row
+            // exists; a stale claim (crash between claim and run creation)
+            // is NOT cleared here — boot recovery classifies it (C-1).
+            let existing_version: Option<i64> = sqlx::query_scalar(
+                "SELECT execution_version FROM orchestration_sessions WHERE session_id = ?",
+            )
+            .bind(existing)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "admit_schedule_run '{}': {e}",
+                    session_id.0
+                )))
+            })?;
+            if existing_version.is_some() {
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "admit_schedule_run: schedule {schedule_id} already owns run {existing}"
+                    )),
+                ));
+            }
+            // Stale claim: refuse fresh admission — the caller must route
+            // through recovery, never mint a second session.
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "admit_schedule_run: schedule {schedule_id} has a stale claim on {existing}; \
+                     recovery must classify it before re-admission"
+                )),
+            ));
+        }
+
+        // 2. Insert the v1 session row (initial checkpoint + descriptor +
+        //    seeded context) — the run is durable before the schedule
+        //    pointer is published (C-2).
+        let existing_version: Option<i64> = sqlx::query_scalar(
+            "SELECT execution_version FROM orchestration_sessions WHERE session_id = ?",
+        )
+        .bind(&id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "admit_schedule_run '{}': {e}",
+                session_id.0
+            )))
+        })?;
+        if let Some(version) = existing_version {
+            return Err(EngineError::RunAlreadyExists {
+                session_id: session_id.0.clone(),
+                execution_version: u32::try_from(version).unwrap_or(0),
+            });
+        }
+
+        sqlx::query!(
+            r#"
+            INSERT INTO orchestration_sessions
+                (session_id, creator_id, preset_id, preset_version,
+                 parent_session_id, current_task_id, status,
+                 context_json, chat_history_json, created_at, updated_at,
+                 execution_version, state_revision, run_state_json, run_descriptor_json)
+            VALUES (?, ?, ?, ?, ?, ?, 'running', ?, NULL, ?, ?, 1, 1, ?, ?)
+            "#,
+            id,
+            creator_id,
+            preset_id,
+            preset_version,
+            parent_session_id,
+            current_task_id,
+            context_bytes,
+            now,
+            now,
+            state_bytes,
+            descriptor_bytes
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "admit_schedule_run '{}': {e}",
+                session_id.0
+            )))
+        })?;
+
+        // 3. Claim the schedule row atomically with the run row (C-1).
+        let claim = sqlx::query(
+            "UPDATE creator_schedules
+             SET status = 'running', current_session_id = ?,
+                 current_core_context_version = ?, updated_at = ?,
+                 execution_policy = 'driven_v1'
+             WHERE schedule_id = ? AND status IN ('pending', 'paused', 'running')
+               AND current_session_id IS NULL",
+        )
+        .bind(&session_id.0)
+        .bind(i64::from(core_context_version))
+        .bind(now)
+        .bind(schedule_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "admit_schedule_run claim '{}': {e}",
+                session_id.0
+            )))
+        })?;
+        if claim.rows_affected() == 0 {
+            // A concurrent admission won the claim between our read and
+            // update. Roll back the run row (the transaction aborts) and
+            // report the conflict — the caller re-reads the winner.
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "admit_schedule_run: schedule {schedule_id} was claimed concurrently"
+                )),
+            ));
+        }
+
+        tx.commit().await.map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "admit_schedule_run commit: {e}"
+            )))
+        })?;
+
+        Ok(RunRecord {
+            session_id: SessionId(session_id.0.clone()),
+            status: SessionStatus::Running,
+            state_revision: 1,
+            execution_version: 1,
+            descriptor: Some(descriptor.clone()),
+            state: Some(next_state.clone()),
+        })
+    }
+
     async fn commit_transition(
         &self,
         session_id: &SessionId,
@@ -1105,6 +1435,135 @@ impl WorkflowStateStore for SqliteSessionStorage {
         Ok(RunRecord {
             session_id: SessionId(session_id.0.clone()),
             status: next_status,
+            state_revision: expected_revision + 1,
+            execution_version,
+            descriptor: root_descriptor,
+            state: Some(next_state.clone()),
+        })
+    }
+
+    async fn settle_cancelled(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: RunCheckpoint<'_>,
+        next_state: &RunStateV1,
+    ) -> Result<RunRecord, EngineError> {
+        let now = chrono::Utc::now().timestamp();
+        let id = session_id.0.clone();
+        let current_task_id = checkpoint.root.current_task_id.clone();
+        let context_bytes = serde_json::to_vec(&checkpoint.root.context).map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "serialize context: {e}"
+            )))
+        })?;
+        let state_bytes = serialize_blob(next_state)?;
+
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "settle_cancelled begin tx: {e}"
+                )))
+            })?;
+
+        // A5 settlement fence: revision CAS + execution-version fence, and the
+        // current status must be `interrupted` (the cleanup-retry shape) or
+        // non-terminal — a run already settled `cancelled`/`completed`/
+        // `failed` is never overwritten by a retry.
+        let expected_revision_i64 = expected_revision as i64;
+        let result = sqlx::query(
+            r#"
+            UPDATE orchestration_sessions
+            SET status = 'cancelled', current_task_id = ?, context_json = ?,
+                updated_at = ?, state_revision = state_revision + 1,
+                run_state_json = ?
+            WHERE session_id = ? AND state_revision = ?
+              AND execution_version = 1
+              AND status IN ('running', 'paused', 'waiting_for_input', 'interrupted')
+            "#,
+        )
+        .bind(&current_task_id)
+        .bind(&context_bytes)
+        .bind(now)
+        .bind(&state_bytes)
+        .bind(&id)
+        .bind(expected_revision_i64)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "settle_cancelled '{}': {e}", session_id.0
+            )))
+        })?;
+
+        if result.rows_affected() == 0 {
+            let current: Option<(i64, i64)> = sqlx::query_as(
+                "SELECT state_revision, execution_version \
+                 FROM orchestration_sessions WHERE session_id = ?",
+            )
+            .bind(&session_id.0)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "settle_cancelled read revision/version: {e}"
+                )))
+            })?;
+
+            return match current {
+                Some((_revision, version)) if version != 1 => {
+                    Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
+                        format!(
+                            "settle_cancelled '{}': execution_version {version} is non-replayable; \
+                             legacy runs cannot transition",
+                            session_id.0
+                        ),
+                    )))
+                }
+                Some((found, _)) if found != expected_revision as i64 => {
+                    Err(EngineError::RevisionMismatch {
+                        session_id: session_id.0.clone(),
+                        expected: expected_revision,
+                        found: u64::try_from(found).unwrap_or(0),
+                    })
+                }
+                _ => Err(EngineError::TerminalState(session_id.0.clone())),
+            };
+        }
+
+        let root_descriptor = read_root_descriptor(&mut tx, &session_id.0).await?;
+        let persisted_version: i64 = sqlx::query_scalar(
+            "SELECT execution_version FROM orchestration_sessions WHERE session_id = ?",
+        )
+        .bind(&session_id.0)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "settle_cancelled read execution_version: {e}"
+            )))
+        })?;
+        if persisted_version != 1 {
+            return Err(EngineError::GraphFlow(
+                graph_flow::GraphError::StorageError(format!(
+                    "settle_cancelled '{}': unsupported execution_version {persisted_version} \
+                     (non-replayable)",
+                    session_id.0
+                )),
+            ));
+        }
+        let execution_version = persisted_version as u32;
+
+        tx.commit().await.map_err(|e| {
+            EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                "settle_cancelled commit: {e}"
+            )))
+        })?;
+
+        Ok(RunRecord {
+            session_id: SessionId(session_id.0.clone()),
+            status: SessionStatus::Cancelled,
             state_revision: expected_revision + 1,
             execution_version,
             descriptor: root_descriptor,

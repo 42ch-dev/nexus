@@ -35,6 +35,14 @@ export interface NexusScheduleSummary {
    */
   status: string;
   /**
+   * Execution policy: `legacy_inert`, `driven_v1`, or `system_inert` (A3).
+   */
+  execution_policy: string;
+  /**
+   * The owned run session ID, when the schedule has been admitted (A3).
+   */
+  current_session_id?: string;
+  /**
    * Human-readable label.
    */
   label?: string;

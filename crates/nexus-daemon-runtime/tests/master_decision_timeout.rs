@@ -116,7 +116,7 @@ async fn review_master_schedule_count(pool: &SqlitePool, work_id: &str) -> i64 {
 async fn sweep_with_no_findings_is_a_no_op() {
     let (pool, _tmp) = fresh_pool().await;
 
-    run_one_sweep(&pool, 60).await;
+    run_one_sweep(&pool, 60, Some("test-provider"), None).await;
 
     let total: i64 = sqlx::query("SELECT COUNT(*) AS n FROM creator_schedules")
         .fetch_one(&pool)
@@ -135,7 +135,7 @@ async fn stale_finding_without_optin_does_not_enqueue() {
     seed_work(&pool, work_id, false).await;
     seed_open_finding(&pool, "fnd_p4t5_default", work_id, 7200).await;
 
-    run_one_sweep(&pool, 60).await;
+    run_one_sweep(&pool, 60, Some("test-provider"), None).await;
 
     assert_eq!(
         review_master_schedule_count(&pool, work_id).await,
@@ -154,7 +154,7 @@ async fn stale_finding_with_optin_enqueues_review_master() {
     seed_work(&pool, work_id, true).await;
     seed_open_finding(&pool, "fnd_p4t5_optin", work_id, 7200).await;
 
-    run_one_sweep(&pool, 60).await;
+    run_one_sweep(&pool, 60, Some("test-provider"), None).await;
 
     let row = sqlx::query(
         "SELECT preset_id, status, work_id, schedule_id \
@@ -192,7 +192,7 @@ async fn mixed_optin_only_enqueues_for_opted_in_work() {
     seed_open_finding(&pool, "fnd_yes", opted_in, 7200).await;
     seed_open_finding(&pool, "fnd_no", default_off, 7200).await;
 
-    run_one_sweep(&pool, 60).await;
+    run_one_sweep(&pool, 60, Some("test-provider"), None).await;
 
     assert_eq!(
         review_master_schedule_count(&pool, opted_in).await,
@@ -216,7 +216,7 @@ async fn fresh_finding_does_not_enqueue_even_when_opted_in() {
     // Age 5s vs threshold 60s — not stale.
     seed_open_finding(&pool, "fnd_fresh", work_id, 5).await;
 
-    run_one_sweep(&pool, 60).await;
+    run_one_sweep(&pool, 60, Some("test-provider"), None).await;
 
     assert_eq!(
         review_master_schedule_count(&pool, work_id).await,
@@ -243,7 +243,7 @@ async fn resolved_finding_is_not_stale() {
         .await
         .unwrap();
 
-    run_one_sweep(&pool, 60).await;
+    run_one_sweep(&pool, 60, Some("test-provider"), None).await;
 
     assert_eq!(
         review_master_schedule_count(&pool, work_id).await,
@@ -263,8 +263,8 @@ async fn repeated_sweeps_remain_stable() {
     seed_work(&pool, work_id, true).await;
     seed_open_finding(&pool, "fnd_repeat", work_id, 7200).await;
 
-    run_one_sweep(&pool, 60).await;
-    run_one_sweep(&pool, 60).await;
+    run_one_sweep(&pool, 60, Some("test-provider"), None).await;
+    run_one_sweep(&pool, 60, Some("test-provider"), None).await;
 
     // Each sweep enqueues a fresh schedule because the underlying
     // finding remains open. AC3 contract: opt-in is sticky until the

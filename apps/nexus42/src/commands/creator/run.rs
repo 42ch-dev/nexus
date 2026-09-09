@@ -223,6 +223,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
         input: Some(input),
         force_gates,
         reason,
+        agent_bindings: None,
     };
 
     let resp: serde_json::Value = client

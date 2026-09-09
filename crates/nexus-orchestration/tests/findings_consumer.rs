@@ -225,6 +225,8 @@ async fn novel_writing_outline_includes_open_findings_block_when_seeded() {
         Some(1),
         None,
         &work,
+        std::collections::HashMap::new(),
+        None,
     )
     .await
     .expect("enqueue_auto_chain_schedule should succeed for produce stage");
@@ -321,6 +323,8 @@ async fn novel_writing_outline_omits_block_when_no_findings() {
         Some(1),
         None,
         &work,
+        std::collections::HashMap::new(),
+        None,
     )
     .await
     .expect("enqueue_auto_chain_schedule should succeed with no findings");

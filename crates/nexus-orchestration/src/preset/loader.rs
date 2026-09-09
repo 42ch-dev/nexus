@@ -258,9 +258,13 @@ pub fn load_preset_from_str_with_limits(
     // 4. Build inner graphs per §8.2 mapping table. The production prompt
     // executor and per-run cancellation tokens are wired at graph build time
     // (A1); `None`/empty keeps loader-only/test construction executor-free.
-    let inner_graphs = build_inner_graphs(&manifest, None, std::sync::Arc::new(
-        std::sync::RwLock::new(std::collections::HashMap::new()),
-    ));
+    let inner_graphs = build_inner_graphs(
+        &manifest,
+        &manifest.preset.id,
+        None,
+        None,
+        std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+    );
 
     // 5. Extract output bindings from manifest.
     let output_bindings = extract_output_bindings(&manifest);
@@ -1276,8 +1280,15 @@ pub fn build_wired_outer_graph(
     let graph = graph_flow::Graph::new(&loaded.id);
 
     // A1: rebuild the inner graphs with the production prompt executor and
-    // cancellation tokens wired into every `acp_prompt` node.
-    let inner_graphs = build_inner_graphs(&loaded.manifest, prompt_executor, session_cancels);
+    // cancellation tokens wired into every `acp_prompt` node. Template files
+    // resolve to actual content from the frozen source identity (N-7).
+    let inner_graphs = build_inner_graphs(
+        &loaded.manifest,
+        &loaded.id,
+        loaded.source_identity.as_ref(),
+        prompt_executor,
+        session_cancels,
+    );
 
     // V1.52 T-B P1: pre-compute incoming labeled edge counts for merge nodes.
     // W-2 (v1.179 QC fix round 2): production wiring shares the exact scan
@@ -1412,6 +1423,8 @@ fn extract_output_bindings(manifest: &PresetManifest) -> HashMap<String, String>
 /// goes through the Host plane — never an echo/worker fallback.
 fn build_inner_graphs(
     manifest: &PresetManifest,
+    preset_id: &str,
+    source_identity: Option<&crate::run_state::PresetSourceIdentity>,
     prompt_executor: Option<std::sync::Arc<dyn crate::capability::PromptExecutor>>,
     session_cancels: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
@@ -1430,6 +1443,30 @@ fn build_inner_graphs(
                 // Determine kind (currently only acp_prompt supported).
                 let task = match node.kind {
                     GraphNodeKind::AcpPrompt => {
+                        // Resolve the template_file to ACTUAL content at build
+                        // time (N-7): the Host must receive the rendered
+                        // prompt, never the raw bundle-relative path. Embedded
+                        // presets read from the compiled-in bundle; directory
+                        // presets read from their resolved root. A missing
+                        // template fails closed (the node refuses at runtime
+                        // with a typed error rather than prompting with a path).
+                        let template = node
+                            .template_file
+                            .as_deref()
+                            .and_then(|path| {
+                                match source_identity {
+                                    Some(crate::run_state::PresetSourceIdentity::Embedded {
+                                        preset_id: pid,
+                                        ..
+                                    }) => crate::preset::read_embedded_template(pid, path),
+                                    Some(crate::run_state::PresetSourceIdentity::Directory {
+                                        root,
+                                        ..
+                                    }) => std::fs::read_to_string(root.join(path)).ok(),
+                                    None => crate::preset::read_embedded_template(preset_id, path),
+                                }
+                            })
+                            .unwrap_or_default();
                         let mut task = InnerGraphNodeTask::new(&node.id)
                             // Tool policy from node (parse from string)
                             .with_tool_policy(
@@ -1438,8 +1475,8 @@ fn build_inner_graphs(
                                     .and_then(|s| std::str::FromStr::from_str(s.as_str()).ok())
                                     .unwrap_or(crate::tasks::ToolPolicy::AutoGrantReadOnly),
                             )
-                            // Template file path (will be resolved at runtime)
-                            .with_template(node.template_file.clone().unwrap_or_default())
+                            // Resolved template content (rendered at runtime)
+                            .with_template(template)
                             // A1: production prompt executor + cancellation tokens
                             .with_prompt_executor(prompt_executor.clone())
                             .with_session_cancels(session_cancels.clone());

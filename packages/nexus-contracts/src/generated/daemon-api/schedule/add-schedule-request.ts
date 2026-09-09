@@ -45,6 +45,17 @@ export interface AddScheduleRequest {
     [k: string]: unknown | undefined;
   };
   /**
+   * Role to provider binding map (A1). Frozen at admission into the run descriptor.
+   */
+  agent_bindings?: {
+    [k: string]:
+      | {
+          provider_id: string;
+          model?: string;
+        }
+      | undefined;
+  };
+  /**
    * When true, bypass preset gate evaluation. Requires reason.
    */
   force_gates?: boolean;

@@ -263,12 +263,19 @@ impl Task for InnerGraphTask {
 
         // Copy core_context.* keys from parent.
         for key_prefix in &["core_context", "preset.input"] {
-            // We use a simple approach: copy known keys via serde.
-            // Since Context uses Arc<DashMap>, we serialize the parent, extract
-            // matching keys, and set them on the child.
+            // Context serializes as `{"data": {...}, "chat_history": {...}}`;
+            // the flat `preset.input.*` / `core_context.*` keys live in the
+            // `data` map. Iterate THAT map, not the top-level envelope —
+            // otherwise no key ever matches the prefix and the child loses
+            // the frozen admission input (N-7: inner-graph prompts render
+            // empty `preset.input.*` variables).
             if let Ok(parent_data) = serde_json::to_value(&context) {
-                if let Some(obj) = parent_data.as_object() {
-                    for (k, v) in obj {
+                if let Some(data) = parent_data
+                    .as_object()
+                    .and_then(|obj| obj.get("data"))
+                    .and_then(|d| d.as_object())
+                {
+                    for (k, v) in data {
                         if k.starts_with(&format!("{key_prefix}.")) || k == *key_prefix {
                             child_ctx.set(k.as_str(), v.clone()).await;
                         }
@@ -1976,10 +1983,22 @@ impl Task for StateCompositeTask {
                 NextAction::WaitForInput
             }
             Some(ExitWhen::Rule) => {
-                // Run rule check inline.
-                let rule_task = RuleCheckTask;
-                let result = rule_task.run(context.clone()).await?;
-                result.next_action
+                // The unit `ExitWhen::Rule` (bare `exit_when: kind: rule`)
+                // contract is "transition as soon as the enter action
+                // completes" (TD-V131-08, locked by
+                // `memory_augmented_rule_exit_is_explicit_always_true`).
+                // Production never injects a `_rule` expression for the
+                // unit variant, so an unset `_rule` means always-true —
+                // immediate transition. A context `_rule` (test/expression
+                // wiring) still routes through the rule evaluator.
+                let rule: String = context.get("_rule").await.unwrap_or_default();
+                if rule.is_empty() {
+                    NextAction::Continue
+                } else {
+                    let rule_task = RuleCheckTask;
+                    let result = rule_task.run(context.clone()).await?;
+                    result.next_action
+                }
             }
             Some(ExitWhen::LlmJudge {
                 ref template_file,

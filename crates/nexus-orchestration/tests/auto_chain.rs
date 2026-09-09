@@ -361,8 +361,15 @@ use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
 use std::sync::Arc;
 
 /// Helper: create a supervisor backed by the test pool.
+///
+/// N-9: the supervisor carries a default binding provider so auto-chain
+/// advancement can build complete binding maps for stage presets (which
+/// have prompt roles). The provider id is a test-only label; these tests
+/// assert advancement/row state, not admission.
 fn test_supervisor(pool: SqlitePool) -> Arc<ScheduleSupervisor> {
-    Arc::new(ScheduleSupervisor::new(Arc::new(pool)))
+    Arc::new(
+        ScheduleSupervisor::new(Arc::new(pool)).with_binding_provider("test-provider".to_string()),
+    )
 }
 
 /// Helper: insert a minimal schedule row directly (bypasses `insert_pending` validation).
@@ -733,6 +740,8 @@ async fn simulate_boot_auto_resume(pool: &SqlitePool) -> Vec<(String, String, Op
                     None,
                     None,
                     &latest,
+                    std::collections::HashMap::new(),
+                    None,
                 )
                 .await
                 {

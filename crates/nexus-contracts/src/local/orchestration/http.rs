@@ -55,6 +55,10 @@ pub struct SessionSummary {
     pub status: String,
     /// Task the session is currently executing (if any).
     pub current_task_id: Option<String>,
+    /// Actionable failure reason for terminal/uncertain outcomes (e.g. an
+    /// unconfirmed cancel cleanup that left the run `interrupted`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_reason: Option<String>,
 }
 
 /// Response body for `GET /v1/daemon/orchestration/sessions/{id}`.
@@ -62,6 +66,21 @@ pub struct SessionSummary {
 #[serde(rename_all = "camelCase")]
 pub struct GetSessionResponse {
     pub session: SessionSummary,
+}
+
+/// Role → provider binding (A1) for the camelCase session-create wire
+/// contract (`agentBindings`). The schedule path uses the snake_case
+/// [`crate::local::schedule::http::AgentBindingDto`]; session creation
+/// preserves its existing camelCase convention (`presetId`, `creatorId`,
+/// `agentBindings` → `providerId`, `model`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionAgentBindingDto {
+    /// Provider id.
+    pub provider_id: String,
+    /// Optional model id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 /// Request body for `POST /v1/daemon/orchestration/sessions` (schedule start).
@@ -75,6 +94,11 @@ pub struct CreateSessionRequest {
     /// Optional seed text for `preset.input.*`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<String>,
+    /// Role → provider binding map (A1, v1.186 P2 T1). Frozen at admission
+    /// into the run descriptor; graph node `agent` selects the role key.
+    /// Unknown role/provider references are refused before enqueue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_bindings: Option<std::collections::HashMap<String, SessionAgentBindingDto>>,
 }
 
 /// Response body for `POST /v1/daemon/orchestration/sessions` (schedule start).
@@ -103,8 +127,12 @@ pub struct ReloadPresetResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignalSessionRequest {
-    /// One of `pause`, `resume`, `cancel`, `advance`.
+    /// One of `pause`, `resume`, `cancel`, `advance`, `continue`.
     pub signal: String,
+    /// Exact durable wait token for `continue` (A4). Required for
+    /// `signal: "continue"`; ignored/absent for other signals.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_id: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
