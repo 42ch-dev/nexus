@@ -393,16 +393,15 @@ function ButtonSection() {
         data-testid="button-chronos-note"
         className="text-copy-14 text-gray-700 mb-4 max-w-prose"
       >
-        Chronos primary is theme-split: light shell uses{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">bg-brand-cyan-1000</code>{' '}
-        +{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">text-brand-white</code>;
-        dark shell keeps{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">bg-brand-cyan</code> +{' '}
+        Primary cobalt uses{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">blue-700/800/900</code>{' '}
+        rest/hover/active with{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">text-brand-white</code>{' '}
+        in light and{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           text-brand-deep-blue
-        </code>
-        . Toggle the theme to confirm both shells.
+        </code>{' '}
+        on the lighter cobalt fill in dark. Toggle the theme to confirm both shells.
       </p>
 
       <p className="text-label-14 text-gray-900 mb-4">
@@ -540,7 +539,7 @@ function CardSection() {
                   The Lost City
                 </CardTitle>
                 <CardDescription>
-                  Serif display-20 — reserved for creative-entity cards
+                  Sans display-20 — reserved for creative-entity cards
                   (work/world).
                 </CardDescription>
               </CardHeader>
@@ -620,15 +619,32 @@ function InputSection() {
         <div className="flex flex-col gap-4 max-w-md">
           <MatrixRow>
             <VariantLabel label="default" />
-            <Input placeholder="Default input..." className="flex-1" />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="input-default">Project codename</Label>
+              <Input id="input-default" placeholder="Default input…" />
+            </div>
           </MatrixRow>
           <MatrixRow>
             <VariantLabel label="disabled" />
-            <Input placeholder="Disabled input..." disabled className="flex-1" />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="input-disabled">Archived field</Label>
+              <Input id="input-disabled" placeholder="Disabled input…" disabled />
+            </div>
           </MatrixRow>
           <MatrixRow>
             <VariantLabel label="invalid" />
-            <Input placeholder="Invalid input..." invalid className="flex-1" defaultValue="bad value" />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="input-invalid">Executor label 执行器标签</Label>
+              <Input
+                id="input-invalid"
+                invalid
+                aria-describedby="input-invalid-error"
+                defaultValue="bad value"
+              />
+              <p id="input-invalid-error" role="alert" className="text-copy-13 text-red-700">
+                Choose a valid executor.
+              </p>
+            </div>
           </MatrixRow>
         </div>
       </MatrixCard>
@@ -655,8 +671,8 @@ function LabelSection() {
             <Input id="demo-input" placeholder="Click the label to focus this input" />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label>Disabled label (visual only)</Label>
-            <Input placeholder="Disabled input" disabled />
+            <Label htmlFor="label-disabled-control">Bio (associated disabled control)</Label>
+            <Input id="label-disabled-control" placeholder="Disabled input" disabled />
           </div>
         </div>
       </MatrixCard>
@@ -969,16 +985,23 @@ function TabsSection() {
   return (
     <section data-testid="tabs-fixtures">
       <SectionHeading id="comp-tabs">Tabs</SectionHeading>
-      <p className="text-copy-16 text-gray-700 mb-6">
-        Tab set — interactive, two panels. V1.137 P2 promotion: imported from{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>
-        ; web keeps a thin re-export under{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          apps/web/src/components/ui/tabs.tsx
-        </code>
-        . Active tab uses background-100 + shadow-card; inactive tabs are hover-responsive.
+      <p className="text-copy-16 text-gray-700 mb-2">
+        Controlled tab set with roving focus, automatic keyboard activation, and
+        per-instance trigger/panel associations.{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">TabsTrigger</code>{' '}
+        has no disabled prop — label that state unsupported rather than simulating it.
       </p>
-      <MatrixCard>
+      <p className="text-copy-13 text-gray-500 mb-6">
+        Focus a tab, then use{' '}
+        <kbd className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">←</kbd> /{' '}
+        <kbd className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">→</kbd>,{' '}
+        <kbd className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">Home</kbd>, or{' '}
+        <kbd className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">End</kbd> to move
+        selection.
+      </p>
+
+      <p className="text-label-14 text-gray-900 mb-4">Controlled — hover, focus, keyboard</p>
+      <MatrixCard className="mb-6" data-testid="tabs-controlled-fixture">
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList>
             <TabsTrigger value="tab1">Overview</TabsTrigger>
@@ -986,21 +1009,43 @@ function TabsSection() {
           </TabsList>
           <TabsContent value="tab1">
             <p className="text-copy-14 text-gray-900">
-              Overview panel — click Details to switch tabs. The Tabs component
-              supports both controlled (<code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">value</code>{' '}
-              + <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">onValueChange</code>) and
-              uncontrolled (<code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">defaultValue</code>) modes.
+              Overview panel — pointer or keyboard selection. Controlled via{' '}
+              <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">value</code> +{' '}
+              <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">onValueChange</code>.
             </p>
           </TabsContent>
           <TabsContent value="tab2">
             <p className="text-copy-14 text-gray-900">
-              Details panel — the active tab trigger has a raised card
-              appearance with <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">shadow-card</code>.
-              Hovering an inactive trigger applies a subtle gray-alpha-100
-              background.
+              Details panel — active trigger uses{' '}
+              <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">shadow-card</code>;
+              inactive triggers respond to real hover.
             </p>
           </TabsContent>
         </Tabs>
+      </MatrixCard>
+
+      <p className="text-label-14 text-gray-900 mb-4">
+        Uncontrolled + duplicate values (two independent instances)
+      </p>
+      <MatrixCard>
+        <div className="flex flex-col gap-6">
+          <Tabs defaultValue="shared">
+            <TabsList>
+              <TabsTrigger value="shared">Instance A</TabsTrigger>
+              <TabsTrigger value="other">Other</TabsTrigger>
+            </TabsList>
+            <TabsContent value="shared">Instance A — shared value panel</TabsContent>
+            <TabsContent value="other">Instance A — other panel</TabsContent>
+          </Tabs>
+          <Tabs defaultValue="shared">
+            <TabsList>
+              <TabsTrigger value="shared">Instance B</TabsTrigger>
+              <TabsTrigger value="other">Other</TabsTrigger>
+            </TabsList>
+            <TabsContent value="shared">Instance B — shared value panel</TabsContent>
+            <TabsContent value="other">Instance B — other panel</TabsContent>
+          </Tabs>
+        </div>
       </MatrixCard>
     </section>
   );
@@ -1022,24 +1067,32 @@ function TextareaSection() {
         <div className="flex flex-col gap-4 max-w-lg">
           <MatrixRow>
             <VariantLabel label="default" />
-            <Textarea placeholder="Default textarea…" className="flex-1" />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="textarea-default">Notes</Label>
+              <Textarea id="textarea-default" placeholder="Default textarea…" />
+            </div>
           </MatrixRow>
           <MatrixRow>
             <VariantLabel label="disabled" />
-            <Textarea
-              placeholder="Disabled textarea…"
-              disabled
-              className="flex-1"
-            />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="textarea-disabled">Locked draft</Label>
+              <Textarea id="textarea-disabled" placeholder="Disabled textarea…" disabled />
+            </div>
           </MatrixRow>
           <MatrixRow>
             <VariantLabel label="invalid" />
-            <Textarea
-              placeholder="Invalid textarea…"
-              invalid
-              className="flex-1"
-              defaultValue="content with errors"
-            />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="textarea-invalid">Synopsis 概要</Label>
+              <Textarea
+                id="textarea-invalid"
+                invalid
+                aria-describedby="textarea-invalid-error"
+                defaultValue="content with errors"
+              />
+              <p id="textarea-invalid-error" role="alert" className="text-copy-13 text-red-700">
+                Synopsis must be at least 20 characters.
+              </p>
+            </div>
           </MatrixRow>
         </div>
       </MatrixCard>

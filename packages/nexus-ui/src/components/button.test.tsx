@@ -7,23 +7,21 @@ import { Button } from './button';
 describe('Button', () => {
   // --- variant rendering ---
 
-  it('renders the primary variant with mid-teal fill in light and cyan CTA in dark', () => {
+  it('renders the primary variant with blue-700 rest/hover/active and theme-split label', () => {
     render(<Button variant="primary">Save</Button>);
     const btn = screen.getByRole('button', { name: 'Save' });
-    expect(btn).toHaveClass('bg-brand-cyan-1000');
+    expect(btn).toHaveClass('bg-blue-700');
     expect(btn).toHaveClass('text-brand-white');
-    expect(btn).toHaveClass('hover:bg-blue-900');
-    expect(btn).toHaveClass('active:bg-blue-1000');
-    expect(btn).toHaveClass('dark:bg-brand-cyan');
+    expect(btn).toHaveClass('hover:bg-blue-800');
+    expect(btn).toHaveClass('active:bg-blue-900');
     expect(btn).toHaveClass('dark:text-brand-deep-blue');
-    expect(btn).toHaveClass('dark:hover:bg-blue-800');
-    expect(btn).toHaveClass('dark:active:bg-blue-900');
   });
 
   it('renders the secondary variant (default)', () => {
     render(<Button>Cancel</Button>);
     const btn = screen.getByRole('button', { name: 'Cancel' });
     expect(btn).toHaveClass('border');
+    expect(btn).toHaveClass('border-gray-500');
     expect(btn).toHaveClass('bg-background-100');
     expect(btn).toHaveClass('text-gray-1000');
   });
@@ -119,7 +117,7 @@ describe('Button', () => {
     );
     const btn = screen.getByRole('button', { name: 'Styled' });
     expect(btn).toHaveClass('custom-extra');
-    expect(btn).toHaveClass('bg-brand-cyan-1000');
+    expect(btn).toHaveClass('bg-blue-700');
     expect(btn).toHaveClass('text-brand-white');
   });
 

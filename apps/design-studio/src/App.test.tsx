@@ -1918,11 +1918,12 @@ describe('Components page — Card v0.4 matrix (interactive + title voice)', () 
     expect(card.className).not.toContain('hover:shadow-elevation-2');
   });
 
-  it('CardTitle voice="content" swaps to the display tier', async () => {
+  it('CardTitle voice="content" swaps to the larger sans display tier', async () => {
     const title = screen.getByTestId('card-title-content');
-    expect(title.className).toContain('font-display');
+    expect(title.className).toContain('font-heading');
     expect(title.className).toContain('text-display-20');
     expect(title.className).toContain('tracking-tight');
+    expect(title.className).not.toContain('font-display');
   });
 
   it('default CardTitle keeps the interface sans treatment', async () => {
@@ -1995,12 +1996,10 @@ describe('Components page — display voice confinement (AC-P1-5)', () => {
     await renderStudio('/components');
   });
 
-  it('confines the display voice to content-voice opt-ins', () => {
-    // Only the CardTitle voice="content" fixture and the EmptyState headline
-    // may carry font-display on this page — interface components (Button,
-    // Badge, Input, Select, Tabs, Table) stay sans per DESIGN.md §Design
-    // Concept.
-    const allowedContainers = ['card-title-content', 'states-empty'];
+  it('confines the display voice to EmptyState headline opt-in', () => {
+    // CardTitle voice="content" now uses sans display-20; only EmptyState may
+    // carry font-display on this page — interface components stay sans.
+    const allowedContainers = ['states-empty'];
     const displayEls = Array.from(document.querySelectorAll('.font-display'));
     expect(displayEls.length).toBeGreaterThan(0);
     for (const el of displayEls) {

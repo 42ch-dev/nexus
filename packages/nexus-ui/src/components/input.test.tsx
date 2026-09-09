@@ -56,13 +56,13 @@ describe('Input', () => {
     render(<Input invalid data-testid="test-input" />);
     const input = screen.getByTestId('test-input');
     expect(input).toHaveClass('border-red-700');
-    expect(input).not.toHaveClass('border-gray-alpha-400');
+    expect(input).not.toHaveClass('border-gray-500');
   });
 
-  it('applies gray-alpha-400 border class when not invalid', () => {
+  it('applies gray-500 border class when not invalid', () => {
     render(<Input data-testid="test-input" />);
     const input = screen.getByTestId('test-input');
-    expect(input).toHaveClass('border-gray-alpha-400');
+    expect(input).toHaveClass('border-gray-500');
     expect(input).not.toHaveClass('border-red-700');
   });
 

@@ -163,17 +163,17 @@ describe('Select', () => {
     );
     const select = screen.getByTestId('test-select');
     expect(select).toHaveClass('border-red-700');
-    expect(select).not.toHaveClass('border-gray-alpha-400');
+    expect(select).not.toHaveClass('border-gray-500');
   });
 
-  it('applies gray-alpha-400 border class when not invalid', () => {
+  it('applies gray-500 border class when not invalid', () => {
     render(
       <Select data-testid="test-select">
         <option value="a">A</option>
       </Select>,
     );
     const select = screen.getByTestId('test-select');
-    expect(select).toHaveClass('border-gray-alpha-400');
+    expect(select).toHaveClass('border-gray-500');
     expect(select).not.toHaveClass('border-red-700');
   });
 

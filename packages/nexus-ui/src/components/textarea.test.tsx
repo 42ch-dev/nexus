@@ -56,13 +56,13 @@ describe('Textarea', () => {
     render(<Textarea invalid data-testid="test-textarea" />);
     const textarea = screen.getByTestId('test-textarea');
     expect(textarea).toHaveClass('border-red-700');
-    expect(textarea).not.toHaveClass('border-gray-alpha-400');
+    expect(textarea).not.toHaveClass('border-gray-500');
   });
 
-  it('applies gray-alpha-400 border class when not invalid', () => {
+  it('applies gray-500 border class when not invalid', () => {
     render(<Textarea data-testid="test-textarea" />);
     const textarea = screen.getByTestId('test-textarea');
-    expect(textarea).toHaveClass('border-gray-alpha-400');
+    expect(textarea).toHaveClass('border-gray-500');
     expect(textarea).not.toHaveClass('border-red-700');
   });
 

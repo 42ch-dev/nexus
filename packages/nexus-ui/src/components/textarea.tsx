@@ -4,7 +4,7 @@ import { cn } from '../lib/cn';
 
 /**
  * Textarea — DESIGN.md §Component Primitives/Textarea. Min height 96px,
- * background-100, gray-1000 text, gray-alpha-400 border, radius-control.
+ * background-100, gray-1000 text, gray-500 border, radius-control.
  * Disabled (v0.4 `input-select-textarea.disabled`): gray-100 fill, gray-700
  * text, gray-alpha-300 border.
  *
@@ -33,7 +33,7 @@ export function Textarea({ className, invalid, ref, ...props }: TextareaProps) {
         'placeholder:text-gray-700',
         'focus-visible:border-blue-700',
         'disabled:bg-gray-100 disabled:text-gray-700 disabled:border-gray-alpha-300 disabled:cursor-not-allowed',
-        invalid ? 'border-red-700' : 'border-gray-alpha-400',
+        invalid ? 'border-red-700' : 'border-gray-500',
         className,
       )}
       {...props}

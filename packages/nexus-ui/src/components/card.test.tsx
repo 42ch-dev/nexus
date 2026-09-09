@@ -113,22 +113,22 @@ describe('Card', () => {
     expect(el).not.toHaveClass('font-display');
   });
 
-  it('swaps to the serif display tier when voice="content"', () => {
+  it('swaps to the larger sans display tier when voice="content"', () => {
     render(<CardTitle voice="content">Work Title</CardTitle>);
     const el = screen.getByText('Work Title');
     expect(el.tagName).toBe('H3');
-    expect(el).toHaveClass('font-display');
+    expect(el).toHaveClass('font-heading');
     expect(el).toHaveClass('text-display-20');
     expect(el).toHaveClass('tracking-tight');
-    // Interface treatment is fully replaced (no sans leftovers).
+    // Interface treatment is fully replaced (no heading-16 leftovers).
     expect(el).not.toHaveClass('text-heading-16');
-    expect(el).not.toHaveClass('font-heading');
+    expect(el).not.toHaveClass('font-display');
   });
 
   it('merges custom className on CardTitle with voice="content"', () => {
     render(<CardTitle voice="content" className="brand-title">Content Merge</CardTitle>);
     const el = screen.getByText('Content Merge');
-    expect(el).toHaveClass('font-display');
+    expect(el).toHaveClass('text-display-20');
     expect(el).toHaveClass('brand-title');
   });
 
