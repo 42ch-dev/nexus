@@ -62,6 +62,43 @@ test('embedded color-mix reference resolves to the scalar hex', () => {
   assert.equal(out, 'color-mix(in srgb, #8EB1F4 16%, transparent)');
 });
 
+test('null mapped scalar fails closed (no silent empty omission)', async () => {
+  const doc = structuredClone(baseDark);
+  doc.colors['brand-white'] = null;
+  assert.throws(() => scalarFor(doc.colors['brand-white'], doc), /fail closed|empty value/);
+  // Use the real SSOT pair so a null brand leaf fails projectDesign (not a
+  // missing-source-path artifact of the minimal fixture).
+  const real = await loadDesignPair(process.cwd());
+  const light = structuredClone(real.light);
+  light.colors['brand-white'] = null;
+  assert.throws(() => projectDesign({ light, dark: structuredClone(real.dark) }), /fail closed|empty value/);
+});
+
+test('empty mapped scalar string fails closed (no silent var drop)', async () => {
+  const doc = structuredClone(baseDark);
+  doc.colors['blue-700'] = '';
+  assert.throws(() => scalarFor(doc.colors['blue-700'], doc), /empty scalar/);
+  const real = await loadDesignPair(process.cwd());
+  const light = structuredClone(real.light);
+  light.colors['brand-cyan'] = '';
+  assert.throws(() => projectDesign({ light, dark: structuredClone(real.dark) }), /fail closed|empty scalar/);
+});
+
+test('missing brand snapshot key fails projectDesign (no empty generated literal)', async () => {
+  const real = await loadDesignPair(process.cwd());
+  const light = structuredClone(real.light);
+  const dark = structuredClone(real.dark);
+  // Remove from BOTH themes so leaf-parity holds and the brand-snapshot
+  // existence check is what fails closed (not a parity artifact).
+  delete light.colors['brand-white'];
+  delete dark.colors['brand-white'];
+  // Removing brand-white is a fail-closed failure: either the brand-snapshot
+  // existence check, an unresolved ref elsewhere, or an empty-value guard —
+  // projectDesign must never emit an empty generated literal. Assert generic
+  // throw (any of these fail-closed paths is a correct rejection).
+  assert.throws(() => projectDesign({ light, dark }), /fail closed|empty value|brand snapshot missing|unresolved reference/);
+});
+
 test('whole-role object reference rejects as non-scalar (no object serialization)', () => {
   const value = '{typography.button-14}';
   assert.throws(() => scalarFor(value, baseDark), /non-scalar value/);

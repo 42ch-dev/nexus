@@ -34,14 +34,6 @@ import { parseDocument } from 'yaml';
 
 /** @typedef {Record<string, unknown>} ThemeDoc */
 
-/** Normalize a value to a CSS text scalar (refs already resolved). */
-function cssText(value) {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'string' || typeof value === 'number') return String(value);
-  if (typeof value === 'boolean') return String(value);
-  return '';
-}
-
 /**
  * Walk a parsed theme document and collect the full dot-paths of every
  * scalar leaf together with its parent path (leaf path set for parity).
@@ -158,10 +150,19 @@ export async function loadDesignPair(repoRoot) {
  * @returns {string}
  */
 export function resolveScalar(value, doc, index, sourcePath, seen = new Set(), trace = []) {
-  if (value === null || value === undefined) return '';
+  if (value === null || value === undefined) {
+    throw new Error(
+      `[projectDesign] empty value at ${sourcePath} — a mapped token must resolve to a non-empty scalar (fail closed, no last-good).`,
+    );
+  }
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
 
   if (typeof value === 'string') {
+    if (value === '') {
+      throw new Error(
+        `[projectDesign] empty scalar at ${sourcePath} — a mapped token must resolve to a non-empty value (fail closed, no silent omission).`,
+      );
+    }
     // Whole-value reference to a recipe/role (e.g. "{typography.label-14}") —
     // resolve the target; callers that need a sub-member pass the member path.
     if (/^\{[^}]+\}$/.test(value)) {
@@ -206,7 +207,6 @@ function resolveRef(refPath, doc, index, sourcePath, seen, trace) {
       `[projectDesign] cyclic reference at ${sourcePath}: ${[...trace, refPath].join(' -> ')}`,
     );
   }
-  if (seen.has(refPath)) return ''; // already resolved (safe); caller cache handles scalars
   if (!index.has(refPath)) {
     throw new Error(`[projectDesign] unresolved reference at ${sourcePath}: {${refPath}} (missing from source)`);
   }
@@ -546,9 +546,8 @@ function buildProjection(doc) {
 /**
  * Resolve a single projection entry to its final CSS value string.
  */
-function projectValue(doc, entry) {
+function projectValue(doc, entry, index = indexPaths(doc)) {
   const { source } = entry;
-  const index = indexPaths(doc);
   if (!index.has(source)) {
     throw new Error(`[projectDesign] missing source path for ${entry.cssVar}: ${source}`);
   }
@@ -577,7 +576,7 @@ function projectValue(doc, entry) {
  * Brand color entries in tokens.css forward to the package theme.css
  * `--nexus-brand-*` layer (public contract: tokens.css imports theme.css).
  */
-function emitBlock(doc, entries, indent = '  ', brandAlias = false) {
+function emitBlock(doc, entries, index, indent = '  ', brandAlias = false) {
   const lines = [];
   for (const entry of entries) {
     let cssVar = entry.cssVar;
@@ -587,8 +586,14 @@ function emitBlock(doc, entries, indent = '  ', brandAlias = false) {
       lines.push(`${indent}${cssVar}: var(--nexus-brand-${rest});`);
       continue;
     }
-    const value = projectValue(doc, entry);
-    if (value === '') continue;
+    const value = projectValue(doc, entry, index);
+    if (value === '') {
+      // resolveScalar already rejects empty/null; this is an unreachable
+      // defensive guard so a future regression cannot silently drop a var.
+      throw new Error(
+        `[projectDesign] ${entry.cssVar} resolved to an empty value (${entry.source}) — fail closed, no silent omission.`,
+      );
+    }
     lines.push(`${indent}${cssVar}: ${value};`);
   }
   return lines.join('\n');
@@ -612,8 +617,12 @@ export function projectDesign(pair) {
     );
   }
 
-  const lightEntries = buildProjection(light).projections;
-  const darkEntries = buildProjection(dark).projections;
+  const lightRegistry = buildProjection(light);
+  const darkRegistry = buildProjection(dark);
+  const lightEntries = lightRegistry.projections;
+  const darkEntries = darkRegistry.projections;
+  const lightIndex = lightRegistry.index;
+  const darkIndex = darkRegistry.index;
 
   // Sanity: both themes must project the identical CSS var surface.
   const lightVars = new Set(lightEntries.map((e) => e.cssVar));
@@ -644,11 +653,11 @@ export function projectDesign(pair) {
     "@import '@42ch/nexus-ui/theme.css';",
     '',
     ':root {',
-    emitBlock(light, lightEntries, '  ', true),
+    emitBlock(light, lightEntries, lightIndex, '  ', true),
     '}',
     '',
     '.dark {',
-    emitBlock(dark, darkEntries, '  ', true),
+    emitBlock(dark, darkEntries, darkIndex, '  ', true),
     '}',
     '',
   ].join('\n');
@@ -656,11 +665,12 @@ export function projectDesign(pair) {
   // ── theme.css (brand CSS custom properties, both themes) ──
   // Brand vars are the raw DESIGN color values under their public
   // --nexus-brand-<name> contract. tokens.css forwards --color-brand-* onto
-  // these (see emitBlock brandAlias).
-  const brandLight = buildProjection(light).projections
+  // these (see emitBlock brandAlias). Reuse the shared registry so the
+  // projection walk happens once per theme (S-001).
+  const brandLight = lightEntries
     .filter((e) => e.cssVar.startsWith('--color-brand-'))
     .map((e) => ({ ...e, cssVar: `--nexus-brand-${e.cssVar.slice('--color-brand-'.length)}` }));
-  const brandDark = buildProjection(dark).projections
+  const brandDark = darkEntries
     .filter((e) => e.cssVar.startsWith('--color-brand-'))
     .map((e) => ({ ...e, cssVar: `--nexus-brand-${e.cssVar.slice('--color-brand-'.length)}` }));
   const brandCss = [
@@ -674,17 +684,28 @@ export function projectDesign(pair) {
     ' * live in @nexus/design-tokens/src/tokens.css (also generated).',
     ' */',
     ':root {',
-    emitBlock(light, brandLight),
+    emitBlock(light, brandLight, lightIndex),
     '}',
     '',
     '.dark {',
-    emitBlock(dark, brandDark),
+    emitBlock(dark, brandDark, darkIndex),
     '}',
     '',
   ].join('\n');
 
   // ── generated-brand.ts (numeric light/default snapshot) ──
+  // Snapshot must consume resolved, validated light scalars (never an empty
+  // or unresolved literal): resolve each brand key through the shared light
+  // projection index, which fails closed on null/undefined/empty/missing.
+  const brandScalars = ['brand-deep-blue', 'brand-cyan', 'brand-white'];
   const colors = light.colors || {};
+  for (const key of brandScalars) {
+    if (colors[key] === undefined || colors[key] === null) {
+      throw new Error(
+        `[projectDesign] brand snapshot missing colors.${key} in DESIGN.md — fail closed, no empty generated literal.`,
+      );
+    }
+  }
   const brandTokens = [
     '// Generated by @nexus/design-tokens — DERIVED OUTPUT, do not edit by hand.',
     '// Light/default numeric snapshot from repo-root DESIGN.md §Brand Colors.',
@@ -692,9 +713,9 @@ export function projectDesign(pair) {
     '// these constants. `cyan` is the historical property name for the',
     '// recalibrated cobalt signal. Regenerate: pnpm --filter @nexus/design-tokens generate.',
     'export const brandColors = {',
-    `  deepBlue: '${colors['brand-deep-blue']}' as const,`,
-    `  cyan: '${colors['brand-cyan']}' as const,`,
-    `  white: '${colors['brand-white']}' as const,`,
+    `  deepBlue: '${resolveScalar(colors['brand-deep-blue'], light, lightIndex, 'colors.brand-deep-blue')}' as const,`,
+    `  cyan: '${resolveScalar(colors['brand-cyan'], light, lightIndex, 'colors.brand-cyan')}' as const,`,
+    `  white: '${resolveScalar(colors['brand-white'], light, lightIndex, 'colors.brand-white')}' as const,`,
     '} as const;',
     '',
   ].join('\n');
