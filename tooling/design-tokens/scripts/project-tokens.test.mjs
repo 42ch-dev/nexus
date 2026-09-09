@@ -97,11 +97,30 @@ test('differing light/dark leaf paths are rejected', async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-test('projectDesign emits a stable deterministic double-theme css block', async () => {
+test('projection emits known theme-specific, reference, and compound outputs', async () => {
+  // Known input (committed DESIGN.md / DESIGN.dark.md SSOT) -> known output:
+  // assert the exact projected CSS strings for (a) distinct theme-specific
+  // values, (b) an alias that resolves through a reference, and (c) a compound
+  // recipe that projects its resolved color member. Without snapshotting the
+  // whole fixture, these guard that a plausible compiler defect (defaulting a
+  // value, dropping a reference, leaking "{ref}" / "[object Object]") would
+  // change the emitted string and fail the test.
   const realPair = await loadDesignPair(process.cwd());
   const out = projectDesign(realPair);
   assert.ok(out.css.includes(':root {'));
   assert.ok(out.css.includes('.dark {'));
-  const second = projectDesign(realPair);
-  assert.equal(out.css, second.css);
+  // Theme-specific distinct values (blue-700 differs by theme in the SSOT).
+  assert.ok(out.css.includes('--color-blue-700: #3263C7;'));
+  assert.ok(out.css.includes('--color-blue-700: #8EB1F4;'));
+  // Reference edge: shadow-card is an alias onto elevation-1; the projected
+  // string carries the resolved shadow value, not "{elevation.elevation-1}".
+  assert.ok(out.css.includes('--shadow-card: 0 1px 2px #181F2910;'));
+  assert.ok(out.css.includes('--shadow-card: 0 1px 2px #080B1140;'));
+  assert.ok(!out.css.includes('{elevation.'));
+  // Compound edge: soul-narrative-prose "{typography.X} @ {colors.gray-900}"
+  // projects the referenced color member, never the source or an object.
+  assert.ok(out.css.includes('--color-soul-narrative-prose: #2B3441;'));
+  assert.ok(out.css.includes('--color-soul-narrative-prose: #DDE2E9;'));
+  assert.ok(!out.css.includes('{typography.'));
+  assert.ok(!out.css.includes('[object Object]'));
 });

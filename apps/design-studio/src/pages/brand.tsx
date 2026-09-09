@@ -466,8 +466,8 @@ function MarkSection() {
           </div>
         </div>
 
-        <div className="border border-gray-alpha-300 rounded-card overflow-hidden dark dark:bg-background-100">
-          <div className="p-8 flex flex-col items-center justify-center gap-3 min-h-[120px]">
+        <div className="border border-gray-alpha-300 rounded-card overflow-hidden dark">
+          <div className="bg-background-100 dark:bg-background-100 p-8 flex flex-col items-center justify-center gap-3 min-h-[120px]">
             <NexusMark size={32} className="w-auto text-brand-cyan dark:text-brand-cyan" />
             <span className="text-copy-13 dark:text-gray-800">
               Dark surface —{' '}
@@ -477,7 +477,7 @@ function MarkSection() {
               (dark `#8EB1F4`).
             </span>
           </div>
-          <div className="px-4 py-2 border-t border-white/10 bg-[#0D1B26] dark:bg-background-200">
+          <div className="px-4 py-2 border-t border-white/10 bg-background-200 dark:bg-background-200">
             <span className="text-label-14 dark:text-gray-800">Dark theme</span>
           </div>
         </div>

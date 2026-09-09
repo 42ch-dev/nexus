@@ -21,7 +21,9 @@
  *    the current DESIGN pair even without a watch event.
  *  - Registers repo-root DESIGN.md + DESIGN.dark.md as watch inputs; on either
  *    change it invalidates both CSS module graphs and full-reloads so
- *    computed-value labels also refresh. No HMR source writes.
+ *    computed-value labels also refresh. No HMR source writes. The default
+ *    Vite source/dependency watcher for apps/design-studio is left intact, so
+ *    ordinary React/CSS source edits keep triggering normal HMR.
  *  - Malformed DESIGN frontmatter throws inside load/transform → Vite overlay.
  */
 import { join, resolve } from 'node:path';
@@ -83,19 +85,6 @@ export function designTokensPlugin(repoRoot: string): Plugin {
       out = out.replace(new RegExp(`@import\\s+['"]${TOKENS_SPEC}['"];?`), fresh.css.trimEnd());
       out = out.replace(new RegExp(`@import\\s+['"]${THEME_SPEC}['"];?`), fresh.brandCss.trimEnd());
       return out;
-    },
-
-    config() {
-      return {
-        server: {
-          watch: {
-            ignored: (path: string) => {
-              const abs = path.startsWith('/') ? path : join(designRoot, path);
-              return !(abs === designFile || abs === darkFile);
-            },
-          },
-        },
-      };
     },
 
     configureServer(server) {

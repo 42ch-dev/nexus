@@ -425,6 +425,23 @@ function resolveBoxShadow(varName: string): string {
 }
 
 /**
+ * Read the computed width that results from assigning a CSS custom property
+ * carrying a *length* (not a color) to a probe element. Resolves through
+ * var() chains and returns the final px string the browser computes, matching
+ * the existing length readouts (background-size / metrics) rather than forcing
+ * a length into a color property.
+ */
+function resolveSwatchLength(varName: string): string {
+  const el = document.createElement('div');
+  el.style.width = `var(${varName})`;
+  el.style.display = 'none';
+  document.body.appendChild(el);
+  const computed = getComputedStyle(el).width;
+  document.body.removeChild(el);
+  return computed;
+}
+
+/**
  * Read a computed property produced by assigning a CSS custom property to a
  * probe element — live from the token's declared value, not a hardcoded copy.
  * Returns '' when the var is not defined (e.g. jsdom without CSS).
@@ -514,37 +531,45 @@ function ColorSwatch({ token }: { token: ColorToken }) {
  * letter-spacing back from the computed style (live) for the metrics line.
  */
 function TypoRow({ specimen }: { specimen: TypoSpecimen }) {
+  const { resolvedTheme } = useTheme();
   const specimenRef = useRef<HTMLDivElement>(null);
   const [metrics, setMetrics] = useState('');
 
   useEffect(() => {
     const el = specimenRef.current;
     if (!el) return;
-    const cs = getComputedStyle(el);
-    const fontSize = cs.fontSize ?? '';
-    const sizePx = parseFloat(fontSize);
-    if (!fontSize.endsWith('px') || Number.isNaN(sizePx) || sizePx === 0) {
-      setMetrics('');
-      return;
-    }
-    const parts: string[] = [fontSize];
-    if (cs.fontWeight) parts.push(`weight ${cs.fontWeight}`);
-    const family = cs.fontFamily ?? '';
-    if (family) parts.push(`family ${family}`);
-    const lineHeight = cs.lineHeight ?? '';
-    if (lineHeight.endsWith('px')) {
-      parts.push(`line-height ${trimRatio(parseFloat(lineHeight) / sizePx, 2)} (${lineHeight})`);
-    } else if (lineHeight && lineHeight !== 'normal') {
-      parts.push(`line-height ${lineHeight}`);
-    }
-    const tracking = cs.letterSpacing ?? '';
-    if (tracking.endsWith('px')) {
-      parts.push(`tracking ${trimRatio(parseFloat(tracking) / sizePx, 3)}em`);
-    } else if (tracking === 'normal') {
-      parts.push('tracking 0');
-    }
-    setMetrics(parts.join(' · '));
-  }, []);
+    // Re-read after the theme swap (next frame) so a light→dark change with
+    // differing typography metrics/family re-projects the live readout and
+    // keeps the labels agreeing with the rendered specimen.
+    const rafId = requestAnimationFrame(() => {
+      const cs = getComputedStyle(el);
+      const fontSize = cs.fontSize ?? '';
+      const sizePx = parseFloat(fontSize);
+      if (!fontSize.endsWith('px') || Number.isNaN(sizePx) || sizePx === 0) {
+        setMetrics('');
+        return;
+      }
+      const parts: string[] = [fontSize];
+      if (cs.fontWeight) parts.push(`weight ${cs.fontWeight}`);
+      const family = cs.fontFamily ?? '';
+      if (family) parts.push(`family ${family}`);
+      const lineHeight = cs.lineHeight ?? '';
+      if (lineHeight.endsWith('px')) {
+        parts.push(`line-height ${trimRatio(parseFloat(lineHeight) / sizePx, 2)} (${lineHeight})`);
+      } else if (lineHeight && lineHeight !== 'normal') {
+        parts.push(`line-height ${lineHeight}`);
+      }
+      const tracking = cs.letterSpacing ?? '';
+      if (tracking.endsWith('px')) {
+        parts.push(`tracking ${trimRatio(parseFloat(tracking) / sizePx, 3)}em`);
+      } else if (tracking === 'normal') {
+        parts.push('tracking 0');
+      }
+      setMetrics(parts.join(' · '));
+    });
+    return () => cancelAnimationFrame(rafId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedTheme]);
 
   const className = [
     specimen.textClass,
@@ -774,8 +799,8 @@ function CanvasAmbientGridSwatch() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const rafId = requestAnimationFrame(() => {
-      setGap(resolveSwatchColor('--color-canvas-grid-gap') || '20px');
-      setDot(resolveSwatchColor('--color-canvas-grid-dot-size') || '1.5px');
+      setGap(resolveSwatchLength('--color-canvas-grid-gap') || '20px');
+      setDot(resolveSwatchLength('--color-canvas-grid-dot-size') || '1.5px');
     });
     return () => cancelAnimationFrame(rafId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -786,8 +811,7 @@ function CanvasAmbientGridSwatch() {
       <div
         className="w-full aspect-[3/2] rounded-card border border-gray-alpha-400 bg-canvas-surface"
         style={{
-          backgroundImage:
-            'radial-gradient(var(--color-canvas-grid) 1.5px, transparent 1.5px)',
+          backgroundImage: `radial-gradient(var(--color-canvas-grid) ${dot}, transparent ${dot})`,
           backgroundSize: `${gap} ${gap}`,
         }}
       />
