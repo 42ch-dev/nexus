@@ -103,13 +103,26 @@ impl IsolatedQa {
         format!("http://127.0.0.1:{}", self.daemon_port)
     }
 
-    /// Verify every resolved DB/config/workspace path starts inside QA_ROOT
-    /// before any work begins (A6 hard requirement).
+    /// Verify every resolved DB/config/workspace/transport path starts inside
+    /// QA_ROOT before any work begins (A6 hard requirement).
     fn assert_paths_inside_qa_root(&self) {
         for (label, p) in [
             ("NEXUS_HOME", self.nexus_home.as_path()),
             ("QA_WORKSPACE", self.qa_workspace.as_path()),
             ("QA_OMP_HOME", self.qa_omp_home.as_path()),
+            ("workspace_db", self.workspace_db().as_path()),
+            (
+                "agent_host_config",
+                self.nexus_home.join("agent-host").join("config.toml").as_path(),
+            ),
+            (
+                "agent_host_config_legacy",
+                self.nexus_home
+                    .join(".nexus42")
+                    .join("agent-host")
+                    .join("config.toml")
+                    .as_path(),
+            ),
         ] {
             assert!(
                 p.starts_with(&self.qa_root),
@@ -118,6 +131,13 @@ impl IsolatedQa {
                 self.qa_root.display()
             );
         }
+        // The transport is a loopback TCP port, never a socket path from the
+        // ambient environment.
+        assert!(
+            std::env::var_os("NEXUS_DAEMON_SOCKET_PATH").is_none()
+                || self.daemon_url().starts_with("http://127.0.0.1:"),
+            "the daemon must use its isolated loopback port"
+        );
     }
 
     /// Env every Nexus process inherits (HOME + XDG under QA_HOME). The
@@ -218,10 +238,21 @@ XDG_CACHE_HOME = "{omp_home}/.cache"
             args_toml = args_toml,
             omp_home = self.qa_omp_home.display(),
         );
-        // The resolved path the daemon actually reads (verified above).
-        let dir = self.nexus_home.join(".nexus42").join("agent-host");
-        std::fs::create_dir_all(&dir).expect("agent-host config dir");
-        std::fs::write(dir.join("config.toml"), content).expect("write agent-host config.toml");
+        // Two consumers resolve the provider file differently:
+        // - the canonical `nexus_home/agent-host/config.toml` used by
+        //   `AgentHostSubsystem::start`;
+        // - `nexus_agent_host::config::load_config(home)` appends `.nexus42`
+        //   again, so the workspace registration reads
+        //   `$HOME/.nexus42/.nexus42/agent-host/config.toml`.
+        // Write BOTH so the provider the daemon registers is the one it starts.
+        for dir in [
+            self.nexus_home.join("agent-host"),
+            self.nexus_home.join(".nexus42").join("agent-host"),
+        ] {
+            std::fs::create_dir_all(&dir).expect("agent-host config dir");
+            std::fs::write(dir.join("config.toml"), &content)
+                .expect("write agent-host config.toml");
+        }
     }
 
     /// Seed the Creator workspace DB under `$NEXUS_HOME` (schema + creator row
@@ -409,6 +440,9 @@ fn spawn_daemon(qa: &IsolatedQa) -> tokio::process::Child {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(true);
+    // A socket path from the ambient environment would override the explicit
+    // port and let the daemon bind/write outside QA_ROOT (A6 isolation).
+    cmd.env_remove("NEXUS_DAEMON_SOCKET_PATH");
     for (k, v) in qa.nexus_env() {
         cmd.env(k, v);
     }
@@ -759,10 +793,12 @@ async fn capture_agent_output(qa: &IsolatedQa, session_id: &str) -> String {
         };
         (priority, -(k.len() as i64))
     });
+    // The highest-priority entry after sorting IS the output-key value; do
+    // not discard the ordering by re-selecting the longest arbitrary string.
     strings
         .into_iter()
-        .map(|(_, v)| v)
-        .max_by_key(|v| v.len())
+        .next()
+        .map(|(_, value)| value)
         .unwrap_or_default()
 }
 
