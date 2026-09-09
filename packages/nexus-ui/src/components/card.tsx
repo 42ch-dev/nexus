@@ -28,7 +28,7 @@ function Card({ className, interactive = false, ref, ...props }: CardProps) {
     <div
       ref={ref}
       className={cn(
-        'rounded-card border border-gray-alpha-400 bg-background-100 p-6 text-gray-1000 shadow-card',
+        'rounded-card border border-gray-alpha-400 bg-background-100 p-6 text-gray-1000 shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 focus-visible:ring-offset-background-100',
         interactive &&
           'transition-[box-shadow,transform] duration-popover ease-standard motion-reduce:transition-none hover:shadow-elevation-2 motion-safe:hover:-translate-y-px active:shadow-elevation-1 motion-safe:active:translate-y-0',
         className,

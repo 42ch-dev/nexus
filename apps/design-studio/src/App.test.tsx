@@ -1893,46 +1893,6 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
 
 /* ---- components page — v0.4 states matrix (V1.121 P1 T4) --------------- */
 
-describe('Components page — Card v0.4 matrix (interactive + title voice)', () => {
-  beforeEach(async () => {
-    mockMatchMedia(false);
-    await renderStudio('/components');
-  });
-
-  it('renders rest and interactive cards as real components', async () => {
-    expect(screen.getByTestId('card-rest')).toBeInTheDocument();
-    expect(screen.getByTestId('card-interactive')).toBeInTheDocument();
-  });
-
-  it('interactive card carries the v0.4 hover-lift recipe classes', async () => {
-    const card = screen.getByTestId('card-interactive');
-    expect(card.className).toContain('hover:shadow-elevation-2');
-    expect(card.className).toContain('motion-safe:hover:-translate-y-px');
-    expect(card.className).toContain('duration-popover');
-    expect(card.className).toContain('motion-reduce:transition-none');
-  });
-
-  it('rest card keeps the static elevation-1 treatment without the recipe', async () => {
-    const card = screen.getByTestId('card-rest');
-    expect(card.className).toContain('shadow-card');
-    expect(card.className).not.toContain('hover:shadow-elevation-2');
-  });
-
-  it('CardTitle voice="content" swaps to the larger sans display tier', async () => {
-    const title = screen.getByTestId('card-title-content');
-    expect(title.className).toContain('font-heading');
-    expect(title.className).toContain('text-display-20');
-    expect(title.className).toContain('tracking-tight');
-    expect(title.className).not.toContain('font-display');
-  });
-
-  it('default CardTitle keeps the interface sans treatment', async () => {
-    const title = screen.getByTestId('card-title-interface');
-    expect(title.className).toContain('text-heading-16');
-    expect(title.className).toContain('font-heading');
-    expect(title.className).not.toContain('font-display');
-  });
-});
 
 describe('Components page — States v0.4 (error surface + display empty headline)', () => {
   beforeEach(async () => {

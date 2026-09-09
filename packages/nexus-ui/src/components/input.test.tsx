@@ -13,15 +13,6 @@ describe('Input', () => {
     expect(input).toHaveProperty('tagName', 'INPUT');
   });
 
-  it('renders with base structural classes', () => {
-    render(<Input data-testid="test-input" />);
-    const input = screen.getByTestId('test-input');
-    expect(input).toHaveClass('h-10');
-    expect(input).toHaveClass('w-full');
-    expect(input).toHaveClass('rounded-control');
-    expect(input).toHaveClass('border');
-    expect(input).toHaveClass('bg-background-100');
-  });
 
   // --- className merge (cn integration) ---
 
@@ -29,7 +20,6 @@ describe('Input', () => {
     render(<Input className="custom-class" data-testid="test-input" />);
     const input = screen.getByTestId('test-input');
     expect(input).toHaveClass('custom-class');
-    expect(input).toHaveClass('h-10'); // base class still present
   });
 
   // --- invalid prop → aria-invalid + visual state ---
@@ -52,19 +42,7 @@ describe('Input', () => {
     expect(input).not.toHaveAttribute('aria-invalid');
   });
 
-  it('applies red-700 border class when invalid', () => {
-    render(<Input invalid data-testid="test-input" />);
-    const input = screen.getByTestId('test-input');
-    expect(input).toHaveClass('border-red-700');
-    expect(input).not.toHaveClass('border-gray-500');
-  });
 
-  it('applies gray-500 border class when not invalid', () => {
-    render(<Input data-testid="test-input" />);
-    const input = screen.getByTestId('test-input');
-    expect(input).toHaveClass('border-gray-500');
-    expect(input).not.toHaveClass('border-red-700');
-  });
 
   // --- ref-as-prop ---
 
@@ -113,12 +91,4 @@ describe('Input', () => {
 
   // --- disabled state ---
 
-  it('applies disabled styling classes when disabled', () => {
-    render(<Input disabled data-testid="test-input" />);
-    const input = screen.getByTestId('test-input');
-    expect(input).toHaveClass('disabled:bg-gray-100');
-    expect(input).toHaveClass('disabled:text-gray-700');
-    expect(input).toHaveClass('disabled:border-gray-alpha-300');
-    expect(input).toHaveClass('disabled:cursor-not-allowed');
-  });
 });

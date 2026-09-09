@@ -1,191 +1,144 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './tabs';
 
+const order = ['Agent', 'Workspace', 'History'];
+
+function TabSet({
+  items = order,
+  ...props
+}: Omit<Parameters<typeof Tabs>[0], 'children'> & { items?: readonly string[] }) {
+  return (
+    <Tabs {...props}>
+      <TabsList>
+        {items.map((item) => <TabsTrigger key={item} value={item}>{item}</TabsTrigger>)}
+      </TabsList>
+      {items.map((item) => <TabsContent key={item} value={item}>{item} panel</TabsContent>)}
+    </Tabs>
+  );
+}
+
 describe('Tabs', () => {
-  function renderControlledTabs(onValueChange = vi.fn()) {
-    return render(
-      <Tabs value="agent" onValueChange={onValueChange}>
-        <TabsList>
-          <TabsTrigger value="agent">Agent</TabsTrigger>
-          <TabsTrigger value="workspace">Workspace</TabsTrigger>
-        </TabsList>
-        <TabsContent value="agent">Agent panel</TabsContent>
-        <TabsContent value="workspace">Workspace panel</TabsContent>
-      </Tabs>,
-    );
-  }
-
-  it('controlled mode: shows the active panel and switches on trigger click', () => {
+  it('preserves caller-owned selection and one callback for each pointer activation', () => {
     const onValueChange = vi.fn();
-    renderControlledTabs(onValueChange);
-
-    expect(screen.getByRole('tabpanel')).toHaveTextContent('Agent panel');
-    expect(screen.queryByText('Workspace panel')).not.toBeInTheDocument();
-
+    render(<TabSet value="Agent" onValueChange={onValueChange} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Agent' }));
+    expect(onValueChange).toHaveBeenCalledTimes(1);
+    expect(onValueChange).toHaveBeenLastCalledWith('Agent');
     fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
-    expect(onValueChange).toHaveBeenCalledWith('workspace');
-  });
-
-  it('uncontrolled mode: uses defaultValue and updates internal selection', () => {
-    render(
-      <Tabs defaultValue="agent">
-        <TabsList>
-          <TabsTrigger value="agent">Agent</TabsTrigger>
-          <TabsTrigger value="workspace">Workspace</TabsTrigger>
-        </TabsList>
-        <TabsContent value="agent">Agent panel</TabsContent>
-        <TabsContent value="workspace">Workspace panel</TabsContent>
-      </Tabs>,
-    );
-
+    expect(onValueChange).toHaveBeenCalledTimes(2);
+    expect(onValueChange).toHaveBeenLastCalledWith('Workspace');
     expect(screen.getByRole('tabpanel')).toHaveTextContent('Agent panel');
-    fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
-    expect(screen.getByRole('tabpanel')).toHaveTextContent('Workspace panel');
-    expect(screen.getByRole('tab', { name: 'Workspace' })).toHaveAttribute('aria-selected', 'true');
   });
 
-  it('transitions from uncontrolled defaultValue to controlled value', () => {
-    const { rerender } = render(
-      <Tabs defaultValue="agent">
-        <TabsList>
-          <TabsTrigger value="agent">Agent</TabsTrigger>
-          <TabsTrigger value="workspace">Workspace</TabsTrigger>
-        </TabsList>
-        <TabsContent value="agent">Agent panel</TabsContent>
-        <TabsContent value="workspace">Workspace panel</TabsContent>
-      </Tabs>,
-    );
-
-    rerender(
-      <Tabs value="workspace" onValueChange={vi.fn()}>
-        <TabsList>
-          <TabsTrigger value="agent">Agent</TabsTrigger>
-          <TabsTrigger value="workspace">Workspace</TabsTrigger>
-        </TabsList>
-        <TabsContent value="agent">Agent panel</TabsContent>
-        <TabsContent value="workspace">Workspace panel</TabsContent>
-      </Tabs>,
-    );
-
-    expect(screen.getByRole('tabpanel')).toHaveTextContent('Workspace panel');
-    expect(screen.getByRole('tab', { name: 'Workspace' })).toHaveAttribute('aria-selected', 'true');
+  it('navigates from actual focus even when a controlled caller does not update selection', () => {
+    const onValueChange = vi.fn();
+    render(<TabSet value="Agent" onValueChange={onValueChange} />);
+    const workspace = screen.getByRole('tab', { name: 'Workspace' });
+    workspace.focus();
+    fireEvent.keyDown(workspace, { key: 'ArrowRight' });
+    expect(screen.getByRole('tab', { name: 'History' })).toHaveFocus();
+    expect(onValueChange).toHaveBeenCalledTimes(1);
+    expect(onValueChange).toHaveBeenLastCalledWith('History');
+    expect(screen.getByRole('tabpanel')).toHaveTextContent('Agent panel');
   });
 
-  it('associates triggers and panels with unique per-instance ids', () => {
+  it('allows keyboard entry without a default selection and automatically activates navigation targets', () => {
+    render(<TabSet />);
+    expect(screen.queryByRole('tabpanel')).not.toBeInTheDocument();
+    const agent = screen.getByRole('tab', { name: 'Agent' });
+    expect(agent.tabIndex).toBe(0);
+    expect(screen.getAllByRole('tab').filter((tab) => tab.tabIndex === 0)).toEqual([agent]);
+    agent.focus();
+    for (const [key, target] of [
+      ['ArrowRight', 'Workspace'],
+      ['End', 'History'],
+      ['ArrowRight', 'Agent'],
+      ['ArrowLeft', 'History'],
+      ['Home', 'Agent'],
+    ]) {
+      fireEvent.keyDown(document.activeElement!, { key });
+      const selected = screen.getByRole('tab', { name: target });
+      expect(selected).toHaveFocus();
+      expect(selected).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByRole('tabpanel')).toHaveTextContent(`${target} panel`);
+      expect(screen.getAllByRole('tab').filter((tab) => tab.tabIndex === 0)).toEqual([selected]);
+    }
+  });
+
+  it('reflects keyboard selection accepted by a stateful controlled caller', () => {
+    function Controlled() {
+      const [value, setValue] = useState('Agent');
+      return <TabSet value={value} onValueChange={setValue} />;
+    }
+    render(<Controlled />);
+    const agent = screen.getByRole('tab', { name: 'Agent' });
+    agent.focus();
+    fireEvent.keyDown(agent, { key: 'ArrowRight' });
+    expect(screen.getByRole('tab', { name: 'Workspace' })).toHaveFocus();
+    expect(screen.getByRole('tab', { name: 'Workspace' }).tabIndex).toBe(0);
+    expect(screen.getByRole('tabpanel')).toHaveTextContent('Workspace panel');
+  });
+
+  it('keeps accessible panel associations distinct for same-valued instances and whitespace values', () => {
+    const value = 'project alpha / 中文';
     render(
       <>
-        <Tabs defaultValue="shared">
-          <TabsList>
-            <TabsTrigger value="shared">First</TabsTrigger>
-          </TabsList>
-          <TabsContent value="shared">First panel</TabsContent>
+        <Tabs defaultValue={value}>
+          <TabsList><TabsTrigger value={value}>First project</TabsTrigger></TabsList>
+          <TabsContent value={value}>First details</TabsContent>
         </Tabs>
-        <Tabs defaultValue="shared">
-          <TabsList>
-            <TabsTrigger value="shared">Second</TabsTrigger>
-          </TabsList>
-          <TabsContent value="shared">Second panel</TabsContent>
+        <Tabs defaultValue={value}>
+          <TabsList><TabsTrigger value={value}>Second project</TabsTrigger></TabsList>
+          <TabsContent value={value}>Second details</TabsContent>
         </Tabs>
       </>,
     );
-
-    const triggers = screen.getAllByRole('tab');
-    expect(triggers).toHaveLength(2);
-    const [firstTrigger, secondTrigger] = triggers;
-    expect(firstTrigger.id).not.toBe(secondTrigger.id);
-    expect(firstTrigger.getAttribute('aria-controls')).not.toBe(
-      secondTrigger.getAttribute('aria-controls'),
-    );
-
-    const firstPanel = document.getElementById(firstTrigger.getAttribute('aria-controls')!);
-    const secondPanel = document.getElementById(secondTrigger.getAttribute('aria-controls')!);
-    expect(firstPanel).toHaveTextContent('First panel');
-    expect(secondPanel).toHaveTextContent('Second panel');
+    const firstPanel = screen.getByRole('tabpanel', { name: 'First project' });
+    const secondPanel = screen.getByRole('tabpanel', { name: 'Second project' });
+    expect(firstPanel).not.toBe(secondPanel);
+    expect(firstPanel.id).not.toBe(secondPanel.id);
+    for (const [name, panel] of [['First project', firstPanel], ['Second project', secondPanel]] as const) {
+      const trigger = screen.getByRole('tab', { name });
+      expect(document.getElementById(trigger.getAttribute('aria-controls')!)).toBe(panel);
+      expect(document.getElementById(panel.getAttribute('aria-labelledby')!)).toBe(trigger);
+    }
   });
 
-  it('roving tabindex keeps one tab stop on the selected trigger', () => {
-    renderControlledTabs();
-    const active = screen.getByRole('tab', { name: 'Agent' });
-    const inactive = screen.getByRole('tab', { name: 'Workspace' });
-    expect(active).toHaveAttribute('tabindex', '0');
-    expect(inactive).toHaveAttribute('tabindex', '-1');
+  it('follows current keyed DOM order and restores an entry point after removing the selected tab', async () => {
+    const { rerender } = render(<TabSet defaultValue="Agent" />);
+    rerender(<TabSet defaultValue="Agent" items={['Workspace', 'Agent', 'History']} />);
+    const agent = screen.getByRole('tab', { name: 'Agent' });
+    agent.focus();
+    fireEvent.keyDown(agent, { key: 'ArrowLeft' });
+    expect(screen.getByRole('tab', { name: 'Workspace' })).toHaveFocus();
+    expect(screen.getByRole('tabpanel')).toHaveTextContent('Workspace panel');
+    rerender(<TabSet defaultValue="Agent" items={['Agent', 'History']} />);
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Agent' }).tabIndex).toBe(0));
+    expect(screen.queryByRole('tabpanel')).not.toBeInTheDocument();
+    screen.getByRole('tab', { name: 'Agent' }).focus();
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' });
+    expect(screen.getByRole('tabpanel')).toHaveTextContent('History panel');
   });
 
-  it('only the selected trigger exposes aria-controls to a mounted panel', () => {
-    renderControlledTabs();
-    const active = screen.getByRole('tab', { name: 'Agent' });
-    const inactive = screen.getByRole('tab', { name: 'Workspace' });
-
-    expect(active).toHaveAttribute('aria-controls');
-    expect(document.getElementById(active.getAttribute('aria-controls')!)).toBeInTheDocument();
-    expect(inactive).not.toHaveAttribute('aria-controls');
-    expect(screen.queryByText('Workspace panel')).not.toBeInTheDocument();
-  });
-
-  it('does not call onValueChange when re-clicking the already selected tab', () => {
-    const onValueChange = vi.fn();
-    renderControlledTabs(onValueChange);
-
-    fireEvent.click(screen.getByRole('tab', { name: 'Agent' }));
-    expect(onValueChange).not.toHaveBeenCalled();
-  });
-
-  it('initializes absent defaultValue to an empty string in uncontrolled mode', () => {
+  it('unmounts inactive panel state instead of retaining hidden children', () => {
     render(
-      <Tabs>
+      <Tabs defaultValue="edit">
         <TabsList>
-          <TabsTrigger value="only">Only</TabsTrigger>
+          <TabsTrigger value="edit">Edit</TabsTrigger>
+          <TabsTrigger value="preview">Preview</TabsTrigger>
         </TabsList>
-        <TabsContent value="only">Only panel</TabsContent>
+        <TabsContent value="edit"><input aria-label="Draft" defaultValue="Initial" /></TabsContent>
+        <TabsContent value="preview">Preview contents</TabsContent>
       </Tabs>,
     );
-
-    expect(screen.queryByRole('tabpanel')).not.toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Only' })).toHaveAttribute('aria-selected', 'false');
-  });
-
-  it('ArrowRight on the tablist selects and focuses the next tab (automatic activation)', () => {
-    const onValueChange = vi.fn();
-    renderControlledTabs(onValueChange);
-    const list = screen.getByRole('tablist');
-    fireEvent.keyDown(list, { key: 'ArrowRight' });
-    expect(onValueChange).toHaveBeenCalledWith('workspace');
-    expect(screen.getByRole('tab', { name: 'Workspace' })).toHaveAttribute('tabindex', '0');
-  });
-
-  it('Home and End jump to the first and last tabs', () => {
-    const onValueChange = vi.fn();
-    renderControlledTabs(onValueChange);
-    const list = screen.getByRole('tablist');
-    fireEvent.keyDown(list, { key: 'End' });
-    expect(onValueChange).toHaveBeenLastCalledWith('workspace');
-    fireEvent.keyDown(list, { key: 'Home' });
-    expect(onValueChange).toHaveBeenLastCalledWith('agent');
-  });
-
-  it('active trigger uses background-100 + shadow-card; inactive uses the hover recipe', () => {
-    renderControlledTabs();
-    const active = screen.getByRole('tab', { name: 'Agent' });
-    const inactive = screen.getByRole('tab', { name: 'Workspace' });
-
-    expect(active).toHaveAttribute('aria-selected', 'true');
-    expect(active.className).toMatch(/\bbg-background-100\b/);
-    expect(active.className).toMatch(/\btext-gray-1000\b/);
-    expect(active.className).toMatch(/\bshadow-card\b/);
-
-    expect(inactive).toHaveAttribute('aria-selected', 'false');
-    expect(inactive.className).toMatch(/\btext-gray-800\b/);
-    expect(inactive.className).toMatch(/\bhover:bg-gray-alpha-100\b/);
-    expect(inactive.className).toMatch(/\bhover:text-gray-1000\b/);
-  });
-
-  it('list consumes the background-200 well with gray-alpha-400 border', () => {
-    renderControlledTabs();
-    const list = screen.getByRole('tablist');
-    expect(list.className).toMatch(/\bbg-background-200\b/);
-    expect(list.className).toMatch(/\bborder-gray-alpha-400\b/);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Draft' }), { target: { value: 'Changed' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Preview' }));
+    expect(screen.queryByRole('textbox', { name: 'Draft' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Edit' }));
+    expect(screen.getByRole('textbox', { name: 'Draft' })).toHaveValue('Initial');
   });
 });

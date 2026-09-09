@@ -515,6 +515,32 @@ function CardSection() {
       </MatrixCard>
 
       <p className="text-label-14 text-gray-900 mb-4">
+        Interactive focus — a focusable consumer card keeps the two-layer ring
+      </p>
+      <MatrixCard className="mb-6">
+        <div className="flex flex-wrap items-start gap-6">
+          <div className="flex flex-col items-center gap-2">
+            <Card
+              data-testid="card-interactive-focus"
+              interactive
+              tabIndex={0}
+              aria-label="Focusable interactive card"
+              className="w-72"
+            >
+              <CardHeader>
+                <CardTitle>Focusable card</CardTitle>
+                <CardDescription>
+                  Native tabIndex keeps the shared surface gap + cobalt band
+                  visible over the elevation recipe.
+                </CardDescription>
+              </CardHeader>
+            </Card>
+            <VariantLabel label="interactive focus-visible" />
+          </div>
+        </div>
+      </MatrixCard>
+
+      <p className="text-label-14 text-gray-900 mb-4">
         Title voice — interface (default) vs content (creative entities)
       </p>
       <MatrixCard>
@@ -613,7 +639,7 @@ function InputSection() {
     <section>
       <SectionHeading id="comp-input">Input</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
-        Text input — default, disabled, and invalid states.
+        Text input — default, focus-visible, disabled, and invalid states.
       </p>
       <MatrixCard>
         <div className="flex flex-col gap-4 max-w-md">
@@ -622,6 +648,13 @@ function InputSection() {
             <div className="flex flex-col gap-1.5 flex-1">
               <Label htmlFor="input-default">Project codename</Label>
               <Input id="input-default" placeholder="Default input…" />
+            </div>
+          </MatrixRow>
+          <MatrixRow>
+            <VariantLabel label="focus-visible" />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="input-focus">Focus target</Label>
+              <Input id="input-focus" data-testid="input-focus" defaultValue="Tab or click to focus" />
             </div>
           </MatrixRow>
           <MatrixRow>
@@ -663,6 +696,7 @@ function LabelSection() {
       <p className="text-copy-16 text-gray-700 mb-6">
         Form label — label-14 weight 500, gray-1000 text. Wired to its control via{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">htmlFor</code>.
+        Labels expose no disabled/invalid state of their own; the associated control shows it.
       </p>
       <MatrixCard>
         <div className="flex flex-col gap-3 max-w-md">
@@ -760,15 +794,18 @@ function SelectSection() {
           </MatrixRow>
           <MatrixRow>
             <VariantLabel label="disabled" />
-            <Select
-              disabled
-              data-testid="select-fixture-disabled"
-              className="flex-1"
-              defaultValue="Option A"
-              aria-label="Disabled select fixture"
-            >
-              <SelectOptionList options={options} />
-            </Select>
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="studio-select-disabled">Retired profile</Label>
+              <Select
+                id="studio-select-disabled"
+                disabled
+                data-testid="select-fixture-disabled"
+                className="w-full"
+                defaultValue="Option A"
+              >
+                <SelectOptionList options={options} />
+              </Select>
+            </div>
           </MatrixRow>
           <MatrixRow>
             <VariantLabel label="invalid" />
@@ -820,6 +857,23 @@ function SelectSection() {
           </code>
           .
         </p>
+      </MatrixCard>
+
+      <p className="text-label-14 text-gray-900 mb-4">
+        Hover (point at the control — border/well darken natively)
+      </p>
+      <MatrixCard className="mb-6">
+        <div className="flex flex-col gap-1.5 max-w-md">
+          <Label htmlFor="studio-select-hover">Hover target</Label>
+          <Select
+            id="studio-select-hover"
+            data-testid="select-fixture-hover"
+            className="w-full"
+            defaultValue="Option B"
+          >
+            <SelectOptionList options={options} />
+          </Select>
+        </div>
       </MatrixCard>
 
       <p className="text-label-14 text-gray-900 mb-4">
@@ -1060,8 +1114,8 @@ function TextareaSection() {
     <section>
       <SectionHeading id="comp-textarea">Textarea</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
-        Multi-line text input — min-height 96px, default, disabled, and invalid
-        states.
+        Multi-line text input — min-height 96px, default, focus-visible,
+        disabled, and invalid states.
       </p>
       <MatrixCard>
         <div className="flex flex-col gap-4 max-w-lg">
@@ -1070,6 +1124,13 @@ function TextareaSection() {
             <div className="flex flex-col gap-1.5 flex-1">
               <Label htmlFor="textarea-default">Notes</Label>
               <Textarea id="textarea-default" placeholder="Default textarea…" />
+            </div>
+          </MatrixRow>
+          <MatrixRow>
+            <VariantLabel label="focus-visible" />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="textarea-focus">Focus target</Label>
+              <Textarea id="textarea-focus" data-testid="textarea-focus" defaultValue="Tab or click to focus" />
             </div>
           </MatrixRow>
           <MatrixRow>
