@@ -1079,11 +1079,14 @@ pub async fn list_schedules(
         .map(ListRow::into_summary)
         .collect::<Result<Vec<_>, _>>()?;
     for summary in &mut items {
-        let record = load_run_record(&pool, summary.current_session_id.as_deref()).await;
-        summary.execution = Some(crate::execution_projection::project_execution(
-            record.as_ref(),
-            &summary.execution_policy,
-        ));
+        summary.execution = Some(
+            crate::execution_projection::project_for_session(
+                &pool,
+                summary.current_session_id.as_deref(),
+                &summary.execution_policy,
+            )
+            .await,
+        );
     }
 
     let has_more = u64::from(total) > u64::from(offset).saturating_add(u64::from(limit));
@@ -1160,11 +1163,14 @@ pub async fn inspect_schedule(
     let concurrency_kind = row.concurrency_kind.clone();
 
     let mut summary = row.into_summary()?;
-    let record = load_run_record(&pool, summary.current_session_id.as_deref()).await;
-    summary.execution = Some(crate::execution_projection::project_execution(
-        record.as_ref(),
-        &summary.execution_policy,
-    ));
+    summary.execution = Some(
+        crate::execution_projection::project_for_session(
+            &pool,
+            summary.current_session_id.as_deref(),
+            &summary.execution_policy,
+        )
+        .await,
+    );
 
     Ok(Json(InspectScheduleResponse {
         schedule: summary,
@@ -1173,23 +1179,7 @@ pub async fn inspect_schedule(
     }))
 }
 
-/// Load the durable v1 record for an owned session, if any (A2/A7).
-async fn load_run_record(
-    pool: &sqlx::SqlitePool,
-    session_id: Option<&str>,
-) -> Option<nexus_orchestration::run_state::RunRecord> {
-    let session_id = session_id?;
-    let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(
-        pool.clone(),
-    ));
-    store
-        .load_run(&nexus_orchestration::engine::SessionId(
-            session_id.to_string(),
-        ))
-        .await
-        .ok()
-        .flatten()
-}
+
 
 // ---------------------------------------------------------------------------
 // PATCH /schedules/{id}/core-context — Apply EditOp

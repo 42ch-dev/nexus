@@ -205,19 +205,14 @@ pub async fn get_session(
         .ok_or_else(|| NexusApiError::service_unavailable("engine not available"))?;
 
     let sid = nexus_orchestration::engine::SessionId(session_id.clone());
-    // Shared durable execution projection (A2/A7) for this run, when a
-    // durable record exists (terminal rows included — no live runner needed).
+    // Shared durable execution projection (A2/A7): present for terminal rows
+    // with no live runner; a load error projects unreadable, never a
+    // fabricated class.
     let execution = match state.pool() {
-        Some(pool) => {
-            let store = SqliteSessionStorage::new(Arc::new(pool.clone()));
-            match store.load_run(&sid).await {
-                Ok(Some(record)) => Some(crate::execution_projection::project_execution(
-                    Some(&record),
-                    "driven_v1",
-                )),
-                _ => None,
-            }
-        }
+        Some(pool) => Some(
+            crate::execution_projection::project_for_session(pool, Some(&session_id), "driven_v1")
+                .await,
+        ),
         None => None,
     };
     let sessions = engine
