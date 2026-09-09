@@ -135,7 +135,10 @@ export function designTokensPlugin(repoRoot: string): Plugin {
       // refresh). This is the missed-watch safety net: a manual reload picks
       // up the current DESIGN pair even if chokidar never fired.
       server.middlewares.use((req, _res, next) => {
-        if (req.url && /(?:^|\/)(?:index\.html)?$/.test(req.url)) {
+        if (
+          (req.method === 'GET' || req.method === 'HEAD') &&
+          req.headers.accept?.includes('text/html')
+        ) {
           compileCache = null;
           invalidateCssGraph();
         }
