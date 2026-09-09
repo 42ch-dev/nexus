@@ -1827,28 +1827,93 @@ impl EngineSharedState {
                             token.cancel();
                         }
                     }
+                    // P1 (fix round 6): the rollback must confirm the durable
+                    // Cancelled settlement BEFORE any in-memory ownership is
+                    // dropped. The settlement is revision-fenced and retried
+                    // on a CAS loss against the current child record (the
+                    // same cancel-settlement retry shape as the confirmed
+                    // cleanup path): a concurrent transition that wins the
+                    // fence between our reload and commit is reloaded and
+                    // re-settled against the new revision (or confirmed
+                    // already-Cancelled — the rollback outcome is identical).
+                    // Other storage/settlement errors propagate: the token
+                    // stays registered so the parent-cancel persisted-closure
+                    // reconciliation remains the owner-scoped fallback, and
+                    // no `TerminalState` is returned as if the rollback
+                    // completed.
                     let child_sid = SessionId(child_session_id.clone());
-                    if let Some(child_root) = self
-                        .storage
-                        .get(&child_session_id)
-                        .await
-                        .map_err(EngineError::GraphFlow)?
-                    {
-                        let cancelled_state = RunStateV1 {
-                            cancel_requested: true,
-                            ..RunStateV1::default()
+                    let mut settle_attempts: u32 = 0;
+                    loop {
+                        let Some(current) = store.load_run(&child_sid).await? else {
+                            return Err(EngineError::GraphFlow(
+                                graph_flow::GraphError::StorageError(format!(
+                                    "child '{}' disappeared before cancelled settlement",
+                                    child_session_id
+                                )),
+                            ));
                         };
-                        let _ = store
+                        if current.status == SessionStatus::Cancelled {
+                            // A concurrent cancel already settled the child —
+                            // the rollback outcome is identical.
+                            break;
+                        }
+                        // The `Interrupted` cleanup-retry shape (durable
+                        // cancel intent) is an A5 settlement target; every
+                        // other terminal status is a deliberate conflict.
+                        let interrupted_retry_shape = current.status == SessionStatus::Interrupted
+                            && current
+                                .state
+                                .as_ref()
+                                .is_some_and(|s| s.cancel_requested);
+                        if current.status.is_terminal() && !interrupted_retry_shape {
+                            return Err(EngineError::TerminalState(
+                                child_session_id.clone(),
+                            ));
+                        }
+                        let current_revision = current.state_revision;
+                        let mut cancelled_state = current.state.unwrap_or_default();
+                        cancelled_state.cancel_requested = true;
+                        cancelled_state.in_flight = None;
+                        // Reload the authoritative root snapshot together
+                        // with the current run record so the terminal
+                        // checkpoint never clobbers a position/context a
+                        // concurrent transition advanced.
+                        let settle_root = self
+                            .storage
+                            .get(&child_session_id)
+                            .await
+                            .map_err(EngineError::GraphFlow)?
+                            .ok_or_else(|| {
+                                EngineError::SessionNotFound(child_session_id.clone())
+                            })?;
+                        let settle_checkpoint = RunCheckpoint {
+                            root: &settle_root,
+                            children: &[],
+                        };
+                        match store
                             .settle_cancelled(
                                 &child_sid,
-                                child_revision,
-                                RunCheckpoint {
-                                    root: &child_root,
-                                    children: &[],
-                                },
+                                current_revision,
+                                settle_checkpoint,
                                 &cancelled_state,
                             )
-                            .await;
+                            .await
+                        {
+                            Ok(_) => break,
+                            Err(EngineError::RevisionMismatch { .. }) => {
+                                settle_attempts += 1;
+                                if settle_attempts >= CANCEL_FENCE_RETRY_BOUND {
+                                    return Err(EngineError::RevisionMismatch {
+                                        session_id: child_session_id.clone(),
+                                        expected: current_revision,
+                                        found: current_revision,
+                                    });
+                                }
+                                // Reload and re-settle against the new
+                                // revision.
+                            }
+                            Err(e) => return Err(e),
+                        }
                     }
                     child_map
                         .entry(params.parent_session_id.clone())
@@ -4952,6 +5017,171 @@ mod tests {
         );
     }
 
+    /// Deterministic child-rollback settlement CAS-loss proof (P1, fix
+    /// round 6): the child admission's rollback settle loses its revision
+    /// CAS to a competing transition (the child row advanced between the
+    /// rollback's reload and its settle). The rollback must reload the child
+    /// record and re-settle against the CURRENT revision — never discard the
+    /// settlement result and drop ownership over an unconfirmed row. After
+    /// the parent cancel fence, no running child row and no unregistered
+    /// late child may remain.
+    #[tokio::test]
+    async fn child_rollback_settle_cas_loss_reloads_and_retries() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let race_store = Arc::new(ChildSettleCasLossStore::new(store, storage.clone()));
+        let store: Arc<dyn WorkflowStateStore> = race_store.clone();
+
+        // Root + rolled-back child both finalize successfully.
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Ok(()), Ok(())]));
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
+
+        let graph = Arc::new(Graph::new("child-settle-cas-loss"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // Commit the durable cancel-intent fence on the parent BEFORE the
+        // child admission recheck.
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        let mut fenced_state = record.state.unwrap_or_default();
+        fenced_state.cancel_requested = true;
+        store
+            .commit_transition(
+                &session_id,
+                record.state_revision,
+                RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                SessionStatus::Running,
+                &fenced_state,
+            )
+            .await
+            .expect("cancel-intent fence commits");
+
+        // The child admission must refuse; the rollback's settle loses its
+        // CAS to the injected competing transition, reloads the child
+        // record, and re-settles against the current revision.
+        let inner = Arc::new(Graph::new("inner-late"));
+        inner.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let err = engine
+            .state
+            .spawn_child_session_internal(ChildSessionParams {
+                parent_session_id: session_id.0.clone(),
+                inner_graph: inner,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect_err("child admission after the cancel fence must refuse");
+        assert!(
+            matches!(err, EngineError::TerminalState(_)),
+            "refusal must be the terminal-state conflict, got {err:?}"
+        );
+        assert!(
+            race_store.injected(),
+            "the competing transition must have been injected before the child settle"
+        );
+
+        // The rolled-back child row is durably terminal `Cancelled` — the
+        // reload/retry settled against the CURRENT revision, never a stale
+        // one, and no running child row remains.
+        let children = store
+            .load_children(&session_id)
+            .await
+            .expect("load children");
+        assert_eq!(children.len(), 1, "exactly one child row remains");
+        assert_eq!(
+            children[0].status,
+            SessionStatus::Cancelled,
+            "the rolled-back child must be durably cancelled, got {:?}",
+            children[0].status
+        );
+        assert!(
+            children[0]
+                .state
+                .as_ref()
+                .is_some_and(|s| s.cancel_requested),
+            "the rolled-back child must carry the durable cancel intent"
+        );
+
+        // No child remains in any in-memory structure — ownership was
+        // dropped only after the confirmed Cancelled settlement, so no
+        // unregistered late child remains.
+        {
+            let child_map = engine.state.children.read().await;
+            assert!(
+                !child_map.contains_key(&session_id.0),
+                "no child may remain in the children map"
+            );
+            let sessions = engine.state.sessions.read().await;
+            assert_eq!(
+                sessions.len(),
+                1,
+                "only the root may remain in the session tracker"
+            );
+            let runners = engine.state.runners.read().await;
+            assert_eq!(runners.len(), 1, "only the root runner may remain");
+            let cancels = engine
+                .state
+                .session_cancels
+                .read()
+                .unwrap_or_else(|e| e.into_inner());
+            assert_eq!(
+                cancels.len(),
+                1,
+                "only the root coordinator token may remain registered"
+            );
+        }
+
+        // The root cancel settles Cancelled; the closure reconciles the
+        // persisted parent relation and finalizes the rolled-back child's
+        // durable row (idempotent).
+        let status = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect("cancel must settle cancelled");
+        assert_eq!(status, SessionStatus::Cancelled);
+        let finalized = executor.finalized_runs();
+        assert_eq!(finalized.len(), 2, "root and the rolled-back child row");
+        assert_eq!(finalized[0], session_id.0, "root finalized first");
+        assert!(
+            finalized[1].starts_with(&format!("{}:child:", session_id.0)),
+            "the rolled-back child's durable row is finalized, got {:?}",
+            finalized[1]
+        );
+    }
+
     /// Deterministic descendant retry-retention proof (Finding 2, round 3):
     /// the grandchild's finalize fails on the first cancel → the run is
     /// `Interrupted` and the grandchild's token is retained (not reclaimed);
@@ -6106,6 +6336,206 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         checkpoint: crate::run_state::RunCheckpoint<'_>,
         next_state: &crate::run_state::RunStateV1,
     ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .settle_cancelled(session_id, expected_revision, checkpoint, next_state)
+            .await
+    }
+
+    async fn restore_pre_step(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        pre_step: &graph_flow::Session,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .restore_pre_step(session_id, expected_revision, pre_step)
+            .await
+    }
+
+    async fn mark_step_in_flight(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        step_state: &crate::run_state::RunStateV1,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .mark_step_in_flight(session_id, expected_revision, checkpoint, step_state)
+            .await
+    }
+
+    async fn persist_prompt_attempt(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_step: Option<&str>,
+        expected_attempt_id: Option<&str>,
+        attempt: &crate::run_state::PromptAttempt,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .persist_prompt_attempt(
+                session_id,
+                expected_revision,
+                expected_step,
+                expected_attempt_id,
+                attempt,
+            )
+            .await
+    }
+
+    async fn clear_prompt_attempt(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_step: Option<&str>,
+        attempt_id: &str,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
+            .await
+    }
+
+    async fn load_children(
+        &self,
+        parent_session_id: &SessionId,
+    ) -> Result<Vec<crate::run_state::RunRecord>, EngineError> {
+        self.inner.load_children(parent_session_id).await
+    }
+}
+
+/// Store wrapper that makes the FIRST child-rollback `settle_cancelled`
+/// lose its revision CAS to a competing transition (P1, fix round 6): the
+/// competing transition advances the child row at the SAME revision BEFORE
+/// the rollback settle commits, so the settle returns `RevisionMismatch`
+/// and the engine's rollback retry must reload the child record and
+/// re-settle against the CURRENT revision. Every later call passes through.
+#[cfg(test)]
+struct ChildSettleCasLossStore {
+    inner: Arc<dyn WorkflowStateStore>,
+    storage: Arc<dyn SessionStorage>,
+    injected: std::sync::atomic::AtomicBool,
+}
+
+#[cfg(test)]
+impl ChildSettleCasLossStore {
+    fn new(inner: Arc<dyn WorkflowStateStore>, storage: Arc<dyn SessionStorage>) -> Self {
+        Self {
+            inner,
+            storage,
+            injected: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Whether the competing transition was injected (the rollback settle
+    /// genuinely lost the CAS).
+    fn injected(&self) -> bool {
+        self.injected.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+#[async_trait]
+impl WorkflowStateStore for ChildSettleCasLossStore {
+    async fn load_run(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<crate::run_state::RunRecord>, EngineError> {
+        self.inner.load_run(session_id).await
+    }
+
+    async fn start_run(
+        &self,
+        session_id: &SessionId,
+        descriptor: &crate::run_state::RunDescriptorV1,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .start_run(session_id, descriptor, checkpoint, next_state)
+            .await
+    }
+
+    async fn admit_schedule_run(
+        &self,
+        schedule_id: &str,
+        session_id: &SessionId,
+        descriptor: &crate::run_state::RunDescriptorV1,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+        core_context_version: u32,
+        expected_core_context_version: u32,
+        admission_gate: Option<&crate::run_state::ScheduleAdmissionGate>,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .admit_schedule_run(
+                schedule_id,
+                session_id,
+                descriptor,
+                checkpoint,
+                next_state,
+                core_context_version,
+                expected_core_context_version,
+                admission_gate,
+            )
+            .await
+    }
+
+    async fn commit_transition(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_status: SessionStatus,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .commit_transition(session_id, expected_revision, checkpoint, next_status, next_state)
+            .await
+    }
+
+    async fn settle_cancelled(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        // The child-rollback settle is the first `settle_cancelled` on the
+        // freshly started child row. Inject a competing transition at the
+        // SAME revision BEFORE the settle commits, so the settle loses the
+        // CAS and the engine's rollback retry must reload and re-settle
+        // against the new revision.
+        if !self.injected.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            let record = self
+                .inner
+                .load_run(session_id)
+                .await?
+                .expect("child exists at rollback settle gate");
+            let mut winner_root = self
+                .storage
+                .get(&session_id.0)
+                .await
+                .expect("child session at rollback settle gate")
+                .expect("child session exists at rollback settle gate");
+            winner_root.current_task_id = "competing-winner".to_string();
+            winner_root
+                .context
+                .set("competing.marker", "advanced")
+                .await;
+            self.inner
+                .commit_transition(
+                    session_id,
+                    record.state_revision,
+                    crate::run_state::RunCheckpoint {
+                        root: &winner_root,
+                        children: &[],
+                    },
+                    SessionStatus::Running,
+                    &crate::run_state::RunStateV1::default(),
+                )
+                .await
+                .expect("competing transition wins the CAS before the child settle");
+        }
         self.inner
             .settle_cancelled(session_id, expected_revision, checkpoint, next_state)
             .await
