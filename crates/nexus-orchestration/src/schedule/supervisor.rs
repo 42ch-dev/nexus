@@ -1744,8 +1744,16 @@ impl ScheduleSupervisor {
             let terminal_status = match record.status {
                 crate::engine::SessionStatus::Completed => ScheduleStatus::Completed,
                 crate::engine::SessionStatus::Failed => ScheduleStatus::Failed,
-                crate::engine::SessionStatus::Cancelled
-                | crate::engine::SessionStatus::Interrupted => ScheduleStatus::Cancelled,
+                crate::engine::SessionStatus::Cancelled => ScheduleStatus::Cancelled,
+                // Unconfirmed cancel/cleanup is NOT a successful cancel
+                // (A5): the schedule row is deliberately left non-terminal
+                // so public inspect projects the run's
+                // `execution.recovery_class: "interrupted"` from the durable
+                // session instead of a fabricated `cancelled` (qc2 F-002).
+                // `creator_schedules.status` has no `interrupted` variant and
+                // an unmapped string projects as `Pending` (re-runnable), so
+                // writing a status string here would be strictly worse.
+                crate::engine::SessionStatus::Interrupted => continue,
                 // Non-terminal: the schedule stays running and is paused by
                 // `resume_running_as_paused` (or re-driven by recovery).
                 _ => continue,

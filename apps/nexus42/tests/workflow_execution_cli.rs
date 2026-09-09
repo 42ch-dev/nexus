@@ -940,7 +940,10 @@ async fn concurrent_start_yields_one_owned_session() {
 #[tokio::test]
 async fn explicit_legacy_running_without_session_starts() {
     let host = MockHost::new();
-    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+    // qc1 F-001: an explicit legacy start now requires a CONFIGURED default
+    // binding provider — the Host catalog's first entry is never selected
+    // as a fallback. This fixture mirrors production (one enabled provider).
+    let daemon = LiveDaemon::start_with_agent_host_and_provider(host.clone()).await;
     let now = chrono::Utc::now().timestamp();
 
     // Seed three REAL historical rows: NULL descriptor, no version-0
@@ -2439,7 +2442,13 @@ async fn admission_failed_driver_transition_refuses_reentry() {
         Some(sid.as_str()),
         "schedule must keep its owned session identity"
     );
-    assert_eq!(row.status, "running", "schedule row stays running (session is terminal)");
+    // T3: the durable run is terminal `cancelled` (asserted above), so the
+    // schedule settles to the same terminal outcome — the pre-settlement
+    // expectation that the row stays `running` is superseded.
+    assert_eq!(
+        row.status, "cancelled",
+        "a terminal run settles its schedule to the matching terminal status"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2467,10 +2476,26 @@ struct BlockingHost {
     /// Kept alive so `send` never fails (the channel stays open even when
     /// no stream is currently subscribed).
     _keep_alive: tokio::sync::watch::Receiver<bool>,
+    /// Non-cooperative mode: `cancel` never completes (bounded by the
+    /// executor's `shutdown_ms` timeout) and never releases the blocked
+    /// stream, and `shutdown_session` fails — the A5 unconfirmed-cleanup
+    /// shape that must persist `interrupted`, never `cancelled`.
+    cancel_blocks: bool,
+    shutdown_fails: bool,
 }
 
 impl BlockingHost {
     fn new() -> Arc<Self> {
+        Self::build(false, false)
+    }
+
+    /// A5 unconfirmed-cleanup fixture: `cancel` never completes and
+    /// `shutdown_session` fails, so the engine cannot confirm the stop.
+    fn non_cooperative() -> Arc<Self> {
+        Self::build(true, true)
+    }
+
+    fn build(cancel_blocks: bool, shutdown_fails: bool) -> Arc<Self> {
         let (release, keep_alive) = tokio::sync::watch::channel(false);
         Arc::new(Self {
             prompts: Mutex::new(Vec::new()),
@@ -2481,6 +2506,8 @@ impl BlockingHost {
             streams_started: std::sync::Arc::new(AtomicU64::new(0)),
             release,
             _keep_alive: keep_alive,
+            cancel_blocks,
+            shutdown_fails,
         })
     }
 
@@ -2604,6 +2631,12 @@ impl HostFacade for BlockingHost {
 
     async fn cancel(&self, _op_id: HostOperationId) -> HostResult<()> {
         self.cancels.fetch_add(1, Ordering::SeqCst);
+        if self.cancel_blocks {
+            // Non-cooperative provider: the cancel request never completes.
+            // The executor bounds this with `shutdown_ms` and proceeds to
+            // unconfirmed cleanup (A5).
+            std::future::pending::<()>().await;
+        }
         // Release any blocked stream so the drain loop can observe
         // cancellation and terminate the operation.
         let _ = self.release.send(true);
@@ -2624,6 +2657,11 @@ impl HostFacade for BlockingHost {
 
     async fn shutdown_session(&self, _session_id: HostSessionId) -> HostResult<()> {
         self.reaps.fetch_add(1, Ordering::SeqCst);
+        if self.shutdown_fails {
+            return Err(HostError::internal(
+                "non-cooperative provider: shutdown_session failed",
+            ));
+        }
         Ok(())
     }
 
@@ -2906,6 +2944,147 @@ async fn control_cancel_reaches_host_and_persists_cancelled() {
     )
     .await;
     assert_eq!(status, reqwest::StatusCode::CONFLICT, "{body}");
+}
+
+/// qc2 F-002: an unconfirmed cancel/cleanup persists `interrupted` on the
+/// run and MUST NOT be projected as a successful schedule `cancelled`.
+/// `creator_schedules.status` has no `interrupted` variant (and an unmapped
+/// string projects as `Pending`, i.e. re-runnable), so the row stays
+/// non-terminal and the response/inspect report the interrupted run.
+#[tokio::test]
+async fn control_unconfirmed_cancel_keeps_schedule_non_cancelled() {
+    let host = BlockingHost::non_cooperative();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": PUBLIC_PRESET,
+            "label": "p2-fix-unconfirmed-cancel",
+            "seed": "p2-fix-topic",
+            "input": { "keyword": "p2-fix", "topic": "p2-fix-topic" },
+            "agent_bindings": {
+                "default": { "provider_id": MOCK_PROVIDER }
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+
+    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            if host.streams_started() >= 1 {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("prompt stream polled");
+
+    let row = load_drive_row(&daemon, &schedule_id).await;
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("owned session")
+        .to_string();
+
+    // Cancel reaches a non-cooperative provider: stop cannot be confirmed.
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "cancel" }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{body}");
+    assert_eq!(
+        body["status"].as_str(),
+        Some("interrupted"),
+        "unconfirmed cancel must report interrupted, never cancelled: {body}"
+    );
+
+    // The durable run is interrupted (uncertain), not a successful cancel.
+    let (run_status, _state) = wait_for_run_status(&daemon, &sid, "interrupted", 15).await;
+    assert_eq!(run_status, "interrupted");
+
+    // The schedule row is NOT cancelled and NOT pending (an unmapped
+    // `interrupted` string would project as Pending → re-runnable).
+    let row = load_drive_row(&daemon, &schedule_id).await;
+    assert_ne!(
+        row.status, "cancelled",
+        "unconfirmed cancel must not fabricate a successful schedule cancel"
+    );
+    assert_ne!(
+        row.status, "pending",
+        "an unmapped status string must never make the schedule re-runnable"
+    );
+    assert_eq!(
+        row.current_session_id.as_deref(),
+        Some(sid.as_str()),
+        "the schedule keeps its owned (interrupted) run identity"
+    );
+}
+
+/// qc1 F-001: an explicit legacy start with no configured default binding
+/// provider MUST refuse — the Host catalog's first entry is never selected
+/// as a fallback — and MUST NOT create a session.
+#[tokio::test]
+async fn admission_legacy_start_without_configured_provider_refuses() {
+    // `start_with_agent_host` leaves `providers` empty (no configured
+    // default binding provider) while the MockHost catalog still has one
+    // entry — exactly the shape that used to fall back to the first entry.
+    let host = MockHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+    let now = chrono::Utc::now().timestamp();
+
+    sqlx::query(
+        "INSERT INTO creator_schedules
+           (schedule_id, creator_id, preset_id, preset_version, status,
+            concurrency_kind, current_core_context_version, label,
+            created_at, updated_at, work_id, execution_policy,
+            execution_descriptor_json)
+           VALUES ('SCHNOBIND', 'test_creator', ?, 1, 'pending', 'parallel_any', 0, ?,
+                   ?, ?, NULL, 'legacy_inert', NULL)",
+    )
+    .bind(PUBLIC_PRESET)
+    .bind("p2-fix-no-binding")
+    .bind(now)
+    .bind(now)
+    .execute(&daemon.pool)
+    .await
+    .expect("seed legacy row");
+
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules/SCHNOBIND/signal",
+        json!({ "signal": "start" }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::CONFLICT,
+        "legacy start without a configured provider must refuse: {body}"
+    );
+    let text = body.to_string();
+    assert!(
+        text.contains("binding provider"),
+        "refusal must name the missing binding provider: {text}"
+    );
+
+    let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions")
+        .fetch_one(&daemon.pool)
+        .await
+        .expect("count sessions");
+    assert_eq!(sessions, 0, "a refused legacy start must create no session");
+    let row = load_drive_row(&daemon, "SCHNOBIND").await;
+    assert_eq!(row.status, "pending", "the row must stay unstarted");
+    assert!(
+        row.current_session_id.is_none(),
+        "no run identity may be minted for a refused legacy start"
+    );
 }
 
 /// T2: completed-v-cancel race — a run that already completed stays

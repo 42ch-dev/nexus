@@ -1379,7 +1379,10 @@ pub async fn signal_schedule(
                 .await
                 .map_err(|e| {
                     let msg = e.to_string();
-                    if msg.contains("not eligible") || msg.contains("execution_policy") {
+                    if msg.contains("not eligible")
+                        || msg.contains("execution_policy")
+                        || msg.contains("binding provider")
+                    {
                         NexusApiError::Conflict(format!(
                             "cannot start schedule {schedule_id}: {msg}"
                         ))
@@ -1475,8 +1478,18 @@ pub async fn signal_schedule(
                 // terminal `cancelled` (unconfirmed → `interrupted`). The
                 // schedule row is updated to match the run's terminal
                 // outcome.
-                let session_id = sqlx::query_scalar::<_, Option<String>>(
-                    "SELECT current_session_id FROM creator_schedules WHERE schedule_id = ?",
+                //
+                // Fence (qc2 F-001): the terminal UPDATE is fenced on the
+                // SAME (status, current_session_id) pair observed in this
+                // snapshot. A concurrent `admit_schedule_run` that commits
+                // `running` + `current_session_id` between this snapshot and
+                // the write loses the fence (rows affected = 0) and the
+                // cancel returns the standard `workflow_state_conflict`
+                // envelope WITHOUT any status write — an admitted driver can
+                // never end up driving under a schedule that reads cancelled.
+                let snapshot = sqlx::query_as::<_, (String, Option<String>)>(
+                    "SELECT status, current_session_id FROM creator_schedules
+                     WHERE schedule_id = ?",
                 )
                 .bind(&schedule_id)
                 .fetch_optional(&*pool)
@@ -1484,63 +1497,140 @@ pub async fn signal_schedule(
                 .map_err(|e| NexusApiError::Internal {
                     code: "DATABASE_ERROR".into(),
                     message: format!("database error: {e}"),
-                })?
-                .flatten();
+                })?;
+                // The row vanished between the top-of-handler read and here.
+                let (snapshot_status, snapshot_session) = snapshot.ok_or_else(|| {
+                    NexusApiError::NotFound(format!("schedule {schedule_id} not found"))
+                })?;
 
                 let mut terminal_status = "cancelled".to_string();
-                if let Some(sid) = session_id {
+                if let Some(sid) = &snapshot_session {
                     let coordinator = state.run_coordinator().ok_or_else(|| {
                         NexusApiError::service_unavailable("run coordinator not configured")
                     })?;
-                    let result = coordinator
+                    let result = match coordinator
                         .signal_run(
-                            &nexus_orchestration::engine::SessionId(sid),
+                            &nexus_orchestration::engine::SessionId(sid.clone()),
                             crate::preset_run::RunSignal::Cancel,
                         )
                         .await
-                        .map_err(|e| match e {
-                            crate::preset_run::RunControlError::StateConflict(sid, msg) => {
-                                NexusApiError::ConflictCoded {
-                                    code: "workflow_state_conflict".into(),
-                                    message: format!("state conflict for {sid}: {msg}"),
-                                }
-                            }
-                            crate::preset_run::RunControlError::WaitConflict {
-                                session_id,
-                                status,
-                                current_wait_id,
-                            } => NexusApiError::ConflictCoded {
+                    {
+                        Ok(result) => result,
+                        Err(crate::preset_run::RunControlError::StateConflict(sid, msg)) => {
+                            return Err(NexusApiError::ConflictCoded {
+                                code: "workflow_state_conflict".into(),
+                                message: format!("state conflict for {sid}: {msg}"),
+                            });
+                        }
+                        Err(crate::preset_run::RunControlError::WaitConflict {
+                            session_id,
+                            status,
+                            current_wait_id,
+                        }) => {
+                            return Err(NexusApiError::ConflictCoded {
                                 code: "workflow_wait_conflict".into(),
                                 message: format!(
                                     "wait conflict for {session_id}: current status {status}, current_wait_id {current_wait_id:?}"
                                 ),
-                            },
-                            crate::preset_run::RunControlError::ScheduleNotFound(sid) => {
-                                NexusApiError::NotFound(format!("session {sid} not found"))
+                            });
+                        }
+                        Err(crate::preset_run::RunControlError::ScheduleNotFound(sid)) => {
+                            return Err(NexusApiError::NotFound(format!(
+                                "session {sid} not found"
+                            )));
+                        }
+                        Err(other) => {
+                            let msg = other.to_string();
+                            // A5 (qc2 F-002): the engine commits durable
+                            // `interrupted` BEFORE surfacing the unconfirmed
+                            // cleanup as an error. That is not a server
+                            // failure — report the persisted outcome so the
+                            // operator sees an unconfirmed stop, never a
+                            // fabricated success and never a 500 that hides
+                            // the durable truth.
+                            if msg.contains("cancel cleanup unconfirmed") {
+                                tracing::warn!(
+                                    schedule_id = %schedule_id,
+                                    session_id = %sid,
+                                    "schedule cancel: owned run cleanup unconfirmed; \
+                                     durable run is interrupted"
+                                );
+                                return Ok((
+                                    StatusCode::OK,
+                                    Json(SignalScheduleResponse {
+                                        schedule_id,
+                                        status: "interrupted".to_string(),
+                                        current_wait_id: None,
+                                    }),
+                                ));
                             }
-                            other => NexusApiError::Internal {
+                            return Err(NexusApiError::Internal {
                                 code: "RUN_CONTROL_ERROR".into(),
-                                message: other.to_string(),
-                            },
-                        })?;
+                                message: msg,
+                            });
+                        }
+                    };
                     terminal_status = result.status;
                 }
 
+                // qc2 F-002: an unconfirmed cancel/cleanup (`interrupted`) is
+                // NOT a successful cancel. `creator_schedules.status` has no
+                // `interrupted` variant and `ScheduleRow::to_schedule` maps an
+                // unmapped string to `Pending` (re-runnable), so writing the
+                // run's `interrupted` status into the row would fabricate a
+                // re-runnable schedule. The row is left non-terminal; the
+                // response reports the durable run status and public inspect
+                // projects `execution.recovery_class: "interrupted"` from the
+                // session record.
+                if terminal_status == "interrupted" {
+                    tracing::warn!(
+                        schedule_id = %schedule_id,
+                        session_id = ?snapshot_session,
+                        "schedule cancel: owned run interrupted (unconfirmed cleanup); \
+                         schedule row left non-terminal"
+                    );
+                    return Ok((
+                        StatusCode::OK,
+                        Json(SignalScheduleResponse {
+                            schedule_id,
+                            status: terminal_status,
+                            current_wait_id: None,
+                        }),
+                    ));
+                }
+
                 // SAFETY: runtime `sqlx::query` — same pool lifetime constraint as inspect_schedule above.
-                sqlx::query(
-                        "UPDATE creator_schedules SET status = ?, terminated_at = ?, updated_at = ?
-                         WHERE schedule_id = ?",
-                    )
-                    .bind(&terminal_status)
-                    .bind(now)
-                    .bind(now)
-                    .bind(&schedule_id)
-                    .execute(&*pool)
-                    .await
-                    .map_err(|e| NexusApiError::Internal {
-                        code: "DATABASE_ERROR".into(),
-                        message: format!("database error: {e}"),
-                    })?;
+                // The fence predicate uses the OBSERVED pair: an admission
+                // that landed after the snapshot loses the fence and no
+                // status write happens (rows affected = 0 → conflict).
+                let fenced_rows = fenced_cancel_schedule_status(
+                    &pool,
+                    &schedule_id,
+                    &snapshot_status,
+                    snapshot_session.as_deref(),
+                    &terminal_status,
+                    now,
+                )
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    code: "DATABASE_ERROR".into(),
+                    message: format!("database error: {e}"),
+                })?;
+                if fenced_rows == 0 {
+                    // The schedule state moved on between our snapshot and
+                    // the write (e.g. a concurrent admission claimed the
+                    // NULL-session window) — the cancel must not mark the
+                    // row cancelled while the admitted run drives. Exact
+                    // conflict envelope, no write.
+                    return Err(NexusApiError::ConflictCoded {
+                        code: "workflow_state_conflict".into(),
+                        message: format!(
+                            "cannot cancel schedule {schedule_id}: schedule state moved on \
+                             concurrently (observed status {snapshot_status}, \
+                             current_session_id {snapshot_session:?})"
+                        ),
+                    });
+                }
 
                 return Ok((
                     StatusCode::OK,
@@ -2381,9 +2471,146 @@ struct HistoryRow {
 // Tests
 // ---------------------------------------------------------------------------
 
+/// Fenced terminal-status write for a schedule cancel (qc2 F-001).
+///
+/// The predicate pins the **observed** `(status, current_session_id)` pair
+/// from the handler's snapshot. A concurrent `admit_schedule_run` that
+/// commits `running` + `current_session_id` between the snapshot and this
+/// write makes the predicate fail, so zero rows are affected and the caller
+/// returns `workflow_state_conflict` **without** any status write — an
+/// admitted driver can never end up driving under a schedule that reads
+/// cancelled.
+///
+/// Returns the number of rows affected (0 = the fence was lost).
+async fn fenced_cancel_schedule_status(
+    pool: &sqlx::SqlitePool,
+    schedule_id: &str,
+    observed_status: &str,
+    observed_session_id: Option<&str>,
+    terminal_status: &str,
+    now: i64,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE creator_schedules SET status = ?, terminated_at = ?, updated_at = ?
+         WHERE schedule_id = ? AND status = ? AND current_session_id IS ?",
+    )
+    .bind(terminal_status)
+    .bind(now)
+    .bind(now)
+    .bind(schedule_id)
+    .bind(observed_status)
+    .bind(observed_session_id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// qc2 F-001: the cancel status write is fenced on the OBSERVED
+    /// `(status, current_session_id)` pair. An admission that commits an
+    /// owned session in the snapshot window must make the fence lose
+    /// (0 rows, no status write); the current pair must commit.
+    #[tokio::test]
+    async fn cancel_fence_loses_to_concurrent_admission_without_writing_status() {
+        let db = tempfile::NamedTempFile::new().expect("temp db");
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool).await.expect("migrate");
+        let now = chrono::Utc::now().timestamp();
+
+        // Admission-only historical shape: running, no owned session.
+        sqlx::query(
+            "INSERT INTO creator_schedules
+               (schedule_id, creator_id, preset_id, preset_version, status,
+                concurrency_kind, current_core_context_version, created_at, updated_at)
+               VALUES ('SCH-FENCE', 'creator-1', 'memory-augmented', 1, 'running',
+                       'serial', 0, ?, ?)",
+        )
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("seed schedule");
+        sqlx::query(
+            "INSERT INTO orchestration_sessions
+               (session_id, creator_id, preset_id, preset_version, status,
+                context_json, created_at, updated_at)
+               VALUES ('sess-admitted', 'creator-1', 'memory-augmented', 1, 'running',
+                       X'00', ?, ?)",
+        )
+        .bind(now)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .expect("seed admitted session");
+
+        // Handler snapshot: (running, NULL).
+        let (observed_status, observed_session): (String, Option<String>) = sqlx::query_as(
+            "SELECT status, current_session_id FROM creator_schedules
+             WHERE schedule_id = 'SCH-FENCE'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("snapshot");
+
+        // Concurrent admission commits the owned session in the window.
+        sqlx::query(
+            "UPDATE creator_schedules SET current_session_id = 'sess-admitted'
+             WHERE schedule_id = 'SCH-FENCE'",
+        )
+        .execute(&pool)
+        .await
+        .expect("concurrent admission");
+
+        let rows = fenced_cancel_schedule_status(
+            &pool,
+            "SCH-FENCE",
+            &observed_status,
+            observed_session.as_deref(),
+            "cancelled",
+            now,
+        )
+        .await
+        .expect("fenced write");
+        assert_eq!(rows, 0, "a stale observed pair must lose the fence");
+
+        let (status, session): (String, Option<String>) = sqlx::query_as(
+            "SELECT status, current_session_id FROM creator_schedules
+             WHERE schedule_id = 'SCH-FENCE'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("read back");
+        assert_eq!(
+            status, "running",
+            "a lost fence must not write a terminal status"
+        );
+        assert_eq!(session.as_deref(), Some("sess-admitted"));
+
+        // The current observed pair commits.
+        let rows = fenced_cancel_schedule_status(
+            &pool,
+            "SCH-FENCE",
+            "running",
+            Some("sess-admitted"),
+            "cancelled",
+            now,
+        )
+        .await
+        .expect("fenced write");
+        assert_eq!(rows, 1, "the current observed pair must commit");
+        let status: String = sqlx::query_scalar(
+            "SELECT status FROM creator_schedules WHERE schedule_id = 'SCH-FENCE'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("read back");
+        assert_eq!(status, "cancelled");
+    }
 
     #[test]
     fn signal_request_parse_valid_signals() {

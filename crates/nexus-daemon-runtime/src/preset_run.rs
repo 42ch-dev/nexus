@@ -943,7 +943,15 @@ impl WorkflowRunCoordinator {
     /// from the durable v1 record and mapped to the supervisor's transition:
     /// - `Completed` → `ScheduleStatus::Completed`
     /// - `Failed` → `ScheduleStatus::Failed`
-    /// - `Cancelled` / `Interrupted` → `ScheduleStatus::Cancelled`
+    /// - `Cancelled` → `ScheduleStatus::Cancelled`
+    /// - `Interrupted` → **no settlement** (qc2 F-002): an unconfirmed
+    ///   cancel/cleanup is not a successful cancel, so the schedule row must
+    ///   never read `cancelled`. `creator_schedules.status` has no
+    ///   `interrupted` variant (`ScheduleStatus`), and an unmapped string
+    ///   projects as `Pending` (re-runnable) — so the row is left
+    ///   non-terminal and public inspect projects the run's
+    ///   `execution.recovery_class: "interrupted"` from the durable session.
+    ///   Boot reconciliation skips the same class.
     ///
     /// This keeps schedule and session inspect in agreement even when the
     /// engine's failure surface committed `cancelled` for a failed drive
@@ -1014,8 +1022,22 @@ impl WorkflowRunCoordinator {
                 nexus_contracts::local::schedule::ScheduleStatus::Completed
             }
             SessionStatus::Failed => nexus_contracts::local::schedule::ScheduleStatus::Failed,
-            SessionStatus::Cancelled | SessionStatus::Interrupted => {
+            SessionStatus::Cancelled => {
                 nexus_contracts::local::schedule::ScheduleStatus::Cancelled
+            }
+            // Unconfirmed cancel/cleanup is NOT a successful cancel (A5).
+            // `creator_schedules.status` has no `interrupted` variant and an
+            // unmapped string projects as `Pending` (re-runnable), so the
+            // schedule row is deliberately left non-terminal: public inspect
+            // projects the run's `execution.recovery_class: "interrupted"`
+            // from the durable session record (qc2 F-002).
+            SessionStatus::Interrupted => {
+                tracing::warn!(
+                    session_id = %session_id.0,
+                    "coordinator: run interrupted (unconfirmed cleanup); schedule row left \
+                     non-terminal and projected as interrupted recovery class"
+                );
+                return;
             }
             // Non-terminal: the run is still live; never settle.
             _ => return,
@@ -1546,45 +1568,25 @@ impl WorkflowRunCoordinator {
             ))
         })?;
 
-        // 3. Choose the sanctioned binding source: the configured default
-        //    binding provider first, then the Host catalog's first entry.
-        //    A preset with no prompt roles accepts an empty map.
+        // 3. Choose the sanctioned binding source: ONLY the coordinator's
+        //    configured default binding provider (the same source the
+        //    supervisor/internal insertion paths use). A catalog-order
+        //    first entry is NEVER selected — a preset with no prompt roles
+        //    accepts an empty map; a preset that needs prompt roles but has
+        //    no configured default provider refuses with a typed admission
+        //    error before any session/claim is created (qc1 F-001).
         let roles = nexus_orchestration::preset::required_prompt_roles(&loaded);
         let agent_bindings = if roles.is_empty() {
             std::collections::HashMap::new()
         } else {
-            let provider_id = match &self.binding_provider {
-                Some(provider) => provider.clone(),
-                None => match &self.agent_host {
-                    Some(host) => {
-                        let catalog = host
-                            .provider_catalog()
-                            .await
-                            .map_err(|e| {
-                                RunControlError::Admission(format!(
-                                    "provider catalog unavailable for legacy start: {e}"
-                                ))
-                            })?;
-                        catalog
-                            .entries
-                            .first()
-                            .map(|e| e.provider_id.to_string())
-                            .ok_or_else(|| {
-                                RunControlError::Admission(
-                                    "no binding provider configured and no Host provider \
-                                     catalogued; cannot derive sanctioned bindings for legacy start"
-                                        .to_string(),
-                                )
-                            })?
-                    }
-                    None => {
-                        return Err(RunControlError::Admission(
-                            "no binding provider configured; cannot derive sanctioned \
-                             bindings for legacy start"
-                                .to_string(),
-                        ));
-                    }
-                },
+            let Some(provider_id) = &self.binding_provider else {
+                return Err(RunControlError::Admission(format!(
+                    "preset '{}' requires {} prompt role binding(s) but no configured \
+                     default binding provider exists; cannot derive sanctioned bindings \
+                     for legacy start",
+                    row.preset_id,
+                    roles.len()
+                )));
             };
             roles
                 .into_iter()
