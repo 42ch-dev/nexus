@@ -170,12 +170,17 @@ impl nexus_orchestration::capability::PromptExecutor for MockLlmExtractWorker {
 }
 
 fn registry_with_mock_worker() -> CapabilityRegistry {
+    // A1: prompt consumers resolve their coordinator cancellation token from
+    // this map and fail closed when none is registered. The review-time hook
+    // runs outside a preset session, so register the ids it can use.
+    let mut cancels = std::collections::HashMap::new();
+    for id in ["sch_v151_llm", "", "review-master"] {
+        cancels.insert(id.to_string(), tokio_util::sync::CancellationToken::new());
+    }
     let deps = CapabilityRuntimeDeps {
         pool: None,
         prompt_executor: Some(std::sync::Arc::new(MockLlmExtractWorker)),
-        session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
+        session_cancels: std::sync::Arc::new(std::sync::RwLock::new(cancels)),
         daemon_tool_dispatch: None,
         cdn_config: None,
     };
