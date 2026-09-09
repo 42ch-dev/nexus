@@ -134,7 +134,7 @@ export function designTokensPlugin(repoRoot: string): Plugin {
       // this request path would loop — the reload that already happened is the
       // refresh). This is the missed-watch safety net: a manual reload picks
       // up the current DESIGN pair even if chokidar never fired.
-      server.middlewares.use((req, res, next) => {
+      server.middlewares.use((req, _res, next) => {
         if (req.url && /(?:^|\/)(?:index\.html)?$/.test(req.url)) {
           compileCache = null;
           invalidateCssGraph();
