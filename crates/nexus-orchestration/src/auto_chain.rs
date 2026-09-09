@@ -1434,9 +1434,166 @@ pub async fn enqueue_auto_chain_schedule(
     volume: Option<i32>,
     work: &WorkRecord,
     agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
+    source_run_id: Option<&str>,
+) -> Result<String, AutoChainError> {
+    // I-9: the schedule INSERT and the Work driver-pointer update commit in
+    // ONE transaction so a concurrent tick can never observe a partial
+    // Work-pointer/schedule state. The runtime lock is acquired after
+    // commit (it is a separate resource, not part of the schedule row).
+    let mut tx = nexus_local_db::begin_immediate(pool)
+        .await
+        .map_err(|e| AutoChainError::Database(nexus_local_db::LocalDbError::from(e)))?;
+
+    match enqueue_auto_chain_schedule_in_tx(
+        &mut tx,
+        pool,
+        creator_id,
+        work_id,
+        stage,
+        chapter,
+        volume,
+        work,
+        agent_bindings,
+        source_run_id,
+    )
+    .await
+    {
+        Ok(schedule_id) => {
+            tx.commit().await.map_err(|e| {
+                tracing::error!(error = %e, "auto-chain: failed to commit schedule+driver");
+                AutoChainError::Database(nexus_local_db::LocalDbError::from(e))
+            })?;
+            acquire_auto_chain_runtime_lock(pool, creator_id, work_id, &schedule_id).await;
+            tracing::info!(
+                work_id = %work_id,
+                schedule_id = %schedule_id,
+                stage = %stage,
+                chapter = chapter.unwrap_or(0),
+                "auto-chain: enqueued next step"
+            );
+            Ok(schedule_id)
+        }
+        Err(e) if source_run_id.is_some() && is_source_run_conflict(&e) => {
+            // T3 (A3): a duplicate terminal callback / restart already
+            // created the child for this source run. Roll back (the child
+            // INSERT failed) and load the already-created child — never
+            // mint a second schedule.
+            drop(tx);
+            let source_run_id = source_run_id.expect("guarded by is_some");
+            let existing: Option<String> = sqlx::query_scalar(
+                "SELECT schedule_id FROM creator_schedules WHERE source_run_id = ?",
+            )
+            .bind(source_run_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(nexus_local_db::LocalDbError::from)?;
+            match existing {
+                Some(schedule_id) => {
+                    tracing::info!(
+                        work_id = %work_id,
+                        schedule_id = %schedule_id,
+                        source_run_id,
+                        "auto-chain: duplicate terminal callback loaded existing child"
+                    );
+                    Ok(schedule_id)
+                }
+                None => Err(e),
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// True when `e` is a UNIQUE violation on the `source_run_id` partial index.
+///
+/// `pub(crate)` so the supervisor's atomic settlement path
+/// (`settle_and_chain_atomic`) can load the already-created child on a
+/// duplicate terminal callback instead of minting a second schedule.
+pub(crate) fn is_source_run_conflict(e: &AutoChainError) -> bool {
+    matches!(
+        e,
+        AutoChainError::Database(nexus_local_db::LocalDbError::Sqlx(
+            sqlx::Error::Database(db)
+        )) if db.is_unique_violation()
+            && (db.constraint().unwrap_or_default().contains("creator_schedules_by_source_run")
+                || db.message().contains("creator_schedules.source_run_id"))
+    )
+}
+
+/// Acquire the daemon runtime lock for an auto-chain schedule (V1.42 P0 T3).
+///
+/// Best-effort: a lock failure is logged and does not fail the enqueue (the
+/// schedule was already committed; auto-chain skips locked Works at tick).
+async fn acquire_auto_chain_runtime_lock(
+    pool: &SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+    schedule_id: &str,
+) {
+    // V1.42 P0 (T3): Acquire runtime lock for this schedule.
+    // Holder format: `daemon:schedule:<schedule_id>`.
+    let holder = nexus_local_db::runtime_lock::schedule_holder(schedule_id);
+    let ttl = nexus_local_db::runtime_lock::ttl_from_env();
+    match nexus_local_db::acquire_runtime_lock(
+        pool, creator_id, work_id, &holder, ttl, true, // force_stale=true for daemon
+    )
+    .await
+    {
+        Ok(nexus_local_db::AcquireResult::Acquired { .. }) => {}
+        Ok(nexus_local_db::AcquireResult::Locked {
+            holder: existing, ..
+        }) => {
+            tracing::warn!(
+                work_id = %work_id,
+                schedule_id = %schedule_id,
+                existing_holder = %existing,
+                "runtime_lock: could not acquire for auto-chain (locked by another process)"
+            );
+            // Continue — auto-chain will skip if Work is locked at next tick.
+        }
+        Err(e) => {
+            tracing::warn!(
+                work_id = %work_id,
+                schedule_id = %schedule_id,
+                error = %e,
+                "runtime_lock: failed to acquire for auto-chain"
+            );
+            // Non-fatal — the schedule was already enqueued.
+        }
+    }
+}
+
+/// Insert the auto-chain child schedule + seed + Work driver-pointer update
+/// inside an OPEN transaction (T3, A3).
+///
+/// This is the shared body of [`enqueue_auto_chain_schedule`] and the
+/// supervisor's atomic terminal settlement (`settle_and_chain_atomic`): the
+/// caller owns the transaction so the child INSERT, the Work driver-pointer
+/// update, and (in the settlement path) the source schedule's terminal
+/// status flip commit together. `source_run_id` is internal provenance
+/// (A3): the terminal source run that created this child, keyed by the
+/// partial unique index `creator_schedules_by_source_run`.
+///
+/// # Errors
+/// Returns [`AutoChainError::Database`] if any DB operation fails. A UNIQUE
+/// violation on `source_run_id` is surfaced to the caller, which loads the
+/// already-created child (never mints a second schedule).
+pub async fn enqueue_auto_chain_schedule_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    pool: &SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+    stage: &str,
+    chapter: Option<i32>,
+    volume: Option<i32>,
+    work: &WorkRecord,
+    agent_bindings: std::collections::HashMap<String, crate::run_state::AgentBinding>,
+    source_run_id: Option<&str>,
 ) -> Result<String, AutoChainError> {
     // V1.48 P1 (overlay §2 Consumer): render the open-findings prompt
-    // block when the produce stage targets a selected chapter.
+    // block when the produce stage targets a selected chapter. The DAO
+    // reads through the pool (the findings table is not part of the
+    // settlement transaction).
     let open_findings_block =
         compute_open_findings_block_for_produce(pool, creator_id, work_id, stage, chapter).await;
 
@@ -1464,14 +1621,6 @@ pub async fn enqueue_auto_chain_schedule(
         counter & 0x00FF_FFFF
     );
     let now_ts = chrono::Utc::now().timestamp();
-
-    // I-9: the schedule INSERT and the Work driver-pointer update commit in
-    // ONE transaction so a concurrent tick can never observe a partial
-    // Work-pointer/schedule state. The runtime lock is acquired after
-    // commit (it is a separate resource, not part of the schedule row).
-    let mut tx = nexus_local_db::begin_immediate(pool)
-        .await
-        .map_err(|e| AutoChainError::Database(nexus_local_db::LocalDbError::from(e)))?;
 
     // SAFETY: dynamic SQL — auto-chain schedule insert with derived params.
     // R-V139P5-S4: read preset_version from the manifest mapping instead of
@@ -1505,8 +1654,8 @@ pub async fn enqueue_auto_chain_schedule(
            (schedule_id, creator_id, preset_id, preset_version, status,
             concurrency_kind, current_core_context_version, label,
             created_at, updated_at, work_id, execution_policy,
-            execution_descriptor_json)
-           VALUES (?, ?, ?, ?, 'pending', 'serial', 0, ?, ?, ?, ?, 'driven_v1', ?)",
+            execution_descriptor_json, source_run_id)
+           VALUES (?, ?, ?, ?, 'pending', 'serial', 0, ?, ?, ?, ?, 'driven_v1', ?, ?)",
     )
     .bind(&schedule_id)
     .bind(creator_id)
@@ -1517,7 +1666,8 @@ pub async fn enqueue_auto_chain_schedule(
     .bind(now_ts)
     .bind(work_id)
     .bind(descriptor)
-    .execute(&mut *tx)
+    .bind(source_run_id)
+    .execute(&mut **tx)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "auto-chain: failed to insert schedule");
@@ -1532,7 +1682,7 @@ pub async fn enqueue_auto_chain_schedule(
         .as_deref()
         .unwrap_or_default()
         .to_string();
-    seed_core_context_version(&mut tx, &schedule_id, &seed_text).await?;
+    seed_core_context_version(tx, &schedule_id, &seed_text).await?;
 
     // Update the Work checkpoint to point at the new driver schedule —
     // atomically with the schedule row (I-9).
@@ -1544,54 +1694,9 @@ pub async fn enqueue_auto_chain_schedule(
         auto_chain_interrupted: Some(false),
         ..Default::default()
     };
-    works::patch_work_tx(&mut tx, creator_id, work_id, &patch, &now)
+    works::patch_work_tx(tx, creator_id, work_id, &patch, &now)
         .await
         .map_err(AutoChainError::from)?;
-
-    tx.commit().await.map_err(|e| {
-        tracing::error!(error = %e, "auto-chain: failed to commit schedule+driver");
-        AutoChainError::Database(nexus_local_db::LocalDbError::from(e))
-    })?;
-
-    // V1.42 P0 (T3): Acquire runtime lock for this schedule.
-    // Holder format: `daemon:schedule:<schedule_id>`.
-    let holder = nexus_local_db::runtime_lock::schedule_holder(&schedule_id);
-    let ttl = nexus_local_db::runtime_lock::ttl_from_env();
-    match nexus_local_db::acquire_runtime_lock(
-        pool, creator_id, work_id, &holder, ttl, true, // force_stale=true for daemon
-    )
-    .await
-    {
-        Ok(nexus_local_db::AcquireResult::Acquired { .. }) => {}
-        Ok(nexus_local_db::AcquireResult::Locked {
-            holder: existing, ..
-        }) => {
-            tracing::warn!(
-                work_id = %work_id,
-                schedule_id = %schedule_id,
-                existing_holder = %existing,
-                "runtime_lock: could not acquire for auto-chain (locked by another process)"
-            );
-            // Continue — auto-chain will skip if Work is locked at next tick.
-        }
-        Err(e) => {
-            tracing::warn!(
-                work_id = %work_id,
-                schedule_id = %schedule_id,
-                error = %e,
-                "runtime_lock: failed to acquire for auto-chain"
-            );
-            // Non-fatal — the schedule was already enqueued.
-        }
-    }
-
-    tracing::info!(
-        work_id = %work_id,
-        schedule_id = %schedule_id,
-        stage = %stage,
-        chapter = chapter.unwrap_or(0),
-        "auto-chain: enqueued next step"
-    );
 
     Ok(schedule_id)
 }
@@ -2138,7 +2243,7 @@ mod tests {
 
         let sid = enqueue_auto_chain_schedule(
             &pool, "ctr_test", "wrk_test", "research", None, None, &work,
-            std::collections::HashMap::new(),
+            std::collections::HashMap::new(), None,
             )
         .await
         .unwrap();
@@ -2200,6 +2305,7 @@ mod tests {
             None,
             &work,
         std::collections::HashMap::new(),
+        None,
         )
         .await;
 

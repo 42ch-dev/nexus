@@ -837,6 +837,11 @@ impl WorkspaceState {
         };
         supervisor_builder = supervisor_builder.with_schedule_starter(Arc::new(starter));
         let supervisor = Arc::new(supervisor_builder);
+        // T3 (A3): the coordinator settles terminal runs through the
+        // supervisor. The supervisor is constructed AFTER the coordinator
+        // (it needs the coordinator's starter), so the handle is attached
+        // here once both exist.
+        coordinator.set_schedule_supervisor(supervisor.clone());
 
         // N-2: publish ONE immutable aggregate after every component is
         // wired. Accessors read this cell; a reader can never observe a

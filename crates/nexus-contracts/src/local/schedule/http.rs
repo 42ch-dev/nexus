@@ -122,6 +122,11 @@ pub struct ScheduleSummary {
     pub creator_id: String,
     pub preset_id: String,
     pub status: String,
+    /// Execution policy (A3): `legacy_inert`, `driven_v1`, or `system_inert`.
+    pub execution_policy: String,
+    /// The owned run session ID, when the schedule has been admitted (A3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_session_id: Option<String>,
     pub label: Option<String>,
     pub current_core_context_version: u32,
     pub created_at: String,

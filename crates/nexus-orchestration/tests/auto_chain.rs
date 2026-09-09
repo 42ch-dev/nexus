@@ -741,6 +741,7 @@ async fn simulate_boot_auto_resume(pool: &SqlitePool) -> Vec<(String, String, Op
                     None,
                     &latest,
                     std::collections::HashMap::new(),
+                    None,
                 )
                 .await
                 {

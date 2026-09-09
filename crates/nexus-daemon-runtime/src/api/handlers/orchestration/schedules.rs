@@ -991,7 +991,8 @@ pub async fn list_schedules(
     // conditionally at runtime. User inputs are bound as parameters; only
     // whitelisted column identifiers are interpolated into ORDER BY.
     let mut sql = String::from(
-        "SELECT schedule_id, creator_id, preset_id, status, label,
+        "SELECT schedule_id, creator_id, preset_id, status, execution_policy,
+                current_session_id, label,
                 current_core_context_version, created_at, updated_at
          FROM creator_schedules WHERE 1=1",
     );
@@ -1115,7 +1116,8 @@ pub async fn inspect_schedule(
     // reference with sufficient lifetime for the macro expansion. Could be converted in a
     // future pass by inlining the pool reference.
     let row = sqlx::query_as::<_, InspectRow>(
-        "SELECT schedule_id, creator_id, preset_id, status, label,
+        "SELECT schedule_id, creator_id, preset_id, status, execution_policy,
+                current_session_id, label,
                 current_core_context_version, created_at, updated_at,
                 concurrency_kind, concurrency_whitelist
          FROM creator_schedules WHERE schedule_id = ?",
@@ -1531,6 +1533,7 @@ pub async fn signal_schedule(
                     )
                     .bind(&terminal_status)
                     .bind(now)
+                    .bind(now)
                     .bind(&schedule_id)
                     .execute(&*pool)
                     .await
@@ -1914,7 +1917,8 @@ pub async fn edit_schedule(
 
     // Read back the summary with the fresh updated_at.
     let row = sqlx::query_as::<_, InspectRow>(
-        "SELECT schedule_id, creator_id, preset_id, status, label,
+        "SELECT schedule_id, creator_id, preset_id, status, execution_policy,
+                current_session_id, label,
                 current_core_context_version, created_at, updated_at,
                 concurrency_kind, concurrency_whitelist
          FROM creator_schedules WHERE schedule_id = ?",
@@ -2286,6 +2290,8 @@ struct ListRow {
     creator_id: String,
     preset_id: String,
     status: String,
+    execution_policy: String,
+    current_session_id: Option<String>,
     label: Option<String>,
     current_core_context_version: i64,
     created_at: i64,
@@ -2299,6 +2305,8 @@ impl ListRow {
             creator_id: self.creator_id,
             preset_id: self.preset_id,
             status: self.status,
+            execution_policy: self.execution_policy,
+            current_session_id: self.current_session_id,
             label: self.label,
             current_core_context_version: u32::try_from(self.current_core_context_version)
                 .map_err(|_| NexusApiError::Internal {
@@ -2320,6 +2328,8 @@ struct InspectRow {
     creator_id: String,
     preset_id: String,
     status: String,
+    execution_policy: String,
+    current_session_id: Option<String>,
     label: Option<String>,
     current_core_context_version: i64,
     created_at: i64,
@@ -2338,6 +2348,8 @@ impl InspectRow {
             creator_id: self.creator_id,
             preset_id: self.preset_id,
             status: self.status,
+            execution_policy: self.execution_policy,
+            current_session_id: self.current_session_id,
             label: self.label,
             current_core_context_version: u32::try_from(self.current_core_context_version)
                 .map_err(|_| NexusApiError::Internal {

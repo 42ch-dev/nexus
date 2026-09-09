@@ -1490,6 +1490,7 @@ async fn admission_internal_insertion_branches_durable() {
         &work,
         nexus_orchestration::preset::default_bindings_for_preset("research", MOCK_PROVIDER)
             .expect("research preset resolves"),
+        None,
     )
     .await
     .expect("enqueue auto-chain schedule");
@@ -3123,4 +3124,596 @@ async fn control_advance_cannot_bypass_human_wait() {
         "bypass attempts must not consume the wait"
     );
     assert_eq!(host.effects(), effects_before, "no effects after bypass attempts");
+}
+
+// ---------------------------------------------------------------------------
+// Task 3 — settlement acceptance: terminal agreement, idempotent auto-chain,
+// boot reconciliation, no re-enqueue
+// ---------------------------------------------------------------------------
+
+/// T3: a completed driven run settles the matching schedule from the durable
+/// session status — schedule and session inspect agree (status, policy,
+/// current run), and a later tick never re-enqueues the terminal row.
+#[tokio::test]
+async fn settlement_completed_inspect_agrees() {
+    let host = BlockingHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": PUBLIC_PRESET,
+            "label": "p2-t3-completed",
+            "seed": "p2-t3-topic",
+            "input": { "keyword": "p2-t3", "topic": "p2-t3-topic" },
+            "agent_bindings": {
+                "default": { "provider_id": MOCK_PROVIDER }
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    host.release();
+
+    let row = load_drive_row(&daemon, &schedule_id).await;
+    let sid = row.current_session_id.as_deref().expect("owned session").to_string();
+    let (run_status, state) = wait_for_run_status(&daemon, &sid, "waiting_for_input", 15).await;
+    assert_eq!(run_status, "waiting_for_input");
+    let wait_id = state["wait"]["wait_id"].as_str().expect("wait id").to_string();
+
+    // Continue to completion.
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "continue", "wait_id": wait_id }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{body}");
+    let (run_status, _) = wait_for_run_status(&daemon, &sid, "completed", 15).await;
+    assert_eq!(run_status, "completed");
+
+    // The schedule settles to completed from the durable session status.
+    let row = load_drive_row(&daemon, &schedule_id).await;
+    assert_eq!(row.status, "completed", "schedule must settle to completed");
+    assert_eq!(
+        row.current_session_id.as_deref(),
+        Some(sid.as_str()),
+        "schedule keeps its owned run identity"
+    );
+
+    // Public inspect agrees: status, policy, current run.
+    let resp = reqwest::Client::new()
+        .get(format!(
+            "{}/v1/daemon/orchestration/schedules/{schedule_id}",
+            daemon.http_url
+        ))
+        .send()
+        .await
+        .expect("GET inspect");
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let inspect: Value = resp.json().await.expect("inspect json");
+    assert_eq!(inspect["schedule"]["status"].as_str(), Some("completed"));
+    assert_eq!(
+        inspect["schedule"]["execution_policy"].as_str(),
+        Some("driven_v1")
+    );
+    assert_eq!(
+        inspect["schedule"]["current_session_id"].as_str(),
+        Some(sid.as_str())
+    );
+
+    // Session inspect agrees.
+    let resp = reqwest::Client::new()
+        .get(format!(
+            "{}/v1/daemon/orchestration/sessions/{sid}",
+            daemon.http_url
+        ))
+        .send()
+        .await
+        .expect("GET session");
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let session: Value = resp.json().await.expect("session json");
+    assert_eq!(session["session"]["status"].as_str(), Some("completed"));
+
+    // Terminal rows are never re-enqueued: a tick leaves the row terminal
+    // and does not mint a second session.
+    let supervisor = daemon.state.schedule_supervisor().expect("supervisor wired");
+    supervisor.tick().await.expect("tick succeeds");
+    let row = load_drive_row(&daemon, &schedule_id).await;
+    assert_eq!(row.status, "completed", "terminal row must not be re-enqueued");
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM orchestration_sessions WHERE session_id = ?",
+    )
+    .bind(&sid)
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("count sessions");
+    assert_eq!(count, 1, "no second session for a terminal row");
+}
+
+/// T3: a cancelled driven run settles the matching schedule to cancelled —
+/// schedule and session inspect agree, and the terminal row is not
+/// re-enqueued.
+#[tokio::test]
+async fn settlement_cancelled_inspect_agrees() {
+    let host = BlockingHost::new();
+    let daemon = LiveDaemon::start_with_agent_host(host.clone()).await;
+
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": PUBLIC_PRESET,
+            "label": "p2-t3-cancelled",
+            "seed": "p2-t3-topic",
+            "input": { "keyword": "p2-t3", "topic": "p2-t3-topic" },
+            "agent_bindings": {
+                "default": { "provider_id": MOCK_PROVIDER }
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+
+    // Wait for the prompt stream to be polled (deterministic cancel-reachability).
+    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            if host.streams_started() >= 1 {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("prompt stream polled");
+
+    let row = load_drive_row(&daemon, &schedule_id).await;
+    let sid = row.current_session_id.as_deref().expect("owned session").to_string();
+
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "cancel" }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{body}");
+    assert_eq!(body["status"].as_str(), Some("cancelled"), "{body}");
+
+    let (run_status, _) = wait_for_run_status(&daemon, &sid, "cancelled", 15).await;
+    assert_eq!(run_status, "cancelled");
+
+    // The schedule settles to cancelled (durable session status is truth).
+    // Settlement is async — the drive task settles after the cancel signal
+    // returns — so poll the schedule row (the handler's raw UPDATE and the
+    // drive task's settlement both converge on "cancelled").
+    let row = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            let row = load_drive_row(&daemon, &schedule_id).await;
+            if row.status == "cancelled" {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("schedule must settle to cancelled");
+    assert_eq!(row.status, "cancelled", "schedule must settle to cancelled");
+
+    // Public inspect agrees.
+    let resp = reqwest::Client::new()
+        .get(format!(
+            "{}/v1/daemon/orchestration/schedules/{schedule_id}",
+            daemon.http_url
+        ))
+        .send()
+        .await
+        .expect("GET inspect");
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let inspect: Value = resp.json().await.expect("inspect json");
+    assert_eq!(inspect["schedule"]["status"].as_str(), Some("cancelled"));
+    assert_eq!(
+        inspect["schedule"]["current_session_id"].as_str(),
+        Some(sid.as_str())
+    );
+
+    // Terminal rows are never re-enqueued.
+    let supervisor = daemon.state.schedule_supervisor().expect("supervisor wired");
+    supervisor.tick().await.expect("tick succeeds");
+    let row = load_drive_row(&daemon, &schedule_id).await;
+    assert_eq!(row.status, "cancelled", "terminal row must not be re-enqueued");
+}
+
+/// T3: a failed driven run settles the matching schedule from the durable
+/// session status — schedule and session inspect agree (the durable record
+/// is truth, whatever terminal status the engine committed).
+#[tokio::test]
+async fn settlement_failed_inspect_agrees() {
+    let daemon = LiveDaemon::start().await;
+    let now = chrono::Utc::now().timestamp();
+
+    // combat-engine fails at runtime when the world has no computable
+    // knowledge entries (the T1 failed-driver fixture).
+    sqlx::query(
+        "INSERT INTO creator_schedules
+           (schedule_id, creator_id, preset_id, preset_version, status,
+            concurrency_kind, current_core_context_version, label,
+            created_at, updated_at, work_id, execution_policy,
+            execution_descriptor_json)
+           VALUES ('SCHSETTLEFAIL', 'test_creator', 'combat-engine', 1, 'pending',
+                   'serial', 0, 'p2-t3-failed', ?, ?, NULL, 'driven_v1', ?)",
+    )
+    .bind(now)
+    .bind(now)
+    .bind(seeded_combat_descriptor_json())
+    .execute(&daemon.pool)
+    .await
+    .expect("seed failed row");
+    seed_core_context_record(&daemon, "SCHSETTLEFAIL").await;
+
+    let starter = daemon
+        .state
+        .schedule_supervisor()
+        .expect("supervisor wired")
+        .schedule_starter_clone()
+        .expect("production starter injected");
+    let sid = starter
+        .start("SCHSETTLEFAIL")
+        .await
+        .expect("admit failed run")
+        .0;
+
+    // The drive fails; the durable record is terminal (cancelled via the
+    // engine's failure surface). The schedule settles to the SAME durable
+    // status — inspect agreement.
+    let (run_status, _) = wait_for_run_status(&daemon, &sid, "cancelled", 15).await;
+    assert_eq!(run_status, "cancelled");
+
+    let row = load_drive_row(&daemon, "SCHSETTLEFAIL").await;
+    assert_eq!(
+        row.status, run_status,
+        "schedule must settle to the durable session status"
+    );
+    assert_eq!(
+        row.current_session_id.as_deref(),
+        Some(sid.as_str()),
+        "schedule keeps its owned run identity"
+    );
+
+    // Public inspect agrees.
+    let resp = reqwest::Client::new()
+        .get(format!(
+            "{}/v1/daemon/orchestration/schedules/SCHSETTLEFAIL",
+            daemon.http_url
+        ))
+        .send()
+        .await
+        .expect("GET inspect");
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let inspect: Value = resp.json().await.expect("inspect json");
+    assert_eq!(inspect["schedule"]["status"].as_str(), Some("cancelled"));
+    assert_eq!(
+        inspect["schedule"]["execution_policy"].as_str(),
+        Some("driven_v1")
+    );
+    assert_eq!(
+        inspect["schedule"]["current_session_id"].as_str(),
+        Some(sid.as_str())
+    );
+}
+
+/// T3: duplicate terminal callbacks never create a second auto-chain child —
+/// the child INSERT is keyed by `source_run_id`; a duplicate loads the
+/// already-created child.
+#[tokio::test]
+async fn settlement_duplicate_callback_no_second_child() {
+    let host = BlockingHost::new();
+    let daemon = LiveDaemon::start_with_agent_host_and_provider(host.clone()).await;
+
+    // Work at the review stage (complete) — the next chain step is persist
+    // (kb-extract, a preset with no prompt roles, so no binding provider is
+    // needed for the child enqueue).
+    let work = nexus_local_db::works::WorkRecord {
+        work_id: "wrk_settle_dup".to_string(),
+        creator_id: "test_creator".to_string(),
+        workspace_slug: "default".to_string(),
+        status: "active".to_string(),
+        title: "Settle Dup Work".to_string(),
+        long_term_goal: "goal".to_string(),
+        initial_idea: "idea".to_string(),
+        creative_brief: None,
+        intake_status: "complete".to_string(),
+        world_id: Some("wld_test_world".to_string()),
+        story_ref: None,
+        inspiration_log: "[]".to_string(),
+        primary_preset_id: "novel-writing".to_string(),
+        schedule_ids: "[]".to_string(),
+        created_at: "2026-06-09T10:00:00Z".to_string(),
+        updated_at: "2026-06-09T10:00:00Z".to_string(),
+        current_stage: "review".to_string(),
+        stage_status: "complete".to_string(),
+        work_ref: Some("settle-dup-ref".to_string()),
+        work_profile: Some("novel".to_string()),
+        total_planned_chapters: Some(3),
+        current_chapter: 0,
+        auto_chain_enabled: true,
+        driver_schedule_id: None,
+        auto_chain_interrupted: false,
+        auto_review_master_on_timeout: false,
+        runtime_lock_holder: None,
+        runtime_lock_acquired_at: None,
+        completion_locked_at: None,
+        novel_completion_status: None,
+        lineage_from_work_id: None,
+    };
+    nexus_local_db::works::create_work(&daemon.pool, &work)
+        .await
+        .expect("create settle work");
+
+    // Drive a public schedule to completion (the source run).
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": PUBLIC_PRESET,
+            "label": "p2-t3-dup-callback",
+            "seed": "p2-t3-topic",
+            "input": { "keyword": "p2-t3", "topic": "p2-t3-topic" },
+            "agent_bindings": {
+                "default": { "provider_id": MOCK_PROVIDER }
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    host.release();
+
+    let row = load_drive_row(&daemon, &schedule_id).await;
+    let sid = row.current_session_id.as_deref().expect("owned session").to_string();
+    let (run_status, state) = wait_for_run_status(&daemon, &sid, "waiting_for_input", 15).await;
+    assert_eq!(run_status, "waiting_for_input");
+    let wait_id = state["wait"]["wait_id"].as_str().expect("wait id").to_string();
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "continue", "wait_id": wait_id }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{body}");
+    let (run_status, _) = wait_for_run_status(&daemon, &sid, "completed", 15).await;
+    assert_eq!(run_status, "completed");
+
+    // The schedule settled to completed (no child yet — the Work had no
+    // driver pointer at settlement time).
+    let row = load_drive_row(&daemon, &schedule_id).await;
+    assert_eq!(row.status, "completed");
+
+    // Attach the driver pointer, then fire the terminal callback again.
+    let now = chrono::Utc::now().to_rfc3339();
+    nexus_local_db::works::patch_work(
+        &daemon.pool,
+        "test_creator",
+        "wrk_settle_dup",
+        &nexus_local_db::works::WorkPatch {
+            driver_schedule_id: Some(Some(schedule_id.clone())),
+            ..Default::default()
+        },
+        &now,
+    )
+    .await
+    .expect("attach driver pointer");
+
+    let supervisor = daemon.state.schedule_supervisor().expect("supervisor wired");
+    // First callback: creates the child keyed by source_run_id.
+    supervisor
+        .on_schedule_terminal(
+            &schedule_id,
+            nexus_contracts::local::schedule::ScheduleStatus::Completed,
+        )
+        .await
+        .expect("first terminal callback");
+    let child_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM creator_schedules WHERE source_run_id = ?",
+    )
+    .bind(&sid)
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("child count");
+    assert_eq!(child_count, 1, "first callback must create exactly one child");
+
+    // Duplicate callback: loads the existing child, never mints a second.
+    supervisor
+        .on_schedule_terminal(
+            &schedule_id,
+            nexus_contracts::local::schedule::ScheduleStatus::Completed,
+        )
+        .await
+        .expect("duplicate terminal callback");
+    let child_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM creator_schedules WHERE source_run_id = ?",
+    )
+    .bind(&sid)
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("child count");
+    assert_eq!(
+        child_count, 1,
+        "duplicate callback must not mint a second child"
+    );
+    let child_id: Option<String> = sqlx::query_scalar(
+        "SELECT schedule_id FROM creator_schedules WHERE source_run_id = ?",
+    )
+    .bind(&sid)
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("child id");
+    assert!(child_id.is_some(), "the existing child must be loaded");
+}
+
+/// T3: boot reconciliation settles a durable terminal session whose schedule
+/// row is still `running` (checkpoint-before-settlement loss) — no second
+/// session, no second auto-chain child.
+#[tokio::test]
+async fn settlement_restart_reconciles_no_second_child() {
+    let host = BlockingHost::new();
+    let daemon = LiveDaemon::start_with_agent_host_and_provider(host.clone()).await;
+
+    // Work at the review stage (complete) — next chain step is persist
+    // (kb-extract, no prompt roles).
+    let work = nexus_local_db::works::WorkRecord {
+        work_id: "wrk_settle_restart".to_string(),
+        creator_id: "test_creator".to_string(),
+        workspace_slug: "default".to_string(),
+        status: "active".to_string(),
+        title: "Settle Restart Work".to_string(),
+        long_term_goal: "goal".to_string(),
+        initial_idea: "idea".to_string(),
+        creative_brief: None,
+        intake_status: "complete".to_string(),
+        world_id: Some("wld_test_world".to_string()),
+        story_ref: None,
+        inspiration_log: "[]".to_string(),
+        primary_preset_id: "novel-writing".to_string(),
+        schedule_ids: "[]".to_string(),
+        created_at: "2026-06-09T10:00:00Z".to_string(),
+        updated_at: "2026-06-09T10:00:00Z".to_string(),
+        current_stage: "review".to_string(),
+        stage_status: "complete".to_string(),
+        work_ref: Some("settle-restart-ref".to_string()),
+        work_profile: Some("novel".to_string()),
+        total_planned_chapters: Some(3),
+        current_chapter: 0,
+        auto_chain_enabled: true,
+        driver_schedule_id: None,
+        auto_chain_interrupted: false,
+        auto_review_master_on_timeout: false,
+        runtime_lock_holder: None,
+        runtime_lock_acquired_at: None,
+        completion_locked_at: None,
+        novel_completion_status: None,
+        lineage_from_work_id: None,
+    };
+    nexus_local_db::works::create_work(&daemon.pool, &work)
+        .await
+        .expect("create settle work");
+
+    // Drive a public schedule to completion.
+    let (status, body) = post_json(
+        &daemon,
+        "/v1/daemon/orchestration/schedules",
+        json!({
+            "creator_id": "test_creator",
+            "preset_id": PUBLIC_PRESET,
+            "label": "p2-t3-restart",
+            "seed": "p2-t3-topic",
+            "input": { "keyword": "p2-t3", "topic": "p2-t3-topic" },
+            "agent_bindings": {
+                "default": { "provider_id": MOCK_PROVIDER }
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    host.release();
+
+    let row = load_drive_row(&daemon, &schedule_id).await;
+    let sid = row.current_session_id.as_deref().expect("owned session").to_string();
+    let (run_status, state) = wait_for_run_status(&daemon, &sid, "waiting_for_input", 15).await;
+    assert_eq!(run_status, "waiting_for_input");
+    let wait_id = state["wait"]["wait_id"].as_str().expect("wait id").to_string();
+    let (status, body) = post_json(
+        &daemon,
+        &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
+        json!({ "signal": "continue", "wait_id": wait_id }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "{body}");
+    let (run_status, _) = wait_for_run_status(&daemon, &sid, "completed", 15).await;
+    assert_eq!(run_status, "completed");
+
+    // Attach the driver pointer and create the child via a terminal callback.
+    let now = chrono::Utc::now().to_rfc3339();
+    nexus_local_db::works::patch_work(
+        &daemon.pool,
+        "test_creator",
+        "wrk_settle_restart",
+        &nexus_local_db::works::WorkPatch {
+            driver_schedule_id: Some(Some(schedule_id.clone())),
+            ..Default::default()
+        },
+        &now,
+    )
+    .await
+    .expect("attach driver pointer");
+    let supervisor = daemon.state.schedule_supervisor().expect("supervisor wired");
+    supervisor
+        .on_schedule_terminal(
+            &schedule_id,
+            nexus_contracts::local::schedule::ScheduleStatus::Completed,
+        )
+        .await
+        .expect("terminal callback");
+    let child_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM creator_schedules WHERE source_run_id = ?",
+    )
+    .bind(&sid)
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("child count");
+    assert_eq!(child_count, 1, "exactly one child after the first settlement");
+
+    // Simulate checkpoint-before-settlement loss: the durable session is
+    // terminal but the schedule row is `running` again (the settlement
+    // transaction did not commit before the crash).
+    let now_ts = chrono::Utc::now().timestamp();
+    sqlx::query(
+        "UPDATE creator_schedules SET status = 'running', terminated_at = NULL, updated_at = ?
+         WHERE schedule_id = ?",
+    )
+    .bind(now_ts)
+    .bind(&schedule_id)
+    .execute(&daemon.pool)
+    .await
+    .expect("rewind schedule to running");
+
+    // Boot reconciliation settles the schedule from the durable terminal
+    // session — no second session, no second child. The child (kb-extract)
+    // was admitted and driven by the first settlement; with no queued KB
+    // jobs its own session is terminal too, so reconcile settles BOTH the
+    // rewound source and the child — the source-specific assertions below
+    // are the acceptance criteria.
+    let reconciled = supervisor
+        .reconcile_terminal_schedules()
+        .await
+        .expect("reconcile");
+    assert!(
+        reconciled >= 1,
+        "at least the rewound source schedule must be reconciled"
+    );
+
+    let row = load_drive_row(&daemon, &schedule_id).await;
+    assert_eq!(row.status, "completed", "schedule settled after reconcile");
+    let child_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM creator_schedules WHERE source_run_id = ?",
+    )
+    .bind(&sid)
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("child count");
+    assert_eq!(child_count, 1, "reconcile must not mint a second child");
+    let session_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM orchestration_sessions WHERE session_id = ?",
+    )
+    .bind(&sid)
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("session count");
+    assert_eq!(session_count, 1, "reconcile must not create a second session");
 }

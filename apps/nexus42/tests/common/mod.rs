@@ -81,6 +81,73 @@ impl LiveDaemon {
         Self::start_with_optional_host(Some(host)).await
     }
 
+    /// Boot the daemon with a `HostFacade` AND an enabled default provider
+    /// in the agent-host config (T3 settlement tests).
+    ///
+    /// A real daemon derives its supervisor binding provider from the first
+    /// enabled `agent_host_config().providers` entry. The default fixture
+    /// leaves `providers` empty, so the supervisor's internal insertion
+    /// paths (auto-chain child enqueue) refuse presets that require prompt
+    /// roles — e.g. `kb-extract` (persist stage) whose `acp_prompt` node
+    /// has no `agent:` field and therefore requires the `default` role.
+    /// This fixture mirrors the production config so the persist-stage
+    /// child enqueue passes the N-9 binding gate.
+    pub async fn start_with_agent_host_and_provider(host: Arc<dyn HostFacade>) -> Self {
+        let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind daemon port");
+        let port = listener.local_addr().expect("local addr").port();
+        let http_url = format!("http://127.0.0.1:{port}");
+
+        let config_path = nexus_home.join("config.toml");
+        let config = format!(
+            "active_creator_id = \"test_creator\"\n\
+             daemon_url = \"{http_url}\"\n\
+             \n\
+             [active_workspace_slug_by_creator]\n\
+             \"test_creator\" = \"default\"\n"
+        );
+        std::fs::write(&config_path, config).expect("write config.toml");
+
+        let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        state.set_agent_host(host);
+        // Mirror a production agent-host config: one enabled provider.
+        state.set_agent_host_config(nexus_agent_host::config::AgentHostConfig {
+            providers: vec![nexus_agent_host::config::ProviderConfig {
+                id: "mock-provider".to_string(),
+                protocol: "native_cli".to_string(),
+                command: Some("mock".to_string()),
+                args: vec![],
+                env: std::collections::HashMap::new(),
+                enabled: true,
+            }],
+            ..nexus_agent_host::config::AgentHostConfig::default()
+        });
+        let pool = state.pool().expect("pool").clone();
+        test_utils::seed_test_creator_and_world(&pool).await;
+        let (engine, session_storage) = wire_orchestration_engine(&mut state, &pool).await;
+
+        let app = api::create_router(
+            state.clone(),
+            DaemonApiConfig::keyless().with_resolved_listen_addr(port, "127.0.0.1"),
+        );
+        let http_task = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("daemon http serve");
+        });
+
+        Self {
+            home: tmp,
+            pool,
+            state,
+            http_url,
+            engine,
+            session_storage,
+            http_task,
+        }
+    }
+
     /// Boot the daemon WITHOUT publishing the Creator-DB runtime bundle
     /// (N-2/N-2b lazy-attach path): the pool is open (test fixture) but no
     /// engine/coordinator/supervisor bundle exists until the test calls
@@ -245,6 +312,9 @@ impl LiveDaemon {
         }
         let supervisor = Arc::new(supervisor_builder);
         state.set_schedule_supervisor(supervisor.clone());
+        // T3 (A3): the coordinator settles terminal runs through the
+        // supervisor (mirrors boot.rs wiring).
+        coordinator.set_schedule_supervisor(supervisor.clone());
 
         // N-13: the BOOT publisher (not the lazy-attach publisher) — the
         // production boot aggregate is published before the router exists.

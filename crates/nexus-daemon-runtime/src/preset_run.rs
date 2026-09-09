@@ -650,6 +650,16 @@ pub struct WorkflowRunCoordinator {
     fail_drive_failure_write: Arc<AtomicBool>,
     /// Bounds for each drive call.
     config: PresetRunConfig,
+    /// The schedule supervisor for terminal settlement (T3, A3). Set at
+    /// boot / lazy attach AFTER the supervisor is constructed (the
+    /// supervisor needs the coordinator's `ScheduleRunStarter`, so the
+    /// handle is attached post-construction). `None` in tests / standalone
+    /// coordinator: settlement is skipped.
+    schedule_supervisor: std::sync::Arc<
+        std::sync::RwLock<
+            Option<Arc<nexus_orchestration::schedule::supervisor::ScheduleSupervisor>>,
+        >,
+    >,
 }
 
 /// An in-flight (or completed) drive owner for one session.
@@ -680,7 +690,43 @@ impl WorkflowRunCoordinator {
             failed_owners: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
             fail_drive_failure_write: Arc::new(AtomicBool::new(false)),
             config: PresetRunConfig::default(),
+            schedule_supervisor: std::sync::Arc::new(std::sync::RwLock::new(None)),
         }
+    }
+
+    /// Attach the schedule supervisor for terminal settlement (T3, A3).
+    ///
+    /// The supervisor is constructed AFTER the coordinator (it needs the
+    /// coordinator's `ScheduleRunStarter`), so boot / lazy attach call
+    /// this once the supervisor exists. Settlement is skipped when the
+    /// handle is absent (tests, standalone coordinator).
+    #[must_use]
+    pub fn with_schedule_supervisor(
+        mut self,
+        supervisor: Arc<nexus_orchestration::schedule::supervisor::ScheduleSupervisor>,
+    ) -> Self {
+        *self
+            .schedule_supervisor
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(supervisor);
+        self
+    }
+
+    /// Attach the schedule supervisor in place (T3, A3).
+    ///
+    /// The coordinator is `Arc`-wrapped and stored in `WorkspaceState`
+    /// before the supervisor exists (the supervisor needs the coordinator's
+    /// `ScheduleRunStarter`), so boot / lazy attach call this setter once
+    /// the supervisor is constructed. Settlement is skipped when the handle
+    /// is absent (tests, standalone coordinator).
+    pub fn set_schedule_supervisor(
+        &self,
+        supervisor: Arc<nexus_orchestration::schedule::supervisor::ScheduleSupervisor>,
+    ) {
+        *self
+            .schedule_supervisor
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(supervisor);
     }
 
     /// Attach the daemon's Host plane so admission can validate provider
@@ -889,6 +935,138 @@ impl WorkflowRunCoordinator {
         }
     }
 
+    /// Settle the schedule whose `current_session_id` equals a terminal run
+    /// (T3, A3).
+    ///
+    /// Durable session terminal status is truth: the drive outcome only
+    /// gates whether settlement is attempted; the terminal status is read
+    /// from the durable v1 record and mapped to the supervisor's transition:
+    /// - `Completed` → `ScheduleStatus::Completed`
+    /// - `Failed` → `ScheduleStatus::Failed`
+    /// - `Cancelled` / `Interrupted` → `ScheduleStatus::Cancelled`
+    ///
+    /// This keeps schedule and session inspect in agreement even when the
+    /// engine's failure surface committed `cancelled` for a failed drive
+    /// (the durable record is authoritative over the outcome).
+    ///
+    /// Only the schedule whose `current_session_id` matches the run is
+    /// updated — a different schedule (or none) is left untouched. The
+    /// supervisor's `on_schedule_terminal` flips the row, releases the
+    /// runtime lock, fires the terminal hooks (review findings, auto-chain
+    /// continuation), and ticks the next eligible schedule.
+    ///
+    /// Settlement is best-effort: a missing supervisor handle (tests /
+    /// standalone coordinator) or a DB error is logged, never fatal to the
+    /// drive loop. A checkpoint-before-settlement crash is reconciled at
+    /// boot (`reconcile_terminal_schedules`).
+    async fn settle_terminal_schedule(
+        &self,
+        session_id: &SessionId,
+        outcome: &PresetRunOutcome,
+    ) {
+        // Only terminal outcomes settle.
+        if !matches!(
+            outcome,
+            PresetRunOutcome::Completed { .. }
+                | PresetRunOutcome::Failed { .. }
+                | PresetRunOutcome::Cancelled { .. }
+        ) {
+            return;
+        }
+
+        let Some(supervisor) = self
+            .schedule_supervisor
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
+            tracing::debug!(
+                session_id = %session_id.0,
+                "coordinator: no schedule supervisor wired; skipping settlement"
+            );
+            return;
+        };
+
+        // Durable session terminal status is truth.
+        let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
+            self.pool.clone(),
+        );
+        let record = match store.load_run(session_id).await {
+            Ok(Some(record)) => record,
+            Ok(None) => {
+                tracing::debug!(
+                    session_id = %session_id.0,
+                    "coordinator: no durable run record; nothing to settle"
+                );
+                return;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    session_id = %session_id.0,
+                    error = %e,
+                    "coordinator: settlement durable-status read failed"
+                );
+                return;
+            }
+        };
+        let terminal_status = match record.status {
+            SessionStatus::Completed => {
+                nexus_contracts::local::schedule::ScheduleStatus::Completed
+            }
+            SessionStatus::Failed => nexus_contracts::local::schedule::ScheduleStatus::Failed,
+            SessionStatus::Cancelled | SessionStatus::Interrupted => {
+                nexus_contracts::local::schedule::ScheduleStatus::Cancelled
+            }
+            // Non-terminal: the run is still live; never settle.
+            _ => return,
+        };
+
+        // Only the schedule whose current_session_id equals this run.
+        let schedule_id: Option<String> = sqlx::query_scalar(
+            "SELECT schedule_id FROM creator_schedules WHERE current_session_id = ?",
+        )
+        .bind(&session_id.0)
+        .fetch_optional(&*self.pool)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(
+                session_id = %session_id.0,
+                error = %e,
+                "coordinator: settlement lookup failed"
+            );
+            None
+        });
+
+        let Some(schedule_id) = schedule_id else {
+            tracing::debug!(
+                session_id = %session_id.0,
+                "coordinator: no schedule owns this run; nothing to settle"
+            );
+            return;
+        };
+
+        if let Err(e) = supervisor
+            .on_schedule_terminal(&schedule_id, terminal_status)
+            .await
+        {
+            tracing::warn!(
+                schedule_id = %schedule_id,
+                session_id = %session_id.0,
+                terminal_status = ?terminal_status,
+                error = %e,
+                "coordinator: schedule terminal settlement failed (non-fatal; \
+                 boot reconciliation will retry)"
+            );
+        } else {
+            tracing::info!(
+                schedule_id = %schedule_id,
+                session_id = %session_id.0,
+                terminal_status = ?terminal_status,
+                "coordinator: settled schedule from durable terminal session"
+            );
+        }
+    }
+
     /// Ensure exactly one drive loop is running for `session_id` (A3).
     ///
     /// Single-flight: when a drive is already registered for the session,
@@ -998,6 +1176,11 @@ impl WorkflowRunCoordinator {
                         .insert(sid.0.clone());
                 }
             }
+            // T3 (A3): settle the matching schedule from the durable
+            // terminal session status. Only the schedule whose
+            // `current_session_id` equals this run is updated; a
+            // checkpoint-before-settlement crash is reconciled at boot.
+            coordinator.settle_terminal_schedule(&sid, &outcome).await;
             tracing::debug!(
                 session_id = %sid.0,
                 outcome = ?outcome,
@@ -1193,6 +1376,10 @@ impl WorkflowRunCoordinator {
                             .insert(sid.0.clone());
                     }
                 }
+                // T3 (A3): settle the matching schedule from the durable
+                // terminal session status (same boundary as
+                // `ensure_driving`).
+                coordinator.settle_terminal_schedule(&sid, &outcome).await;
                 tracing::debug!(
                     session_id = %sid.0,
                     outcome = ?outcome,

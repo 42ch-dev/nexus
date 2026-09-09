@@ -20,6 +20,7 @@ use nexus_local_db::SqlitePool;
 use tokio::sync::Mutex;
 
 use super::admission::{admit, CompletedSet, RunningSet};
+use crate::run_state::WorkflowStateStore;
 
 /// `creator_schedules.execution_policy` value for a never-started legacy row
 /// (the migration default — no owned session, never started by boot/tick/cron
@@ -480,6 +481,14 @@ impl ScheduleSupervisor {
     /// the running set, evaluates auto-chain continuation, and triggers a
     /// `tick()` to potentially start the next eligible schedule.
     ///
+    /// T3 (A3): a driven schedule (one that owns a session) settles through
+    /// the atomic path — the source terminal status flip, the auto-chain
+    /// child INSERT (+ core-context seed), and the Work driver-pointer
+    /// update commit in ONE transaction keyed by `source_run_id`. A
+    /// duplicate terminal callback / restart loads the already-created
+    /// child instead of minting a second schedule. Non-driven rows (tests,
+    /// legacy) keep the sequential path.
+    ///
     /// # Errors
     /// Returns [`SupervisorError`] if database operations fail.
     /// Evaluate terminal transitions for a schedule: status update, runtime
@@ -504,6 +513,37 @@ impl ScheduleSupervisor {
             ));
         }
 
+        // Fetch creator_id + preset_id + owned session for the schedule.
+        // V1.47 P0 fix (qc3 W-1): preset_id is inspected here so the
+        // review-findings hook can be short-circuited for non-review
+        // presets without an extra round-trip inside
+        // persist_review_findings_for_schedule.
+        let schedule_row = sqlx::query_as::<_, TerminalScheduleRow>(
+            "SELECT creator_id, preset_id, current_session_id
+             FROM creator_schedules WHERE schedule_id = ?",
+        )
+        .bind(schedule_id)
+        .fetch_optional(&*self.pool)
+        .await?;
+
+        // T3 (A3): a driven schedule (owned session) settles through the
+        // atomic path — source settlement + auto-chain child commit in ONE
+        // transaction keyed by source_run_id. Non-driven rows (tests,
+        // legacy) keep the sequential path below.
+        if let Some(row) = &schedule_row {
+            if let Some(source_run_id) = &row.current_session_id {
+                return self
+                    .settle_and_chain_atomic(
+                        schedule_id,
+                        terminal_status,
+                        source_run_id,
+                        &row.creator_id,
+                        &row.preset_id,
+                    )
+                    .await;
+            }
+        }
+
         let now = chrono::Utc::now().timestamp();
         let status_str = match terminal_status {
             ScheduleStatus::Completed => "completed",
@@ -512,19 +552,7 @@ impl ScheduleSupervisor {
             _ => unreachable!(),
         };
 
-        // Fetch creator_id + preset_id for the schedule before removing from running set.
-        // V1.47 P0 fix (qc3 W-1): preset_id is inspected here so the review-findings
-        // hook can be short-circuited for non-review presets without an extra
-        // round-trip inside persist_review_findings_for_schedule.
         let schedule_id_owned = schedule_id.to_owned();
-        let schedule_row = sqlx::query!(
-            "SELECT creator_id as \"creator_id!\", preset_id as \"preset_id!\"
-             FROM creator_schedules WHERE schedule_id = ?",
-            schedule_id_owned
-        )
-        .fetch_optional(&*self.pool)
-        .await?;
-
         let status_owned = status_str.to_owned();
         sqlx::query!(
             "UPDATE creator_schedules
@@ -539,170 +567,22 @@ impl ScheduleSupervisor {
         .await?;
 
         // Remove from running cache
-        if let Some(ref row) = schedule_row {
-            let creator_id = &row.creator_id;
-            let mut inner = self.inner.lock().await;
-            if let Some(ids) = inner.running_by_creator.get_mut(creator_id) {
-                ids.remove(&ScheduleId(schedule_id.to_string()));
-            }
+        if let Some(row) = &schedule_row {
+            self.remove_from_running_cache(schedule_id, &row.creator_id).await;
         }
 
         // V1.42 P0 (T3): Release runtime lock held by this schedule.
         // The holder format is `daemon:schedule:<schedule_id>`.
         // Look up the Work that was driven by this schedule and release its lock.
-        if let Some(ref row) = schedule_row {
-            let creator_id = &row.creator_id;
-            let holder = format!("daemon:schedule:{schedule_id}");
-            // Best-effort: if the schedule wasn't a Work driver, this is a no-op.
-            if let Err(e) = release_daemon_schedule_lock(&self.pool, creator_id, &holder).await {
-                tracing::warn!(
-                    schedule_id,
-                    holder = %holder,
-                    error = %e,
-                    "runtime_lock: failed to release daemon schedule lock on terminal"
-                );
-            }
+        if let Some(row) = &schedule_row {
+            self.release_schedule_lock(schedule_id, &row.creator_id).await;
         }
 
         // V1.39 §5.4 (Fix 1): Evaluate auto-chain continuation for completed schedules.
         // Only on success — failed/cancelled schedules do not trigger auto-chain.
         if terminal_status == ScheduleStatus::Completed {
-            // V1.47 P0 (novel-quality-loop §5.5.6 / §8): persist ≥1 finding
-            // when a `novel-chapter-review` schedule completes. This is the
-            // **single code path** covering both the auto-chain driver and
-            // on-demand `creator run novel-chapter-review <work_id>` runs.
-            // It runs BEFORE `process_auto_chain_after_terminal` so findings
-            // exist before advancing to the persist stage. Best-effort:
-            // errors are logged and do NOT block the terminal transition
-            // (spec §8.4 invariant — finding creation must not fork/cancel
-            // the active driver).
-            //
-            // V1.47 P0 fix (qc3 W-1): only call the hook when the schedule's
-            // preset_id is `novel-chapter-review`. Other presets are a no-op
-            // and the guard avoids the extra schedule-row lookup that
-            // persist_review_findings_for_schedule would otherwise perform.
-            // R-V147P0-06 (V1.48 P0 T3): preset id hoisted to `preset_ids`
-            // SSOT — single source shared with the allowlist and findings hook.
-            if schedule_row
-                .as_ref()
-                .is_some_and(|r| r.preset_id == crate::preset_ids::NOVEL_CHAPTER_REVIEW_PRESET_ID)
-            {
-                use crate::auto_chain;
-                // V1.48 P0 T2: thread the supervisor's optional
-                // `workspace_dir` so the producer can read
-                // `Works/<work_ref>/Logs/review/review-report.md` and parse
-                // richer findings (`.mstar/archived/knowledge/novel-findings-maturity.md`
-                // §1). When the workspace is None (e.g. hermetic DB-only
-                // tests) or the report is missing, the producer falls back
-                // to the V1.47 placeholder synthesis with `tracing::warn!`.
-                let ws_ref = self.workspace_dir.as_ref();
-                let ws_path = ws_ref.as_deref();
-                if let Err(e) = auto_chain::persist_review_findings_for_schedule(
-                    &self.pool,
-                    schedule_id,
-                    ws_path,
-                )
-                .await
-                {
-                    tracing::warn!(
-                        schedule_id,
-                        error = %e,
-                        "review-findings: persist hook failed (non-fatal)"
-                    );
-                }
-            }
-            // V1.49 P1 (narrative-indexes overlay §4): promote inline F###
-            // declarations from chapter outlines into
-            // `Works/<work_ref>/Outlines/foreshadowing.md` after a
-            // `novel-writing` produce run completes. Runs BEFORE
-            // `process_auto_chain_after_terminal` so the updated index is
-            // visible when the next chapter's outline prompt is assembled.
-            // Best-effort + non-blocking: errors are logged and do NOT fail
-            // the terminal transition (mirrors the review-findings hook).
-            if schedule_row
-                .as_ref()
-                .is_some_and(|r| r.preset_id == crate::preset_ids::NOVEL_WRITING_PRESET_ID)
-            {
-                use crate::auto_chain;
-                use crate::quality_loop;
-                let ws_ref = self.workspace_dir.as_ref();
-                let ws_path = ws_ref.as_deref();
-                if let Err(e) =
-                    auto_chain::promote_foreshadowing_for_schedule(&self.pool, schedule_id, ws_path)
-                        .await
-                {
-                    tracing::warn!(
-                        schedule_id,
-                        error = %e,
-                        "foreshadowing-promote: hook failed (non-fatal)"
-                    );
-                }
-
-                // V1.51 T-A P2: finalize-time missing-KB detection. Scan the
-                // finalized chapter prose, diff against confirmed World KB rows,
-                // and write an advisory log under
-                // Works/<work_ref>/Logs/kb/missing/. Missing candidates are NOT
-                // inserted into kb_extract_jobs. Best-effort: errors are logged
-                // and do NOT fail the terminal transition.
-                let reg: Option<&crate::capability::CapabilityRegistry> =
-                    self.registry.as_ref().as_ref().map(|r| &**r);
-                if let Err(e) = quality_loop::detect_missing_kb_on_finalize(
-                    &self.pool,
-                    schedule_id,
-                    ws_path,
-                    reg,
-                )
-                .await
-                {
-                    tracing::warn!(
-                        schedule_id,
-                        error = %e,
-                        "kb-missing: finalize-time detection hook failed (non-fatal)"
-                    );
-                }
-            }
-            // V1.50 T-B P1 (entity-scope-model.md §5.5 / cron-staggering.md
-            // §4.4): review-time KB candidate extraction. When a
-            // `novel-review-master` schedule completes, scan the current
-            // chapter prose for capitalized noun phrases and insert
-            // `kb_extract_jobs` rows with `promotion_status='pending'`. The
-            // author confirms via `creator world kb adopt`.
-            //
-            // T-A P2 (`2026-06-18-v1.50-cron-review-staggering`) wired the
-            // per-Work `review` cron role that enqueues these schedules. The
-            // hook fires for any `novel-review-master` schedule reaching the
-            // supervisor (cron-fired, V1.39 stale-findings path, or manual
-            // `creator run`), so the extraction pipeline remains testable.
-            // Best-effort + non-blocking: errors are logged and do NOT fail
-            // the terminal transition (mirrors the review-findings hook).
-            if schedule_row
-                .as_ref()
-                .is_some_and(|r| r.preset_id == crate::preset_ids::NOVEL_REVIEW_MASTER_PRESET_ID)
-            {
-                use crate::quality_loop;
-                let ws_ref = self.workspace_dir.as_ref();
-                let ws_path = ws_ref.as_deref();
-                // V1.51 T-A P0: thread the capability registry so the hook can
-                // invoke nexus.llm.extract. `None` (no registry) or
-                // WorkerUnavailable falls back to the heuristic inside the hook.
-                let reg: Option<&crate::capability::CapabilityRegistry> =
-                    self.registry.as_ref().as_ref().map(|r| &**r);
-                if let Err(e) = quality_loop::extract_kb_candidates_for_review(
-                    &self.pool,
-                    schedule_id,
-                    ws_path,
-                    reg,
-                )
-                .await
-                {
-                    tracing::warn!(
-                        schedule_id,
-                        error = %e,
-                        "kb-extract: review-time extraction hook failed (non-fatal)"
-                    );
-                }
-            }
-            if let Some(ref row) = schedule_row {
+            if let Some(row) = &schedule_row {
+                self.run_completed_hooks(schedule_id, &row.preset_id).await;
                 self.process_auto_chain_after_terminal(schedule_id, &row.creator_id)
                     .await;
             }
@@ -712,6 +592,466 @@ impl ScheduleSupervisor {
         self.tick().await?;
 
         Ok(())
+    }
+
+    /// Remove a schedule from the in-memory running cache (best-effort).
+    async fn remove_from_running_cache(&self, schedule_id: &str, creator_id: &str) {
+        let mut inner = self.inner.lock().await;
+        if let Some(ids) = inner.running_by_creator.get_mut(creator_id) {
+            ids.remove(&ScheduleId(schedule_id.to_string()));
+        }
+    }
+
+    /// Release the daemon runtime lock held by a terminal schedule
+    /// (best-effort; a non-Work-driver schedule is a no-op).
+    async fn release_schedule_lock(&self, schedule_id: &str, creator_id: &str) {
+        let holder = format!("daemon:schedule:{schedule_id}");
+        if let Err(e) = release_daemon_schedule_lock(&self.pool, creator_id, &holder).await {
+            tracing::warn!(
+                schedule_id,
+                holder = %holder,
+                error = %e,
+                "runtime_lock: failed to release daemon schedule lock on terminal"
+            );
+        }
+    }
+
+    /// Fire the best-effort terminal hooks for a completed schedule (T3).
+    ///
+    /// Review findings, foreshadowing promotion, finalize-time missing-KB
+    /// detection, and review-time KB candidate extraction. Every hook is
+    /// best-effort + non-blocking: errors are logged and never fail the
+    /// terminal transition (spec §8.4 invariant — hook failure must not
+    /// fork/cancel the active driver).
+    async fn run_completed_hooks(&self, schedule_id: &str, preset_id: &str) {
+        use crate::auto_chain;
+        use crate::quality_loop;
+        let ws_ref = self.workspace_dir.as_ref();
+        let ws_path = ws_ref.as_deref();
+        let reg: Option<&crate::capability::CapabilityRegistry> =
+            self.registry.as_ref().as_ref().map(|r| &**r);
+
+        // V1.47 P0 (novel-quality-loop §5.5.6 / §8): persist ≥1 finding
+        // when a `novel-chapter-review` schedule completes. This is the
+        // **single code path** covering both the auto-chain driver and
+        // on-demand `creator run novel-chapter-review <work_id>` runs.
+        // R-V147P0-06 (V1.48 P0 T3): preset id hoisted to `preset_ids`
+        // SSOT — single source shared with the allowlist and findings hook.
+        if preset_id == crate::preset_ids::NOVEL_CHAPTER_REVIEW_PRESET_ID {
+            if let Err(e) = auto_chain::persist_review_findings_for_schedule(
+                &self.pool,
+                schedule_id,
+                ws_path,
+            )
+            .await
+            {
+                tracing::warn!(
+                    schedule_id,
+                    error = %e,
+                    "review-findings: persist hook failed (non-fatal)"
+                );
+            }
+        }
+        // V1.49 P1 (narrative-indexes overlay §4): promote inline F###
+        // declarations from chapter outlines into
+        // `Works/<work_ref>/Outlines/foreshadowing.md` after a
+        // `novel-writing` produce run completes.
+        if preset_id == crate::preset_ids::NOVEL_WRITING_PRESET_ID {
+            if let Err(e) =
+                auto_chain::promote_foreshadowing_for_schedule(&self.pool, schedule_id, ws_path)
+                    .await
+            {
+                tracing::warn!(
+                    schedule_id,
+                    error = %e,
+                    "foreshadowing-promote: hook failed (non-fatal)"
+                );
+            }
+
+            // V1.51 T-A P2: finalize-time missing-KB detection. Scan the
+            // finalized chapter prose, diff against confirmed World KB rows,
+            // and write an advisory log under
+            // Works/<work_ref>/Logs/kb/missing/. Missing candidates are NOT
+            // inserted into kb_extract_jobs. Best-effort: errors are logged
+            // and do NOT fail the terminal transition.
+            if let Err(e) = quality_loop::detect_missing_kb_on_finalize(
+                &self.pool,
+                schedule_id,
+                ws_path,
+                reg,
+            )
+            .await
+            {
+                tracing::warn!(
+                    schedule_id,
+                    error = %e,
+                    "kb-missing: finalize-time detection hook failed (non-fatal)"
+                );
+            }
+        }
+        // V1.50 T-B P1 (entity-scope-model.md §5.5 / cron-staggering.md
+        // §4.4): review-time KB candidate extraction. When a
+        // `novel-review-master` schedule completes, scan the current
+        // chapter prose for capitalized noun phrases and insert
+        // `kb_extract_jobs` rows with `promotion_status='pending'`.
+        if preset_id == crate::preset_ids::NOVEL_REVIEW_MASTER_PRESET_ID {
+            if let Err(e) = quality_loop::extract_kb_candidates_for_review(
+                &self.pool,
+                schedule_id,
+                ws_path,
+                reg,
+            )
+            .await
+            {
+                tracing::warn!(
+                    schedule_id,
+                    error = %e,
+                    "kb-extract: review-time extraction hook failed (non-fatal)"
+                );
+            }
+        }
+    }
+
+    /// T3 (A3): settle a driven schedule and enqueue its auto-chain child in
+    /// ONE transaction keyed by `source_run_id`.
+    ///
+    /// The source schedule's terminal status flip, the child schedule INSERT
+    /// (+ core-context seed), and the Work driver-pointer update commit
+    /// together. A duplicate terminal callback / restart that races the same
+    /// source run hits the partial unique index
+    /// `creator_schedules_by_source_run`: the transaction rolls back, the
+    /// already-created child is loaded, and the source settlement is retried
+    /// idempotently (a no-op when the winner already settled). Never mints a
+    /// second child.
+    ///
+    /// Only the schedule whose `current_session_id` equals `source_run_id`
+    /// is updated. Post-commit work (running cache, runtime lock, terminal
+    /// hooks, starter handoff, WorkComplete, tick) mirrors the sequential
+    /// path.
+    #[allow(clippy::too_many_lines)]
+    async fn settle_and_chain_atomic(
+        &self,
+        schedule_id: &str,
+        terminal_status: ScheduleStatus,
+        source_run_id: &str,
+        creator_id: &str,
+        preset_id: &str,
+    ) -> Result<(), SupervisorError> {
+        use crate::auto_chain::{self, AutoChainError, ChainAction};
+
+        let now = chrono::Utc::now().timestamp();
+        let status_str = match terminal_status {
+            ScheduleStatus::Completed => "completed",
+            ScheduleStatus::Failed => "failed",
+            ScheduleStatus::Cancelled => "cancelled",
+            _ => unreachable!(),
+        };
+
+        // Evaluate auto-chain BEFORE the transaction (read-only).
+        let chain = if terminal_status == ScheduleStatus::Completed {
+            self.evaluate_auto_chain(schedule_id, creator_id).await
+        } else {
+            None
+        };
+
+        let mut tx = nexus_local_db::begin_immediate(&self.pool)
+            .await
+            .map_err(|e| SupervisorError::Database(match e {
+                nexus_local_db::LocalDbError::Sqlx(s) => s,
+                other => sqlx::Error::Protocol(other.to_string()),
+            }))?;
+
+        // 1. Source settlement — only the schedule whose current_session_id
+        //    equals the run is updated.
+        sqlx::query(
+            "UPDATE creator_schedules SET status = ?, terminated_at = ?, updated_at = ?
+             WHERE schedule_id = ? AND status = 'running' AND current_session_id = ?",
+        )
+        .bind(status_str)
+        .bind(now)
+        .bind(now)
+        .bind(schedule_id)
+        .bind(source_run_id)
+        .execute(&mut *tx)
+        .await?;
+
+        // 2. Child enqueue in the SAME transaction (auto-chain only).
+        let mut child_id: Option<String> = None;
+        let mut conflict = false;
+        if let Some((action, work)) = &chain {
+            let child_spec: Option<(&str, Option<i32>, Option<i32>, &str)> = match action {
+                ChainAction::AdvanceStage { work_id, next_stage } => {
+                    Some((next_stage.as_str(), None, None, work_id.as_str()))
+                }
+                ChainAction::NextChapter {
+                    work_id,
+                    next_chapter,
+                    next_volume,
+                } => Some((
+                    "produce",
+                    Some(*next_chapter),
+                    Some(*next_volume),
+                    work_id.as_str(),
+                )),
+                // WorkComplete / NoAction do not create a child; handled
+                // after commit.
+                _ => None,
+            };
+            if let Some((stage, chapter, volume, work_id)) = child_spec {
+                if let Some(bindings) = self.derive_auto_chain_bindings(stage, work_id) {
+                    match auto_chain::enqueue_auto_chain_schedule_in_tx(
+                        &mut tx,
+                        &self.pool,
+                        creator_id,
+                        work_id,
+                        stage,
+                        chapter,
+                        volume,
+                        work,
+                        bindings,
+                        Some(source_run_id),
+                    )
+                    .await
+                    {
+                        Ok(sid) => child_id = Some(sid),
+                        Err(e) if auto_chain::is_source_run_conflict(&e) => {
+                            conflict = true;
+                        }
+                        Err(e) => {
+                            return Err(SupervisorError::Database(match e {
+                                AutoChainError::Database(
+                                    nexus_local_db::LocalDbError::Sqlx(s),
+                                ) => s,
+                                other => sqlx::Error::Protocol(other.to_string()),
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+
+        if conflict {
+            // Duplicate terminal callback: the child INSERT failed on the
+            // source_run_id unique index. Roll back (the source settlement
+            // flips back with it) and load the already-created child.
+            drop(tx);
+            let existing: Option<String> = sqlx::query_scalar(
+                "SELECT schedule_id FROM creator_schedules WHERE source_run_id = ?",
+            )
+            .bind(source_run_id)
+            .fetch_optional(&*self.pool)
+            .await?;
+            // Settle the source idempotently — a no-op when the winner's
+            // transaction already settled it.
+            sqlx::query(
+                "UPDATE creator_schedules SET status = ?, terminated_at = ?, updated_at = ?
+                 WHERE schedule_id = ? AND status = 'running' AND current_session_id = ?",
+            )
+            .bind(status_str)
+            .bind(now)
+            .bind(now)
+            .bind(schedule_id)
+            .bind(source_run_id)
+            .execute(&*self.pool)
+            .await?;
+            child_id = existing;
+            tracing::info!(
+                schedule_id,
+                source_run_id,
+                child_id = ?child_id,
+                "auto-chain: duplicate terminal callback loaded existing child"
+            );
+        } else {
+            tx.commit().await?;
+        }
+
+        // Post-commit: running cache, runtime lock, hooks, starter handoff,
+        // WorkComplete, tick.
+        self.remove_from_running_cache(schedule_id, creator_id).await;
+        self.release_schedule_lock(schedule_id, creator_id).await;
+
+        if terminal_status == ScheduleStatus::Completed {
+            self.run_completed_hooks(schedule_id, preset_id).await;
+            if let Some((action, _work)) = &chain {
+                if let ChainAction::WorkComplete { work_id } = action {
+                    if let Err(e) =
+                        auto_chain::mark_work_completed(&self.pool, creator_id, work_id).await
+                    {
+                        tracing::warn!(
+                            work_id = %work_id,
+                            error = %e,
+                            "auto-chain: failed to mark work completed"
+                        );
+                    } else {
+                        self.write_completion_lock_if_available(creator_id, work_id)
+                            .await;
+                        tracing::info!(
+                            work_id = %work_id,
+                            "auto-chain: work completed"
+                        );
+                    }
+                }
+            }
+            if let Some(sid) = &child_id {
+                if let Some(starter) = self.schedule_starter.as_ref().clone() {
+                    if let Err(e) = starter.start(sid).await {
+                        tracing::warn!(
+                            schedule_id = sid.as_str(),
+                            error = e.to_string(),
+                            "auto-chain: driven_v1 starter handoff failed; leaving pending"
+                        );
+                    }
+                }
+            }
+        }
+
+        // Trigger tick to admit next eligible schedule
+        self.tick().await?;
+
+        Ok(())
+    }
+
+    /// Evaluate the auto-chain continuation for a completed schedule (T3).
+    ///
+    /// Returns `Some((action, work))` when the schedule is an auto-chain
+    /// driver whose next step should be enqueued; `None` when it is not a
+    /// driver, auto-chain is disabled, the Work is completion-locked, or
+    /// evaluation failed (logged, non-fatal). Read-only — the caller commits
+    /// the child INSERT + Work pointer update in its own transaction.
+    async fn evaluate_auto_chain(
+        &self,
+        schedule_id: &str,
+        creator_id: &str,
+    ) -> Option<(crate::auto_chain::ChainAction, nexus_local_db::works::WorkRecord)> {
+        use crate::auto_chain::{self, ChainAction};
+
+        // Find the Work that was driven by this schedule
+        let work = match auto_chain::find_work_for_driver(&self.pool, schedule_id).await {
+            Ok(Some(w)) => w,
+            Ok(None) => return None, // Not an auto-chain driver
+            Err(e) => {
+                tracing::warn!(
+                    schedule_id,
+                    error = %e,
+                    "auto-chain: failed to find work for driver schedule"
+                );
+                return None;
+            }
+        };
+
+        if !work.auto_chain_enabled {
+            return None;
+        }
+
+        // DF-60 §6: skip auto-chain on completion-locked Works
+        if work.completion_locked_at.is_some() {
+            tracing::debug!(
+                work_id = %work.work_id,
+                "auto-chain: skipping completion-locked work"
+            );
+            return None;
+        }
+
+        // Read latest WorkRecord from DB (SSOT, not cached state)
+        let work =
+            match nexus_local_db::works::get_work(&self.pool, creator_id, &work.work_id).await {
+                Ok(Some(w)) => w,
+                Ok(None) => return None,
+                Err(e) => {
+                    tracing::warn!(
+                        work_id = %work.work_id,
+                        error = %e,
+                        "auto-chain: failed to reload work record"
+                    );
+                    return None;
+                }
+            };
+
+        // V1.42 F-001: When the persist stage just completed, use the
+        // volume-aware evaluator to correctly handle cross-volume auto-chain
+        // (Plan Goal 4 / AC2). For all other stages, the flat evaluator suffices.
+        let action = if work.current_stage == "persist" && work.stage_status == "complete" {
+            match auto_chain::evaluate_after_persist_volume_aware(&self.pool, &work).await {
+                Ok(vol_action) => vol_action,
+                Err(e) => {
+                    tracing::warn!(
+                        work_id = %work.work_id,
+                        error = %e,
+                        "auto-chain: volume-aware evaluation failed, falling back to flat"
+                    );
+                    auto_chain::evaluate_next_step(&work)
+                }
+            }
+        } else {
+            auto_chain::evaluate_next_step(&work)
+        };
+
+        match action {
+            ChainAction::NoAction => None,
+            other => Some((other, work)),
+        }
+    }
+
+    /// Derive the complete binding map for an auto-chain stage's preset
+    /// (N-9). Returns `None` when the stage has no preset mapping or the
+    /// preset requires prompt roles with no binding provider — the caller
+    /// skips the child enqueue (never a drive-enabled row with an empty
+    /// binding map).
+    fn derive_auto_chain_bindings(
+        &self,
+        stage: &str,
+        work_id: &str,
+    ) -> Option<std::collections::HashMap<String, crate::run_state::AgentBinding>> {
+        let Some(preset_id) = crate::stage_gates::preset_for_stage(stage) else {
+            return None;
+        };
+        match self.binding_provider.as_ref().as_ref() {
+            Some(provider_id) => {
+                match crate::preset::default_bindings_for_preset(preset_id, provider_id) {
+                    Some(bindings) => Some(bindings),
+                    None => {
+                        tracing::warn!(
+                            work_id = %work_id,
+                            stage = %stage,
+                            preset_id = %preset_id,
+                            "auto-chain: preset has prompt roles but no binding provider; \
+                             refusing to publish a drive-enabled row"
+                        );
+                        None
+                    }
+                }
+            }
+            None => {
+                // No configured provider: only presets WITHOUT prompt roles
+                // may be enqueued (empty map passes the completeness gate).
+                let caps = crate::capability::CapabilityRegistry::with_builtins();
+                match crate::preset::load_embedded_preset(preset_id, &caps) {
+                    Ok(loaded) => {
+                        let roles = crate::preset::required_prompt_roles(&loaded);
+                        if !roles.is_empty() {
+                            tracing::warn!(
+                                work_id = %work_id,
+                                stage = %stage,
+                                preset_id = %preset_id,
+                                "auto-chain: preset requires prompt roles but no binding \
+                                 provider is configured; refusing to publish a drive-enabled row"
+                            );
+                            return None;
+                        }
+                        Some(std::collections::HashMap::new())
+                    }
+                    Err(_) => {
+                        tracing::warn!(
+                            work_id = %work_id,
+                            stage = %stage,
+                            preset_id = %preset_id,
+                            "auto-chain: preset not resolvable; refusing to publish a drive-enabled row"
+                        );
+                        None
+                    }
+                }
+            }
+        }
     }
 
     /// Evaluate and execute auto-chain continuation after a schedule completes.
@@ -972,7 +1312,7 @@ impl ScheduleSupervisor {
         };
 
         match auto_chain::enqueue_auto_chain_schedule(
-            &self.pool, creator_id, work_id, stage, chapter, volume, work, bindings,
+            &self.pool, creator_id, work_id, stage, chapter, volume, work, bindings, None,
         )
         .await
         {
@@ -1341,6 +1681,83 @@ impl ScheduleSupervisor {
         Ok(count)
     }
 
+    /// Reconcile checkpoint-before-settlement loss at boot (T3, A3).
+    ///
+    /// A driven schedule whose durable session is terminal but whose row is
+    /// still `running` (the drive loop persisted the terminal checkpoint but
+    /// crashed before `on_schedule_terminal` ran) is settled from the
+    /// durable session status — no new session, no second auto-chain child
+    /// (the child INSERT is keyed by `source_run_id`, so a duplicate
+    /// settlement loads the already-created child).
+    ///
+    /// MUST run BEFORE `resume_running_as_paused`: a terminal session's
+    /// schedule must settle, not pause. Returns the number of schedules
+    /// reconciled.
+    ///
+    /// # Errors
+    /// Returns [`SupervisorError`] if database operations fail.
+    pub async fn reconcile_terminal_schedules(&self) -> Result<usize, SupervisorError> {
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT schedule_id, current_session_id FROM creator_schedules
+             WHERE status = 'running' AND current_session_id IS NOT NULL",
+        )
+        .fetch_all(&*self.pool)
+        .await?;
+
+        let store = crate::storage::sqlite::SqliteSessionStorage::new(
+            self.pool.clone(),
+        );
+        let mut reconciled = 0usize;
+        for (schedule_id, session_id) in rows {
+            let record = match store
+                .load_run(&crate::engine::SessionId(session_id.clone()))
+                .await
+            {
+                Ok(Some(record)) => record,
+                Ok(None) => continue, // no durable run — not a settlement case
+                Err(e) => {
+                    tracing::warn!(
+                        schedule_id,
+                        session_id = %session_id,
+                        error = %e,
+                        "boot reconcile: failed to load durable run; skipping"
+                    );
+                    continue;
+                }
+            };
+            let terminal_status = match record.status {
+                crate::engine::SessionStatus::Completed => ScheduleStatus::Completed,
+                crate::engine::SessionStatus::Failed => ScheduleStatus::Failed,
+                crate::engine::SessionStatus::Cancelled
+                | crate::engine::SessionStatus::Interrupted => ScheduleStatus::Cancelled,
+                // Non-terminal: the schedule stays running and is paused by
+                // `resume_running_as_paused` (or re-driven by recovery).
+                _ => continue,
+            };
+            if let Err(e) = self
+                .on_schedule_terminal(&schedule_id, terminal_status)
+                .await
+            {
+                tracing::warn!(
+                    schedule_id,
+                    session_id = %session_id,
+                    terminal_status = ?terminal_status,
+                    error = %e,
+                    "boot reconcile: settlement failed (non-fatal)"
+                );
+            } else {
+                reconciled += 1;
+                tracing::info!(
+                    schedule_id,
+                    session_id = %session_id,
+                    terminal_status = ?terminal_status,
+                    "boot reconcile: settled schedule from durable terminal session"
+                );
+            }
+        }
+        Ok(reconciled)
+    }
+
     // -----------------------------------------------------------------------
     // R1+R4 — pause_schedule(): atomically update DB + running cache
     // -----------------------------------------------------------------------
@@ -1652,6 +2069,15 @@ impl ScheduleSupervisor {
 struct StatusCreatorRow {
     status: String,
     creator_id: String,
+}
+
+/// Internal row for terminal settlement (T3): the schedule's creator,
+/// preset, and owned session (the `source_run_id` for auto-chain).
+#[derive(sqlx::FromRow)]
+struct TerminalScheduleRow {
+    creator_id: String,
+    preset_id: String,
+    current_session_id: Option<String>,
 }
 
 /// Internal row mapping for reading `creator_schedules` from `SQLite`.

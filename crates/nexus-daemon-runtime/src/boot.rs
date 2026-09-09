@@ -1108,6 +1108,32 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         }
         let schedule_supervisor = Arc::new(schedule_supervisor_builder);
         state.set_schedule_supervisor(schedule_supervisor.clone());
+        // T3 (A3): the coordinator settles terminal runs through the
+        // supervisor. The supervisor is constructed AFTER the coordinator
+        // (it needs the coordinator's starter), so the handle is attached
+        // here once both exist.
+        if let Some(coordinator) = &run_coordinator {
+            coordinator.set_schedule_supervisor(schedule_supervisor.clone());
+        }
+
+        // T3 (A3): reconcile checkpoint-before-settlement loss — a durable
+        // terminal session whose schedule row is still `running` is settled
+        // from the durable status. MUST run BEFORE
+        // `resume_running_as_paused`: a terminal session's schedule must
+        // settle, not pause.
+        match schedule_supervisor.reconcile_terminal_schedules().await {
+            Ok(count) => {
+                if count > 0 {
+                    tracing::info!(
+                        "reconciled {} terminal schedule(s) from durable session status",
+                        count
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!("failed to reconcile terminal schedules on boot: {}", e);
+            }
+        }
 
         match schedule_supervisor
             .resume_running_as_paused("daemon_restart")
@@ -1911,7 +1937,7 @@ async fn resume_auto_chain_work(
         }
     };
     let schedule_id = nexus_orchestration::auto_chain::enqueue_auto_chain_schedule(
-        pool, creator_id, work_id, stage, chapter, None, work, bindings,
+        pool, creator_id, work_id, stage, chapter, None, work, bindings, None,
     )
     .await
     .map_err(|e| e.to_string())?;
