@@ -111,7 +111,11 @@ pub fn load_embedded_preset(
     let mut loaded = load_preset_from_str(yaml, caps)?;
     // An embedded preset knows its source identity (A2/A7): content hash
     // over the manifest + every referenced asset from the compiled-in tree.
-    loaded.source_identity = Some(loader::preset_source_identity(&loaded.manifest, None, Some(id))?);
+    loaded.source_identity = Some(loader::preset_source_identity(
+        &loaded.manifest,
+        None,
+        Some(id),
+    )?);
     Ok(loaded)
 }
 
@@ -210,7 +214,12 @@ pub fn default_bindings_for_preset(
         provider_id: provider_id.to_string(),
         model: None,
     };
-    Some(roles.into_iter().map(|role| (role, binding.clone())).collect())
+    Some(
+        roles
+            .into_iter()
+            .map(|role| (role, binding.clone()))
+            .collect(),
+    )
 }
 
 // ---------------------------------------------------------------------------

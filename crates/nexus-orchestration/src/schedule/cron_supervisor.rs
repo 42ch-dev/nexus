@@ -178,7 +178,15 @@ pub async fn evaluate_cron_fires(
     let mut summary = CronFireSummary::default();
     let works_scanned = rows.len();
     for row in &rows {
-        evaluate_work(pool, workspace_dir, row, now, binding_provider, &mut summary).await;
+        evaluate_work(
+            pool,
+            workspace_dir,
+            row,
+            now,
+            binding_provider,
+            &mut summary,
+        )
+        .await;
     }
 
     info!(

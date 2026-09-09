@@ -848,7 +848,6 @@ impl ProviderAdapter for CodexNativeProvider {
             ));
         }
 
-
         // Build prompt text from content blocks.
         let prompt_text: String = content
             .iter()

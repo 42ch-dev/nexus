@@ -60,7 +60,10 @@ fn test_descriptor(_session_id: &str) -> RunDescriptorV1 {
             preset_id: "test-preset".to_string(),
             content_hash: [7u8; 32],
         },
-        input: serde_json::json!({"topic": "durable"}).as_object().unwrap().clone(),
+        input: serde_json::json!({"topic": "durable"})
+            .as_object()
+            .unwrap()
+            .clone(),
         agent_bindings,
         parent_session_id: None,
         graph_name: None,
@@ -112,7 +115,12 @@ async fn terminal_status_survives_reopen_not_disguised_as_running() {
             children: &[],
         };
         storage
-            .start_run(&session_id, &test_descriptor(&session_id.0), checkpoint, &RunStateV1::default())
+            .start_run(
+                &session_id,
+                &test_descriptor(&session_id.0),
+                checkpoint,
+                &RunStateV1::default(),
+            )
             .await
             .expect("start_run");
 
@@ -179,7 +187,12 @@ async fn wait_status_survives_reopen() {
             children: &[],
         };
         storage
-            .start_run(&session_id, &test_descriptor(&session_id.0), checkpoint, &RunStateV1::default())
+            .start_run(
+                &session_id,
+                &test_descriptor(&session_id.0),
+                checkpoint,
+                &RunStateV1::default(),
+            )
             .await
             .expect("start_run");
 
@@ -254,7 +267,12 @@ async fn stale_graph_save_cannot_overwrite_terminal_status() {
         children: &[],
     };
     storage
-        .start_run(&session_id, &test_descriptor(&session_id.0), checkpoint, &RunStateV1::default())
+        .start_run(
+            &session_id,
+            &test_descriptor(&session_id.0),
+            checkpoint,
+            &RunStateV1::default(),
+        )
         .await
         .expect("start_run");
 
@@ -293,7 +311,10 @@ async fn stale_graph_save_cannot_overwrite_terminal_status() {
         SessionStatus::Completed,
         "stale save must not overwrite terminal status"
     );
-    assert_eq!(record.state_revision, 2, "stale save must not advance revision");
+    assert_eq!(
+        record.state_revision, 2,
+        "stale save must not advance revision"
+    );
 }
 
 #[tokio::test]
@@ -308,7 +329,12 @@ async fn commit_transition_with_wrong_revision_fails() {
         children: &[],
     };
     storage
-        .start_run(&session_id, &test_descriptor(&session_id.0), checkpoint, &RunStateV1::default())
+        .start_run(
+            &session_id,
+            &test_descriptor(&session_id.0),
+            checkpoint,
+            &RunStateV1::default(),
+        )
         .await
         .expect("start_run");
 
@@ -364,7 +390,12 @@ async fn commit_transition_after_terminal_fails() {
         children: &[],
     };
     storage
-        .start_run(&session_id, &test_descriptor(&session_id.0), checkpoint, &RunStateV1::default())
+        .start_run(
+            &session_id,
+            &test_descriptor(&session_id.0),
+            checkpoint,
+            &RunStateV1::default(),
+        )
         .await
         .expect("start_run");
 
@@ -445,7 +476,11 @@ async fn descriptor_and_child_identity_preserved() {
     assert_eq!(loaded_descriptor.preset_version, 3);
     assert_eq!(loaded_descriptor.work_id.as_deref(), Some("work-1"));
     assert_eq!(
-        loaded_descriptor.agent_bindings.get("default").unwrap().provider_id,
+        loaded_descriptor
+            .agent_bindings
+            .get("default")
+            .unwrap()
+            .provider_id,
         "test-provider"
     );
     assert_eq!(
@@ -533,10 +568,7 @@ async fn corrupt_blobs_preserved_not_reinterpreted() {
         .expect_err("corrupt blob must not be silently reinterpreted");
 
     assert!(
-        matches!(
-            err,
-            nexus_orchestration::engine::EngineError::GraphFlow(_)
-        ),
+        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
         "expected GraphFlow error for corrupt blob, got {err:?}"
     );
 
@@ -584,10 +616,7 @@ async fn old_migrated_db_upgrades_cleanly() {
     let old_migrator = sqlx::migrate::Migrator::new(old_migrations_dir.path())
         .await
         .expect("build old migrator");
-    old_migrator
-        .run(&pool)
-        .await
-        .expect("apply old migrations");
+    old_migrator.run(&pool).await.expect("apply old migrations");
 
     // The new columns must NOT exist yet.
     let has_new_col: i64 = sqlx::query_scalar(
@@ -614,7 +643,12 @@ async fn old_migrated_db_upgrades_cleanly() {
         children: &[],
     };
     storage
-        .start_run(&session_id, &test_descriptor(&session_id.0), checkpoint, &RunStateV1::default())
+        .start_run(
+            &session_id,
+            &test_descriptor(&session_id.0),
+            checkpoint,
+            &RunStateV1::default(),
+        )
         .await
         .expect("start_run after upgrade");
     let record = storage
@@ -651,7 +685,12 @@ async fn paused_status_survives_reopen() {
             children: &[],
         };
         storage
-            .start_run(&session_id, &test_descriptor(&session_id.0), checkpoint, &RunStateV1::default())
+            .start_run(
+                &session_id,
+                &test_descriptor(&session_id.0),
+                checkpoint,
+                &RunStateV1::default(),
+            )
             .await
             .expect("start_run");
 
@@ -730,13 +769,19 @@ async fn engine_start_creates_v1_run() {
         .await
         .expect("load_run")
         .expect("run present");
-    assert_eq!(record.execution_version, 1, "engine start must create a v1 run");
+    assert_eq!(
+        record.execution_version, 1,
+        "engine start must create a v1 run"
+    );
     assert_eq!(record.status, SessionStatus::Running);
     assert!(
         record.descriptor.is_some(),
         "v1 run must carry a frozen descriptor"
     );
-    assert_eq!(record.descriptor.as_ref().unwrap().preset_id, "novel-writing");
+    assert_eq!(
+        record.descriptor.as_ref().unwrap().preset_id,
+        "novel-writing"
+    );
 }
 
 // Critical 2: the trait-level session constructor also uses start_run when a
@@ -871,7 +916,9 @@ async fn engine_wait_produces_durable_wait_token() {
         .expect("run present");
     assert_eq!(record.status, SessionStatus::WaitingForInput);
     let state = record.state.expect("v1 state present");
-    let wait = state.wait.expect("engine-path wait must carry a durable WaitRecord");
+    let wait = state
+        .wait
+        .expect("engine-path wait must carry a durable WaitRecord");
     assert!(
         !wait.wait_id.is_empty(),
         "wait token must be a fresh UUID, not empty"
@@ -903,9 +950,15 @@ async fn engine_wait_produces_durable_wait_token() {
         .expect("reload wait")
         .expect("run present");
     assert_eq!(after.status, SessionStatus::WaitingForInput);
-    assert_eq!(after.state_revision, revision, "rejected signals do not write");
     assert_eq!(
-        after.state.and_then(|state| state.wait).map(|wait| wait.wait_id),
+        after.state_revision, revision,
+        "rejected signals do not write"
+    );
+    assert_eq!(
+        after
+            .state
+            .and_then(|state| state.wait)
+            .map(|wait| wait.wait_id),
         Some(wait_id),
         "only the wait-token CAS may consume the durable wait"
     );
@@ -1041,7 +1094,10 @@ async fn child_identity_and_revision_fence() {
         "child must inherit trusted root preset identity"
     );
     assert_eq!(
-        child_descriptor.parent_session_id.as_ref().map(|s| s.0.as_str()),
+        child_descriptor
+            .parent_session_id
+            .as_ref()
+            .map(|s| s.0.as_str()),
         Some("sess-child-fix"),
         "child must name its parent session"
     );
@@ -1110,7 +1166,12 @@ async fn stale_save_cannot_overwrite_wait_or_paused() {
             children: &[],
         };
         storage
-            .start_run(&session_id, &test_descriptor(&session_id.0), checkpoint, &RunStateV1::default())
+            .start_run(
+                &session_id,
+                &test_descriptor(&session_id.0),
+                checkpoint,
+                &RunStateV1::default(),
+            )
             .await
             .expect("start_run");
 
@@ -1120,13 +1181,22 @@ async fn stale_save_cannot_overwrite_wait_or_paused() {
             children: &[],
         };
         storage
-            .commit_transition(&session_id, 1, checkpoint, status.clone(), &RunStateV1::default())
+            .commit_transition(
+                &session_id,
+                1,
+                checkpoint,
+                status.clone(),
+                &RunStateV1::default(),
+            )
             .await
             .expect("commit");
 
         // A stale graph save must NOT flip the row back to running.
         let stale = root_session(&session_id.0, "task_stale").await;
-        storage.save(stale).await.expect("stale save is best-effort");
+        storage
+            .save(stale)
+            .await
+            .expect("stale save is best-effort");
 
         let record = storage
             .load_run(&session_id)
@@ -1137,7 +1207,10 @@ async fn stale_save_cannot_overwrite_wait_or_paused() {
             record.status, status,
             "stale save must not overwrite {status:?}"
         );
-        assert_eq!(record.state_revision, 2, "stale save must not advance revision");
+        assert_eq!(
+            record.state_revision, 2,
+            "stale save must not advance revision"
+        );
     }
 }
 
@@ -1147,7 +1220,10 @@ async fn stale_save_cannot_overwrite_wait_or_paused() {
 #[tokio::test]
 async fn commit_transition_refuses_v0_rows_without_mutation() {
     for (session_id, descriptor) in [
-        ("sess-v0-with-desc", Some(test_descriptor("sess-v0-with-desc"))),
+        (
+            "sess-v0-with-desc",
+            Some(test_descriptor("sess-v0-with-desc")),
+        ),
         ("sess-v0-no-desc", None),
     ] {
         let (pool, _db) = fresh_pool().await;
@@ -1184,7 +1260,8 @@ async fn commit_transition_refuses_v0_rows_without_mutation() {
             .await
             .expect_err("legacy v0 transition must be refused");
         assert!(
-            err.to_string().contains("execution_version 0 is non-replayable"),
+            err.to_string()
+                .contains("execution_version 0 is non-replayable"),
             "unexpected error: {err}"
         );
 
@@ -1197,7 +1274,10 @@ async fn commit_transition_refuses_v0_rows_without_mutation() {
         .await
         .expect("read preserved legacy row");
         assert_eq!(persisted.0, 0, "legacy revision must remain unchanged");
-        assert_eq!(persisted.1, "running", "legacy status must remain unchanged");
+        assert_eq!(
+            persisted.1, "running",
+            "legacy status must remain unchanged"
+        );
         assert_eq!(
             persisted.2.is_some(),
             descriptor.is_some(),
@@ -1232,10 +1312,7 @@ async fn unknown_v1_status_is_non_replayable() {
         .await
         .expect_err("unknown v1 status must be non-replayable");
     assert!(
-        matches!(
-            err,
-            nexus_orchestration::engine::EngineError::GraphFlow(_)
-        ),
+        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
         "expected GraphFlow error for unknown status, got {err:?}"
     );
 }
@@ -1265,10 +1342,7 @@ async fn v1_row_missing_metadata_is_non_replayable() {
         .await
         .expect_err("v1 row missing descriptor must be non-replayable");
     assert!(
-        matches!(
-            err,
-            nexus_orchestration::engine::EngineError::GraphFlow(_)
-        ),
+        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
         "expected GraphFlow error, got {err:?}"
     );
 }
@@ -1385,7 +1459,12 @@ async fn start_run_reports_accurate_conflict_for_v1_row() {
         children: &[],
     };
     storage
-        .start_run(&session_id, &test_descriptor(&session_id.0), checkpoint, &RunStateV1::default())
+        .start_run(
+            &session_id,
+            &test_descriptor(&session_id.0),
+            checkpoint,
+            &RunStateV1::default(),
+        )
         .await
         .expect("first start_run");
 
@@ -1397,7 +1476,12 @@ async fn start_run_reports_accurate_conflict_for_v1_row() {
         children: &[],
     };
     let err = storage
-        .start_run(&session_id, &test_descriptor(&session_id.0), checkpoint, &RunStateV1::default())
+        .start_run(
+            &session_id,
+            &test_descriptor(&session_id.0),
+            checkpoint,
+            &RunStateV1::default(),
+        )
         .await
         .expect_err("second start_run must be refused");
 
@@ -1723,7 +1807,9 @@ async fn engine_nested_child_creates_v1_run() {
 
     // Spawn a child session via the production path.
     let inner_graph = Arc::new(graph_flow::Graph::new("inner_graph"));
-    inner_graph.add_task(Arc::new(nexus_orchestration::tasks::InnerGraphNodeTask::new("n1")));
+    inner_graph.add_task(Arc::new(
+        nexus_orchestration::tasks::InnerGraphNodeTask::new("n1"),
+    ));
     let params = nexus_orchestration::ChildSessionParams {
         parent_session_id: parent_sid.0.clone(),
         inner_graph,
@@ -1754,7 +1840,10 @@ async fn engine_nested_child_creates_v1_run() {
         "child must inherit trusted root preset identity"
     );
     assert_eq!(
-        child_descriptor.parent_session_id.as_ref().map(|s| s.0.as_str()),
+        child_descriptor
+            .parent_session_id
+            .as_ref()
+            .map(|s| s.0.as_str()),
         Some(parent_sid.0.as_str()),
         "child must name its parent session"
     );
@@ -1790,7 +1879,12 @@ async fn engine_nested_child_creates_v1_run() {
         .expect("child present after parent step");
     assert_eq!(child_after.execution_version, 1);
     assert_eq!(
-        child_after.descriptor.as_ref().unwrap().graph_name.as_deref(),
+        child_after
+            .descriptor
+            .as_ref()
+            .unwrap()
+            .graph_name
+            .as_deref(),
         Some("inner_graph")
     );
 }
@@ -1893,10 +1987,7 @@ async fn unknown_v0_status_is_non_replayable() {
         .await
         .expect_err("unknown v0 status must be non-replayable");
     assert!(
-        matches!(
-            err,
-            nexus_orchestration::engine::EngineError::GraphFlow(_)
-        ),
+        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
         "expected GraphFlow error for unknown v0 status, got {err:?}"
     );
 
@@ -1907,7 +1998,11 @@ async fn unknown_v0_status_is_non_replayable() {
     .fetch_one(&*pool)
     .await
     .expect("read raw status");
-    assert_eq!(raw.as_deref(), Some("bogus_status"), "row preserved verbatim");
+    assert_eq!(
+        raw.as_deref(),
+        Some("bogus_status"),
+        "row preserved verbatim"
+    );
 }
 
 // Important 4: a negative/out-of-range integer revision on a v0 row must
@@ -1938,10 +2033,7 @@ async fn negative_v0_revision_is_non_replayable() {
         .await
         .expect_err("negative v0 revision must be non-replayable");
     assert!(
-        matches!(
-            err,
-            nexus_orchestration::engine::EngineError::GraphFlow(_)
-        ),
+        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
         "expected GraphFlow error for negative revision, got {err:?}"
     );
 
@@ -1966,10 +2058,7 @@ impl graph_flow::Task for EndTask {
     fn id(&self) -> &str {
         "end_task"
     }
-    async fn run(
-        &self,
-        _ctx: graph_flow::Context,
-    ) -> graph_flow::Result<graph_flow::TaskResult> {
+    async fn run(&self, _ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
         Ok(graph_flow::TaskResult::new(
             None,
             graph_flow::NextAction::End,
@@ -1985,10 +2074,7 @@ impl graph_flow::Task for ContinueTask {
     fn id(&self) -> &str {
         "continue_task"
     }
-    async fn run(
-        &self,
-        ctx: graph_flow::Context,
-    ) -> graph_flow::Result<graph_flow::TaskResult> {
+    async fn run(&self, ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
         ctx.set("advanced", true).await;
         Ok(graph_flow::TaskResult::new(
             None,
@@ -2052,10 +2138,7 @@ async fn engine_nested_child_runs_to_completion_then_parent_commits() {
     // Run the parent step — the InnerGraphTask spawns the child, polls it to
     // completion, and the parent's commit_transition must succeed (the child
     // checkpoint revision is synchronized).
-    let outcome = engine
-        .run_step(&parent_sid)
-        .await
-        .expect("run_step parent");
+    let outcome = engine.run_step(&parent_sid).await.expect("run_step parent");
     // The parent graph has no outgoing edge from the InnerGraphTask, so it
     // returns Paused.
     assert!(
@@ -2362,10 +2445,7 @@ async fn restart_hydrates_child_checkpoints() {
             .start_session("novel-writing", parent_graph)
             .await
             .expect("start parent session");
-        engine
-            .run_step(&parent_sid)
-            .await
-            .expect("run_step parent");
+        engine.run_step(&parent_sid).await.expect("run_step parent");
 
         let children = storage
             .load_children(&parent_sid)
@@ -2576,15 +2656,9 @@ impl graph_flow::Task for EffectTask {
     fn id(&self) -> &str {
         "effect_task"
     }
-    async fn run(
-        &self,
-        ctx: graph_flow::Context,
-    ) -> graph_flow::Result<graph_flow::TaskResult> {
-        ctx.set(
-            nexus_orchestration::engine::EXTERNAL_EFFECT_MARKER,
-            true,
-        )
-        .await;
+    async fn run(&self, ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
+        ctx.set(nexus_orchestration::engine::EXTERNAL_EFFECT_MARKER, true)
+            .await;
         Ok(graph_flow::TaskResult::new(
             None,
             graph_flow::NextAction::Continue,
@@ -2600,10 +2674,7 @@ impl graph_flow::Task for DeterministicContinueTask {
     fn id(&self) -> &str {
         "deterministic_continue_task"
     }
-    async fn run(
-        &self,
-        ctx: graph_flow::Context,
-    ) -> graph_flow::Result<graph_flow::TaskResult> {
+    async fn run(&self, ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
         ctx.set("advanced", true).await;
         Ok(graph_flow::TaskResult::new(
             None,
@@ -2661,10 +2732,7 @@ async fn corrupt_child_is_non_replayable_during_recovery() {
         .await
         .expect_err("corrupt child must be non-replayable");
     assert!(
-        matches!(
-            err,
-            nexus_orchestration::engine::EngineError::GraphFlow(_)
-        ),
+        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
         "expected GraphFlow error for corrupt child, got {err:?}"
     );
 
@@ -2742,10 +2810,7 @@ async fn child_missing_session_snapshot_is_non_replayable() {
         .await
         .expect_err("missing child session must be non-replayable");
     assert!(
-        matches!(
-            err,
-            nexus_orchestration::engine::EngineError::GraphFlow(_)
-        ),
+        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
         "expected GraphFlow error for missing child session, got {err:?}"
     );
 }
@@ -2762,10 +2827,7 @@ impl graph_flow::Task for ConcurrentBumpRootTask {
     fn id(&self) -> &str {
         "concurrent_bump_task"
     }
-    async fn run(
-        &self,
-        _ctx: graph_flow::Context,
-    ) -> graph_flow::Result<graph_flow::TaskResult> {
+    async fn run(&self, _ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
         sqlx::query(
             "UPDATE orchestration_sessions SET state_revision = state_revision + 1,
                     current_task_id = 'deterministic_continue_task'
@@ -2869,18 +2931,13 @@ async fn failed_cas_restore_is_revision_fenced() {
         .expect("runner present")
         .clone();
     drop(stored_runner);
-    engine
-        .shared_state()
-        .runners
-        .write()
-        .await
-        .insert(
-            parent_sid.0.clone(),
-            std::sync::Arc::new(graph_flow::FlowRunner::new(
-                parent_graph2,
-                storage.clone() as Arc<dyn SessionStorage>,
-            )),
-        );
+    engine.shared_state().runners.write().await.insert(
+        parent_sid.0.clone(),
+        std::sync::Arc::new(graph_flow::FlowRunner::new(
+            parent_graph2,
+            storage.clone() as Arc<dyn SessionStorage>,
+        )),
+    );
 
     // Capture the pre-step root position at the pre-step task.
     let pre_step_root = storage
@@ -3366,12 +3423,7 @@ states:
             current_task_id: Some("a".to_string()),
         };
         // Reset the runner map so reconstruction actually runs.
-        engine
-            .shared_state()
-            .runners
-            .write()
-            .await
-            .clear();
+        engine.shared_state().runners.write().await.clear();
         engine.recover_sessions(vec![summary]).await;
 
         assert!(
@@ -3453,10 +3505,7 @@ async fn negative_v1_revision_is_non_replayable() {
         .await
         .expect_err("negative v1 revision must be non-replayable");
     assert!(
-        matches!(
-            err,
-            nexus_orchestration::engine::EngineError::GraphFlow(_)
-        ),
+        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
         "expected GraphFlow error for negative v1 revision, got {err:?}"
     );
 
@@ -3521,10 +3570,7 @@ async fn child_terminal_status_mismatch_rejects_confirmation() {
         .expect_err("terminal child status mismatch must reject the parent's Completed commit");
 
     assert!(
-        matches!(
-            err,
-            nexus_orchestration::engine::EngineError::GraphFlow(_)
-        ),
+        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
         "expected GraphFlow mismatch error, got {err:?}"
     );
 
@@ -3724,10 +3770,7 @@ async fn missing_child_session_clears_stale_children_entry() {
         .await
         .expect_err("missing child session must be non-replayable");
     assert!(
-        matches!(
-            err,
-            nexus_orchestration::engine::EngineError::GraphFlow(_)
-        ),
+        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
         "expected GraphFlow error, got {err:?}"
     );
     let shared = engine.shared_state();
@@ -3825,9 +3868,10 @@ async fn child_effect_propagates_to_parent_interrupted_on_failed_commit() {
     // terminal child? No — the child spawn path runs it. The InnerGraphTask
     // sets the parent effect marker; the parent commit fails on the stale
     // child, so the parent must be Interrupted, never rewound.
-    let err = engine.run_step(&parent_sid).await.expect_err(
-        "stale child must fail the parent commit",
-    );
+    let err = engine
+        .run_step(&parent_sid)
+        .await
+        .expect_err("stale child must fail the parent commit");
     assert!(
         matches!(
             err,
@@ -3864,12 +3908,7 @@ async fn restore_pre_step_is_single_atomic_revision_fence() {
         children: &[],
     };
     storage
-        .start_run(
-            &session_id,
-            &descriptor,
-            checkpoint,
-            &RunStateV1::default(),
-        )
+        .start_run(&session_id, &descriptor, checkpoint, &RunStateV1::default())
         .await
         .expect("start_run");
 
@@ -3954,10 +3993,7 @@ async fn negative_execution_version_is_non_replayable() {
         .await
         .expect_err("negative execution_version must be non-replayable");
     assert!(
-        matches!(
-            err,
-            nexus_orchestration::engine::EngineError::GraphFlow(_)
-        ),
+        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
         "expected GraphFlow error, got {err:?}"
     );
 
@@ -4001,10 +4037,7 @@ async fn unsupported_forward_execution_version_is_non_replayable() {
         .await
         .expect_err("forward execution_version must be non-replayable");
     assert!(
-        matches!(
-            err,
-            nexus_orchestration::engine::EngineError::GraphFlow(_)
-        ),
+        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
         "expected GraphFlow error, got {err:?}"
     );
 
@@ -4308,10 +4341,7 @@ impl graph_flow::Task for MarkerEffectTask {
     fn id(&self) -> &str {
         "marker_effect_task"
     }
-    async fn run(
-        &self,
-        ctx: graph_flow::Context,
-    ) -> graph_flow::Result<graph_flow::TaskResult> {
+    async fn run(&self, ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
         // Set both the engine effect marker AND a test-only dispatch marker so
         // the test can observe whether the task actually ran.
         ctx.set(nexus_orchestration::engine::EXTERNAL_EFFECT_MARKER, true)
@@ -4366,7 +4396,8 @@ async fn v0_child_is_non_replayable_and_preserved() {
         .await
         .expect_err("legacy child must make parent recovery non-replayable");
     assert!(
-        err.to_string().contains("v0 legacy child row (non-replayable)"),
+        err.to_string()
+            .contains("v0 legacy child row (non-replayable)"),
         "unexpected error: {err}"
     );
 
@@ -4436,10 +4467,7 @@ async fn negative_child_revision_is_non_replayable() {
         .await
         .expect_err("negative child state_revision must be non-replayable");
     assert!(
-        matches!(
-            err,
-            nexus_orchestration::engine::EngineError::GraphFlow(_)
-        ),
+        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
         "expected GraphFlow error for negative child revision, got {err:?}"
     );
 
@@ -4461,10 +4489,7 @@ async fn negative_child_revision_is_non_replayable() {
         .await
         .expect_err("hydrate_children must propagate the negative child revision");
     assert!(
-        matches!(
-            err,
-            nexus_orchestration::engine::EngineError::GraphFlow(_)
-        ),
+        matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)),
         "expected GraphFlow error from hydrate_children, got {err:?}"
     );
     let shared = engine.shared_state();
@@ -4556,7 +4581,10 @@ async fn stale_mark_step_in_flight_against_waiting_row_leaves_wait_untouched() {
         SessionStatus::WaitingForInput,
         "stale mark must not change the wait row's status"
     );
-    assert_eq!(record.state_revision, 2, "stale mark must not advance revision");
+    assert_eq!(
+        record.state_revision, 2,
+        "stale mark must not advance revision"
+    );
     let state = record.state.expect("v1 state present");
     let wait = state.wait.expect("WaitRecord retained");
     assert_eq!(
@@ -4646,9 +4674,14 @@ async fn stale_restore_pre_step_against_waiting_row_leaves_wait_untouched() {
         SessionStatus::WaitingForInput,
         "stale restore must not change the wait row's status"
     );
-    assert_eq!(record.state_revision, 2, "stale restore must not advance revision");
+    assert_eq!(
+        record.state_revision, 2,
+        "stale restore must not advance revision"
+    );
     let state = record.state.expect("v1 state present");
-    let wait = state.wait.expect("WaitRecord retained through stale restore");
+    let wait = state
+        .wait
+        .expect("WaitRecord retained through stale restore");
     assert_eq!(
         wait.wait_id, "wait-restore-token",
         "WaitRecord token must survive a stale restore_pre_step"
@@ -4859,7 +4892,10 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
 
     // One real engine step at the parked join → graph-flow `WaitForInput`;
     // the store-wired engine must persist the SCHEDULER shape.
-    let outcome = engine.run_step(&sid).await.expect("run_step parks the join");
+    let outcome = engine
+        .run_step(&sid)
+        .await
+        .expect("run_step parks the join");
     assert!(
         matches!(
             outcome,
@@ -4913,7 +4949,9 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
     // classifier must see the exact engine gate marker and classify the park
     // as a converge/merge chain, never a human wait.
     pool.close().await;
-    let pool_b = nexus_local_db::open_pool(db.path()).await.expect("reopen pool");
+    let pool_b = nexus_local_db::open_pool(db.path())
+        .await
+        .expect("reopen pool");
     let storage_b = Arc::new(SqliteSessionStorage::new(pool_b.clone().into()));
     let record_after_reopen = storage_b
         .load_run(&sid)
@@ -4928,10 +4966,7 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
     let context_value_b = serde_json::to_value(&context_b.context).expect("context json");
     let gate_park_live = nexus_orchestration::resume_rules::context_data(&context_value_b)
         .is_some_and(|data| {
-            nexus_orchestration::resume_rules::gate_park_live(
-                data,
-                &context_b.current_task_id,
-            )
+            nexus_orchestration::resume_rules::gate_park_live(data, &context_b.current_task_id)
         });
     assert_eq!(
         nexus_orchestration::resume_rules::classify_recovery(
@@ -4994,7 +5029,9 @@ async fn engine_manual_wait_persists_waiting_for_input_fresh_retained_token() {
         "a genuine human wait persists as `waiting_for_input` (A2)"
     );
     let state = record.state.expect("v1 state present");
-    let wait = state.wait.expect("human wait must carry a durable WaitRecord (A4)");
+    let wait = state
+        .wait
+        .expect("human wait must carry a durable WaitRecord (A4)");
     assert!(
         !wait.wait_id.is_empty(),
         "the wait token must be a fresh UUID, not empty"
@@ -5006,7 +5043,9 @@ async fn engine_manual_wait_persists_waiting_for_input_fresh_retained_token() {
     // survive byte-identical (A4 retention until a successful CAS consumes
     // it) and the status must remain waiting_for_input.
     pool.close().await;
-    let pool_b = nexus_local_db::open_pool(db.path()).await.expect("reopen pool");
+    let pool_b = nexus_local_db::open_pool(db.path())
+        .await
+        .expect("reopen pool");
     let storage_b = Arc::new(SqliteSessionStorage::new(pool_b.into()));
     let record_after = storage_b
         .load_run(&sid)
@@ -5014,7 +5053,12 @@ async fn engine_manual_wait_persists_waiting_for_input_fresh_retained_token() {
         .expect("load_run after reopen")
         .expect("run present");
     assert_eq!(record_after.status, SessionStatus::WaitingForInput);
-    let wait_after = record_after.state.clone().expect("state present").wait.expect("token retained");
+    let wait_after = record_after
+        .state
+        .clone()
+        .expect("state present")
+        .wait
+        .expect("token retained");
     assert_eq!(
         wait_after.wait_id, token,
         "the A4 wait token must be retained unchanged across reopen"
@@ -5060,7 +5104,10 @@ impl nexus_orchestration::capability::PromptExecutor for GoJudgeProvider {
     async fn execute(
         &self,
         _request: nexus_orchestration::capability::PromptRequest,
-    ) -> Result<nexus_orchestration::capability::PromptResult, nexus_orchestration::capability::CapabilityError> {
+    ) -> Result<
+        nexus_orchestration::capability::PromptResult,
+        nexus_orchestration::capability::CapabilityError,
+    > {
         Ok(nexus_orchestration::capability::PromptResult {
             full_text: "Go ahead — first-token match routes label 'go'.".to_string(),
             host_session_id: "host-sess".to_string(),
@@ -5074,7 +5121,9 @@ fn judge_registry_holder() -> nexus_orchestration::CapabilityRegistryHolder {
     let deps = nexus_orchestration::capability::CapabilityRuntimeDeps {
         pool: None,
         prompt_executor: Some(std::sync::Arc::new(GoJudgeProvider)),
-        session_cancels: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
         daemon_tool_dispatch: None,
         cdn_config: None,
     };
@@ -5093,7 +5142,9 @@ fn judge_registry_holder() -> nexus_orchestration::CapabilityRegistryHolder {
 /// auto-step on the next boot).
 #[tokio::test]
 async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
-    use nexus_orchestration::preset::manifest::{ExitWhen, LabeledNext, NextTarget, StateDefinition};
+    use nexus_orchestration::preset::manifest::{
+        ExitWhen, LabeledNext, NextTarget, StateDefinition,
+    };
     use nexus_orchestration::tasks::StateCompositeTask;
 
     let (pool, db) = fresh_pool().await;
@@ -5159,7 +5210,9 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
             .await
             .expect("get session")
             .expect("present");
-        session.context.set_sync("_merge_other", serde_json::json!(["x"]));
+        session
+            .context
+            .set_sync("_merge_other", serde_json::json!(["x"]));
         session
             .context
             .set_sync("_join_wait_start_other", serde_json::json!(1));
@@ -5170,7 +5223,10 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
     // routing writes `_merge_manual_state` / `_converge_arrivals_manual_state`.
     let outcome = engine.run_step(&sid).await.expect("judge step");
     assert!(
-        matches!(outcome, nexus_orchestration::engine::StepOutcome::Paused { .. }),
+        matches!(
+            outcome,
+            nexus_orchestration::engine::StepOutcome::Paused { .. }
+        ),
         "judge route is an inter-task boundary, got {outcome:?}"
     );
 
@@ -5201,7 +5257,10 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
         .as_ref()
         .and_then(|s| s.wait.as_ref())
         .expect("labeled-routed manual wait must carry a fresh A4 token");
-    assert!(!wait.wait_id.is_empty(), "the wait token must be a fresh UUID");
+    assert!(
+        !wait.wait_id.is_empty(),
+        "the wait token must be a fresh UUID"
+    );
 
     // The post-step context carries the routing-written BROAD join keys
     // (`_merge_manual_state` / `_converge_arrivals_manual_state` — written
@@ -5235,7 +5294,9 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
     // Reopen the SAME DB file: the canonical classifier must see HumanWait
     // (rule 4 — fresh token beats old join keys), never ConvergeMerge.
     pool.close().await;
-    let pool_b = nexus_local_db::open_pool(db.path()).await.expect("reopen pool");
+    let pool_b = nexus_local_db::open_pool(db.path())
+        .await
+        .expect("reopen pool");
     let storage_b = Arc::new(SqliteSessionStorage::new(pool_b.clone().into()));
     let record_after = storage_b
         .load_run(&sid)
@@ -5338,9 +5399,7 @@ states:
             .await
             .expect("get session")
             .expect("present");
-        session
-            .context
-            .set_sync("score", serde_json::json!(95));
+        session.context.set_sync("score", serde_json::json!(95));
         session
             .context
             .set_sync("_merge_other", serde_json::json!(["x"]));
@@ -5353,7 +5412,10 @@ states:
     // Step 1: conditional branch matches → GoTo manual_state.
     let outcome = engine.run_step(&sid).await.expect("branch step");
     assert!(
-        matches!(outcome, nexus_orchestration::engine::StepOutcome::Paused { .. }),
+        matches!(
+            outcome,
+            nexus_orchestration::engine::StepOutcome::Paused { .. }
+        ),
         "conditional route is an inter-task boundary, got {outcome:?}"
     );
 
@@ -5406,7 +5468,9 @@ states:
 
     // Reopen: HumanWait (rule 4 token beats join keys), token retained.
     pool.close().await;
-    let pool_b = nexus_local_db::open_pool(db.path()).await.expect("reopen pool");
+    let pool_b = nexus_local_db::open_pool(db.path())
+        .await
+        .expect("reopen pool");
     let storage_b = Arc::new(SqliteSessionStorage::new(pool_b.clone().into()));
     let record_after = storage_b
         .load_run(&sid)
@@ -5488,10 +5552,7 @@ async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume(
     // Parent step: the child parks at its manual wait. The parent must NOT
     // auto-resume the child and must return WaitingForInput (never
     // Completed/Paused — the old InnerGraphTask auto-approval bypass).
-    let outcome = engine
-        .run_step(&parent_sid)
-        .await
-        .expect("run_step parent");
+    let outcome = engine.run_step(&parent_sid).await.expect("run_step parent");
     assert!(
         matches!(
             outcome,
@@ -5559,7 +5620,9 @@ async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume(
     // identity/token survive; the row classifies HumanWait — never stepped
     // at boot.
     pool.close().await;
-    let pool_b = nexus_local_db::open_pool(db.path()).await.expect("reopen pool");
+    let pool_b = nexus_local_db::open_pool(db.path())
+        .await
+        .expect("reopen pool");
     let storage_b = Arc::new(SqliteSessionStorage::new(pool_b.into()));
     let parent_after = storage_b
         .load_run(&parent_sid)
@@ -5644,11 +5707,7 @@ async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume(
         "hydrated child stays waiting (no automatic resume)"
     );
     assert_eq!(
-        hydrated[0]
-            .state
-            .wait
-            .as_ref()
-            .map(|w| w.wait_id.as_str()),
+        hydrated[0].state.wait.as_ref().map(|w| w.wait_id.as_str()),
         Some(child_wait.wait_id.as_str()),
         "hydrated child carries the SAME nested token"
     );

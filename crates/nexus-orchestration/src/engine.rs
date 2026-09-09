@@ -213,7 +213,9 @@ pub enum EngineSignal {
     /// durable wait token; a stale/consumed/wrong token loses the CAS and
     /// is refused with [`EngineError::WaitConflict`] — never a second
     /// driver and never an auto-approval.
-    Continue { wait_id: String },
+    Continue {
+        wait_id: String,
+    },
 }
 
 /// Parameters for spawning a child session (inner graph).
@@ -268,7 +270,9 @@ pub enum EngineError {
     NoGraphLoaded,
     /// A revision compare-and-swap failed: the persisted `state_revision` no
     /// longer equals the expected value (a concurrent transition won).
-    #[error("state revision mismatch for session {session_id}: expected {expected}, found {found}")]
+    #[error(
+        "state revision mismatch for session {session_id}: expected {expected}, found {found}"
+    )]
     RevisionMismatch {
         /// Session id.
         session_id: String,
@@ -300,9 +304,7 @@ pub enum EngineError {
     /// The caller must surface the current persisted status and current
     /// wait id (null when none) so the operator can re-issue the exact
     /// token. No mutation occurred and no second driver was started.
-    #[error(
-        "wait conflict for session {session_id}: token does not match the current wait"
-    )]
+    #[error("wait conflict for session {session_id}: token does not match the current wait")]
     WaitConflict {
         /// Session id.
         session_id: String,
@@ -423,10 +425,7 @@ pub trait OrchestrationEngine: Send + Sync {
     /// Returns [`EngineError`] when the run has no durable v1 descriptor,
     /// the frozen source no longer matches, or a persisted child is
     /// corrupt/unsupported — all non-replayable.
-    async fn ensure_recovered_runner(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), EngineError>;
+    async fn ensure_recovered_runner(&self, session_id: &SessionId) -> Result<(), EngineError>;
 
     /// Start a session using a loaded preset (outer graph + inner graphs wired).
     async fn start_session_with_preset(
@@ -564,10 +563,7 @@ impl EngineSharedState {
     /// non-replayable rather than reconstructing a runner over an incomplete
     /// children map. An empty result **replaces/clears** any prior map entry
     /// so a stale checkpoint never lingers (Important 1).
-    pub async fn hydrate_children(
-        &self,
-        parent_session_id: &SessionId,
-    ) -> Result<(), EngineError> {
+    pub async fn hydrate_children(&self, parent_session_id: &SessionId) -> Result<(), EngineError> {
         let Some(store) = &self.workflow_store else {
             return Ok(());
         };
@@ -615,12 +611,12 @@ impl EngineSharedState {
             Ok(context) => context,
             Err(e) => {
                 self.children.write().await.remove(&parent_session_id.0);
-                return Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
-                    format!(
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
                         "serialize recovered parent context '{}': {e}",
                         parent_session_id.0
-                    ),
-                )));
+                    )),
+                ));
             }
         };
         let active_terminal_children: Vec<String> =
@@ -654,19 +650,16 @@ impl EngineSharedState {
                     // On child-snapshot error, clear the parent's stale
                     // children-map entry before propagating (Minor 1).
                     self.children.write().await.remove(&parent_session_id.0);
-                    return Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
-                        format!(
+                    return Err(EngineError::GraphFlow(
+                        graph_flow::GraphError::StorageError(format!(
                             "hydrate_children '{}': persisted child '{}' has no readable \
                              session snapshot (non-replayable)",
                             parent_session_id.0, child.session_id.0
-                        ),
-                    )));
+                        )),
+                    ));
                 }
             };
-            let graph_name = child
-                .descriptor
-                .as_ref()
-                .and_then(|d| d.graph_name.clone());
+            let graph_name = child.descriptor.as_ref().and_then(|d| d.graph_name.clone());
             checkpoints.push(ChildCheckpoint {
                 session: child_session,
                 status: child.status.clone(),
@@ -1031,9 +1024,7 @@ impl EngineSharedState {
                     // load failure is non-replayable (A7) — propagate rather
                     // than settle a cancellation over an incomplete closure.
                     if let Some(store) = &self.workflow_store {
-                        let persisted = store
-                            .load_children(&SessionId(parent.clone()))
-                            .await?;
+                        let persisted = store.load_children(&SessionId(parent.clone())).await?;
                         for child in persisted {
                             let child_id = child.session_id.0.clone();
                             if child_id != session_id.0 && !ids.contains(&child_id) {
@@ -1046,7 +1037,10 @@ impl EngineSharedState {
                 ids
             };
             {
-                let cancels = self.session_cancels.read().unwrap_or_else(|e| e.into_inner());
+                let cancels = self
+                    .session_cancels
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner());
                 if let Some(token) = cancels.get(&session_id.0).cloned() {
                     token.cancel();
                 }
@@ -1089,10 +1083,8 @@ impl EngineSharedState {
                     // and re-committed against the new revision; the write
                     // result is never discarded, and the in-memory summary
                     // is updated only after the durable write succeeds.
-                    let reason = format!(
-                        "cancel cleanup unconfirmed for run '{}': {e}",
-                        session_id.0
-                    );
+                    let reason =
+                        format!("cancel cleanup unconfirmed for run '{}': {e}", session_id.0);
                     let mut interrupted_attempts: u32 = 0;
                     loop {
                         let Some(current) = store.load_run(session_id).await? else {
@@ -1119,9 +1111,7 @@ impl EngineSharedState {
                             .get(&session_id.0)
                             .await
                             .map_err(EngineError::GraphFlow)?
-                            .ok_or_else(|| {
-                                EngineError::SessionNotFound(session_id.0.clone())
-                            })?;
+                            .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
                         let interrupted_checkpoint = RunCheckpoint {
                             root: &interrupted_root,
                             children: &[],
@@ -1200,10 +1190,7 @@ impl EngineSharedState {
                 // to `settle_cancelled`. Every other terminal status is a
                 // deliberate conflict.
                 let interrupted_retry_shape = current.status == SessionStatus::Interrupted
-                    && current
-                        .state
-                        .as_ref()
-                        .is_some_and(|s| s.cancel_requested);
+                    && current.state.as_ref().is_some_and(|s| s.cancel_requested);
                 if current.status.is_terminal() && !interrupted_retry_shape {
                     return Err(EngineError::TerminalState(session_id.0.clone()));
                 }
@@ -1259,7 +1246,10 @@ impl EngineSharedState {
             // finalized successfully above, so no descendant can still be
             // driving work.
             {
-                let mut cancels = self.session_cancels.write().unwrap_or_else(|e| e.into_inner());
+                let mut cancels = self
+                    .session_cancels
+                    .write()
+                    .unwrap_or_else(|e| e.into_inner());
                 cancels.remove(&session_id.0);
                 for child_id in &descendant_ids {
                     cancels.remove(child_id);
@@ -1519,7 +1509,8 @@ impl EngineSharedState {
                     status = SessionStatus::Paused;
                 }
 
-                let next_state = build_step_state(&result, &status, &root.current_task_id, &root.context);
+                let next_state =
+                    build_step_state(&result, &status, &root.current_task_id, &root.context);
                 // Pass the real child checkpoints recorded by
                 // `spawn_child_session` so nested child rows are persisted
                 // atomically and reconstructible after restart (Important 2).
@@ -1530,9 +1521,9 @@ impl EngineSharedState {
                     .get(&session_id.0)
                     .cloned()
                     .unwrap_or_default();
-                let parent_advanced = pre_step_root.as_ref().is_some_and(|pre| {
-                    pre.current_task_id != root.current_task_id
-                });
+                let parent_advanced = pre_step_root
+                    .as_ref()
+                    .is_some_and(|pre| pre.current_task_id != root.current_task_id);
                 if parent_advanced && children.iter().any(|child| child.status.is_terminal()) {
                     if let Some(pre) = &pre_step_root {
                         root.context
@@ -1557,7 +1548,13 @@ impl EngineSharedState {
                     clear_step_effect_marker(&root).await;
                 }
                 let commit_result = store
-                    .commit_transition(session_id, transition_revision, checkpoint, status.clone(), &next_state)
+                    .commit_transition(
+                        session_id,
+                        transition_revision,
+                        checkpoint,
+                        status.clone(),
+                        &next_state,
+                    )
                     .await;
                 match commit_result {
                     Ok(_) => {
@@ -1574,10 +1571,7 @@ impl EngineSharedState {
                             let mut child_map = self.children.write().await;
                             if let Some(entries) = child_map.get_mut(&session_id.0) {
                                 for child in entries.iter_mut() {
-                                    if children
-                                        .iter()
-                                        .any(|c| c.session.id == child.session.id)
-                                    {
+                                    if children.iter().any(|c| c.session.id == child.session.id) {
                                         child.state_revision =
                                             child.state_revision.saturating_add(1);
                                     }
@@ -1915,14 +1909,9 @@ impl EngineSharedState {
                         // cancel intent) is an A5 settlement target; every
                         // other terminal status is a deliberate conflict.
                         let interrupted_retry_shape = current.status == SessionStatus::Interrupted
-                            && current
-                                .state
-                                .as_ref()
-                                .is_some_and(|s| s.cancel_requested);
+                            && current.state.as_ref().is_some_and(|s| s.cancel_requested);
                         if current.status.is_terminal() && !interrupted_retry_shape {
-                            return Err(EngineError::TerminalState(
-                                child_session_id.clone(),
-                            ));
+                            return Err(EngineError::TerminalState(child_session_id.clone()));
                         }
                         let current_revision = current.state_revision;
                         let mut cancelled_state = current.state.unwrap_or_default();
@@ -1988,9 +1977,7 @@ impl EngineSharedState {
                         .write()
                         .unwrap_or_else(|e| e.into_inner())
                         .remove(&child_session_id);
-                    return Err(EngineError::TerminalState(
-                        params.parent_session_id.clone(),
-                    ));
+                    return Err(EngineError::TerminalState(params.parent_session_id.clone()));
                 }
             }
             child_map
@@ -2000,10 +1987,7 @@ impl EngineSharedState {
         }
 
         // WS2 R3: Store Arc<FlowRunner> instead of FlowRunner.
-        let runner = Arc::new(FlowRunner::new(
-            params.inner_graph,
-            self.storage.clone(),
-        ));
+        let runner = Arc::new(FlowRunner::new(params.inner_graph, self.storage.clone()));
         self.runners
             .write()
             .await
@@ -2048,7 +2032,13 @@ impl EngineSharedState {
             parent_children
                 .iter()
                 .find(|c| c.graph_name.as_deref() == Some(inner_graph.id.as_str()))
-                .map(|c| (c.session.id.clone(), c.session.current_task_id.clone(), c.status.clone()))
+                .map(|c| {
+                    (
+                        c.session.id.clone(),
+                        c.session.current_task_id.clone(),
+                        c.status.clone(),
+                    )
+                })
         };
         let Some((child_id, child_task, child_status)) = target else {
             return Ok(None);
@@ -2083,12 +2073,7 @@ impl EngineSharedState {
         // Reconstruct a FlowRunner for the reattached child so it can be
         // stepped from its persisted position (and so the caller can query
         // its durable status via `get_status`).
-        if !self
-            .runners
-            .read()
-            .await
-            .contains_key(&child_id)
-        {
+        if !self.runners.read().await.contains_key(&child_id) {
             let runner = Arc::new(FlowRunner::new(inner_graph, self.storage.clone()));
             self.runners.write().await.insert(child_id.clone(), runner);
         }
@@ -2295,10 +2280,12 @@ fn build_step_state(
     root_context: &graph_flow::Context,
 ) -> RunStateV1 {
     let failure = match (&result.status, status) {
-        (ExecutionStatus::Error(msg), SessionStatus::Failed) => Some(crate::run_state::RunFailure {
-            code: "graph_step_error".to_string(),
-            message: msg.clone(),
-        }),
+        (ExecutionStatus::Error(msg), SessionStatus::Failed) => {
+            Some(crate::run_state::RunFailure {
+                code: "graph_step_error".to_string(),
+                message: msg.clone(),
+            })
+        }
         _ => None,
     };
     // Round-4 Critical 2 (A4): when THIS step parked because a nested child
@@ -2517,22 +2504,19 @@ impl OrchestrationEngine for EngineProxy {
         self.state.recover_sessions(summaries).await;
     }
 
-    async fn ensure_recovered_runner(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), EngineError> {
+    async fn ensure_recovered_runner(&self, session_id: &SessionId) -> Result<(), EngineError> {
         // EngineProxy carries no capability holder/executor wiring, so the
         // frozen-source reconstruction cannot run through it. GraphFlowEngine
         // (the daemon's concrete engine) is the only supported path; this
         // proxy never serves daemon recovery.
-        Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
-            format!(
+        Err(EngineError::GraphFlow(
+            graph_flow::GraphError::StorageError(format!(
                 "ensure_recovered_runner: EngineProxy cannot reconstruct session '{}' \
                  (no capability/executor wiring); use the concrete GraphFlowEngine \
                  (reconstruction_unavailable, non-replayable)",
                 session_id.0
-            ),
-        )))
+            )),
+        ))
     }
 
     async fn start_session_with_preset(
@@ -2643,7 +2627,10 @@ impl GraphFlowEngine {
         caps: crate::capability::CapabilityRegistryHolder,
     ) -> Self {
         Self {
-            state: Arc::new(EngineSharedState::with_workflow_store(storage, workflow_store)),
+            state: Arc::new(EngineSharedState::with_workflow_store(
+                storage,
+                workflow_store,
+            )),
             caps,
             daemon_tool_dispatch: None,
             prompt_executor: None,
@@ -2665,7 +2652,10 @@ impl GraphFlowEngine {
         workspace_root: std::path::PathBuf,
     ) -> Self {
         Self {
-            state: Arc::new(EngineSharedState::with_workflow_store(storage, workflow_store)),
+            state: Arc::new(EngineSharedState::with_workflow_store(
+                storage,
+                workflow_store,
+            )),
             caps,
             daemon_tool_dispatch: None,
             prompt_executor: None,
@@ -2896,16 +2886,13 @@ impl GraphFlowEngine {
         // cannot be reconstructed over a frozen source (A2/A7).
         let descriptor = match &self.state.workflow_store {
             Some(store) => {
-                let record = store
-                    .load_run(session_id)
-                    .await?
-                    .ok_or_else(|| {
-                        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                            "R6: session '{}' has no persisted run record; cannot reconstruct runner \
+                let record = store.load_run(session_id).await?.ok_or_else(|| {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                        "R6: session '{}' has no persisted run record; cannot reconstruct runner \
                              (non-replayable)",
-                            session_id.0
-                        )))
-                    })?;
+                        session_id.0
+                    )))
+                })?;
                 record.descriptor.ok_or_else(|| {
                     EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                         "R6: session '{}' has no v1 descriptor; cannot reconstruct runner over a \
@@ -3090,8 +3077,7 @@ impl GraphFlowEngine {
                                 continue;
                             };
                             map.entry(child_id.to_string()).or_default().insert(
-                                inner_graph_entered_by_state(&loaded, state)
-                                    .map(str::to_owned),
+                                inner_graph_entered_by_state(&loaded, state).map(str::to_owned),
                             );
                         }
                     }
@@ -3162,10 +3148,7 @@ impl GraphFlowEngine {
     /// Legacy reconstruction against the current embedded preset (no workflow
     /// store). Used only by in-memory/test engines that never persisted a v1
     /// descriptor. This path is intentionally NOT frozen-source aware.
-    async fn reconstruct_runner_legacy(
-        &self,
-        summary: &SessionSummary,
-    ) -> Result<(), EngineError> {
+    async fn reconstruct_runner_legacy(&self, summary: &SessionSummary) -> Result<(), EngineError> {
         let caps = self.current_caps();
         let loaded =
             crate::preset::load_embedded_preset(&summary.preset_id, &caps).map_err(|e| {
@@ -3257,7 +3240,10 @@ impl GraphFlowEngine {
             let session = graph_flow::Session::new_from_task(session_id.clone(), &start_task_id);
             session.context.set("_session_id", session_id.clone()).await;
             if !creator_id.is_empty() {
-                session.context.set("_creator_id", creator_id.to_string()).await;
+                session
+                    .context
+                    .set("_creator_id", creator_id.to_string())
+                    .await;
             }
             let checkpoint = RunCheckpoint {
                 root: &session,
@@ -3330,10 +3316,17 @@ impl GraphFlowEngine {
             descriptor.input = input.clone();
             descriptor.agent_bindings = agent_bindings;
             let start_task_id = graph.start_task_id().unwrap_or_default();
-            let session = graph_flow::Session::new_from_task(session_id.to_string(), &start_task_id);
-            session.context.set("_session_id", session_id.to_string()).await;
+            let session =
+                graph_flow::Session::new_from_task(session_id.to_string(), &start_task_id);
+            session
+                .context
+                .set("_session_id", session_id.to_string())
+                .await;
             if !creator_id.is_empty() {
-                session.context.set("_creator_id", creator_id.to_string()).await;
+                session
+                    .context
+                    .set("_creator_id", creator_id.to_string())
+                    .await;
             }
             // Seed the frozen admission input + core-context seed into the
             // session context BEFORE the checkpoint is persisted (A3).
@@ -3344,7 +3337,10 @@ impl GraphFlowEngine {
                     .await;
             }
             if let Some(cc) = core_context {
-                session.context.set("core_context.text", cc.to_string()).await;
+                session
+                    .context
+                    .set("core_context.text", cc.to_string())
+                    .await;
             }
             let checkpoint = RunCheckpoint {
                 root: &session,
@@ -3462,9 +3458,15 @@ impl GraphFlowEngine {
         }
         let start_task_id = graph.start_task_id().unwrap_or_default();
         let session = graph_flow::Session::new_from_task(session_id.to_string(), &start_task_id);
-        session.context.set("_session_id", session_id.to_string()).await;
+        session
+            .context
+            .set("_session_id", session_id.to_string())
+            .await;
         if !creator_id.is_empty() {
-            session.context.set("_creator_id", creator_id.to_string()).await;
+            session
+                .context
+                .set("_creator_id", creator_id.to_string())
+                .await;
         }
         // Seed the frozen admission input + core-context seed into the
         // session context BEFORE the checkpoint is persisted (A3).
@@ -3475,7 +3477,10 @@ impl GraphFlowEngine {
                 .await;
         }
         if let Some(cc) = core_context {
-            session.context.set("core_context.text", cc.to_string()).await;
+            session
+                .context
+                .set("core_context.text", cc.to_string())
+                .await;
         }
         let checkpoint = RunCheckpoint {
             root: &session,
@@ -3845,10 +3850,7 @@ impl OrchestrationEngine for GraphFlowEngine {
         self.recover_sessions_inner(summaries).await;
     }
 
-    async fn ensure_recovered_runner(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), EngineError> {
+    async fn ensure_recovered_runner(&self, session_id: &SessionId) -> Result<(), EngineError> {
         self.ensure_recovered_runner_inner(session_id).await
     }
 
@@ -3926,58 +3928,128 @@ mod tests {
         let valid: HashSet<&str> = ["graph_a", "graph_b"].into_iter().collect();
 
         validate_descendant_position(
-            "preset", &valid, Some("graph_a"), true, None, "parent", "s1", "child", Some("graph_a"), false,
+            "preset",
+            &valid,
+            Some("graph_a"),
+            true,
+            None,
+            "parent",
+            "s1",
+            "child",
+            Some("graph_a"),
+            false,
         )
         .expect("matching non-terminal child is replayable");
 
         let err = validate_descendant_position(
-            "preset", &valid, Some("graph_a"), true, None, "parent", "s1", "child", Some("graph_b"), false,
+            "preset",
+            &valid,
+            Some("graph_a"),
+            true,
+            None,
+            "parent",
+            "s1",
+            "child",
+            Some("graph_b"),
+            false,
         )
         .expect_err("valid-but-wrong-position must refuse");
-        assert!(
-            err.to_string().contains("non-replayable"),
-            "got {err}"
-        );
+        assert!(err.to_string().contains("non-replayable"), "got {err}");
 
         let err = validate_descendant_position(
-            "preset", &valid, None, true, None, "parent", "s1", "child", Some("graph_c"), true,
+            "preset",
+            &valid,
+            None,
+            true,
+            None,
+            "parent",
+            "s1",
+            "child",
+            Some("graph_c"),
+            true,
         )
         .expect_err("unknown inner graph must refuse even when terminal");
         assert!(err.to_string().contains("unknown inner graph"), "got {err}");
 
         validate_descendant_position(
-            "preset", &valid, Some("graph_a"), true, None, "parent", "s1", "child", Some("graph_b"), true,
+            "preset",
+            &valid,
+            Some("graph_a"),
+            true,
+            None,
+            "parent",
+            "s1",
+            "child",
+            Some("graph_b"),
+            true,
         )
         .expect("terminal child is historical: membership suffices");
 
         validate_descendant_position(
-            "preset", &valid, None, true, Some("graph_a"), "parent", "s2", "child", Some("graph_a"), false,
+            "preset",
+            &valid,
+            None,
+            true,
+            Some("graph_a"),
+            "parent",
+            "s2",
+            "child",
+            Some("graph_a"),
+            false,
         )
         .expect("a child recorded under a state entering its own graph is tolerated");
 
         let err = validate_descendant_position(
-            "preset", &valid, None, true, Some("graph_a"), "parent", "s2", "child", Some("graph_b"), false,
+            "preset",
+            &valid,
+            None,
+            true,
+            Some("graph_a"),
+            "parent",
+            "s2",
+            "child",
+            Some("graph_b"),
+            false,
         )
         .expect_err("a recorded state entering a different graph must refuse");
         assert!(
-            err.to_string().contains("not recorded by an inner-graph state entering"),
+            err.to_string()
+                .contains("not recorded by an inner-graph state entering"),
             "got {err}"
         );
 
         let err = validate_descendant_position(
-            "preset", &valid, None, true, None, "parent", "s2", "child", Some("graph_a"), false,
+            "preset",
+            &valid,
+            None,
+            true,
+            None,
+            "parent",
+            "s2",
+            "child",
+            Some("graph_a"),
+            false,
         )
         .expect_err("an unrecorded past-position child must refuse (loop-back replay)");
         assert!(
-            err.to_string().contains("not recorded by an inner-graph state entering"),
+            err.to_string()
+                .contains("not recorded by an inner-graph state entering"),
             "got {err}"
         );
 
         // Inner graph nodes cannot enter inner graphs: a live descendant
         // under a non-root parent is non-replayable.
         let err = validate_descendant_position(
-            "preset", &valid, Some("graph_a"), false, None, "child-parent", "n1", "grandchild",
-            Some("graph_a"), false,
+            "preset",
+            &valid,
+            Some("graph_a"),
+            false,
+            None,
+            "child-parent",
+            "n1",
+            "grandchild",
+            Some("graph_a"),
+            false,
         )
         .expect_err("live descendant under an inner-graph session must refuse");
         assert!(
@@ -4886,7 +4958,11 @@ mod tests {
             "the terminal checkpoint must carry the Continue winner's position"
         );
         assert_eq!(
-            final_root.context.get::<String>("winner.marker").await.as_deref(),
+            final_root
+                .context
+                .get::<String>("winner.marker")
+                .await
+                .as_deref(),
             Some("continue-won"),
             "the terminal checkpoint must carry the Continue winner's context"
         );
@@ -4916,7 +4992,10 @@ mod tests {
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
-        let race_store = Arc::new(ContinueWinsBeforeCancelFenceStore::new(store, storage.clone()));
+        let race_store = Arc::new(ContinueWinsBeforeCancelFenceStore::new(
+            store,
+            storage.clone(),
+        ));
         let store: Arc<dyn WorkflowStateStore> = race_store.clone();
 
         let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Ok(())]));
@@ -5013,7 +5092,11 @@ mod tests {
             "the terminal checkpoint must carry the Continue winner's position"
         );
         assert_eq!(
-            final_root.context.get::<String>("winner.marker").await.as_deref(),
+            final_root
+                .context
+                .get::<String>("winner.marker")
+                .await
+                .as_deref(),
             Some("continue-won"),
             "the terminal checkpoint must carry the Continue winner's context"
         );
@@ -5044,11 +5127,7 @@ mod tests {
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
 
         // All finalizes succeed: root, child, grandchild.
-        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![
-            Ok(()),
-            Ok(()),
-            Ok(()),
-        ]));
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Ok(()), Ok(()), Ok(())]));
 
         let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
@@ -5182,10 +5261,7 @@ mod tests {
             .session_cancels
             .read()
             .unwrap_or_else(|e| e.into_inner());
-        assert!(
-            !cancels.contains_key(&session_id.0),
-            "root token reclaimed"
-        );
+        assert!(!cancels.contains_key(&session_id.0), "root token reclaimed");
         assert!(!cancels.contains_key(&child_id.0), "child token reclaimed");
         assert!(
             !cancels.contains_key(&grandchild_id.0),
@@ -5226,11 +5302,7 @@ mod tests {
 
         // Root + mapped child + late (persisted, unmapped) child all
         // finalize successfully.
-        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![
-            Ok(()),
-            Ok(()),
-            Ok(()),
-        ]));
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Ok(()), Ok(()), Ok(())]));
 
         let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
@@ -5322,11 +5394,7 @@ mod tests {
         // reaped even though its map entry was gone.
         assert_eq!(
             executor.finalized_runs(),
-            vec![
-                session_id.0.clone(),
-                child_id.0.clone(),
-                late_id.0.clone(),
-            ],
+            vec![session_id.0.clone(), child_id.0.clone(), late_id.0.clone(),],
             "root, mapped child, and persisted late child each finalized by their own run id"
         );
 
@@ -5334,9 +5402,9 @@ mod tests {
         {
             let child_map = engine.state.children.read().await;
             assert!(
-                !child_map.get(&session_id.0).is_some_and(|entries| {
-                    entries.iter().any(|c| c.session.id == late_id.0)
-                }),
+                !child_map
+                    .get(&session_id.0)
+                    .is_some_and(|entries| { entries.iter().any(|c| c.session.id == late_id.0) }),
                 "late child must not remain in the children map"
             );
             let sessions = engine.state.sessions.read().await;
@@ -5956,11 +6024,7 @@ mod tests {
             store.clone(),
             caps,
         );
-        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![
-            Ok(()),
-            Ok(()),
-            Ok(()),
-        ]));
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Ok(()), Ok(()), Ok(())]));
         restarted.set_prompt_executor(executor.clone(), restarted.state.session_cancels.clone());
 
         let root_summary = SessionSummary {
@@ -5981,7 +6045,10 @@ mod tests {
                 .get(&session_id.0)
                 .expect("root children hydrated after restart");
             assert_eq!(
-                root_children.iter().map(|c| c.session.id.as_str()).collect::<Vec<_>>(),
+                root_children
+                    .iter()
+                    .map(|c| c.session.id.as_str())
+                    .collect::<Vec<_>>(),
                 vec![child_id.0.as_str()],
                 "root's direct child hydrated"
             );
@@ -5989,7 +6056,10 @@ mod tests {
                 .get(&child_id.0)
                 .expect("child children hydrated after restart");
             assert_eq!(
-                child_children.iter().map(|c| c.session.id.as_str()).collect::<Vec<_>>(),
+                child_children
+                    .iter()
+                    .map(|c| c.session.id.as_str())
+                    .collect::<Vec<_>>(),
                 vec![grandchild_id.0.as_str()],
                 "grandchild hydrated under the child (recursive closure)"
             );
@@ -6022,7 +6092,10 @@ mod tests {
             .expect("restarted root cancel must settle cancelled");
         assert_eq!(status, SessionStatus::Cancelled);
         assert!(child_token.is_cancelled(), "child token must fire");
-        assert!(grandchild_token.is_cancelled(), "grandchild token must fire");
+        assert!(
+            grandchild_token.is_cancelled(),
+            "grandchild token must fire"
+        );
         assert_eq!(
             executor.finalized_runs(),
             vec![
@@ -6589,7 +6662,9 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
         next_state: &crate::run_state::RunStateV1,
     ) -> Result<crate::run_state::RunRecord, EngineError> {
         if next_status == SessionStatus::Interrupted
-            && !self.injected.swap(true, std::sync::atomic::Ordering::SeqCst)
+            && !self
+                .injected
+                .swap(true, std::sync::atomic::Ordering::SeqCst)
         {
             // The competing transition wins the CAS first: a concurrent
             // transition commits at the SAME revision the Interrupted write
@@ -6622,7 +6697,13 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
                 .expect("competing transition wins the CAS");
         }
         self.inner
-            .commit_transition(session_id, expected_revision, checkpoint, next_status, next_state)
+            .commit_transition(
+                session_id,
+                expected_revision,
+                checkpoint,
+                next_status,
+                next_state,
+            )
             .await
     }
 
@@ -6797,7 +6878,9 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         // the CAS and must reload/re-fence against the winner.
         if next_state.cancel_requested
             && next_status != SessionStatus::Interrupted
-            && !self.injected.swap(true, std::sync::atomic::Ordering::SeqCst)
+            && !self
+                .injected
+                .swap(true, std::sync::atomic::Ordering::SeqCst)
         {
             let record = self
                 .inner
@@ -6830,7 +6913,13 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
                 .expect("Continue wins the CAS before the cancel fence");
         }
         self.inner
-            .commit_transition(session_id, expected_revision, checkpoint, next_status, next_state)
+            .commit_transition(
+                session_id,
+                expected_revision,
+                checkpoint,
+                next_status,
+                next_state,
+            )
             .await
     }
 
@@ -6994,7 +7083,13 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         next_state: &crate::run_state::RunStateV1,
     ) -> Result<crate::run_state::RunRecord, EngineError> {
         self.inner
-            .commit_transition(session_id, expected_revision, checkpoint, next_status, next_state)
+            .commit_transition(
+                session_id,
+                expected_revision,
+                checkpoint,
+                next_status,
+                next_state,
+            )
             .await
     }
 
@@ -7010,7 +7105,10 @@ impl WorkflowStateStore for ChildSettleCasLossStore {
         // SAME revision BEFORE the settle commits, so the settle loses the
         // CAS and the engine's rollback retry must reload and re-settle
         // against the new revision.
-        if !self.injected.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        if !self
+            .injected
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
             let record = self
                 .inner
                 .load_run(session_id)

@@ -1464,8 +1464,8 @@ impl NexusAcpClient for AcpSdkAdapter {
                             .as_ref()
                             .cloned()
                             .ok_or_else(|| {
-                                crate::AcpError::connection_failed("Connection not established")
-                            })?;
+                            crate::AcpError::connection_failed("Connection not established")
+                        })?;
                         connection_handle
                             .send_notification_to(Agent, notification)
                             .map_err(|e| crate::AcpError::sdk(&e))?;

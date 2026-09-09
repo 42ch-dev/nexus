@@ -352,7 +352,11 @@ pub fn load_preset(
     let mut loaded = load_preset_from_str(&yaml, caps)?;
     // A directory bundle knows its source identity (A2/A7): content hash
     // over the manifest + every referenced asset, with a canonicalized root.
-    loaded.source_identity = Some(preset_source_identity(&loaded.manifest, Some(bundle_root), None)?);
+    loaded.source_identity = Some(preset_source_identity(
+        &loaded.manifest,
+        Some(bundle_root),
+        None,
+    )?);
     Ok(loaded)
 }
 
@@ -386,15 +390,16 @@ pub fn preset_source_identity(
     // Canonicalize the directory root so the stored identity is stable and
     // symlink-consistent (A2/A7).
     let canonical_root = match bundle_root {
-        Some(root) => Some(root.canonicalize().map_err(|e| {
-            PresetLoadError::Validation {
-                len: 1,
-                problems: vec![ValidationProblem {
-                    path: "preset_source_identity".to_string(),
-                    error: format!("failed to canonicalize bundle root: {e}"),
-                }],
-            }
-        })?),
+        Some(root) => Some(
+            root.canonicalize()
+                .map_err(|e| PresetLoadError::Validation {
+                    len: 1,
+                    problems: vec![ValidationProblem {
+                        path: "preset_source_identity".to_string(),
+                        error: format!("failed to canonicalize bundle root: {e}"),
+                    }],
+                })?,
+        ),
         None => None,
     };
 
@@ -436,8 +441,8 @@ pub fn preset_source_identity(
                 }
             }
         } else if let Some(id) = embedded_id {
-            crate::preset::read_embedded_template(id, rel).ok_or_else(|| {
-                PresetLoadError::Validation {
+            crate::preset::read_embedded_template(id, rel)
+                .ok_or_else(|| PresetLoadError::Validation {
                     len: 1,
                     problems: vec![ValidationProblem {
                         path: format!("asset {rel}"),
@@ -445,9 +450,8 @@ pub fn preset_source_identity(
                             "referenced asset '{rel}' is missing from embedded preset '{id}'"
                         ),
                     }],
-                }
-            })?
-            .into_bytes()
+                })?
+                .into_bytes()
         } else {
             return Err(PresetLoadError::Validation {
                 len: 1,
@@ -464,10 +468,7 @@ pub fn preset_source_identity(
     content_hash.copy_from_slice(hasher.finalize().as_bytes());
 
     Ok(match (canonical_root, embedded_id) {
-        (Some(root), _) => PresetSourceIdentity::Directory {
-            root,
-            content_hash,
-        },
+        (Some(root), _) => PresetSourceIdentity::Directory { root, content_hash },
         (None, Some(id)) => PresetSourceIdentity::Embedded {
             preset_id: id.to_string(),
             content_hash,
@@ -1453,18 +1454,16 @@ fn build_inner_graphs(
                         let template = node
                             .template_file
                             .as_deref()
-                            .and_then(|path| {
-                                match source_identity {
-                                    Some(crate::run_state::PresetSourceIdentity::Embedded {
-                                        preset_id: pid,
-                                        ..
-                                    }) => crate::preset::read_embedded_template(pid, path),
-                                    Some(crate::run_state::PresetSourceIdentity::Directory {
-                                        root,
-                                        ..
-                                    }) => std::fs::read_to_string(root.join(path)).ok(),
-                                    None => crate::preset::read_embedded_template(preset_id, path),
-                                }
+                            .and_then(|path| match source_identity {
+                                Some(crate::run_state::PresetSourceIdentity::Embedded {
+                                    preset_id: pid,
+                                    ..
+                                }) => crate::preset::read_embedded_template(pid, path),
+                                Some(crate::run_state::PresetSourceIdentity::Directory {
+                                    root,
+                                    ..
+                                }) => std::fs::read_to_string(root.join(path)).ok(),
+                                None => crate::preset::read_embedded_template(preset_id, path),
                             })
                             .unwrap_or_default();
                         let mut task = InnerGraphNodeTask::new(&node.id)
@@ -1955,10 +1954,7 @@ states:
         async fn has_runner(&self, _: &crate::engine::SessionId) -> bool {
             unimplemented!("wiring test must not query runner existence")
         }
-        async fn recover_sessions(
-            &self,
-            _: Vec<crate::engine::SessionSummary>,
-        ) {
+        async fn recover_sessions(&self, _: Vec<crate::engine::SessionSummary>) {
             unimplemented!("wiring test must not recover sessions")
         }
         async fn ensure_recovered_runner(

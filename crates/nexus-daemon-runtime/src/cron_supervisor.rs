@@ -119,8 +119,8 @@ pub async fn run_one_tick(
 ) {
     let now = chrono::Utc::now();
     // Step 1: evaluate per-Work crons → enqueue pending schedules.
-    let summary = cron_eval::evaluate_cron_fires(pool, Some(workspace_dir), now, binding_provider)
-        .await;
+    let summary =
+        cron_eval::evaluate_cron_fires(pool, Some(workspace_dir), now, binding_provider).await;
     // Step 2: admit due pending schedules (including any just enqueued).
     // `tick_clocked` filters by `scheduled_at <= now` (cron schedules have no
     // `scheduled_at`, so they are on-demand-admissible).

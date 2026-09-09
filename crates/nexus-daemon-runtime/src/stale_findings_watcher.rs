@@ -286,10 +286,7 @@ async fn maybe_enqueue_review_master(
     };
 
     match nexus_orchestration::auto_chain::enqueue_review_master_schedule(
-        pool,
-        creator_id,
-        work_id,
-        bindings,
+        pool, creator_id, work_id, bindings,
     )
     .await
     {

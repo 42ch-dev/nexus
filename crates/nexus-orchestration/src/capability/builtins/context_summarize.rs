@@ -310,19 +310,20 @@ mod tests {
     /// Shared cancellation map with coordinator tokens registered for the
     /// given run ids (fail-closed contract; production registers at run
     /// admission).
-    fn cancels_with(ids: &[&str]) -> std::sync::Arc<
+    fn cancels_with(
+        ids: &[&str],
+    ) -> std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     > {
         let map: std::sync::Arc<
-            std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
         > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
         {
             let mut guard = map.write().unwrap_or_else(|e| e.into_inner());
             for id in ids {
-                guard.insert(
-                    id.to_string(),
-                    tokio_util::sync::CancellationToken::new(),
-                );
+                guard.insert(id.to_string(), tokio_util::sync::CancellationToken::new());
             }
         }
         map

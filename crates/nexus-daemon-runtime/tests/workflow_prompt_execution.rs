@@ -53,9 +53,7 @@ const FIXTURE: &str = concat!(
 static PROCESS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-    PROCESS_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
+    PROCESS_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 struct TestWorkspace {
@@ -168,11 +166,7 @@ async fn build_stack(
     Arc<dyn WorkflowStateStore>,
     Arc<HostPromptExecutor>,
     Arc<CapabilityRegistry>,
-    Arc<
-        std::sync::RwLock<
-            std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
-        >,
-    >,
+    Arc<std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>>,
 ) {
     let (_manager, host) = build_host(ws, provider_cfg).await;
     let pool = Arc::new(
@@ -180,7 +174,9 @@ async fn build_stack(
             .await
             .expect("open pool"),
     );
-    nexus_local_db::run_migrations(&pool).await.expect("run migrations");
+    nexus_local_db::run_migrations(&pool)
+        .await
+        .expect("run migrations");
     let storage = Arc::new(SqliteSessionStorage::new(pool));
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
     let executor = Arc::new(HostPromptExecutor::new(
@@ -189,9 +185,7 @@ async fn build_stack(
         timeouts(),
     ));
     let session_cancels: Arc<
-        std::sync::RwLock<
-            std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
-        >,
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     > = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
     let deps = CapabilityRuntimeDeps {
         pool: None,
@@ -221,9 +215,7 @@ async fn start_v1_run(
     ws: &TestWorkspace,
     provider_id: &str,
     session_cancels: &Arc<
-        std::sync::RwLock<
-            std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
-        >,
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
 ) -> String {
     let run_id = format!("run:{}", uuid::Uuid::new_v4());
@@ -232,10 +224,7 @@ async fn start_v1_run(
         .expect("session cancels write")
         .insert(run_id.clone(), tokio_util::sync::CancellationToken::new());
     let session = GraphSession::new_from_task(run_id.clone(), "start");
-    session
-        .context
-        .set("_session_id", run_id.clone())
-        .await;
+    session.context.set("_session_id", run_id.clone()).await;
 
     let mut agent_bindings = HashMap::new();
     agent_bindings.insert(
@@ -369,7 +358,10 @@ async fn all_five_consumers_observe_non_echo_agent_output() {
     let ctx = graph_flow::Context::new();
     ctx.set("_session_id", run_id.clone()).await;
     ctx.set("core_context.version", "7").await;
-    let result = task.run(ctx.clone()).await.expect("graph acp_prompt succeeds");
+    let result = task
+        .run(ctx.clone())
+        .await
+        .expect("graph acp_prompt succeeds");
     assert_eq!(
         result.response.as_deref().unwrap_or(""),
         "transformed:graph prompt 7"
@@ -407,8 +399,14 @@ async fn all_five_consumers_observe_non_echo_agent_output() {
     // No live handle in context: only text + ids.
     let ctx_json = serde_json::to_value(&ctx).unwrap();
     let s = ctx_json.to_string();
-    assert!(!s.contains("AcpSdkAdapter"), "no SDK handle in context: {s}");
-    assert!(!s.contains("ManagedAcpProcess"), "no process handle in context: {s}");
+    assert!(
+        !s.contains("AcpSdkAdapter"),
+        "no SDK handle in context: {s}"
+    );
+    assert!(
+        !s.contains("ManagedAcpProcess"),
+        "no process handle in context: {s}"
+    );
 
     host.shutdown().await.expect("host shutdown");
 }
@@ -463,7 +461,9 @@ async fn eof_after_initialize_is_typed_failure() {
 
     // The fixture exits right after initialize; session creation fails with a
     // typed launch error — never a fake success.
-    let result = executor.execute(request(&run_id, "hello", ToolPolicy::DenyAll)).await;
+    let result = executor
+        .execute(request(&run_id, "hello", ToolPolicy::DenyAll))
+        .await;
     assert!(result.is_err(), "EOF after initialize must fail");
     match result.unwrap_err() {
         CapabilityError::TransientExternal(msg) => {
@@ -521,7 +521,8 @@ async fn pre_cancelled_request_is_fenced_before_launch() {
 async fn in_stream_cancel_calls_host_cancel_and_bounds_cleanup() {
     let _lock = env_lock();
     let ws = setup_workspace();
-    let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log).with_env("BLOCK_PROMPT", "1");
+    let provider_cfg =
+        acp_provider_config("mock-acp", &ws.fixture_log).with_env("BLOCK_PROMPT", "1");
     let (host, _storage, workflow_store, executor, _registry, session_cancels) =
         build_stack(&ws, provider_cfg).await;
     let run_id = start_v1_run(&workflow_store, &ws, "mock-acp", &session_cancels).await;
@@ -597,7 +598,8 @@ async fn in_stream_cancel_calls_host_cancel_and_bounds_cleanup() {
 async fn concurrent_same_key_second_prompt_reuses_session_not_spawn() {
     let _lock = env_lock();
     let ws = setup_workspace();
-    let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log).with_env("BLOCK_PROMPT", "1");
+    let provider_cfg =
+        acp_provider_config("mock-acp", &ws.fixture_log).with_env("BLOCK_PROMPT", "1");
     let (host, _storage, workflow_store, executor, _registry, session_cancels) =
         build_stack(&ws, provider_cfg).await;
     let run_id = start_v1_run(&workflow_store, &ws, "mock-acp", &session_cancels).await;
@@ -648,7 +650,10 @@ async fn concurrent_same_key_second_prompt_reuses_session_not_spawn() {
         .expect("record");
     let state = record.state.expect("v1 state");
     let in_flight = state.in_flight.as_ref().expect("in_flight persisted");
-    assert_eq!(in_flight.task_id, "task-1", "first operation owns the marker");
+    assert_eq!(
+        in_flight.task_id, "task-1",
+        "first operation owns the marker"
+    );
     assert!(
         in_flight.operation_id.is_some(),
         "first operation's Active write carries its Host op id"
@@ -789,7 +794,10 @@ async fn capability_route_cancel_uses_shared_coordinator_token() {
             "_session_id": run_id,
         }))
         .await;
-    assert!(result.is_err(), "capability route must surface the cancellation");
+    assert!(
+        result.is_err(),
+        "capability route must surface the cancellation"
+    );
     match result.unwrap_err() {
         CapabilityError::Cancelled => {}
         other => panic!("expected Cancelled through capability route, got: {other:?}"),
@@ -907,7 +915,8 @@ async fn cancellation_after_active_before_exec_no_effect_and_no_session_leak() {
     let ws = setup_workspace();
     // The fixture blocks after receiving the prompt, so the operation stays
     // admitted (Active CAS won) until the coordinator token fires.
-    let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log).with_env("BLOCK_PROMPT", "1");
+    let provider_cfg =
+        acp_provider_config("mock-acp", &ws.fixture_log).with_env("BLOCK_PROMPT", "1");
     let (host, _storage, workflow_store, executor, _registry, session_cancels) =
         build_stack(&ws, provider_cfg).await;
     let run_id = start_v1_run(&workflow_store, &ws, "mock-acp", &session_cancels).await;
@@ -947,9 +956,7 @@ async fn cancellation_after_active_before_exec_no_effect_and_no_session_leak() {
             .expect("load run");
         let state = record.and_then(|r| r.state);
         let active = state.as_ref().and_then(|s| s.in_flight.as_ref());
-        if active
-            .is_some_and(|a| a.phase == nexus_orchestration::run_state::PromptPhase::Active)
-        {
+        if active.is_some_and(|a| a.phase == nexus_orchestration::run_state::PromptPhase::Active) {
             break;
         }
         assert!(
@@ -967,7 +974,10 @@ async fn cancellation_after_active_before_exec_no_effect_and_no_session_leak() {
         .cancel();
 
     let result = handle.await.expect("task joins");
-    assert!(result.is_err(), "post-Active cancellation must be a typed failure");
+    assert!(
+        result.is_err(),
+        "post-Active cancellation must be a typed failure"
+    );
     match result.unwrap_err() {
         CapabilityError::Cancelled => {}
         other => panic!("expected Cancelled, got: {other:?}"),
@@ -1041,13 +1051,10 @@ async fn nested_inner_graph_prompt_executes_with_child_identity() {
     );
     let node_cancels = engine.shared_state().session_cancels.clone();
     let parent_sid = format!("run:{}", uuid::Uuid::new_v4());
-    node_cancels
-        .write()
-        .expect("session cancels write")
-        .insert(
-            parent_sid.clone(),
-            tokio_util::sync::CancellationToken::new(),
-        );
+    node_cancels.write().expect("session cancels write").insert(
+        parent_sid.clone(),
+        tokio_util::sync::CancellationToken::new(),
+    );
     let parent_session = GraphSession::new_from_task(parent_sid.clone(), "parent_state");
     parent_session
         .context
@@ -1124,11 +1131,10 @@ async fn nested_inner_graph_prompt_executes_with_child_identity() {
     // shares the same `Arc<Graph>`, so start-task resolution sees the final
     // graph), and register the parent in the in-memory tracker.
     {
-        engine_shared
-            .runners
-            .write()
-            .await
-            .insert(parent_sid.clone(), Arc::new(FlowRunner::new(parent_graph, storage_arc)));
+        engine_shared.runners.write().await.insert(
+            parent_sid.clone(),
+            Arc::new(FlowRunner::new(parent_graph, storage_arc)),
+        );
         engine_shared.sessions.write().await.push(SessionSummary {
             session_id: SessionId(parent_sid.clone()),
             creator_id: "ctr_test".to_string(),
@@ -1162,7 +1168,8 @@ async fn nested_inner_graph_prompt_executes_with_child_identity() {
     // never an unbound "default" refusal.
     let log = read_fixture_log(&ws.fixture_log);
     assert!(
-        log.iter().any(|e| e["event"] == "prompt" && e["prompt"] == "hello from outer"),
+        log.iter()
+            .any(|e| e["event"] == "prompt" && e["prompt"] == "hello from outer"),
         "fixture must observe the nested prompt: {log:?}"
     );
 
@@ -1176,7 +1183,11 @@ async fn nested_inner_graph_prompt_executes_with_child_identity() {
     let child = &children[0];
     let child_desc = child.descriptor.as_ref().expect("child descriptor");
     assert_eq!(
-        child_desc.parent_session_id.as_ref().expect("parent link").0,
+        child_desc
+            .parent_session_id
+            .as_ref()
+            .expect("parent link")
+            .0,
         parent_sid
     );
     assert_eq!(child_desc.graph_name.as_deref(), Some("inner_graph"));
@@ -1210,10 +1221,7 @@ impl Task for EndTask {
         "end_task"
     }
 
-    async fn run(
-        &self,
-        _ctx: graph_flow::Context,
-    ) -> graph_flow::Result<graph_flow::TaskResult> {
+    async fn run(&self, _ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
         Ok(graph_flow::TaskResult::new(
             None,
             graph_flow::NextAction::End,

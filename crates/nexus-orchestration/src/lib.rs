@@ -17,9 +17,9 @@ pub mod preset_ids;
 pub mod quality_loop;
 pub mod resume_rules;
 pub mod review_report;
-pub mod run_state;
 pub mod rules_history;
 pub mod rules_layers;
+pub mod run_state;
 pub mod schedule;
 pub mod scheduler;
 pub mod skill_link;
@@ -38,7 +38,9 @@ pub use capability::{
     CapabilityRuntimeDeps, PromptExecutor, PromptPermissionScope, PromptRequest, PromptResult,
     ToolPolicy,
 };
-pub use engine::{ChildSessionParams, EngineError, GraphFlowEngine, OrchestrationEngine, SessionId};
+pub use engine::{
+    ChildSessionParams, EngineError, GraphFlowEngine, OrchestrationEngine, SessionId,
+};
 pub use preset::resolve_preset;
 pub use run_state::{
     AgentBinding, ChildCheckpoint, OwnedProcessIdentity, PresetSourceIdentity, PromptAttempt,

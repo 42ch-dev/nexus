@@ -444,9 +444,8 @@ pub async fn resume_driven_sessions(
                             continue;
                         }
                         resume_rules::RecoveryClass::Unreadable => {
-                            decisions.push(ResumeDecision::SkippedUnreadableMetadata {
-                                session_id,
-                            });
+                            decisions
+                                .push(ResumeDecision::SkippedUnreadableMetadata { session_id });
                             continue;
                         }
                         resume_rules::RecoveryClass::Interrupted => {
@@ -468,9 +467,8 @@ pub async fn resume_driven_sessions(
                                     "recovery: safe-boundary reconstruction failed; \
                                      treating as non-replayable metadata"
                                 );
-                                decisions.push(ResumeDecision::SkippedUnreadableMetadata {
-                                    session_id,
-                                });
+                                decisions
+                                    .push(ResumeDecision::SkippedUnreadableMetadata { session_id });
                                 continue;
                             }
                             v1_safe_boundary = true;
@@ -519,7 +517,10 @@ pub async fn resume_driven_sessions(
         // 4. Converge/merge chain class filter (no-checkpoint default
         //    equivalence): only sessions provably inside a converge/merge
         //    chain are re-driven.
-        if !v1_converge_merge && !v1_safe_boundary && !data.is_some_and(resume_rules::is_converge_merge_chain) {
+        if !v1_converge_merge
+            && !v1_safe_boundary
+            && !data.is_some_and(resume_rules::is_converge_merge_chain)
+        {
             decisions.push(ResumeDecision::SkippedNotConvergeMergeClass { session_id });
             continue;
         }
@@ -712,7 +713,11 @@ impl WorkflowRunCoordinator {
     /// decides which runs are re-driven). Idempotent — owners already
     /// finished are skipped.
     pub async fn abort_all_drives(&self) {
-        let owners: Vec<(String, tokio_util::sync::CancellationToken, tokio::task::JoinHandle<()>)> = {
+        let owners: Vec<(
+            String,
+            tokio_util::sync::CancellationToken,
+            tokio::task::JoinHandle<()>,
+        )> = {
             let mut drives = self.drives.lock().await;
             drives
                 .drain()
@@ -768,9 +773,7 @@ impl WorkflowRunCoordinator {
             "recover_persisted: recovering {} persisted session(s) into in-memory tracker",
             summaries.len()
         );
-        self.engine
-            .recover_sessions_inner(summaries.clone())
-            .await;
+        self.engine.recover_sessions_inner(summaries.clone()).await;
         let mut drivable = Vec::new();
         {
             // One shared read lock for the whole batch (tri-QC P1-E): N
@@ -812,7 +815,9 @@ impl WorkflowRunCoordinator {
         storage: Arc<dyn SessionStorage>,
         pool: Arc<sqlx::SqlitePool>,
         session_cancels: std::sync::Arc<
-            std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
         >,
     ) -> Self {
         Self {
@@ -918,11 +923,18 @@ impl WorkflowRunCoordinator {
         preset_id: &str,
         creator_id: &str,
         seed: Option<&str>,
-        agent_bindings: std::collections::HashMap<String, nexus_orchestration::run_state::AgentBinding>,
+        agent_bindings: std::collections::HashMap<
+            String,
+            nexus_orchestration::run_state::AgentBinding,
+        >,
         nexus_home: &std::path::Path,
         caps: &nexus_orchestration::CapabilityRegistryHolder,
-        daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>,
-        prompt_executor: Option<std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
+        daemon_tool_dispatch: Option<
+            std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>,
+        >,
+        prompt_executor: Option<
+            std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>,
+        >,
     ) -> Result<SessionId, RunControlError> {
         // A8 fail-closed: `_system.*` presets are never driven as user
         // sessions.
@@ -933,9 +945,9 @@ impl WorkflowRunCoordinator {
             ));
         }
 
-        let registry = caps
-            .get()
-            .ok_or_else(|| RunControlError::NoWorkspace("capability registry unavailable".into()))?;
+        let registry = caps.get().ok_or_else(|| {
+            RunControlError::NoWorkspace("capability registry unavailable".into())
+        })?;
         let loaded = nexus_orchestration::preset::resolve_preset(preset_id, nexus_home, &registry)
             .map_err(|e| RunControlError::PresetLoad(preset_id.to_string(), e.to_string()))?;
 
@@ -1013,19 +1025,15 @@ impl WorkflowRunCoordinator {
         // the durable `Failed` transition is forced to fail (the write is
         // skipped and reported as uncommittable) so the failed-owner fence
         // path is exercised through the real coordinator and real store.
-        if self
-            .fail_drive_failure_write
-            .swap(false, Ordering::SeqCst)
-        {
+        if self.fail_drive_failure_write.swap(false, Ordering::SeqCst) {
             tracing::warn!(
                 session_id = %session_id.0,
                 "coordinator: fault-injection armed; durable drive failure write forced to fail"
             );
             return false;
         }
-        let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
-            self.pool.clone(),
-        );
+        let store =
+            nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(self.pool.clone());
         let Ok(Some(record)) = store.load_run(session_id).await else {
             return false;
         };
@@ -1103,11 +1111,7 @@ impl WorkflowRunCoordinator {
     /// standalone coordinator) or a DB error is logged, never fatal to the
     /// drive loop. A checkpoint-before-settlement crash is reconciled at
     /// boot (`reconcile_terminal_schedules`).
-    async fn settle_terminal_schedule(
-        &self,
-        session_id: &SessionId,
-        outcome: &PresetRunOutcome,
-    ) {
+    async fn settle_terminal_schedule(&self, session_id: &SessionId, outcome: &PresetRunOutcome) {
         // Only terminal outcomes settle.
         if !matches!(
             outcome,
@@ -1132,9 +1136,8 @@ impl WorkflowRunCoordinator {
         };
 
         // Durable session terminal status is truth.
-        let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
-            self.pool.clone(),
-        );
+        let store =
+            nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(self.pool.clone());
         let record = match store.load_run(session_id).await {
             Ok(Some(record)) => record,
             Ok(None) => {
@@ -1154,13 +1157,9 @@ impl WorkflowRunCoordinator {
             }
         };
         let terminal_status = match record.status {
-            SessionStatus::Completed => {
-                nexus_contracts::local::schedule::ScheduleStatus::Completed
-            }
+            SessionStatus::Completed => nexus_contracts::local::schedule::ScheduleStatus::Completed,
             SessionStatus::Failed => nexus_contracts::local::schedule::ScheduleStatus::Failed,
-            SessionStatus::Cancelled => {
-                nexus_contracts::local::schedule::ScheduleStatus::Cancelled
-            }
+            SessionStatus::Cancelled => nexus_contracts::local::schedule::ScheduleStatus::Cancelled,
             // Unconfirmed cancel/cleanup is NOT a successful cancel (A5).
             // `creator_schedules.status` has no `interrupted` variant and an
             // unmapped string projects as `Pending` (re-runnable), so the
@@ -1262,9 +1261,8 @@ impl WorkflowRunCoordinator {
 
         // Durable-state gate even when no owner exists (I-2): a reconstructed
         // coordinator must not start a fresh owner for terminal/wait/interrupt.
-        let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
-            self.pool.clone(),
-        );
+        let store =
+            nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(self.pool.clone());
         let record = store
             .load_run(session_id)
             .await
@@ -1312,14 +1310,9 @@ impl WorkflowRunCoordinator {
         let drive_cancel = cancel.clone();
         let coordinator = self.clone();
         let join = tokio::spawn(async move {
-            let outcome = drive_preset_run(
-                &*engine,
-                Some(&storage),
-                &sid,
-                &config,
-                Some(&drive_cancel),
-            )
-            .await;
+            let outcome =
+                drive_preset_run(&*engine, Some(&storage), &sid, &config, Some(&drive_cancel))
+                    .await;
             // Closure 8: a failed driver persists a durable non-replayable
             // `Failed` transition so the v1 record is never classified
             // runnable again after owner cleanup. When the transition
@@ -1327,11 +1320,7 @@ impl WorkflowRunCoordinator {
             // `ensure_driving` refuses re-entry until it is durable.
             if let PresetRunOutcome::Failed { error, .. } = &outcome {
                 if !coordinator.persist_drive_failure(&sid, error).await {
-                    coordinator
-                        .failed_owners
-                        .lock()
-                        .await
-                        .insert(sid.0.clone());
+                    coordinator.failed_owners.lock().await.insert(sid.0.clone());
                 }
             }
             // T3 (A3): settle the matching schedule from the durable
@@ -1425,9 +1414,8 @@ impl WorkflowRunCoordinator {
                                 continue;
                             }
                             resume_rules::RecoveryClass::Unreadable => {
-                                decisions.push(ResumeDecision::SkippedUnreadableMetadata {
-                                    session_id,
-                                });
+                                decisions
+                                    .push(ResumeDecision::SkippedUnreadableMetadata { session_id });
                                 continue;
                             }
                             resume_rules::RecoveryClass::Interrupted => {
@@ -1495,7 +1483,10 @@ impl WorkflowRunCoordinator {
             }
 
             // Converge/merge chain class filter.
-            if !v1_converge_merge && !v1_safe_boundary && !data.is_some_and(resume_rules::is_converge_merge_chain) {
+            if !v1_converge_merge
+                && !v1_safe_boundary
+                && !data.is_some_and(resume_rules::is_converge_merge_chain)
+            {
                 decisions.push(ResumeDecision::SkippedNotConvergeMergeClass { session_id });
                 continue;
             }
@@ -1536,24 +1527,15 @@ impl WorkflowRunCoordinator {
             let drive_cancel = cancel.clone();
             let coordinator = self.clone();
             let join = tokio::spawn(async move {
-                let outcome = drive_preset_run(
-                    &*engine,
-                    Some(&storage),
-                    &sid,
-                    &config,
-                    Some(&drive_cancel),
-                )
-                .await;
+                let outcome =
+                    drive_preset_run(&*engine, Some(&storage), &sid, &config, Some(&drive_cancel))
+                        .await;
                 // Closure 8: a failed recovery drive persists a durable
                 // non-replayable `Failed` transition (same boundary as
                 // `ensure_driving`); a failed write fences the owner.
                 if let PresetRunOutcome::Failed { error, .. } = &outcome {
                     if !coordinator.persist_drive_failure(&sid, error).await {
-                        coordinator
-                            .failed_owners
-                            .lock()
-                            .await
-                            .insert(sid.0.clone());
+                        coordinator.failed_owners.lock().await.insert(sid.0.clone());
                     }
                 }
                 // T3 (A3): settle the matching schedule from the durable
@@ -1593,8 +1575,12 @@ impl WorkflowRunCoordinator {
         pool: &sqlx::SqlitePool,
         nexus_home: &std::path::Path,
         caps: &nexus_orchestration::CapabilityRegistryHolder,
-        daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>,
-        prompt_executor: Option<std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
+        daemon_tool_dispatch: Option<
+            std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>,
+        >,
+        prompt_executor: Option<
+            std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>,
+        >,
     ) -> Result<SessionId, RunControlError> {
         // Load the schedule row.
         let row = sqlx::query_as::<_, ScheduleAdmissionRow>(
@@ -1660,7 +1646,8 @@ impl WorkflowRunCoordinator {
         // this explicit call; the cutover + owned-session claim remain
         // atomic inside `admit_schedule`'s store transaction.
         if row.execution_descriptor_json.is_none() {
-            self.prepare_legacy_row(&row, pool, nexus_home, caps).await?;
+            self.prepare_legacy_row(&row, pool, nexus_home, caps)
+                .await?;
         }
 
         // Policy cutover happens inside admit_schedule_run (same claim
@@ -1711,11 +1698,12 @@ impl WorkflowRunCoordinator {
         caps: &nexus_orchestration::CapabilityRegistryHolder,
     ) -> Result<(), RunControlError> {
         // 1. Resolve the preset through the shared resolver.
-        let registry = caps
-            .get()
-            .ok_or_else(|| RunControlError::NoWorkspace("capability registry unavailable".into()))?;
-        let loaded = nexus_orchestration::preset::resolve_preset(&row.preset_id, nexus_home, &registry)
-            .map_err(|e| RunControlError::PresetLoad(row.preset_id.clone(), e.to_string()))?;
+        let registry = caps.get().ok_or_else(|| {
+            RunControlError::NoWorkspace("capability registry unavailable".into())
+        })?;
+        let loaded =
+            nexus_orchestration::preset::resolve_preset(&row.preset_id, nexus_home, &registry)
+                .map_err(|e| RunControlError::PresetLoad(row.preset_id.clone(), e.to_string()))?;
 
         // 2. Freeze the source identity (must be present — embedded and
         //    directory presets both carry it).
@@ -1852,8 +1840,12 @@ impl WorkflowRunCoordinator {
         pool: &sqlx::SqlitePool,
         nexus_home: &std::path::Path,
         caps: &nexus_orchestration::CapabilityRegistryHolder,
-        daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>,
-        prompt_executor: Option<std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
+        daemon_tool_dispatch: Option<
+            std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>,
+        >,
+        prompt_executor: Option<
+            std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>,
+        >,
     ) -> Result<SessionId, RunControlError> {
         // 1. Load the schedule row.
         let row = sqlx::query_as::<_, ScheduleAdmissionRow>(
@@ -1873,11 +1865,14 @@ impl WorkflowRunCoordinator {
         if row.preset_id.starts_with("_system.") {
             return Err(RunControlError::NotEligible(
                 schedule_id.to_string(),
-                format!("system preset '{}' cannot be admitted as a driven run", row.preset_id),
+                format!(
+                    "system preset '{}' cannot be admitted as a driven run",
+                    row.preset_id
+                ),
             ));
         }
-        let policy_ok = row.execution_policy == "driven_v1"
-            || row.execution_policy == "legacy_inert";
+        let policy_ok =
+            row.execution_policy == "driven_v1" || row.execution_policy == "legacy_inert";
         if !policy_ok {
             return Err(RunControlError::NotEligible(
                 schedule_id.to_string(),
@@ -1965,11 +1960,12 @@ impl WorkflowRunCoordinator {
         };
 
         // 2. Resolve the preset and freeze the descriptor + core seed.
-        let registry = caps
-            .get()
-            .ok_or_else(|| RunControlError::NoWorkspace("capability registry unavailable".into()))?;
-        let loaded = nexus_orchestration::preset::resolve_preset(&row.preset_id, nexus_home, &registry)
-            .map_err(|e| RunControlError::PresetLoad(row.preset_id.clone(), e.to_string()))?;
+        let registry = caps.get().ok_or_else(|| {
+            RunControlError::NoWorkspace("capability registry unavailable".into())
+        })?;
+        let loaded =
+            nexus_orchestration::preset::resolve_preset(&row.preset_id, nexus_home, &registry)
+                .map_err(|e| RunControlError::PresetLoad(row.preset_id.clone(), e.to_string()))?;
 
         // 3. Freeze the core-context seed at the EXACT version persisted with
         //    the schedule row (N-3/I-6): admission reads the frozen version,
@@ -1985,7 +1981,10 @@ impl WorkflowRunCoordinator {
             let sid = nexus_contracts::local::schedule::ScheduleId(schedule_id.to_string());
             let frozen_version = u32::try_from(row.current_core_context_version).unwrap_or(0);
             match mgr
-                .read(&sid, nexus_contracts::local::schedule::CoreContextVersion(frozen_version))
+                .read(
+                    &sid,
+                    nexus_contracts::local::schedule::CoreContextVersion(frozen_version),
+                )
                 .await
             {
                 Ok(record) => {
@@ -2002,7 +2001,12 @@ impl WorkflowRunCoordinator {
                     };
                     (Some(body), version)
                 }
-                Err(nexus_orchestration::schedule::derivation::CoreContextError::VersionNotFound(_, version)) => {
+                Err(
+                    nexus_orchestration::schedule::derivation::CoreContextError::VersionNotFound(
+                        _,
+                        version,
+                    ),
+                ) => {
                     return Err(RunControlError::Admission(format!(
                         "core-context version {version} is missing; \
                          the schedule row is not durably seeded (pre-seed rows are never admitted)"
@@ -2048,7 +2052,6 @@ impl WorkflowRunCoordinator {
         // gate session POST uses. Unknown roles/providers refuse before any
         // run row is created.
         validate_agent_bindings(&loaded, &agent_bindings, self.agent_host.as_ref()).await?;
-
 
         // 5. Mint the owned session id and admit atomically (C-1).
         let session_id = format!("{}:{}", row.preset_id, uuid::Uuid::new_v4());
@@ -2129,10 +2132,7 @@ impl WorkflowRunCoordinator {
                     || msg.contains("dependency")
                     || msg.contains("not due")
                 {
-                    return Err(RunControlError::NotEligible(
-                        schedule_id.to_string(),
-                        msg,
-                    ));
+                    return Err(RunControlError::NotEligible(schedule_id.to_string(), msg));
                 }
                 Err(RunControlError::Admission(msg))
             }
@@ -2210,21 +2210,16 @@ impl WorkflowRunCoordinator {
             // cancel-requested/terminal/incompatible state is
             // `workflow_state_conflict`.
             Err(nexus_orchestration::engine::EngineError::RevisionMismatch {
-                session_id,
-                ..
+                session_id, ..
             }) => {
-                let store =
-                    nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
-                        self.pool.clone(),
-                    );
+                let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
+                    self.pool.clone(),
+                );
                 match store.load_run(&SessionId(session_id.clone())).await {
                     Ok(Some(record)) => {
                         let state = record.state.as_ref();
-                        let cancel_requested =
-                            state.is_some_and(|s| s.cancel_requested);
-                        if record.status == SessionStatus::WaitingForInput
-                            && !cancel_requested
-                        {
+                        let cancel_requested = state.is_some_and(|s| s.cancel_requested);
+                        if record.status == SessionStatus::WaitingForInput && !cancel_requested {
                             let current_wait_id = state
                                 .and_then(|s| s.wait.as_ref())
                                 .map(|w| w.wait_id.clone());
@@ -2258,7 +2253,10 @@ impl WorkflowRunCoordinator {
                     current_wait_id,
                 },
                 nexus_orchestration::engine::EngineError::TerminalState(sid) => {
-                    RunControlError::StateConflict(sid, "run is terminal or not in a signalable state".to_string())
+                    RunControlError::StateConflict(
+                        sid,
+                        "run is terminal or not in a signalable state".to_string(),
+                    )
                 }
                 nexus_orchestration::engine::EngineError::SessionNotFound(sid) => {
                     RunControlError::ScheduleNotFound(sid)
@@ -2276,9 +2274,8 @@ impl WorkflowRunCoordinator {
         }
 
         // Project the persisted status + current wait id for the response.
-        let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
-            self.pool.clone(),
-        );
+        let store =
+            nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(self.pool.clone());
         let record = store
             .load_run(session_id)
             .await
@@ -2337,13 +2334,12 @@ async fn schedule_eligible(
     row: &ScheduleAdmissionRow,
 ) -> Result<bool, RunControlError> {
     // scheduled_at gate (same shape as the supervisor's clocked tick).
-    let scheduled_at: Option<i64> = sqlx::query_scalar(
-        "SELECT scheduled_at FROM creator_schedules WHERE schedule_id = ?",
-    )
-    .bind(&row.schedule_id)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
+    let scheduled_at: Option<i64> =
+        sqlx::query_scalar("SELECT scheduled_at FROM creator_schedules WHERE schedule_id = ?")
+            .bind(&row.schedule_id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
     if let Some(at) = scheduled_at {
         if at > chrono::Utc::now().timestamp() {
             return Ok(false);
@@ -2351,13 +2347,12 @@ async fn schedule_eligible(
     }
 
     // Load the candidate's concurrency + dependencies.
-    let concurrency_kind: String = sqlx::query_scalar(
-        "SELECT concurrency_kind FROM creator_schedules WHERE schedule_id = ?",
-    )
-    .bind(&row.schedule_id)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
+    let concurrency_kind: String =
+        sqlx::query_scalar("SELECT concurrency_kind FROM creator_schedules WHERE schedule_id = ?")
+            .bind(&row.schedule_id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
     let concurrency_whitelist: Option<String> = sqlx::query_scalar(
         "SELECT concurrency_whitelist FROM creator_schedules WHERE schedule_id = ?",
     )
@@ -2365,13 +2360,12 @@ async fn schedule_eligible(
     .fetch_one(pool)
     .await
     .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
-    let deps: Vec<String> = sqlx::query_scalar(
-        "SELECT depends_on FROM schedule_dependencies WHERE schedule_id = ?",
-    )
-    .bind(&row.schedule_id)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
+    let deps: Vec<String> =
+        sqlx::query_scalar("SELECT depends_on FROM schedule_dependencies WHERE schedule_id = ?")
+            .bind(&row.schedule_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
 
     // Completed/cancelled set for dependency satisfaction (Failed does not
     // satisfy — spec §4).
@@ -2472,16 +2466,24 @@ async fn validate_agent_bindings(
                 if role_ids.is_empty() {
                     "none — single-agent presets accept only 'default'".to_string()
                 } else {
-                    role_ids.iter().map(|r| format!("'{r}'")).collect::<Vec<_>>().join(", ")
+                    role_ids
+                        .iter()
+                        .map(|r| format!("'{r}'"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 }
             )));
         }
         if let Some(host) = host {
-            let catalog = host
-                .provider_catalog()
-                .await
-                .map_err(|e| RunControlError::Admission(format!("provider catalog unavailable: {e}")))?;
-            if catalog.find(&nexus_agent_host::ProviderId::new(binding.provider_id.clone())).is_none() {
+            let catalog = host.provider_catalog().await.map_err(|e| {
+                RunControlError::Admission(format!("provider catalog unavailable: {e}"))
+            })?;
+            if catalog
+                .find(&nexus_agent_host::ProviderId::new(
+                    binding.provider_id.clone(),
+                ))
+                .is_none()
+            {
                 return Err(RunControlError::Admission(format!(
                     "unknown provider '{}' for role '{role}'",
                     binding.provider_id
@@ -2562,10 +2564,7 @@ mod tests {
             unreachable!("not used by driver unit tests")
         }
 
-        async fn ensure_recovered_runner(
-            &self,
-            session_id: &SessionId,
-        ) -> Result<(), EngineError> {
+        async fn ensure_recovered_runner(&self, session_id: &SessionId) -> Result<(), EngineError> {
             if !*self.runner_present.lock() {
                 return Err(EngineError::GraphFlow(
                     graph_flow::GraphError::StorageError(format!(
@@ -3250,14 +3249,11 @@ mod tests {
     async fn a7_storage(
         db_path: &std::path::Path,
     ) -> (Arc<dyn SessionStorage>, Arc<SqliteSessionStorage>) {
-        let pool = nexus_local_db::open_pool(db_path)
-            .await
-            .expect("open pool");
+        let pool = nexus_local_db::open_pool(db_path).await.expect("open pool");
         // The create_test_workspace fixture already ran migrations; opening
         // the pool again is idempotent. The same adapter implements both
         // SessionStorage and WorkflowStateStore (A2).
-        let sqlite: Arc<SqliteSessionStorage> =
-            Arc::new(SqliteSessionStorage::new(Arc::new(pool)));
+        let sqlite: Arc<SqliteSessionStorage> = Arc::new(SqliteSessionStorage::new(Arc::new(pool)));
         let dyn_storage: Arc<dyn SessionStorage> = sqlite.clone();
         (dyn_storage, sqlite)
     }
@@ -3267,9 +3263,19 @@ mod tests {
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
         {
-            let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
-            seed_v1_row(&pool, "v1:crashed", "running", Some("task_3"), false, false, true)
-                .await;
+            let pool = nexus_local_db::open_pool(&db_path)
+                .await
+                .expect("open pool");
+            seed_v1_row(
+                &pool,
+                "v1:crashed",
+                "running",
+                Some("task_3"),
+                false,
+                false,
+                true,
+            )
+            .await;
             pool.close().await;
         }
         let (storage, sqlite) = a7_storage(&db_path).await;
@@ -3311,13 +3317,32 @@ mod tests {
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
         {
-            let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
-            seed_v1_row(&pool, "v1:wait", "waiting_for_input", None, false, true, false).await;
+            let pool = nexus_local_db::open_pool(&db_path)
+                .await
+                .expect("open pool");
+            seed_v1_row(
+                &pool,
+                "v1:wait",
+                "waiting_for_input",
+                None,
+                false,
+                true,
+                false,
+            )
+            .await;
             // A token-bearing wait WITH live scheduler join keys must still
             // classify as a human wait (L2 Important 1): the durable A4 wait
             // token beats old join keys; daemon must not re-drive it.
-            seed_v1_row(&pool, "v1:wait_joins", "waiting_for_input", None, false, true, true)
-                .await;
+            seed_v1_row(
+                &pool,
+                "v1:wait_joins",
+                "waiting_for_input",
+                None,
+                false,
+                true,
+                true,
+            )
+            .await;
             pool.close().await;
         }
         let (storage, sqlite) = a7_storage(&db_path).await;
@@ -3384,7 +3409,9 @@ mod tests {
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
         {
-            let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
+            let pool = nexus_local_db::open_pool(&db_path)
+                .await
+                .expect("open pool");
             // v1 row with a corrupt state blob — non-replayable, never
             // silently reinterpreted (A7 rule 2).
             sqlx::query(
@@ -3447,9 +3474,17 @@ mod tests {
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
         {
-            let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
+            let pool = nexus_local_db::open_pool(&db_path)
+                .await
+                .expect("open pool");
             seed_v1_row(
-                &pool, "v1:stale-terminal", "completed", None, false, false, true,
+                &pool,
+                "v1:stale-terminal",
+                "completed",
+                None,
+                false,
+                false,
+                true,
             )
             .await;
             pool.close().await;
@@ -3501,7 +3536,9 @@ mod tests {
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
         {
-            let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
+            let pool = nexus_local_db::open_pool(&db_path)
+                .await
+                .expect("open pool");
             // v1 row with structurally invalid run state (string where bool
             // required) → `load_run` errors (non-replayable). Context is
             // byte-valid with `data` so the failure is definitively in the
@@ -3578,7 +3615,9 @@ mod tests {
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
         {
-            let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
+            let pool = nexus_local_db::open_pool(&db_path)
+                .await
+                .expect("open pool");
             // v1 running row at a live converge/merge chain, context carrying
             // STALE typed-failure keys (v0-era leftovers) alongside the live
             // join keys.
@@ -3592,7 +3631,7 @@ mod tests {
                 "wait": null, "step_in_flight": null, "in_flight": null,
                 "failure": null, "cancel_requested": false
             }"#
-                .to_vec();
+            .to_vec();
             sqlx::query(
                 "INSERT INTO orchestration_sessions
                     (session_id, creator_id, preset_id, preset_version, status,
@@ -3630,15 +3669,8 @@ mod tests {
             status: SessionStatus::WaitingForInput,
             current_task_id: Some("join".to_string()),
         };
-        let decisions = resume_driven_sessions(
-            &engine,
-            &storage,
-            Some(&store),
-            &[sum],
-            &config,
-            None,
-        )
-        .await;
+        let decisions =
+            resume_driven_sessions(&engine, &storage, Some(&store), &[sum], &config, None).await;
         assert_eq!(
             decisions,
             vec![ResumeDecision::ReDriven {
@@ -3765,7 +3797,13 @@ mod tests {
                     .expect("competing cancel fence wins the CAS");
             }
             self.inner
-                .commit_transition(session_id, expected_revision, checkpoint, next_status, next_state)
+                .commit_transition(
+                    session_id,
+                    expected_revision,
+                    checkpoint,
+                    next_status,
+                    next_state,
+                )
                 .await
         }
 
@@ -3852,7 +3890,9 @@ mod tests {
     async fn signal_continue_loses_cas_to_cancel_returns_state_conflict() {
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("open pool");
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -3864,11 +3904,13 @@ mod tests {
         let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
             nexus_orchestration::CapabilityRegistry::with_builtins(),
         ));
-        let engine = Arc::new(nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
-            storage.clone(),
-            race_store.clone(),
-            caps,
-        ));
+        let engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                race_store.clone(),
+                caps,
+            ),
+        );
         let session_cancels: std::sync::Arc<
             std::sync::RwLock<
                 std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
@@ -3993,7 +4035,9 @@ mod tests {
     async fn continue_after_cancel_fence_returns_state_conflict_without_driving() {
         let (tmp, _nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let _ = &tmp;
-        let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("open pool");
         let pool = Arc::new(pool);
         let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
@@ -4002,11 +4046,13 @@ mod tests {
         let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
             nexus_orchestration::CapabilityRegistry::with_builtins(),
         ));
-        let engine = Arc::new(nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
-            storage.clone(),
-            store.clone(),
-            caps,
-        ));
+        let engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                store.clone(),
+                caps,
+            ),
+        );
         let session_cancels: std::sync::Arc<
             std::sync::RwLock<
                 std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
@@ -4135,11 +4181,7 @@ mod tests {
         // `ensure_driving` was never called: no drive owner exists for the
         // session (no new work was created while cancellation is in flight).
         assert!(
-            !coordinator
-                .drives
-                .lock()
-                .await
-                .contains_key(&session_id.0),
+            !coordinator.drives.lock().await.contains_key(&session_id.0),
             "the refused continue must not start a drive owner"
         );
     }

@@ -295,11 +295,7 @@ impl LiveDaemon {
     /// workspace `state.db` path this herd serves.
     #[must_use]
     pub fn db_path(&self) -> std::path::PathBuf {
-        nexus_home_layout::workspace_state_db_path(
-            self.home.path(),
-            "test_creator",
-            "default",
-        )
+        nexus_home_layout::workspace_state_db_path(self.home.path(), "test_creator", "default")
     }
 
     /// Boot the daemon WITHOUT publishing the Creator-DB runtime bundle
@@ -349,9 +345,7 @@ impl LiveDaemon {
 
         let engine = state.engine().expect("engine after lazy attach");
         let session_storage: Arc<dyn graph_flow::SessionStorage> = Arc::new(
-            nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(
-                pool.clone(),
-            )),
+            nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(pool.clone())),
         );
         let app = api::create_router(
             state.clone(),
@@ -428,8 +422,7 @@ impl LiveDaemon {
             .join("capabilities");
         let (registry, _outcome) =
             nexus_orchestration::capability::CapabilityRegistry::with_runtime_deps_and_user_caps(
-                &deps,
-                &scan_dir,
+                &deps, &scan_dir,
             );
         let holder =
             nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(registry));

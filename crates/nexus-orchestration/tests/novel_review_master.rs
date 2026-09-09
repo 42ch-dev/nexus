@@ -154,7 +154,10 @@ impl nexus_orchestration::capability::PromptExecutor for MockLlmExtractWorker {
     async fn execute(
         &self,
         _request: nexus_orchestration::capability::PromptRequest,
-    ) -> Result<nexus_orchestration::capability::PromptResult, nexus_orchestration::capability::CapabilityError> {
+    ) -> Result<
+        nexus_orchestration::capability::PromptResult,
+        nexus_orchestration::capability::CapabilityError,
+    > {
         Ok(nexus_orchestration::capability::PromptResult {
             full_text: "{\"candidates\":[
                 {\"canonical_name\":\"Lin Xia\",\"block_type\":\"character\",\"summary\":\"A warrior\",\"confidence\":0.95,\"source_quote\":\"Lin Xia drew her blade at the Azure Gate.\"},
@@ -170,7 +173,9 @@ fn registry_with_mock_worker() -> CapabilityRegistry {
     let deps = CapabilityRuntimeDeps {
         pool: None,
         prompt_executor: Some(std::sync::Arc::new(MockLlmExtractWorker)),
-        session_cancels: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
         daemon_tool_dispatch: None,
         cdn_config: None,
     };

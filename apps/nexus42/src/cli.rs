@@ -9,10 +9,10 @@ use crate::commands::connect::ConnectCommand;
 #[cfg(feature = "connect-client")]
 use crate::commands::mcp::McpCommand;
 use crate::commands::{
-    acp::AcpCommand, capability::CapabilityCommand,
-    compute::ComputeCommand, creator::CreatorCommand, daemon::DaemonCommand,
-    daemon_run::DaemonRunArgs, desktop::DesktopCommand, host_call::HostCallArgs, ops::OpsCommand,
-    platform::PlatformCommand, preset::PresetCommand, sync::SyncCommand, system::SystemCommand,
+    acp::AcpCommand, capability::CapabilityCommand, compute::ComputeCommand,
+    creator::CreatorCommand, daemon::DaemonCommand, daemon_run::DaemonRunArgs,
+    desktop::DesktopCommand, host_call::HostCallArgs, ops::OpsCommand, platform::PlatformCommand,
+    preset::PresetCommand, sync::SyncCommand, system::SystemCommand,
 };
 use clap::{Parser, Subcommand};
 

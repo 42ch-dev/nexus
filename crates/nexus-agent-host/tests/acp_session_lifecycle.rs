@@ -19,8 +19,7 @@ use std::sync::Arc;
 
 use futures_util::StreamExt;
 use nexus_agent_host::capability::model::{
-    CreateSessionRequest, HostContentBlock, HostEvent, HostOperation, HostStartConfig,
-    SessionOwner,
+    CreateSessionRequest, HostContentBlock, HostEvent, HostOperation, HostStartConfig, SessionOwner,
 };
 use nexus_agent_host::config::{AgentHostConfig, ProviderConfig, TimeoutConfig};
 use nexus_agent_host::core::manager::HostManager;
@@ -37,9 +36,7 @@ const FIXTURE: &str = concat!(
 static PROCESS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-    PROCESS_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
+    PROCESS_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 struct TestWorkspace {
@@ -143,7 +140,10 @@ async fn build_host(
         env: provider_cfg.env.clone(),
     };
     manager.register_provider(Arc::new(provider), launch).await;
-    manager.start(host_start_config(ws)).await.expect("host start");
+    manager
+        .start(host_start_config(ws))
+        .await
+        .expect("host start");
     let host: Arc<dyn HostFacade> = manager.clone();
     (manager, host)
 }
@@ -194,7 +194,10 @@ async fn no_boot_spawn_and_truthful_catalog_recipe() {
     let entry = catalog
         .find(&ProviderId::new("mock-acp"))
         .expect("configured ACP provider in catalog");
-    assert_eq!(entry.protocol_kind, nexus_agent_host::capability::model::ProtocolKind::Acp);
+    assert_eq!(
+        entry.protocol_kind,
+        nexus_agent_host::capability::model::ProtocolKind::Acp
+    );
     match &entry.launch {
         LaunchStrategy::Acp { command, args, env } => {
             assert_eq!(command, FIXTURE, "catalog reports the real command");
@@ -211,7 +214,13 @@ async fn no_boot_spawn_and_truthful_catalog_recipe() {
     // The manager's runtime catalog reports the registered recipe; the
     // discovery catalog (config path) states the lazy-spawn message.
     assert!(
-        entry.health.message.is_none() || entry.health.message.as_deref().unwrap_or_default().contains("lazy"),
+        entry.health.message.is_none()
+            || entry
+                .health
+                .message
+                .as_deref()
+                .unwrap_or_default()
+                .contains("lazy"),
         "catalog must not claim a successful launch, got {:?}",
         entry.health.message
     );
@@ -250,7 +259,11 @@ async fn lazy_per_session_pid_and_creator_cwd_isolation() {
     let starts = start_events(&log);
     assert_eq!(starts.len(), 1, "exactly one spawn for session A: {log:?}");
     let cwd_a = starts[0]["cwd"].as_str().expect("cwd recorded");
-    let expected_cwd = ws.creator_ws_a.join("sub").canonicalize().expect("canonical");
+    let expected_cwd = ws
+        .creator_ws_a
+        .join("sub")
+        .canonicalize()
+        .expect("canonical");
     assert_eq!(
         Path::new(cwd_a),
         expected_cwd,
@@ -281,7 +294,11 @@ async fn lazy_per_session_pid_and_creator_cwd_isolation() {
         "distinct Host sessions/Creators must not share a process"
     );
     let cwd_b = starts[1]["cwd"].as_str().expect("cwd recorded");
-    let expected_cwd_b = ws.creator_ws_b.join("sub").canonicalize().expect("canonical");
+    let expected_cwd_b = ws
+        .creator_ws_b
+        .join("sub")
+        .canonicalize()
+        .expect("canonical");
     assert_eq!(Path::new(cwd_b), expected_cwd_b);
 
     // Cleanup: shutdown both sessions (reaps the exact owned children).
@@ -328,10 +345,7 @@ async fn prompt_returns_non_echo_agent_output() {
         .await
         .expect("exec");
 
-    let events: Vec<HostEvent> = stream
-        .map(|r| r.expect("event"))
-        .collect()
-        .await;
+    let events: Vec<HostEvent> = stream.map(|r| r.expect("event")).collect().await;
 
     let mut text = String::new();
     let mut finished = false;
@@ -398,7 +412,8 @@ async fn missing_and_disabled_providers_refuse() {
 async fn cancel_reaches_owned_operation_and_shutdown_reaps_exact_process() {
     let _lock = env_lock();
     let ws = setup_workspace();
-    let provider_cfg = acp_provider_config("mock-acp", &ws.fixture_log, &[("BLOCK_PROMPT", "1")], true);
+    let provider_cfg =
+        acp_provider_config("mock-acp", &ws.fixture_log, &[("BLOCK_PROMPT", "1")], true);
     let (_manager, host) = build_host(&ws, provider_cfg).await;
 
     let session = host
@@ -523,8 +538,12 @@ async fn shutdown_reaps_owned_process_tree_descendants() {
 async fn eof_after_initialize_is_typed_failure() {
     let _lock = env_lock();
     let ws = setup_workspace();
-    let provider_cfg =
-        acp_provider_config("mock-acp", &ws.fixture_log, &[("EOF_AFTER_INIT", "1")], true);
+    let provider_cfg = acp_provider_config(
+        "mock-acp",
+        &ws.fixture_log,
+        &[("EOF_AFTER_INIT", "1")],
+        true,
+    );
     let (_manager, host) = build_host(&ws, provider_cfg).await;
 
     // The fixture exits right after initialize; session creation must fail

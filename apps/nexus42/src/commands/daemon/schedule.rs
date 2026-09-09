@@ -532,10 +532,7 @@ async fn inspect_schedule(client: &crate::api::DaemonClient, id: &str) -> Result
         if let Some(wait) = &execution.wait {
             println!("wait_id:        {}", wait.wait_id);
         }
-        println!(
-            "allowed_actions: {}",
-            execution.allowed_actions.join(", ")
-        );
+        println!("allowed_actions: {}", execution.allowed_actions.join(", "));
     }
     if !resp.depends_on.is_empty() {
         println!("depends_on:     {}", resp.depends_on.join(", "));

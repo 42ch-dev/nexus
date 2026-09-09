@@ -84,7 +84,10 @@ impl ProviderCatalog {
                         provider_id: pid.clone(),
                         available: true,
                         latency_ms: None,
-                        message: Some("launch recipe registered; process spawns lazily per session".to_string()),
+                        message: Some(
+                            "launch recipe registered; process spawns lazily per session"
+                                .to_string(),
+                        ),
                     },
                 });
                 seen_ids.insert(pid);

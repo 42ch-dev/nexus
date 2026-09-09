@@ -14,8 +14,8 @@
 //! Run with: `cargo test -p nexus42 --test ops_inspect_cli`
 
 use assert_cmd::Command;
-use serde_json::{json, Value};
 use nexus_orchestration::run_state::{PresetSourceIdentity, RunDescriptorV1};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -1407,7 +1407,13 @@ fn inspect_v1_legacy_v0_chain_row_is_legacy_unverified() {
         let pool = create_db(&db_path).await;
         seed_session(
             &pool,
-            &SeedRow::new("ses_legacy", "preset_chain", "running", Some("task_9"), &ctx),
+            &SeedRow::new(
+                "ses_legacy",
+                "preset_chain",
+                "running",
+                Some("task_9"),
+                &ctx,
+            ),
         )
         .await;
         pool.close().await;
@@ -1612,22 +1618,14 @@ fn inspect_v1_terminal_wins_with_absent_state_blob() {
             ("ses_failed_absent", "failed"),
             ("ses_cancelled_absent", "cancelled"),
         ] {
-            seed_session(
-                &pool,
-                &SeedRow::new(id, "preset_x", status, None, b"{}"),
-            )
-            .await;
+            seed_session(&pool, &SeedRow::new(id, "preset_x", status, None, b"{}")).await;
         }
         for (id, status) in [
             ("ses_done_corrupt", "completed"),
             ("ses_failed_corrupt", "failed"),
             ("ses_cancelled_corrupt", "cancelled"),
         ] {
-            seed_session(
-                &pool,
-                &SeedRow::new(id, "preset_x", status, None, b"{}"),
-            )
-            .await;
+            seed_session(&pool, &SeedRow::new(id, "preset_x", status, None, b"{}")).await;
         }
         for (id, state) in [
             ("ses_done_absent", None),
@@ -1659,7 +1657,8 @@ fn inspect_v1_terminal_wins_with_absent_state_blob() {
             .clone();
         let parsed: Value = serde_json::from_slice(&output).expect("valid json");
         assert_eq!(
-            parsed["recovery_class"], json!("terminal"),
+            parsed["recovery_class"],
+            json!("terminal"),
             "{id} must stay terminal even with absent/corrupt durable state"
         );
         assert_eq!(parsed["resumable"]["verdict"], json!("no"));
@@ -1704,7 +1703,8 @@ fn inspect_v1_structurally_corrupt_state_is_unreadable_in_list_and_detail() {
     assert_eq!(detail["recovery_class"], json!("unreadable"));
     assert_eq!(detail["resumable"]["verdict"], json!("unknown"));
     assert_eq!(
-        detail["resumable"]["rule"], json!("unreadable_metadata"),
+        detail["resumable"]["rule"],
+        json!("unreadable_metadata"),
         "v1 corrupt metadata must carry the explicit non-replayable metadata reason"
     );
     assert!(detail.get("wait_id").is_none());
@@ -1724,7 +1724,8 @@ fn inspect_v1_structurally_corrupt_state_is_unreadable_in_list_and_detail() {
         .find(|r| r["session_id"] == "ses_struct")
         .expect("row listed");
     assert_eq!(
-        row["recovery_class"], json!("unreadable"),
+        row["recovery_class"],
+        json!("unreadable"),
         "list must not coerce structurally corrupt RunStateV1 evidence: {row}"
     );
     assert_eq!(row["resumable"]["verdict"], json!("unknown"));
@@ -1771,7 +1772,8 @@ fn inspect_v1_unsupported_execution_versions_are_unreadable() {
             .clone();
         let detail: Value = serde_json::from_slice(&output).expect("valid json");
         assert_eq!(
-            detail["recovery_class"], json!("unreadable"),
+            detail["recovery_class"],
+            json!("unreadable"),
             "{id} (execution_version) must be unreadable, not coerced"
         );
         assert_eq!(detail["resumable"]["verdict"], json!("unknown"));
@@ -1797,7 +1799,8 @@ fn inspect_v1_unsupported_execution_versions_are_unreadable() {
             .find(|r| r["session_id"] == id)
             .expect("row listed");
         assert_eq!(
-            row["recovery_class"], json!("unreadable"),
+            row["recovery_class"],
+            json!("unreadable"),
             "list must agree {id} is unreadable: {row}"
         );
     }
@@ -1844,7 +1847,8 @@ fn inspect_v1_human_wait_token_beats_old_join_keys() {
         "old join keys are preserved"
     );
     assert_eq!(
-        parsed["recovery_class"], json!("human_wait"),
+        parsed["recovery_class"],
+        json!("human_wait"),
         "the durable wait token must beat old scheduler join keys"
     );
     assert_eq!(parsed["wait_id"], json!("wait-tok-1"));
@@ -1982,7 +1986,8 @@ fn inspect_v1_corrupt_metadata_with_readable_context_is_unreadable_metadata() {
     assert_eq!(parsed["recovery_class"], json!("unreadable"));
     assert_eq!(parsed["resumable"]["verdict"], json!("unknown"));
     assert_eq!(
-        parsed["resumable"]["rule"], json!("unreadable_metadata"),
+        parsed["resumable"]["rule"],
+        json!("unreadable_metadata"),
         "corrupt v1 metadata must not be labelled context_unreadable: {parsed}"
     );
     let explanation = parsed["resumable"]["explanation"].as_str().unwrap();
@@ -2074,7 +2079,11 @@ fn inspect_v1_terminal_with_stale_wait_bytes_has_no_wait_id() {
         let parsed: Value = serde_json::from_slice(&output).expect("valid json");
         assert_eq!(parsed["recovery_class"], json!("terminal"), "{id}");
         assert_eq!(parsed["resumable"]["verdict"], json!("no"), "{id}");
-        assert_eq!(parsed["resumable"]["rule"], json!("terminal_status"), "{id}");
+        assert_eq!(
+            parsed["resumable"]["rule"],
+            json!("terminal_status"),
+            "{id}"
+        );
         assert!(
             parsed.get("wait_id").is_none(),
             "terminal rows must not advertise a wait token even with stale \

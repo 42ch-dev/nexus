@@ -332,10 +332,8 @@ impl crate::HostFacade for HostManager {
         // The session cwd must belong to the verified Creator workspace; a
         // profile switch or foreign workspace must never retarget an existing
         // run (A5: owner_workspace_mismatch).
-        let owner_workspace = crate::config::validate_workspace_path_under(
-            &request.owner.workspace_root,
-            &boundary,
-        )?;
+        let owner_workspace =
+            crate::config::validate_workspace_path_under(&request.owner.workspace_root, &boundary)?;
         if !validated_cwd.starts_with(&owner_workspace) {
             return Err(HostError::owner_workspace_mismatch(format!(
                 "session cwd '{}' is outside verified Creator workspace '{}'",
@@ -484,9 +482,7 @@ impl crate::HostFacade for HostManager {
                         // ACP read loop (A5 "reuse serially").
                         let mut sess = sessions.write().await;
                         match sess.get(&sid).map(|s| s.state.clone()) {
-                            Some(crate::core::session::SessionState::Busy(op))
-                                if &op == &oid =>
-                            {
+                            Some(crate::core::session::SessionState::Busy(op)) if &op == &oid => {
                                 let _ = sess.transition_busy_to_ready(&sid, &oid);
                             }
                             Some(crate::core::session::SessionState::Cancelling(op))
@@ -742,32 +738,33 @@ impl crate::HostFacade for HostManager {
         // failure/timeout means the exact owned process was not confirmed
         // reaped: the session must remain visibly interrupted (A5), never be
         // marked/removed as cleanly stopped.
-        let cleanup_unconfirmed = match tokio::time::timeout(shutdown_timeout, adapter.shutdown(handle)).await {
-            Ok(Ok(())) => {
-                tracing::info!(
-                    session_id = %session_id,
-                    provider_id = %session.provider_id,
-                    "Per-session shutdown succeeded"
-                );
-                false
-            }
-            Ok(Err(e)) => {
-                tracing::warn!(
-                    session_id = %session_id,
-                    error = %e,
-                    "Per-session provider shutdown returned error (cleanup unconfirmed)"
-                );
-                true
-            }
-            Err(_) => {
-                tracing::warn!(
-                    session_id = %session_id,
-                    timeout_ms = shutdown_timeout.as_millis(),
-                    "Per-session provider shutdown timed out (cleanup unconfirmed)"
-                );
-                true
-            }
-        };
+        let cleanup_unconfirmed =
+            match tokio::time::timeout(shutdown_timeout, adapter.shutdown(handle)).await {
+                Ok(Ok(())) => {
+                    tracing::info!(
+                        session_id = %session_id,
+                        provider_id = %session.provider_id,
+                        "Per-session shutdown succeeded"
+                    );
+                    false
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        error = %e,
+                        "Per-session provider shutdown returned error (cleanup unconfirmed)"
+                    );
+                    true
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        timeout_ms = shutdown_timeout.as_millis(),
+                        "Per-session provider shutdown timed out (cleanup unconfirmed)"
+                    );
+                    true
+                }
+            };
 
         if cleanup_unconfirmed {
             // Keep the session in the registry as ErrorRecoverable: it must
@@ -786,13 +783,11 @@ impl crate::HostFacade for HostManager {
                 }
                 sessions.transition_to_error_recoverable(&session_id)?;
             }
-            return Err(
-                HostError::cleanup_unconfirmed(format!(
-                    "session {session_id} cleanup unconfirmed"
-                ))
-                .with_provider(session.provider_id.clone())
-                .with_session(session_id.clone()),
-            );
+            return Err(HostError::cleanup_unconfirmed(format!(
+                "session {session_id} cleanup unconfirmed"
+            ))
+            .with_provider(session.provider_id.clone())
+            .with_session(session_id.clone()));
         }
 
         // Transition session through Stopping → Stopped
@@ -1157,7 +1152,9 @@ mod tests {
         test_owner_for(std::path::PathBuf::from("/tmp"))
     }
 
-    fn test_owner_for(workspace_root: std::path::PathBuf) -> crate::capability::model::SessionOwner {
+    fn test_owner_for(
+        workspace_root: std::path::PathBuf,
+    ) -> crate::capability::model::SessionOwner {
         crate::capability::model::SessionOwner {
             creator_id: "ctr_test".to_string(),
             workspace_root,
@@ -1427,7 +1424,9 @@ mod tests {
     async fn shutdown_calls_provider_adapter_for_each_session() {
         let provider = Arc::new(TrackingMockProvider::new(ProviderId::new("mock")));
         let manager = HostManager::new();
-        manager.register_provider(provider.clone(), mock_launch()).await;
+        manager
+            .register_provider(provider.clone(), mock_launch())
+            .await;
         manager.start(start_config()).await.expect("start");
 
         let session1 = manager
@@ -1479,7 +1478,9 @@ mod tests {
     async fn shutdown_timeout_retains_unconfirmed_session() {
         let provider = Arc::new(HangingMockProvider::new(ProviderId::new("mock")));
         let manager = HostManager::new();
-        manager.register_provider(provider.clone(), mock_launch()).await;
+        manager
+            .register_provider(provider.clone(), mock_launch())
+            .await;
 
         // Create a temp config file with a very short shutdown timeout.
         let temp_dir = tempfile::tempdir().expect("temp dir");
@@ -1555,7 +1556,9 @@ mod tests {
     async fn shutdown_with_no_sessions_succeeds() {
         let provider = Arc::new(TrackingMockProvider::new(ProviderId::new("mock")));
         let manager = HostManager::new();
-        manager.register_provider(provider.clone(), mock_launch()).await;
+        manager
+            .register_provider(provider.clone(), mock_launch())
+            .await;
         manager.start(start_config()).await.expect("start");
 
         manager.shutdown().await.expect("shutdown");
@@ -1595,7 +1598,9 @@ mod tests {
 
         let provider = Arc::new(TrackingMockProvider::new(ProviderId::new("mock")));
         let manager = HostManager::new();
-        manager.register_provider(provider.clone(), mock_launch()).await;
+        manager
+            .register_provider(provider.clone(), mock_launch())
+            .await;
         manager.start(start_config()).await.expect("start");
 
         // Create a session

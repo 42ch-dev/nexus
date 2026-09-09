@@ -172,7 +172,9 @@ async fn start_server(
         let deps = CapabilityRuntimeDeps {
             pool: None,
             prompt_executor: None,
-            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
             daemon_tool_dispatch: None,
             cdn_config: None,
         };
@@ -575,10 +577,7 @@ async fn unknown_peer_id_is_not_supported_identically_to_unknown_builtin() {
     // HTTP spine: unknown peer id → not_supported (same as unknown builtin).
     let (status, body) = post_tool_execution(&server, "tools.t3.ghost", json!({})).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(
-        body["error"]["code"], "not_supported",
-        "HTTP spine: {body}"
-    );
+    assert_eq!(body["error"]["code"], "not_supported", "HTTP spine: {body}");
 
     // HTTP tool-executions: same.
     let (status2, body2) = post_tool_execution(&server, "tools.t3.ghost", json!({})).await;

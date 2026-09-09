@@ -673,7 +673,9 @@ mod tests {
         );
 
         // Later ownership-safe retry completes: ErrorRecoverable → Stopping.
-        registry.transition_to_stopping(&id).expect("retry to Stopping");
+        registry
+            .transition_to_stopping(&id)
+            .expect("retry to Stopping");
         let event = registry
             .transition_to_stopped(&id, SessionStopReason::GracefulShutdown)
             .expect("Stopping → Stopped");

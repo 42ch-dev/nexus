@@ -538,9 +538,11 @@ async fn child_cas_outcome(
                 ))))
             }
         }
-        None => Some(EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-            "child CAS failed for '{child_id}': row absent"
-        )))),
+        None => Some(EngineError::GraphFlow(
+            graph_flow::GraphError::StorageError(format!(
+                "child CAS failed for '{child_id}': row absent"
+            )),
+        )),
     })
 }
 
@@ -586,7 +588,8 @@ impl WorkflowStateStore for SqliteSessionStorage {
         .await
         .map_err(|e| {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                "load_run '{}': {e}", session_id.0
+                "load_run '{}': {e}",
+                session_id.0
             )))
         })?;
 
@@ -661,7 +664,8 @@ impl WorkflowStateStore for SqliteSessionStorage {
                     session_id.0
                 )))
             })?;
-            let descriptor = deserialize_blob::<RunDescriptorV1>(descriptor_bytes, "run_descriptor_json")?;
+            let descriptor =
+                deserialize_blob::<RunDescriptorV1>(descriptor_bytes, "run_descriptor_json")?;
             let state = deserialize_blob::<RunStateV1>(state_bytes, "run_state_json")?;
             Ok(Some(RunRecord {
                 session_id: SessionId(row.session_id),
@@ -706,10 +710,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         let creator_id = descriptor.creator_id.clone();
         let preset_id = descriptor.preset_id.clone();
         let preset_version = i64::from(descriptor.preset_version);
-        let parent_session_id = descriptor
-            .parent_session_id
-            .as_ref()
-            .map(|s| s.0.clone());
+        let parent_session_id = descriptor.parent_session_id.as_ref().map(|s| s.0.clone());
         let current_task_id = checkpoint.root.current_task_id.clone();
         let context_bytes = serde_json::to_vec(&checkpoint.root.context).map_err(|e| {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
@@ -739,7 +740,8 @@ impl WorkflowStateStore for SqliteSessionStorage {
         .await
         .map_err(|e| {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                "start_run '{}': {e}", session_id.0
+                "start_run '{}': {e}",
+                session_id.0
             )))
         })?;
 
@@ -776,7 +778,8 @@ impl WorkflowStateStore for SqliteSessionStorage {
         .await
         .map_err(|e| {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                "start_run '{}': {e}", session_id.0
+                "start_run '{}': {e}",
+                session_id.0
             )))
         })?;
 
@@ -854,8 +857,13 @@ impl WorkflowStateStore for SqliteSessionStorage {
             // is already terminal at the expected revision is confirmed (no
             // overwrite needed) and does not fail the root start.
             if child_result.rows_affected() == 0 {
-                if let Some(err) =
-                    child_cas_outcome(&mut tx, &child_id, child.state_revision, child.status.clone()).await?
+                if let Some(err) = child_cas_outcome(
+                    &mut tx,
+                    &child_id,
+                    child.state_revision,
+                    child.status.clone(),
+                )
+                .await?
                 {
                     return Err(err);
                 }
@@ -894,10 +902,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         let creator_id = descriptor.creator_id.clone();
         let preset_id = descriptor.preset_id.clone();
         let preset_version = i64::from(descriptor.preset_version);
-        let parent_session_id = descriptor
-            .parent_session_id
-            .as_ref()
-            .map(|s| s.0.clone());
+        let parent_session_id = descriptor.parent_session_id.as_ref().map(|s| s.0.clone());
         let current_task_id = checkpoint.root.current_task_id.clone();
         let context_bytes = serde_json::to_vec(&checkpoint.root.context).map_err(|e| {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
@@ -1054,8 +1059,8 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 )),
             ));
         }
-        let policy_ok = row.execution_policy == "driven_v1"
-            || row.execution_policy == "legacy_inert";
+        let policy_ok =
+            row.execution_policy == "driven_v1" || row.execution_policy == "legacy_inert";
         if !policy_ok {
             return Err(EngineError::GraphFlow(
                 graph_flow::GraphError::StorageError(format!(
@@ -1261,7 +1266,8 @@ impl WorkflowStateStore for SqliteSessionStorage {
         .await
         .map_err(|e| {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                "commit_transition '{}': {e}", session_id.0
+                "commit_transition '{}': {e}",
+                session_id.0
             )))
         })?;
 
@@ -1282,15 +1288,13 @@ impl WorkflowStateStore for SqliteSessionStorage {
             })?;
 
             return match current {
-                Some((_revision, version)) if version != 1 => {
-                    Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
-                        format!(
-                            "commit_transition '{}': execution_version {version} is non-replayable; \
+                Some((_revision, version)) if version != 1 => Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "commit_transition '{}': execution_version {version} is non-replayable; \
                              legacy runs cannot transition",
-                            session_id.0
-                        ),
-                    )))
-                }
+                        session_id.0
+                    )),
+                )),
                 Some((found, _)) if found != expected_revision as i64 => {
                     Err(EngineError::RevisionMismatch {
                         session_id: session_id.0.clone(),
@@ -1418,8 +1422,13 @@ impl WorkflowStateStore for SqliteSessionStorage {
             // that is already terminal at the expected revision is confirmed
             // (no overwrite needed) and does not fail the root transition.
             if child_result.rows_affected() == 0 {
-                if let Some(err) =
-                    child_cas_outcome(&mut tx, &child_id, child.state_revision, child.status.clone()).await?
+                if let Some(err) = child_cas_outcome(
+                    &mut tx,
+                    &child_id,
+                    child.state_revision,
+                    child.status.clone(),
+                )
+                .await?
                 {
                     return Err(err);
                 }
@@ -1493,7 +1502,8 @@ impl WorkflowStateStore for SqliteSessionStorage {
         .await
         .map_err(|e| {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                "settle_cancelled '{}': {e}", session_id.0
+                "settle_cancelled '{}': {e}",
+                session_id.0
             )))
         })?;
 
@@ -1512,15 +1522,13 @@ impl WorkflowStateStore for SqliteSessionStorage {
             })?;
 
             return match current {
-                Some((_revision, version)) if version != 1 => {
-                    Err(EngineError::GraphFlow(graph_flow::GraphError::StorageError(
-                        format!(
-                            "settle_cancelled '{}': execution_version {version} is non-replayable; \
+                Some((_revision, version)) if version != 1 => Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "settle_cancelled '{}': execution_version {version} is non-replayable; \
                              legacy runs cannot transition",
-                            session_id.0
-                        ),
-                    )))
-                }
+                        session_id.0
+                    )),
+                )),
                 Some((found, _)) if found != expected_revision as i64 => {
                     Err(EngineError::RevisionMismatch {
                         session_id: session_id.0.clone(),
@@ -1588,7 +1596,8 @@ impl WorkflowStateStore for SqliteSessionStorage {
         .await
         .map_err(|e| {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                "load_children '{}': {e}", parent_session_id.0
+                "load_children '{}': {e}",
+                parent_session_id.0
             )))
         })?;
 
@@ -1737,7 +1746,8 @@ impl WorkflowStateStore for SqliteSessionStorage {
         .await
         .map_err(|e| {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                "restore_pre_step '{}': {e}", session_id.0
+                "restore_pre_step '{}': {e}",
+                session_id.0
             )))
         })?;
 
@@ -1816,7 +1826,8 @@ impl WorkflowStateStore for SqliteSessionStorage {
         .await
         .map_err(|e| {
             EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                "mark_step_in_flight '{}': {e}", session_id.0
+                "mark_step_in_flight '{}': {e}",
+                session_id.0
             )))
         })?;
 
@@ -1905,11 +1916,9 @@ impl WorkflowStateStore for SqliteSessionStorage {
         // claims an empty slot) or already carry exactly this operation's
         // attempt id (Active updates the SAME operation).
         let owner_cas_sql = match expected_attempt_id {
-            Some(_) => {
-                " AND (json_extract(COALESCE(run_state_json, '{}'), '$.in_flight') IS NULL \
+            Some(_) => " AND (json_extract(COALESCE(run_state_json, '{}'), '$.in_flight') IS NULL \
                    OR json_extract(COALESCE(run_state_json, '{}'), '$.in_flight.attempt_id') = ?)"
-                    .to_string()
-            }
+                .to_string(),
             None => String::new(),
         };
         let sql = match expected_step {
@@ -1999,8 +2008,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 // superseded this prompt's admission — same linearization
                 // boundary, same typed mismatch.
                 Some(row)
-                    if expected_step.is_some()
-                        && row.step_marker.as_deref() != expected_step =>
+                    if expected_step.is_some() && row.step_marker.as_deref() != expected_step =>
                 {
                     EngineError::RevisionMismatch {
                         session_id: session_id.0.clone(),
@@ -2195,7 +2203,10 @@ mod tests {
             &serde_json::to_vec(&session.context).expect("serialize seed context"),
         )
         .await;
-        storage.save(session.clone()).await.expect("insert paused row");
+        storage
+            .save(session.clone())
+            .await
+            .expect("insert paused row");
         let mut session = storage
             .get("sess-paused-save")
             .await
@@ -2203,7 +2214,10 @@ mod tests {
             .expect("row exists");
         session.context.set_sync("_gate_park_join", true);
         session.current_task_id = "join".to_string();
-        storage.save(session).await.expect("save mutated paused row");
+        storage
+            .save(session)
+            .await
+            .expect("save mutated paused row");
 
         let persisted = storage
             .get("sess-paused-save")
@@ -2239,7 +2253,10 @@ mod tests {
             &serde_json::to_vec(&session.context).expect("serialize seed context"),
         )
         .await;
-        storage.save(session.clone()).await.expect("insert wait row");
+        storage
+            .save(session.clone())
+            .await
+            .expect("insert wait row");
         let mut session = storage
             .get("sess-wait-fence")
             .await
@@ -2294,7 +2311,10 @@ mod tests {
                     msg.contains("unknown/corrupt status"),
                     "unexpected error: {msg}"
                 );
-                assert!(msg.contains("sess-unknown-status"), "unexpected error: {msg}");
+                assert!(
+                    msg.contains("sess-unknown-status"),
+                    "unexpected error: {msg}"
+                );
             }
             other => panic!("expected StorageError, got {other:?}"),
         }
@@ -2343,8 +2363,14 @@ mod tests {
             .expect_err("unexpected zero-row on a running row must not succeed");
         match &err {
             graph_flow::GraphError::StorageError(msg) => {
-                assert!(msg.contains("unexpected zero-row"), "unexpected error: {msg}");
-                assert!(msg.contains("sess-zero-row-race"), "unexpected error: {msg}");
+                assert!(
+                    msg.contains("unexpected zero-row"),
+                    "unexpected error: {msg}"
+                );
+                assert!(
+                    msg.contains("sess-zero-row-race"),
+                    "unexpected error: {msg}"
+                );
             }
             other => panic!("expected StorageError, got {other:?}"),
         }
@@ -2590,10 +2616,7 @@ mod tests {
         .expect("seed v1 stepped row");
     }
 
-    fn test_attempt(
-        task_id: &str,
-        phase: crate::run_state::PromptPhase,
-    ) -> PromptAttempt {
+    fn test_attempt(task_id: &str, phase: crate::run_state::PromptPhase) -> PromptAttempt {
         PromptAttempt {
             attempt_id: uuid::Uuid::new_v4().to_string(),
             task_id: task_id.to_string(),
@@ -2630,7 +2653,10 @@ mod tests {
             .await
             .expect("load")
             .expect("row");
-        assert_eq!(record.state_revision, 2, "intent write must not advance the revision");
+        assert_eq!(
+            record.state_revision, 2,
+            "intent write must not advance the revision"
+        );
         let state = record.state.expect("v1 state");
         assert_eq!(state.in_flight.as_ref().expect("in_flight").task_id, "t1");
 
