@@ -724,12 +724,48 @@ impl PromptExecutor for HostPromptExecutor {
         // session Cancelling → Ready, so step 9's bounded shutdown can
         // remove the session — no leaked Host session.
         let mut cancel_triggered = false;
+        let mut cancel_unconfirmed = false;
         let terminal = loop {
             tokio::select! {
                 biased;
                 _ = cancel.cancelled(), if !cancel_triggered => {
                     cancel_triggered = true;
-                    let _ = self.host.cancel(op_id.clone()).await;
+                    // P1 (rereview-4): the Host cancel request is bounded by
+                    // the configured shutdown timeout. A provider that fails
+                    // or blocks `cancel` must not leave `execute` (and the
+                    // engine's `finalize_run`) waiting indefinitely: on
+                    // timeout/error the cooperative drain is abandoned and
+                    // the run proceeds to the bounded owned-session/process
+                    // cleanup path below, retaining an honest
+                    // `Interrupted` disposition when cleanup cannot be
+                    // confirmed — never a false successful cancellation.
+                    let cancel_result = tokio::time::timeout(
+                        self.timeouts.shutdown_duration(),
+                        self.host.cancel(op_id.clone()),
+                    )
+                    .await;
+                    match cancel_result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            tracing::warn!(
+                                run_id = %request.run_id,
+                                op_id = %op_id,
+                                error = %e,
+                                "host cancel returned an error; abandoning cooperative drain"
+                            );
+                            cancel_unconfirmed = true;
+                            break Err(CapabilityError::Cancelled);
+                        }
+                        Err(_) => {
+                            tracing::warn!(
+                                run_id = %request.run_id,
+                                op_id = %op_id,
+                                "host cancel timed out; abandoning cooperative drain"
+                            );
+                            cancel_unconfirmed = true;
+                            break Err(CapabilityError::Cancelled);
+                        }
+                    }
                 }
                 event = stream.next() => {
                     match event {
@@ -796,7 +832,38 @@ impl PromptExecutor for HostPromptExecutor {
         //    I-002: the entry is evicted ONLY on a confirmed shutdown; on
         //    timeout/error the Host still owns the session, so the entry is
         //    kept for a later `finalize_run` retry to reap.
+        //
+        //    P1 (rereview-4): the post-cancel stream drain is bounded by the
+        //    same shutdown timeout. A provider that ignores cancellation and
+        //    never emits a terminal event must not leave `execute` (and the
+        //    engine's `finalize_run`) waiting indefinitely: the drain is
+        //    abandoned on timeout and the run proceeds to the bounded
+        //    owned-session/process cleanup path, retaining an honest
+        //    `Interrupted` disposition when cleanup cannot be confirmed —
+        //    never a false successful cancellation.
         if request.cancellation.is_cancelled() {
+            if !cancel_unconfirmed {
+                let drain_result = tokio::time::timeout(
+                    self.timeouts.shutdown_duration(),
+                    async {
+                        let mut drain = std::pin::pin!(stream);
+                        while let Some(event) = drain.next().await {
+                            if let Ok(HostEvent::OpFinished(_)) | Ok(HostEvent::OpFailed(_)) = event
+                            {
+                                break;
+                            }
+                        }
+                    },
+                )
+                .await;
+                if drain_result.is_err() {
+                    tracing::warn!(
+                        run_id = %request.run_id,
+                        "post-cancel stream drain timed out; abandoning cooperative drain"
+                    );
+                    cancel_unconfirmed = true;
+                }
+            }
             let confirmed = tokio::time::timeout(
                 self.timeouts.shutdown_duration(),
                 self.host.shutdown_session(host_session_id.clone()),
@@ -946,6 +1013,15 @@ mod tests {
         cancels: AtomicU64,
         shutdowns: AtomicU64,
         fail_shutdown_remaining: AtomicU64,
+        /// Non-cooperative cancel hook (P1, round 5): when set, `cancel`
+        /// blocks forever — the executor's bounded cancel must still return
+        /// within the shutdown timeout and never report successful
+        /// cancellation without confirmed cleanup.
+        block_cancel: AtomicU64,
+        /// Non-cooperative shutdown hook (P1, round 5): when set,
+        /// `shutdown_session` always fails — cleanup can never be confirmed,
+        /// so the run must stay `Interrupted`, never falsely `Cancelled`.
+        fail_shutdown_forever: AtomicU64,
         /// Active operations: op id → (session id, release signal). `exec`
         /// parks the returned stream until the operation is cancelled or
         /// released, so a real `HostPromptExecutor::execute` drains a
@@ -969,12 +1045,24 @@ mod tests {
                 cancels: AtomicU64::new(0),
                 shutdowns: AtomicU64::new(0),
                 fail_shutdown_remaining: AtomicU64::new(0),
+                block_cancel: AtomicU64::new(0),
+                fail_shutdown_forever: AtomicU64::new(0),
                 active_ops: Mutex::new(HashMap::new()),
             })
         }
 
         fn fail_next_shutdowns(&self, count: u64) {
             self.fail_shutdown_remaining.store(count, Ordering::SeqCst);
+        }
+
+        /// Make `cancel` block forever (non-cooperative provider).
+        fn block_cancel_forever(&self) {
+            self.block_cancel.store(1, Ordering::SeqCst);
+        }
+
+        /// Make `shutdown_session` always fail (cleanup can never confirm).
+        fn fail_shutdown_forever(&self) {
+            self.fail_shutdown_forever.store(1, Ordering::SeqCst);
         }
 
         /// Register a Host session row the host would have created (the
@@ -1074,6 +1162,12 @@ mod tests {
 
         async fn cancel(&self, op_id: nexus_agent_host::HostOperationId) -> HostResult<()> {
             self.cancels.fetch_add(1, Ordering::SeqCst);
+            // Non-cooperative provider hook (P1, round 5): block forever —
+            // the executor's bounded cancel must still return within the
+            // shutdown timeout.
+            if self.block_cancel.load(Ordering::SeqCst) > 0 {
+                std::future::pending::<()>().await;
+            }
             // Release the parked operation stream so the executor's drain
             // observes the terminal `OpFinished(Cancelled)` event — the
             // bounded stream/operation termination the cancel path awaits.
@@ -1101,6 +1195,14 @@ mod tests {
             &self,
             session_id: nexus_agent_host::HostSessionId,
         ) -> HostResult<()> {
+            // Non-cooperative provider hook (P1, round 5): cleanup can never
+            // be confirmed — the run must stay `Interrupted`, never falsely
+            // `Cancelled`.
+            if self.fail_shutdown_forever.load(Ordering::SeqCst) > 0 {
+                return Err(nexus_agent_host::HostError::internal(
+                    "injected permanent shutdown failure",
+                ));
+            }
             let remaining = self.fail_shutdown_remaining.load(Ordering::SeqCst);
             if remaining > 0 {
                 self.fail_shutdown_remaining
@@ -1466,6 +1568,219 @@ mod tests {
                 .as_ref()
                 .is_some_and(|s| s.cancel_requested),
             "cancelled run must carry cancel_requested"
+        );
+    }
+
+    /// Non-cooperative Host cancellation/drain bound proof (P1, round 5):
+    /// the provider BLOCKS `cancel` forever and its `shutdown_session`
+    /// always fails — the exact shape the round-4 fixture could not create
+    /// (its `ScriptedHost` always released the parked stream from `cancel`).
+    /// The executor's bounded cancel must still return within the shutdown
+    /// timeout, the engine's cancel must return within a bounded window, and
+    /// the run must land `Interrupted` (cleanup unconfirmed) — never a false
+    /// successful `Cancelled`.
+    #[tokio::test]
+    async fn non_cooperative_host_cancel_is_bounded_and_never_falsely_cancelled() {
+        let host = ScriptedHost::new();
+        let (executor, sqlite, storage, pool, _db) = test_executor(host.clone()).await;
+        let store: Arc<dyn nexus_orchestration::run_state::WorkflowStateStore> = sqlite.clone();
+
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        engine.set_prompt_executor(executor.clone(), session_cancels.clone());
+
+        let graph = Arc::new(graph_flow::Graph::new("non-cooperative-cancel"));
+        graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // Freeze a `default` provider binding into the v1 descriptor so the
+        // real executor's `resolve_run_metadata` admits the prompt.
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let mut descriptor = record
+            .descriptor
+            .clone()
+            .expect("v1 descriptor present");
+        descriptor.agent_bindings.insert(
+            "default".to_string(),
+            nexus_orchestration::run_state::AgentBinding {
+                provider_id: "scripted".to_string(),
+                model: None,
+            },
+        );
+        let descriptor_bytes = serde_json::to_vec(&descriptor).expect("serialize descriptor");
+        sqlx::query("UPDATE orchestration_sessions SET run_descriptor_json = ? WHERE session_id = ?")
+            .bind(&descriptor_bytes)
+            .bind(&session_id.0)
+            .execute(&*pool)
+            .await
+            .expect("patch descriptor binding");
+
+        // mark_step_in_flight wins immediately before Cancel.
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let pre_step_root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        let in_flight_state = nexus_orchestration::run_state::RunStateV1 {
+            step_in_flight: Some(pre_step_root.current_task_id.clone()),
+            ..nexus_orchestration::run_state::RunStateV1::default()
+        };
+        store
+            .mark_step_in_flight(
+                &session_id,
+                record.state_revision,
+                nexus_orchestration::run_state::RunCheckpoint {
+                    root: &pre_step_root,
+                    children: &[],
+                },
+                &in_flight_state,
+            )
+            .await
+            .expect("mark_step_in_flight wins the CAS");
+
+        // Drive a REAL execute against the deterministic blocking Host
+        // stream; the Host operation parks.
+        let token = {
+            let cancels = session_cancels
+                .read()
+                .unwrap_or_else(|e| e.into_inner());
+            cancels
+                .get(&session_id.0)
+                .cloned()
+                .expect("coordinator token registered")
+        };
+        let executor2 = executor.clone();
+        let run_id = session_id.0.clone();
+        let task_id = pre_step_root.current_task_id.clone();
+        let execute_handle = tokio::spawn(async move {
+            executor2
+                .execute(nexus_orchestration::capability::PromptRequest {
+                    run_id,
+                    task_id,
+                    agent_ref: None,
+                    prompt: "hello".to_string(),
+                    tool_policy: nexus_orchestration::capability::ToolPolicy::AutoGrantAll,
+                    cancellation: token,
+                })
+                .await
+        });
+
+        let mut attempts = 0;
+        while host.active_op_count() == 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            attempts += 1;
+            assert!(attempts < 200, "host operation must become active");
+        }
+        assert_eq!(host.active_op_count(), 1, "exactly one active operation");
+
+        // Make the provider non-cooperative: `cancel` blocks forever and
+        // `shutdown_session` always fails — cleanup can never be confirmed.
+        host.block_cancel_forever();
+        host.fail_shutdown_forever();
+
+        // Cancel: the bounded cancel must return within a bounded window
+        // (the configured shutdown timeout bounds the cancel request, the
+        // drain is abandoned, and the failing shutdown keeps the run
+        // Interrupted — never a false successful Cancelled).
+        let cancel_start = std::time::Instant::now();
+        let signal_result = engine
+            .signal(
+                &session_id,
+                nexus_orchestration::engine::EngineSignal::Cancel,
+            )
+            .await;
+        let cancel_elapsed = cancel_start.elapsed();
+        assert!(
+            signal_result.is_err(),
+            "unconfirmed cleanup must surface the error, got {signal_result:?}"
+        );
+        assert!(
+            cancel_elapsed < std::time::Duration::from_secs(20),
+            "cancel must return within the bounded window, took {cancel_elapsed:?}"
+        );
+
+        // The Host cancel was attempted exactly once (and blocked).
+        assert_eq!(
+            host.cancels.load(Ordering::SeqCst),
+            1,
+            "the Host cancel effect must be attempted exactly once"
+        );
+
+        // The execute future terminated with the typed cancellation within
+        // the bound — never stuck behind the blocking provider.
+        let execute_result = execute_handle.await.expect("execute task joined");
+        assert!(
+            matches!(
+                execute_result,
+                Err(nexus_orchestration::capability::CapabilityError::Cancelled)
+            ),
+            "execute must return the typed cancellation, got {execute_result:?}"
+        );
+
+        // Cleanup was NOT confirmed: the owned Host session is retained for
+        // a later `finalize_run` retry (I-002), never reported reaped.
+        assert_eq!(
+            host.shutdowns.load(Ordering::SeqCst),
+            0,
+            "no shutdown may be confirmed against the failing provider"
+        );
+        assert_eq!(
+            host.session_count(),
+            1,
+            "the owned Host session must be retained (cleanup unconfirmed)"
+        );
+
+        // The run landed Interrupted with the durable cancel intent and the
+        // unconfirmed-cleanup failure — never a false successful Cancelled.
+        let final_record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(
+            final_record.status,
+            nexus_orchestration::engine::SessionStatus::Interrupted,
+            "unconfirmed cleanup must keep the run Interrupted, got {:?}",
+            final_record.status
+        );
+        assert!(
+            final_record
+                .state
+                .as_ref()
+                .is_some_and(|s| s.cancel_requested),
+            "interrupted run must carry the durable cancel intent"
+        );
+        assert_eq!(
+            final_record
+                .state
+                .as_ref()
+                .and_then(|s| s.failure.as_ref())
+                .map(|f| f.code.as_str()),
+            Some("cancel_cleanup_unconfirmed"),
+            "the run must record the unconfirmed-cleanup failure"
         );
     }
 

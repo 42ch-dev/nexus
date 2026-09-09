@@ -944,6 +944,16 @@ impl EngineSharedState {
             // owner-scoped retry, and descendant tokens are reclaimed only
             // at their confirmed cleanup boundary (after the whole closure
             // is confirmed).
+            //
+            // P1 (rereview-4): the closure is reconciled against the
+            // AUTHORITATIVE persisted parent relation. The in-memory
+            // children map is the admission-time snapshot; a child admitted
+            // by an in-flight `InnerGraphTask` after the fence (or a child
+            // whose map entry was dropped) is still a durable owned
+            // descendant that must be fired and finalized. `load_children`
+            // reads the persisted `parent_session_id` rows, so the closure
+            // covers every durable descendant — mapped or not — and no
+            // child can be admitted after the fence and escape the closure.
             let descendant_ids: Vec<String> = {
                 let children = self.children.read().await;
                 let mut ids: Vec<String> = Vec::new();
@@ -955,6 +965,24 @@ impl EngineSharedState {
                         for child in entries {
                             let child_id = child.session.id.clone();
                             if child_id != session_id.0 {
+                                ids.push(child_id.clone());
+                                queue.push_back(child_id);
+                            }
+                        }
+                    }
+                    // Reconcile the persisted parent relation: every durable
+                    // child row of this parent joins the closure (and is
+                    // enqueued for its own persisted descendants), even when
+                    // the in-memory map entry is absent or stale. A
+                    // load failure is non-replayable (A7) — propagate rather
+                    // than settle a cancellation over an incomplete closure.
+                    if let Some(store) = &self.workflow_store {
+                        let persisted = store
+                            .load_children(&SessionId(parent.clone()))
+                            .await?;
+                        for child in persisted {
+                            let child_id = child.session_id.0.clone();
+                            if child_id != session_id.0 && !ids.contains(&child_id) {
                                 ids.push(child_id.clone());
                                 queue.push_back(child_id);
                             }
@@ -1752,12 +1780,105 @@ impl EngineSharedState {
             state_revision: child_revision,
             graph_name: Some(params.inner_graph.id.clone()),
         };
-        self.children
-            .write()
-            .await
-            .entry(params.parent_session_id.clone())
-            .or_default()
-            .push(child_checkpoint);
+
+        // P1 (rereview-4): child admission is cancellation-aware and
+        // revision-linearized with the parent. The child row is now durable,
+        // but an in-flight `InnerGraphTask` can race the root cancel fence:
+        // the fence may commit (durable `cancel_requested`) or the root may
+        // reach a terminal state while this admission was in flight. Re-check
+        // the AUTHORITATIVE parent record AFTER the child row is persisted,
+        // atomically with the children-map push (the cancel closure snapshots
+        // the map under the read lock, so a fence that commits after this
+        // recheck is guaranteed to observe the child in the closure). A parent
+        // that is terminal or carries durable `cancel_requested` refuses the
+        // admission: the child is rolled back — its coordinator token is
+        // fired, its row is settled durably `cancelled` (A5 settlement fence;
+        // never runnable, never replayed), and every in-memory entry is
+        // dropped — so no descendant can escape a root cancellation closure
+        // (A5: no downstream effects after the fence, complete owned-work
+        // cleanup).
+        {
+            let mut child_map = self.children.write().await;
+            if let Some(store) = &self.workflow_store {
+                let parent_record = store
+                    .load_run(&SessionId(params.parent_session_id.clone()))
+                    .await?
+                    .ok_or_else(|| {
+                        EngineError::SessionNotFound(params.parent_session_id.clone())
+                    })?;
+                if parent_record.status.is_terminal()
+                    || parent_record
+                        .state
+                        .as_ref()
+                        .is_some_and(|s| s.cancel_requested)
+                {
+                    // Roll back the just-persisted child: fire its token so
+                    // no prompt can ever admit under it, settle the child row
+                    // terminal `cancelled` (the row is `running` at revision
+                    // 1 — an admissible A5 settlement source), and drop every
+                    // in-memory entry so no late child remains mapped,
+                    // driven, or awaiting a closure reap.
+                    {
+                        let cancels = self
+                            .session_cancels
+                            .read()
+                            .unwrap_or_else(|e| e.into_inner());
+                        if let Some(token) = cancels.get(&child_session_id).cloned() {
+                            token.cancel();
+                        }
+                    }
+                    let child_sid = SessionId(child_session_id.clone());
+                    if let Some(child_root) = self
+                        .storage
+                        .get(&child_session_id)
+                        .await
+                        .map_err(EngineError::GraphFlow)?
+                    {
+                        let cancelled_state = RunStateV1 {
+                            cancel_requested: true,
+                            ..RunStateV1::default()
+                        };
+                        let _ = store
+                            .settle_cancelled(
+                                &child_sid,
+                                child_revision,
+                                RunCheckpoint {
+                                    root: &child_root,
+                                    children: &[],
+                                },
+                                &cancelled_state,
+                            )
+                            .await;
+                    }
+                    child_map
+                        .entry(params.parent_session_id.clone())
+                        .or_default()
+                        .retain(|c| c.session.id != child_session_id);
+                    if child_map
+                        .get(&params.parent_session_id)
+                        .is_some_and(Vec::is_empty)
+                    {
+                        child_map.remove(&params.parent_session_id);
+                    }
+                    self.runners.write().await.remove(&child_session_id);
+                    self.sessions
+                        .write()
+                        .await
+                        .retain(|s| s.session_id.0 != child_session_id);
+                    self.session_cancels
+                        .write()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&child_session_id);
+                    return Err(EngineError::TerminalState(
+                        params.parent_session_id.clone(),
+                    ));
+                }
+            }
+            child_map
+                .entry(params.parent_session_id.clone())
+                .or_default()
+                .push(child_checkpoint);
+        }
 
         // WS2 R3: Store Arc<FlowRunner> instead of FlowRunner.
         let runner = Arc::new(FlowRunner::new(
@@ -4508,6 +4629,327 @@ mod tests {
             .expect("load run")
             .expect("run exists");
         assert_eq!(final_record.status, SessionStatus::Cancelled);
+    }
+
+    /// Deterministic late-child admission race proof (P1, rereview-4): a
+    /// child is admitted (durable row + coordinator token) but its in-memory
+    /// children-map entry is dropped BEFORE the root cancel — the exact
+    /// shape of an in-flight `InnerGraphTask` racing the cancel fence. The
+    /// cancel closure reconciles the AUTHORITATIVE persisted parent
+    /// relation, so the late child's token is fired and its run is finalized
+    /// by its own run id — no descendant can be admitted after the fence and
+    /// escape the closure (A5: no downstream effects after the fence,
+    /// complete owned-work cleanup).
+    #[tokio::test]
+    async fn cancel_reconciles_persisted_late_child_into_closure() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+
+        // Root + mapped child + late (persisted, unmapped) child all
+        // finalize successfully.
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![
+            Ok(()),
+            Ok(()),
+            Ok(()),
+        ]));
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
+
+        let graph = Arc::new(Graph::new("late-child-cancel"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // Spawn child A (mapped).
+        let inner = Arc::new(Graph::new("inner-a"));
+        inner.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let child_id = engine
+            .state
+            .spawn_child_session_internal(ChildSessionParams {
+                parent_session_id: session_id.0.clone(),
+                inner_graph: inner,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect("spawn child");
+
+        // Spawn the LATE child (durable row + token), then drop its
+        // in-memory entries — the shape of an admission whose map entry was
+        // lost before the cancel closure snapshot.
+        let inner2 = Arc::new(Graph::new("inner-late"));
+        inner2.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let late_id = engine
+            .state
+            .spawn_child_session_internal(ChildSessionParams {
+                parent_session_id: session_id.0.clone(),
+                inner_graph: inner2,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect("spawn late child");
+        {
+            let mut child_map = engine.state.children.write().await;
+            if let Some(entries) = child_map.get_mut(&session_id.0) {
+                entries.retain(|c| c.session.id != late_id.0);
+            }
+            engine.state.runners.write().await.remove(&late_id.0);
+            engine
+                .state
+                .sessions
+                .write()
+                .await
+                .retain(|s| s.session_id.0 != late_id.0);
+        }
+
+        // The late child's token is registered but not yet fired.
+        let late_token = {
+            let cancels = engine
+                .state
+                .session_cancels
+                .read()
+                .unwrap_or_else(|e| e.into_inner());
+            cancels
+                .get(&late_id.0)
+                .cloned()
+                .expect("late child token registered")
+        };
+        assert!(!late_token.is_cancelled());
+
+        // Cancel: the closure reconciles the persisted parent relation,
+        // fires the late child's token, finalizes root + child + late child,
+        // and settles Cancelled.
+        let status = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect("cancel must settle cancelled");
+        assert_eq!(status, SessionStatus::Cancelled);
+
+        // The late child's token fired — no Host admission can occur under
+        // it after the fence.
+        assert!(late_token.is_cancelled(), "late child token must fire");
+
+        // Every owned run finalized by its own run id — the late child is
+        // reaped even though its map entry was gone.
+        assert_eq!(
+            executor.finalized_runs(),
+            vec![
+                session_id.0.clone(),
+                child_id.0.clone(),
+                late_id.0.clone(),
+            ],
+            "root, mapped child, and persisted late child each finalized by their own run id"
+        );
+
+        // No late child remains mapped, tracked, driven, or token-registered.
+        {
+            let child_map = engine.state.children.read().await;
+            assert!(
+                !child_map.get(&session_id.0).is_some_and(|entries| {
+                    entries.iter().any(|c| c.session.id == late_id.0)
+                }),
+                "late child must not remain in the children map"
+            );
+            let sessions = engine.state.sessions.read().await;
+            assert!(
+                !sessions.iter().any(|s| s.session_id.0 == late_id.0),
+                "late child must not remain in the session tracker"
+            );
+            let runners = engine.state.runners.read().await;
+            assert!(
+                !runners.contains_key(&late_id.0),
+                "late child runner must be dropped"
+            );
+            let cancels = engine
+                .state
+                .session_cancels
+                .read()
+                .unwrap_or_else(|e| e.into_inner());
+            assert!(
+                !cancels.contains_key(&late_id.0),
+                "late child token reclaimed at the confirmed boundary"
+            );
+        }
+
+        let final_record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(final_record.status, SessionStatus::Cancelled);
+    }
+
+    /// Deterministic child-admission-vs-cancel-fence proof (P1, rereview-4):
+    /// the parent's durable `cancel_requested` fence is committed BEFORE the
+    /// child admission's post-persistence recheck. The admission must refuse
+    /// (revision-linearized with the parent), roll the child back — token
+    /// fired, durable row settled `cancelled`, every in-memory entry dropped
+    /// — and no child Host admission can occur after the root fence.
+    #[tokio::test]
+    async fn child_admission_after_parent_cancel_fence_is_rolled_back() {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+
+        let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Ok(())]));
+
+        let caps = crate::capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
+
+        let graph = Arc::new(Graph::new("child-after-fence"));
+        graph.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // Commit the durable cancel-intent fence on the parent (the phase-1
+        // fence of the cancel path) BEFORE the child admission recheck.
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        let mut fenced_state = record.state.unwrap_or_default();
+        fenced_state.cancel_requested = true;
+        store
+            .commit_transition(
+                &session_id,
+                record.state_revision,
+                RunCheckpoint {
+                    root: &root,
+                    children: &[],
+                },
+                SessionStatus::Running,
+                &fenced_state,
+            )
+            .await
+            .expect("cancel-intent fence commits");
+
+        // The child admission must refuse: the parent carries durable
+        // `cancel_requested`, so no child may be created/registered after the
+        // fence.
+        let inner = Arc::new(Graph::new("inner-late"));
+        inner.add_task(Arc::new(crate::tasks::ManualWaitTask));
+        let err = engine
+            .state
+            .spawn_child_session_internal(ChildSessionParams {
+                parent_session_id: session_id.0.clone(),
+                inner_graph: inner,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect_err("child admission after the cancel fence must refuse");
+        assert!(
+            matches!(err, EngineError::TerminalState(_)),
+            "refusal must be the terminal-state conflict, got {err:?}"
+        );
+
+        // The rolled-back child row is durably terminal `Cancelled` — never
+        // runnable, never replayed (A5 settlement fence).
+        let children = store
+            .load_children(&session_id)
+            .await
+            .expect("load children");
+        assert_eq!(children.len(), 1, "exactly one child row remains");
+        assert_eq!(
+            children[0].status,
+            SessionStatus::Cancelled,
+            "the rolled-back child must be durably cancelled, got {:?}",
+            children[0].status
+        );
+        assert!(
+            children[0]
+                .state
+                .as_ref()
+                .is_some_and(|s| s.cancel_requested),
+            "the rolled-back child must carry the durable cancel intent"
+        );
+
+        // No child remains in any in-memory structure.
+        {
+            let child_map = engine.state.children.read().await;
+            assert!(
+                !child_map.contains_key(&session_id.0),
+                "no child may remain in the children map"
+            );
+            let sessions = engine.state.sessions.read().await;
+            assert_eq!(
+                sessions.len(),
+                1,
+                "only the root may remain in the session tracker"
+            );
+            let runners = engine.state.runners.read().await;
+            assert_eq!(runners.len(), 1, "only the root runner may remain");
+            let cancels = engine
+                .state
+                .session_cancels
+                .read()
+                .unwrap_or_else(|e| e.into_inner());
+            assert_eq!(
+                cancels.len(),
+                1,
+                "only the root coordinator token may remain registered"
+            );
+        }
+
+        // The root cancel settles Cancelled. The closure reconciles the
+        // persisted parent relation, so the rolled-back child's durable row
+        // (terminal `cancelled`) is also finalized — idempotent, and any
+        // Host session it might have created is reaped.
+        let status = engine
+            .state
+            .persist_signal_transition(&session_id, &EngineSignal::Cancel)
+            .await
+            .expect("cancel must settle cancelled");
+        assert_eq!(status, SessionStatus::Cancelled);
+        let finalized = executor.finalized_runs();
+        assert_eq!(finalized.len(), 2, "root and the rolled-back child row");
+        assert_eq!(finalized[0], session_id.0, "root finalized first");
+        assert!(
+            finalized[1].starts_with(&format!("{}:child:", session_id.0)),
+            "the rolled-back child's durable row is finalized, got {:?}",
+            finalized[1]
+        );
     }
 
     /// Deterministic descendant retry-retention proof (Finding 2, round 3):
