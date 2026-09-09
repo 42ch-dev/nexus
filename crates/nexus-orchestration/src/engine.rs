@@ -2177,6 +2177,75 @@ fn validate_child_descriptor_identity(
     Ok(())
 }
 
+/// A7 rule 2 (P3 T1 rereview-4 P1): decide whether a persisted descendant's
+/// `graph_name` is replayable for its parent's current position.
+///
+/// - unknown inner graph name → non-replayable;
+/// - NON-TERMINAL child whose name differs from the inner graph entered by
+///   the parent's current task position → non-replayable (a valid-but-wrong
+///   name would miss reattachment and mint a replacement child);
+/// - terminal children are historical and only need membership.
+fn validate_descendant_position(
+    preset_id: &str,
+    valid_inner: &std::collections::HashSet<&str>,
+    expected_inner: Option<&str>,
+    parent_id: &str,
+    parent_task: &str,
+    child_id: &str,
+    graph_name: Option<&str>,
+    terminal: bool,
+) -> Result<(), EngineError> {
+    let name = graph_name.ok_or_else(|| {
+        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            "R6: child '{child_id}' has no graph_name (non-replayable)"
+        )))
+    })?;
+    if !valid_inner.contains(name) {
+        return Err(EngineError::GraphFlow(
+            graph_flow::GraphError::StorageError(format!(
+                "R6: child '{child_id}' names unknown inner graph '{name}' for preset \
+                 '{preset_id}' (tampered/unsupported metadata, non-replayable)"
+            )),
+        ));
+    }
+    if terminal {
+        return Ok(());
+    }
+    match expected_inner {
+        Some(expected) if expected == name => Ok(()),
+        Some(expected) => Err(EngineError::GraphFlow(
+            graph_flow::GraphError::StorageError(format!(
+                "R6: non-terminal child '{child_id}' names inner graph '{name}' but parent \
+                 '{parent_id}' is at position '{parent_task}' which enters '{expected}' \
+                 (tampered/unsupported metadata, non-replayable)"
+            )),
+        )),
+        // The parent is not at an inner-graph position (e.g. it advanced past
+        // the inner-graph state while the child row is still non-terminal).
+        // Attachment is only attempted from an inner-graph position, so this
+        // cannot mint a replacement child; membership above is the guard.
+        None => Ok(()),
+    }
+}
+
+/// The inner graph a manifest state enters, if any.
+fn inner_graph_entered_by_state<'a>(
+    loaded: &'a crate::preset::LoadedPreset,
+    state_id: &str,
+) -> Option<&'a str> {
+    loaded
+        .manifest
+        .states
+        .iter()
+        .find(|state| state.id == state_id)
+        .and_then(|state| {
+            state.enter.iter().find_map(|action| match action {
+                crate::preset::manifest::EnterAction::InnerGraph { name } => Some(name.as_str()),
+                _ => None,
+            })
+        })
+}
+
 /// Build the durable [`RunStateV1`] for a step outcome (A2/A4).
 ///
 /// On a terminal/wait/paused transition the step is no longer in flight; the
@@ -2913,39 +2982,56 @@ impl GraphFlowEngine {
             ));
         }
 
-        // P3 T1 rereview-3 P1 (A7 rule 2): every persisted descendant's
+        // P3 T1 rereview-3/4 P1 (A7 rule 2): every persisted descendant's
         // `graph_name` must name an inner graph the frozen preset actually
-        // defines. A parseable but tampered graph_name would otherwise miss
-        // the reattachment lookup and make `InnerGraphTask` spawn a fresh
-        // child and replay the work.
+        // defines, and every NON-TERMINAL child must additionally name the
+        // inner graph entered by its parent's CURRENT task position. A
+        // parseable but tampered graph_name (unknown, or valid-but-wrong
+        // position) would otherwise miss the reattachment lookup and make
+        // `InnerGraphTask` spawn a fresh child and replay the work.
         {
             let valid_inner: std::collections::HashSet<&str> =
                 loaded.inner_graphs.keys().map(String::as_str).collect();
-            let children_map = self.state.children.read().await;
-            let mut queue: std::collections::VecDeque<SessionId> =
-                std::collections::VecDeque::new();
-            queue.push_back(session_id.clone());
-            while let Some(parent) = queue.pop_front() {
-                let Some(children) = children_map.get(&parent.0) else {
-                    continue;
-                };
-                for child in children {
-                    let name = child.graph_name.as_deref().ok_or_else(|| {
-                        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                            "R6: child '{}' has no graph_name (non-replayable)",
-                            child.session.id
-                        )))
-                    })?;
-                    if !valid_inner.contains(name) {
-                        return Err(EngineError::GraphFlow(
-                            graph_flow::GraphError::StorageError(format!(
-                                "R6: child '{}' names unknown inner graph '{}' for preset '{}' \
-                                 (tampered/unsupported metadata, non-replayable)",
-                                child.session.id, name, loaded.id
-                            )),
-                        ));
+            // Snapshot the closure first so no children-map lock is held
+            // across the storage awaits below.
+            let snapshot: Vec<(SessionId, Vec<crate::run_state::ChildCheckpoint>)> = {
+                let children_map = self.state.children.read().await;
+                let mut queue: std::collections::VecDeque<SessionId> =
+                    std::collections::VecDeque::new();
+                queue.push_back(session_id.clone());
+                let mut collected = Vec::new();
+                while let Some(parent) = queue.pop_front() {
+                    let Some(children) = children_map.get(&parent.0) else {
+                        continue;
+                    };
+                    for child in children {
+                        queue.push_back(SessionId(child.session.id.clone()));
                     }
-                    queue.push_back(SessionId(child.session.id.clone()));
+                    collected.push((parent, children.clone()));
+                }
+                collected
+            };
+            for (parent, children) in snapshot {
+                let parent_task = self
+                    .state
+                    .storage
+                    .get(&parent.0)
+                    .await
+                    .map_err(EngineError::GraphFlow)?
+                    .map(|session| session.current_task_id.clone())
+                    .unwrap_or_default();
+                let expected_inner = inner_graph_entered_by_state(&loaded, &parent_task);
+                for child in children {
+                    validate_descendant_position(
+                        &loaded.id,
+                        &valid_inner,
+                        expected_inner,
+                        &parent.0,
+                        &parent_task,
+                        &child.session.id,
+                        child.graph_name.as_deref(),
+                        child.status.is_terminal(),
+                    )?;
                 }
             }
         }
@@ -3741,6 +3827,46 @@ mod tests {
             CapabilityRegistry::with_builtins(),
         ));
         GraphFlowEngine::new_with_storage(storage, caps)
+    }
+
+    /// P3 T1 rereview-4 P1 (A7 rule 2): a NON-TERMINAL descendant must name
+    /// the inner graph entered by its parent's current position — a valid but
+    /// wrong inner-graph name is non-replayable (it would miss reattachment
+    /// and mint a replacement child).
+    #[test]
+    fn descendant_position_validation_rejects_valid_but_wrong_inner_graph() {
+        use std::collections::HashSet;
+        let valid: HashSet<&str> = ["graph_a", "graph_b"].into_iter().collect();
+
+        validate_descendant_position(
+            "preset", &valid, Some("graph_a"), "parent", "s1", "child", Some("graph_a"), false,
+        )
+        .expect("matching non-terminal child is replayable");
+
+        let err = validate_descendant_position(
+            "preset", &valid, Some("graph_a"), "parent", "s1", "child", Some("graph_b"), false,
+        )
+        .expect_err("valid-but-wrong-position must refuse");
+        assert!(
+            err.to_string().contains("non-replayable"),
+            "got {err}"
+        );
+
+        let err = validate_descendant_position(
+            "preset", &valid, None, "parent", "s1", "child", Some("graph_c"), true,
+        )
+        .expect_err("unknown inner graph must refuse even when terminal");
+        assert!(err.to_string().contains("unknown inner graph"), "got {err}");
+
+        validate_descendant_position(
+            "preset", &valid, Some("graph_a"), "parent", "s1", "child", Some("graph_b"), true,
+        )
+        .expect("terminal child is historical: membership suffices");
+
+        validate_descendant_position(
+            "preset", &valid, None, "parent", "s2", "child", Some("graph_a"), false,
+        )
+        .expect("a parent past the inner-graph state is tolerated (membership is the guard)");
     }
 
     #[tokio::test]
