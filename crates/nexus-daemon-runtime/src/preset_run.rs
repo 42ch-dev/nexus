@@ -2600,7 +2600,7 @@ mod tests {
             &self,
             _: &str,
             _: Arc<graph_flow::Graph>,
-        ) -> Option<SessionId> {
+        ) -> Result<Option<SessionId>, EngineError> {
             unreachable!("not used by driver unit tests")
         }
 

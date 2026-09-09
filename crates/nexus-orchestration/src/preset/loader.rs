@@ -1931,7 +1931,7 @@ states:
             &self,
             _: &str,
             _: std::sync::Arc<graph_flow::Graph>,
-        ) -> Option<crate::engine::SessionId> {
+        ) -> Result<Option<crate::engine::SessionId>, crate::engine::EngineError> {
             unimplemented!("wiring test must not execute engine steps")
         }
         async fn start_session_with_preset(

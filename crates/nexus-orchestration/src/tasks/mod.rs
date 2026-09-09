@@ -292,24 +292,33 @@ impl Task for InnerGraphTask {
         //    cursor/context) rather than creating a duplicate child row and
         //    potentially replaying completed child work. We only spawn a new
         //    child when no matching child row exists.
-        let child_sid = if let Some(existing) = self
+        let child_sid = match self
             .engine
             .attach_existing_child_session(&parent_session_id, self.inner_graph.clone())
             .await
         {
-            existing
-        } else {
-            let params = crate::engine::ChildSessionParams {
-                parent_session_id: parent_session_id.clone(),
-                inner_graph: self.inner_graph.clone(),
-                initial_context: child_ctx,
-            };
+            Ok(Some(existing)) => existing,
+            Ok(None) => {
+                let params = crate::engine::ChildSessionParams {
+                    parent_session_id: parent_session_id.clone(),
+                    inner_graph: self.inner_graph.clone(),
+                    initial_context: child_ctx,
+                };
 
-            self.engine.spawn_child_session(params).await.map_err(|e| {
-                graph_flow::GraphError::TaskExecutionFailed(format!(
-                    "InnerGraphTask: failed to spawn child session: {e}"
-                ))
-            })?
+                self.engine.spawn_child_session(params).await.map_err(|e| {
+                    graph_flow::GraphError::TaskExecutionFailed(format!(
+                        "InnerGraphTask: failed to spawn child session: {e}"
+                    ))
+                })?
+            }
+            // A7 rule 2 (P3 T1 rereview-2 P1): a persisted child row whose
+            // descriptor no longer matches the trusted root is non-replayable.
+            // Fail closed — never mint a fresh child id and replay the work.
+            Err(e) => {
+                return Err(graph_flow::GraphError::TaskExecutionFailed(format!(
+                    "InnerGraphTask: existing child session is non-replayable: {e}"
+                )));
+            }
         };
 
         // Driving an inner graph session is itself an external effect: the

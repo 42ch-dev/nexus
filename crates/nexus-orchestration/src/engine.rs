@@ -23,8 +23,8 @@ use thiserror::Error;
 // Re-export for internal use.
 use crate::capability::{CapabilityError, CapabilityRegistry};
 use crate::run_state::{
-    ChildCheckpoint, PresetSourceIdentity, RunCheckpoint, RunDescriptorV1, RunFailure, RunStateV1,
-    WorkflowStateStore,
+    ChildCheckpoint, PresetSourceIdentity, RunCheckpoint, RunDescriptorV1, RunFailure, RunRecord,
+    RunStateV1, WorkflowStateStore,
 };
 
 /// Context key that effectful tasks set when they perform an external effect
@@ -371,7 +371,7 @@ pub trait OrchestrationEngine: Send + Sync {
         &self,
         parent_session_id: &str,
         inner_graph: Arc<Graph>,
-    ) -> Option<SessionId>;
+    ) -> Result<Option<SessionId>, EngineError>;
 
     /// Retrieve the context for a session.
     async fn get_context(&self, session_id: &SessionId)
@@ -590,6 +590,22 @@ impl EngineSharedState {
             .await
             .map_err(EngineError::GraphFlow)?
             .ok_or_else(|| EngineError::SessionNotFound(parent_session_id.0.clone()))?;
+        // A7 rule 2 (P3 T1 rereview-2 P1): every persisted child of a v1
+        // root must still carry the trusted frozen identity. A parseable but
+        // tampered child descriptor makes the whole owned closure
+        // non-replayable — the root must not be reconstructed over it (and a
+        // later reattachment must never fall back to minting a fresh child).
+        if let Ok(Some(parent_record)) = store.load_run(parent_session_id).await {
+            if parent_record.execution_version >= 1 {
+                for child in &children {
+                    validate_child_descriptor_identity(
+                        parent_session_id,
+                        parent_record.descriptor.as_ref(),
+                        child,
+                    )?;
+                }
+            }
+        }
         let parent_context = match serde_json::to_value(&parent.context) {
             Ok(context) => context,
             Err(e) => {
@@ -2018,16 +2034,47 @@ impl EngineSharedState {
         &self,
         parent_session_id: &str,
         inner_graph: Arc<Graph>,
-    ) -> Option<SessionId> {
+    ) -> Result<Option<SessionId>, EngineError> {
         let target = {
             let children = self.children.read().await;
-            let parent_children = children.get(parent_session_id)?;
+            let Some(parent_children) = children.get(parent_session_id) else {
+                return Ok(None);
+            };
             parent_children
                 .iter()
                 .find(|c| c.graph_name.as_deref() == Some(inner_graph.id.as_str()))
                 .map(|c| (c.session.id.clone(), c.session.current_task_id.clone(), c.status.clone()))
         };
-        let (child_id, child_task, child_status) = target?;
+        let Some((child_id, child_task, child_status)) = target else {
+            return Ok(None);
+        };
+        // P3 T1 rereview-2 P1 (A7 rule 2): a persisted child row may only be
+        // attached when its frozen descriptor still matches the trusted root
+        // identity. A parseable but tampered child (different parent, graph,
+        // preset, version or source) is non-replayable — failing closed here
+        // also prevents the caller from falling back to `spawn_child_session`
+        // and replaying work under a fresh child id.
+        if let Some(store) = &self.workflow_store {
+            let parent_id = SessionId(parent_session_id.to_string());
+            let parent_record = store
+                .load_run(&parent_id)
+                .await?
+                .ok_or_else(|| EngineError::SessionNotFound(parent_session_id.to_string()))?;
+            if parent_record.execution_version >= 1 {
+                let child_sid = SessionId(child_id.clone());
+                let child_record = store.load_run(&child_sid).await?.ok_or_else(|| {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                        "attach_existing_child_session '{}': child row missing (non-replayable)",
+                        child_id
+                    )))
+                })?;
+                validate_child_descriptor_identity(
+                    &parent_id,
+                    parent_record.descriptor.as_ref(),
+                    &child_record,
+                )?;
+            }
+        }
         // Reconstruct a FlowRunner for the reattached child so it can be
         // stepped from its persisted position (and so the caller can query
         // its durable status via `get_status`).
@@ -2068,8 +2115,66 @@ impl EngineSharedState {
                 });
             }
         }
-        Some(SessionId(child_id))
+        Ok(Some(SessionId(child_id)))
     }
+}
+
+/// A7 rule 2 (P3 T1 rereview-2 P1): a persisted v1 child descriptor must
+/// match the trusted root identity exactly. Parseable but tampered metadata
+/// is non-replayable — never silently reinterpreted by attaching the row to
+/// a root-built graph (which would also let a graph-name mismatch fall back
+/// to spawning a fresh child and replaying work).
+fn validate_child_descriptor_identity(
+    parent_session_id: &SessionId,
+    parent: Option<&RunDescriptorV1>,
+    child: &RunRecord,
+) -> Result<(), EngineError> {
+    let non_replayable = |reason: String| {
+        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+            "child '{}' descriptor identity mismatch (non-replayable): {reason}",
+            child.session_id.0
+        )))
+    };
+    let Some(parent) = parent else {
+        return Err(non_replayable(format!(
+            "parent '{}' has no frozen v1 descriptor; child identity unverifiable",
+            parent_session_id.0
+        )));
+    };
+    let Some(child_descriptor) = child.descriptor.as_ref() else {
+        return Err(non_replayable(
+            "child has no frozen v1 descriptor".to_string(),
+        ));
+    };
+    if child.execution_version < 1 {
+        return Err(non_replayable(format!(
+            "child execution_version {} is not v1",
+            child.execution_version
+        )));
+    }
+    if child_descriptor.parent_session_id.as_ref() != Some(parent_session_id) {
+        return Err(non_replayable(format!(
+            "parent_session_id {:?} does not name the recovering root",
+            child_descriptor.parent_session_id
+        )));
+    }
+    if child_descriptor.graph_name.is_none() {
+        return Err(non_replayable("graph_name is absent".to_string()));
+    }
+    if child_descriptor.creator_id != parent.creator_id
+        || child_descriptor.preset_id != parent.preset_id
+        || child_descriptor.preset_version != parent.preset_version
+        || child_descriptor.source != parent.source
+    {
+        return Err(non_replayable(format!(
+            "creator/preset/version/source ({} v{}) do not match the trusted root ({} v{})",
+            child_descriptor.preset_id,
+            child_descriptor.preset_version,
+            parent.preset_id,
+            parent.preset_version
+        )));
+    }
+    Ok(())
 }
 
 /// Build the durable [`RunStateV1`] for a step outcome (A2/A4).
@@ -2279,7 +2384,7 @@ impl OrchestrationEngine for EngineProxy {
         &self,
         parent_session_id: &str,
         inner_graph: Arc<Graph>,
-    ) -> Option<SessionId> {
+    ) -> Result<Option<SessionId>, EngineError> {
         self.state
             .attach_existing_child_session_internal(parent_session_id, inner_graph)
             .await
@@ -3495,7 +3600,7 @@ impl OrchestrationEngine for GraphFlowEngine {
         &self,
         parent_session_id: &str,
         inner_graph: Arc<Graph>,
-    ) -> Option<SessionId> {
+    ) -> Result<Option<SessionId>, EngineError> {
         self.state
             .attach_existing_child_session_internal(parent_session_id, inner_graph)
             .await
