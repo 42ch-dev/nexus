@@ -999,19 +999,36 @@ const READING_CHROME_SPECIMENS: ReadingChromeSpecimen[] = [
 /* ------------------------------------------------------------------ */
 
 /**
+ * Single shared, visible (not display:none) off-screen probe element reused
+ * for every live computed read on this page (W-002). Creating/attaching a
+ * fresh element per swatch across a theme flip produced hundreds of
+ * createElement/appendChild/getComputedStyle/removeChild cycles; one
+ * persistent fixed-position element eliminates that churn while keeping
+ * length probes laid out against a real box so calc/min/%/viewport resolve.
+ */
+let probeEl: HTMLDivElement | null = null;
+function sharedProbe(): HTMLDivElement {
+  if (!probeEl) {
+    probeEl = document.createElement('div');
+    probeEl.style.position = 'fixed';
+    probeEl.style.left = '-9999px';
+    probeEl.style.top = '0';
+    probeEl.style.pointerEvents = 'none';
+    document.body.appendChild(probeEl);
+  }
+  return probeEl;
+}
+
+/**
  * Read the computed background-color that results from applying a CSS
  * custom property to a DOM element.  This resolves *through* var()
  * chains (e.g. `var(--nexus-brand-deep-blue)`) and returns the final
  * rgb / rgba string the browser paints.
  */
 function resolveSwatchColor(varName: string): string {
-  const el = document.createElement('div');
+  const el = sharedProbe();
   el.style.backgroundColor = `var(${varName})`;
-  el.style.display = 'none';
-  document.body.appendChild(el);
-  const computed = getComputedStyle(el).backgroundColor;
-  document.body.removeChild(el);
-  return computed;
+  return getComputedStyle(el).backgroundColor;
 }
 
 /**
@@ -1020,51 +1037,59 @@ function resolveSwatchColor(varName: string): string {
  * to the value the browser actually paints.
  */
 function resolveBoxShadow(varName: string): string {
-  const el = document.createElement('div');
+  const el = sharedProbe();
   el.style.boxShadow = `var(${varName})`;
-  el.style.display = 'none';
-  document.body.appendChild(el);
-  const computed = getComputedStyle(el).boxShadow;
-  document.body.removeChild(el);
-  return computed;
+  return getComputedStyle(el).boxShadow;
 }
 
 /**
  * Read the computed width that results from assigning a CSS custom property
- * carrying a *length* (not a color) to a probe element. Resolves through
- * var() chains and returns the final px string the browser computes, matching
- * the existing length readouts (background-size / metrics) rather than forcing
- * a length into a color property.
+ * carrying a *length* (not a color) to the shared off-screen visible probe.
+ * Resolves through var() chains and returns the final px string the browser
+ * computes. Unlike a display:none box, a laid-out fixed-position element lets
+ * calc/min/%/viewport length expressions resolve, matching the scalar rows.
+ * Returns '' when the var is not defined (e.g. jsdom without CSS) so callers
+ * can surface "unavailable" instead of inventing a fallback pixel.
  */
 function resolveSwatchLength(varName: string): string {
+  // Length reads are property-appropriate: a laid-out off-screen element (NOT
+  // display:none) so calc/min/%/viewport resolve against a real box. Each call
+  // uses its own positioned element because sharing one probe across many
+  // readers that run in the same frame would cross-clobber the inline width
+  // (stale layout cache). Color/shadow/opacity reads reuse the shared probe
+  // (single property, no stale-layout risk).
   const el = document.createElement('div');
+  el.style.position = 'fixed';
+  el.style.left = '-9999px';
+  el.style.top = '0';
+  el.style.pointerEvents = 'none';
   el.style.width = `var(${varName})`;
-  el.style.display = 'none';
   document.body.appendChild(el);
   const computed = getComputedStyle(el).width;
-  document.body.removeChild(el);
+  el.remove();
+  if (!computed || computed === '0px' || computed === 'auto') return '';
   return computed;
 }
 
 /**
- * Read a computed property produced by assigning a CSS custom property to a
- * probe element — live from the token's declared value, not a hardcoded copy.
- * Returns '' when the var is not defined (e.g. jsdom without CSS).
+ * Read a computed property produced by assigning a CSS custom property to the
+ * shared visible probe — live from the token's declared value. Re-resolves on
+ * theme flip (S-004) and returns '' when the var is not defined (jsdom).
  */
 function useComputedVarValue(
   varName: string,
   property: 'transitionDuration' | 'transitionTimingFunction',
 ): string {
+  const { resolvedTheme } = useTheme();
   const [value, setValue] = useState('');
   useEffect(() => {
-    const el = document.createElement('div');
+    const el = sharedProbe();
     el.style[property] = `var(${varName})`;
-    el.style.display = 'none';
-    document.body.appendChild(el);
     const computed = getComputedStyle(el)[property];
-    document.body.removeChild(el);
-    setValue(computed ?? '');
-  }, [varName, property]);
+    const rafId = requestAnimationFrame(() => setValue(computed ?? ''));
+    return () => cancelAnimationFrame(rafId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [varName, property, resolvedTheme]);
   return value;
 }
 
@@ -1454,36 +1479,74 @@ function CanvasColorSwatch({ token }: { token: CanvasToken }) {
 /**
  * Ambient dot-grid swatch — renders the actual canvas dot-grid pattern at
  * the live grid-gap / grid-dot-size metrics. The reader sees the same
- * texture the App canvas paints, in both themes.
+ * texture the App canvas paints, in both themes. Metrics are read through the
+ * shared laid-out probe (never a display:none box); when a metric is missing
+ * the swatch shows an explicit "unavailable" state instead of inventing a
+ * fixed pixel (F-003 — no fabricated 20px / 1.5px success).
  */
 function CanvasAmbientGridSwatch() {
   const { resolvedTheme } = useTheme();
-  const [gap, setGap] = useState('20px');
-  const [dot, setDot] = useState('1.5px');
+  const [gap, setGap] = useState('');
+  const [dot, setDot] = useState('');
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const rafId = requestAnimationFrame(() => {
-      setGap(resolveSwatchLength('--color-canvas-grid-gap') || '20px');
-      setDot(resolveSwatchLength('--color-canvas-grid-dot-size') || '1.5px');
-    });
-    return () => cancelAnimationFrame(rafId);
+    // Read the live metrics through the shared laid-out probe. On first paint
+    // Vite may not yet have injected the CSS that defines the vars, so the
+    // first read can be '' even though the value is valid moments later —
+    // retry a bounded number of frames, then surface genuine unavailability.
+    let cancelled = false;
+    const attempts = [...Array(8).keys()];
+    const rafIds: number[] = [];
+    let attempt = 0;
+    const read = () => {
+      if (cancelled) return;
+      const g = resolveSwatchLength('--color-canvas-grid-gap');
+      const d = resolveSwatchLength('--color-canvas-grid-dot-size');
+      if (g !== '' && d !== '') {
+        setGap(g);
+        setDot(d);
+        return;
+      }
+      if (attempt < attempts.length) {
+        attempt += 1;
+        rafIds.push(requestAnimationFrame(read));
+      } else {
+        setGap('');
+        setDot('');
+      }
+    };
+    rafIds.push(requestAnimationFrame(read));
+    return () => {
+      cancelled = true;
+      for (const id of rafIds) cancelAnimationFrame(id);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedTheme]);
 
+  const missing = gap === '' || dot === '';
+
   return (
     <div className="flex flex-col gap-2" data-testid="canvas-ambient-grid-swatch">
-      <div
-        className="w-full aspect-[3/2] rounded-card border border-gray-alpha-400 bg-canvas-surface"
-        style={{
-          backgroundImage: `radial-gradient(var(--color-canvas-grid) ${dot}, transparent ${dot})`,
-          backgroundSize: `${gap} ${gap}`,
-        }}
-      />
+      {missing ? (
+        <div className="w-full aspect-[3/2] rounded-card border border-gray-alpha-400 bg-canvas-surface flex items-center justify-center">
+          <span className="text-copy-13 text-gray-700" data-testid="canvas-grid-metric-unavailable">
+            grid gap / dot size unavailable
+          </span>
+        </div>
+      ) : (
+        <div
+          className="w-full aspect-[3/2] rounded-card border border-gray-alpha-400 bg-canvas-surface"
+          style={{
+            backgroundImage: `radial-gradient(var(--color-canvas-grid) ${dot}, transparent ${dot})`,
+            backgroundSize: `${gap} ${gap}`,
+          }}
+        />
+      )}
       <div className="flex flex-col gap-0.5 min-w-0">
         <span className="text-label-14 text-gray-1000">canvas dot-grid</span>
         <span className="text-copy-13 text-gray-700 font-mono">
-          gap {gap} · dot {dot}
+          {missing ? 'gap ? · dot ?' : `gap ${gap} · dot ${dot}`}
         </span>
       </div>
     </div>
@@ -1601,11 +1664,30 @@ function HoverLiftDemo() {
 function EnterExitDemo() {
   const [visible, setVisible] = useState(true);
 
+  // Clear any pending re-enter timer on unmount and between replays so a
+  // delayed state mutation never fires on a demo that left the tree or that
+  // was superseded by a newer replay (S-003).
+  const cleanupTimerRef = useRef<number | null>(null);
+
   const replay = () => {
     setVisible(false);
     // Outlasts duration-exit (140ms) so the exit completes before re-enter.
-    window.setTimeout(() => setVisible(true), 280);
+    // Store the timer id so a stale replay cannot mutate state after unmount
+    // or a newer replay has already reset the sequence.
+    if (cleanupTimerRef.current !== null) {
+      window.clearTimeout(cleanupTimerRef.current);
+    }
+    cleanupTimerRef.current = window.setTimeout(() => setVisible(true), 280);
   };
+
+  useEffect(() => {
+    return () => {
+      if (cleanupTimerRef.current !== null) {
+        window.clearTimeout(cleanupTimerRef.current);
+        cleanupTimerRef.current = null;
+      }
+    };
+  }, []);
 
   return (
     <div>
@@ -1656,12 +1738,9 @@ function DisabledWashDemo() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const el = document.createElement('div');
+    const el = sharedProbe();
     el.style.opacity = 'var(--color-states-disabled-opacity)';
-    el.style.display = 'none';
-    document.body.appendChild(el);
     const value = getComputedStyle(el).opacity;
-    document.body.removeChild(el);
     const rafId = requestAnimationFrame(() => setComputed(value));
     return () => cancelAnimationFrame(rafId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1694,16 +1773,18 @@ function DisabledWashDemo() {
  *
  * We do NOT force every token through backgroundColor (which turns
  * `--dialog-width: calc(100% - 2rem)` into an empty/zero readout and any
- * transparent color into "0px"), nor do we measure a `display:none` length
+ * transparent color into "0px"), nor do we measure a display:none length
  * (viewport/percentage/calc expressions cannot resolve against a hidden
- * element and always collapse to 0px).
+ * element and always collapse to 0px). All probes reuse one shared visible
+ * off-screen element (W-002) so a theme flip does not allocate hundreds of
+ * temporary DOM nodes.
  *
- * Instead each scalar declares how it is *used* (kind): colors probe
- * background-color, shadows probe box-shadow, and lengths probe the actual
- * dimension of a visible off-canvas element so calc/min/`%` expressions
- * resolve against a real containing block. The declared token value is
- * read from the document root and shown alongside the applied result so the
- * reviewer sees both the source expression and the computed result.
+ * Each scalar declares how it is *used* (kind): colors probe background-color,
+ * shadows probe box-shadow, and lengths probe the actual dimension of a
+ * visible off-canvas element so calc/min/`%` expressions resolve against a
+ * real containing block. The declared token value is read from the document
+ * root and shown alongside the applied result so the reviewer sees both the
+ * source expression and the computed result.
  */
 function resolveScalarValue(
   varName: string,
@@ -1712,14 +1793,11 @@ function resolveScalarValue(
 ): string {
   const root = getComputedStyle(window.document.documentElement);
   const declared = root.getPropertyValue(varName).trim();
+  const el = sharedProbe();
 
   if (kind === 'color') {
-    const el = document.createElement('div');
     el.style.backgroundColor = `var(${varName})`;
-    el.style.display = 'none';
-    document.body.appendChild(el);
     const computed = getComputedStyle(el).backgroundColor;
-    document.body.removeChild(el);
     // Transparent stays transparent — never turn it into "0px".
     if (computed === 'transparent' || computed === 'rgba(0, 0, 0, 0)') {
       return `${declared} → transparent`;
@@ -1728,40 +1806,25 @@ function resolveScalarValue(
   }
 
   if (kind === 'shadow') {
-    const el = document.createElement('div');
     el.style.boxShadow = `var(${varName})`;
-    el.style.display = 'none';
-    document.body.appendChild(el);
     const computed = getComputedStyle(el).boxShadow;
-    document.body.removeChild(el);
     return computed && computed !== 'none' ? `${declared} → ${computed}` : declared;
   }
 
   if (kind === 'radius') {
-    const el = document.createElement('div');
     el.style.borderRadius = `var(${varName})`;
-    el.style.position = 'fixed';
-    el.style.left = '-9999px';
-    document.body.appendChild(el);
     const computed = getComputedStyle(el).borderRadius;
-    document.body.removeChild(el);
     return computed && computed !== '0px' ? `${declared} → ${computed}` : declared;
   }
 
   // Length (or auto) — probe the relevant dimension on a VISIBLE (not
   // display:none / hidden) element so viewport/percentage/calc resolve
-  // against a real box. We use `position:fixed; left:-9999px` to keep the
-  // probe off-screen without removing it from layout resolution.
+  // against a real box. We use `position:fixed; left:-9999px` on the shared
+  // probe to keep it off-screen without removing it from layout resolution.
   const isHeight = prop === 'height';
-  const el = document.createElement('div');
-  el.style.position = 'fixed';
-  el.style.left = '-9999px';
-  el.style.top = '0';
   el.style.width = isHeight ? 'auto' : `var(${varName})`;
   el.style.height = isHeight ? `var(${varName})` : 'auto';
-  document.body.appendChild(el);
   const applied = getComputedStyle(el)[isHeight ? 'height' : 'width'];
-  document.body.removeChild(el);
   const validApplied = applied && /^(?!0px$).*px$/.test(applied) && applied.trim() !== '0px';
   return validApplied ? `${declared} → ${applied}` : declared;
 }

@@ -361,7 +361,13 @@ function ChronosShellMini({
   mode: 'light' | 'dark';
   logo: ReactNode;
 }) {
+  const { resolvedTheme } = useTheme();
   const isDark = mode === 'dark';
+  // The "light" shell's content follows the document theme (no light reset);
+  // its label must be honest about the actual current theme so it never claims
+  // a light plate under html.dark (F-004). The scoped-dark shell always forces
+  // a true dark plate via a nested `.dark`, so its label stays "dark".
+  const lightLabel = resolvedTheme === 'dark' ? 'Theme-following · dark' : 'Chronos Light';
   return (
     <div
       className={`border border-gray-alpha-300 rounded-card overflow-hidden ${
@@ -378,7 +384,7 @@ function ChronosShellMini({
             isDark ? 'text-brand-cyan dark:text-brand-cyan' : 'text-white'
           }`}
         >
-          {isDark ? 'Chronos Dark' : 'Chronos Light'}
+          {isDark ? 'Chronos Dark' : lightLabel}
         </span>
         {logo}
       </div>
@@ -511,11 +517,13 @@ function MarkSection() {
           <div className="bg-background-100 p-8 flex flex-col items-center justify-center gap-3 min-h-[120px]">
             <NexusMark size={32} className="w-auto text-brand-deep-blue" />
             <span className="text-copy-13 text-gray-600 text-center">
-              Light surface — deep ink via text-brand-deep-blue.
+              Document-following surface — deep ink via text-brand-deep-blue.
             </span>
           </div>
           <div className="px-4 py-2 border-t border-gray-alpha-200 bg-gray-alpha-100">
-            <span className="text-label-14 text-gray-700">Light theme</span>
+            <span className="text-label-14 text-gray-700">
+              Theme-following (uses current document theme)
+            </span>
           </div>
         </div>
 
