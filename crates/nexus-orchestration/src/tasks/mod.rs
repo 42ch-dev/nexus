@@ -2344,7 +2344,24 @@ impl Task for InnerGraphNodeTask {
             if let Some(agent_ref) = &self.agent_ref {
                 acp_task = acp_task.with_agent_ref(agent_ref.clone());
             }
-            return acp_task.run(context).await;
+            let result = acp_task.run(context.clone()).await?;
+            // Inner-graph presets bind outputs as `<node>.text` /
+            // `<node>.output`, which `InnerGraphTask` resolves via the
+            // `nodes.<binding>` key. `AcpPromptTask` stores
+            // `state.<node>.output`; mirror it into the node-namespaced keys
+            // so existing output_binding values keep working after the P1
+            // prompt-executor cutover.
+            let text: String = context
+                .get(&format!("state.{}.output", self.id))
+                .await
+                .unwrap_or_default();
+            if !text.is_empty() {
+                context
+                    .set(format!("nodes.{}.output", self.id), text.clone())
+                    .await;
+                context.set(format!("nodes.{}.text", self.id), text).await;
+            }
+            return Ok(result);
         }
 
         // Stub mode: no executor — refuse with a typed failure, never a

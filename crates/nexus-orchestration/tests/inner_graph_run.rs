@@ -10,6 +10,27 @@ use nexus_orchestration::engine::StepOutcome;
 use nexus_orchestration::{CapabilityRegistry, GraphFlowEngine, OrchestrationEngine};
 use std::sync::Arc;
 
+/// Deterministic prompt executor for the P1 cutover (no echo/worker fallback):
+/// returns text derived from the rendered prompt so node outputs are stable.
+struct EchoExecutor;
+
+#[async_trait::async_trait]
+impl nexus_orchestration::capability::PromptExecutor for EchoExecutor {
+    async fn execute(
+        &self,
+        request: nexus_orchestration::capability::PromptRequest,
+    ) -> Result<
+        nexus_orchestration::capability::PromptResult,
+        nexus_orchestration::capability::CapabilityError,
+    > {
+        Ok(nexus_orchestration::capability::PromptResult {
+            full_text: format!("inner_node:{}:echo_output", request.task_id),
+            host_session_id: "host-test".to_string(),
+            operation_id: "op-test".to_string(),
+        })
+    }
+}
+
 /// Preset with one outer state A that enters an `inner_graph` `my_graph`.
 /// The inner graph has three nodes: n1 -> n2 -> n3 (rule-only, no ACP).
 /// `output_binding`: n3.text
@@ -57,10 +78,16 @@ async fn inner_graph_runs_to_completion_and_exports_output() {
     assert_eq!(loaded.output_bindings.get("my_graph").unwrap(), "n3.text");
 
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
-    let engine = Arc::new(GraphFlowEngine::new_with_storage(
+    let mut engine = GraphFlowEngine::new_with_storage(
         storage,
         nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(caps)),
-    ));
+    );
+    // P1 cutover: inner `acp_prompt` nodes require a prompt executor.
+    engine.set_prompt_executor(
+        Arc::new(EchoExecutor),
+        Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+    );
+    let engine = Arc::new(engine);
 
     // Use start_session_with_preset which wires engine + inner graphs.
     let sid = engine
@@ -136,8 +163,12 @@ async fn spawn_child_and_get_context() {
 
     // Create a simple inner graph.
     let inner = graph_flow::Graph::new("test_child");
+    // A1: the node resolves its cancellation token from this map.
+    let session_cancels = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
     inner.add_task(std::sync::Arc::new(
-        nexus_orchestration::tasks::InnerGraphNodeTask::new("x"),
+        nexus_orchestration::tasks::InnerGraphNodeTask::new("x")
+            .with_prompt_executor(Some(Arc::new(EchoExecutor)))
+            .with_session_cancels(session_cancels.clone()),
     ));
 
     let params = nexus_orchestration::engine::ChildSessionParams {
@@ -150,6 +181,13 @@ async fn spawn_child_and_get_context() {
         .spawn_child_session(params)
         .await
         .expect("spawn_child_session");
+
+    // A1: prompt consumers resolve their coordinator cancellation token from
+    // the shared per-run map and fail closed when none is registered.
+    session_cancels.write().expect("session_cancels").insert(
+        child_sid.0.clone(),
+        tokio_util::sync::CancellationToken::new(),
+    );
 
     // Run the child to completion.
     for _ in 0..8 {
