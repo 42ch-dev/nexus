@@ -772,9 +772,16 @@ impl WorkflowRunCoordinator {
             .recover_sessions_inner(summaries.clone())
             .await;
         let mut drivable = Vec::new();
-        for s in &summaries {
-            if self.engine.has_runner(&s.session_id).await {
-                drivable.push(s.clone());
+        {
+            // One shared read lock for the whole batch (tri-QC P1-E): N
+            // sequential acquisitions on the runners RwLock stall recovery
+            // behind any writer.
+            let shared = self.engine.shared_state();
+            let runners = shared.runners.read().await;
+            for summary in &summaries {
+                if runners.contains_key(&summary.session_id.0) {
+                    drivable.push(summary.clone());
+                }
             }
         }
         if drivable.is_empty() {
