@@ -1729,3 +1729,429 @@ async fn daemon_restart_missing_source_continue_refuses_cancel_only() {
         "cancel-only actions"
     );
 }
+
+// ---------------------------------------------------------------------------
+// P3 T1 remaining daemon-level restart scenarios (plan matrix):
+//   (a) corrupt child identity → wait preserved, continue reconstruction_unavailable
+//   (b) nested/multiple waits preserved, no auto-approval, no new IDs
+//   (c) dispatch-before-output crash → interrupted, no retry, refuse signals
+//   (d) final-checkpoint-before-settlement crash → schedule settles terminal
+// ---------------------------------------------------------------------------
+
+/// `RunDescriptorV1` for the REAL embedded `memory-augmented` preset (A7
+/// frozen identity that actually resolves at reconstruction — never a zero
+/// hash). `parent` selects the nested-child shape (parent session + inner
+/// graph name).
+fn memory_augmented_descriptor(parent: Option<(&str, &str)>) -> Vec<u8> {
+    let source = nexus_orchestration::preset::embedded_source_identity("memory-augmented")
+        .expect("memory-augmented embedded source identity");
+    let (parent_session_id, graph_name) = match parent {
+        Some((parent_sid, graph)) => (Some(parent_sid.to_string()), Some(graph.to_string())),
+        None => (None, None),
+    };
+    serde_json::to_vec(&json!({
+        "creator_id": "test_creator",
+        "work_id": null,
+        "workspace_root": "",
+        "preset_id": "memory-augmented",
+        "preset_version": 1,
+        "source": source,
+        "input": {},
+        "agent_bindings": {},
+        "parent_session_id": parent_session_id,
+        "graph_name": graph_name
+    }))
+    .expect("memory-augmented descriptor json")
+}
+
+/// Seed a durable v1 session row with an explicit descriptor and optional
+/// parent (daemon-level restart fixtures).
+#[allow(clippy::too_many_arguments)]
+async fn seed_daemon_session(
+    pool: &sqlx::SqlitePool,
+    session_id: &str,
+    status: &str,
+    current_task_id: Option<&str>,
+    context: &[u8],
+    run_state: &[u8],
+    state_revision: i64,
+    descriptor: &[u8],
+    parent_session_id: Option<&str>,
+) {
+    sqlx::query(
+        "INSERT INTO orchestration_sessions
+            (session_id, creator_id, preset_id, preset_version, parent_session_id,
+             current_task_id, status, context_json, created_at, updated_at,
+             execution_version, state_revision, run_state_json, run_descriptor_json)
+         VALUES (?, 'test_creator', 'memory-augmented', 1, ?, ?, ?, ?, 1_756_990_000, 1_756_990_300,
+                 1, ?, ?, ?)",
+    )
+    .bind(session_id)
+    .bind(parent_session_id)
+    .bind(current_task_id)
+    .bind(status)
+    .bind(context)
+    .bind(state_revision)
+    .bind(run_state)
+    .bind(descriptor)
+    .execute(pool)
+    .await
+    .expect("seed daemon session");
+}
+
+/// Durable `RunStateV1` with a human-wait record carrying the exact token
+/// (A4 shape; optional waiting-child cursor for nested waits).
+fn wait_state_with_token(
+    token: &str,
+    task: &str,
+    child_session: Option<&str>,
+    child_task: Option<&str>,
+) -> Vec<u8> {
+    json!({
+        "wait": {
+            "wait_id": token, "task_id": task,
+            "child_session_id": child_session, "child_task_id": child_task, "kind": "manual"
+        },
+        "step_in_flight": null, "in_flight": null, "failure": null, "cancel_requested": false
+    })
+    .to_string()
+    .into_bytes()
+}
+
+/// Durable `RunStateV1` for a dispatch-before-output crash (A2): the prompt
+/// was persisted `dispatching`/`active` before the Host effect completed and
+/// the step never checkpointed past it.
+fn dispatch_crash_state() -> Vec<u8> {
+    json!({
+        "wait": null,
+        "step_in_flight": "generate",
+        "in_flight": {
+            "attempt_id": "attempt-crash", "task_id": "generate", "phase": "active",
+            "host_session_id": "host-crash", "operation_id": "op-crash", "process_identity": null
+        },
+        "failure": null,
+        "cancel_requested": false
+    })
+    .to_string()
+    .into_bytes()
+}
+
+/// Post a session control signal over the live HTTP surface and return
+/// (status, parsed body).
+async fn post_session_signal(
+    daemon: &LiveDaemon,
+    session_id: &str,
+    payload: Value,
+) -> (reqwest::StatusCode, Value) {
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "{}/v1/daemon/orchestration/sessions/{session_id}/signal",
+            daemon.http_url
+        ))
+        .json(&payload)
+        .send()
+        .await
+        .expect("session signal");
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(json!({}));
+    (status, body)
+}
+
+/// (b) Nested/multiple waits at the daemon level: a parent with TWO waiting
+/// children survives the production boot/attach restart with every wait
+/// token preserved, boot never auto-approves either child, and no new
+/// session/child IDs are minted (existing IDs reattached).
+#[tokio::test]
+async fn daemon_restart_nested_multiple_waits_preserved_no_auto_approval() {
+    let host = RestartMockHost::new();
+    let mut daemon = LiveDaemon::start_with_host_provider_and_dispatch(
+        host.clone(),
+        Arc::new(CountingDispatch {
+            calls: Arc::new(AtomicUsize::new(0)),
+        }),
+    )
+    .await;
+
+    let parent = "daemon:nested-parent";
+    let child_a = "daemon:nested-parent::child:a";
+    let child_b = "daemon:nested-parent::child:b";
+    let descriptor = memory_augmented_descriptor(None);
+    let child_descriptor = memory_augmented_descriptor(Some((parent, "generate_graph")));
+    seed_daemon_session(
+        &daemon.pool, parent, "waiting_for_input", Some("persist"), &plain_context(),
+        &wait_state_with_token("parent-tok-p3", "persist", Some(child_a), Some("persist")),
+        8, &descriptor, None,
+    )
+    .await;
+    seed_daemon_session(
+        &daemon.pool, child_a, "waiting_for_input", Some("persist"), &plain_context(),
+        &wait_state_with_token("child-a-tok", "persist", None, None),
+        3, &child_descriptor, Some(parent),
+    )
+    .await;
+    seed_daemon_session(
+        &daemon.pool, child_b, "waiting_for_input", Some("persist"), &plain_context(),
+        &wait_state_with_token("child-b-tok", "persist", None, None),
+        3, &child_descriptor, Some(parent),
+    )
+    .await;
+    let sessions_before: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions")
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("session count before");
+
+    daemon.restart().await;
+
+    // Every wait token survives; all three rows still waiting; no new IDs.
+    for (sid, tok) in [
+        (parent, "parent-tok-p3"),
+        (child_a, "child-a-tok"),
+        (child_b, "child-b-tok"),
+    ] {
+        let (status, state) = durable_run_state(&daemon.pool, sid).await;
+        assert_eq!(status, "waiting_for_input", "{sid} still waiting");
+        assert_eq!(
+            state.and_then(|s| s["wait"]["wait_id"].as_str().map(str::to_string)),
+            Some(tok.to_string()),
+            "{sid} token preserved"
+        );
+    }
+    let sessions_after: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions")
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("session count after");
+    assert_eq!(
+        sessions_after, sessions_before,
+        "daemon restart must not mint new session/child IDs"
+    );
+    assert_eq!(
+        host.execs.load(Ordering::SeqCst),
+        0,
+        "boot never steps nested/multiple waits"
+    );
+}
+
+/// (a) Corrupt child identity at the daemon level: a persisted child with an
+/// unsupported execution version blocks the parent's owned-descendant
+/// reconstruction. The parent's human wait is preserved; a matching continue
+/// refuses with `reconstruction_unavailable` (409, cancel-only); no new
+/// effects are created and the corrupt child row is preserved verbatim.
+#[tokio::test]
+async fn daemon_restart_corrupt_child_identity_wait_preserved_continue_refuses() {
+    let host = RestartMockHost::new();
+    let mut daemon = LiveDaemon::start_with_host_provider_and_dispatch(
+        host.clone(),
+        Arc::new(CountingDispatch {
+            calls: Arc::new(AtomicUsize::new(0)),
+        }),
+    )
+    .await;
+
+    let parent = "daemon:corrupt-parent";
+    let child = "daemon:corrupt-parent::child:bad";
+    seed_daemon_session(
+        &daemon.pool, parent, "waiting_for_input", Some("persist"), &plain_context(),
+        &wait_state_with_token("parent-tok-corr", "persist", Some(child), Some("persist")),
+        8, &memory_augmented_descriptor(None), None,
+    )
+    .await;
+    // Corrupt child: unsupported execution_version 2 → load_children refuses
+    // (A7 non-replayable).
+    sqlx::query(
+        "INSERT INTO orchestration_sessions
+            (session_id, creator_id, preset_id, preset_version, parent_session_id,
+             current_task_id, status, context_json, created_at, updated_at,
+             execution_version, state_revision, run_state_json, run_descriptor_json)
+         VALUES (?, 'test_creator', 'memory-augmented', 1, ?, 'persist', 'waiting_for_input',
+                 ?, 1_756_990_000, 1_756_990_300, 2, 3, ?, ?)",
+    )
+    .bind(child)
+    .bind(parent)
+    .bind(&plain_context())
+    .bind(&wait_state_with_token("child-bad-tok", "persist", None, None))
+    .bind(&memory_augmented_descriptor(Some((parent, "generate_graph"))))
+    .execute(&daemon.pool)
+    .await
+    .expect("seed corrupt child");
+
+    daemon.restart().await;
+
+    // The wait is preserved (recovery surfaces the corrupt child as
+    // non-replayable but never steps the human wait).
+    let (status, state) = durable_run_state(&daemon.pool, parent).await;
+    assert_eq!(status, "waiting_for_input", "parent wait preserved");
+    assert_eq!(
+        state.as_ref().and_then(|s| s["wait"]["wait_id"].as_str()),
+        Some("parent-tok-corr"),
+        "parent token preserved under corrupt child identity"
+    );
+    // The corrupt child row is preserved verbatim (never reinterpreted).
+    let (child_status, _) = durable_run_state(&daemon.pool, child).await;
+    assert_eq!(child_status, "waiting_for_input", "corrupt child row preserved");
+
+    // Matching continue: the on-demand reattachment hydrates the owned
+    // closure, hits the corrupt child, and refuses reconstruction_unavailable
+    // (cancel-only) — no mutation, no effects.
+    let effects_before = host.execs.load(Ordering::SeqCst);
+    let (code, body) = post_session_signal(
+        &daemon,
+        parent,
+        json!({ "signal": "continue", "waitId": "parent-tok-corr" }),
+    )
+    .await;
+    assert_eq!(code, reqwest::StatusCode::CONFLICT, "{body}");
+    assert_eq!(
+        body["error"]["code"].as_str(),
+        Some("reconstruction_unavailable"),
+        "{body}"
+    );
+    assert_eq!(
+        body["error"]["details"]["allowed_actions"],
+        json!(["cancel", "new_run"]),
+        "cancel-only actions"
+    );
+    let (status, state_now) = durable_run_state(&daemon.pool, parent).await;
+    assert_eq!(status, "waiting_for_input", "wait untouched by refused continue");
+    assert_eq!(
+        state_now.as_ref().and_then(|s| s["wait"]["wait_id"].as_str()),
+        Some("parent-tok-corr"),
+        "token untouched"
+    );
+    assert_eq!(host.execs.load(Ordering::SeqCst), effects_before, "no effects");
+}
+
+/// (c) Dispatch-before-output crash at the daemon level: the durable record
+/// carries a dispatching/active prompt with an unfinished step mark (the
+/// crash happened after the external effect but before the result
+/// checkpoint). The restart classifies interrupted, NEVER re-drives (zero
+/// Host effects), never rewrites the row, and refuses control signals with
+/// workflow_state_conflict.
+#[tokio::test]
+async fn daemon_restart_dispatch_before_output_crash_interrupted_no_retry() {
+    let host = RestartMockHost::new();
+    let mut daemon = LiveDaemon::start_with_host_provider_and_dispatch(
+        host.clone(),
+        Arc::new(CountingDispatch {
+            calls: Arc::new(AtomicUsize::new(0)),
+        }),
+    )
+    .await;
+
+    let sid = "daemon:dispatch-crash";
+    seed_daemon_session(
+        &daemon.pool, sid, "running", Some("generate"), &plain_context(),
+        &dispatch_crash_state(), 5, &memory_augmented_descriptor(None), None,
+    )
+    .await;
+
+    daemon.restart().await;
+
+    // Never retried: the durable row is untouched (status + interrupted
+    // marks), zero Host effects even after a grace window.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let (status, state) = durable_run_state(&daemon.pool, sid).await;
+    assert_eq!(status, "running", "durable row never rewritten by recovery");
+    let state = state.expect("durable state present");
+    assert_eq!(state["step_in_flight"], json!("generate"), "step mark preserved");
+    assert!(
+        state["in_flight"].is_object(),
+        "the unfinished prompt attempt is preserved (never cleared/retried)"
+    );
+    assert_eq!(
+        host.execs.load(Ordering::SeqCst),
+        0,
+        "interrupted in-flight work must NOT retry across daemon restart"
+    );
+
+    // Advance cannot resurrect the interrupted run: 409 workflow_state_conflict.
+    let (code, body) = post_session_signal(&daemon, sid, json!({ "signal": "advance" })).await;
+    assert_eq!(code, reqwest::StatusCode::CONFLICT, "{body}");
+    assert_eq!(
+        body["error"]["code"].as_str(),
+        Some("workflow_state_conflict"),
+        "{body}"
+    );
+
+    // Scoped public evidence: inspect projects the interrupted recovery class
+    // (never a retryable verdict).
+    let output = nexus42(daemon.home.path())
+        .args(["ops", "inspect", sid, "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let parsed: Value = serde_json::from_slice(&output).expect("valid inspect json");
+    assert_eq!(parsed["recovery_class"], json!("interrupted"));
+    assert_eq!(parsed["resumable"]["verdict"], json!("no"));
+}
+
+/// (d) Final-checkpoint-before-settlement crash at the daemon level: the
+/// durable session is terminal `completed` but the schedule row still reads
+/// `running` (the settlement crashed before the flip). The restart's
+/// production bundle publication reconciles the schedule from the durable
+/// terminal session (settles to completed), and recovery never re-drives the
+/// completed session — zero effects, one session, owned-identity preserved.
+#[tokio::test]
+async fn daemon_restart_final_checkpoint_before_settlement_settles_terminal() {
+    let host = RestartMockHost::new();
+    let mut daemon = LiveDaemon::start_with_host_provider_and_dispatch(
+        host.clone(),
+        Arc::new(CountingDispatch {
+            calls: Arc::new(AtomicUsize::new(0)),
+        }),
+    )
+    .await;
+
+    let sid = "daemon:settle-crash";
+    seed_daemon_session(
+        &daemon.pool, sid, "completed", Some("done"), &plain_context(),
+        &run_state_v1(false, None, false, false), 6, &memory_augmented_descriptor(None), None,
+    )
+    .await;
+    let now = chrono::Utc::now().timestamp();
+    sqlx::query(
+        "INSERT INTO creator_schedules
+           (schedule_id, creator_id, preset_id, preset_version, status,
+            concurrency_kind, current_core_context_version, label,
+            created_at, updated_at, work_id, execution_policy,
+            execution_descriptor_json, current_session_id)
+           VALUES ('SCHSETTLECRASH', 'test_creator', 'memory-augmented', 1, 'running',
+                   'serial', 0, 'p3-final-checkpoint', ?, ?, NULL, 'driven_v1', ?, ?)",
+    )
+    .bind(now)
+    .bind(now)
+    .bind(&memory_augmented_descriptor(None))
+    .bind(sid)
+    .execute(&daemon.pool)
+    .await
+    .expect("seed pre-settlement schedule row");
+
+    daemon.restart().await;
+
+    // The production bundle publication reconciles the schedule from the
+    // durable terminal session BEFORE recovery runs; the terminal session is
+    // never re-driven.
+    let (status, current_sid): (String, Option<String>) = sqlx::query_as(
+        "SELECT status, current_session_id FROM creator_schedules \
+         WHERE schedule_id = 'SCHSETTLECRASH'",
+    )
+    .fetch_one(&daemon.pool)
+    .await
+    .expect("settled schedule row");
+    assert_eq!(status, "completed", "schedule settles from the durable terminal");
+    assert_eq!(
+        current_sid.as_deref(),
+        Some(sid),
+        "schedule keeps its owned run identity"
+    );
+    let (run_status, _) = durable_run_state(&daemon.pool, sid).await;
+    assert_eq!(run_status, "completed", "the terminal session stays terminal");
+    assert_eq!(
+        host.execs.load(Ordering::SeqCst),
+        0,
+        "a settled terminal run is never re-driven after restart"
+    );
+}
