@@ -833,6 +833,10 @@ impl ScheduleSupervisor {
             }
         }
 
+        // Whether THIS call performed the terminal transition. A duplicate
+        // callback (source_run_id conflict) must not re-run completion hooks,
+        // mark Work complete, or re-hand the child to the starter (Greptile P2).
+        let mut transitioned = !conflict;
         if conflict {
             // Duplicate terminal callback: the child INSERT failed on the
             // source_run_id unique index. Roll back (the source settlement
@@ -846,7 +850,7 @@ impl ScheduleSupervisor {
             .await?;
             // Settle the source idempotently — a no-op when the winner's
             // transaction already settled it.
-            sqlx::query(
+            let settled = sqlx::query(
                 "UPDATE creator_schedules SET status = ?, terminated_at = ?, updated_at = ?
                  WHERE schedule_id = ? AND status NOT IN ('completed', 'failed', 'cancelled')
                    AND current_session_id = ?",
@@ -858,6 +862,7 @@ impl ScheduleSupervisor {
             .bind(source_run_id)
             .execute(&*self.pool)
             .await?;
+            transitioned = settled.rows_affected() > 0;
             child_id = existing;
             tracing::info!(
                 schedule_id,
@@ -875,7 +880,7 @@ impl ScheduleSupervisor {
             .await;
         self.release_schedule_lock(schedule_id, creator_id).await;
 
-        if terminal_status == ScheduleStatus::Completed {
+        if terminal_status == ScheduleStatus::Completed && transitioned {
             self.run_completed_hooks(schedule_id, preset_id).await;
             if let Some((action, _work)) = &chain {
                 if let ChainAction::WorkComplete { work_id } = action {

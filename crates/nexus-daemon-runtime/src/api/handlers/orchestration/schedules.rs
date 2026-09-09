@@ -1092,6 +1092,7 @@ pub async fn list_schedules(
                 &pool,
                 summary.current_session_id.as_deref(),
                 &summary.execution_policy,
+                state.capability_registry().as_ref(),
             )
             .await,
         );
@@ -1176,6 +1177,7 @@ pub async fn inspect_schedule(
             &pool,
             summary.current_session_id.as_deref(),
             &summary.execution_policy,
+            state.capability_registry().as_ref(),
         )
         .await,
     );

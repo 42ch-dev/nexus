@@ -54,13 +54,13 @@ pub fn project_no_run(execution_policy: &str) -> ExecutionProjection {
 /// matches (A7): no runner is attached, no state mutated.
 fn frozen_source_reconstructable(
     descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
+    caps: &nexus_orchestration::capability::CapabilityRegistry,
 ) -> bool {
     use nexus_orchestration::preset::{load_embedded_preset, load_preset};
     use nexus_orchestration::run_state::PresetSourceIdentity;
-    let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
     let loaded = match &descriptor.source {
-        PresetSourceIdentity::Embedded { preset_id, .. } => load_embedded_preset(preset_id, &caps),
-        PresetSourceIdentity::Directory { root, .. } => load_preset(root, &caps),
+        PresetSourceIdentity::Embedded { preset_id, .. } => load_embedded_preset(preset_id, caps),
+        PresetSourceIdentity::Directory { root, .. } => load_preset(root, caps),
     };
     match loaded {
         Ok(loaded) => {
@@ -79,6 +79,7 @@ pub async fn project_for_session(
     pool: &sqlx::SqlitePool,
     session_id: Option<&str>,
     execution_policy: &str,
+    caps: Option<&std::sync::Arc<nexus_orchestration::capability::CapabilityRegistry>>,
 ) -> ExecutionProjection {
     use graph_flow::SessionStorage as _;
     use nexus_orchestration::engine::SessionId;
@@ -112,7 +113,7 @@ pub async fn project_for_session(
         Ok(None) => return unreadable_projection("owned session row missing"),
         Err(e) => return unreadable_projection(&e.to_string()),
     };
-    project_execution(&record, gate_park_live)
+    project_execution(&record, gate_park_live, caps)
 }
 
 #[cfg(test)]
@@ -140,6 +141,7 @@ mod tests {
         let projection = project_execution(
             &record(SessionStatus::Running, 0, Some(RunStateV1::default())),
             false,
+            None,
         );
         assert_eq!(projection.recovery_class, "legacy_unverified");
         assert_eq!(projection.allowed_actions, vec!["cancel", "new_run"]);
@@ -156,10 +158,10 @@ mod tests {
     #[test]
     fn converge_merge_park_requires_the_gate_marker() {
         let parked = record(SessionStatus::Paused, 1, Some(RunStateV1::default()));
-        let with_marker = project_execution(&parked, true);
+        let with_marker = project_execution(&parked, true, None);
         assert_eq!(with_marker.recovery_class, "converge_merge");
         assert_eq!(with_marker.allowed_actions, vec!["cancel"]);
-        let without_marker = project_execution(&parked, false);
+        let without_marker = project_execution(&parked, false, None);
         assert_eq!(without_marker.recovery_class, "safe_boundary");
     }
 
@@ -178,7 +180,7 @@ mod tests {
         // A reconstructable frozen source keeps `continue` legal.
         let mut with_source = record(SessionStatus::WaitingForInput, 1, Some(state.clone()));
         with_source.descriptor = Some(reconstructable_descriptor());
-        let projection = project_execution(&with_source, false);
+        let projection = project_execution(&with_source, false, None);
         assert_eq!(projection.recovery_class, "human_wait");
         assert_eq!(
             projection.wait.as_ref().map(|w| w.wait_id.as_str()),
@@ -191,6 +193,7 @@ mod tests {
         let degraded = project_execution(
             &record(SessionStatus::WaitingForInput, 1, Some(state)),
             false,
+            None,
         );
         assert_eq!(degraded.recovery_class, "human_wait");
         assert_eq!(degraded.allowed_actions, vec!["cancel", "new_run"]);
@@ -236,8 +239,11 @@ mod tests {
             cancel_requested: true,
             ..RunStateV1::default()
         };
-        let projection =
-            project_execution(&record(SessionStatus::Interrupted, 1, Some(state)), false);
+        let projection = project_execution(
+            &record(SessionStatus::Interrupted, 1, Some(state)),
+            false,
+            None,
+        );
         assert_eq!(projection.recovery_class, "interrupted");
         assert_eq!(projection.allowed_actions, vec!["cancel", "new_run"]);
         assert!(!projection
@@ -259,8 +265,11 @@ mod tests {
             cancel_requested: true,
             ..RunStateV1::default()
         };
-        let projection =
-            project_execution(&record(SessionStatus::Interrupted, 1, Some(state)), false);
+        let projection = project_execution(
+            &record(SessionStatus::Interrupted, 1, Some(state)),
+            false,
+            None,
+        );
         assert_eq!(projection.recovery_class, "interrupted");
         assert!(
             projection.wait.is_none(),
@@ -274,7 +283,11 @@ mod tests {
 /// (computed by the caller from the session context); without it a parked
 /// converge/merge run would misproject as `safe_boundary`.
 #[must_use]
-pub fn project_execution(record: &RunRecord, gate_park_live: bool) -> ExecutionProjection {
+pub fn project_execution(
+    record: &RunRecord,
+    gate_park_live: bool,
+    caps: Option<&std::sync::Arc<nexus_orchestration::capability::CapabilityRegistry>>,
+) -> ExecutionProjection {
     // v0 rows are explicitly legacy/unverified — never reinterpreted through
     // the v1 classifier (A2/A7 rule 7).
     if record.execution_version < 1 {
@@ -314,11 +327,17 @@ pub fn project_execution(record: &RunRecord, gate_park_live: bool) -> ExecutionP
     // not advertise `continue` (tri-QC P1-C): legal actions degrade to
     // cancel/new-run and the reason names the reconstruction failure.
     let (allowed_actions, source_unavailable) = if class == RecoveryClass::HumanWait
-        && !record
-            .descriptor
-            .as_ref()
-            .is_some_and(frozen_source_reconstructable)
-    {
+        && !record.descriptor.as_ref().is_some_and(|descriptor| {
+            let builtin;
+            let registry = match caps {
+                Some(caps) => &**caps,
+                None => {
+                    builtin = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+                    &builtin
+                }
+            };
+            frozen_source_reconstructable(descriptor, registry)
+        }) {
         (vec!["cancel".to_string(), "new_run".to_string()], true)
     } else {
         (allowed_actions, false)
