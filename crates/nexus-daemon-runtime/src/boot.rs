@@ -1431,10 +1431,11 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 
     // --- Section 6: Lifecycle HSM initialization ---
     let subsystems = create_subsystems(&state, config.port, agent_host_facade);
-    let lifecycle = Arc::new(StatigLifecycle::new_with_subsystems(
+    let lifecycle = StatigLifecycle::new_with_subsystems(
         subsystems,
         config.shutdown_grace_ms,
-    ));
+    )
+    .await;
 
     state.set_lifecycle(Arc::clone(&lifecycle));
     tracing::info!("Lifecycle HSM initialized");
