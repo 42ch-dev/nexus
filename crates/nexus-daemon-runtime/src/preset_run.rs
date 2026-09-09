@@ -1756,21 +1756,23 @@ impl WorkflowRunCoordinator {
         let now = chrono::Utc::now().timestamp();
         let payload = serde_json::json!({ "kind": "text", "body": "" });
         let derivation = serde_json::json!({ "kind": "seed", "raw": "" });
-        sqlx::query(
+        let content = serde_json::to_vec(&payload).map_err(|e| {
+            RunControlError::Admission(format!("seed payload serialization failed: {e}"))
+        })?;
+        let derivation_detail = serde_json::to_vec(&derivation).map_err(|e| {
+            RunControlError::Admission(format!("seed derivation serialization failed: {e}"))
+        })?;
+        sqlx::query!(
             "INSERT OR IGNORE INTO core_context_versions
                (schedule_id, version, payload_kind, content,
                 derivation_kind, derivation_detail,
                 created_at, created_by_kind, created_by_user_id)
              VALUES (?, 0, 'text', ?, 'seed', ?, ?, 'system', NULL)",
+            row.schedule_id,
+            content,
+            derivation_detail,
+            now,
         )
-        .bind(&row.schedule_id)
-        .bind(serde_json::to_vec(&payload).map_err(|e| {
-            RunControlError::Admission(format!("seed payload serialization failed: {e}"))
-        })?)
-        .bind(serde_json::to_vec(&derivation).map_err(|e| {
-            RunControlError::Admission(format!("seed derivation serialization failed: {e}"))
-        })?)
-        .bind(now)
         .execute(pool)
         .await
         .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
