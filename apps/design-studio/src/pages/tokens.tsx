@@ -835,6 +835,7 @@ const READING_CHROME_SPECIMENS: ReadingChromeSpecimen[] = [
     className: 'block',
     styleVarNames: {
       color: '--reading-chrome-essay-section-heading-color',
+      fontFamily: '--reading-chrome-essay-section-heading-font-family',
       fontSize: '--reading-chrome-essay-section-heading-font-size',
       fontWeight: '--reading-chrome-essay-section-heading-font-weight',
       lineHeight: '--reading-chrome-essay-section-heading-line-height',
@@ -842,6 +843,7 @@ const READING_CHROME_SPECIMENS: ReadingChromeSpecimen[] = [
       marginTop: '--reading-chrome-essay-section-heading-margin-top',
     },
     readouts: [
+      { prop: 'fontFamily', varName: '--reading-chrome-essay-section-heading-font-family' },
       { prop: 'fontSize', varName: '--reading-chrome-essay-section-heading-font-size' },
       { prop: 'lineHeight', varName: '--reading-chrome-essay-section-heading-line-height' },
       { prop: 'marginTop', varName: '--reading-chrome-essay-section-heading-margin-top' },
@@ -941,8 +943,10 @@ const READING_CHROME_SPECIMENS: ReadingChromeSpecimen[] = [
     styleVarNames: {
       color: '--reading-chrome-game-bible-term-link-color',
       textDecoration: '--reading-chrome-game-bible-term-link-text-decoration',
+      cursor: '--reading-chrome-game-bible-term-link-cursor',
     },
     readouts: [
+      { prop: 'cursor', varName: '--reading-chrome-game-bible-term-link-cursor' },
       { prop: 'textDecorationLine', varName: '--reading-chrome-game-bible-term-link-text-decoration' },
     ],
   },
