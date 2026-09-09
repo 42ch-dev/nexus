@@ -3343,6 +3343,31 @@ async fn settlement_completed_inspect_agrees() {
     assert_eq!(run_status, "waiting_for_input");
     let wait_id = state["wait"]["wait_id"].as_str().expect("wait id").to_string();
 
+    // Shared projection: the durable human wait is actionable and named.
+    let resp = reqwest::Client::new()
+        .get(format!(
+            "{}/v1/daemon/orchestration/schedules/{schedule_id}",
+            daemon.http_url
+        ))
+        .send()
+        .await
+        .expect("GET inspect (waiting)");
+    let inspect: Value = resp.json().await.expect("inspect json");
+    assert_eq!(
+        inspect["schedule"]["execution"]["recovery_class"].as_str(),
+        Some("human_wait"),
+        "a parked run must project human_wait: {inspect}"
+    );
+    assert_eq!(
+        inspect["schedule"]["execution"]["wait"]["wait_id"].as_str(),
+        Some(wait_id.as_str())
+    );
+    let actions = inspect["schedule"]["execution"]["allowed_actions"]
+        .as_array()
+        .expect("allowed_actions array");
+    assert!(actions.iter().any(|a| a.as_str() == Some("continue")));
+    assert!(actions.iter().any(|a| a.as_str() == Some("cancel")));
+
     // Continue to completion.
     let (status, body) = post_json(
         &daemon,
@@ -3382,6 +3407,19 @@ async fn settlement_completed_inspect_agrees() {
     assert_eq!(
         inspect["schedule"]["current_session_id"].as_str(),
         Some(sid.as_str())
+    );
+    // Shared projection: a terminal run is `terminal` and offers only a new run.
+    assert_eq!(
+        inspect["schedule"]["execution"]["recovery_class"].as_str(),
+        Some("terminal"),
+        "settled schedule must project terminal: {inspect}"
+    );
+    assert_eq!(
+        inspect["schedule"]["execution"]["allowed_actions"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>()),
+        Some(vec!["new_run"]),
+        "terminal rows offer only new_run: {inspect}"
     );
 
     // Session inspect agrees.

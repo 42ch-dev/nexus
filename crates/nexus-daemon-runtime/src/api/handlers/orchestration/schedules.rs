@@ -48,6 +48,7 @@ use nexus_contracts::PaginationInfo;
 use nexus_orchestration::preset_gates::{
     GateEvalError, PreviousPresetLookup, PreviousPresetResult,
 };
+use nexus_orchestration::run_state::WorkflowStateStore;
 use nexus_orchestration::schedule::work_schedule::{validate_cron_expr, validate_tz, WorkSchedule};
 use sqlx::Row;
 use std::sync::Arc;
@@ -1073,10 +1074,17 @@ pub async fn list_schedules(
         message: format!("database error: {e}"),
     })?;
 
-    let items: Vec<ScheduleSummary> = rows
+    let mut items: Vec<ScheduleSummary> = rows
         .into_iter()
         .map(ListRow::into_summary)
         .collect::<Result<Vec<_>, _>>()?;
+    for summary in &mut items {
+        let record = load_run_record(&pool, summary.current_session_id.as_deref()).await;
+        summary.execution = Some(crate::execution_projection::project_execution(
+            record.as_ref(),
+            &summary.execution_policy,
+        ));
+    }
 
     let has_more = u64::from(total) > u64::from(offset).saturating_add(u64::from(limit));
     let next_cursor = if has_more {
@@ -1151,11 +1159,36 @@ pub async fn inspect_schedule(
 
     let concurrency_kind = row.concurrency_kind.clone();
 
+    let mut summary = row.into_summary()?;
+    let record = load_run_record(&pool, summary.current_session_id.as_deref()).await;
+    summary.execution = Some(crate::execution_projection::project_execution(
+        record.as_ref(),
+        &summary.execution_policy,
+    ));
+
     Ok(Json(InspectScheduleResponse {
-        schedule: row.into_summary()?,
+        schedule: summary,
         depends_on: deps,
         concurrency_kind,
     }))
+}
+
+/// Load the durable v1 record for an owned session, if any (A2/A7).
+async fn load_run_record(
+    pool: &sqlx::SqlitePool,
+    session_id: Option<&str>,
+) -> Option<nexus_orchestration::run_state::RunRecord> {
+    let session_id = session_id?;
+    let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(Arc::new(
+        pool.clone(),
+    ));
+    store
+        .load_run(&nexus_orchestration::engine::SessionId(
+            session_id.to_string(),
+        ))
+        .await
+        .ok()
+        .flatten()
 }
 
 // ---------------------------------------------------------------------------
@@ -2414,6 +2447,7 @@ impl ListRow {
             status: self.status,
             execution_policy: self.execution_policy,
             current_session_id: self.current_session_id,
+            execution: None,
             label: self.label,
             current_core_context_version: u32::try_from(self.current_core_context_version)
                 .map_err(|_| NexusApiError::Internal {
@@ -2457,6 +2491,7 @@ impl InspectRow {
             status: self.status,
             execution_policy: self.execution_policy,
             current_session_id: self.current_session_id,
+            execution: None,
             label: self.label,
             current_core_context_version: u32::try_from(self.current_core_context_version)
                 .map_err(|_| NexusApiError::Internal {

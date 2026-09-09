@@ -199,6 +199,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   CapabilityInfo: 1,
   ListCapabilitiesQuery: 2,
   ListCapabilitiesResponse: 2,
+  ExecutionProjection: 1,
   ListSessionsQuery: 2,
   ListSessionsResponse: 2,
   SessionDetailResponse: 1,

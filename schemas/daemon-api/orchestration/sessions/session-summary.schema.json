@@ -11,7 +11,9 @@
     "creator_id": { "type": "string" },
     "preset_id": { "type": "string" },
     "status": { "type": "string" },
-    "current_task_id": { "type": "string" }
+    "current_task_id": { "type": "string" },
+    "failure_reason": { "type": "string", "description": "Stable reason for terminal/uncertain outcomes (e.g. unconfirmed cancel cleanup)." },
+    "execution": { "$ref": "https://nexus42.invalid/schemas/daemon-api/orchestration/sessions/execution-projection.schema.json", "description": "Shared recovery/legal-action projection (A2/A7)." }
   },
   "additionalProperties": false
 }

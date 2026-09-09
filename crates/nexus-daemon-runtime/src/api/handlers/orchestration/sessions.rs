@@ -154,6 +154,7 @@ pub async fn list_sessions(
             status: session_status_to_str(&s.status),
             current_task_id: s.current_task_id,
             failure_reason: None,
+            execution: None,
         })
         .collect();
 
@@ -204,6 +205,21 @@ pub async fn get_session(
         .ok_or_else(|| NexusApiError::service_unavailable("engine not available"))?;
 
     let sid = nexus_orchestration::engine::SessionId(session_id.clone());
+    // Shared durable execution projection (A2/A7) for this run, when a
+    // durable record exists (terminal rows included — no live runner needed).
+    let execution = match state.pool() {
+        Some(pool) => {
+            let store = SqliteSessionStorage::new(Arc::new(pool.clone()));
+            match store.load_run(&sid).await {
+                Ok(Some(record)) => Some(crate::execution_projection::project_execution(
+                    Some(&record),
+                    "driven_v1",
+                )),
+                _ => None,
+            }
+        }
+        None => None,
+    };
     let sessions = engine
         .list_active(nexus_orchestration::engine::SessionFilter::default())
         .await
@@ -245,6 +261,7 @@ pub async fn get_session(
                 status: row.status,
                 current_task_id: row.current_task_id,
                 failure_reason,
+                execution: execution.clone(),
             }
         } else {
             SessionSummary {
@@ -254,6 +271,7 @@ pub async fn get_session(
                 status: session_status_to_str(&active.status),
                 current_task_id: active.current_task_id,
                 failure_reason: None,
+                execution: execution.clone(),
             }
         }
     } else {
@@ -275,6 +293,7 @@ pub async fn get_session(
             status: row.status,
             current_task_id: row.current_task_id,
             failure_reason,
+            execution: execution.clone(),
         }
     };
 
