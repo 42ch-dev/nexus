@@ -35,17 +35,29 @@ function mockMatchMedia(prefersDark: boolean) {
   vi.spyOn(window, 'matchMedia').mockReturnValue(media as unknown as MediaQueryList);
 }
 
-function renderStudio(initialRoute = '/') {
-  return render(
+async function renderStudio(initialRoute = '/') {
+  const result = render(
     <ThemeProvider>
       <MemoryRouter initialEntries={[initialRoute]}>
         <App />
       </MemoryRouter>
     </ThemeProvider>,
   );
+  // Lazy route chunks resolve asynchronously (S-002); flush them so gallery
+  // assertions see the fully-mounted page, not the Suspense fallback. Wait
+  // until every RouteLoading fallback has been replaced by the mounted page.
+  await act(async () => {
+    let guard = 0;
+    while (document.querySelector('[data-testid^="route-loading-"]') && guard < 40) {
+      // Let the lazy import's microtask/timer chain settle (macrotask tick).
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      guard += 1;
+    }
+  });
+  return result;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   window.localStorage.clear();
   document.documentElement.classList.remove('dark');
   document.documentElement.removeAttribute('data-theme');
@@ -58,23 +70,23 @@ afterEach(() => {
 /* ---- landing page ------------------------------------------------------- */
 
 describe('App landing page', () => {
-  it('renders the studio heading', () => {
+  it('renders the studio heading', async () => {
     mockMatchMedia(false);
-    renderStudio();
+    await renderStudio();
     expect(
       screen.getByRole('heading', { name: 'Nexus Design Studio' }),
     ).toBeInTheDocument();
   });
 
-  it('renders the read-only SSOT hint in footer', () => {
+  it('renders the read-only SSOT hint in footer', async () => {
     mockMatchMedia(false);
-    renderStudio();
+    await renderStudio();
     expect(screen.getByText(/Read-only/)).toBeInTheDocument();
   });
 
-  it('renders navigation links for all five gallery sections', () => {
+  it('renders navigation links for all five gallery sections', async () => {
     mockMatchMedia(false);
-    renderStudio();
+    await renderStudio();
     // Nav links appear in the header AND as home-page cards — verify at
     // least one of each label exists.
     const expectedLabels = ['Tokens', 'Brand', 'Components', 'Voice', 'Surfaces'];
@@ -87,21 +99,21 @@ describe('App landing page', () => {
 /* ---- theme toggle ------------------------------------------------------- */
 
 describe('Theme toggle', () => {
-  it('starts in light mode when OS prefers light', () => {
+  it('starts in light mode when OS prefers light', async () => {
     mockMatchMedia(false);
-    renderStudio();
+    await renderStudio();
     expect(document.documentElement.classList.contains('dark')).toBe(false);
   });
 
-  it('starts in dark mode when OS prefers dark', () => {
+  it('starts in dark mode when OS prefers dark', async () => {
     mockMatchMedia(true);
-    renderStudio();
+    await renderStudio();
     expect(document.documentElement.classList.contains('dark')).toBe(true);
   });
 
-  it('toggles dark class on click', () => {
+  it('toggles dark class on click', async () => {
     mockMatchMedia(false);
-    renderStudio();
+    await renderStudio();
 
     const toggle = screen.getByLabelText(/Switch to dark theme/);
     expect(document.documentElement.classList.contains('dark')).toBe(false);
@@ -128,9 +140,9 @@ const GALLERY_SECTIONS = [
 describe('Gallery section rendering', () => {
   it.each(GALLERY_SECTIONS)(
     'renders $heading at $route',
-    ({ route, heading }) => {
+    async ({ route, heading }) => {
       mockMatchMedia(false);
-      renderStudio(route);
+      await renderStudio(route);
       // Heading text may appear both in the nav link and the page <h2> —
       // verify at least one instance exists.
       expect(screen.getAllByText(heading).length).toBeGreaterThanOrEqual(1);
@@ -163,27 +175,27 @@ function mockMatchMediaFull({
 /* ---- Chronos Light / Dark gallery acceptance (VI logo upgrade T7) ------- */
 
 describe('Chronos gallery acceptance', () => {
-  it('tokens page documents dual-role and renders blue-* swatches', () => {
+  it('tokens page documents dual-role and renders blue-* swatches', async () => {
     mockMatchMediaFull();
-    renderStudio('/tokens');
+    await renderStudio('/tokens');
     const swatch = screen.getByTestId('color-swatch-blue-700');
     const fill = swatch.querySelector('[style*="--color-blue-700"]');
     expect(fill).not.toBeNull();
     expect(swatch).toHaveTextContent('blue-700');
   });
 
-  it('components Button matrix includes tiny size (24px)', () => {
+  it('components Button matrix includes tiny size (24px)', async () => {
     mockMatchMediaFull();
-    renderStudio('/components');
+    await renderStudio('/components');
     const tiny = screen.getByTestId('button-primary-tiny');
     expect(tiny.className).toMatch(/\bh-6\b/);
     expect(tiny.className).toMatch(/\bpx-2\b/);
     expect(tiny.className).toMatch(/\btext-button-12\b/);
   });
 
-  it('brand page states Chronos identity without N-network lockup copy', () => {
+  it('brand page states Chronos identity without N-network lockup copy', async () => {
     mockMatchMedia(false);
-    renderStudio('/brand');
+    await renderStudio('/brand');
     expect(screen.getByTestId('brand-chronos-note')).toHaveTextContent(/compact bright mark/i);
     expect(screen.getByText(/no N-network lockup/i)).toBeInTheDocument();
   });
@@ -192,9 +204,9 @@ describe('Chronos gallery acceptance', () => {
 /* ---- Brand logo gallery lockup (V1.131 P1) ----------------------------- */
 
 describe('Brand logo gallery lockup', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMedia(false);
-    renderStudio('/brand');
+    await renderStudio('/brand');
   });
 
   it('primary plain mark card uses deep-blue panel and NexusLogo', () => {
@@ -247,7 +259,7 @@ describe('Brand logo gallery lockup', () => {
     }
   });
 
-  it('dark hero lockup wordmark renders larger than V1.130 caption scale', () => {
+  it('dark hero lockup wordmark renders larger than V1.130 caption scale', async () => {
     const hero = screen.getByTestId('dark-hero-lockup');
     const wordmark = within(hero)
       .getAllByRole('img')
@@ -257,7 +269,7 @@ describe('Brand logo gallery lockup', () => {
     expect(wordmark).toHaveAccessibleName('Nexus');
   });
 
-  it('documents the logo-text wordmark contract on Brand', () => {
+  it('documents the logo-text wordmark contract on Brand', async () => {
     const note = screen.getByTestId('brand-wordmark-contract');
     expect(note).toHaveTextContent(/logo-text\.svg/);
     expect(note).toHaveTextContent(/NexusTextLogo/);
@@ -266,9 +278,9 @@ describe('Brand logo gallery lockup', () => {
 });
 
 describe('Tokens page — typography gallery (display tier)', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMediaFull();
-    renderStudio('/tokens');
+    await renderStudio('/tokens');
   });
 
   it('renders the display tier rows with text-display-* size classes', () => {
@@ -298,12 +310,12 @@ describe('Tokens page — typography gallery (display tier)', () => {
 });
 
 describe('Tokens page — spacing / radius galleries', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMediaFull();
-    renderStudio('/tokens');
+    await renderStudio('/tokens');
   });
 
-  it('renders spacing rows driven by the token CSS variable', () => {
+  it('renders spacing rows driven by the token CSS variable', async () => {
     const row = screen.getByTestId('spacing-row-space-4');
     const bar = row.querySelector('[style*="--space-4"]');
     expect(bar).not.toBeNull();
@@ -313,7 +325,7 @@ describe('Tokens page — spacing / radius galleries', () => {
     expect(row24).toHaveTextContent('--space-24');
   });
 
-  it('renders radius boxes driven by the token CSS variable', () => {
+  it('renders radius boxes driven by the token CSS variable', async () => {
     const card = screen.getByTestId('radius-box-card');
     expect(card.querySelector('[style*="--radius-card"]')).not.toBeNull();
     expect(card).toHaveTextContent('--radius-card');
@@ -324,9 +336,9 @@ describe('Tokens page — spacing / radius galleries', () => {
 });
 
 describe('Tokens page — elevation gallery', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMediaFull();
-    renderStudio('/tokens');
+    await renderStudio('/tokens');
   });
 
   it('renders the full elevation-0…4 scale', () => {
@@ -335,7 +347,7 @@ describe('Tokens page — elevation gallery', () => {
     }
   });
 
-  it('documents the legacy alias chain onto the scale', () => {
+  it('documents the legacy alias chain onto the scale', async () => {
     const aliases = screen.getByTestId('elevation-aliases');
     expect(aliases).toHaveTextContent('shadow-card');
     expect(aliases).toHaveTextContent('→ elevation-1');
@@ -347,9 +359,9 @@ describe('Tokens page — elevation gallery', () => {
 });
 
 describe('Tokens page — motion gallery', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMediaFull();
-    renderStudio('/tokens');
+    await renderStudio('/tokens');
   });
 
   it('renders duration and easing token rows', () => {
@@ -392,11 +404,11 @@ describe('Tokens page — motion gallery', () => {
     }
   });
 
-  it('shows the honesty note when prefers-reduced-motion is active', () => {
+  it('shows the honesty note when prefers-reduced-motion is active', async () => {
     // Re-render with reduced-motion active.
     vi.restoreAllMocks();
     mockMatchMediaFull({ reducedMotion: true });
-    renderStudio('/tokens');
+    await renderStudio('/tokens');
     expect(screen.getByTestId('motion-reduced-note')).toBeInTheDocument();
   });
 
@@ -443,9 +455,9 @@ const SURFACES_SECTION_ROUTES = [
 ] as const;
 
 describe('Surfaces section menu — deep links', () => {
-  it('uses a persistent left sidebar (not horizontal pills)', () => {
+  it('uses a persistent left sidebar (not horizontal pills)', async () => {
     mockMatchMedia(false);
-    renderStudio('/surfaces');
+    await renderStudio('/surfaces');
 
     expect(screen.getByTestId('surfaces-section-sidebar')).toBeInTheDocument();
     const sectionNav = screen.getByTestId('surfaces-section-nav');
@@ -456,9 +468,9 @@ describe('Surfaces section menu — deep links', () => {
 
   it.each(SURFACES_SECTION_ROUTES)(
     'renders $testId at $route with section nav',
-    ({ route, testId, linkLabel }) => {
+    async ({ route, testId, linkLabel }) => {
       mockMatchMedia(false);
-      renderStudio(route);
+      await renderStudio(route);
 
       expect(screen.getByTestId(testId)).toBeInTheDocument();
       const sectionNav = screen.getByTestId('surfaces-section-nav');
@@ -476,9 +488,9 @@ describe('Surfaces section menu — deep links', () => {
     },
   );
 
-  it('index lists deep links to each Surfaces section', () => {
+  it('index lists deep links to each Surfaces section', async () => {
     mockMatchMedia(false);
-    renderStudio('/surfaces');
+    await renderStudio('/surfaces');
     const index = screen.getByTestId('surfaces-index');
     expect(within(index).getByRole('link', { name: /Setup/ })).toHaveAttribute(
       'href',
@@ -507,9 +519,9 @@ describe('Surfaces section menu — deep links', () => {
     ).toHaveAttribute('href', '/surfaces/selection-submenu');
   });
 
-  it('does not list Banner in the section sidebar (V1.128 P0 T2)', () => {
+  it('does not list Banner in the section sidebar (V1.128 P0 T2)', async () => {
     mockMatchMedia(false);
-    renderStudio('/surfaces');
+    await renderStudio('/surfaces');
 
     const sectionNav = screen.getByTestId('surfaces-section-nav');
     expect(
@@ -517,9 +529,9 @@ describe('Surfaces section menu — deep links', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('does not render a Banner gallery at /surfaces/banner (V1.128 P0 T2)', () => {
+  it('does not render a Banner gallery at /surfaces/banner (V1.128 P0 T2)', async () => {
     mockMatchMedia(false);
-    renderStudio('/surfaces/banner');
+    await renderStudio('/surfaces/banner');
 
     expect(screen.queryByTestId('surfaces-banner')).not.toBeInTheDocument();
     expect(
@@ -529,9 +541,9 @@ describe('Surfaces section menu — deep links', () => {
 });
 
 describe('Surfaces — import source badges (V1.128 P3 T1)', () => {
-  it('shows the two-tier legend on the Surfaces layout', () => {
+  it('shows the two-tier legend on the Surfaces layout', async () => {
     mockMatchMedia(false);
-    renderStudio('/surfaces/shell');
+    await renderStudio('/surfaces/shell');
 
     const legend = screen.getByTestId('surface-source-legend');
     expect(legend).toBeInTheDocument();
@@ -546,9 +558,9 @@ describe('Surfaces — import source badges (V1.128 P3 T1)', () => {
     ).toBeInTheDocument();
   });
 
-  it('labels Shell sections with extract badges', () => {
+  it('labels Shell sections with extract badges', async () => {
     mockMatchMedia(false);
-    renderStudio('/surfaces/shell');
+    await renderStudio('/surfaces/shell');
 
     const shell = screen.getByTestId('surfaces-shell');
     const badges = within(shell).getAllByTestId('surface-source-badge-extract');
@@ -561,9 +573,9 @@ describe('Surfaces — import source badges (V1.128 P3 T1)', () => {
     ).toBeGreaterThanOrEqual(1);
   });
 
-  it('labels Canvas NLE Timeline with the canvas extract badge', () => {
+  it('labels Canvas NLE Timeline with the canvas extract badge', async () => {
     mockMatchMedia(false);
-    renderStudio('/surfaces/canvas');
+    await renderStudio('/surfaces/canvas');
 
     const nle = screen.getByTestId('surfaces-nle-timeline');
     expect(
@@ -574,9 +586,9 @@ describe('Surfaces — import source badges (V1.128 P3 T1)', () => {
     ).toBeInTheDocument();
   });
 
-  it('labels Selection Submenu with the shell extract badge', () => {
+  it('labels Selection Submenu with the shell extract badge', async () => {
     mockMatchMedia(false);
-    renderStudio('/surfaces/selection-submenu');
+    await renderStudio('/surfaces/selection-submenu');
 
     const section = screen.getByTestId('surfaces-selection-submenu');
     expect(
@@ -591,9 +603,9 @@ describe('Surfaces — import source badges (V1.128 P3 T1)', () => {
 /* ---- surfaces page fixtures (T4) ---------------------------------------- */
 
 describe('Surfaces page — setup wizard chrome fixtures', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMedia(false);
-    renderStudio('/surfaces/setup');
+    await renderStudio('/surfaces/setup');
   });
 
   it('renders the wizard chrome section heading', () => {
@@ -727,9 +739,9 @@ describe('Surfaces page — setup wizard chrome fixtures', () => {
 });
 
 describe('Surfaces page — app shell fixture', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMedia(false);
-    renderStudio('/surfaces/shell');
+    await renderStudio('/surfaces/shell');
   });
 
   it('renders Creator and Orchestrator tabs', () => {
@@ -789,7 +801,7 @@ describe('Surfaces page — app shell fixture', () => {
     expect(within(appShell).getByTestId('shell-mode-switch')).toBeInTheDocument();
   });
 
-  it('renders footer mode switch in both light and dark app-shell fixtures', () => {
+  it('renders footer mode switch in both light and dark app-shell fixtures', async () => {
     expect(
       within(screen.getByTestId('app-shell-fixture-light')).getByTestId('shell-mode-switch'),
     ).toBeInTheDocument();
@@ -798,7 +810,7 @@ describe('Surfaces page — app shell fixture', () => {
     ).toBeInTheDocument();
   });
 
-  it('renders Creator Hub dual-pane IA fixtures (V1.134 P3 T2)', () => {
+  it('renders Creator Hub dual-pane IA fixtures (V1.134 P3 T2)', async () => {
     expect(screen.getByTestId('surfaces-creator-hub-dual-pane-ia')).toBeInTheDocument();
     expect(screen.getByTestId('creator-hub-dual-pane-ia-fixtures')).toBeInTheDocument();
     expect(screen.getByTestId('creator-hub-dual-pane-ia-fixture-world-tab')).toBeInTheDocument();
@@ -807,7 +819,7 @@ describe('Surfaces page — app shell fixture', () => {
     expect(screen.getByTestId('creator-hub-dual-pane-ia-variant-matrix')).toBeInTheDocument();
   });
 
-  it('renders Creator / Orchestrator 功能区 IA fixtures (V1.132 P3 T1)', () => {
+  it('renders Creator / Orchestrator 功能区 IA fixtures (V1.132 P3 T1)', async () => {
     expect(screen.getByTestId('surfaces-creator-orch-gongnengqu-ia')).toBeInTheDocument();
     expect(screen.getByTestId('creator-orch-gongnengqu-ia-fixtures')).toBeInTheDocument();
     const creatorHubFixture = screen.getByTestId('gongnengqu-ia-fixture-creator-hub');
@@ -817,7 +829,7 @@ describe('Surfaces page — app shell fixture', () => {
     expect(screen.queryByTestId('gongnengqu-ia-creator-hub-themes-light')).not.toBeInTheDocument();
   });
 
-  it('renders Creator shell Create vs Controller fixtures (V1.128 P2 T1)', () => {
+  it('renders Creator shell Create vs Controller fixtures (V1.128 P2 T1)', async () => {
     expect(screen.getByTestId('surfaces-creator-shell')).toBeInTheDocument();
     expect(screen.getByTestId('creator-shell-fixtures')).toBeInTheDocument();
     expect(screen.getByTestId('creator-shell-fixture-interactive')).toBeInTheDocument();
@@ -825,9 +837,9 @@ describe('Surfaces page — app shell fixture', () => {
 });
 
 describe('Surfaces page — daemon status strip', () => {
-  it('renders single-line status + soft badge + Restart (no description)', () => {
+  it('renders single-line status + soft badge + Restart (no description)', async () => {
     mockMatchMedia(false);
-    renderStudio('/surfaces/daemon');
+    await renderStudio('/surfaces/daemon');
 
     const strip = screen.getByTestId('daemon-status-strip');
     expect(within(strip).getByText('Daemon running')).toBeInTheDocument();
@@ -844,9 +856,9 @@ describe('Surfaces page — daemon status strip', () => {
 /* ---- surfaces page — launch splash fixtures (V1.106 P0 Task 3) --------- */
 
 describe('Surfaces page — launch splash fixtures', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMedia(false);
-    renderStudio('/surfaces/launch');
+    await renderStudio('/surfaces/launch');
   });
 
   it('renders the launch section heading', () => {
@@ -879,9 +891,9 @@ describe('Surfaces page — launch splash fixtures', () => {
 /* ---- surfaces page — selection submenu fixtures (V1.126 P0 T4) -------- */
 
 describe('Surfaces page — selection submenu fixtures', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMedia(false);
-    renderStudio('/surfaces/selection-submenu');
+    await renderStudio('/surfaces/selection-submenu');
   });
 
   it('renders the selection submenu section heading', () => {
@@ -960,7 +972,7 @@ describe('Surfaces page — selection submenu fixtures', () => {
     expect(within(agentFrame).getByRole('dialog')).toBeInTheDocument();
   });
 
-  it('renders dark variant with dark class wrapper', () => {
+  it('renders dark variant with dark class wrapper', async () => {
     const worldDark = screen.getByTestId('selection-submenu-world-dark');
     const darkWrapper = worldDark.querySelector('.dark') as HTMLElement | null;
     expect(darkWrapper).toBeInTheDocument();
@@ -971,9 +983,9 @@ describe('Surfaces page — selection submenu fixtures', () => {
 /* ---- components page — Toast matrix (V1.106 P0 Task 3) ---------------- */
 
 describe('Components page — Toast matrix', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMedia(false);
-    renderStudio('/components');
+    await renderStudio('/components');
   });
 
   it('renders the Toast section heading and fixture root', () => {
@@ -981,14 +993,14 @@ describe('Components page — Toast matrix', () => {
     expect(screen.getByTestId('toast-matrix')).toBeInTheDocument();
   });
 
-  it('renders all four toast variant testids', () => {
+  it('renders all four toast variant testids', async () => {
     expect(screen.getByTestId('toast-variant-success')).toBeInTheDocument();
     expect(screen.getByTestId('toast-variant-error')).toBeInTheDocument();
     expect(screen.getByTestId('toast-variant-warning')).toBeInTheDocument();
     expect(screen.getByTestId('toast-variant-info')).toBeInTheDocument();
   });
 
-  it('uses error role on the error variant and status on others', () => {
+  it('uses error role on the error variant and status on others', async () => {
     expect(screen.getByTestId('toast-variant-error')).toHaveAttribute('role', 'alert');
     expect(screen.getByTestId('toast-variant-success')).toHaveAttribute('role', 'status');
     expect(screen.getByTestId('toast-variant-warning')).toHaveAttribute('role', 'status');
@@ -999,9 +1011,9 @@ describe('Components page — Toast matrix', () => {
 /* ---- surfaces page — AgentPicker fixtures (V1.101 P0 Task 2) ------------ */
 
 describe('Surfaces page — AgentPicker fixtures', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMedia(false);
-    renderStudio('/surfaces/agent-picker');
+    await renderStudio('/surfaces/agent-picker');
   });
 
   it('renders the AgentPicker section heading', () => {
@@ -1048,14 +1060,14 @@ describe('Surfaces page — AgentPicker fixtures', () => {
     }
   });
 
-  it('marks selected fixture with aria-pressed', () => {
+  it('marks selected fixture with aria-pressed', async () => {
     const pressed = screen
       .getAllByTestId('agent-card-select-claude-native')
       .filter((el) => el.getAttribute('aria-pressed') === 'true');
     expect(pressed.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('renders the V1.108 Verify Agent static state matrix (FB-UI-008)', () => {
+  it('renders the V1.108 Verify Agent static state matrix (FB-UI-008)', async () => {
     // idle: Verify button visible and enabled (command non-empty).
     const idleBtns = screen.getAllByTestId('agent-picker-verify');
     expect(idleBtns.length).toBeGreaterThanOrEqual(1);
@@ -1081,10 +1093,10 @@ describe('Surfaces page — AgentPicker fixtures', () => {
 /* ---- surfaces page — Settings shell chrome (V1.103 P0 Task 2) ----------- */
 
 describe('Surfaces page — Settings shell chrome fixtures', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMedia(false);
     // Settings shell chrome remains discoverable under Shell (Studio-only).
-    renderStudio('/surfaces/shell');
+    await renderStudio('/surfaces/shell');
   });
 
   it('renders the Settings shell chrome section heading', () => {
@@ -1093,7 +1105,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).toBeInTheDocument();
   });
 
-  it('renders shell chrome without footer utility Settings link (V1.125 P2)', () => {
+  it('renders shell chrome without footer utility Settings link (V1.125 P2)', async () => {
     const settingsShell = screen.getByTestId('settings-shell-chrome');
     expect(settingsShell).toBeInTheDocument();
     expect(
@@ -1101,7 +1113,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('renders section nav with Agent, Workspace, Appearance, Modules, Advanced', () => {
+  it('renders section nav with Agent, Workspace, Appearance, Modules, Advanced', async () => {
     const hostRoot = screen.getByTestId('settings-host-fixtures');
     const sectionNav = within(hostRoot).getByTestId('settings-section-nav');
     expect(
@@ -1127,7 +1139,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('defaults to Agent section with preselected Agent body and locked shell helper', () => {
+  it('defaults to Agent section with preselected Agent body and locked shell helper', async () => {
     const hostRoot = screen.getByTestId('settings-host-fixtures');
     const shellPages = within(hostRoot).getAllByTestId(
       'settings-shell-page-chrome',
@@ -1154,7 +1166,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('switches to Advanced section chrome when section nav is clicked', () => {
+  it('switches to Advanced section chrome when section nav is clicked', async () => {
     const hostRoot = screen.getByTestId('settings-host-fixtures');
     const outlet = within(hostRoot).getByTestId('settings-shell-outlet');
     const advancedTab = within(hostRoot).getByTestId(
@@ -1182,7 +1194,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('renders static empty frames for registry section bodies', () => {
+  it('renders static empty frames for registry section bodies', async () => {
     const framesRoot = screen.getByTestId(
       'settings-host-fixture-section-frames',
     );
@@ -1206,7 +1218,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).toBeInTheDocument();
   });
 
-  it('renders Agent section fixture with locked helper and preselected Codex (instant-apply)', () => {
+  it('renders Agent section fixture with locked helper and preselected Codex (instant-apply)', async () => {
     const agentRoot = screen.getByTestId(
       'settings-host-fixture-agent-section',
     );
@@ -1231,7 +1243,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('renders Connection section fixture with locked helper and form chrome', () => {
+  it('renders Connection section fixture with locked helper and form chrome', async () => {
     const connectionRoot = screen.getByTestId(
       'settings-host-fixture-connection-section',
     );
@@ -1276,7 +1288,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).toHaveTextContent('Use Local Daemon');
   });
 
-  it('renders Setup section fixture with locked helper and Re-run Setup CTA', () => {
+  it('renders Setup section fixture with locked helper and Re-run Setup CTA', async () => {
     const setupRoot = screen.getByTestId(
       'settings-host-fixture-setup-section',
     );
@@ -1292,7 +1304,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).toHaveTextContent('Re-run');
   });
 
-  it('opens Re-run Setup confirm dialog with locked copy and Title Case CTAs', () => {
+  it('opens Re-run Setup confirm dialog with locked copy and Title Case CTAs', async () => {
     const setupRoot = screen.getByTestId(
       'settings-host-fixture-setup-section',
     );
@@ -1314,7 +1326,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     fireEvent.click(within(dialog).getByTestId('settings-rerun-setup-cancel'));
   });
 
-  it('renders Setup confirm dialog fixture open for visual acceptance', () => {
+  it('renders Setup confirm dialog fixture open for visual acceptance', async () => {
     const confirmRoot = screen.getByTestId(
       'settings-host-fixture-setup-confirm',
     );
@@ -1331,7 +1343,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     expect(within(chrome).getByText('Re-run')).toBeInTheDocument();
   });
 
-  it('renders Setup browser-only fixture with disabled CTA and honest helper', () => {
+  it('renders Setup browser-only fixture with disabled CTA and honest helper', async () => {
     const browserRoot = screen.getByTestId(
       'settings-host-fixture-setup-browser',
     );
@@ -1350,7 +1362,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     );
   });
 
-  it('switches to Workspace section chrome when section nav is clicked', () => {
+  it('switches to Workspace section chrome when section nav is clicked', async () => {
     const hostRoot = screen.getByTestId('settings-host-fixtures');
     const outlet = within(hostRoot).getByTestId('settings-shell-outlet');
     const workspaceTab = within(hostRoot).getByTestId(
@@ -1369,7 +1381,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('renders Workspace section fixture with locked helper, path, and Change Folder CTA', () => {
+  it('renders Workspace section fixture with locked helper, path, and Change Folder CTA', async () => {
     const workspaceRoot = screen.getByTestId(
       'settings-host-fixture-workspace-section',
     );
@@ -1388,7 +1400,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     expect(cta).not.toBeDisabled();
   });
 
-  it('renders Workspace post-persist fixture with honesty copy', () => {
+  it('renders Workspace post-persist fixture with honesty copy', async () => {
     const savedRoot = screen.getByTestId('settings-host-fixture-workspace-saved');
     const section = within(savedRoot).getByTestId('settings-workspace-section');
     expect(section).toHaveAttribute('data-desktop', 'true');
@@ -1402,7 +1414,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).toBeInTheDocument();
   });
 
-  it('renders Workspace browser-only fixture with disabled CTA and honest helper', () => {
+  it('renders Workspace browser-only fixture with disabled CTA and honest helper', async () => {
     const browserRoot = screen.getByTestId(
       'settings-host-fixture-workspace-browser',
     );
@@ -1421,7 +1433,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     );
   });
 
-  it('retains AgentPicker thin-host reference for P1', () => {
+  it('retains AgentPicker thin-host reference for P1', async () => {
     const regions = screen.getAllByTestId('settings-host-picker-region');
     expect(regions.length).toBeGreaterThanOrEqual(1);
     const cards = screen.getAllByTestId('agent-card-claude-native');
@@ -1435,9 +1447,9 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
 /* ---- components page — form-field composition fixture (P2 T3) ----------- */
 
 describe('Components page — form-field composition fixture', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMedia(false);
-    renderStudio('/components');
+    await renderStudio('/components');
   });
 
   it('renders the form-field composition section heading', () => {
@@ -1479,7 +1491,7 @@ describe('Components page — form-field composition fixture', () => {
     expect(error).toHaveAttribute('role', 'alert');
   });
 
-  it('renders required field indicator (*)', () => {
+  it('renders required field indicator (*)', async () => {
     // Scoped to the email label — other gallery sections (e.g. Run Studio)
     // also render required markers.
     const emailLabel = document.querySelector('label[for="ff-email"]');
@@ -1490,11 +1502,11 @@ describe('Components page — form-field composition fixture', () => {
     expect(emailInput).toBeRequired();
   });
 
-  it('renders optional field indicator', () => {
+  it('renders optional field indicator', async () => {
     expect(screen.getByText('(optional)')).toBeInTheDocument();
   });
 
-  it('renders disabled textarea', () => {
+  it('renders disabled textarea', async () => {
     const bio = screen.getByPlaceholderText('Tell us about yourself…');
     expect(bio).toBeDisabled();
   });
@@ -1503,9 +1515,9 @@ describe('Components page — form-field composition fixture', () => {
 /* ---- components page — Badge soft/solid matrix (V1.102 P0 Task 3) -------- */
 
 describe('Components page — Badge soft/solid matrix', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMedia(false);
-    renderStudio('/components');
+    await renderStudio('/components');
   });
 
   it('renders Soft and Solid matrix headings under Badge', () => {
@@ -1528,9 +1540,9 @@ describe('Components page — Badge soft/solid matrix', () => {
 });
 
 describe('Components page — Domain badge matrices', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMedia(false);
-    renderStudio('/components');
+    await renderStudio('/components');
   });
 
   it('renders the Domain Badges section heading and fixture root', () => {
@@ -1604,9 +1616,9 @@ describe('Components page — Domain badge matrices', () => {
 /* ---- components page — Select fixtures (V1.101 P2 Task 2) --------------- */
 
 describe('Components page — Select fixtures', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMedia(false);
-    renderStudio('/components');
+    await renderStudio('/components');
   });
 
   it('renders the Select section and fixture root', () => {
@@ -1614,7 +1626,7 @@ describe('Components page — Select fixtures', () => {
     expect(screen.getByTestId('select-fixtures')).toBeInTheDocument();
   });
 
-  it('renders closed select with label association', () => {
+  it('renders closed select with label association', async () => {
     const select = screen.getByTestId('select-fixture-closed');
     expect(select.tagName).toBe('SELECT');
     expect(select).toHaveAttribute('id', 'studio-select-closed');
@@ -1626,12 +1638,12 @@ describe('Components page — Select fixtures', () => {
     expect(label).toHaveAttribute('for', 'studio-select-closed');
   });
 
-  it('renders disabled select', () => {
+  it('renders disabled select', async () => {
     const select = screen.getByTestId('select-fixture-disabled');
     expect(select).toBeDisabled();
   });
 
-  it('renders invalid select with aria-invalid and app-owned error', () => {
+  it('renders invalid select with aria-invalid and app-owned error', async () => {
     const select = screen.getByTestId('select-fixture-invalid');
     expect(select).toHaveAttribute('aria-invalid', 'true');
     expect(select).toHaveAttribute('aria-describedby', 'studio-select-invalid-helper');
@@ -1643,13 +1655,13 @@ describe('Components page — Select fixtures', () => {
     expect(error).toHaveTextContent('Choose a valid executor.');
   });
 
-  it('documents focus-visible class path on the focus fixture', () => {
+  it('documents focus-visible class path on the focus fixture', async () => {
     const select = screen.getByTestId('select-fixture-focus');
     expect(select.className).toMatch(/focus-visible:border-blue-700/);
     expect(select).toHaveAttribute('id', 'studio-select-focus');
   });
 
-  it('provides a manual open-acceptance fixture without package open API', () => {
+  it('provides a manual open-acceptance fixture without package open API', async () => {
     const select = screen.getByTestId('select-fixture-open-manual');
     expect(select.tagName).toBe('SELECT');
     expect(select).not.toHaveAttribute('aria-expanded');
@@ -1660,9 +1672,9 @@ describe('Components page — Select fixtures', () => {
 /* ---- surfaces page — Canvas shell + context menu chrome (V1.108 P1 T4) -- */
 
 describe('Surfaces page — Canvas surfaces fixtures', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMedia(false);
-    renderStudio('/surfaces/canvas');
+    await renderStudio('/surfaces/canvas');
   });
 
   it('renders the Canvas section heading', () => {
@@ -1693,7 +1705,7 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
     ).toBeInTheDocument();
   });
 
-  it('renders outline node samples aligned with P0 (Volume / Chapter / Timeline)', () => {
+  it('renders outline node samples aligned with P0 (Volume / Chapter / Timeline)', async () => {
     const matrix = screen.getByTestId('canvas-node-matrix');
     // Volume node
     expect(within(matrix).getByText('Volume II — Journeys')).toBeInTheDocument();
@@ -1708,7 +1720,7 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
     expect(within(matrix).getByText('Unattached event')).toBeInTheDocument();
   });
 
-  it('marks the selected node with the canvas-node-border-selected class', () => {
+  it('marks the selected node with the canvas-node-border-selected class', async () => {
     const matrix = screen.getByTestId('canvas-node-matrix');
     // The finalized-and-selected chapter node title is unique in the matrix.
     const selectedTitle = within(matrix).getByText('Chapter 6 — Descent');
@@ -1717,7 +1729,7 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
     expect(nodeShell!.className).toContain('border-canvas-node-border-selected');
   });
 
-  it('renders context menu chrome matrices with role=menu and Title Case items', () => {
+  it('renders context menu chrome matrices with role=menu and Title Case items', async () => {
     const matrix = screen.getByTestId('canvas-context-menu-matrix');
     const menus = within(matrix).getAllByRole('menu');
     expect(menus.length).toBeGreaterThanOrEqual(3);
@@ -1736,13 +1748,13 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
     expect(within(matrix).getByText('Add Chapter')).toBeInTheDocument();
   });
 
-  it('marks each context menu item with role=menuitem', () => {
+  it('marks each context menu item with role=menuitem', async () => {
     const matrix = screen.getByTestId('canvas-context-menu-matrix');
     const items = within(matrix).getAllByRole('menuitem');
     expect(items.length).toBeGreaterThanOrEqual(4);
   });
 
-  it('does not render light/dark as separate DOM trees (theme toggle drives both)', () => {
+  it('does not render light/dark as separate DOM trees (theme toggle drives both)', async () => {
     // The fixture renders once; the global ThemeToggle applies .dark to <html>.
     // There should be exactly one canvas shell chrome instance.
     expect(screen.getAllByTestId('canvas-shell-chrome')).toHaveLength(1);
@@ -1750,7 +1762,7 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
 
   /* ---- Strategy surface chrome (V1.111 P2 T1) --------------------- */
 
-  it('renders the Strategy surface chrome fixture with shell + inspector + validation', () => {
+  it('renders the Strategy surface chrome fixture with shell + inspector + validation', async () => {
     const shell = screen.getByTestId('strategy-shell-chrome');
     expect(shell).toBeInTheDocument();
 
@@ -1765,7 +1777,7 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
     ).toBeInTheDocument();
   });
 
-  it('mirrors strategy node kinds (state / join / terminal) with status + kind tags', () => {
+  it('mirrors strategy node kinds (state / join / terminal) with status + kind tags', async () => {
     const shell = screen.getByTestId('strategy-shell-chrome');
 
     // "Drafting" appears both as the state-node header (span[title]) and as the
@@ -1791,7 +1803,7 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
     expect(within(shell).getByText('End')).toBeInTheDocument();
   });
 
-  it('renders labeled transition edges as static connectors (canvas-strategy-accent)', () => {
+  it('renders labeled transition edges as static connectors (canvas-strategy-accent)', async () => {
     const shell = screen.getByTestId('strategy-shell-chrome');
     const edges = within(shell).getAllByTestId('strategy-edge-sample');
     expect(edges.length).toBeGreaterThanOrEqual(2);
@@ -1803,7 +1815,7 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
 
   /* ---- World KB surface chrome (V1.111 P2 T2) ---------------------- */
 
-  it('renders the World KB surface chrome fixture with shell + inspector', () => {
+  it('renders the World KB surface chrome fixture with shell + inspector', async () => {
     const shell = screen.getByTestId('worldkb-shell-chrome');
     expect(shell).toBeInTheDocument();
 
@@ -1813,7 +1825,7 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
     ).toBeInTheDocument();
   });
 
-  it('mirrors entity node cards with lifecycle badges for all four states', () => {
+  it('mirrors entity node cards with lifecycle badges for all four states', async () => {
     const shell = screen.getByTestId('worldkb-shell-chrome');
 
     // Confirmed (selected) entity — mirrors WorldKbEntityNode selected paint.
@@ -1833,7 +1845,7 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
     expect(within(shell).getAllByText('Rejected').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('mirrors the computable chip on computable BlockType entities', () => {
+  it('mirrors the computable chip on computable BlockType entities', async () => {
     const shell = screen.getByTestId('worldkb-shell-chrome');
     // "Act" is a computable block kind → Computable chip renders.
     expect(within(shell).getAllByText('Computable').length).toBeGreaterThanOrEqual(1);
@@ -1841,7 +1853,7 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
     expect(within(shell).getAllByText('Act').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('mirrors source-anchor provenance nodes + read-only provenance edges', () => {
+  it('mirrors source-anchor provenance nodes + read-only provenance edges', async () => {
     const shell = screen.getByTestId('worldkb-shell-chrome');
 
     // Source-anchor node — mirrors WorldKbSourceAnchorNode (sourceType + reference).
@@ -1853,7 +1865,7 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
     ).toBeGreaterThanOrEqual(1);
   });
 
-  it('mirrors typed relationship edges with confidence bands + suggested-dashed', () => {
+  it('mirrors typed relationship edges with confidence bands + suggested-dashed', async () => {
     const shell = screen.getByTestId('worldkb-shell-chrome');
     const edges = within(shell).getAllByTestId('worldkb-relationship-edge-sample');
     expect(edges.length).toBeGreaterThanOrEqual(3);
@@ -1869,7 +1881,7 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
     expect(within(shell).getAllByText('Low').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('mirrors the relationship inspector with grounded-badge and confidence', () => {
+  it('mirrors the relationship inspector with grounded-badge and confidence', async () => {
     const inspector = screen.getByTestId('worldkb-inspector-chrome');
     expect(inspector).toBeInTheDocument();
     // Grounded badge mirrors the relationship-grounded-badge token.
@@ -1882,17 +1894,17 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
 /* ---- components page — v0.4 states matrix (V1.121 P1 T4) --------------- */
 
 describe('Components page — Card v0.4 matrix (interactive + title voice)', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMedia(false);
-    renderStudio('/components');
+    await renderStudio('/components');
   });
 
-  it('renders rest and interactive cards as real components', () => {
+  it('renders rest and interactive cards as real components', async () => {
     expect(screen.getByTestId('card-rest')).toBeInTheDocument();
     expect(screen.getByTestId('card-interactive')).toBeInTheDocument();
   });
 
-  it('interactive card carries the v0.4 hover-lift recipe classes', () => {
+  it('interactive card carries the v0.4 hover-lift recipe classes', async () => {
     const card = screen.getByTestId('card-interactive');
     expect(card.className).toContain('hover:shadow-elevation-2');
     expect(card.className).toContain('motion-safe:hover:-translate-y-px');
@@ -1900,20 +1912,20 @@ describe('Components page — Card v0.4 matrix (interactive + title voice)', () 
     expect(card.className).toContain('motion-reduce:transition-none');
   });
 
-  it('rest card keeps the static elevation-1 treatment without the recipe', () => {
+  it('rest card keeps the static elevation-1 treatment without the recipe', async () => {
     const card = screen.getByTestId('card-rest');
     expect(card.className).toContain('shadow-card');
     expect(card.className).not.toContain('hover:shadow-elevation-2');
   });
 
-  it('CardTitle voice="content" swaps to the display tier', () => {
+  it('CardTitle voice="content" swaps to the display tier', async () => {
     const title = screen.getByTestId('card-title-content');
     expect(title.className).toContain('font-display');
     expect(title.className).toContain('text-display-20');
     expect(title.className).toContain('tracking-tight');
   });
 
-  it('default CardTitle keeps the interface sans treatment', () => {
+  it('default CardTitle keeps the interface sans treatment', async () => {
     const title = screen.getByTestId('card-title-interface');
     expect(title.className).toContain('text-heading-16');
     expect(title.className).toContain('font-heading');
@@ -1922,9 +1934,9 @@ describe('Components page — Card v0.4 matrix (interactive + title voice)', () 
 });
 
 describe('Components page — States v0.4 (error surface + display empty headline)', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMedia(false);
-    renderStudio('/components');
+    await renderStudio('/components');
   });
 
   it('renders Spinner and LoadingState as the loading cells', () => {
@@ -1962,9 +1974,9 @@ describe('Components page — States v0.4 (error surface + display empty headlin
 });
 
 describe('Components page — Dialog scrim convergence (V1.121)', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMedia(false);
-    renderStudio('/components');
+    await renderStudio('/components');
   });
 
   it('opens with a bg-scrim overlay and an elevation-4 panel', () => {
@@ -1978,9 +1990,9 @@ describe('Components page — Dialog scrim convergence (V1.121)', () => {
 });
 
 describe('Components page — display voice confinement (AC-P1-5)', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMedia(false);
-    renderStudio('/components');
+    await renderStudio('/components');
   });
 
   it('confines the display voice to content-voice opt-ins', () => {
@@ -2003,9 +2015,9 @@ describe('Components page — display voice confinement (AC-P1-5)', () => {
 });
 
 describe('Components page — theme toggle coverage (light/dark)', () => {
-  it('renders a single DOM tree driven by the .dark class toggle', () => {
+  it('renders a single DOM tree driven by the .dark class toggle', async () => {
     mockMatchMedia(false);
-    renderStudio('/components');
+    await renderStudio('/components');
 
     // Light: the states matrix renders once (no per-theme DOM duplication).
     expect(screen.getAllByTestId('card-interactive')).toHaveLength(1);
@@ -2023,9 +2035,9 @@ describe('Components page — theme toggle coverage (light/dark)', () => {
 /* ---- V1.121 P3 T4 — canvas surfaces v0.4 fixture updates ----------------- */
 
 describe('Surfaces page — Canvas surfaces v0.4 fixtures', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMedia(false);
-    renderStudio('/surfaces/canvas');
+    await renderStudio('/surfaces/canvas');
   });
 
   it('paints the outline accent spine on outline surface nodes (amber-700)', () => {
@@ -2134,9 +2146,9 @@ describe('Surfaces page — Canvas surfaces v0.4 fixtures', () => {
 /* ---- V1.121 P3 T4 — Tokens page canvas section -------------------------- */
 
 describe('Tokens page — Canvas token gallery (V1.121 P3)', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMediaFull();
-    renderStudio('/tokens');
+    await renderStudio('/tokens');
   });
 
   it('renders the Canvas section heading + sub-nav link', () => {
@@ -2314,9 +2326,9 @@ describe('Tokens page — Canvas token gallery (V1.121 P3)', () => {
 /* ---- V1.121 P3 T4 — parity sweep (light/dark DOM assertions) ------------ */
 
 describe('V1.121 P3 T4 — parity sweep across all surfaces', () => {
-  it('renders all three canvas surfaces + canvas token gallery in a single tree', () => {
+  it('renders all three canvas surfaces + canvas token gallery in a single tree', async () => {
     mockMatchMedia(false);
-    renderStudio('/surfaces/canvas');
+    await renderStudio('/surfaces/canvas');
 
     // Three surface chrome fixtures render in the same DOM tree.
     expect(screen.getByTestId('canvas-shell-chrome')).toBeInTheDocument();
@@ -2327,9 +2339,9 @@ describe('V1.121 P3 T4 — parity sweep across all surfaces', () => {
     expect(screen.getAllByTestId('canvas-shell-chrome')).toHaveLength(1);
   });
 
-  it('keeps a single DOM tree across light + dark for canvas surfaces', () => {
+  it('keeps a single DOM tree across light + dark for canvas surfaces', async () => {
     mockMatchMedia(false);
-    renderStudio('/surfaces/canvas');
+    await renderStudio('/surfaces/canvas');
 
     expect(document.documentElement.classList.contains('dark')).toBe(false);
     expect(screen.getAllByTestId('canvas-shell-chrome')).toHaveLength(1);
