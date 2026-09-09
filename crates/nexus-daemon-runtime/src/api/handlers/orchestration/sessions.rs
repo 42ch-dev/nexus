@@ -705,4 +705,398 @@ mod tests {
             body.session.failure_reason
         );
     }
+
+    // ------------------------------------------------------------------
+    // T2 fix round 3 — Finding 4: public Interrupted projection is
+    // exercised from the failed-cancel path
+    // ------------------------------------------------------------------
+
+    /// Scripted executor for the public-surface regression: the first
+    /// `finalize_run` fails (cleanup unconfirmed), later calls succeed.
+    struct ScriptedFailFirstExecutor {
+        calls: std::sync::atomic::AtomicU64,
+    }
+
+    impl ScriptedFailFirstExecutor {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                calls: std::sync::atomic::AtomicU64::new(0),
+            })
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl nexus_orchestration::capability::PromptExecutor for ScriptedFailFirstExecutor {
+        async fn execute(
+            &self,
+            _request: nexus_orchestration::capability::PromptRequest,
+        ) -> Result<nexus_orchestration::capability::PromptResult, nexus_orchestration::capability::CapabilityError>
+        {
+            unreachable!("not used by the public cancel regression")
+        }
+
+        async fn finalize_run(
+            &self,
+            _run_id: &str,
+        ) -> Result<(), nexus_orchestration::capability::CapabilityError> {
+            let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if call == 0 {
+                Err(nexus_orchestration::capability::CapabilityError::Internal(
+                    "shutdown timeout".to_string(),
+                ))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    /// Store wrapper that makes EVERY `Interrupted` commit fail its revision
+    /// CAS (bounded-exhaustion): the engine's retry bound is exhausted and
+    /// the public result must be a conflict/error — never an apparent
+    /// successful cancellation.
+    struct InterruptedWriteExhaustingStore {
+        inner: Arc<dyn WorkflowStateStore>,
+        storage: Arc<dyn graph_flow::SessionStorage>,
+    }
+
+    impl InterruptedWriteExhaustingStore {
+        fn new(
+            inner: Arc<dyn WorkflowStateStore>,
+            storage: Arc<dyn graph_flow::SessionStorage>,
+        ) -> Self {
+            Self { inner, storage }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl WorkflowStateStore for InterruptedWriteExhaustingStore {
+        async fn load_run(
+            &self,
+            session_id: &nexus_orchestration::engine::SessionId,
+        ) -> Result<Option<nexus_orchestration::run_state::RunRecord>, nexus_orchestration::engine::EngineError>
+        {
+            self.inner.load_run(session_id).await
+        }
+
+        async fn start_run(
+            &self,
+            session_id: &nexus_orchestration::engine::SessionId,
+            descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<nexus_orchestration::run_state::RunRecord, nexus_orchestration::engine::EngineError>
+        {
+            self.inner
+                .start_run(session_id, descriptor, checkpoint, next_state)
+                .await
+        }
+
+        async fn admit_schedule_run(
+            &self,
+            schedule_id: &str,
+            session_id: &nexus_orchestration::engine::SessionId,
+            descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+            core_context_version: u32,
+            expected_core_context_version: u32,
+            admission_gate: Option<&nexus_orchestration::run_state::ScheduleAdmissionGate>,
+        ) -> Result<nexus_orchestration::run_state::RunRecord, nexus_orchestration::engine::EngineError>
+        {
+            self.inner
+                .admit_schedule_run(
+                    schedule_id,
+                    session_id,
+                    descriptor,
+                    checkpoint,
+                    next_state,
+                    core_context_version,
+                    expected_core_context_version,
+                    admission_gate,
+                )
+                .await
+        }
+
+        async fn commit_transition(
+            &self,
+            session_id: &nexus_orchestration::engine::SessionId,
+            expected_revision: u64,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_status: nexus_orchestration::engine::SessionStatus,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<nexus_orchestration::run_state::RunRecord, nexus_orchestration::engine::EngineError>
+        {
+            if next_status == nexus_orchestration::engine::SessionStatus::Interrupted {
+                // The competing transition wins the CAS first, every time:
+                // the engine's bounded retry exhausts and the public result
+                // must be a conflict/error, never successful cancellation.
+                let record = self
+                    .inner
+                    .load_run(session_id)
+                    .await?
+                    .expect("run exists at interrupted exhaustion gate");
+                let root = self
+                    .storage
+                    .get(&session_id.0)
+                    .await
+                    .expect("root session at interrupted exhaustion gate")
+                    .expect("root exists at interrupted exhaustion gate");
+                let mut competing_state = record.state.unwrap_or_default();
+                competing_state.cancel_requested = true;
+                self.inner
+                    .commit_transition(
+                        session_id,
+                        record.state_revision,
+                        nexus_orchestration::run_state::RunCheckpoint {
+                            root: &root,
+                            children: &[],
+                        },
+                        record.status.clone(),
+                        &competing_state,
+                    )
+                    .await
+                    .expect("competing transition wins the CAS");
+            }
+            self.inner
+                .commit_transition(session_id, expected_revision, checkpoint, next_status, next_state)
+                .await
+        }
+
+        async fn settle_cancelled(
+            &self,
+            session_id: &nexus_orchestration::engine::SessionId,
+            expected_revision: u64,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            next_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<nexus_orchestration::run_state::RunRecord, nexus_orchestration::engine::EngineError>
+        {
+            self.inner
+                .settle_cancelled(session_id, expected_revision, checkpoint, next_state)
+                .await
+        }
+
+        async fn restore_pre_step(
+            &self,
+            session_id: &nexus_orchestration::engine::SessionId,
+            expected_revision: u64,
+            pre_step: &graph_flow::Session,
+        ) -> Result<(), nexus_orchestration::engine::EngineError> {
+            self.inner
+                .restore_pre_step(session_id, expected_revision, pre_step)
+                .await
+        }
+
+        async fn mark_step_in_flight(
+            &self,
+            session_id: &nexus_orchestration::engine::SessionId,
+            expected_revision: u64,
+            checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
+            step_state: &nexus_orchestration::run_state::RunStateV1,
+        ) -> Result<(), nexus_orchestration::engine::EngineError> {
+            self.inner
+                .mark_step_in_flight(session_id, expected_revision, checkpoint, step_state)
+                .await
+        }
+
+        async fn persist_prompt_attempt(
+            &self,
+            session_id: &nexus_orchestration::engine::SessionId,
+            expected_revision: u64,
+            expected_step: Option<&str>,
+            expected_attempt_id: Option<&str>,
+            attempt: &nexus_orchestration::run_state::PromptAttempt,
+        ) -> Result<(), nexus_orchestration::engine::EngineError> {
+            self.inner
+                .persist_prompt_attempt(
+                    session_id,
+                    expected_revision,
+                    expected_step,
+                    expected_attempt_id,
+                    attempt,
+                )
+                .await
+        }
+
+        async fn clear_prompt_attempt(
+            &self,
+            session_id: &nexus_orchestration::engine::SessionId,
+            expected_revision: u64,
+            expected_step: Option<&str>,
+            attempt_id: &str,
+        ) -> Result<(), nexus_orchestration::engine::EngineError> {
+            self.inner
+                .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
+                .await
+        }
+
+        async fn load_children(
+            &self,
+            parent_session_id: &nexus_orchestration::engine::SessionId,
+        ) -> Result<Vec<nexus_orchestration::run_state::RunRecord>, nexus_orchestration::engine::EngineError>
+        {
+            self.inner.load_children(parent_session_id).await
+        }
+    }
+
+    /// Production handler-level regression (Finding 4, round 3): a real v1
+    /// session, one injected cleanup failure, the first Cancel through the
+    /// production `signal_session` handler, then an immediate `get_session`
+    /// — the public projection must be `interrupted` with the actionable
+    /// failure reason, never a stale in-memory `running`.
+    #[tokio::test]
+    async fn get_session_projects_interrupted_after_first_failed_cancel() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let pool = state.pool().expect("test pool").clone();
+        let sqlite = Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
+        let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn graph_flow::SessionStorage> = sqlite.clone();
+
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        // Inject one cleanup failure: the first finalize_run fails.
+        let executor = ScriptedFailFirstExecutor::new();
+        let session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        engine.set_prompt_executor(executor.clone(), session_cancels.clone());
+        state.set_engine(Arc::new(engine));
+
+        // Start a real v1 session.
+        let engine = state.engine().expect("engine set");
+        let graph = manual_wait_graph("public-failed-cancel");
+        let session_id = engine
+            .start_session_with_graph("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // First Cancel through the production handler: the cleanup fails →
+        // the handler surfaces the engine error (the durable row is
+        // `interrupted` with the actionable reason).
+        let err = signal_session(
+            State(state.clone()),
+            Path(session_id.0.clone()),
+            Json(SignalSessionRequest {
+                signal: "cancel".to_string(),
+                wait_id: None,
+            }),
+        )
+        .await
+        .expect_err("first cancel must surface the unconfirmed cleanup");
+        assert!(
+            matches!(err, NexusApiError::Internal { .. }),
+            "the failed cancel surfaces the engine error, got {err:?}"
+        );
+
+        // Immediately perform the public GET: the projection must be
+        // `interrupted` with the actionable failure reason.
+        let Json(body) = get_session(State(state), Path(session_id.0.clone()))
+            .await
+            .expect("get_session should succeed");
+        assert_eq!(
+            body.session.status, "interrupted",
+            "the public projection must expose the durable interrupted status"
+        );
+        assert!(
+            body.session
+                .failure_reason
+                .as_deref()
+                .is_some_and(|r| r.contains("cancel cleanup unconfirmed")),
+            "the public projection must carry the actionable cleanup reason, got: {:?}",
+            body.session.failure_reason
+        );
+    }
+
+    /// Bounded interruption-write exhaustion proof (Finding 4, round 3):
+    /// when the `Interrupted` write can never win its revision CAS, the
+    /// engine's bounded retry exhausts and the public result is a conflict
+    /// (409) — never an apparent successful cancellation.
+    #[tokio::test]
+    async fn interrupted_write_exhaustion_is_conflict_never_successful_cancel() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let pool = state.pool().expect("test pool").clone();
+        let sqlite = Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
+        let real_store: Arc<dyn WorkflowStateStore> = sqlite.clone();
+        let storage: Arc<dyn graph_flow::SessionStorage> = sqlite.clone();
+        let store: Arc<dyn WorkflowStateStore> = Arc::new(InterruptedWriteExhaustingStore::new(
+            real_store.clone(),
+            storage.clone(),
+        ));
+
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        // The first finalize fails (cleanup unconfirmed) — the Interrupted
+        // write then exhausts its bounded retry.
+        let executor = ScriptedFailFirstExecutor::new();
+        let session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        engine.set_prompt_executor(executor.clone(), session_cancels.clone());
+        state.set_engine(Arc::new(engine));
+
+        // Start a real v1 session.
+        let engine = state.engine().expect("engine set");
+        let graph = manual_wait_graph("public-exhaustion");
+        let session_id = engine
+            .start_session_with_graph("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // First Cancel: the Interrupted write exhausts its retry bound →
+        // the handler maps the revision loss to a 409 conflict — never a
+        // successful cancellation.
+        let err = signal_session(
+            State(state.clone()),
+            Path(session_id.0.clone()),
+            Json(SignalSessionRequest {
+                signal: "cancel".to_string(),
+                wait_id: None,
+            }),
+        )
+        .await
+        .expect_err("the exhausted interruption write must surface a conflict");
+        assert!(
+            matches!(err, NexusApiError::ConflictCoded { .. }),
+            "the exhausted interruption write is a 409 conflict, got {err:?}"
+        );
+
+        // The durable row is NOT cancelled — the run cannot appear
+        // successfully cancelled.
+        let record = real_store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_ne!(
+            record.status,
+            nexus_orchestration::engine::SessionStatus::Cancelled,
+            "the run must never appear successfully cancelled"
+        );
+        assert!(
+            record
+                .state
+                .as_ref()
+                .is_some_and(|s| s.cancel_requested),
+            "the durable cancel intent is present (the run stays actionable)"
+        );
+    }
 }

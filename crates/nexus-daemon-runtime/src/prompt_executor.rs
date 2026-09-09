@@ -459,6 +459,28 @@ impl HostPromptExecutor {
             }
         }
     }
+
+    /// Test-only: seed a cached Host session for a `(run, role)` key so the
+    /// real `finalize_run` path can be exercised against a scripted Host
+    /// facade without driving a full prompt operation (Finding 3, round 3).
+    #[cfg(test)]
+    pub(crate) async fn seed_cached_session_for_test(
+        &self,
+        run_id: &str,
+        role: &str,
+        session_id: nexus_agent_host::HostSessionId,
+    ) {
+        self.sessions.write().await.insert(
+            HostSessionKey {
+                run_id: run_id.to_string(),
+                role: role.to_string(),
+            },
+            CachedHostSession {
+                id: session_id,
+                process_identity: None,
+            },
+        );
+    }
 }
 
 #[async_trait]
@@ -888,5 +910,498 @@ impl PromptExecutor for HostPromptExecutor {
             )));
         }
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// T2 fix round 3 — Finding 3: real HostPromptExecutor cancellation/reap
+// proof with a production-shaped Host/ACP fixture
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_agent_host::capability::model::{
+        CreateSessionRequest, HostEvent, HostEventStream, HostHealth, HostOperation,
+        HostStartConfig, SessionOwner,
+    };
+    use nexus_agent_host::{HostFacade, HostResult, HostSession, ProviderCatalog, SessionState};
+    use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
+    use nexus_orchestration::OrchestrationEngine;
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Mutex;
+
+    /// `graph_flow::SessionStorage` — the storage trait the engine consumes
+    /// for root snapshots (the test executor's SQLite store implements it).
+    use graph_flow::SessionStorage;
+
+    /// Production-shaped scripted Host facade: creates real `HostSession`
+    /// rows, records cancel/shutdown effects, and can fail shutdowns
+    /// deterministically (Finding 3 — the executor's `finalize_run` must
+    /// reach the Host cancel/shutdown/reap effects, not a no-op fake).
+    struct ScriptedHost {
+        sessions: Mutex<HashMap<nexus_agent_host::HostSessionId, HostSession>>,
+        creates: AtomicU64,
+        cancels: AtomicU64,
+        shutdowns: AtomicU64,
+        fail_shutdown_remaining: AtomicU64,
+    }
+
+    impl ScriptedHost {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                sessions: Mutex::new(HashMap::new()),
+                creates: AtomicU64::new(0),
+                cancels: AtomicU64::new(0),
+                shutdowns: AtomicU64::new(0),
+                fail_shutdown_remaining: AtomicU64::new(0),
+            })
+        }
+
+        fn fail_next_shutdowns(&self, count: u64) {
+            self.fail_shutdown_remaining.store(count, Ordering::SeqCst);
+        }
+
+        /// Register a Host session row the host would have created (the
+        /// executor's cached entry must correspond to a real owned Host
+        /// session for `shutdown_session` to confirm the reap).
+        fn seed_session(&self, id: nexus_agent_host::HostSessionId) {
+            let session = HostSession {
+                id: id.clone(),
+                provider_id: nexus_agent_host::ProviderId::new("scripted"),
+                state: SessionState::Ready,
+                created_at: chrono::Utc::now(),
+                active_op_id: None,
+                negotiated_capabilities:
+                    nexus_agent_host::capability::model::CapabilityDescriptor::native_cli_limited(),
+                owner: SessionOwner {
+                    creator_id: "test-creator".to_string(),
+                    workspace_root: std::path::PathBuf::from("/tmp/test-workspace"),
+                    orchestration_run_id: None,
+                },
+                process_identity: None,
+            };
+            self.sessions
+                .lock()
+                .expect("sessions")
+                .insert(id, session);
+        }
+
+        fn session_count(&self) -> usize {
+            self.sessions.lock().expect("sessions").len()
+        }
+    }
+
+    #[async_trait]
+    impl HostFacade for ScriptedHost {
+        async fn start(&self, _config: HostStartConfig) -> HostResult<()> {
+            Ok(())
+        }
+
+        async fn create_session(
+            &self,
+            request: CreateSessionRequest,
+        ) -> HostResult<HostSession> {
+            self.creates.fetch_add(1, Ordering::SeqCst);
+            let session = HostSession {
+                id: nexus_agent_host::HostSessionId::new(),
+                provider_id: request.provider_id,
+                state: SessionState::Ready,
+                created_at: chrono::Utc::now(),
+                active_op_id: None,
+                negotiated_capabilities: nexus_agent_host::capability::model::CapabilityDescriptor::native_cli_limited(),
+                owner: request.owner,
+                process_identity: None,
+            };
+            self.sessions
+                .lock()
+                .expect("sessions")
+                .insert(session.id.clone(), session.clone());
+            Ok(session)
+        }
+
+        async fn exec(
+            &self,
+            _session_id: nexus_agent_host::HostSessionId,
+            _op: HostOperation,
+        ) -> HostResult<HostEventStream> {
+            Err(nexus_agent_host::HostError::internal("unused"))
+        }
+
+        async fn cancel(&self, _op_id: nexus_agent_host::HostOperationId) -> HostResult<()> {
+            self.cancels.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        async fn health(&self) -> HostResult<HostHealth> {
+            Ok(HostHealth {
+                running: true,
+                active_sessions: self.sessions.lock().expect("sessions").len(),
+                active_operations: 0,
+            })
+        }
+
+        async fn shutdown(&self) -> HostResult<()> {
+            self.sessions.lock().expect("sessions").clear();
+            Ok(())
+        }
+
+        async fn shutdown_session(
+            &self,
+            session_id: nexus_agent_host::HostSessionId,
+        ) -> HostResult<()> {
+            let remaining = self.fail_shutdown_remaining.load(Ordering::SeqCst);
+            if remaining > 0 {
+                self.fail_shutdown_remaining
+                    .store(remaining.saturating_sub(1), Ordering::SeqCst);
+                return Err(nexus_agent_host::HostError::internal(
+                    "injected shutdown failure",
+                ));
+            }
+            self.shutdowns.fetch_add(1, Ordering::SeqCst);
+            self.sessions
+                .lock()
+                .expect("sessions")
+                .remove(&session_id)
+                .ok_or_else(|| nexus_agent_host::HostError::internal("session not found"))?;
+            Ok(())
+        }
+
+        async fn list_sessions(&self) -> HostResult<Vec<HostSession>> {
+            Ok(self
+                .sessions
+                .lock()
+                .expect("sessions")
+                .values()
+                .cloned()
+                .collect())
+        }
+
+        async fn provider_catalog(&self) -> HostResult<ProviderCatalog> {
+            Ok(ProviderCatalog::new())
+        }
+
+        fn subscribe_events(
+            &self,
+            _session_id: nexus_agent_host::HostSessionId,
+        ) -> tokio::sync::broadcast::Receiver<HostEvent> {
+            let (tx, _) = tokio::sync::broadcast::channel(16);
+            tx.subscribe()
+        }
+    }
+
+    /// Build a real `HostPromptExecutor` over the scripted Host with a
+    /// real SQLite workflow store (production-shaped).
+    async fn test_executor(
+        host: Arc<ScriptedHost>,
+    ) -> (
+        Arc<HostPromptExecutor>,
+        Arc<SqliteSessionStorage>,
+        Arc<dyn SessionStorage>,
+        tempfile::NamedTempFile,
+    ) {
+        let db = tempfile::NamedTempFile::new().unwrap();
+        let pool = nexus_local_db::open_pool(db.path())
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        let pool = Arc::new(pool);
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let executor = Arc::new(HostPromptExecutor::new(
+            host,
+            sqlite.clone(),
+            nexus_agent_host::config::TimeoutConfig::default(),
+        ));
+        (executor, sqlite, storage, db)
+    }
+
+    /// Deterministic mark-step-wins cancellation proof (Finding 3): a real
+    /// `HostPromptExecutor` with a cached owned Host session for the run is
+    /// wired into the engine; `mark_step_in_flight` wins immediately before
+    /// Cancel; the cancel path fires the token, reaches the executor's
+    /// `finalize_run`, and the Host shutdown effect is observed. The run
+    /// settles Cancelled.
+    #[tokio::test]
+    async fn real_executor_cancel_reaches_host_shutdown() {
+        let host = ScriptedHost::new();
+        let (executor, sqlite, storage, _db) = test_executor(host.clone()).await;
+        let store: Arc<dyn nexus_orchestration::run_state::WorkflowStateStore> = sqlite.clone();
+
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        engine.set_prompt_executor(executor.clone(), session_cancels.clone());
+
+        let graph = Arc::new(graph_flow::Graph::new("real-cancel"));
+        graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // Seed a cached owned Host session for the run (production-shaped:
+        // the executor's session map holds a real Host session row).
+        let host_session_id = nexus_agent_host::HostSessionId::new();
+        host.seed_session(host_session_id.clone());
+        executor
+            .seed_cached_session_for_test(&session_id.0, "default", host_session_id.clone())
+            .await;
+
+        // mark_step_in_flight wins immediately before Cancel (revision R →
+        // R+1): the cancel fence must reload, re-fence, and still reach the
+        // Host teardown.
+        let record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let pre_step_root = storage
+            .get(&session_id.0)
+            .await
+            .expect("get root")
+            .expect("root exists");
+        let in_flight_state = nexus_orchestration::run_state::RunStateV1 {
+            step_in_flight: Some(pre_step_root.current_task_id.clone()),
+            ..nexus_orchestration::run_state::RunStateV1::default()
+        };
+        store
+            .mark_step_in_flight(
+                &session_id,
+                record.state_revision,
+                nexus_orchestration::run_state::RunCheckpoint {
+                    root: &pre_step_root,
+                    children: &[],
+                },
+                &in_flight_state,
+            )
+            .await
+            .expect("mark_step_in_flight wins the CAS");
+
+        // Cancel: the fence reloads, re-fences, fires the token, and the
+        // real executor's finalize_run shuts down the owned Host session.
+        engine
+            .signal(
+                &session_id,
+                nexus_orchestration::engine::EngineSignal::Cancel,
+            )
+            .await
+            .expect("cancel must settle cancelled");
+        assert_eq!(
+            host.shutdowns.load(Ordering::SeqCst),
+            1,
+            "the Host shutdown effect must be observed exactly once"
+        );
+        assert_eq!(
+            host.session_count(),
+            0,
+            "the owned Host session must be reaped"
+        );
+        let final_record = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(final_record.status, nexus_orchestration::engine::SessionStatus::Cancelled);
+    }
+
+    /// Deterministic parked child/grandchild Host session reap proof
+    /// (Finding 3): child and grandchild cached Host sessions (parked at a
+    /// human wait, no active operation) are reaped by the real executor's
+    /// `finalize_run` through the engine's recursive descendant closure.
+    #[tokio::test]
+    async fn real_executor_reaps_parked_child_and_grandchild_sessions() {
+        let host = ScriptedHost::new();
+        let (executor, sqlite, storage, _db) = test_executor(host.clone()).await;
+        let store: Arc<dyn nexus_orchestration::run_state::WorkflowStateStore> = sqlite.clone();
+
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        engine.set_prompt_executor(executor.clone(), session_cancels.clone());
+
+        let graph = Arc::new(graph_flow::Graph::new("reap-nested"));
+        graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        // Spawn child and grandchild.
+        let inner = Arc::new(graph_flow::Graph::new("inner-a"));
+        inner.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        let child_id = engine
+            .spawn_child_session(nexus_orchestration::engine::ChildSessionParams {
+                parent_session_id: session_id.0.clone(),
+                inner_graph: inner,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect("spawn child");
+
+        let inner2 = Arc::new(graph_flow::Graph::new("inner-b"));
+        inner2.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        let grandchild_id = engine
+            .spawn_child_session(nexus_orchestration::engine::ChildSessionParams {
+                parent_session_id: child_id.0.clone(),
+                inner_graph: inner2,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect("spawn grandchild");
+
+        // Seed cached Host sessions for the child and grandchild (parked at
+        // a human wait — no active operation to observe a fired token).
+        let child_host_session = nexus_agent_host::HostSessionId::new();
+        let grandchild_host_session = nexus_agent_host::HostSessionId::new();
+        host.seed_session(child_host_session.clone());
+        host.seed_session(grandchild_host_session.clone());
+        executor
+            .seed_cached_session_for_test(&child_id.0, "default", child_host_session.clone())
+            .await;
+        executor
+            .seed_cached_session_for_test(
+                &grandchild_id.0,
+                "default",
+                grandchild_host_session.clone(),
+            )
+            .await;
+
+        // Cancel: the recursive closure finalizes root, child, and
+        // grandchild — every owned Host session is shut down and reaped.
+        engine
+            .signal(
+                &session_id,
+                nexus_orchestration::engine::EngineSignal::Cancel,
+            )
+            .await
+            .expect("cancel must settle cancelled");
+        assert_eq!(
+            host.shutdowns.load(Ordering::SeqCst),
+            2,
+            "child and grandchild Host sessions must each be shut down"
+        );
+        assert_eq!(
+            host.session_count(),
+            0,
+            "all owned Host sessions must be reaped"
+        );
+    }
+
+    /// Deterministic failed-shutdown retry retention proof (Finding 3): the
+    /// first `finalize_run` cannot confirm the child's Host shutdown → the
+    /// run is `Interrupted` and the child's cached session is retained; the
+    /// retry reaps it and settles Cancelled.
+    #[tokio::test]
+    async fn real_executor_failed_shutdown_retains_for_retry() {
+        let host = ScriptedHost::new();
+        let (executor, sqlite, storage, _db) = test_executor(host.clone()).await;
+        let store: Arc<dyn nexus_orchestration::run_state::WorkflowStateStore> = sqlite.clone();
+
+        let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_orchestration::CapabilityRegistry::with_builtins(),
+        ));
+        let session_cancels: std::sync::Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        let mut engine = nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+            storage.clone(),
+            store.clone(),
+            caps,
+        );
+        engine.set_prompt_executor(executor.clone(), session_cancels.clone());
+
+        let graph = Arc::new(graph_flow::Graph::new("reap-retry"));
+        graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        let session_id = engine
+            .start_session("novel-writing", graph)
+            .await
+            .expect("start session");
+
+        let inner = Arc::new(graph_flow::Graph::new("inner-a"));
+        inner.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        let child_id = engine
+            .spawn_child_session(nexus_orchestration::engine::ChildSessionParams {
+                parent_session_id: session_id.0.clone(),
+                inner_graph: inner,
+                initial_context: graph_flow::Context::new(),
+            })
+            .await
+            .expect("spawn child");
+
+        // Seed a cached Host session for the child; the first shutdown fails.
+        let child_host_session = nexus_agent_host::HostSessionId::new();
+        host.seed_session(child_host_session.clone());
+        executor
+            .seed_cached_session_for_test(&child_id.0, "default", child_host_session.clone())
+            .await;
+        host.fail_next_shutdowns(1);
+
+        // First cancel: the child's shutdown fails → Interrupted; the
+        // child's cached session is retained for retry.
+        let err = engine
+            .signal(
+                &session_id,
+                nexus_orchestration::engine::EngineSignal::Cancel,
+            )
+            .await
+            .expect_err("first cancel must surface the unconfirmed cleanup");
+        assert!(matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)));
+        let interrupted = store
+            .load_run(&session_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        assert_eq!(interrupted.status, nexus_orchestration::engine::SessionStatus::Interrupted);
+        assert_eq!(
+            host.session_count(),
+            1,
+            "the child's Host session must be retained after the failed shutdown"
+        );
+
+        // Retry cancel: the child's shutdown succeeds → Cancelled; the
+        // session is reaped.
+        engine
+            .signal(
+                &session_id,
+                nexus_orchestration::engine::EngineSignal::Cancel,
+            )
+            .await
+            .expect("retry cancel must settle cancelled");
+        assert_eq!(
+            host.session_count(),
+            0,
+            "the child's Host session must be reaped on the retry"
+        );
+        assert_eq!(
+            host.shutdowns.load(Ordering::SeqCst),
+            1,
+            "exactly one confirmed shutdown"
+        );
     }
 }
