@@ -328,10 +328,9 @@ pub async fn create_session(
 }
 
 fn session_cwd_path(req: &CreateSessionRequest, state: &WorkspaceState) -> std::path::PathBuf {
-    req.cwd.as_ref().map_or_else(
-        || verified_workspace_root(state),
-        std::path::PathBuf::from,
-    )
+    req.cwd
+        .as_ref()
+        .map_or_else(|| verified_workspace_root(state), std::path::PathBuf::from)
 }
 
 /// Resolve the canonical Creator workspace root from verified state.

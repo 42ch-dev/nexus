@@ -297,9 +297,7 @@ pub async fn get_session(
 
 /// Actionable failure reason from the durable v1 run state (e.g. an
 /// unconfirmed cancel cleanup that left the run `interrupted`).
-fn failure_reason_for(
-    row: &nexus_orchestration::storage::CheckpointRow,
-) -> Option<String> {
+fn failure_reason_for(row: &nexus_orchestration::storage::CheckpointRow) -> Option<String> {
     row.run_state_json
         .as_deref()
         .and_then(|blob| {
@@ -325,16 +323,17 @@ pub async fn signal_session(
         "cancel" => EngineSignal::Cancel,
         "advance" => EngineSignal::Advance,
         "continue" => {
-            let wait_id = body.wait_id.as_deref().ok_or_else(|| {
-                NexusApiError::BadRequestCodedDetails {
-                    code: "invalid_input".into(),
-                    message: "continue requires the exact durable wait token".into(),
-                    details: serde_json::json!({
-                        "field": "waitId",
-                        "reason": "continue requires the exact durable wait token",
-                    }),
-                }
-            })?;
+            let wait_id =
+                body.wait_id
+                    .as_deref()
+                    .ok_or_else(|| NexusApiError::BadRequestCodedDetails {
+                        code: "invalid_input".into(),
+                        message: "continue requires the exact durable wait token".into(),
+                        details: serde_json::json!({
+                            "field": "waitId",
+                            "reason": "continue requires the exact durable wait token",
+                        }),
+                    })?;
             EngineSignal::Continue {
                 wait_id: wait_id.to_string(),
             }
@@ -355,19 +354,20 @@ pub async fn signal_session(
     // after the wait CAS (single-flight). Other signals go through the
     // engine's revision-fenced transition path directly.
     if body.signal == "continue" {
-        let coordinator = state.run_coordinator().ok_or_else(|| {
-            NexusApiError::service_unavailable("run coordinator not configured")
-        })?;
-        let wait_id = body.wait_id.as_deref().ok_or_else(|| {
-            NexusApiError::BadRequestCodedDetails {
-                code: "invalid_input".into(),
-                message: "continue requires the exact durable wait token".into(),
-                details: serde_json::json!({
-                    "field": "waitId",
-                    "reason": "continue requires the exact durable wait token",
-                }),
-            }
-        })?;
+        let coordinator = state
+            .run_coordinator()
+            .ok_or_else(|| NexusApiError::service_unavailable("run coordinator not configured"))?;
+        let wait_id =
+            body.wait_id
+                .as_deref()
+                .ok_or_else(|| NexusApiError::BadRequestCodedDetails {
+                    code: "invalid_input".into(),
+                    message: "continue requires the exact durable wait token".into(),
+                    details: serde_json::json!({
+                        "field": "waitId",
+                        "reason": "continue requires the exact durable wait token",
+                    }),
+                })?;
         let result = coordinator
             .signal_run(
                 &sid,
@@ -452,17 +452,16 @@ pub async fn signal_session(
             nexus_orchestration::engine::EngineError::TerminalState(sid) => {
                 NexusApiError::ConflictCoded {
                     code: "workflow_state_conflict".into(),
-                    message: format!("state conflict for {sid}: run is terminal or not in a signalable state"),
+                    message: format!(
+                        "state conflict for {sid}: run is terminal or not in a signalable state"
+                    ),
                 }
             }
             // Finding 2: a CAS/revision loss is a linearized control race —
             // the durable winner is safe, but the losing public operation
             // must be an exact conflict response, never a 500. Reload the
             // authoritative row and project the exact envelope.
-            nexus_orchestration::engine::EngineError::RevisionMismatch {
-                session_id,
-                ..
-            } => {
+            nexus_orchestration::engine::EngineError::RevisionMismatch { session_id, .. } => {
                 let conflict = match state.pool() {
                     Some(pool) => {
                         let store = nexus_orchestration::storage::sqlite::SqliteSessionStorage::new(
@@ -503,9 +502,7 @@ pub async fn signal_session(
                             }
                             _ => NexusApiError::ConflictCoded {
                                 code: "workflow_state_conflict".into(),
-                                message: format!(
-                                    "state conflict for {session_id}: revision moved"
-                                ),
+                                message: format!("state conflict for {session_id}: revision moved"),
                             },
                         }
                     }
@@ -759,8 +756,10 @@ mod tests {
         async fn execute(
             &self,
             _request: nexus_orchestration::capability::PromptRequest,
-        ) -> Result<nexus_orchestration::capability::PromptResult, nexus_orchestration::capability::CapabilityError>
-        {
+        ) -> Result<
+            nexus_orchestration::capability::PromptResult,
+            nexus_orchestration::capability::CapabilityError,
+        > {
             unreachable!("not used by the public cancel regression")
         }
 
@@ -802,8 +801,10 @@ mod tests {
         async fn load_run(
             &self,
             session_id: &nexus_orchestration::engine::SessionId,
-        ) -> Result<Option<nexus_orchestration::run_state::RunRecord>, nexus_orchestration::engine::EngineError>
-        {
+        ) -> Result<
+            Option<nexus_orchestration::run_state::RunRecord>,
+            nexus_orchestration::engine::EngineError,
+        > {
             self.inner.load_run(session_id).await
         }
 
@@ -813,8 +814,10 @@ mod tests {
             descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
             checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
             next_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, nexus_orchestration::engine::EngineError>
-        {
+        ) -> Result<
+            nexus_orchestration::run_state::RunRecord,
+            nexus_orchestration::engine::EngineError,
+        > {
             self.inner
                 .start_run(session_id, descriptor, checkpoint, next_state)
                 .await
@@ -830,8 +833,10 @@ mod tests {
             core_context_version: u32,
             expected_core_context_version: u32,
             admission_gate: Option<&nexus_orchestration::run_state::ScheduleAdmissionGate>,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, nexus_orchestration::engine::EngineError>
-        {
+        ) -> Result<
+            nexus_orchestration::run_state::RunRecord,
+            nexus_orchestration::engine::EngineError,
+        > {
             self.inner
                 .admit_schedule_run(
                     schedule_id,
@@ -853,8 +858,10 @@ mod tests {
             checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
             next_status: nexus_orchestration::engine::SessionStatus,
             next_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, nexus_orchestration::engine::EngineError>
-        {
+        ) -> Result<
+            nexus_orchestration::run_state::RunRecord,
+            nexus_orchestration::engine::EngineError,
+        > {
             if next_status == nexus_orchestration::engine::SessionStatus::Interrupted {
                 // The competing transition wins the CAS first, every time:
                 // the engine's bounded retry exhausts and the public result
@@ -887,7 +894,13 @@ mod tests {
                     .expect("competing transition wins the CAS");
             }
             self.inner
-                .commit_transition(session_id, expected_revision, checkpoint, next_status, next_state)
+                .commit_transition(
+                    session_id,
+                    expected_revision,
+                    checkpoint,
+                    next_status,
+                    next_state,
+                )
                 .await
         }
 
@@ -897,8 +910,10 @@ mod tests {
             expected_revision: u64,
             checkpoint: nexus_orchestration::run_state::RunCheckpoint<'_>,
             next_state: &nexus_orchestration::run_state::RunStateV1,
-        ) -> Result<nexus_orchestration::run_state::RunRecord, nexus_orchestration::engine::EngineError>
-        {
+        ) -> Result<
+            nexus_orchestration::run_state::RunRecord,
+            nexus_orchestration::engine::EngineError,
+        > {
             self.inner
                 .settle_cancelled(session_id, expected_revision, checkpoint, next_state)
                 .await
@@ -961,8 +976,10 @@ mod tests {
         async fn load_children(
             &self,
             parent_session_id: &nexus_orchestration::engine::SessionId,
-        ) -> Result<Vec<nexus_orchestration::run_state::RunRecord>, nexus_orchestration::engine::EngineError>
-        {
+        ) -> Result<
+            Vec<nexus_orchestration::run_state::RunRecord>,
+            nexus_orchestration::engine::EngineError,
+        > {
             self.inner.load_children(parent_session_id).await
         }
     }
@@ -1121,10 +1138,7 @@ mod tests {
             "the run must never appear successfully cancelled"
         );
         assert!(
-            record
-                .state
-                .as_ref()
-                .is_some_and(|s| s.cancel_requested),
+            record.state.as_ref().is_some_and(|s| s.cancel_requested),
             "the durable cancel intent is present (the run stays actionable)"
         );
     }

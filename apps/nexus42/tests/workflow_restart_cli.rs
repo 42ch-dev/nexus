@@ -164,8 +164,8 @@ fn chain_context() -> Vec<u8> {
         "_converge_arrivals_j1": ["src-a"],
         "_join_wait_start_j1": 1
     }, "chat_history": {"messages": [], "max_messages": 1000}})
-        .to_string()
-        .into_bytes()
+    .to_string()
+    .into_bytes()
 }
 
 /// Reopen the REAL SQLite file with a fresh pool + storage + workflow store
@@ -177,7 +177,9 @@ async fn reopen(
     Arc<dyn graph_flow::SessionStorage>,
     Arc<dyn WorkflowStateStore>,
 ) {
-    let pool = nexus_local_db::open_pool(db_path).await.expect("reopen pool");
+    let pool = nexus_local_db::open_pool(db_path)
+        .await
+        .expect("reopen pool");
     let sqlite: Arc<SqliteSessionStorage> =
         Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
     let dyn_storage: Arc<dyn graph_flow::SessionStorage> = sqlite.clone();
@@ -264,7 +266,9 @@ async fn restart_durable_status_terminals_stay_terminal_and_never_revert() {
     // STALE interrupted evidence (step_in_flight + cancel_requested + active
     // in-flight prompt) — terminal status must still win (A7 rule 1).
     {
-        let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("open pool");
         for (id, status) in [
             ("done:completed", "completed"),
             ("done:failed", "failed"),
@@ -272,7 +276,13 @@ async fn restart_durable_status_terminals_stay_terminal_and_never_revert() {
         ] {
             let state = run_state_v1(false, Some("task_3"), true, true);
             seed_v1_row(
-                &pool, id, status, Some("task_9"), &plain_context(), &state, 5,
+                &pool,
+                id,
+                status,
+                Some("task_9"),
+                &plain_context(),
+                &state,
+                5,
             )
             .await;
         }
@@ -340,13 +350,18 @@ async fn restart_durable_status_terminals_stay_terminal_and_never_revert() {
     );
 
     // Terminal rows never revert to running: raw DB status unchanged.
-    let rows: Vec<String> = sqlx::query_scalar("SELECT status FROM orchestration_sessions ORDER BY session_id")
-        .fetch_all(&pool_b)
-        .await
-        .expect("status rows");
+    let rows: Vec<String> =
+        sqlx::query_scalar("SELECT status FROM orchestration_sessions ORDER BY session_id")
+            .fetch_all(&pool_b)
+            .await
+            .expect("status rows");
     assert_eq!(
         rows,
-        vec!["cancelled".to_string(), "completed".to_string(), "failed".to_string()],
+        vec![
+            "cancelled".to_string(),
+            "completed".to_string(),
+            "failed".to_string()
+        ],
         "DB status column must still carry the terminal statuses after resume"
     );
 
@@ -408,15 +423,27 @@ async fn restart_durable_status_human_wait_token_survives_not_approved() {
     // (`_gate_park_other`) alongside broad keys — historical gate markers
     // must never demote a live human wait either.
     {
-        let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("open pool");
         seed_v1_row(
-            &pool, "wait:plain", "waiting_for_input", Some("task_7"),
-            &plain_context(), &wait_state, 6,
+            &pool,
+            "wait:plain",
+            "waiting_for_input",
+            Some("task_7"),
+            &plain_context(),
+            &wait_state,
+            6,
         )
         .await;
         seed_v1_row(
-            &pool, "wait:old-joins", "waiting_for_input", Some("task_7"),
-            &chain_context(), &wait_state, 7,
+            &pool,
+            "wait:old-joins",
+            "waiting_for_input",
+            Some("task_7"),
+            &chain_context(),
+            &wait_state,
+            7,
         )
         .await;
         let stale_marker_context = serde_json::json!({"data": {
@@ -427,8 +454,13 @@ async fn restart_durable_status_human_wait_token_survives_not_approved() {
         .to_string()
         .into_bytes();
         seed_v1_row(
-            &pool, "wait:stale-marker", "waiting_for_input", Some("task_7"),
-            &stale_marker_context, &wait_state, 8,
+            &pool,
+            "wait:stale-marker",
+            "waiting_for_input",
+            Some("task_7"),
+            &stale_marker_context,
+            &wait_state,
+            8,
         )
         .await;
         pool.close().await;
@@ -538,7 +570,10 @@ async fn restart_durable_status_human_wait_token_survives_not_approved() {
         .clone();
     let human = String::from_utf8(human).unwrap();
     assert!(human.contains("recovery_class: human_wait"), "{human}");
-    assert!(human.contains("resumable:      no — human wait (A4) token preserved"), "{human}");
+    assert!(
+        human.contains("resumable:      no — human wait (A4) token preserved"),
+        "{human}"
+    );
 
     pool_b.close().await;
     drop(tmp);
@@ -557,15 +592,27 @@ async fn restart_durable_status_interrupted_not_replayed_and_never_retried() {
     // status with an unfinished step mark; (b) running with a dispatching
     // prompt + cancel requested (crash-after-effect, never "safe to replay").
     {
-        let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("open pool");
         seed_v1_row(
-            &pool, "int:explicit", "interrupted", Some("task_3"),
-            &plain_context(), &run_state_v1(false, Some("task_3"), false, false), 4,
+            &pool,
+            "int:explicit",
+            "interrupted",
+            Some("task_3"),
+            &plain_context(),
+            &run_state_v1(false, Some("task_3"), false, false),
+            4,
         )
         .await;
         seed_v1_row(
-            &pool, "int:crash", "running", Some("task_3"),
-            &chain_context(), &run_state_v1(false, Some("task_3"), true, true), 5,
+            &pool,
+            "int:crash",
+            "running",
+            Some("task_3"),
+            &chain_context(),
+            &run_state_v1(false, Some("task_3"), true, true),
+            5,
         )
         .await;
         pool.close().await;
@@ -622,7 +669,11 @@ async fn restart_durable_status_interrupted_not_replayed_and_never_retried() {
             .expect("load_run")
             .expect("row exists");
         assert_eq!(record.status, status, "{id} must not be rewritten");
-        assert_eq!(record.state_revision, if id == "int:explicit" { 4 } else { 5 }, "{id}");
+        assert_eq!(
+            record.state_revision,
+            if id == "int:explicit" { 4 } else { 5 },
+            "{id}"
+        );
         let state = record.state.expect("state present");
         assert!(
             state.step_in_flight.is_some(),
@@ -684,7 +735,9 @@ async fn restart_durable_status_converge_merge_redrives_after_reopen() {
     // 5), running, exact current-gate park marker, live join keys, one arrival
     // of two. The instrumented start/branch_a edges already fired (fixture).
     {
-        let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("open pool");
         let context = serde_json::json!({"data": {
             "_converge_arrivals_join": ["branch_a"],
             "_join_wait_start_join": chrono::Utc::now().timestamp_millis(),
@@ -786,7 +839,10 @@ async fn restart_durable_status_converge_merge_redrives_after_reopen() {
     // is `Paused` — the same shape it persisted durably (A2; previously it
     // mirrored the graph-flow WaitingForInput outcome).
     assert_eq!(
-        engine_ref.get_status(&SessionId(sid.to_string())).await.expect("status"),
+        engine_ref
+            .get_status(&SessionId(sid.to_string()))
+            .await
+            .expect("status"),
         SessionStatus::Paused,
         "the resumed converge chain must remain parked, not terminal"
     );
@@ -917,13 +973,15 @@ async fn restart_durable_status_converge_merge_redrives_after_reopen() {
         .expect("storage get")
         .expect("row exists");
     let context_value = serde_json::to_value(&context_c.context).expect("context json");
-    let live_join_keys =
-        nexus_orchestration::resume_rules::live_join_keys(
-            nexus_orchestration::resume_rules::context_data(&context_value).expect("data map"),
-        );
+    let live_join_keys = nexus_orchestration::resume_rules::live_join_keys(
+        nexus_orchestration::resume_rules::context_data(&context_value).expect("data map"),
+    );
     assert_eq!(
         live_join_keys,
-        vec!["_converge_arrivals_join".to_string(), "_join_wait_start_join".to_string()],
+        vec![
+            "_converge_arrivals_join".to_string(),
+            "_join_wait_start_join".to_string()
+        ],
         "the join keys must survive the second restart"
     );
 
@@ -947,7 +1005,9 @@ async fn restart_durable_status_engine_parked_join_redrives_after_reopen() {
     // exact current-gate marker, live join keys (1/2 arrivals, deadline not
     // yet elapsed), and NO human-wait token.
     {
-        let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("open pool");
         let context = serde_json::json!({"data": {
             "_converge_arrivals_join": ["branch_a"],
             "_join_wait_start_join": chrono::Utc::now().timestamp_millis(),
@@ -1043,7 +1103,10 @@ async fn restart_durable_status_engine_parked_join_redrives_after_reopen() {
         .clone();
     let parsed: Value = serde_json::from_slice(&output).expect("valid inspect json");
     assert_eq!(parsed["recovery_class"], json!("converge_merge"));
-    assert_eq!(parsed["live_join_keys"], json!(["_converge_arrivals_join", "_join_wait_start_join"]));
+    assert_eq!(
+        parsed["live_join_keys"],
+        json!(["_converge_arrivals_join", "_join_wait_start_join"])
+    );
     assert!(
         parsed.get("wait_id").is_none(),
         "an engine-parked join must never advertise a wait token: {parsed}"
@@ -1070,7 +1133,9 @@ async fn restart_durable_status_nested_child_wait_preserved_and_never_auto_resum
     //   child row: waiting_for_input + its own durable token (the child
     //   parked exactly once — the auto-resume loop is forbidden).
     {
-        let pool = nexus_local_db::open_pool(&db_path).await.expect("open pool");
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("open pool");
         let parent_state = serde_json::json!({
             "wait": {
                 "wait_id": "parent-tok-9", "task_id": "parent_state",
@@ -1095,8 +1160,13 @@ async fn restart_durable_status_nested_child_wait_preserved_and_never_auto_resum
         let ctx = plain_context();
         // Parent row.
         seed_v1_row(
-            &pool, "nested:parent", "waiting_for_input", Some("parent_state"),
-            &ctx, &parent_state, 8,
+            &pool,
+            "nested:parent",
+            "waiting_for_input",
+            Some("parent_state"),
+            &ctx,
+            &parent_state,
+            8,
         )
         .await;
         // Child row: same schema with parent_session_id column.
@@ -1161,7 +1231,11 @@ async fn restart_durable_status_nested_child_wait_preserved_and_never_auto_resum
         .expect("load_run parent")
         .expect("parent present");
     assert_eq!(parent.status, SessionStatus::WaitingForInput);
-    let pw = parent.state.as_ref().and_then(|s| s.wait.as_ref()).expect("parent wait");
+    let pw = parent
+        .state
+        .as_ref()
+        .and_then(|s| s.wait.as_ref())
+        .expect("parent wait");
     assert_eq!(pw.wait_id, "parent-tok-9", "parent token preserved");
     assert_eq!(
         pw.child_session_id.as_deref(),
@@ -1180,9 +1254,17 @@ async fn restart_durable_status_nested_child_wait_preserved_and_never_auto_resum
         .await
         .expect("load_run child")
         .expect("child present");
-    assert_eq!(child.status, SessionStatus::WaitingForInput, "child still waiting");
     assert_eq!(
-        child.state.as_ref().and_then(|s| s.wait.as_ref()).map(|w| w.wait_id.as_str()),
+        child.status,
+        SessionStatus::WaitingForInput,
+        "child still waiting"
+    );
+    assert_eq!(
+        child
+            .state
+            .as_ref()
+            .and_then(|s| s.wait.as_ref())
+            .map(|w| w.wait_id.as_str()),
         Some("child-tok-9"),
         "the nested child wait token survives restart untouched — no auto-resume"
     );
@@ -1217,7 +1299,10 @@ async fn restart_durable_status_nested_child_wait_preserved_and_never_auto_resum
         "child must inherit the root embedded source identity"
     );
     assert_eq!(
-        child_descriptor.parent_session_id.as_ref().map(|s| s.0.as_str()),
+        child_descriptor
+            .parent_session_id
+            .as_ref()
+            .map(|s| s.0.as_str()),
         Some("nested:parent"),
         "child must name its parent session"
     );
@@ -1277,10 +1362,7 @@ impl nexus_agent_host::HostFacade for RestartMockHost {
     async fn start(&self, _config: HostStartConfig) -> HostResult<()> {
         Ok(())
     }
-    async fn create_session(
-        &self,
-        request: CreateSessionRequest,
-    ) -> HostResult<HostSession> {
+    async fn create_session(&self, request: CreateSessionRequest) -> HostResult<HostSession> {
         Ok(HostSession {
             id: HostSessionId::new(),
             provider_id: request.provider_id,
@@ -1397,7 +1479,10 @@ async fn post_schedule(
     label: &str,
 ) -> (reqwest::StatusCode, String, String) {
     let resp = reqwest::Client::new()
-        .post(format!("{}/v1/daemon/orchestration/schedules", daemon.http_url))
+        .post(format!(
+            "{}/v1/daemon/orchestration/schedules",
+            daemon.http_url
+        ))
         .json(&json!({
             "creator_id": "test_creator",
             "preset_id": preset_id,
@@ -1411,15 +1496,19 @@ async fn post_schedule(
         .expect("POST schedule");
     let status = resp.status();
     let body: Value = resp.json().await.expect("schedule json");
-    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
-    (status, schedule_id, body["status"].as_str().unwrap_or("").to_string())
+    let schedule_id = body["schedule_id"]
+        .as_str()
+        .expect("schedule_id")
+        .to_string();
+    (
+        status,
+        schedule_id,
+        body["status"].as_str().unwrap_or("").to_string(),
+    )
 }
 
 /// Read the durable v1 run state (status + wait token) for a session.
-async fn durable_run_state(
-    pool: &sqlx::SqlitePool,
-    session_id: &str,
-) -> (String, Option<Value>) {
+async fn durable_run_state(pool: &sqlx::SqlitePool, session_id: &str) -> (String, Option<Value>) {
     let (status, state): (String, Option<Vec<u8>>) = sqlx::query_as(
         "SELECT status, run_state_json FROM orchestration_sessions WHERE session_id = ?",
     )
@@ -1427,9 +1516,7 @@ async fn durable_run_state(
     .fetch_one(pool)
     .await
     .expect("load run state");
-    let state: Option<Value> = state.map(|b| {
-        serde_json::from_slice(&b).expect("run state json")
-    });
+    let state: Option<Value> = state.map(|b| serde_json::from_slice(&b).expect("run state json"));
     (status, state)
 }
 
@@ -1465,7 +1552,10 @@ async fn wait_owned_status(
 /// Write a user preset bundle (manifest + referenced template) under
 /// `$HOME/.nexus42/presets/<id>/` — the A7 directory-source shape.
 fn write_user_wait_preset(home: &Path, template_body: &str) {
-    let bundle = home.join(".nexus42").join("presets").join("p3-restart-wait");
+    let bundle = home
+        .join(".nexus42")
+        .join("presets")
+        .join("p3-restart-wait");
     std::fs::create_dir_all(&bundle.join("prompts")).expect("bundle dirs");
     std::fs::write(
         bundle.join("preset.yaml"),
@@ -1544,9 +1634,14 @@ async fn daemon_restart_user_wait_reextracts_and_continues() {
 
     // The wait SURVIVES untouched: no auto-approval, no consume.
     let (run_status, state_after) = durable_run_state(&daemon.pool, &sid).await;
-    assert_eq!(run_status, "waiting_for_input", "still waiting after restart");
     assert_eq!(
-        state_after.as_ref().and_then(|s| s["wait"]["wait_id"].as_str()),
+        run_status, "waiting_for_input",
+        "still waiting after restart"
+    );
+    assert_eq!(
+        state_after
+            .as_ref()
+            .and_then(|s| s["wait"]["wait_id"].as_str()),
         Some(wait_id.as_str()),
         "the durable A4 wait token survives the daemon-level restart"
     );
@@ -1563,7 +1658,11 @@ async fn daemon_restart_user_wait_reextracts_and_continues() {
         .send()
         .await
         .expect("continue");
-    assert_eq!(resp.status(), reqwest::StatusCode::OK, "authorized continue");
+    assert_eq!(
+        resp.status(),
+        reqwest::StatusCode::OK,
+        "authorized continue"
+    );
     // The re-drive runs in the background (single-flight owner); wait for
     // the durable terminal.
     tokio::time::timeout(std::time::Duration::from_secs(20), async {
@@ -1619,9 +1718,14 @@ async fn daemon_restart_changed_template_continue_refuses_cancel_only() {
     // The wait survives (source identity is only verified ON DEMAND, at a
     // matching continue — boot never steps a human wait).
     let (run_status, state_after) = durable_run_state(&daemon.pool, &sid).await;
-    assert_eq!(run_status, "waiting_for_input", "wait preserved under changed source");
     assert_eq!(
-        state_after.as_ref().and_then(|s| s["wait"]["wait_id"].as_str()),
+        run_status, "waiting_for_input",
+        "wait preserved under changed source"
+    );
+    assert_eq!(
+        state_after
+            .as_ref()
+            .and_then(|s| s["wait"]["wait_id"].as_str()),
         Some(wait_id.as_str()),
         "wait token preserved under changed source"
     );
@@ -1655,13 +1759,22 @@ async fn daemon_restart_changed_template_continue_refuses_cancel_only() {
         "cancel-only actions"
     );
     let (run_status, state_now) = durable_run_state(&daemon.pool, &sid).await;
-    assert_eq!(run_status, "waiting_for_input", "wait still preserved after refused continue");
     assert_eq!(
-        state_now.as_ref().and_then(|s| s["wait"]["wait_id"].as_str()),
+        run_status, "waiting_for_input",
+        "wait still preserved after refused continue"
+    );
+    assert_eq!(
+        state_now
+            .as_ref()
+            .and_then(|s| s["wait"]["wait_id"].as_str()),
         Some(wait_id.as_str()),
         "token untouched by the refused continue"
     );
-    assert_eq!(host.execs.load(Ordering::SeqCst), effects_before, "no effects");
+    assert_eq!(
+        host.execs.load(Ordering::SeqCst),
+        effects_before,
+        "no effects"
+    );
 }
 
 /// A7 rule 4 missing source at the daemon level: deleting the user preset
@@ -1704,7 +1817,9 @@ async fn daemon_restart_missing_source_continue_refuses_cancel_only() {
     let (run_status, state_after) = durable_run_state(&daemon.pool, &sid).await;
     assert_eq!(run_status, "waiting_for_input");
     assert_eq!(
-        state_after.as_ref().and_then(|s| s["wait"]["wait_id"].as_str()),
+        state_after
+            .as_ref()
+            .and_then(|s| s["wait"]["wait_id"].as_str()),
         Some(wait_id.as_str())
     );
     let resp = reqwest::Client::new()
@@ -1888,28 +2003,45 @@ async fn daemon_restart_nested_multiple_waits_preserved_no_auto_approval() {
     let descriptor = memory_augmented_descriptor(None);
     let child_descriptor = memory_augmented_descriptor(Some((parent, "generate_graph")));
     seed_daemon_session(
-        &daemon.pool, parent, "waiting_for_input", Some("persist"), &plain_context(),
+        &daemon.pool,
+        parent,
+        "waiting_for_input",
+        Some("persist"),
+        &plain_context(),
         &wait_state_with_token("parent-tok-p3", "persist", Some(child_a), Some("persist")),
-        8, &descriptor, None,
+        8,
+        &descriptor,
+        None,
     )
     .await;
     seed_daemon_session(
-        &daemon.pool, child_a, "waiting_for_input", Some("persist"), &plain_context(),
+        &daemon.pool,
+        child_a,
+        "waiting_for_input",
+        Some("persist"),
+        &plain_context(),
         &wait_state_with_token("child-a-tok", "persist", None, None),
-        3, &child_descriptor, Some(parent),
+        3,
+        &child_descriptor,
+        Some(parent),
     )
     .await;
     seed_daemon_session(
-        &daemon.pool, child_b, "waiting_for_input", Some("persist"), &plain_context(),
+        &daemon.pool,
+        child_b,
+        "waiting_for_input",
+        Some("persist"),
+        &plain_context(),
         &wait_state_with_token("child-b-tok", "persist", None, None),
-        3, &child_descriptor, Some(parent),
+        3,
+        &child_descriptor,
+        Some(parent),
     )
     .await;
-    let sessions_before: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions")
-            .fetch_one(&daemon.pool)
-            .await
-            .expect("session count before");
+    let sessions_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions")
+        .fetch_one(&daemon.pool)
+        .await
+        .expect("session count before");
 
     daemon.restart().await;
 
@@ -1927,11 +2059,10 @@ async fn daemon_restart_nested_multiple_waits_preserved_no_auto_approval() {
             "{sid} token preserved"
         );
     }
-    let sessions_after: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions")
-            .fetch_one(&daemon.pool)
-            .await
-            .expect("session count after");
+    let sessions_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions")
+        .fetch_one(&daemon.pool)
+        .await
+        .expect("session count after");
     assert_eq!(
         sessions_after, sessions_before,
         "daemon restart must not mint new session/child IDs"
@@ -1962,9 +2093,15 @@ async fn daemon_restart_corrupt_child_identity_wait_preserved_continue_refuses()
     let parent = "daemon:corrupt-parent";
     let child = "daemon:corrupt-parent::child:bad";
     seed_daemon_session(
-        &daemon.pool, parent, "waiting_for_input", Some("persist"), &plain_context(),
+        &daemon.pool,
+        parent,
+        "waiting_for_input",
+        Some("persist"),
+        &plain_context(),
         &wait_state_with_token("parent-tok-corr", "persist", Some(child), Some("persist")),
-        8, &memory_augmented_descriptor(None), None,
+        8,
+        &memory_augmented_descriptor(None),
+        None,
     )
     .await;
     // Corrupt child: unsupported execution_version 2 → load_children refuses
@@ -1980,8 +2117,16 @@ async fn daemon_restart_corrupt_child_identity_wait_preserved_continue_refuses()
     .bind(child)
     .bind(parent)
     .bind(&plain_context())
-    .bind(&wait_state_with_token("child-bad-tok", "persist", None, None))
-    .bind(&memory_augmented_descriptor(Some((parent, "generate_graph"))))
+    .bind(&wait_state_with_token(
+        "child-bad-tok",
+        "persist",
+        None,
+        None,
+    ))
+    .bind(&memory_augmented_descriptor(Some((
+        parent,
+        "generate_graph",
+    ))))
     .execute(&daemon.pool)
     .await
     .expect("seed corrupt child");
@@ -1999,7 +2144,10 @@ async fn daemon_restart_corrupt_child_identity_wait_preserved_continue_refuses()
     );
     // The corrupt child row is preserved verbatim (never reinterpreted).
     let (child_status, _) = durable_run_state(&daemon.pool, child).await;
-    assert_eq!(child_status, "waiting_for_input", "corrupt child row preserved");
+    assert_eq!(
+        child_status, "waiting_for_input",
+        "corrupt child row preserved"
+    );
 
     // Matching continue: the on-demand reattachment hydrates the owned
     // closure, hits the corrupt child, and refuses reconstruction_unavailable
@@ -2023,13 +2171,22 @@ async fn daemon_restart_corrupt_child_identity_wait_preserved_continue_refuses()
         "cancel-only actions"
     );
     let (status, state_now) = durable_run_state(&daemon.pool, parent).await;
-    assert_eq!(status, "waiting_for_input", "wait untouched by refused continue");
     assert_eq!(
-        state_now.as_ref().and_then(|s| s["wait"]["wait_id"].as_str()),
+        status, "waiting_for_input",
+        "wait untouched by refused continue"
+    );
+    assert_eq!(
+        state_now
+            .as_ref()
+            .and_then(|s| s["wait"]["wait_id"].as_str()),
         Some("parent-tok-corr"),
         "token untouched"
     );
-    assert_eq!(host.execs.load(Ordering::SeqCst), effects_before, "no effects");
+    assert_eq!(
+        host.execs.load(Ordering::SeqCst),
+        effects_before,
+        "no effects"
+    );
 }
 
 /// (c) Dispatch-before-output crash at the daemon level: the durable record
@@ -2051,8 +2208,15 @@ async fn daemon_restart_dispatch_before_output_crash_interrupted_no_retry() {
 
     let sid = "daemon:dispatch-crash";
     seed_daemon_session(
-        &daemon.pool, sid, "running", Some("generate"), &plain_context(),
-        &dispatch_crash_state(), 5, &memory_augmented_descriptor(None), None,
+        &daemon.pool,
+        sid,
+        "running",
+        Some("generate"),
+        &plain_context(),
+        &dispatch_crash_state(),
+        5,
+        &memory_augmented_descriptor(None),
+        None,
     )
     .await;
 
@@ -2064,7 +2228,11 @@ async fn daemon_restart_dispatch_before_output_crash_interrupted_no_retry() {
     let (status, state) = durable_run_state(&daemon.pool, sid).await;
     assert_eq!(status, "running", "durable row never rewritten by recovery");
     let state = state.expect("durable state present");
-    assert_eq!(state["step_in_flight"], json!("generate"), "step mark preserved");
+    assert_eq!(
+        state["step_in_flight"],
+        json!("generate"),
+        "step mark preserved"
+    );
     assert!(
         state["in_flight"].is_object(),
         "the unfinished prompt attempt is preserved (never cleared/retried)"
@@ -2117,8 +2285,15 @@ async fn daemon_restart_final_checkpoint_before_settlement_settles_terminal() {
 
     let sid = "daemon:settle-crash";
     seed_daemon_session(
-        &daemon.pool, sid, "completed", Some("done"), &plain_context(),
-        &run_state_v1(false, None, false, false), 6, &memory_augmented_descriptor(None), None,
+        &daemon.pool,
+        sid,
+        "completed",
+        Some("done"),
+        &plain_context(),
+        &run_state_v1(false, None, false, false),
+        6,
+        &memory_augmented_descriptor(None),
+        None,
     )
     .await;
     let now = chrono::Utc::now().timestamp();
@@ -2151,14 +2326,20 @@ async fn daemon_restart_final_checkpoint_before_settlement_settles_terminal() {
     .fetch_one(&daemon.pool)
     .await
     .expect("settled schedule row");
-    assert_eq!(status, "completed", "schedule settles from the durable terminal");
+    assert_eq!(
+        status, "completed",
+        "schedule settles from the durable terminal"
+    );
     assert_eq!(
         current_sid.as_deref(),
         Some(sid),
         "schedule keeps its owned run identity"
     );
     let (run_status, _) = durable_run_state(&daemon.pool, sid).await;
-    assert_eq!(run_status, "completed", "the terminal session stays terminal");
+    assert_eq!(
+        run_status, "completed",
+        "the terminal session stays terminal"
+    );
     assert_eq!(
         host.execs.load(Ordering::SeqCst),
         0,
@@ -2177,11 +2358,8 @@ async fn daemon_restart_safe_boundary_is_reconstructed_and_redriven() {
     let dispatch = Arc::new(CountingDispatch {
         calls: Arc::new(AtomicUsize::new(0)),
     });
-    let daemon = LiveDaemon::start_with_host_provider_and_dispatch(
-        host.clone(),
-        dispatch.clone(),
-    )
-    .await;
+    let daemon =
+        LiveDaemon::start_with_host_provider_and_dispatch(host.clone(), dispatch.clone()).await;
 
     let sid = "daemon:safe-boundary";
     // Running at a committed boundary: plain context (no join keys), no
@@ -2202,10 +2380,7 @@ async fn daemon_restart_safe_boundary_is_reconstructed_and_redriven() {
     // The exact production recovery seam boot/restart runs
     // (`run_boot_recovery` → `recover_persisted`): reconstruction from the
     // frozen source, classification, then the single-owner re-drive.
-    let coordinator = daemon
-        .state
-        .run_coordinator()
-        .expect("coordinator wired");
+    let coordinator = daemon.state.run_coordinator().expect("coordinator wired");
     let sqlite = Arc::new(SqliteSessionStorage::new(Arc::new(daemon.pool.clone())));
     let decisions = coordinator.recover_persisted(&sqlite, None).await;
 

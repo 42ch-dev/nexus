@@ -124,10 +124,7 @@ impl Capability for AcpPrompt {
             .and_then(|v| v.as_str())
             .map_or_else(
                 || Ok(ToolPolicy::AutoGrantReadOnly),
-                |s| {
-                    std::str::FromStr::from_str(s)
-                        .map_err(|e| CapabilityError::InputInvalid(e))
-                },
+                |s| std::str::FromStr::from_str(s).map_err(|e| CapabilityError::InputInvalid(e)),
             )?;
 
         // Security: only accept context-injected identity fields (prefixed _).
@@ -247,15 +244,12 @@ mod tests {
         });
         // Seed the run's coordinator token (fail-closed contract: unregistered
         // runs refuse CancellationUnavailable; production registers at admission).
-        let cancels = Arc::new(std::sync::RwLock::new(
-            std::collections::HashMap::new(),
-        ));
-        cancels
-            .write()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert("sess".to_string(), tokio_util::sync::CancellationToken::new());
-        let cap = AcpPrompt::with_prompt_executor(executor.clone())
-            .with_session_cancels(cancels);
+        let cancels = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+        cancels.write().unwrap_or_else(|e| e.into_inner()).insert(
+            "sess".to_string(),
+            tokio_util::sync::CancellationToken::new(),
+        );
+        let cap = AcpPrompt::with_prompt_executor(executor.clone()).with_session_cancels(cancels);
         let input = json!({
             "prompt": "hello",
             "tool_policy": "deny_all",
@@ -265,7 +259,12 @@ mod tests {
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["full_text"], "transformed:hello");
         assert_eq!(result["host_session_id"], "host-sess");
-        let captured = executor.captured.lock().expect("capture lock").clone().unwrap();
+        let captured = executor
+            .captured
+            .lock()
+            .expect("capture lock")
+            .clone()
+            .unwrap();
         assert_eq!(captured.run_id, "sess");
         assert_eq!(captured.tool_policy, ToolPolicy::DenyAll);
     }

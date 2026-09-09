@@ -79,10 +79,7 @@ impl Task for CapabilityTask {
         // post-effect `commit_transition` can persist an interrupted
         // disposition rather than blindly rewinding (Important 3).
         context
-            .set(
-                crate::engine::EXTERNAL_EFFECT_MARKER,
-                true,
-            )
+            .set(crate::engine::EXTERNAL_EFFECT_MARKER, true)
             .await;
 
         match cap.run(input).await {
@@ -329,7 +326,9 @@ impl Task for InnerGraphTask {
         // CAS) is classified Interrupted, never deterministically restored and
         // replayed on restart (Important 2). Scoped to this parent step: the
         // engine clears the marker after a successful parent checkpoint.
-        context.set(crate::engine::EXTERNAL_EFFECT_MARKER, true).await;
+        context
+            .set(crate::engine::EXTERNAL_EFFECT_MARKER, true)
+            .await;
 
         // A reattached child that is already terminal (its durable checkpoint
         // was persisted before the parent committed past this inner graph)
@@ -350,53 +349,53 @@ impl Task for InnerGraphTask {
         let mut last_error = None;
         let mut child_wait = None;
         if !child_terminal {
-        for _ in 0..256 {
-            let outcome = self.engine.run_step(&child_sid).await.map_err(|e| {
-                graph_flow::GraphError::TaskExecutionFailed(format!(
-                    "InnerGraphTask: run_step failed: {e}"
-                ))
-            })?;
+            for _ in 0..256 {
+                let outcome = self.engine.run_step(&child_sid).await.map_err(|e| {
+                    graph_flow::GraphError::TaskExecutionFailed(format!(
+                        "InnerGraphTask: run_step failed: {e}"
+                    ))
+                })?;
 
-            match outcome {
-                crate::engine::StepOutcome::Completed { .. } => break,
-                crate::engine::StepOutcome::Paused {
-                    reason,
-                    next_task_id,
-                } => {
-                    // Resume the child if it paused (shouldn't happen for
-                    // rule-only inner graphs, but handle gracefully).
-                    let _ = self
-                        .engine
-                        .signal(&child_sid, crate::engine::EngineSignal::Resume)
-                        .await;
-                    tracing::debug!(
-                        child_session = %child_sid.0,
-                        %next_task_id,
-                        %reason,
-                        "InnerGraphTask: child paused, resuming"
-                    );
-                }
-                crate::engine::StepOutcome::WaitingForInput { response } => {
-                    // Round-4 Critical 2 (A4): a supported inner-graph child
-                    // waiting for human input MUST NOT be auto-resumed by the
-                    // inner poller (auto-approval bypass). Preserve the
-                    // child's WaitRecord and propagate the wait to the parent:
-                    // the parent step parks with `WaitForInput` and the root
-                    // `WaitRecord` carries the exact child cursor (A4 "a
-                    // waiting child makes the parent waiting"). Explicit
-                    // continuation re-runs the parent inner-graph task, which
-                    // reattaches the still-waiting child and steps it — the
-                    // child's durable token is then consumed by the matching
-                    // authorized continue, never by boot or the poller.
-                    child_wait = Some((child_sid.0.clone(), response));
-                    break;
-                }
-                crate::engine::StepOutcome::Error(e) => {
-                    last_error = Some(e);
-                    break;
+                match outcome {
+                    crate::engine::StepOutcome::Completed { .. } => break,
+                    crate::engine::StepOutcome::Paused {
+                        reason,
+                        next_task_id,
+                    } => {
+                        // Resume the child if it paused (shouldn't happen for
+                        // rule-only inner graphs, but handle gracefully).
+                        let _ = self
+                            .engine
+                            .signal(&child_sid, crate::engine::EngineSignal::Resume)
+                            .await;
+                        tracing::debug!(
+                            child_session = %child_sid.0,
+                            %next_task_id,
+                            %reason,
+                            "InnerGraphTask: child paused, resuming"
+                        );
+                    }
+                    crate::engine::StepOutcome::WaitingForInput { response } => {
+                        // Round-4 Critical 2 (A4): a supported inner-graph child
+                        // waiting for human input MUST NOT be auto-resumed by the
+                        // inner poller (auto-approval bypass). Preserve the
+                        // child's WaitRecord and propagate the wait to the parent:
+                        // the parent step parks with `WaitForInput` and the root
+                        // `WaitRecord` carries the exact child cursor (A4 "a
+                        // waiting child makes the parent waiting"). Explicit
+                        // continuation re-runs the parent inner-graph task, which
+                        // reattaches the still-waiting child and steps it — the
+                        // child's durable token is then consumed by the matching
+                        // authorized continue, never by boot or the poller.
+                        child_wait = Some((child_sid.0.clone(), response));
+                        break;
+                    }
+                    crate::engine::StepOutcome::Error(e) => {
+                        last_error = Some(e);
+                        break;
+                    }
                 }
             }
-        }
         }
 
         // 5a. Round-4 Critical 2: a child human wait must make THIS parent
@@ -415,21 +414,22 @@ impl Task for InnerGraphTask {
                 .get_current_task_id(&SessionId(child_session.clone()))
                 .await
                 .unwrap_or(None);
-            context.set("_child_wait_session", child_session.clone()).await;
-            context.set(
-                "_child_wait_task",
-                child_task_id.unwrap_or_else(|| child_session.clone()),
-            )
-            .await;
+            context
+                .set("_child_wait_session", child_session.clone())
+                .await;
+            context
+                .set(
+                    "_child_wait_task",
+                    child_task_id.unwrap_or_else(|| child_session.clone()),
+                )
+                .await;
             return Ok(TaskResult::new(
-                Some(
-                    response.unwrap_or_else(|| {
-                        format!(
-                            "inner graph '{}' child '{}' is waiting for human input",
-                            self.inner_graph.id, child_session
-                        )
-                    }),
-                ),
+                Some(response.unwrap_or_else(|| {
+                    format!(
+                        "inner graph '{}' child '{}' is waiting for human input",
+                        self.inner_graph.id, child_session
+                    )
+                })),
                 NextAction::WaitForInput,
             ));
         }
@@ -2531,23 +2531,22 @@ impl Task for AcpPromptTask {
             // `CancellationUnavailable` — a fresh token would be
             // uncancellable by any coordinator. The run admission path
             // (engine start/spawn/recovery) registers the token.
-            let cancellation =
-                crate::capability::resolve_session_cancellation(&self.session_cancels, &self.session_id)
-                    .map_err(|e| {
-                        graph_flow::GraphError::TaskExecutionFailed(format!(
-                            "acp_prompt cancellation resolution failed: {e}"
-                        ))
-                    })?;
+            let cancellation = crate::capability::resolve_session_cancellation(
+                &self.session_cancels,
+                &self.session_id,
+            )
+            .map_err(|e| {
+                graph_flow::GraphError::TaskExecutionFailed(format!(
+                    "acp_prompt cancellation resolution failed: {e}"
+                ))
+            })?;
 
             // Dispatching a prompt to an external agent is an external
             // effect — mark the step so a failed post-effect commit persists
             // an interrupted disposition rather than blindly rewinding
             // (Important 3).
             context
-                .set(
-                    crate::engine::EXTERNAL_EFFECT_MARKER,
-                    true,
-                )
+                .set(crate::engine::EXTERNAL_EFFECT_MARKER, true)
                 .await;
 
             let result = executor
@@ -2876,10 +2875,7 @@ impl Task for HostToolCallTask {
             // failed post-effect commit persists an interrupted disposition
             // rather than blindly rewinding (Important 3).
             context
-                .set(
-                    crate::engine::EXTERNAL_EFFECT_MARKER,
-                    true,
-                )
+                .set(crate::engine::EXTERNAL_EFFECT_MARKER, true)
                 .await;
             dispatch_ref
                 .dispatch_tool(&self.tool_name, &rendered_args, &request_id)
@@ -2894,10 +2890,7 @@ impl Task for HostToolCallTask {
             // Test-oriented path: call through Mutex-wrapped dispatch slot.
             // A host-tool dispatch is an external effect (Important 3).
             context
-                .set(
-                    crate::engine::EXTERNAL_EFFECT_MARKER,
-                    true,
-                )
+                .set(crate::engine::EXTERNAL_EFFECT_MARKER, true)
                 .await;
             let dispatch = {
                 let guard = dispatch_arc.lock().map_err(|e| {
@@ -3128,7 +3121,8 @@ mod tests {
             async fn execute(
                 &self,
                 _request: crate::capability::PromptRequest,
-            ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError> {
+            ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError>
+            {
                 Ok(crate::capability::PromptResult {
                     full_text: "GO — evaluation passes.".to_string(),
                     host_session_id: "host-sess".to_string(),
@@ -3171,7 +3165,8 @@ mod tests {
             async fn execute(
                 &self,
                 _request: crate::capability::PromptRequest,
-            ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError> {
+            ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError>
+            {
                 Ok(crate::capability::PromptResult {
                     full_text: "NO — stop and review.".to_string(),
                     host_session_id: "host-sess".to_string(),
@@ -3863,12 +3858,10 @@ mod tests {
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     > {
         let map = empty_session_cancels();
-        map.write()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(
-                session_id.to_string(),
-                tokio_util::sync::CancellationToken::new(),
-            );
+        map.write().unwrap_or_else(|e| e.into_inner()).insert(
+            session_id.to_string(),
+            tokio_util::sync::CancellationToken::new(),
+        );
         map
     }
 
@@ -3950,7 +3943,8 @@ mod tests {
             async fn execute(
                 &self,
                 _request: crate::capability::PromptRequest,
-            ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError> {
+            ) -> Result<crate::capability::PromptResult, crate::capability::CapabilityError>
+            {
                 Ok(crate::capability::PromptResult {
                     full_text: "transformed:test prompt".to_string(),
                     host_session_id: "host-sess".to_string(),
@@ -4097,12 +4091,12 @@ mod tests {
         }
     }
 
-    fn identity_registry(
-        executor: Arc<CapturingIdentityExecutor>,
-    ) -> Arc<CapabilityRegistry> {
-        let session_cancels: Arc<std::sync::RwLock<
-            std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
-        >> = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+    fn identity_registry(executor: Arc<CapturingIdentityExecutor>) -> Arc<CapabilityRegistry> {
+        let session_cancels: Arc<
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
+        > = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
         // The identity regressions run an unbound capability path whose run
         // id resolves to the trusted `_session_id` injected by the engine —
         // register the coordinator tokens for the known test run ids (and

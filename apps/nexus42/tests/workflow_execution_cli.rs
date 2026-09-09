@@ -16,8 +16,7 @@ use nexus_agent_host::capability::model::{
 };
 use nexus_agent_host::{
     DiscoverySource, HostError, HostFacade, HostOperationId, HostResult, HostSession,
-    HostSessionId, LaunchStrategy, ProviderCatalog, ProviderCatalogEntry, SessionState,
-    TrustLevel,
+    HostSessionId, LaunchStrategy, ProviderCatalog, ProviderCatalogEntry, SessionState, TrustLevel,
 };
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -322,9 +321,7 @@ async fn wait_for_run_status(
         Ok(record) => record,
         Err(_) => {
             let (status, state) = load_run_record(daemon, session_id).await;
-            panic!(
-                "run {session_id} did not reach {expected}; status={status} state={state:?}"
-            );
+            panic!("run {session_id} did not reach {expected}; status={status} state={state:?}");
         }
     }
 }
@@ -380,7 +377,10 @@ async fn admission_production_host_progress_non_echo() {
         reqwest::StatusCode::CREATED,
         "public add with valid binding must succeed: {body}"
     );
-    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    let schedule_id = body["schedule_id"]
+        .as_str()
+        .expect("schedule_id")
+        .to_string();
 
     // The drive loop steps recall → generate (Host prompt) → persist, then
     // parks at the manual wait. Wait for the prompt to be recorded.
@@ -423,7 +423,9 @@ async fn admission_production_host_progress_non_echo() {
         "rendered prompt must carry the frozen preset.input.topic: {prompts:?}"
     );
     assert!(
-        prompts.iter().all(|p| !p.contains("transformed:mock-output")),
+        prompts
+            .iter()
+            .all(|p| !p.contains("transformed:mock-output")),
         "the fixture output must never be an echo of the prompt"
     );
     assert!(
@@ -530,13 +532,12 @@ async fn admission_concurrent_pending_row_one_session() {
         .expect("exactly one owned session");
     assert!(!sid.is_empty());
     assert_eq!(row.execution_policy, "driven_v1");
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM orchestration_sessions WHERE session_id = ?",
-    )
-    .bind(sid)
-    .fetch_one(&daemon.pool)
-    .await
-    .expect("count sessions");
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions WHERE session_id = ?")
+            .bind(sid)
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("count sessions");
     assert_eq!(count, 1, "one pending row must mint exactly one session");
 }
 
@@ -576,7 +577,11 @@ async fn admission_distinct_serial_rows_race_one_owned() {
     let payload = json!({ "signal": "start" });
     let (a, b) = tokio::join!(
         post_json(&daemon, path, payload.clone()),
-        post_json(&daemon, "/v1/daemon/orchestration/schedules/SCHRACE2/signal", payload),
+        post_json(
+            &daemon,
+            "/v1/daemon/orchestration/schedules/SCHRACE2/signal",
+            payload
+        ),
     );
     // Exactly one admission wins; the loser is refused with a conflict and
     // its row stays pending and unowned (the store's in-transaction matrix
@@ -598,14 +603,24 @@ async fn admission_distinct_serial_rows_race_one_owned() {
 
     let row1 = load_drive_row(&daemon, "SCHRACE1").await;
     let row2 = load_drive_row(&daemon, "SCHRACE2").await;
-    let owned1 = row1.current_session_id.as_deref().is_some_and(|s| !s.is_empty());
-    let owned2 = row2.current_session_id.as_deref().is_some_and(|s| !s.is_empty());
+    let owned1 = row1
+        .current_session_id
+        .as_deref()
+        .is_some_and(|s| !s.is_empty());
+    let owned2 = row2
+        .current_session_id
+        .as_deref()
+        .is_some_and(|s| !s.is_empty());
     assert!(
         owned1 ^ owned2,
         "exactly one of the two distinct serial rows must own a run: \
          SCHRACE1 owned={owned1} SCHRACE2 owned={owned2}"
     );
-    let (winner, loser) = if owned1 { ("SCHRACE1", &row2) } else { ("SCHRACE2", &row1) };
+    let (winner, loser) = if owned1 {
+        ("SCHRACE1", &row2)
+    } else {
+        ("SCHRACE2", &row1)
+    };
     assert_eq!(
         loser.status, "pending",
         "the serial loser must stay pending and unowned: {winner} won, loser status={}",
@@ -664,7 +679,10 @@ async fn admission_dependency_blocked_stays_pending() {
     let schedule_id = body["schedule_id"].as_str().expect("schedule_id");
     let row = load_drive_row(&daemon, schedule_id).await;
     assert_eq!(row.status, "pending");
-    assert!(row.current_session_id.is_none(), "blocked row must be unowned");
+    assert!(
+        row.current_session_id.is_none(),
+        "blocked row must be unowned"
+    );
 }
 
 /// N-7: serial concurrency blocking — a second serial schedule for the same
@@ -674,7 +692,10 @@ async fn admission_serial_blocked_stays_pending() {
     let daemon = LiveDaemon::start().await;
     let (status, body) = add_public(&daemon, "p2-t1-serial-first").await;
     assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
-    let first_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    let first_id = body["schedule_id"]
+        .as_str()
+        .expect("schedule_id")
+        .to_string();
     let first = load_drive_row(&daemon, &first_id).await;
     assert!(
         first.current_session_id.is_some(),
@@ -691,7 +712,10 @@ async fn admission_serial_blocked_stays_pending() {
     let second_id = body["schedule_id"].as_str().expect("schedule_id");
     let row = load_drive_row(&daemon, second_id).await;
     assert_eq!(row.status, "pending");
-    assert!(row.current_session_id.is_none(), "serial-blocked row is unowned");
+    assert!(
+        row.current_session_id.is_none(),
+        "serial-blocked row is unowned"
+    );
 }
 
 /// N-7: session POST honors the sanctioned `agentBindings` contract — a
@@ -765,13 +789,12 @@ async fn session_post_bindings_accepted_and_unknown_refused() {
         text.contains("missing agent binding") || text.contains("unknown role"),
         "refusal must name the missing/unknown role: {text}"
     );
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM orchestration_sessions WHERE session_id = ?",
-    )
-    .bind(&session_id)
-    .fetch_one(&daemon.pool)
-    .await
-    .expect("count sessions");
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions WHERE session_id = ?")
+            .bind(&session_id)
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("count sessions");
     assert_eq!(count, 1, "the refused POST must not mint a second session");
 }
 
@@ -825,7 +848,9 @@ async fn admission_new_public_schedule_is_driven() {
     let row = load_drive_row(&daemon, schedule_id).await;
     assert_eq!(row.execution_policy, "driven_v1", "{schedule_id}");
     assert!(
-        row.current_session_id.as_deref().is_some_and(|s| !s.is_empty()),
+        row.current_session_id
+            .as_deref()
+            .is_some_and(|s| !s.is_empty()),
         "driven schedule must own a session: status={} session={:?}",
         row.status,
         row.current_session_id
@@ -905,7 +930,10 @@ async fn concurrent_start_yields_one_owned_session() {
     let daemon = LiveDaemon::start().await;
     let (status, body) = add_public(&daemon, "p2-t1-concurrent").await;
     assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
-    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    let schedule_id = body["schedule_id"]
+        .as_str()
+        .expect("schedule_id")
+        .to_string();
 
     let path = format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal");
     let payload = json!({ "signal": "start" });
@@ -973,14 +1001,16 @@ async fn explicit_legacy_running_without_session_starts() {
         .await
         .expect("seed historical row");
         // No core_context_versions row is created — the historical shape.
-        let seed_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM core_context_versions WHERE schedule_id = ?",
-        )
-        .bind(id)
-        .fetch_one(&daemon.pool)
-        .await
-        .expect("count seeds");
-        assert_eq!(seed_count, 0, "historical row {id} must have no version-0 seed");
+        let seed_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM core_context_versions WHERE schedule_id = ?")
+                .bind(id)
+                .fetch_one(&daemon.pool)
+                .await
+                .expect("count seeds");
+        assert_eq!(
+            seed_count, 0,
+            "historical row {id} must have no version-0 seed"
+        );
     }
 
     // Inertness before the explicit start: boot resume, tick, and cron
@@ -1047,7 +1077,9 @@ async fn explicit_legacy_running_without_session_starts() {
             "historical row {id} must be cut over to driven_v1"
         );
         assert!(
-            row.current_session_id.as_deref().is_some_and(|s| !s.is_empty()),
+            row.current_session_id
+                .as_deref()
+                .is_some_and(|s| !s.is_empty()),
             "historical row {id} must own exactly one session: status={} session={:?}",
             row.status,
             row.current_session_id
@@ -1080,14 +1112,16 @@ async fn explicit_legacy_running_without_session_starts() {
 
         // Exactly one owned session row.
         let sid = row.current_session_id.expect("session id");
-        let session_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM orchestration_sessions WHERE session_id = ?",
-        )
-        .bind(&sid)
-        .fetch_one(&daemon.pool)
-        .await
-        .expect("count sessions");
-        assert_eq!(session_count, 1, "historical row {id} must own exactly one session");
+        let session_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions WHERE session_id = ?")
+                .bind(&sid)
+                .fetch_one(&daemon.pool)
+                .await
+                .expect("count sessions");
+        assert_eq!(
+            session_count, 1,
+            "historical row {id} must own exactly one session"
+        );
     }
 }
 
@@ -1180,7 +1214,10 @@ async fn admission_lazy_attach_drives_host_prompt() {
         reqwest::StatusCode::CREATED,
         "lazy-attached add must succeed: {body}"
     );
-    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    let schedule_id = body["schedule_id"]
+        .as_str()
+        .expect("schedule_id")
+        .to_string();
 
     let prompts = tokio::time::timeout(std::time::Duration::from_secs(15), async {
         loop {
@@ -1203,7 +1240,9 @@ async fn admission_lazy_attach_drives_host_prompt() {
     );
     let row = load_drive_row(&daemon, &schedule_id).await;
     assert!(
-        row.current_session_id.as_deref().is_some_and(|s| !s.is_empty()),
+        row.current_session_id
+            .as_deref()
+            .is_some_and(|s| !s.is_empty()),
         "lazy-attached schedule must own a session"
     );
 }
@@ -1301,7 +1340,11 @@ async fn admission_legacy_rows_inert_across_tick() {
     assert_eq!(paused, 0, "no driven_v1 running rows to pause");
     for id in ["SCHLEGACY1", "SCHLEGACY2"] {
         let row = load_drive_row(&daemon, id).await;
-        let expected = if id == "SCHLEGACY1" { "pending" } else { "running" };
+        let expected = if id == "SCHLEGACY1" {
+            "pending"
+        } else {
+            "running"
+        };
         assert_eq!(
             row.status, expected,
             "legacy row {id} must keep its historical status after boot resume"
@@ -1337,7 +1380,11 @@ async fn admission_legacy_rows_inert_across_tick() {
         // A3: operator-visible historical status is preserved — a legacy
         // `running` row stays `running` (never driven, never re-flipped);
         // a legacy `pending` row stays `pending` (never flipped to running).
-        let expected = if id == "SCHLEGACY1" { "pending" } else { "running" };
+        let expected = if id == "SCHLEGACY1" {
+            "pending"
+        } else {
+            "running"
+        };
         assert_eq!(
             row.status, expected,
             "legacy row {id} must keep its historical status after tick/cron"
@@ -1407,7 +1454,10 @@ async fn admission_resume_ignores_legacy_running_capacity() {
     let driven = load_drive_row(&daemon, "SCHDRIVEN-PAUSED").await;
     assert_eq!(driven.status, "running");
     assert!(
-        driven.current_session_id.as_deref().is_some_and(|s| !s.is_empty()),
+        driven
+            .current_session_id
+            .as_deref()
+            .is_some_and(|s| !s.is_empty()),
         "driven row must own a session after resume"
     );
 
@@ -1506,15 +1556,20 @@ async fn admission_internal_insertion_branches_durable() {
     .fetch_one(&daemon.pool)
     .await
     .expect("chain core version");
-    assert_eq!(chain_cc, 0, "auto-chain row must carry a durable seed pointer");
-    let chain_cc_rows: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM core_context_versions WHERE schedule_id = ?",
-    )
-    .bind(&chain_id)
-    .fetch_one(&daemon.pool)
-    .await
-    .expect("chain cc rows");
-    assert_eq!(chain_cc_rows, 1, "auto-chain row must have a durable seed record");
+    assert_eq!(
+        chain_cc, 0,
+        "auto-chain row must carry a durable seed pointer"
+    );
+    let chain_cc_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM core_context_versions WHERE schedule_id = ?")
+            .bind(&chain_id)
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("chain cc rows");
+    assert_eq!(
+        chain_cc_rows, 1,
+        "auto-chain row must have a durable seed record"
+    );
     let chain_desc: Option<Vec<u8>> = sqlx::query_scalar(
         "SELECT execution_descriptor_json FROM creator_schedules WHERE schedule_id = ?",
     )
@@ -1526,10 +1581,11 @@ async fn admission_internal_insertion_branches_durable() {
         serde_json::from_slice(chain_desc.as_deref().expect("chain descriptor present"))
             .expect("chain descriptor parses");
     assert!(
-        chain_desc.source != nexus_orchestration::run_state::PresetSourceIdentity::Embedded {
-            preset_id: "research".to_string(),
-            content_hash: [0; 32],
-        },
+        chain_desc.source
+            != nexus_orchestration::run_state::PresetSourceIdentity::Embedded {
+                preset_id: "research".to_string(),
+                content_hash: [0; 32],
+            },
         "auto-chain descriptor must carry the REAL content hash, never zero"
     );
 
@@ -1539,18 +1595,15 @@ async fn admission_internal_insertion_branches_durable() {
         .start(&chain_id)
         .await
         .expect("auto-chain admitted through the production starter");
-    let chain_prompts = match tokio::time::timeout(
-        std::time::Duration::from_secs(15),
-        async {
-            loop {
-                let prompts = host.prompts();
-                if !prompts.is_empty() {
-                    return prompts;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let chain_prompts = match tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            let prompts = host.prompts();
+            if !prompts.is_empty() {
+                return prompts;
             }
-        },
-    )
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
     .await
     {
         Ok(prompts) => prompts,
@@ -1575,17 +1628,14 @@ async fn admission_internal_insertion_branches_durable() {
             panic!(
                 "auto-chain host prompt not recorded; session={} status={} state={:?} \
                  schedule_status={} schedule_session={:?} run_error={:?}",
-                chain_sid.0,
-                status,
-                state,
-                row.status,
-                row.current_session_id,
-                run_error
+                chain_sid.0, status, state, row.status, row.current_session_id, run_error
             );
         }
     };
     assert!(
-        chain_prompts.iter().all(|p| !p.contains("transformed:mock-output")),
+        chain_prompts
+            .iter()
+            .all(|p| !p.contains("transformed:mock-output")),
         "auto-chain fixture output must never be an echo of the prompt"
     );
     let (chain_status, chain_state) =
@@ -1620,13 +1670,12 @@ async fn admission_internal_insertion_branches_durable() {
     .expect("enqueue cron schedule");
     let cron_row = load_drive_row(&daemon, &cron_id).await;
     assert_eq!(cron_row.execution_policy, "driven_v1");
-    let cron_cc_rows: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM core_context_versions WHERE schedule_id = ?",
-    )
-    .bind(&cron_id)
-    .fetch_one(&daemon.pool)
-    .await
-    .expect("cron cc rows");
+    let cron_cc_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM core_context_versions WHERE schedule_id = ?")
+            .bind(&cron_id)
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("cron cc rows");
     assert_eq!(cron_cc_rows, 1, "cron row must have a durable seed record");
 
     let cron_sid = starter
@@ -1635,7 +1684,9 @@ async fn admission_internal_insertion_branches_durable() {
         .expect("cron admitted through the production starter");
     let cron_prompts = wait_for_prompts(&host, 15).await;
     assert!(
-        cron_prompts.iter().all(|p| !p.contains("transformed:mock-output")),
+        cron_prompts
+            .iter()
+            .all(|p| !p.contains("transformed:mock-output")),
         "cron fixture output must never be an echo of the prompt"
     );
     let (cron_status, cron_state) =
@@ -1667,14 +1718,16 @@ async fn admission_internal_insertion_branches_durable() {
     .expect("enqueue review-master schedule");
     let rvm_row = load_drive_row(&daemon, &rvm_id).await;
     assert_eq!(rvm_row.execution_policy, "driven_v1");
-    let rvm_cc_rows: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM core_context_versions WHERE schedule_id = ?",
-    )
-    .bind(&rvm_id)
-    .fetch_one(&daemon.pool)
-    .await
-    .expect("rvm cc rows");
-    assert_eq!(rvm_cc_rows, 1, "review-master row must have a durable seed record");
+    let rvm_cc_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM core_context_versions WHERE schedule_id = ?")
+            .bind(&rvm_id)
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("rvm cc rows");
+    assert_eq!(
+        rvm_cc_rows, 1,
+        "review-master row must have a durable seed record"
+    );
 
     let rvm_sid = starter
         .start(&rvm_id)
@@ -1734,12 +1787,10 @@ async fn admission_missing_default_binding_refuses() {
         text.contains("missing agent binding"),
         "refusal must name the missing binding: {text}"
     );
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM orchestration_sessions",
-    )
-    .fetch_one(&daemon.pool)
-    .await
-    .expect("count sessions");
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions")
+        .fetch_one(&daemon.pool)
+        .await
+        .expect("count sessions");
     assert_eq!(count, 0, "no run row may be created for a refused add");
 }
 
@@ -1818,7 +1869,10 @@ async fn admission_force_gates_insertion_driven() {
         reqwest::StatusCode::CREATED,
         "force-gates add must succeed: {body}"
     );
-    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    let schedule_id = body["schedule_id"]
+        .as_str()
+        .expect("schedule_id")
+        .to_string();
     assert_eq!(
         body["status"].as_str(),
         Some("running"),
@@ -1837,18 +1891,15 @@ async fn admission_force_gates_insertion_driven() {
     // Driven with real Host progress: the `gather` enter action
     // (`creator.inject_prompt`) enqueues the durable prompt injection; the
     // exit judge (`judge.llm` → acp.prompt) reaches the Host.
-    let prompts = match tokio::time::timeout(
-        std::time::Duration::from_secs(15),
-        async {
-            loop {
-                let prompts = host.prompts();
-                if !prompts.is_empty() {
-                    return prompts;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let prompts = match tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            let prompts = host.prompts();
+            if !prompts.is_empty() {
+                return prompts;
             }
-        },
-    )
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
     .await
     {
         Ok(prompts) => prompts,
@@ -1875,13 +1926,14 @@ async fn admission_force_gates_insertion_driven() {
                 "force-gates host prompt not recorded; schedule={schedule_id} \
                  schedule_status={} schedule_session={:?} session={sid} \
                  status={status} state={state:?} run_error={run_error:?}",
-                row.status,
-                row.current_session_id,
+                row.status, row.current_session_id,
             );
         }
     };
     assert!(
-        prompts.iter().any(|p| p.contains("Gather Phase Exit Check")),
+        prompts
+            .iter()
+            .any(|p| p.contains("Gather Phase Exit Check")),
         "force-gates judge prompt must reach the Host: {prompts:?}"
     );
     let row = load_drive_row(&daemon, &schedule_id).await;
@@ -1970,24 +2022,24 @@ async fn admission_gated_work_insertion_driven() {
         reqwest::StatusCode::CREATED,
         "gated add with satisfying Work must succeed: {body}"
     );
-    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    let schedule_id = body["schedule_id"]
+        .as_str()
+        .expect("schedule_id")
+        .to_string();
     assert_eq!(
         body["status"].as_str(),
         Some("running"),
         "gated row must be admitted immediately: {body}"
     );
-    let prompts = match tokio::time::timeout(
-        std::time::Duration::from_secs(15),
-        async {
-            loop {
-                let prompts = host.prompts();
-                if !prompts.is_empty() {
-                    return prompts;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let prompts = match tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            let prompts = host.prompts();
+            if !prompts.is_empty() {
+                return prompts;
             }
-        },
-    )
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
     .await
     {
         Ok(prompts) => prompts,
@@ -2014,13 +2066,14 @@ async fn admission_gated_work_insertion_driven() {
                 "gated host prompt not recorded; schedule={schedule_id} \
                  schedule_status={} schedule_session={:?} session={sid} \
                  status={status} state={state:?} run_error={run_error:?}",
-                row.status,
-                row.current_session_id,
+                row.status, row.current_session_id,
             );
         }
     };
     assert!(
-        prompts.iter().any(|p| p.contains("Gather Phase Exit Check")),
+        prompts
+            .iter()
+            .any(|p| p.contains("Gather Phase Exit Check")),
         "gated judge prompt must reach the Host: {prompts:?}"
     );
     let row = load_drive_row(&daemon, &schedule_id).await;
@@ -2110,7 +2163,10 @@ async fn admission_gated_work_insertion_driven() {
     .fetch_one(&daemon.pool)
     .await
     .expect("bad schedule count");
-    assert_eq!(bad_count, 0, "no schedule row may be created for a gate failure");
+    assert_eq!(
+        bad_count, 0,
+        "no schedule row may be created for a gate failure"
+    );
 }
 
 /// N-14: work-linked vs general insertion — a work-linked add freezes the
@@ -2180,14 +2236,16 @@ async fn admission_work_linked_vs_general_insertion() {
     )
     .await;
     assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
-    let linked_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
-    let linked_work: Option<String> = sqlx::query_scalar(
-        "SELECT work_id FROM creator_schedules WHERE schedule_id = ?",
-    )
-    .bind(&linked_id)
-    .fetch_one(&daemon.pool)
-    .await
-    .expect("linked work_id");
+    let linked_id = body["schedule_id"]
+        .as_str()
+        .expect("schedule_id")
+        .to_string();
+    let linked_work: Option<String> =
+        sqlx::query_scalar("SELECT work_id FROM creator_schedules WHERE schedule_id = ?")
+            .bind(&linked_id)
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("linked work_id");
     assert_eq!(
         linked_work.as_deref(),
         Some("wrk_linked"),
@@ -2230,14 +2288,16 @@ async fn admission_work_linked_vs_general_insertion() {
     )
     .await;
     assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
-    let general_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
-    let general_work: Option<String> = sqlx::query_scalar(
-        "SELECT work_id FROM creator_schedules WHERE schedule_id = ?",
-    )
-    .bind(&general_id)
-    .fetch_one(&daemon.pool)
-    .await
-    .expect("general work_id");
+    let general_id = body["schedule_id"]
+        .as_str()
+        .expect("schedule_id")
+        .to_string();
+    let general_work: Option<String> =
+        sqlx::query_scalar("SELECT work_id FROM creator_schedules WHERE schedule_id = ?")
+            .bind(&general_id)
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("general work_id");
     assert!(
         general_work.is_none() || general_work.as_deref() == Some(""),
         "general add must stay work-less: {general_work:?}"
@@ -2245,20 +2305,17 @@ async fn admission_work_linked_vs_general_insertion() {
 
     // Both driven with real Host progress: wait until BOTH prompts are
     // recorded (the linked run is admitted first, the general run second).
-    let prompts = match tokio::time::timeout(
-        std::time::Duration::from_secs(15),
-        async {
-            loop {
-                let prompts = host.prompts();
-                if prompts.iter().any(|p| p.contains("p2-t1-linked-topic"))
-                    && prompts.iter().any(|p| p.contains("p2-t1-general-topic"))
-                {
-                    return prompts;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let prompts = match tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            let prompts = host.prompts();
+            if prompts.iter().any(|p| p.contains("p2-t1-linked-topic"))
+                && prompts.iter().any(|p| p.contains("p2-t1-general-topic"))
+            {
+                return prompts;
             }
-        },
-    )
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
     .await
     {
         Ok(prompts) => prompts,
@@ -2287,13 +2344,10 @@ async fn admission_work_linked_vs_general_insertion() {
                 diag.push_str(&format!(
                     "schedule={id} schedule_status={} schedule_session={:?} \
                      session={sid} status={status} state={state:?} run_error={run_error:?}; ",
-                    row.status,
-                    row.current_session_id,
+                    row.status, row.current_session_id,
                 ));
             }
-            panic!(
-                "work-linked/general prompts not both recorded; prompts={prompts:?} {diag}"
-            );
+            panic!("work-linked/general prompts not both recorded; prompts={prompts:?} {diag}");
         }
     };
     assert!(
@@ -2308,7 +2362,9 @@ async fn admission_work_linked_vs_general_insertion() {
         let row = load_drive_row(&daemon, id).await;
         assert_eq!(row.execution_policy, "driven_v1");
         assert!(
-            row.current_session_id.as_deref().is_some_and(|s| !s.is_empty()),
+            row.current_session_id
+                .as_deref()
+                .is_some_and(|s| !s.is_empty()),
             "schedule {id} must own a session"
         );
     }
@@ -2356,10 +2412,7 @@ async fn admission_failed_driver_transition_refuses_reentry() {
         .expect("supervisor wired")
         .schedule_starter_clone()
         .expect("production starter injected");
-    let coordinator = daemon
-        .state
-        .run_coordinator()
-        .expect("coordinator wired");
+    let coordinator = daemon.state.run_coordinator().expect("coordinator wired");
 
     // N-14: arm the deterministic production-storage fault seam — the
     // durable `Failed` transition write will be forced to fail after the
@@ -2398,7 +2451,10 @@ async fn admission_failed_driver_transition_refuses_reentry() {
     let (status, state) = wait_for_run_status(&daemon, &sid, "cancelled", 15).await;
     assert_eq!(status, "cancelled");
     assert!(
-        state.get("cancel_requested").and_then(Value::as_bool).unwrap_or(false),
+        state
+            .get("cancel_requested")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         "durable cancel/failure record must be present: {state}"
     );
 
@@ -2419,22 +2475,20 @@ async fn admission_failed_driver_transition_refuses_reentry() {
     // gate — the equivalent refusal) — no second session is minted and no
     // second driver starts.
     let reentry = starter.start("SCHDRVFAIL").await;
-    let reentry_err = reentry.expect_err(
-        "re-entry must be refused: the fenced owner is never re-driven",
-    );
+    let reentry_err =
+        reentry.expect_err("re-entry must be refused: the fenced owner is never re-driven");
     let reentry_msg = reentry_err.to_string();
     assert!(
         reentry_msg.contains("not eligible"),
         "re-entry refusal must be the eligibility gate: {reentry_msg}"
     );
 
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM orchestration_sessions WHERE session_id = ?",
-    )
-    .bind(&sid)
-    .fetch_one(&daemon.pool)
-    .await
-    .expect("count sessions");
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions WHERE session_id = ?")
+            .bind(&sid)
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("count sessions");
     assert_eq!(count, 1, "exactly one session for the failed run");
     let row = load_drive_row(&daemon, "SCHDRVFAIL").await;
     assert_eq!(
@@ -2616,11 +2670,20 @@ impl HostFacade for BlockingHost {
                                 }
                             }
                         }
-                        Some((Ok(started.clone()), (false, release_rx, started, delta, finished, 1)))
+                        Some((
+                            Ok(started.clone()),
+                            (false, release_rx, started, delta, finished, 1),
+                        ))
                     } else if state == 1 {
-                        Some((Ok(delta.clone()), (false, release_rx, started, delta, finished, 2)))
+                        Some((
+                            Ok(delta.clone()),
+                            (false, release_rx, started, delta, finished, 2),
+                        ))
                     } else if state == 2 {
-                        Some((Ok(finished.clone()), (false, release_rx, started, delta, finished, 3)))
+                        Some((
+                            Ok(finished.clone()),
+                            (false, release_rx, started, delta, finished, 3),
+                        ))
                     } else {
                         None
                     }
@@ -2729,7 +2792,10 @@ async fn control_authorized_continue_resumes_and_stale_refuses() {
     )
     .await;
     assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
-    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    let schedule_id = body["schedule_id"]
+        .as_str()
+        .expect("schedule_id")
+        .to_string();
 
     // Release the first prompt so the run reaches the manual wait.
     host.release();
@@ -2785,7 +2851,11 @@ async fn control_authorized_continue_resumes_and_stale_refuses() {
         Some(wait_id.as_str()),
         "stale continue must not consume the wait"
     );
-    assert_eq!(host.effects(), effects_before, "no new effects after stale continue");
+    assert_eq!(
+        host.effects(),
+        effects_before,
+        "no new effects after stale continue"
+    );
 
     // Missing wait_id → 422 invalid_input.
     let (status, body) = post_json(
@@ -2870,7 +2940,10 @@ async fn control_cancel_reaches_host_and_persists_cancelled() {
     )
     .await;
     assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
-    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    let schedule_id = body["schedule_id"]
+        .as_str()
+        .expect("schedule_id")
+        .to_string();
 
     // Wait for the prompt to be in flight AND its stream to be polled by
     // the executor's drain loop (deterministic cancel-reachability: a
@@ -2972,7 +3045,10 @@ async fn control_unconfirmed_cancel_keeps_schedule_non_cancelled() {
     )
     .await;
     assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
-    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    let schedule_id = body["schedule_id"]
+        .as_str()
+        .expect("schedule_id")
+        .to_string();
 
     tokio::time::timeout(std::time::Duration::from_secs(15), async {
         loop {
@@ -3112,7 +3188,10 @@ async fn control_completed_vs_cancel_race_completed_wins() {
     )
     .await;
     assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
-    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    let schedule_id = body["schedule_id"]
+        .as_str()
+        .expect("schedule_id")
+        .to_string();
     host.release();
 
     let row = load_drive_row(&daemon, &schedule_id).await;
@@ -3176,7 +3255,10 @@ async fn control_restart_wait_stays_blocked() {
     )
     .await;
     assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
-    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    let schedule_id = body["schedule_id"]
+        .as_str()
+        .expect("schedule_id")
+        .to_string();
     host.release();
 
     let row = load_drive_row(&daemon, &schedule_id).await;
@@ -3252,7 +3334,10 @@ async fn control_advance_cannot_bypass_human_wait() {
     )
     .await;
     assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
-    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    let schedule_id = body["schedule_id"]
+        .as_str()
+        .expect("schedule_id")
+        .to_string();
     host.release();
 
     let row = load_drive_row(&daemon, &schedule_id).await;
@@ -3302,7 +3387,11 @@ async fn control_advance_cannot_bypass_human_wait() {
         Some(wait_id.as_str()),
         "bypass attempts must not consume the wait"
     );
-    assert_eq!(host.effects(), effects_before, "no effects after bypass attempts");
+    assert_eq!(
+        host.effects(),
+        effects_before,
+        "no effects after bypass attempts"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -3334,14 +3423,24 @@ async fn settlement_completed_inspect_agrees() {
     )
     .await;
     assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
-    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    let schedule_id = body["schedule_id"]
+        .as_str()
+        .expect("schedule_id")
+        .to_string();
     host.release();
 
     let row = load_drive_row(&daemon, &schedule_id).await;
-    let sid = row.current_session_id.as_deref().expect("owned session").to_string();
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("owned session")
+        .to_string();
     let (run_status, state) = wait_for_run_status(&daemon, &sid, "waiting_for_input", 15).await;
     assert_eq!(run_status, "waiting_for_input");
-    let wait_id = state["wait"]["wait_id"].as_str().expect("wait id").to_string();
+    let wait_id = state["wait"]["wait_id"]
+        .as_str()
+        .expect("wait id")
+        .to_string();
 
     // Shared projection: the durable human wait is actionable and named.
     let resp = reqwest::Client::new()
@@ -3437,17 +3536,22 @@ async fn settlement_completed_inspect_agrees() {
 
     // Terminal rows are never re-enqueued: a tick leaves the row terminal
     // and does not mint a second session.
-    let supervisor = daemon.state.schedule_supervisor().expect("supervisor wired");
+    let supervisor = daemon
+        .state
+        .schedule_supervisor()
+        .expect("supervisor wired");
     supervisor.tick().await.expect("tick succeeds");
     let row = load_drive_row(&daemon, &schedule_id).await;
-    assert_eq!(row.status, "completed", "terminal row must not be re-enqueued");
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM orchestration_sessions WHERE session_id = ?",
-    )
-    .bind(&sid)
-    .fetch_one(&daemon.pool)
-    .await
-    .expect("count sessions");
+    assert_eq!(
+        row.status, "completed",
+        "terminal row must not be re-enqueued"
+    );
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions WHERE session_id = ?")
+            .bind(&sid)
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("count sessions");
     assert_eq!(count, 1, "no second session for a terminal row");
 }
 
@@ -3475,7 +3579,10 @@ async fn settlement_cancelled_inspect_agrees() {
     )
     .await;
     assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
-    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    let schedule_id = body["schedule_id"]
+        .as_str()
+        .expect("schedule_id")
+        .to_string();
 
     // Wait for the prompt stream to be polled (deterministic cancel-reachability).
     tokio::time::timeout(std::time::Duration::from_secs(15), async {
@@ -3490,7 +3597,11 @@ async fn settlement_cancelled_inspect_agrees() {
     .expect("prompt stream polled");
 
     let row = load_drive_row(&daemon, &schedule_id).await;
-    let sid = row.current_session_id.as_deref().expect("owned session").to_string();
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("owned session")
+        .to_string();
 
     let (status, body) = post_json(
         &daemon,
@@ -3539,10 +3650,16 @@ async fn settlement_cancelled_inspect_agrees() {
     );
 
     // Terminal rows are never re-enqueued.
-    let supervisor = daemon.state.schedule_supervisor().expect("supervisor wired");
+    let supervisor = daemon
+        .state
+        .schedule_supervisor()
+        .expect("supervisor wired");
     supervisor.tick().await.expect("tick succeeds");
     let row = load_drive_row(&daemon, &schedule_id).await;
-    assert_eq!(row.status, "cancelled", "terminal row must not be re-enqueued");
+    assert_eq!(
+        row.status, "cancelled",
+        "terminal row must not be re-enqueued"
+    );
 }
 
 /// T3: a failed driven run settles the matching schedule from the durable
@@ -3688,14 +3805,24 @@ async fn settlement_duplicate_callback_no_second_child() {
     )
     .await;
     assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
-    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    let schedule_id = body["schedule_id"]
+        .as_str()
+        .expect("schedule_id")
+        .to_string();
     host.release();
 
     let row = load_drive_row(&daemon, &schedule_id).await;
-    let sid = row.current_session_id.as_deref().expect("owned session").to_string();
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("owned session")
+        .to_string();
     let (run_status, state) = wait_for_run_status(&daemon, &sid, "waiting_for_input", 15).await;
     assert_eq!(run_status, "waiting_for_input");
-    let wait_id = state["wait"]["wait_id"].as_str().expect("wait id").to_string();
+    let wait_id = state["wait"]["wait_id"]
+        .as_str()
+        .expect("wait id")
+        .to_string();
     let (status, body) = post_json(
         &daemon,
         &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
@@ -3726,7 +3853,10 @@ async fn settlement_duplicate_callback_no_second_child() {
     .await
     .expect("attach driver pointer");
 
-    let supervisor = daemon.state.schedule_supervisor().expect("supervisor wired");
+    let supervisor = daemon
+        .state
+        .schedule_supervisor()
+        .expect("supervisor wired");
     // First callback: creates the child keyed by source_run_id.
     supervisor
         .on_schedule_terminal(
@@ -3735,14 +3865,16 @@ async fn settlement_duplicate_callback_no_second_child() {
         )
         .await
         .expect("first terminal callback");
-    let child_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM creator_schedules WHERE source_run_id = ?",
-    )
-    .bind(&sid)
-    .fetch_one(&daemon.pool)
-    .await
-    .expect("child count");
-    assert_eq!(child_count, 1, "first callback must create exactly one child");
+    let child_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM creator_schedules WHERE source_run_id = ?")
+            .bind(&sid)
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("child count");
+    assert_eq!(
+        child_count, 1,
+        "first callback must create exactly one child"
+    );
 
     // Duplicate callback: loads the existing child, never mints a second.
     supervisor
@@ -3752,24 +3884,22 @@ async fn settlement_duplicate_callback_no_second_child() {
         )
         .await
         .expect("duplicate terminal callback");
-    let child_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM creator_schedules WHERE source_run_id = ?",
-    )
-    .bind(&sid)
-    .fetch_one(&daemon.pool)
-    .await
-    .expect("child count");
+    let child_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM creator_schedules WHERE source_run_id = ?")
+            .bind(&sid)
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("child count");
     assert_eq!(
         child_count, 1,
         "duplicate callback must not mint a second child"
     );
-    let child_id: Option<String> = sqlx::query_scalar(
-        "SELECT schedule_id FROM creator_schedules WHERE source_run_id = ?",
-    )
-    .bind(&sid)
-    .fetch_one(&daemon.pool)
-    .await
-    .expect("child id");
+    let child_id: Option<String> =
+        sqlx::query_scalar("SELECT schedule_id FROM creator_schedules WHERE source_run_id = ?")
+            .bind(&sid)
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("child id");
     assert!(child_id.is_some(), "the existing child must be loaded");
 }
 
@@ -3837,14 +3967,24 @@ async fn settlement_restart_reconciles_no_second_child() {
     )
     .await;
     assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
-    let schedule_id = body["schedule_id"].as_str().expect("schedule_id").to_string();
+    let schedule_id = body["schedule_id"]
+        .as_str()
+        .expect("schedule_id")
+        .to_string();
     host.release();
 
     let row = load_drive_row(&daemon, &schedule_id).await;
-    let sid = row.current_session_id.as_deref().expect("owned session").to_string();
+    let sid = row
+        .current_session_id
+        .as_deref()
+        .expect("owned session")
+        .to_string();
     let (run_status, state) = wait_for_run_status(&daemon, &sid, "waiting_for_input", 15).await;
     assert_eq!(run_status, "waiting_for_input");
-    let wait_id = state["wait"]["wait_id"].as_str().expect("wait id").to_string();
+    let wait_id = state["wait"]["wait_id"]
+        .as_str()
+        .expect("wait id")
+        .to_string();
     let (status, body) = post_json(
         &daemon,
         &format!("/v1/daemon/orchestration/schedules/{schedule_id}/signal"),
@@ -3869,7 +4009,10 @@ async fn settlement_restart_reconciles_no_second_child() {
     )
     .await
     .expect("attach driver pointer");
-    let supervisor = daemon.state.schedule_supervisor().expect("supervisor wired");
+    let supervisor = daemon
+        .state
+        .schedule_supervisor()
+        .expect("supervisor wired");
     supervisor
         .on_schedule_terminal(
             &schedule_id,
@@ -3877,14 +4020,16 @@ async fn settlement_restart_reconciles_no_second_child() {
         )
         .await
         .expect("terminal callback");
-    let child_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM creator_schedules WHERE source_run_id = ?",
-    )
-    .bind(&sid)
-    .fetch_one(&daemon.pool)
-    .await
-    .expect("child count");
-    assert_eq!(child_count, 1, "exactly one child after the first settlement");
+    let child_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM creator_schedules WHERE source_run_id = ?")
+            .bind(&sid)
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("child count");
+    assert_eq!(
+        child_count, 1,
+        "exactly one child after the first settlement"
+    );
 
     // Simulate checkpoint-before-settlement loss: the durable session is
     // terminal but the schedule row is `running` again (the settlement
@@ -3917,20 +4062,21 @@ async fn settlement_restart_reconciles_no_second_child() {
 
     let row = load_drive_row(&daemon, &schedule_id).await;
     assert_eq!(row.status, "completed", "schedule settled after reconcile");
-    let child_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM creator_schedules WHERE source_run_id = ?",
-    )
-    .bind(&sid)
-    .fetch_one(&daemon.pool)
-    .await
-    .expect("child count");
+    let child_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM creator_schedules WHERE source_run_id = ?")
+            .bind(&sid)
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("child count");
     assert_eq!(child_count, 1, "reconcile must not mint a second child");
-    let session_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM orchestration_sessions WHERE session_id = ?",
-    )
-    .bind(&sid)
-    .fetch_one(&daemon.pool)
-    .await
-    .expect("session count");
-    assert_eq!(session_count, 1, "reconcile must not create a second session");
+    let session_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM orchestration_sessions WHERE session_id = ?")
+            .bind(&sid)
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("session count");
+    assert_eq!(
+        session_count, 1,
+        "reconcile must not create a second session"
+    );
 }

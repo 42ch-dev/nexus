@@ -580,11 +580,9 @@ fn verdict_for_recovery(class: RecoveryClass, row_status: &str) -> ResumableVerd
                           no verdict fabricated"
                 .to_string(),
         },
-        RecoveryClass::ConvergeMerge => verdict_for(
-            row_status,
-            ResumeClass::ChainClassNoFailure,
-            None,
-        ),
+        RecoveryClass::ConvergeMerge => {
+            verdict_for(row_status, ResumeClass::ChainClassNoFailure, None)
+        }
         RecoveryClass::Interrupted => ResumableVerdict {
             verdict: Verdict::No,
             rule: ResumeRule::Interrupted,
@@ -597,8 +595,9 @@ fn verdict_for_recovery(class: RecoveryClass, row_status: &str) -> ResumableVerd
             verdict: Verdict::No,
             rule: ResumeRule::HumanWait,
             runner_check: RunnerCheck::NotApplicable,
-            explanation: "human wait (A4) — wait token preserved; never stepped or approved at boot"
-                .to_string(),
+            explanation:
+                "human wait (A4) — wait token preserved; never stepped or approved at boot"
+                    .to_string(),
         },
         RecoveryClass::SafeBoundary => ResumableVerdict {
             verdict: Verdict::No,
@@ -609,7 +608,9 @@ fn verdict_for_recovery(class: RecoveryClass, row_status: &str) -> ResumableVerd
                 .to_string(),
         },
         RecoveryClass::LegacyUnverified => {
-            unreachable!("LegacyUnverified routes through the legacy cascade, not verdict_for_recovery")
+            unreachable!(
+                "LegacyUnverified routes through the legacy cascade, not verdict_for_recovery"
+            )
         }
     }
 }
@@ -751,7 +752,11 @@ fn render_detail(dto: &InspectDto) -> String {
     let _ = writeln!(out, "preset:         {}", dto.preset_id);
     let _ = writeln!(out, "preset_version: {}", dto.preset_version);
     let _ = writeln!(out, "status:         {}", dto.db_status);
-    let _ = writeln!(out, "recovery_class: {}", recovery_class_str(dto.recovery_class));
+    let _ = writeln!(
+        out,
+        "recovery_class: {}",
+        recovery_class_str(dto.recovery_class)
+    );
     let _ = writeln!(out, "allowed_actions: {}", dto.allowed_actions.join(", "));
     if let Some(reason) = &dto.reason_code {
         let _ = writeln!(out, "reason_code:    {reason}");

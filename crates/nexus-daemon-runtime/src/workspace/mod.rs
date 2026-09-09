@@ -160,7 +160,8 @@ pub struct WorkspaceState {
     shutdown_requested: Arc<AtomicBool>,
     /// Daemon-side tool dispatch for nexus.* tools (DF-47, V1.42 P3).
     /// Set at daemon boot so schedule-executed `HostToolCallTask` can invoke tools.
-    daemon_tool_dispatch: Arc<RwLock<Option<Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>>>,
+    daemon_tool_dispatch:
+        Arc<RwLock<Option<Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>>>,
     /// V1.80 REL-01: per-creator in-flight serialization guard for
     /// `POST /v1/daemon/memory/review`. Two overlapping review calls for the same
     /// creator fetch the same pending rows and would double-promote / mint
@@ -641,19 +642,25 @@ impl WorkspaceState {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
-            .ok_or_else(|| anyhow::anyhow!("capability registry not wired before boot bundle publish"))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!("capability registry not wired before boot bundle publish")
+            })?;
         let coordinator = self
             .run_coordinator
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
-            .ok_or_else(|| anyhow::anyhow!("run coordinator not wired before boot bundle publish"))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!("run coordinator not wired before boot bundle publish")
+            })?;
         let supervisor = self
             .schedule_supervisor
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
-            .ok_or_else(|| anyhow::anyhow!("schedule supervisor not wired before boot bundle publish"))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!("schedule supervisor not wired before boot bundle publish")
+            })?;
         let prompt_executor = self
             .prompt_executor
             .read()
@@ -970,10 +977,7 @@ impl WorkspaceState {
     /// owns one cancellation/join handle per (Creator DB, session) around
     /// the bounded `drive_preset_run` loop; schedule admission and session
     /// POST route through it.
-    pub fn set_run_coordinator(
-        &self,
-        coordinator: Arc<crate::preset_run::WorkflowRunCoordinator>,
-    ) {
+    pub fn set_run_coordinator(&self, coordinator: Arc<crate::preset_run::WorkflowRunCoordinator>) {
         *self
             .run_coordinator
             .write()
@@ -1773,14 +1777,16 @@ mod tests {
         .bind(CREATOR_ID)
         .bind(now - 10)
         .bind(now)
-        .bind(serde_json::to_vec(&serde_json::json!({
-            "wait": null,
-            "step_in_flight": null,
-            "in_flight": null,
-            "failure": null,
-            "cancel_requested": false
-        }))
-        .expect("run state"))
+        .bind(
+            serde_json::to_vec(&serde_json::json!({
+                "wait": null,
+                "step_in_flight": null,
+                "in_flight": null,
+                "failure": null,
+                "cancel_requested": false
+            }))
+            .expect("run state"),
+        )
         .bind(&descriptor)
         .execute(&pool)
         .await
@@ -1815,11 +1821,7 @@ mod tests {
             "SELECT status, current_session_id FROM creator_schedules \
              WHERE schedule_id = 'SCH-LAZY-RECON'",
         )
-        .fetch_one(
-            state
-                .pool()
-                .expect("pool published after attach"),
-        )
+        .fetch_one(state.pool().expect("pool published after attach"))
         .await
         .expect("schedule row after attach");
         assert_eq!(

@@ -348,7 +348,9 @@ mod tests {
         CapabilityRuntimeDeps {
             pool: None,
             prompt_executor: None,
-            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
             daemon_tool_dispatch: None,
             cdn_config: None,
         }

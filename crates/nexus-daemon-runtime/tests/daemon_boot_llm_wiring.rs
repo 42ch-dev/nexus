@@ -41,10 +41,7 @@ struct MockLlmExtractExecutor;
 
 #[async_trait::async_trait]
 impl PromptExecutor for MockLlmExtractExecutor {
-    async fn execute(
-        &self,
-        _request: PromptRequest,
-    ) -> Result<PromptResult, CapabilityError> {
+    async fn execute(&self, _request: PromptRequest) -> Result<PromptResult, CapabilityError> {
         Ok(PromptResult {
             full_text: "{\"candidates\":[{\"canonical_name\":\"Mock Character\",\"block_type\":\"character\",\"summary\":null,\"confidence\":0.8,\"source_quote\":\"mock quote\"}]}".to_string(),
             host_session_id: "host-sess".to_string(),
@@ -67,12 +64,10 @@ fn session_cancels_with_test_session() -> std::sync::Arc<
     std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
 > {
     let map = empty_session_cancels();
-    map.write()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(
-            "test_session".to_string(),
-            tokio_util::sync::CancellationToken::new(),
-        );
+    map.write().unwrap_or_else(|e| e.into_inner()).insert(
+        "test_session".to_string(),
+        tokio_util::sync::CancellationToken::new(),
+    );
     map
 }
 
@@ -130,10 +125,7 @@ async fn executor_failure_stays_typed_failure() {
 
     #[async_trait::async_trait]
     impl PromptExecutor for FailingExecutor {
-        async fn execute(
-            &self,
-            _request: PromptRequest,
-        ) -> Result<PromptResult, CapabilityError> {
+        async fn execute(&self, _request: PromptRequest) -> Result<PromptResult, CapabilityError> {
             Err(CapabilityError::TransientExternal(
                 "agent refused the request".to_string(),
             ))
@@ -160,7 +152,10 @@ async fn executor_failure_stays_typed_failure() {
         "_session_id": "test_session",
     });
     let result = cap.run(input).await;
-    assert!(result.is_err(), "executor failure must stay a typed failure");
+    assert!(
+        result.is_err(),
+        "executor failure must stay a typed failure"
+    );
     match result.unwrap_err() {
         CapabilityError::TransientExternal(msg) => {
             assert!(msg.contains("refused"), "typed refusal: {msg}");

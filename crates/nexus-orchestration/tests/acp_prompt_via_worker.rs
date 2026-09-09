@@ -6,7 +6,9 @@
 //! prompt echo.
 
 use graph_flow::Task;
-use nexus_orchestration::capability::{CapabilityError, PromptExecutor, PromptRequest, PromptResult};
+use nexus_orchestration::capability::{
+    CapabilityError, PromptExecutor, PromptRequest, PromptResult,
+};
 use nexus_orchestration::tasks::{AcpPromptTask, ToolPolicy};
 
 /// Mock executor returning a deterministic non-echo transformation.
@@ -36,10 +38,10 @@ async fn acp_prompt_task_dispatches_to_executor_and_records_output() {
     // task's fail-closed token resolution succeeds (production registers at
     // run admission).
     let cancels = empty_session_cancels();
-    cancels
-        .write()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert("default".to_string(), tokio_util::sync::CancellationToken::new());
+    cancels.write().unwrap_or_else(|e| e.into_inner()).insert(
+        "default".to_string(),
+        tokio_util::sync::CancellationToken::new(),
+    );
     let task = AcpPromptTask::new(
         Some(std::sync::Arc::new(MockExecutor)),
         cancels,

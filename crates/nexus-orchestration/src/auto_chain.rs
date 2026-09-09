@@ -1332,15 +1332,17 @@ pub async fn seed_core_context_version(
 ) -> Result<(), AutoChainError> {
     let now = chrono::Utc::now().timestamp();
     let payload = serde_json::json!({ "kind": "text", "body": seed_text });
-    let content_bytes = serde_json::to_vec(&payload)
-        .map_err(|e| AutoChainError::Database(nexus_local_db::LocalDbError::from(
-            sqlx::Error::Protocol(format!("serialize core-context seed: {e}")),
-        )))?;
+    let content_bytes = serde_json::to_vec(&payload).map_err(|e| {
+        AutoChainError::Database(nexus_local_db::LocalDbError::from(sqlx::Error::Protocol(
+            format!("serialize core-context seed: {e}"),
+        )))
+    })?;
     let derivation = serde_json::json!({ "kind": "seed", "raw": seed_text });
-    let derivation_bytes = serde_json::to_vec(&derivation)
-        .map_err(|e| AutoChainError::Database(nexus_local_db::LocalDbError::from(
-            sqlx::Error::Protocol(format!("serialize core-context derivation: {e}")),
-        )))?;
+    let derivation_bytes = serde_json::to_vec(&derivation).map_err(|e| {
+        AutoChainError::Database(nexus_local_db::LocalDbError::from(sqlx::Error::Protocol(
+            format!("serialize core-context derivation: {e}"),
+        )))
+    })?;
     sqlx::query(
         "INSERT INTO core_context_versions
            (schedule_id, version, payload_kind, content,
@@ -1419,11 +1421,9 @@ fn enqueue_descriptor_json(
         parent_session_id: None,
         graph_name: None,
     };
-    serde_json::to_vec(&descriptor).map_err(|e| {
-        AutoChainError::InvalidState(format!("descriptor serialization failed: {e}"))
-    })
+    serde_json::to_vec(&descriptor)
+        .map_err(|e| AutoChainError::InvalidState(format!("descriptor serialization failed: {e}")))
 }
-
 
 pub async fn enqueue_auto_chain_schedule(
     pool: &SqlitePool,
@@ -1677,11 +1677,7 @@ pub async fn enqueue_auto_chain_schedule_in_tx(
     // N-3: the row is not admissible until its core-context version record
     // is durable. Seed version 0 from the prepared seed (the same text the
     // public add path would persist) inside the SAME transaction.
-    let seed_text = schedule_req
-        .seed
-        .as_deref()
-        .unwrap_or_default()
-        .to_string();
+    let seed_text = schedule_req.seed.as_deref().unwrap_or_default().to_string();
     seed_core_context_version(tx, &schedule_id, &seed_text).await?;
 
     // Update the Work checkpoint to point at the new driver schedule —
@@ -1810,7 +1806,14 @@ pub async fn enqueue_review_master_schedule(
     // keys default to empty strings here.
     let mut input = serde_json::Map::new();
     input.insert("work_id".to_string(), serde_json::json!(work_id));
-    for key in ["work_ref", "topic", "open_findings", "world_id", "body_path", "creator_id"] {
+    for key in [
+        "work_ref",
+        "topic",
+        "open_findings",
+        "world_id",
+        "body_path",
+        "creator_id",
+    ] {
         input.insert(key.to_string(), serde_json::Value::String(String::new()));
     }
     // N-15: resolve and persist the REAL source identity or reject before
@@ -1920,7 +1923,14 @@ pub async fn enqueue_cron_schedule(
     // unpopulated keys default to empty strings here.
     let mut input = serde_json::Map::new();
     input.insert("work_id".to_string(), serde_json::json!(work_id));
-    for key in ["work_ref", "topic", "open_findings", "vibe", "chapter", "chapter_label"] {
+    for key in [
+        "work_ref",
+        "topic",
+        "open_findings",
+        "vibe",
+        "chapter",
+        "chapter_label",
+    ] {
         input.insert(key.to_string(), serde_json::Value::String(String::new()));
     }
     // N-15: resolve and persist the REAL source identity or reject before
@@ -2242,9 +2252,16 @@ mod tests {
             .unwrap();
 
         let sid = enqueue_auto_chain_schedule(
-            &pool, "ctr_test", "wrk_test", "research", None, None, &work,
-            std::collections::HashMap::new(), None,
-            )
+            &pool,
+            "ctr_test",
+            "wrk_test",
+            "research",
+            None,
+            None,
+            &work,
+            std::collections::HashMap::new(),
+            None,
+        )
         .await
         .unwrap();
 
@@ -2304,8 +2321,8 @@ mod tests {
             None,
             None,
             &work,
-        std::collections::HashMap::new(),
-        None,
+            std::collections::HashMap::new(),
+            None,
         )
         .await;
 
@@ -2347,12 +2364,22 @@ mod tests {
 
         // Fire two enqueues back-to-back. Even if both land in the same ms
         // granule, the counter suffix must keep the PKs distinct.
-        let sid_a = enqueue_review_master_schedule(&pool, "ctr_test", "wrk_test", std::collections::HashMap::new())
-            .await
-            .expect("first RVM enqueue must succeed");
-        let sid_b = enqueue_review_master_schedule(&pool, "ctr_test", "wrk_test", std::collections::HashMap::new())
-            .await
-            .expect("second RVM enqueue must succeed even in the same ms");
+        let sid_a = enqueue_review_master_schedule(
+            &pool,
+            "ctr_test",
+            "wrk_test",
+            std::collections::HashMap::new(),
+        )
+        .await
+        .expect("first RVM enqueue must succeed");
+        let sid_b = enqueue_review_master_schedule(
+            &pool,
+            "ctr_test",
+            "wrk_test",
+            std::collections::HashMap::new(),
+        )
+        .await
+        .expect("second RVM enqueue must succeed even in the same ms");
 
         assert!(
             sid_a != sid_b,

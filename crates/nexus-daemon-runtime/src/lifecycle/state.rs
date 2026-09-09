@@ -440,11 +440,7 @@ impl StatigLifecycle {
 
         // Phase 2: construct the action context referencing the shell, then
         // set the machine (wired with that context) into the slot.
-        let context = ActionContext::new(
-            Arc::clone(&lifecycle),
-            subsystems,
-            shutdown_grace_ms,
-        );
+        let context = ActionContext::new(Arc::clone(&lifecycle), subsystems, shutdown_grace_ms);
         let daemon_hsm = DaemonHsm::with_context(Arc::new(context));
         let mut machine = lifecycle.machine.lock().await;
         *machine = Some(daemon_hsm.state_machine());

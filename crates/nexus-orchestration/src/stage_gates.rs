@@ -287,7 +287,8 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
         "vibe",
     ] {
         map.as_object_mut().map(|o| {
-            o.entry(key.to_string()).or_insert_with(|| serde_json::Value::String(String::new()))
+            o.entry(key.to_string())
+                .or_insert_with(|| serde_json::Value::String(String::new()))
         });
     }
 

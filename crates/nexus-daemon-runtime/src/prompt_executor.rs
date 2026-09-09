@@ -62,7 +62,6 @@ struct CachedHostSession {
     process_identity: Option<nexus_agent_host::capability::model::OwnedProcessIdentity>,
 }
 
-
 /// Production prompt executor over the existing `HostFacade` (A1).
 ///
 /// Constructed once at daemon boot with the host facade, the durable
@@ -82,8 +81,7 @@ pub struct HostPromptExecutor {
     /// session map under their own lock, and publish exactly one session;
     /// a losing duplicate is impossible by construction (only the lock
     /// holder publishes).
-    creation_locks:
-        std::sync::Mutex<HashMap<HostSessionKey, Arc<tokio::sync::Mutex<()>>>>,
+    creation_locks: std::sync::Mutex<HashMap<HostSessionKey, Arc<tokio::sync::Mutex<()>>>>,
     /// Per-run operation admission serialization (Important): one `run_id`
     /// → one mutex. A prompt operation holds this mutex from BEFORE the
     /// durable Dispatching claim through the external `exec` admission and
@@ -207,10 +205,7 @@ impl HostPromptExecutor {
         if record.state.as_ref().is_some_and(|s| s.cancel_requested) {
             return Err(CapabilityError::Cancelled);
         }
-        let expected_step = record
-            .state
-            .as_ref()
-            .and_then(|s| s.step_in_flight.clone());
+        let expected_step = record.state.as_ref().and_then(|s| s.step_in_flight.clone());
         Ok((record.state_revision, expected_step))
     }
 
@@ -276,9 +271,7 @@ impl HostPromptExecutor {
                 EngineError::RevisionMismatch { .. }
                 | EngineError::TerminalState(_)
                 | EngineError::SessionNotFound(_) => CapabilityError::Cancelled,
-                other => {
-                    CapabilityError::Internal(format!("persist prompt attempt: {other}"))
-                }
+                other => CapabilityError::Internal(format!("persist prompt attempt: {other}")),
             })?;
         Ok(())
     }
@@ -345,11 +338,7 @@ impl HostPromptExecutor {
         {
             let sessions = self.sessions.read().await;
             if let Some(session) = sessions.get(key) {
-                return Ok((
-                    session.id.clone(),
-                    session.process_identity.clone(),
-                    false,
-                ));
+                return Ok((session.id.clone(), session.process_identity.clone(), false));
             }
         }
 
@@ -372,11 +361,7 @@ impl HostPromptExecutor {
         {
             let sessions = self.sessions.read().await;
             if let Some(session) = sessions.get(key) {
-                return Ok((
-                    session.id.clone(),
-                    session.process_identity.clone(),
-                    false,
-                ));
+                return Ok((session.id.clone(), session.process_identity.clone(), false));
             }
         }
         if cancellation.is_cancelled() {
@@ -400,9 +385,7 @@ impl HostPromptExecutor {
             })
             .await
             .map_err(|e| {
-                CapabilityError::TransientExternal(format!(
-                    "host session creation failed: {e}"
-                ))
+                CapabilityError::TransientExternal(format!("host session creation failed: {e}"))
             })?;
 
         let sid = session.id;
@@ -428,11 +411,7 @@ impl HostPromptExecutor {
     /// (`Ok(Ok(()))`). On timeout/error the entry is kept: the Host still
     /// owns the session, and a later `finalize_run` retry can reap it —
     /// evicting first would orphan the owned process group.
-    async fn cleanup_created_session(
-        &self,
-        key: &HostSessionKey,
-        created_by_us: bool,
-    ) {
+    async fn cleanup_created_session(&self, key: &HostSessionKey, created_by_us: bool) {
         if !created_by_us {
             return;
         }
@@ -511,7 +490,10 @@ impl PromptExecutor for HostPromptExecutor {
             .admission_fence(&request.run_id, &request.cancellation)
             .await?;
 
-        let role = request.agent_ref.clone().unwrap_or_else(|| "default".to_string());
+        let role = request
+            .agent_ref
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
         let key = HostSessionKey {
             run_id: request.run_id.clone(),
             role,
@@ -708,9 +690,7 @@ impl PromptExecutor for HostPromptExecutor {
                 },
             ) => r,
         }
-        .map_err(|e| {
-            CapabilityError::TransientExternal(format!("host exec failed: {e}"))
-        })?;
+        .map_err(|e| CapabilityError::TransientExternal(format!("host exec failed: {e}")))?;
 
         // 8. Drain the stream, collecting MessageDelta only, while listening
         //    to the coordinator cancellation token concurrently (A5).
@@ -843,18 +823,14 @@ impl PromptExecutor for HostPromptExecutor {
         //    never a false successful cancellation.
         if request.cancellation.is_cancelled() {
             if !cancel_unconfirmed {
-                let drain_result = tokio::time::timeout(
-                    self.timeouts.shutdown_duration(),
-                    async {
-                        let mut drain = std::pin::pin!(stream);
-                        while let Some(event) = drain.next().await {
-                            if let Ok(HostEvent::OpFinished(_)) | Ok(HostEvent::OpFailed(_)) = event
-                            {
-                                break;
-                            }
+                let drain_result = tokio::time::timeout(self.timeouts.shutdown_duration(), async {
+                    let mut drain = std::pin::pin!(stream);
+                    while let Some(event) = drain.next().await {
+                        if let Ok(HostEvent::OpFinished(_)) | Ok(HostEvent::OpFailed(_)) = event {
+                            break;
                         }
-                    },
-                )
+                    }
+                })
                 .await;
                 if drain_result.is_err() {
                     tracing::warn!(
@@ -1084,10 +1060,7 @@ mod tests {
                 },
                 process_identity: None,
             };
-            self.sessions
-                .lock()
-                .expect("sessions")
-                .insert(id, session);
+            self.sessions.lock().expect("sessions").insert(id, session);
         }
 
         fn session_count(&self) -> usize {
@@ -1106,10 +1079,7 @@ mod tests {
             Ok(())
         }
 
-        async fn create_session(
-            &self,
-            request: CreateSessionRequest,
-        ) -> HostResult<HostSession> {
+        async fn create_session(&self, request: CreateSessionRequest) -> HostResult<HostSession> {
             self.creates.fetch_add(1, Ordering::SeqCst);
             let session = HostSession {
                 id: nexus_agent_host::HostSessionId::new(),
@@ -1117,7 +1087,8 @@ mod tests {
                 state: SessionState::Ready,
                 created_at: chrono::Utc::now(),
                 active_op_id: None,
-                negotiated_capabilities: nexus_agent_host::capability::model::CapabilityDescriptor::native_cli_limited(),
+                negotiated_capabilities:
+                    nexus_agent_host::capability::model::CapabilityDescriptor::native_cli_limited(),
                 owner: request.owner,
                 process_identity: None,
             };
@@ -1171,8 +1142,7 @@ mod tests {
             // Release the parked operation stream so the executor's drain
             // observes the terminal `OpFinished(Cancelled)` event — the
             // bounded stream/operation termination the cancel path awaits.
-            if let Some((_, release)) = self.active_ops.lock().expect("active_ops").remove(&op_id)
-            {
+            if let Some((_, release)) = self.active_ops.lock().expect("active_ops").remove(&op_id) {
                 let _ = release.send(());
             }
             Ok(())
@@ -1368,7 +1338,10 @@ mod tests {
             .await
             .expect("load run")
             .expect("run exists");
-        assert_eq!(final_record.status, nexus_orchestration::engine::SessionStatus::Cancelled);
+        assert_eq!(
+            final_record.status,
+            nexus_orchestration::engine::SessionStatus::Cancelled
+        );
     }
 
     /// Active Host operation cancellation/reap proof (Finding 3, round 4):
@@ -1418,10 +1391,7 @@ mod tests {
             .await
             .expect("load run")
             .expect("run exists");
-        let mut descriptor = record
-            .descriptor
-            .clone()
-            .expect("v1 descriptor present");
+        let mut descriptor = record.descriptor.clone().expect("v1 descriptor present");
         descriptor.agent_bindings.insert(
             "default".to_string(),
             nexus_orchestration::run_state::AgentBinding {
@@ -1430,12 +1400,14 @@ mod tests {
             },
         );
         let descriptor_bytes = serde_json::to_vec(&descriptor).expect("serialize descriptor");
-        sqlx::query("UPDATE orchestration_sessions SET run_descriptor_json = ? WHERE session_id = ?")
-            .bind(&descriptor_bytes)
-            .bind(&session_id.0)
-            .execute(&*pool)
-            .await
-            .expect("patch descriptor binding");
+        sqlx::query(
+            "UPDATE orchestration_sessions SET run_descriptor_json = ? WHERE session_id = ?",
+        )
+        .bind(&descriptor_bytes)
+        .bind(&session_id.0)
+        .execute(&*pool)
+        .await
+        .expect("patch descriptor binding");
 
         // mark_step_in_flight wins immediately before Cancel (revision R →
         // R+1): the step is durably in flight when the prompt admits and
@@ -1471,9 +1443,7 @@ mod tests {
         // stream. The operation admits (revision R+1 + step marker), the
         // Host session is created, and the Host operation parks.
         let token = {
-            let cancels = session_cancels
-                .read()
-                .unwrap_or_else(|e| e.into_inner());
+            let cancels = session_cancels.read().unwrap_or_else(|e| e.into_inner());
             cancels
                 .get(&session_id.0)
                 .cloned()
@@ -1614,10 +1584,7 @@ mod tests {
             .await
             .expect("load run")
             .expect("run exists");
-        let mut descriptor = record
-            .descriptor
-            .clone()
-            .expect("v1 descriptor present");
+        let mut descriptor = record.descriptor.clone().expect("v1 descriptor present");
         descriptor.agent_bindings.insert(
             "default".to_string(),
             nexus_orchestration::run_state::AgentBinding {
@@ -1626,12 +1593,14 @@ mod tests {
             },
         );
         let descriptor_bytes = serde_json::to_vec(&descriptor).expect("serialize descriptor");
-        sqlx::query("UPDATE orchestration_sessions SET run_descriptor_json = ? WHERE session_id = ?")
-            .bind(&descriptor_bytes)
-            .bind(&session_id.0)
-            .execute(&*pool)
-            .await
-            .expect("patch descriptor binding");
+        sqlx::query(
+            "UPDATE orchestration_sessions SET run_descriptor_json = ? WHERE session_id = ?",
+        )
+        .bind(&descriptor_bytes)
+        .bind(&session_id.0)
+        .execute(&*pool)
+        .await
+        .expect("patch descriptor binding");
 
         // mark_step_in_flight wins immediately before Cancel.
         let record = store
@@ -1664,9 +1633,7 @@ mod tests {
         // Drive a REAL execute against the deterministic blocking Host
         // stream; the Host operation parks.
         let token = {
-            let cancels = session_cancels
-                .read()
-                .unwrap_or_else(|e| e.into_inner());
+            let cancels = session_cancels.read().unwrap_or_else(|e| e.into_inner());
             cancels
                 .get(&session_id.0)
                 .cloned()
@@ -1937,13 +1904,19 @@ mod tests {
             )
             .await
             .expect_err("first cancel must surface the unconfirmed cleanup");
-        assert!(matches!(err, nexus_orchestration::engine::EngineError::GraphFlow(_)));
+        assert!(matches!(
+            err,
+            nexus_orchestration::engine::EngineError::GraphFlow(_)
+        ));
         let interrupted = store
             .load_run(&session_id)
             .await
             .expect("load run")
             .expect("run exists");
-        assert_eq!(interrupted.status, nexus_orchestration::engine::SessionStatus::Interrupted);
+        assert_eq!(
+            interrupted.status,
+            nexus_orchestration::engine::SessionStatus::Interrupted
+        );
         assert_eq!(
             host.session_count(),
             1,

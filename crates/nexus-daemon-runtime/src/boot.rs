@@ -674,10 +674,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             }
         }
 
-        tracing::info!(
-            providers_registered,
-            "agent provider registration complete"
-        );
+        tracing::info!(providers_registered, "agent provider registration complete");
         Arc::new(manager)
     };
     state.set_agent_host(Arc::clone(&agent_host_facade));
@@ -781,21 +778,22 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
     state.set_session_cancels(session_cancels.clone());
-    let prompt_executor: Option<std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>> =
-        match &sqlite_boot_storage {
-            Some(sqlite_storage) => {
-                let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();
-                let host_config = state.agent_host_config();
-                Some(std::sync::Arc::new(
-                    crate::prompt_executor::HostPromptExecutor::new(
-                        agent_host_facade.clone(),
-                        workflow_store,
-                        host_config.timeouts.clone(),
-                    ),
-                ))
-            }
-            None => None,
-        };
+    let prompt_executor: Option<
+        std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>,
+    > = match &sqlite_boot_storage {
+        Some(sqlite_storage) => {
+            let workflow_store: Arc<dyn WorkflowStateStore> = sqlite_storage.clone();
+            let host_config = state.agent_host_config();
+            Some(std::sync::Arc::new(
+                crate::prompt_executor::HostPromptExecutor::new(
+                    agent_host_facade.clone(),
+                    workflow_store,
+                    host_config.timeouts.clone(),
+                ),
+            ))
+        }
+        None => None,
+    };
 
     // N-13: when a Creator DB is already available at boot, the capability
     // registry is built with the SAME pool the boot engine/coordinator/
@@ -1431,11 +1429,8 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 
     // --- Section 6: Lifecycle HSM initialization ---
     let subsystems = create_subsystems(&state, config.port, agent_host_facade);
-    let lifecycle = StatigLifecycle::new_with_subsystems(
-        subsystems,
-        config.shutdown_grace_ms,
-    )
-    .await;
+    let lifecycle =
+        StatigLifecycle::new_with_subsystems(subsystems, config.shutdown_grace_ms).await;
 
     state.set_lifecycle(Arc::clone(&lifecycle));
     tracing::info!("Lifecycle HSM initialized");
@@ -1982,15 +1977,18 @@ pub(crate) struct DaemonScheduleRunStarter {
     pub(crate) pool: Arc<sqlx::SqlitePool>,
     pub(crate) nexus_home: std::path::PathBuf,
     pub(crate) caps: Option<nexus_orchestration::CapabilityRegistryHolder>,
-    pub(crate) daemon_tool_dispatch: Option<
-        std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>,
-    >,
-    pub(crate) prompt_executor: Option<std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
+    pub(crate) daemon_tool_dispatch:
+        Option<std::sync::Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>,
+    pub(crate) prompt_executor:
+        Option<std::sync::Arc<dyn nexus_orchestration::capability::PromptExecutor>>,
 }
 
 #[async_trait::async_trait]
 impl ScheduleRunStarter for DaemonScheduleRunStarter {
-    async fn start(&self, schedule_id: &str) -> Result<nexus_orchestration::SessionId, SupervisorError> {
+    async fn start(
+        &self,
+        schedule_id: &str,
+    ) -> Result<nexus_orchestration::SessionId, SupervisorError> {
         let caps = self.caps.clone().ok_or_else(|| {
             SupervisorError::Database(sqlx::Error::Protocol(
                 "capability registry unavailable for schedule admission".to_string(),
@@ -2209,7 +2207,9 @@ mod tests {
         CapabilityRuntimeDeps {
             pool: None,
             prompt_executor: None,
-            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
             daemon_tool_dispatch: None,
             cdn_config: None,
         }

@@ -382,7 +382,6 @@ impl ManagedAcpProcess {
         self.birth.as_ref()
     }
 
-
     /// Whether the owned child is still running.
     pub fn is_running(&mut self) -> bool {
         self.child.as_ref().and_then(|c| c.id()).is_some()
@@ -404,10 +403,7 @@ impl ManagedAcpProcess {
     /// Guarded signal: only signal the owned group after the platform
     /// birth token is re-validated (PID + start time still match).
     #[cfg(unix)]
-    fn signal_group_guarded(
-        birth: &ProcessBirthToken,
-        signal: nix::sys::signal::Signal,
-    ) -> bool {
+    fn signal_group_guarded(birth: &ProcessBirthToken, signal: nix::sys::signal::Signal) -> bool {
         if !birth.verify() {
             tracing::warn!(
                 pid = birth.pid,
@@ -622,7 +618,11 @@ impl ManagedAcpProcess {
                     );
                     if Self::signal_group_guarded(&birth, Signal::SIGKILL) {
                         let status = self.child_mut()?.wait().await.map_err(|e| {
-                            AcpError::agent_crashed(None, self.agent_path.clone(), Some(e.to_string()))
+                            AcpError::agent_crashed(
+                                None,
+                                self.agent_path.clone(),
+                                Some(e.to_string()),
+                            )
                         })?;
                         if Self::wait_group_quiescent(pgrp, grace).await {
                             tracing::info!(
@@ -815,9 +815,10 @@ impl ManagedAcpProcess {
         {
             let agent_path = self.agent_path.clone();
             let _ = child.kill().await;
-            child.wait().await.map_err(|e| {
-                AcpError::agent_crashed(None, agent_path, Some(e.to_string()))
-            })?;
+            child
+                .wait()
+                .await
+                .map_err(|e| AcpError::agent_crashed(None, agent_path, Some(e.to_string())))?;
             Ok(())
         }
     }

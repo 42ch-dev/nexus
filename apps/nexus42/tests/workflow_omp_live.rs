@@ -70,10 +70,7 @@ impl IsolatedQa {
             .prefix("omp-live-qa-")
             .tempdir()
             .expect("create QA_ROOT");
-        let qa_root = root_dir
-            .path()
-            .canonicalize()
-            .expect("canonical QA_ROOT");
+        let qa_root = root_dir.path().canonicalize().expect("canonical QA_ROOT");
         let qa_home = qa_root.join("home");
         let nexus_home = qa_home.join(".nexus42");
         let qa_workspace = qa_root.join("workspace");
@@ -113,7 +110,10 @@ impl IsolatedQa {
             ("workspace_db", self.workspace_db().as_path()),
             (
                 "agent_host_config",
-                self.nexus_home.join("agent-host").join("config.toml").as_path(),
+                self.nexus_home
+                    .join("agent-host")
+                    .join("config.toml")
+                    .as_path(),
             ),
             (
                 "agent_host_config_legacy",
@@ -519,10 +519,7 @@ async fn schedule_status(qa: &IsolatedQa, schedule_id: &str) -> Result<Value, St
 /// reported `available:true`, or Err(msg) with the observed provider state
 /// after `timeout`. A configured provider that never becomes available means
 /// isolated provider execution is unusable on this daemon build.
-async fn wait_for_provider_available(
-    qa: &IsolatedQa,
-    timeout: Duration,
-) -> Result<(), String> {
+async fn wait_for_provider_available(qa: &IsolatedQa, timeout: Duration) -> Result<(), String> {
     let client = reqwest::Client::new();
     let url = format!("{}/v1/daemon/agent-host/providers", qa.daemon_url());
     let deadline = Instant::now() + timeout;
@@ -530,7 +527,9 @@ async fn wait_for_provider_available(
         if let Ok(resp) = client.get(&url).send().await {
             if let Ok(v) = resp.json::<Value>().await {
                 let providers = v["providers"].as_array().cloned().unwrap_or_default();
-                if let Some(entry) = providers.iter().find(|p| p["provider_id"] == json!("omp-qa"))
+                if let Some(entry) = providers
+                    .iter()
+                    .find(|p| p["provider_id"] == json!("omp-qa"))
                 {
                     match entry["available"].as_bool() {
                         Some(true) => return Ok(()),
@@ -583,10 +582,7 @@ async fn isolated_public_success() {
     let qa = IsolatedQa::new();
     qa.assert_paths_inside_qa_root();
     eprintln!("EVIDENCE: QA_ROOT = {}", qa.qa_root.display());
-    eprintln!(
-        "EVIDENCE: NEXUS_HOME = {}",
-        qa.nexus_home.display()
-    );
+    eprintln!("EVIDENCE: NEXUS_HOME = {}", qa.nexus_home.display());
     eprintln!("EVIDENCE: QA_WORKSPACE = {}", qa.qa_workspace.display());
     eprintln!("EVIDENCE: QA_OMP_HOME = {}", qa.qa_omp_home.display());
 
@@ -617,9 +613,11 @@ async fn isolated_public_success() {
     if let Err(msg) = wait_for_provider_available(&qa, Duration::from_secs(15)).await {
         let _ = daemon.start_kill();
         eprintln!("{msg}");
-        eprintln!("EVIDENCE[refusal]: omp-qa provider unavailable on the running daemon — \
+        eprintln!(
+            "EVIDENCE[refusal]: omp-qa provider unavailable on the running daemon — \
                    isolated live provider execution is unusable; refusing (no silent skip, \
-                   no fixture success)");
+                   no fixture success)"
+        );
         panic!("{}", msg);
     }
     eprintln!("EVIDENCE: omp-qa provider AVAILABLE on the running daemon");
@@ -697,7 +695,8 @@ async fn isolated_public_success() {
     );
     let inspected: Value = serde_json::from_str(&inspect_text).expect("ops inspect json");
     assert_eq!(
-        inspected["recovery_class"], json!("terminal"),
+        inspected["recovery_class"],
+        json!("terminal"),
         "terminal session must classify terminal after restart"
     );
     assert_eq!(inspected["db_status"], json!("completed"));
@@ -754,13 +753,12 @@ async fn capture_agent_output(qa: &IsolatedQa, session_id: &str) -> String {
     let pool = nexus_local_db::open_pool(&db_path)
         .await
         .expect("open workspace db for output capture");
-    let bytes: Option<Vec<u8>> = sqlx::query_scalar(
-        "SELECT context_json FROM orchestration_sessions WHERE session_id = ?",
-    )
-    .bind(session_id)
-    .fetch_optional(&pool)
-    .await
-    .expect("load session context");
+    let bytes: Option<Vec<u8>> =
+        sqlx::query_scalar("SELECT context_json FROM orchestration_sessions WHERE session_id = ?")
+            .bind(session_id)
+            .fetch_optional(&pool)
+            .await
+            .expect("load session context");
     drop(pool);
     let Some(bytes) = bytes else {
         return String::new();

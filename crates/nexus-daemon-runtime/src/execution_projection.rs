@@ -34,21 +34,27 @@ pub fn project_no_run(execution_policy: &str) -> ExecutionProjection {
         // A7 rule 6 reconstructs and drives it.
         "driven_v1" => ("safe_boundary", vec!["start".to_string()]),
         // Unknown policy is corrupt metadata: never a fabricated class.
-        _ => ("unreadable", vec!["cancel".to_string(), "new_run".to_string()]),
+        _ => (
+            "unreadable",
+            vec!["cancel".to_string(), "new_run".to_string()],
+        ),
     };
     ExecutionProjection {
         execution_version: None,
         state_revision: None,
         recovery_class: recovery_class.to_string(),
         wait: None,
-        reason_code: (recovery_class == "unreadable").then(|| "unknown_execution_policy".to_string()),
+        reason_code: (recovery_class == "unreadable")
+            .then(|| "unknown_execution_policy".to_string()),
         allowed_actions,
     }
 }
 
 /// Read-only check that the frozen source identity still resolves and
 /// matches (A7): no runner is attached, no state mutated.
-fn frozen_source_reconstructable(descriptor: &nexus_orchestration::run_state::RunDescriptorV1) -> bool {
+fn frozen_source_reconstructable(
+    descriptor: &nexus_orchestration::run_state::RunDescriptorV1,
+) -> bool {
     use nexus_orchestration::preset::{load_embedded_preset, load_preset};
     use nexus_orchestration::run_state::PresetSourceIdentity;
     let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
@@ -74,10 +80,10 @@ pub async fn project_for_session(
     session_id: Option<&str>,
     execution_policy: &str,
 ) -> ExecutionProjection {
+    use graph_flow::SessionStorage as _;
     use nexus_orchestration::engine::SessionId;
     use nexus_orchestration::run_state::WorkflowStateStore;
     use nexus_orchestration::storage::sqlite::SqliteSessionStorage;
-    use graph_flow::SessionStorage as _;
 
     let Some(session_id) = session_id else {
         return project_no_run(execution_policy);
@@ -100,10 +106,7 @@ pub async fn project_for_session(
                 Err(e) => return unreadable_projection(&format!("context unreadable: {e}")),
             };
             nexus_orchestration::resume_rules::context_data(&context).is_some_and(|data| {
-                nexus_orchestration::resume_rules::gate_park_live(
-                    data,
-                    &session.current_task_id,
-                )
+                nexus_orchestration::resume_rules::gate_park_live(data, &session.current_task_id)
             })
         }
         Ok(None) => return unreadable_projection("owned session row missing"),
@@ -115,9 +118,13 @@ pub async fn project_for_session(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_orchestration::run_state::{RunRecord, RunStateV1, WaitRecord, WaitKind};
+    use nexus_orchestration::run_state::{RunRecord, RunStateV1, WaitKind, WaitRecord};
 
-    fn record(status: SessionStatus, execution_version: u32, state: Option<RunStateV1>) -> RunRecord {
+    fn record(
+        status: SessionStatus,
+        execution_version: u32,
+        state: Option<RunStateV1>,
+    ) -> RunRecord {
         RunRecord {
             session_id: nexus_orchestration::engine::SessionId("s1".to_string()),
             status,
@@ -148,11 +155,7 @@ mod tests {
 
     #[test]
     fn converge_merge_park_requires_the_gate_marker() {
-        let parked = record(
-            SessionStatus::Paused,
-            1,
-            Some(RunStateV1::default()),
-        );
+        let parked = record(SessionStatus::Paused, 1, Some(RunStateV1::default()));
         let with_marker = project_execution(&parked, true);
         assert_eq!(with_marker.recovery_class, "converge_merge");
         assert_eq!(with_marker.allowed_actions, vec!["cancel"]);
@@ -173,8 +176,7 @@ mod tests {
             ..RunStateV1::default()
         };
         // A reconstructable frozen source keeps `continue` legal.
-        let mut with_source =
-            record(SessionStatus::WaitingForInput, 1, Some(state.clone()));
+        let mut with_source = record(SessionStatus::WaitingForInput, 1, Some(state.clone()));
         with_source.descriptor = Some(reconstructable_descriptor());
         let projection = project_execution(&with_source, false);
         assert_eq!(projection.recovery_class, "human_wait");
@@ -201,9 +203,8 @@ mod tests {
     /// A descriptor whose embedded source resolves and matches.
     fn reconstructable_descriptor() -> nexus_orchestration::run_state::RunDescriptorV1 {
         let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
-        let loaded =
-            nexus_orchestration::preset::load_embedded_preset("memory-augmented", &caps)
-                .expect("embedded preset");
+        let loaded = nexus_orchestration::preset::load_embedded_preset("memory-augmented", &caps)
+            .expect("embedded preset");
         nexus_orchestration::run_state::RunDescriptorV1 {
             creator_id: "c".to_string(),
             work_id: None,
@@ -318,26 +319,25 @@ pub fn project_execution(record: &RunRecord, gate_park_live: bool) -> ExecutionP
             .as_ref()
             .is_some_and(frozen_source_reconstructable)
     {
-        (
-            vec!["cancel".to_string(), "new_run".to_string()],
-            true,
-        )
+        (vec!["cancel".to_string(), "new_run".to_string()], true)
     } else {
         (allowed_actions, false)
     };
     // The wait token is only operator-actionable for a human wait; exposing a
     // stale token for another class would invite an invalid continue.
-    let wait = (class == RecoveryClass::HumanWait).then(|| {
-        record.state.as_ref().and_then(|state| {
-            state.wait.as_ref().map(|wait| ExecutionWait {
-                wait_id: wait.wait_id.clone(),
-                task_id: wait.task_id.clone(),
-                child_session_id: wait.child_session_id.clone(),
-                child_task_id: wait.child_task_id.clone(),
-                kind: format!("{:?}", wait.kind).to_lowercase(),
+    let wait = (class == RecoveryClass::HumanWait)
+        .then(|| {
+            record.state.as_ref().and_then(|state| {
+                state.wait.as_ref().map(|wait| ExecutionWait {
+                    wait_id: wait.wait_id.clone(),
+                    task_id: wait.task_id.clone(),
+                    child_session_id: wait.child_session_id.clone(),
+                    child_task_id: wait.child_task_id.clone(),
+                    kind: format!("{:?}", wait.kind).to_lowercase(),
+                })
             })
         })
-    }).flatten();
+        .flatten();
     let reason_code = if source_unavailable {
         Some("reconstruction_unavailable".to_string())
     } else {

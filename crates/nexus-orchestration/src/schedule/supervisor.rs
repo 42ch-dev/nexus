@@ -197,7 +197,6 @@ impl ScheduleSupervisor {
         self
     }
 
-
     /// Load pending schedules from DB, evaluate admission, and start eligible ones.
     ///
     /// For each pending schedule that passes the admission gate:
@@ -568,14 +567,16 @@ impl ScheduleSupervisor {
 
         // Remove from running cache
         if let Some(row) = &schedule_row {
-            self.remove_from_running_cache(schedule_id, &row.creator_id).await;
+            self.remove_from_running_cache(schedule_id, &row.creator_id)
+                .await;
         }
 
         // V1.42 P0 (T3): Release runtime lock held by this schedule.
         // The holder format is `daemon:schedule:<schedule_id>`.
         // Look up the Work that was driven by this schedule and release its lock.
         if let Some(row) = &schedule_row {
-            self.release_schedule_lock(schedule_id, &row.creator_id).await;
+            self.release_schedule_lock(schedule_id, &row.creator_id)
+                .await;
         }
 
         // V1.39 §5.4 (Fix 1): Evaluate auto-chain continuation for completed schedules.
@@ -638,12 +639,9 @@ impl ScheduleSupervisor {
         // R-V147P0-06 (V1.48 P0 T3): preset id hoisted to `preset_ids`
         // SSOT — single source shared with the allowlist and findings hook.
         if preset_id == crate::preset_ids::NOVEL_CHAPTER_REVIEW_PRESET_ID {
-            if let Err(e) = auto_chain::persist_review_findings_for_schedule(
-                &self.pool,
-                schedule_id,
-                ws_path,
-            )
-            .await
+            if let Err(e) =
+                auto_chain::persist_review_findings_for_schedule(&self.pool, schedule_id, ws_path)
+                    .await
             {
                 tracing::warn!(
                     schedule_id,
@@ -674,13 +672,9 @@ impl ScheduleSupervisor {
             // Works/<work_ref>/Logs/kb/missing/. Missing candidates are NOT
             // inserted into kb_extract_jobs. Best-effort: errors are logged
             // and do NOT fail the terminal transition.
-            if let Err(e) = quality_loop::detect_missing_kb_on_finalize(
-                &self.pool,
-                schedule_id,
-                ws_path,
-                reg,
-            )
-            .await
+            if let Err(e) =
+                quality_loop::detect_missing_kb_on_finalize(&self.pool, schedule_id, ws_path, reg)
+                    .await
             {
                 tracing::warn!(
                     schedule_id,
@@ -756,10 +750,12 @@ impl ScheduleSupervisor {
 
         let mut tx = nexus_local_db::begin_immediate(&self.pool)
             .await
-            .map_err(|e| SupervisorError::Database(match e {
-                nexus_local_db::LocalDbError::Sqlx(s) => s,
-                other => sqlx::Error::Protocol(other.to_string()),
-            }))?;
+            .map_err(|e| {
+                SupervisorError::Database(match e {
+                    nexus_local_db::LocalDbError::Sqlx(s) => s,
+                    other => sqlx::Error::Protocol(other.to_string()),
+                })
+            })?;
 
         // 1. Source settlement — only the schedule whose current_session_id
         //    equals the run is updated. Any non-terminal status settles
@@ -786,9 +782,10 @@ impl ScheduleSupervisor {
         let mut conflict = false;
         if let Some((action, work)) = &chain {
             let child_spec: Option<(&str, Option<i32>, Option<i32>, &str)> = match action {
-                ChainAction::AdvanceStage { work_id, next_stage } => {
-                    Some((next_stage.as_str(), None, None, work_id.as_str()))
-                }
+                ChainAction::AdvanceStage {
+                    work_id,
+                    next_stage,
+                } => Some((next_stage.as_str(), None, None, work_id.as_str())),
                 ChainAction::NextChapter {
                     work_id,
                     next_chapter,
@@ -825,9 +822,9 @@ impl ScheduleSupervisor {
                         }
                         Err(e) => {
                             return Err(SupervisorError::Database(match e {
-                                AutoChainError::Database(
-                                    nexus_local_db::LocalDbError::Sqlx(s),
-                                ) => s,
+                                AutoChainError::Database(nexus_local_db::LocalDbError::Sqlx(s)) => {
+                                    s
+                                }
                                 other => sqlx::Error::Protocol(other.to_string()),
                             }));
                         }
@@ -874,7 +871,8 @@ impl ScheduleSupervisor {
 
         // Post-commit: running cache, runtime lock, hooks, starter handoff,
         // WorkComplete, tick.
-        self.remove_from_running_cache(schedule_id, creator_id).await;
+        self.remove_from_running_cache(schedule_id, creator_id)
+            .await;
         self.release_schedule_lock(schedule_id, creator_id).await;
 
         if terminal_status == ScheduleStatus::Completed {
@@ -929,7 +927,10 @@ impl ScheduleSupervisor {
         &self,
         schedule_id: &str,
         creator_id: &str,
-    ) -> Option<(crate::auto_chain::ChainAction, nexus_local_db::works::WorkRecord)> {
+    ) -> Option<(
+        crate::auto_chain::ChainAction,
+        nexus_local_db::works::WorkRecord,
+    )> {
         use crate::auto_chain::{self, ChainAction};
 
         // Find the Work that was driven by this schedule
@@ -1720,9 +1721,7 @@ impl ScheduleSupervisor {
         .fetch_all(&*self.pool)
         .await?;
 
-        let store = crate::storage::sqlite::SqliteSessionStorage::new(
-            self.pool.clone(),
-        );
+        let store = crate::storage::sqlite::SqliteSessionStorage::new(self.pool.clone());
         let mut reconciled = 0usize;
         for (schedule_id, session_id) in rows {
             let record = match store
@@ -3312,16 +3311,14 @@ mod tests_t9 {
         // The storage glitch clears (next boot): the SAME paused row is
         // retried and settles from the durable terminal — paused rows are
         // inside the reconcile scan and errors never permanently exclude.
-        let good_state = serde_json::to_vec(&crate::run_state::RunStateV1::default())
-            .expect("run state json");
-        sqlx::query(
-            "UPDATE orchestration_sessions SET run_state_json = ? WHERE session_id = ?",
-        )
-        .bind(&good_state)
-        .bind("SES-P1-1")
-        .execute(&*sup.pool)
-        .await
-        .expect("repair run state");
+        let good_state =
+            serde_json::to_vec(&crate::run_state::RunStateV1::default()).expect("run state json");
+        sqlx::query("UPDATE orchestration_sessions SET run_state_json = ? WHERE session_id = ?")
+            .bind(&good_state)
+            .bind("SES-P1-1")
+            .execute(&*sup.pool)
+            .await
+            .expect("repair run state");
         let count = sup
             .reconcile_terminal_schedules()
             .await

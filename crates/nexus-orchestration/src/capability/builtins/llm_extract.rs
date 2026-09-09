@@ -373,11 +373,15 @@ mod tests {
     /// Shared cancellation map with coordinator tokens registered for the
     /// given run ids (fail-closed contract; production registers at run
     /// admission).
-    fn cancels_with(ids: &[&str]) -> std::sync::Arc<
+    fn cancels_with(
+        ids: &[&str],
+    ) -> std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     > {
         let map: std::sync::Arc<
-            std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+            std::sync::RwLock<
+                std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
+            >,
         > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
         {
             let mut guard = map.write().unwrap_or_else(|e| e.into_inner());
@@ -457,7 +461,8 @@ mod tests {
             ]}"#,
         ))
             .with_session_cancels(cancels_with(&["default"]));
-        let input = json!({ "prompt": "extract", "chapter_prose": "...", "_session_id": "default" });
+        let input =
+            json!({ "prompt": "extract", "chapter_prose": "...", "_session_id": "default" });
         let result = cap.run(input).await.unwrap();
         let candidates = result.get("candidates").and_then(|v| v.as_array()).unwrap();
         assert_eq!(candidates.len(), 2);
@@ -472,7 +477,8 @@ mod tests {
             "```json\n{\"candidates\":[{\"canonical_name\":\"X\",\"block_type\":\"item\",\"confidence\":0.5,\"source_quote\":\"q\"}]}\n```",
         ))
             .with_session_cancels(cancels_with(&["default"]));
-        let input = json!({ "prompt": "extract", "chapter_prose": "...", "_session_id": "default" });
+        let input =
+            json!({ "prompt": "extract", "chapter_prose": "...", "_session_id": "default" });
         let result = cap.run(input).await.unwrap();
         let candidates = result.get("candidates").and_then(|v| v.as_array()).unwrap();
         assert_eq!(candidates.len(), 1);
@@ -483,7 +489,8 @@ mod tests {
     async fn llm_extract_malformed_json_returns_empty_candidates() {
         let cap = LlmExtract::with_prompt_executor(mock_executor("this is not json at all"))
             .with_session_cancels(cancels_with(&["default"]));
-        let input = json!({ "prompt": "extract", "chapter_prose": "...", "_session_id": "default" });
+        let input =
+            json!({ "prompt": "extract", "chapter_prose": "...", "_session_id": "default" });
         let result = cap.run(input).await.unwrap();
         let candidates = result.get("candidates").and_then(|v| v.as_array()).unwrap();
         assert!(candidates.is_empty(), "malformed JSON → empty candidates");
@@ -582,7 +589,8 @@ mod tests {
             ]}"#,
         ))
             .with_session_cancels(cancels_with(&["default"]));
-        let input = json!({ "prompt": "extract", "chapter_prose": "...", "_session_id": "default" });
+        let input =
+            json!({ "prompt": "extract", "chapter_prose": "...", "_session_id": "default" });
         let result = cap.run(input).await.unwrap();
         // candidates still present.
         let candidates = result.get("candidates").and_then(|v| v.as_array()).unwrap();
@@ -640,9 +648,6 @@ mod tests {
             "SEC-V131-01/M-002: raw session_id must never be trusted; missing trusted _session_id must refuse"
         );
         let captured = executor.captured.lock().expect("capture lock").clone();
-        assert_eq!(
-            captured, "",
-            "SEC-V131-01: raw session_id leaked through"
-        );
+        assert_eq!(captured, "", "SEC-V131-01: raw session_id leaked through");
     }
 }

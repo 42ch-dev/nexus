@@ -208,9 +208,8 @@ impl AcpProvider {
             .collect();
 
         let spawner = AgentSpawner::new(cwd.clone());
-        let (child, stdin, stdout) = spawner
-            .spawn_with_env(&command, &args, &env)
-            .map_err(|e| {
+        let (child, stdin, stdout) =
+            spawner.spawn_with_env(&command, &args, &env).map_err(|e| {
                 HostError::launch_failed(
                     self.provider_id.clone(),
                     "ACP process spawn failed",
@@ -223,12 +222,8 @@ impl AcpProvider {
         // the child can exit during initialize/session negotiation.
         let mut owned_process =
             ManagedAcpProcess::new(self.provider_id.0.clone(), child, agent_path.clone());
-        let client = AcpSdkAdapter::with_connection(
-            self.provider_id.0.clone(),
-            agent_path,
-            stdin,
-            stdout,
-        );
+        let client =
+            AcpSdkAdapter::with_connection(self.provider_id.0.clone(), agent_path, stdin, stdout);
 
         // Await the handler registration — the provider is not usable until
         // the handler is installed (QC2 F-005, QC3 F-003). The handler reads
@@ -240,9 +235,7 @@ impl AcpProvider {
         > = std::sync::Arc::new(tokio::sync::RwLock::new(None));
         let client_arc = Arc::new(client);
         client_arc
-            .set_permission_handler(self.build_permission_handler(
-                active_permission_scope.clone(),
-            ))
+            .set_permission_handler(self.build_permission_handler(active_permission_scope.clone()))
             .await;
 
         // Any handshake failure below must run the owned teardown/reap
@@ -528,7 +521,8 @@ impl AcpProvider {
                             session_id: session_id.clone(),
                             op_id: op_id.clone(),
                             error_category: "max_turn_requests".to_string(),
-                            error_message: "agent reached the maximum turn request limit".to_string(),
+                            error_message: "agent reached the maximum turn request limit"
+                                .to_string(),
                         })
                     }
                 }
@@ -581,16 +575,13 @@ impl AcpProvider {
             (Arc::clone(&state.client), state.acp_session_id.clone())
         };
 
-        client
-            .set_mode(acp_session_id, mode)
-            .await
-            .map_err(|e| {
-                HostError::capability_unsupported(
-                    self.provider_id.clone(),
-                    "set_mode",
-                    format!("ACP set_mode failed: {e}"),
-                )
-            })?;
+        client.set_mode(acp_session_id, mode).await.map_err(|e| {
+            HostError::capability_unsupported(
+                self.provider_id.clone(),
+                "set_mode",
+                format!("ACP set_mode failed: {e}"),
+            )
+        })?;
 
         // Emit a single OpFinished event to signal success.
         let op_id = HostOperationId::new();
@@ -755,7 +746,10 @@ impl ProviderAdapter for AcpProvider {
                 provider_id,
                 available: false,
                 latency_ms: None,
-                message: Some(format!("command '{}' not found on PATH", self.recipe.command.as_deref().unwrap_or(""))),
+                message: Some(format!(
+                    "command '{}' not found on PATH",
+                    self.recipe.command.as_deref().unwrap_or("")
+                )),
             },
         };
         Ok(health)
@@ -773,13 +767,15 @@ impl ProviderAdapter for AcpProvider {
         // birth token + owned group id. The birth token is re-validated
         // before every signal; a missing token means cleanup must be
         // reported unconfirmed. No transport handle crosses this boundary.
-        let process_identity = connected.process.birth().map(|birth| {
-            crate::capability::model::OwnedProcessIdentity {
-                pid: birth.pid,
-                process_birth: Some(birth.start_tick.to_string()),
-                group_id: Some(birth.pid.to_string()),
-            }
-        });
+        let process_identity =
+            connected
+                .process
+                .birth()
+                .map(|birth| crate::capability::model::OwnedProcessIdentity {
+                    pid: birth.pid,
+                    process_birth: Some(birth.start_tick.to_string()),
+                    group_id: Some(birth.pid.to_string()),
+                });
 
         let host_session_id = HostSessionId::new();
 
@@ -903,9 +899,7 @@ impl ProviderAdapter for AcpProvider {
                         );
                     }
                     Err(_) => {
-                        tracing::warn!(
-                            "Best-effort cancel timed out on stream setup timeout"
-                        );
+                        tracing::warn!("Best-effort cancel timed out on stream setup timeout");
                     }
                 }
                 return Ok(Self::make_error_stream(
@@ -948,8 +942,17 @@ impl ProviderAdapter for AcpProvider {
                 active_permission_scope,
             )),
             |state| async move {
-                let Some((mut rx, client, acp_sid, session_id, op_id, provider_id, dur, cancel_dur, scope)) =
-                    state
+                let Some((
+                    mut rx,
+                    client,
+                    acp_sid,
+                    session_id,
+                    op_id,
+                    provider_id,
+                    dur,
+                    cancel_dur,
+                    scope,
+                )) = state
                 else {
                     return None;
                 };
@@ -967,7 +970,17 @@ impl ProviderAdapter for AcpProvider {
                         let next = if terminal {
                             None
                         } else {
-                            Some((rx, client, acp_sid, session_id, op_id, provider_id, dur, cancel_dur, scope))
+                            Some((
+                                rx,
+                                client,
+                                acp_sid,
+                                session_id,
+                                op_id,
+                                provider_id,
+                                dur,
+                                cancel_dur,
+                                scope,
+                            ))
                         };
                         Some((Ok(event), next))
                     }
@@ -1004,9 +1017,7 @@ impl ProviderAdapter for AcpProvider {
                                 );
                             }
                             Err(_) => {
-                                tracing::warn!(
-                                    "Best-effort cancel timed out on streaming timeout"
-                                );
+                                tracing::warn!("Best-effort cancel timed out on streaming timeout");
                             }
                         }
                         *scope.write().await = None;
@@ -1074,11 +1085,8 @@ impl ProviderAdapter for AcpProvider {
                     }
                 }
             };
-            let cancel_result = tokio::time::timeout(
-                shutdown_dur,
-                connected.0.cancel(connected.1),
-            )
-            .await;
+            let cancel_result =
+                tokio::time::timeout(shutdown_dur, connected.0.cancel(connected.1)).await;
             match cancel_result {
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => {
@@ -1483,13 +1491,11 @@ mod tests {
             HostPermissionResolver::with_acp_policy(&PolicyConfig::default(), policy),
         )
         .expect("valid recipe");
-        let active_scope = Arc::new(tokio::sync::RwLock::new(Some(
-            PromptPermissionScope {
-                allow_read: true,
-                allow_write: false,
-                allow_destructive: false,
-            },
-        )));
+        let active_scope = Arc::new(tokio::sync::RwLock::new(Some(PromptPermissionScope {
+            allow_read: true,
+            allow_write: false,
+            allow_destructive: false,
+        })));
         let handler = provider.build_permission_handler(active_scope.clone());
 
         assert_eq!(handler("file_read"), AcpPermissionOutcome::Approve);

@@ -263,7 +263,8 @@ pub async fn add_schedule(
         } else {
             "driven_v1"
         };
-        let (concurrency_kind, concurrency_whitelist, scheduled_at_ts) = insert_concurrency_and_schedule(&body);
+        let (concurrency_kind, concurrency_whitelist, scheduled_at_ts) =
+            insert_concurrency_and_schedule(&body);
         let descriptor = build_execution_descriptor(&state, &body, &work_id)?;
         sqlx::query(
             "INSERT INTO creator_schedules \
@@ -495,7 +496,8 @@ pub async fn add_schedule(
                         } else {
                             "driven_v1"
                         };
-                        let (concurrency_kind, concurrency_whitelist, scheduled_at_ts) = insert_concurrency_and_schedule(&body);
+                        let (concurrency_kind, concurrency_whitelist, scheduled_at_ts) =
+                            insert_concurrency_and_schedule(&body);
                         let descriptor = build_execution_descriptor(&state, &body, work_id)?;
                         sqlx::query(
                             "INSERT INTO creator_schedules \
@@ -729,12 +731,11 @@ async fn seed_core_context_in_tx(
         message: format!("failed to serialize core-context seed: {e}"),
     })?;
     let derivation = serde_json::json!({ "kind": "seed", "raw": seed_text });
-    let derivation_bytes = serde_json::to_vec(&derivation).map_err(|e| {
-        NexusApiError::Internal {
+    let derivation_bytes =
+        serde_json::to_vec(&derivation).map_err(|e| NexusApiError::Internal {
             code: "CORE_CONTEXT_SEED_ERROR".into(),
             message: format!("failed to serialize core-context derivation: {e}"),
-        }
-    })?;
+        })?;
     sqlx::query(
         "INSERT INTO core_context_versions
            (schedule_id, version, payload_kind, content,
@@ -756,7 +757,9 @@ async fn seed_core_context_in_tx(
     Ok(())
 }
 
-fn insert_concurrency_and_schedule(body: &AddScheduleRequest) -> (String, Option<String>, Option<i64>) {
+fn insert_concurrency_and_schedule(
+    body: &AddScheduleRequest,
+) -> (String, Option<String>, Option<i64>) {
     let (kind, whitelist) = match &body.concurrency {
         None => ("serial".to_string(), None),
         Some(ScheduleConcurrencyRequest::Serial) => ("serial".to_string(), None),
@@ -766,7 +769,10 @@ fn insert_concurrency_and_schedule(body: &AddScheduleRequest) -> (String, Option
             Some(serde_json::to_string(schedule_ids).unwrap_or_else(|_| "[]".to_string())),
         ),
     };
-    let scheduled_at = body.scheduled_at.as_ref().and_then(|s| s.parse::<i64>().ok());
+    let scheduled_at = body
+        .scheduled_at
+        .as_ref()
+        .and_then(|s| s.parse::<i64>().ok());
     (kind, whitelist, scheduled_at)
 }
 
@@ -793,31 +799,30 @@ fn build_execution_descriptor(
     if body.preset_id.starts_with("_system.") {
         return Ok(None);
     }
-    let registry = state.capability_registry().ok_or_else(|| {
-        NexusApiError::Internal {
+    let registry = state
+        .capability_registry()
+        .ok_or_else(|| NexusApiError::Internal {
             code: "CAPABILITY_REGISTRY_UNAVAILABLE".into(),
             message: "capability registry unavailable; cannot freeze preset source identity".into(),
-        }
-    })?;
-    let loaded = nexus_orchestration::preset::resolve_preset(
-        &body.preset_id,
-        state.nexus_home(),
-        &registry,
-    )
-    .map_err(|e| NexusApiError::Internal {
-        code: "PRESET_LOAD_ERROR".into(),
-        message: format!(
-            "failed to resolve preset '{}' for descriptor freeze: {e}",
-            body.preset_id
-        ),
-    })?;
-    let source = loaded.source_identity.ok_or_else(|| NexusApiError::Internal {
-        code: "PRESET_SOURCE_IDENTITY_MISSING".into(),
-        message: format!(
-            "preset '{}' has no content-addressed source identity",
-            body.preset_id
-        ),
-    })?;
+        })?;
+    let loaded =
+        nexus_orchestration::preset::resolve_preset(&body.preset_id, state.nexus_home(), &registry)
+            .map_err(|e| NexusApiError::Internal {
+                code: "PRESET_LOAD_ERROR".into(),
+                message: format!(
+                    "failed to resolve preset '{}' for descriptor freeze: {e}",
+                    body.preset_id
+                ),
+            })?;
+    let source = loaded
+        .source_identity
+        .ok_or_else(|| NexusApiError::Internal {
+            code: "PRESET_SOURCE_IDENTITY_MISSING".into(),
+            message: format!(
+                "preset '{}' has no content-addressed source identity",
+                body.preset_id
+            ),
+        })?;
     let input = body
         .input
         .as_ref()
@@ -843,7 +848,11 @@ fn build_execution_descriptor(
         .unwrap_or_default();
     let descriptor = nexus_orchestration::run_state::RunDescriptorV1 {
         creator_id: body.creator_id.clone(),
-        work_id: if work_id.is_empty() { None } else { Some(work_id.to_string()) },
+        work_id: if work_id.is_empty() {
+            None
+        } else {
+            Some(work_id.to_string())
+        },
         workspace_root: std::path::PathBuf::new(),
         preset_id: body.preset_id.clone(),
         preset_version: 1,
@@ -880,16 +889,15 @@ async fn admit_new_schedule(
 ) -> Result<String, NexusApiError> {
     // A scheduled_at in the future defers admission to the clocked tick.
     let pool = supervisor.pool();
-    let scheduled_at: Option<i64> = sqlx::query_scalar(
-        "SELECT scheduled_at FROM creator_schedules WHERE schedule_id = ?",
-    )
-    .bind(schedule_id)
-    .fetch_one(&*pool)
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".into(),
-        message: format!("database error reading scheduled_at: {e}"),
-    })?;
+    let scheduled_at: Option<i64> =
+        sqlx::query_scalar("SELECT scheduled_at FROM creator_schedules WHERE schedule_id = ?")
+            .bind(schedule_id)
+            .fetch_one(&*pool)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: format!("database error reading scheduled_at: {e}"),
+            })?;
     if let Some(at) = scheduled_at {
         if at > chrono::Utc::now().timestamp() {
             sqlx::query("UPDATE creator_schedules SET status = 'pending' WHERE schedule_id = ? AND status = 'paused'")
@@ -903,12 +911,12 @@ async fn admit_new_schedule(
 
     // Route through the single coordinator/starter (C-5): the same
     // admission path a tick would use, invoked immediately.
-    let coordinator = state.run_coordinator().ok_or_else(|| {
-        NexusApiError::service_unavailable("run coordinator not configured")
-    })?;
-    let caps = state.capability_registry_holder().ok_or_else(|| {
-        NexusApiError::service_unavailable("capability registry not configured")
-    })?;
+    let coordinator = state
+        .run_coordinator()
+        .ok_or_else(|| NexusApiError::service_unavailable("run coordinator not configured"))?;
+    let caps = state
+        .capability_registry_holder()
+        .ok_or_else(|| NexusApiError::service_unavailable("capability registry not configured"))?;
     match coordinator
         .admit_schedule(
             schedule_id,
@@ -1178,8 +1186,6 @@ pub async fn inspect_schedule(
         concurrency_kind,
     }))
 }
-
-
 
 // ---------------------------------------------------------------------------
 // PATCH /schedules/{id}/core-context — Apply EditOp
@@ -1747,16 +1753,17 @@ pub async fn signal_schedule(
             // refuses with 409 workflow_wait_conflict and never starts a
             // second driver. The coordinator routes the signal to the
             // engine's revision-fenced wait CAS and re-drives the run.
-            let wait_id = body.wait_id.as_deref().ok_or_else(|| {
-                NexusApiError::BadRequestCodedDetails {
-                    code: "invalid_input".into(),
-                    message: "continue requires the exact durable wait token".into(),
-                    details: serde_json::json!({
-                        "field": "wait_id",
-                        "reason": "continue requires the exact durable wait token",
-                    }),
-                }
-            })?;
+            let wait_id =
+                body.wait_id
+                    .as_deref()
+                    .ok_or_else(|| NexusApiError::BadRequestCodedDetails {
+                        code: "invalid_input".into(),
+                        message: "continue requires the exact durable wait token".into(),
+                        details: serde_json::json!({
+                            "field": "wait_id",
+                            "reason": "continue requires the exact durable wait token",
+                        }),
+                    })?;
             let coordinator = state.run_coordinator().ok_or_else(|| {
                 NexusApiError::service_unavailable("run coordinator not configured")
             })?;
@@ -1854,7 +1861,6 @@ pub async fn signal_schedule(
             });
         }
     };
-
 }
 
 // ---------------------------------------------------------------------------
@@ -2561,7 +2567,9 @@ mod tests {
         let pool = nexus_local_db::open_pool(db.path())
             .await
             .expect("open pool");
-        nexus_local_db::run_migrations(&pool).await.expect("migrate");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("migrate");
         let now = chrono::Utc::now().timestamp();
 
         // Admission-only historical shape: running, no owned session.
