@@ -1091,6 +1091,31 @@ fn inspect_v1_human_wait_stays_distinct_and_preserves_wait_token() {
             },
         )
         .await;
+        // A v1 human wait carries a frozen descriptor; the shared projection
+        // only offers `continue` when that source still verifies (P1-C).
+        let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+        let loaded = nexus_orchestration::preset::load_embedded_preset("memory-augmented", &caps)
+            .expect("embedded preset");
+        let descriptor = serde_json::json!({
+            "creator_id": CREATOR,
+            "work_id": null,
+            "workspace_root": "/tmp",
+            "preset_id": "memory-augmented",
+            "preset_version": loaded.version,
+            "source": loaded.source_identity.clone().expect("source identity"),
+            "input": {},
+            "agent_bindings": {},
+            "parent_session_id": null,
+            "graph_name": null
+        });
+        sqlx::query(
+            "UPDATE orchestration_sessions SET run_descriptor_json = ? WHERE session_id = ?",
+        )
+        .bind(serde_json::to_vec(&descriptor).expect("descriptor json"))
+        .bind("ses_wait")
+        .execute(&pool)
+        .await
+        .expect("seed reconstructable descriptor");
         pool.close().await;
     });
 
@@ -1375,6 +1400,31 @@ fn inspect_v1_list_mode_recovery_classes_and_read_only() {
             },
         )
         .await;
+        // A v1 human wait carries a frozen descriptor; the shared projection
+        // only offers `continue` when that source still verifies (P1-C).
+        let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+        let loaded = nexus_orchestration::preset::load_embedded_preset("memory-augmented", &caps)
+            .expect("embedded preset");
+        let descriptor = serde_json::json!({
+            "creator_id": CREATOR,
+            "work_id": null,
+            "workspace_root": "/tmp",
+            "preset_id": "memory-augmented",
+            "preset_version": loaded.version,
+            "source": loaded.source_identity.clone().expect("source identity"),
+            "input": {},
+            "agent_bindings": {},
+            "parent_session_id": null,
+            "graph_name": null
+        });
+        sqlx::query(
+            "UPDATE orchestration_sessions SET run_descriptor_json = ? WHERE session_id = ?",
+        )
+        .bind(serde_json::to_vec(&descriptor).expect("descriptor json"))
+        .bind("ses_wait")
+        .execute(&pool)
+        .await
+        .expect("seed reconstructable descriptor");
         pool.close().await;
     });
 

@@ -436,7 +436,10 @@ fn project(row: &CheckpointRow) -> InspectDto {
         state_revision: row.state_revision,
         recovery_class,
         wait_id,
-        allowed_actions: allowed_actions_for(recovery_class),
+        allowed_actions: allowed_actions_for(
+            recovery_class,
+            frozen_source_reconstructable(row.run_descriptor_json.as_deref()),
+        ),
         current_task_id: row.current_task_id.clone(),
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -534,7 +537,10 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
         state_revision: row.state_revision,
         recovery_class,
         wait_id,
-        allowed_actions: allowed_actions_for(recovery_class),
+        allowed_actions: allowed_actions_for(
+            recovery_class,
+            frozen_source_reconstructable(row.run_descriptor_json.as_deref()),
+        ),
         current_task_id: row.current_task_id.clone(),
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -673,6 +679,35 @@ fn render_ts(secs: i64) -> String {
 
 /// Stable human word for a [`RecoveryClass`] (same wording as detail and
 /// list output; the DTO `serde` name stays the machine contract).
+/// Read-only frozen-source verification (A7): the persisted descriptor's
+/// source must still resolve and hash-match at its frozen version. No runner
+/// is attached and no state is mutated.
+fn frozen_source_reconstructable(bytes: Option<&[u8]>) -> bool {
+    use nexus_orchestration::preset::{load_embedded_preset, load_preset};
+    use nexus_orchestration::run_state::PresetSourceIdentity;
+
+    let Some(bytes) = bytes else {
+        return false;
+    };
+    let Ok(descriptor) =
+        serde_json::from_slice::<nexus_orchestration::run_state::RunDescriptorV1>(bytes)
+    else {
+        return false;
+    };
+    let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+    let loaded = match &descriptor.source {
+        PresetSourceIdentity::Embedded { preset_id, .. } => load_embedded_preset(preset_id, &caps),
+        PresetSourceIdentity::Directory { root, .. } => load_preset(root, &caps),
+    };
+    match loaded {
+        Ok(loaded) => {
+            loaded.source_identity.as_ref() == Some(&descriptor.source)
+                && loaded.version == descriptor.preset_version
+        }
+        Err(_) => false,
+    }
+}
+
 fn recovery_class_str(class: RecoveryClass) -> &'static str {
     match class {
         RecoveryClass::Terminal => "terminal",
@@ -687,9 +722,12 @@ fn recovery_class_str(class: RecoveryClass) -> &'static str {
 
 /// Legal operator actions for the canonical recovery class — the same
 /// mapping the daemon projection uses (A2; tri-QC P1-B).
-fn allowed_actions_for(class: RecoveryClass) -> Vec<String> {
+fn allowed_actions_for(class: RecoveryClass, source_reconstructable: bool) -> Vec<String> {
     let actions: &[&str] = match class {
         RecoveryClass::Terminal => &["new_run"],
+        // A human wait whose frozen source no longer verifies must not
+        // advertise continue (tri-QC P1-C).
+        RecoveryClass::HumanWait if !source_reconstructable => &["cancel", "new_run"],
         RecoveryClass::HumanWait => &["continue", "cancel"],
         RecoveryClass::Interrupted => &["cancel", "new_run"],
         RecoveryClass::SafeBoundary | RecoveryClass::ConvergeMerge => &["cancel"],
