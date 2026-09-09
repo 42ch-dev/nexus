@@ -62,7 +62,7 @@ async fn test_state(
     db_path: std::path::PathBuf,
 ) -> WorkspaceState {
     let db_url = format!("sqlite:{}?mode=rw", db_path.display());
-    let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
     let schedule_pool = Arc::new(sqlx::SqlitePool::connect(&db_url).await.unwrap());
     let supervisor = Arc::new(ScheduleSupervisor::new(schedule_pool));

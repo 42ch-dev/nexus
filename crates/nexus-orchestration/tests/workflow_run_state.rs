@@ -2055,7 +2055,7 @@ async fn negative_v0_revision_is_non_replayable() {
 struct EndTask;
 #[async_trait::async_trait]
 impl graph_flow::Task for EndTask {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "end_task"
     }
     async fn run(&self, _ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
@@ -2071,7 +2071,7 @@ impl graph_flow::Task for EndTask {
 struct ContinueTask;
 #[async_trait::async_trait]
 impl graph_flow::Task for ContinueTask {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "continue_task"
     }
     async fn run(&self, ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
@@ -2090,7 +2090,7 @@ async fn fresh_engine(
     Arc<SqliteSessionStorage>,
     nexus_orchestration::GraphFlowEngine,
 ) {
-    let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
+    let storage = Arc::new(SqliteSessionStorage::new(pool));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
     let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
@@ -2653,7 +2653,7 @@ async fn child_ids_are_collision_resistant() {
 struct EffectTask;
 #[async_trait::async_trait]
 impl graph_flow::Task for EffectTask {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "effect_task"
     }
     async fn run(&self, ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
@@ -2671,7 +2671,7 @@ impl graph_flow::Task for EffectTask {
 struct DeterministicContinueTask;
 #[async_trait::async_trait]
 impl graph_flow::Task for DeterministicContinueTask {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "deterministic_continue_task"
     }
     async fn run(&self, ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
@@ -2793,7 +2793,7 @@ async fn child_missing_session_snapshot_is_non_replayable() {
                  '{\"wait\":null,\"step_in_flight\":null,\"in_flight\":null,\"failure\":null,\"cancel_requested\":false}',
                  ?)",
     )
-    .bind(&child_sid)
+    .bind(child_sid)
     .bind(&parent_sid.0)
     .bind(
         serde_json::to_vec(&test_descriptor(child_sid))
@@ -2815,7 +2815,7 @@ async fn child_missing_session_snapshot_is_non_replayable() {
     );
 }
 
-/// A graph-flow task that bumps the parent's root state_revision mid-step to
+/// A graph-flow task that bumps the parent's root `state_revision` mid-step to
 /// simulate a concurrent transition that wins before the outer
 /// `commit_transition` (used to prove the restore is revision-fenced).
 struct ConcurrentBumpRootTask {
@@ -2824,7 +2824,7 @@ struct ConcurrentBumpRootTask {
 }
 #[async_trait::async_trait]
 impl graph_flow::Task for ConcurrentBumpRootTask {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "concurrent_bump_task"
     }
     async fn run(&self, _ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
@@ -3739,7 +3739,7 @@ async fn missing_child_session_clears_stale_children_entry() {
                  '{\"wait\":null,\"step_in_flight\":null,\"in_flight\":null,\"failure\":null,\"cancel_requested\":false}',
                  ?)",
     )
-    .bind(&child_sid)
+    .bind(child_sid)
     .bind(&parent_sid.0)
     .bind(serde_json::to_vec(&test_descriptor(child_sid)).expect("child descriptor"))
     .execute(&*pool)
@@ -4338,7 +4338,7 @@ async fn external_effect_marker_cleared_per_step() {
 struct MarkerEffectTask;
 #[async_trait::async_trait]
 impl graph_flow::Task for MarkerEffectTask {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "marker_effect_task"
     }
     async fn run(&self, ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
@@ -4803,7 +4803,7 @@ async fn engine_effectful_task_does_not_dispatch_before_in_flight_mark() {
 /// durable output shape (A2: scheduler joins = paused + join keys, tokenless).
 /// `branch_b` is the hanging upstream (never walked, never arrives), so the
 /// join deterministically parks at 1/2 arrivals with a 300s deadline.
-fn converge_preset_yaml() -> &'static str {
+const fn converge_preset_yaml() -> &'static str {
     r#"preset:
   id: e2e-engine-converge
   version: 1
@@ -5338,7 +5338,7 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
 /// `_converge_arrivals_manual_state` for the routed target; a stale
 /// `_merge_other` / `_join_wait_start_other` pair is pre-seeded as
 /// historical/broad evidence. The manual wait must still persist
-/// `waiting_for_input` + fresh retained token and reopen as HumanWait.
+/// `waiting_for_input` + fresh retained token and reopen as `HumanWait`.
 #[tokio::test]
 async fn engine_conditional_routed_manual_wait_keeps_token_despite_join_keys() {
     let (pool, db) = fresh_pool().await;

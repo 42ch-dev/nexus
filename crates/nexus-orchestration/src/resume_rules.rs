@@ -92,9 +92,11 @@ pub enum RecoveryClass {
     LegacyUnverified,
 }
 
-/// Classify a v1 run record (authoritative status + durable state) against the
-/// A7 precedence. `gate_park_live` is the exact current-task
-/// `_gate_park_<task>` marker used for bounded converge/merge resume.
+/// Classify a v1 run record (authoritative status + durable state) against
+/// the A7 precedence.
+///
+/// `gate_park_live` is the exact current-task `_gate_park_<task>` marker used
+/// for bounded converge/merge resume.
 ///
 /// `state: None` means the v1 row's state blob is missing/unparseable
 /// (corrupt/unsupported) — non-replayable `Unreadable`, except that an
@@ -104,7 +106,7 @@ pub enum RecoveryClass {
 /// (rule 2 beats rule 3); a durable human-wait token beats old scheduler
 /// join keys (rule 4 beats rule 5).
 #[must_use]
-pub fn classify_recovery(
+pub const fn classify_recovery(
     status: &SessionStatus,
     state: Option<&RunStateV1>,
     gate_park_live: bool,

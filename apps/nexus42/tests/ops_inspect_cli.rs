@@ -1581,7 +1581,7 @@ fn inspect_v1_list_mode_recovery_classes_and_read_only() {
 // ---------------------------------------------------------------------------
 
 /// Promote a seeded row to v1 with a given state/descriptor, or set an
-/// arbitrary execution_version (negative/forward) without state.
+/// arbitrary `execution_version` (negative/forward) without state.
 async fn set_v1_metadata(
     pool: &sqlx::SqlitePool,
     session_id: &str,

@@ -489,8 +489,7 @@ async fn list_schedules(
         let recovery = s
             .execution
             .as_ref()
-            .map(|execution| execution.recovery_class.as_str())
-            .unwrap_or("-");
+            .map_or("-", |execution| execution.recovery_class.as_str());
         println!(
             "{:<25} {:<15} {:<12} {:<10} {:<6} {:<14} {}",
             s.schedule_id,

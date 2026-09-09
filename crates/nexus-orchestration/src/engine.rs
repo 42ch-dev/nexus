@@ -21,14 +21,16 @@ use std::sync::Arc;
 use thiserror::Error;
 
 // Re-export for internal use.
-use crate::capability::{CapabilityError, CapabilityRegistry};
+#[cfg(test)]
+use crate::capability::CapabilityError;
+use crate::capability::CapabilityRegistry;
 use crate::run_state::{
     ChildCheckpoint, PresetSourceIdentity, RunCheckpoint, RunDescriptorV1, RunFailure, RunRecord,
     RunStateV1, WorkflowStateStore,
 };
 
 /// Context key that effectful tasks set when they perform an external effect
-/// (capability call, ACP/Host prompt dispatch, HostTool call, child spawn).
+/// (capability call, ACP/Host prompt dispatch, `HostTool` call, child spawn).
 ///
 /// `run_step_internal` inspects the post-step root context for this marker to
 /// decide the disposition of a failed post-effect `commit_transition`: if an
@@ -525,9 +527,9 @@ impl EngineSharedState {
     pub fn register_cancellation(&self, session_id: &SessionId) {
         self.session_cancels
             .write()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entry(session_id.0.clone())
-            .or_insert_with(tokio_util::sync::CancellationToken::new);
+            .or_default();
     }
 
     /// Recover persisted non-terminal sessions into in-memory tracker (WS2 R1).
@@ -563,6 +565,12 @@ impl EngineSharedState {
     /// non-replayable rather than reconstructing a runner over an incomplete
     /// children map. An empty result **replaces/clears** any prior map entry
     /// so a stale checkpoint never lingers (Important 1).
+    ///
+    /// # Errors
+    ///
+    /// Returns `EngineError` when a child row load fails, a child's stored
+    /// snapshot is unreadable, its descriptor identity is tampered, or the
+    /// parent's own snapshot cannot be loaded or serialized.
     pub async fn hydrate_children(&self, parent_session_id: &SessionId) -> Result<(), EngineError> {
         let Some(store) = &self.workflow_store else {
             return Ok(());
@@ -639,25 +647,22 @@ impl EngineSharedState {
             }
             // A child whose session snapshot cannot be read from storage is
             // corrupt: propagate rather than silently skip it (Important 1).
-            let child_session = match self
+            let Ok(Some(child_session)) = self
                 .storage
                 .get(&child.session_id.0)
                 .await
                 .map_err(EngineError::GraphFlow)
-            {
-                Ok(Some(s)) => s,
-                Ok(None) | Err(_) => {
-                    // On child-snapshot error, clear the parent's stale
-                    // children-map entry before propagating (Minor 1).
-                    self.children.write().await.remove(&parent_session_id.0);
-                    return Err(EngineError::GraphFlow(
-                        graph_flow::GraphError::StorageError(format!(
-                            "hydrate_children '{}': persisted child '{}' has no readable \
-                             session snapshot (non-replayable)",
-                            parent_session_id.0, child.session_id.0
-                        )),
-                    ));
-                }
+            else {
+                // On child-snapshot error, clear the parent's stale
+                // children-map entry before propagating (Minor 1).
+                self.children.write().await.remove(&parent_session_id.0);
+                return Err(EngineError::GraphFlow(
+                    graph_flow::GraphError::StorageError(format!(
+                        "hydrate_children '{}': persisted child '{}' has no readable \
+                         session snapshot (non-replayable)",
+                        parent_session_id.0, child.session_id.0
+                    )),
+                ));
             };
             let graph_name = child.descriptor.as_ref().and_then(|d| d.graph_name.clone());
             checkpoints.push(ChildCheckpoint {
@@ -676,6 +681,7 @@ impl EngineSharedState {
         } else {
             map.insert(parent_session_id.0.clone(), checkpoints);
         }
+        drop(map); // release children write guard before returning Ok(())
         Ok(())
     }
 
@@ -686,7 +692,7 @@ impl EngineSharedState {
     /// tracker (which may lag after recovery). `Ok(None)` when no session
     /// row exists yet (or storage errors are treated as absent by callers).
     async fn current_task_id(
-        state: &EngineSharedState,
+        state: &Self,
         session_id: &SessionId,
     ) -> Result<Option<String>, EngineError> {
         match state.storage.get(&session_id.0).await {
@@ -724,6 +730,7 @@ impl EngineSharedState {
     /// persisted only after owned Host work is stopped/reaped;
     /// cleanup-unconfirmed persists `Interrupted` (actionable, never false
     /// successful cancellation).
+    #[allow(clippy::too_many_lines, clippy::significant_drop_tightening)] // sequential linear signal→persist→teardown path; closure read-guard spans the BFS await loop
     async fn persist_signal_transition(
         &self,
         session_id: &SessionId,
@@ -731,9 +738,10 @@ impl EngineSharedState {
     ) -> Result<SessionStatus, EngineError> {
         let target_status = match signal {
             EngineSignal::Pause => SessionStatus::Paused,
-            EngineSignal::Resume | EngineSignal::Advance => SessionStatus::Running,
             EngineSignal::Cancel => SessionStatus::Cancelled,
-            EngineSignal::Continue { .. } => SessionStatus::Running,
+            EngineSignal::Resume | EngineSignal::Advance | EngineSignal::Continue { .. } => {
+                SessionStatus::Running
+            }
         };
 
         let Some(store) = &self.workflow_store else {
@@ -1040,7 +1048,7 @@ impl EngineSharedState {
                 let cancels = self
                     .session_cancels
                     .read()
-                    .unwrap_or_else(|e| e.into_inner());
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 if let Some(token) = cancels.get(&session_id.0).cloned() {
                     token.cancel();
                 }
@@ -1061,18 +1069,21 @@ impl EngineSharedState {
             // settles `Cancelled`; failed entries are retained for the
             // owner-scoped retry.
             if let Some(executor) = &self.prompt_executor {
-                let mut cleanup_error: Option<CapabilityError> = None;
-                if let Err(e) = executor.finalize_run(&session_id.0).await {
-                    cleanup_error = Some(e);
-                }
-                if cleanup_error.is_none() {
+                // Prefer the root cleanup error; if the root confirms, keep
+                // the first descendant-finalize error (if any).
+                let root_cleanup_err = executor.finalize_run(&session_id.0).await.err();
+                let cleanup_error = if let Some(e) = root_cleanup_err {
+                    Some(e)
+                } else {
+                    let mut child_err = None;
                     for child_id in &descendant_ids {
                         if let Err(e) = executor.finalize_run(child_id).await {
-                            cleanup_error = Some(e);
+                            child_err = Some(e);
                             break;
                         }
                     }
-                }
+                    child_err
+                };
                 if let Some(e) = cleanup_error {
                     // Cleanup unconfirmed: persist Interrupted (actionable,
                     // never false successful cancellation) and surface the
@@ -1249,7 +1260,7 @@ impl EngineSharedState {
                 let mut cancels = self
                     .session_cancels
                     .write()
-                    .unwrap_or_else(|e| e.into_inner());
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 cancels.remove(&session_id.0);
                 for child_id in &descendant_ids {
                     cancels.remove(child_id);
@@ -1352,6 +1363,7 @@ impl EngineSharedState {
         } else {
             entry.push(child_checkpoint);
         }
+        drop(children); // release children write guard before returning
         Ok(())
     }
 
@@ -1367,6 +1379,7 @@ impl EngineSharedState {
     /// # Errors
     /// Returns [`EngineError`] if the engine has no graph loaded, the step cannot be resolved,
     /// or capability execution fails.
+    #[allow(clippy::too_many_lines)] // sequential step→persist→wait pipeline; splitting obscures the single execution path
     pub async fn run_step_internal(
         &self,
         session_id: &SessionId,
@@ -1386,8 +1399,7 @@ impl EngineSharedState {
             store
                 .load_run(session_id)
                 .await?
-                .map(|r| r.state_revision)
-                .unwrap_or(0)
+                .map_or(0, |r| r.state_revision)
         } else {
             0
         };
@@ -1428,17 +1440,14 @@ impl EngineSharedState {
                     root: pre,
                     children: &[],
                 };
-                if let Err(e) = store
+                store
                     .mark_step_in_flight(
                         session_id,
                         expected_revision,
                         in_flight_checkpoint,
                         &in_flight_state,
                     )
-                    .await
-                {
-                    return Err(e);
-                }
+                    .await?;
             }
         }
 
@@ -1626,7 +1635,7 @@ impl EngineSharedState {
                             if finalized {
                                 self.session_cancels
                                     .write()
-                                    .unwrap_or_else(|e| e.into_inner())
+                                    .unwrap_or_else(std::sync::PoisonError::into_inner)
                                     .remove(&session_id.0);
                             }
                         }
@@ -1733,6 +1742,12 @@ impl EngineSharedState {
     /// never a bare `SessionStorage::save` with empty identity (Important 2).
     /// The child checkpoint is recorded so `run_step_internal` can persist
     /// nested child rows atomically under the root transition.
+    ///
+    /// # Errors
+    ///
+    /// Returns `EngineError` if the child session cannot be persisted, the
+    /// inner graph cannot be resolved, or a storage write fails.
+    #[allow(clippy::too_many_lines)] // sequential admit→persist→wire path; splitting obscures the single admission flow
     pub async fn spawn_child_session_internal(
         &self,
         params: ChildSessionParams,
@@ -1820,7 +1835,7 @@ impl EngineSharedState {
         // nested child row atomically (Important 2). The CAS anchor is the
         // child's actual persisted revision: a v1 child created via
         // `start_run` is at revision 1; a bare-save child (no store) is at 0.
-        let child_revision = if self.workflow_store.is_some() { 1 } else { 0 };
+        let child_revision = u64::from(self.workflow_store.is_some());
         let child_checkpoint = ChildCheckpoint {
             session: session_mut.clone(),
             status: SessionStatus::Running,
@@ -1870,7 +1885,7 @@ impl EngineSharedState {
                         let cancels = self
                             .session_cancels
                             .read()
-                            .unwrap_or_else(|e| e.into_inner());
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
                         if let Some(token) = cancels.get(&child_session_id).cloned() {
                             token.cancel();
                         }
@@ -1895,8 +1910,7 @@ impl EngineSharedState {
                         let Some(current) = store.load_run(&child_sid).await? else {
                             return Err(EngineError::GraphFlow(
                                 graph_flow::GraphError::StorageError(format!(
-                                    "child '{}' disappeared before cancelled settlement",
-                                    child_session_id
+                                    "child '{child_session_id}' disappeared before cancelled settlement"
                                 )),
                             ));
                         };
@@ -1975,7 +1989,7 @@ impl EngineSharedState {
                         .retain(|s| s.session_id.0 != child_session_id);
                     self.session_cancels
                         .write()
-                        .unwrap_or_else(|e| e.into_inner())
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .remove(&child_session_id);
                     return Err(EngineError::TerminalState(params.parent_session_id.clone()));
                 }
@@ -2019,6 +2033,11 @@ impl EngineSharedState {
     /// runner points at the same storage, resuming from the persisted
     /// position. When the store is absent or no matching child exists,
     /// returns `None`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `EngineError` when a durable child row must be reattached but
+    /// cannot be loaded or its descriptor identity is tampered.
     pub async fn attach_existing_child_session_internal(
         &self,
         parent_session_id: &str,
@@ -2029,7 +2048,7 @@ impl EngineSharedState {
             let Some(parent_children) = children.get(parent_session_id) else {
                 return Ok(None);
             };
-            parent_children
+            let found = parent_children
                 .iter()
                 .find(|c| c.graph_name.as_deref() == Some(inner_graph.id.as_str()))
                 .map(|c| {
@@ -2038,7 +2057,9 @@ impl EngineSharedState {
                         c.session.current_task_id.clone(),
                         c.status.clone(),
                     )
-                })
+                });
+            drop(children); // release read guard before the find result is used downstream
+            found
         };
         let Some((child_id, child_task, child_status)) = target else {
             return Ok(None);
@@ -2056,11 +2077,10 @@ impl EngineSharedState {
                 .await?
                 .ok_or_else(|| EngineError::SessionNotFound(parent_session_id.to_string()))?;
             if parent_record.execution_version >= 1 {
-                let child_sid = SessionId(child_id.clone());
-                let child_record = store.load_run(&child_sid).await?.ok_or_else(|| {
+                let child_session = SessionId(child_id.clone());
+                let child_record = store.load_run(&child_session).await?.ok_or_else(|| {
                     EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                        "attach_existing_child_session '{}': child row missing (non-replayable)",
-                        child_id
+                        "attach_existing_child_session '{child_id}': child row missing (non-replayable)"
                     )))
                 })?;
                 validate_child_descriptor_identity(
@@ -2175,6 +2195,7 @@ fn validate_child_descriptor_identity(
 ///   the parent's current task position → non-replayable (a valid-but-wrong
 ///   name would miss reattachment and mint a replacement child);
 /// - terminal children are historical and only need membership.
+#[allow(clippy::too_many_arguments)] // pure predicate over the candidate child's fields; a struct would flatten the caller
 fn validate_descendant_position(
     preset_id: &str,
     valid_inner: &std::collections::HashSet<&str>,
@@ -2266,13 +2287,13 @@ fn inner_graph_entered_by_state<'a>(
 /// retained through restart until a successful CAS consumes it. When the
 /// wait belongs to a nested inner-graph child, `root_context` carries the
 /// `_child_wait_session` / `_child_wait_task` markers written by
-/// `InnerGraphTask` and the root WaitRecord names the exact waiting
+/// `InnerGraphTask` and the root `WaitRecord` names the exact waiting
 /// descendant (`child_session_id` / `child_task_id`, A4 nested path).
 /// Scheduler converge/merge parks arrive here as `SessionStatus::Paused` and
 /// persist tokenless (A2) — the join keys in the context are the wait
 /// evidence. Manual waits reached through labeled/conditional routing with
 /// stale/broad join keys are not re-mapped (no current-gate park marker) and
-/// keep the waiting_for_input + fresh token shape.
+/// keep the `waiting_for_input` + fresh token shape.
 fn build_step_state(
     result: &graph_flow::ExecutionResult,
     status: &SessionStatus,
@@ -2687,9 +2708,9 @@ impl GraphFlowEngine {
     fn register_cancellation(&self, session_id: &SessionId) {
         self.session_cancels
             .write()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entry(session_id.0.clone())
-            .or_insert_with(tokio_util::sync::CancellationToken::new);
+            .or_default();
     }
 
     /// Set the daemon-side tool dispatch adapter (DF-47, V1.42 P3).
@@ -2765,7 +2786,7 @@ impl GraphFlowEngine {
                 self.attach_runner_with_owned_closure(&summary.session_id)
                     .await
             } else {
-                self.reconstruct_runner_legacy(&summary).await
+                self.reconstruct_runner_legacy(summary).await
             };
             if let Err(e) = result {
                 tracing::warn!(
@@ -2792,7 +2813,7 @@ impl GraphFlowEngine {
     /// root Cancel after this recovery can then fire/finalize every owned
     /// descendant.
     ///
-    /// A corrupt/unsupported child (load_children failure, missing child
+    /// A corrupt/unsupported child (`load_children` failure, missing child
     /// session snapshot) must propagate: the parent cannot be reconstructed
     /// over an incomplete children map (A7). Surface it as non-replayable.
     async fn attach_runner_with_owned_closure(
@@ -2879,53 +2900,51 @@ impl GraphFlowEngine {
             .unwrap_or_else(|| Arc::new(CapabilityRegistry::empty()))
     }
 
+    #[allow(clippy::too_many_lines, clippy::significant_drop_tightening)] // sequential descriptor→validate→rebuild path; guard spans await loop
     async fn reconstruct_runner(&self, session_id: &SessionId) -> Result<(), EngineError> {
         // Load the durable descriptor (frozen at admission) so we honour the
         // persisted source identity and preset version (Important 5). A run
         // that has no v1 descriptor is a legacy/unverified row — its runner
         // cannot be reconstructed over a frozen source (A2/A7).
-        let descriptor = match &self.state.workflow_store {
-            Some(store) => {
-                let record = store.load_run(session_id).await?.ok_or_else(|| {
-                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                        "R6: session '{}' has no persisted run record; cannot reconstruct runner \
-                             (non-replayable)",
-                        session_id.0
-                    )))
-                })?;
-                record.descriptor.ok_or_else(|| {
-                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                        "R6: session '{}' has no v1 descriptor; cannot reconstruct runner over a \
-                         frozen source (non-replayable)",
-                        session_id.0
-                    )))
-                })?
-            }
-            None => {
-                // No workflow store (in-memory/test engine): no durable
-                // descriptor exists, so a frozen-source reconstruction is
-                // impossible. The legacy embedded path is used by
-                // `recover_sessions` directly; an on-demand attach without
-                // a store (no durable run) is non-replayable.
-                let summary = self
-                    .state
-                    .sessions
-                    .read()
-                    .await
-                    .iter()
-                    .find(|s| s.session_id == *session_id)
-                    .cloned();
-                match summary.as_ref() {
-                    Some(summary) => return self.reconstruct_runner_legacy(summary).await,
-                    None => {
-                        return Err(EngineError::GraphFlow(
-                            graph_flow::GraphError::StorageError(format!(
-                                "R6: session '{}' has no durable run record and is not tracked; \
-                                 cannot reconstruct runner (non-replayable)",
-                                session_id.0
-                            )),
-                        ));
-                    }
+        let descriptor = if let Some(store) = &self.state.workflow_store {
+            let record = store.load_run(session_id).await?.ok_or_else(|| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "R6: session '{}' has no persisted run record; cannot reconstruct runner \
+                         (non-replayable)",
+                    session_id.0
+                )))
+            })?;
+            record.descriptor.ok_or_else(|| {
+                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                    "R6: session '{}' has no v1 descriptor; cannot reconstruct runner over a \
+                     frozen source (non-replayable)",
+                    session_id.0
+                )))
+            })?
+        } else {
+            // No workflow store (in-memory/test engine): no durable
+            // descriptor exists, so a frozen-source reconstruction is
+            // impossible. The legacy embedded path is used by
+            // `recover_sessions` directly; an on-demand attach without
+            // a store (no durable run) is non-replayable.
+            let summary = self
+                .state
+                .sessions
+                .read()
+                .await
+                .iter()
+                .find(|s| s.session_id == *session_id)
+                .cloned();
+            match summary.as_ref() {
+                Some(summary) => return self.reconstruct_runner_legacy(summary).await,
+                None => {
+                    return Err(EngineError::GraphFlow(
+                        graph_flow::GraphError::StorageError(format!(
+                            "R6: session '{}' has no durable run record and is not tracked; \
+                             cannot reconstruct runner (non-replayable)",
+                            session_id.0
+                        )),
+                    ));
                 }
             }
         };
@@ -2956,9 +2975,9 @@ impl GraphFlowEngine {
                     Err(e) => {
                         return Err(EngineError::GraphFlow(
                             graph_flow::GraphError::StorageError(format!(
-                                "R6: directory preset at '{:?}' is missing/invalid for session {}: {} \
+                                "R6: directory preset at '{}' is missing/invalid for session {}: {} \
                                  (reconstruction_unavailable, non-replayable)",
-                                root, session_id.0, e
+                                root.display(), session_id.0, e
                             )),
                         ));
                     }
@@ -3299,6 +3318,7 @@ impl GraphFlowEngine {
     /// # Errors
     /// Returns [`EngineError`] if session creation, preset loading, or the
     /// initial checkpoint write fails.
+    #[allow(clippy::too_many_arguments, clippy::implicit_hasher)] // admit-time parameter bundle; a config struct would obscure the graph/frozen-source coupling
     pub async fn start_preset_run_with_input(
         &self,
         session_id: &str,
@@ -3406,6 +3426,7 @@ impl GraphFlowEngine {
     /// # Errors
     /// Returns [`EngineError`] on storage failure, policy refusal, or when
     /// the schedule is not in an admissible state.
+    #[allow(clippy::too_many_arguments, clippy::implicit_hasher)] // admit-time parameter bundle; a config struct would obscure the CAS gate coupling
     pub async fn admit_schedule_run_with_input(
         &self,
         schedule_id: &str,
@@ -3899,6 +3920,681 @@ impl OrchestrationEngine for GraphFlowEngine {
 // Re-export EngineSharedState for consumers (e.g., preset loader).
 pub use EngineSharedState as SharedState;
 
+/// Scripted [`PromptExecutor`] for the A5 cleanup-retry tests: `finalize_run`
+/// pops from a scripted queue of outcomes and records every call's run id.
+#[cfg(test)]
+struct ScriptedFinalizeExecutor {
+    outcomes: std::sync::Mutex<std::collections::VecDeque<Result<(), CapabilityError>>>,
+    calls: std::sync::atomic::AtomicU64,
+    finalized_runs: std::sync::Mutex<Vec<String>>,
+}
+
+#[cfg(test)]
+impl ScriptedFinalizeExecutor {
+    fn new(outcomes: Vec<Result<(), CapabilityError>>) -> Self {
+        Self {
+            outcomes: std::sync::Mutex::new(outcomes.into()),
+            calls: std::sync::atomic::AtomicU64::new(0),
+            finalized_runs: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn calls(&self) -> u64 {
+        self.calls.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Run ids passed to `finalize_run`, in call order.
+    fn finalized_runs(&self) -> Vec<String> {
+        self.finalized_runs.lock().expect("finalized_runs").clone()
+    }
+}
+
+#[cfg(test)]
+#[async_trait]
+impl crate::capability::PromptExecutor for ScriptedFinalizeExecutor {
+    async fn execute(
+        &self,
+        _request: crate::capability::PromptRequest,
+    ) -> Result<crate::capability::PromptResult, CapabilityError> {
+        unreachable!("not used by cancel-path tests")
+    }
+
+    async fn finalize_run(&self, run_id: &str) -> Result<(), CapabilityError> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.finalized_runs
+            .lock()
+            .expect("finalized_runs")
+            .push(run_id.to_string());
+        self.outcomes
+            .lock()
+            .expect("outcomes")
+            .pop_front()
+            .unwrap_or(Ok(()))
+    }
+}
+
+/// Store wrapper that makes the FIRST `Interrupted` commit lose its revision
+/// CAS to a competing transition (Finding 2): the competing transition wins
+/// the same revision first, so the engine's bounded retry must reload and
+/// re-commit against the new revision. Every later commit passes through.
+#[cfg(test)]
+struct InterruptedCasInjectingStore {
+    inner: Arc<dyn WorkflowStateStore>,
+    storage: Arc<dyn SessionStorage>,
+    injected: std::sync::atomic::AtomicBool,
+}
+
+#[cfg(test)]
+impl InterruptedCasInjectingStore {
+    fn new(inner: Arc<dyn WorkflowStateStore>, storage: Arc<dyn SessionStorage>) -> Self {
+        Self {
+            inner,
+            storage,
+            injected: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+}
+
+#[cfg(test)]
+#[async_trait]
+impl WorkflowStateStore for InterruptedCasInjectingStore {
+    async fn load_run(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<crate::run_state::RunRecord>, EngineError> {
+        self.inner.load_run(session_id).await
+    }
+
+    async fn start_run(
+        &self,
+        session_id: &SessionId,
+        descriptor: &crate::run_state::RunDescriptorV1,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .start_run(session_id, descriptor, checkpoint, next_state)
+            .await
+    }
+
+    async fn admit_schedule_run(
+        &self,
+        schedule_id: &str,
+        session_id: &SessionId,
+        descriptor: &crate::run_state::RunDescriptorV1,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+        core_context_version: u32,
+        expected_core_context_version: u32,
+        admission_gate: Option<&crate::run_state::ScheduleAdmissionGate>,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .admit_schedule_run(
+                schedule_id,
+                session_id,
+                descriptor,
+                checkpoint,
+                next_state,
+                core_context_version,
+                expected_core_context_version,
+                admission_gate,
+            )
+            .await
+    }
+
+    async fn commit_transition(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_status: SessionStatus,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        if next_status == SessionStatus::Interrupted
+            && !self
+                .injected
+                .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            // The competing transition wins the CAS first: a concurrent
+            // transition commits at the SAME revision the Interrupted write
+            // is about to lose.
+            let record = self
+                .inner
+                .load_run(session_id)
+                .await?
+                .expect("run exists at interrupted race gate");
+            let root = self
+                .storage
+                .get(&session_id.0)
+                .await
+                .expect("root session at interrupted race gate")
+                .expect("root exists at interrupted race gate");
+            let mut competing_state = record.state.unwrap_or_default();
+            competing_state.cancel_requested = true;
+            self.inner
+                .commit_transition(
+                    session_id,
+                    record.state_revision,
+                    crate::run_state::RunCheckpoint {
+                        root: &root,
+                        children: &[],
+                    },
+                    record.status.clone(),
+                    &competing_state,
+                )
+                .await
+                .expect("competing transition wins the CAS");
+        }
+        self.inner
+            .commit_transition(
+                session_id,
+                expected_revision,
+                checkpoint,
+                next_status,
+                next_state,
+            )
+            .await
+    }
+
+    async fn settle_cancelled(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .settle_cancelled(session_id, expected_revision, checkpoint, next_state)
+            .await
+    }
+
+    async fn restore_pre_step(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        pre_step: &graph_flow::Session,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .restore_pre_step(session_id, expected_revision, pre_step)
+            .await
+    }
+
+    async fn mark_step_in_flight(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        step_state: &crate::run_state::RunStateV1,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .mark_step_in_flight(session_id, expected_revision, checkpoint, step_state)
+            .await
+    }
+
+    async fn persist_prompt_attempt(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_step: Option<&str>,
+        expected_attempt_id: Option<&str>,
+        attempt: &crate::run_state::PromptAttempt,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .persist_prompt_attempt(
+                session_id,
+                expected_revision,
+                expected_step,
+                expected_attempt_id,
+                attempt,
+            )
+            .await
+    }
+
+    async fn clear_prompt_attempt(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_step: Option<&str>,
+        attempt_id: &str,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
+            .await
+    }
+
+    async fn load_children(
+        &self,
+        parent_session_id: &SessionId,
+    ) -> Result<Vec<crate::run_state::RunRecord>, EngineError> {
+        self.inner.load_children(parent_session_id).await
+    }
+}
+
+/// Store wrapper that injects a Continue winner BETWEEN Cancel's initial
+/// read and its phase-1 fence commit (Finding 3, round 4): the FIRST
+/// `commit_transition` carrying the durable cancel intent (the phase-1
+/// fence) is pre-empted by a competing Continue that consumes the wait and
+/// commits a NEWER root position/context at the SAME revision. Cancel's
+/// fence then loses the CAS, reloads the winner row/root, and re-fences
+/// against the new revision. Every later commit passes through.
+///
+/// This is the deterministic Continue-v-cancel interleaving the round-3
+/// regression did not create: the Continue genuinely wins BEFORE the cancel
+/// fence, so the settlement must reload the authoritative root — the stale
+/// pre-fence root would clobber the winner's position/context.
+#[cfg(test)]
+struct ContinueWinsBeforeCancelFenceStore {
+    inner: Arc<dyn WorkflowStateStore>,
+    storage: Arc<dyn SessionStorage>,
+    injected: std::sync::atomic::AtomicBool,
+}
+
+#[cfg(test)]
+impl ContinueWinsBeforeCancelFenceStore {
+    fn new(inner: Arc<dyn WorkflowStateStore>, storage: Arc<dyn SessionStorage>) -> Self {
+        Self {
+            inner,
+            storage,
+            injected: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Whether the Continue winner was injected (the interleaving actually
+    /// happened — the cancel fence genuinely lost the CAS).
+    fn injected(&self) -> bool {
+        self.injected.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+#[async_trait]
+impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
+    async fn load_run(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<crate::run_state::RunRecord>, EngineError> {
+        self.inner.load_run(session_id).await
+    }
+
+    async fn start_run(
+        &self,
+        session_id: &SessionId,
+        descriptor: &crate::run_state::RunDescriptorV1,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .start_run(session_id, descriptor, checkpoint, next_state)
+            .await
+    }
+
+    async fn admit_schedule_run(
+        &self,
+        schedule_id: &str,
+        session_id: &SessionId,
+        descriptor: &crate::run_state::RunDescriptorV1,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+        core_context_version: u32,
+        expected_core_context_version: u32,
+        admission_gate: Option<&crate::run_state::ScheduleAdmissionGate>,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .admit_schedule_run(
+                schedule_id,
+                session_id,
+                descriptor,
+                checkpoint,
+                next_state,
+                core_context_version,
+                expected_core_context_version,
+                admission_gate,
+            )
+            .await
+    }
+
+    async fn commit_transition(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_status: SessionStatus,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        // The phase-1 cancel fence is the first commit carrying the durable
+        // cancel intent on a non-terminal status. Inject the Continue winner
+        // at the SAME revision BEFORE the fence commits, so the fence loses
+        // the CAS and must reload/re-fence against the winner.
+        if next_state.cancel_requested
+            && next_status != SessionStatus::Interrupted
+            && !self
+                .injected
+                .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            let record = self
+                .inner
+                .load_run(session_id)
+                .await?
+                .expect("run exists at continue-v-cancel gate");
+            let mut winner_root = self
+                .storage
+                .get(&session_id.0)
+                .await
+                .expect("root session at continue-v-cancel gate")
+                .expect("root exists at continue-v-cancel gate");
+            winner_root.current_task_id = "winner-task".to_string();
+            winner_root
+                .context
+                .set("winner.marker", "continue-won")
+                .await;
+            self.inner
+                .commit_transition(
+                    session_id,
+                    record.state_revision,
+                    crate::run_state::RunCheckpoint {
+                        root: &winner_root,
+                        children: &[],
+                    },
+                    SessionStatus::Running,
+                    &crate::run_state::RunStateV1::default(),
+                )
+                .await
+                .expect("Continue wins the CAS before the cancel fence");
+        }
+        self.inner
+            .commit_transition(
+                session_id,
+                expected_revision,
+                checkpoint,
+                next_status,
+                next_state,
+            )
+            .await
+    }
+
+    async fn settle_cancelled(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .settle_cancelled(session_id, expected_revision, checkpoint, next_state)
+            .await
+    }
+
+    async fn restore_pre_step(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        pre_step: &graph_flow::Session,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .restore_pre_step(session_id, expected_revision, pre_step)
+            .await
+    }
+
+    async fn mark_step_in_flight(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        step_state: &crate::run_state::RunStateV1,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .mark_step_in_flight(session_id, expected_revision, checkpoint, step_state)
+            .await
+    }
+
+    async fn persist_prompt_attempt(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_step: Option<&str>,
+        expected_attempt_id: Option<&str>,
+        attempt: &crate::run_state::PromptAttempt,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .persist_prompt_attempt(
+                session_id,
+                expected_revision,
+                expected_step,
+                expected_attempt_id,
+                attempt,
+            )
+            .await
+    }
+
+    async fn clear_prompt_attempt(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_step: Option<&str>,
+        attempt_id: &str,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
+            .await
+    }
+
+    async fn load_children(
+        &self,
+        parent_session_id: &SessionId,
+    ) -> Result<Vec<crate::run_state::RunRecord>, EngineError> {
+        self.inner.load_children(parent_session_id).await
+    }
+}
+
+/// Store wrapper that makes the FIRST child-rollback `settle_cancelled`
+/// lose its revision CAS to a competing transition (P1, fix round 6): the
+/// competing transition advances the child row at the SAME revision BEFORE
+/// the rollback settle commits, so the settle returns `RevisionMismatch`
+/// and the engine's rollback retry must reload the child record and
+/// re-settle against the CURRENT revision. Every later call passes through.
+#[cfg(test)]
+struct ChildSettleCasLossStore {
+    inner: Arc<dyn WorkflowStateStore>,
+    storage: Arc<dyn SessionStorage>,
+    injected: std::sync::atomic::AtomicBool,
+}
+
+#[cfg(test)]
+impl ChildSettleCasLossStore {
+    fn new(inner: Arc<dyn WorkflowStateStore>, storage: Arc<dyn SessionStorage>) -> Self {
+        Self {
+            inner,
+            storage,
+            injected: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Whether the competing transition was injected (the rollback settle
+    /// genuinely lost the CAS).
+    fn injected(&self) -> bool {
+        self.injected.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+#[async_trait]
+impl WorkflowStateStore for ChildSettleCasLossStore {
+    async fn load_run(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<crate::run_state::RunRecord>, EngineError> {
+        self.inner.load_run(session_id).await
+    }
+
+    async fn start_run(
+        &self,
+        session_id: &SessionId,
+        descriptor: &crate::run_state::RunDescriptorV1,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .start_run(session_id, descriptor, checkpoint, next_state)
+            .await
+    }
+
+    async fn admit_schedule_run(
+        &self,
+        schedule_id: &str,
+        session_id: &SessionId,
+        descriptor: &crate::run_state::RunDescriptorV1,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+        core_context_version: u32,
+        expected_core_context_version: u32,
+        admission_gate: Option<&crate::run_state::ScheduleAdmissionGate>,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .admit_schedule_run(
+                schedule_id,
+                session_id,
+                descriptor,
+                checkpoint,
+                next_state,
+                core_context_version,
+                expected_core_context_version,
+                admission_gate,
+            )
+            .await
+    }
+
+    async fn commit_transition(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_status: SessionStatus,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        self.inner
+            .commit_transition(
+                session_id,
+                expected_revision,
+                checkpoint,
+                next_status,
+                next_state,
+            )
+            .await
+    }
+
+    async fn settle_cancelled(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        next_state: &crate::run_state::RunStateV1,
+    ) -> Result<crate::run_state::RunRecord, EngineError> {
+        // The child-rollback settle is the first `settle_cancelled` on the
+        // freshly started child row. Inject a competing transition at the
+        // SAME revision BEFORE the settle commits, so the settle loses the
+        // CAS and the engine's rollback retry must reload and re-settle
+        // against the new revision.
+        if !self
+            .injected
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            let record = self
+                .inner
+                .load_run(session_id)
+                .await?
+                .expect("child exists at rollback settle gate");
+            let mut winner_root = self
+                .storage
+                .get(&session_id.0)
+                .await
+                .expect("child session at rollback settle gate")
+                .expect("child session exists at rollback settle gate");
+            winner_root.current_task_id = "competing-winner".to_string();
+            winner_root
+                .context
+                .set("competing.marker", "advanced")
+                .await;
+            self.inner
+                .commit_transition(
+                    session_id,
+                    record.state_revision,
+                    crate::run_state::RunCheckpoint {
+                        root: &winner_root,
+                        children: &[],
+                    },
+                    SessionStatus::Running,
+                    &crate::run_state::RunStateV1::default(),
+                )
+                .await
+                .expect("competing transition wins the CAS before the child settle");
+        }
+        self.inner
+            .settle_cancelled(session_id, expected_revision, checkpoint, next_state)
+            .await
+    }
+
+    async fn restore_pre_step(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        pre_step: &graph_flow::Session,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .restore_pre_step(session_id, expected_revision, pre_step)
+            .await
+    }
+
+    async fn mark_step_in_flight(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        checkpoint: crate::run_state::RunCheckpoint<'_>,
+        step_state: &crate::run_state::RunStateV1,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .mark_step_in_flight(session_id, expected_revision, checkpoint, step_state)
+            .await
+    }
+
+    async fn persist_prompt_attempt(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_step: Option<&str>,
+        expected_attempt_id: Option<&str>,
+        attempt: &crate::run_state::PromptAttempt,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .persist_prompt_attempt(
+                session_id,
+                expected_revision,
+                expected_step,
+                expected_attempt_id,
+                attempt,
+            )
+            .await
+    }
+
+    async fn clear_prompt_attempt(
+        &self,
+        session_id: &SessionId,
+        expected_revision: u64,
+        expected_step: Option<&str>,
+        attempt_id: &str,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
+            .await
+    }
+
+    async fn load_children(
+        &self,
+        parent_session_id: &SessionId,
+    ) -> Result<Vec<crate::run_state::RunRecord>, EngineError> {
+        self.inner.load_children(parent_session_id).await
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -4344,14 +5040,14 @@ mod tests {
             .state
             .session_cancels
             .write()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entry(session_id.0.clone())
-            .or_insert_with(tokio_util::sync::CancellationToken::new);
+            .or_default();
         let token = engine
             .state
             .session_cancels
             .read()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(&session_id.0)
             .cloned()
             .expect("token registered");
@@ -5215,7 +5911,7 @@ mod tests {
             .state
             .session_cancels
             .read()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let child_token = cancels
             .get(&child_id.0)
             .cloned()
@@ -5260,7 +5956,7 @@ mod tests {
             .state
             .session_cancels
             .read()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         assert!(!cancels.contains_key(&session_id.0), "root token reclaimed");
         assert!(!cancels.contains_key(&child_id.0), "child token reclaimed");
         assert!(
@@ -5368,7 +6064,7 @@ mod tests {
                 .state
                 .session_cancels
                 .read()
-                .unwrap_or_else(|e| e.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             cancels
                 .get(&late_id.0)
                 .cloned()
@@ -5421,7 +6117,7 @@ mod tests {
                 .state
                 .session_cancels
                 .read()
-                .unwrap_or_else(|e| e.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             assert!(
                 !cancels.contains_key(&late_id.0),
                 "late child token reclaimed at the confirmed boundary"
@@ -5562,7 +6258,7 @@ mod tests {
                 .state
                 .session_cancels
                 .read()
-                .unwrap_or_else(|e| e.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             assert_eq!(
                 cancels.len(),
                 1,
@@ -5728,7 +6424,7 @@ mod tests {
                 .state
                 .session_cancels
                 .read()
-                .unwrap_or_else(|e| e.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             assert_eq!(
                 cancels.len(),
                 1,
@@ -5854,7 +6550,7 @@ mod tests {
             .state
             .session_cancels
             .read()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         assert!(
             cancels.contains_key(&grandchild_id.0),
             "grandchild token retained for retry after unconfirmed cleanup"
@@ -5893,7 +6589,7 @@ mod tests {
             .state
             .session_cancels
             .read()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         assert!(
             !cancels.contains_key(&session_id.0),
             "root token reclaimed after confirmed closure"
@@ -6068,7 +6764,7 @@ mod tests {
             .state
             .session_cancels
             .read()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let child_token = cancels
             .get(&child_id.0)
             .cloned()
@@ -6228,7 +6924,7 @@ mod tests {
             .state
             .session_cancels
             .read()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         assert!(
             cancels.contains_key(&grandchild_id.0),
             "grandchild token retained for retry after unconfirmed cleanup"
@@ -6267,7 +6963,7 @@ mod tests {
             .state
             .session_cancels
             .read()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         assert!(
             !cancels.contains_key(&session_id.0),
             "root token reclaimed after confirmed closure"
@@ -6528,680 +7224,5 @@ mod tests {
             .expect("load run")
             .expect("run exists");
         assert_eq!(final_record.status, SessionStatus::Cancelled);
-    }
-}
-
-/// Scripted [`PromptExecutor`] for the A5 cleanup-retry tests: `finalize_run`
-/// pops from a scripted queue of outcomes and records every call's run id.
-#[cfg(test)]
-struct ScriptedFinalizeExecutor {
-    outcomes: std::sync::Mutex<std::collections::VecDeque<Result<(), CapabilityError>>>,
-    calls: std::sync::atomic::AtomicU64,
-    finalized_runs: std::sync::Mutex<Vec<String>>,
-}
-
-#[cfg(test)]
-impl ScriptedFinalizeExecutor {
-    fn new(outcomes: Vec<Result<(), CapabilityError>>) -> Self {
-        Self {
-            outcomes: std::sync::Mutex::new(outcomes.into()),
-            calls: std::sync::atomic::AtomicU64::new(0),
-            finalized_runs: std::sync::Mutex::new(Vec::new()),
-        }
-    }
-
-    fn calls(&self) -> u64 {
-        self.calls.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    /// Run ids passed to `finalize_run`, in call order.
-    fn finalized_runs(&self) -> Vec<String> {
-        self.finalized_runs.lock().expect("finalized_runs").clone()
-    }
-}
-
-#[cfg(test)]
-#[async_trait]
-impl crate::capability::PromptExecutor for ScriptedFinalizeExecutor {
-    async fn execute(
-        &self,
-        _request: crate::capability::PromptRequest,
-    ) -> Result<crate::capability::PromptResult, CapabilityError> {
-        unreachable!("not used by cancel-path tests")
-    }
-
-    async fn finalize_run(&self, run_id: &str) -> Result<(), CapabilityError> {
-        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.finalized_runs
-            .lock()
-            .expect("finalized_runs")
-            .push(run_id.to_string());
-        self.outcomes
-            .lock()
-            .expect("outcomes")
-            .pop_front()
-            .unwrap_or(Ok(()))
-    }
-}
-
-/// Store wrapper that makes the FIRST `Interrupted` commit lose its revision
-/// CAS to a competing transition (Finding 2): the competing transition wins
-/// the same revision first, so the engine's bounded retry must reload and
-/// re-commit against the new revision. Every later commit passes through.
-#[cfg(test)]
-struct InterruptedCasInjectingStore {
-    inner: Arc<dyn WorkflowStateStore>,
-    storage: Arc<dyn SessionStorage>,
-    injected: std::sync::atomic::AtomicBool,
-}
-
-#[cfg(test)]
-impl InterruptedCasInjectingStore {
-    fn new(inner: Arc<dyn WorkflowStateStore>, storage: Arc<dyn SessionStorage>) -> Self {
-        Self {
-            inner,
-            storage,
-            injected: std::sync::atomic::AtomicBool::new(false),
-        }
-    }
-}
-
-#[cfg(test)]
-#[async_trait]
-impl WorkflowStateStore for InterruptedCasInjectingStore {
-    async fn load_run(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<crate::run_state::RunRecord>, EngineError> {
-        self.inner.load_run(session_id).await
-    }
-
-    async fn start_run(
-        &self,
-        session_id: &SessionId,
-        descriptor: &crate::run_state::RunDescriptorV1,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
-        self.inner
-            .start_run(session_id, descriptor, checkpoint, next_state)
-            .await
-    }
-
-    async fn admit_schedule_run(
-        &self,
-        schedule_id: &str,
-        session_id: &SessionId,
-        descriptor: &crate::run_state::RunDescriptorV1,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
-        core_context_version: u32,
-        expected_core_context_version: u32,
-        admission_gate: Option<&crate::run_state::ScheduleAdmissionGate>,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
-        self.inner
-            .admit_schedule_run(
-                schedule_id,
-                session_id,
-                descriptor,
-                checkpoint,
-                next_state,
-                core_context_version,
-                expected_core_context_version,
-                admission_gate,
-            )
-            .await
-    }
-
-    async fn commit_transition(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_status: SessionStatus,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
-        if next_status == SessionStatus::Interrupted
-            && !self
-                .injected
-                .swap(true, std::sync::atomic::Ordering::SeqCst)
-        {
-            // The competing transition wins the CAS first: a concurrent
-            // transition commits at the SAME revision the Interrupted write
-            // is about to lose.
-            let record = self
-                .inner
-                .load_run(session_id)
-                .await?
-                .expect("run exists at interrupted race gate");
-            let root = self
-                .storage
-                .get(&session_id.0)
-                .await
-                .expect("root session at interrupted race gate")
-                .expect("root exists at interrupted race gate");
-            let mut competing_state = record.state.unwrap_or_default();
-            competing_state.cancel_requested = true;
-            self.inner
-                .commit_transition(
-                    session_id,
-                    record.state_revision,
-                    crate::run_state::RunCheckpoint {
-                        root: &root,
-                        children: &[],
-                    },
-                    record.status.clone(),
-                    &competing_state,
-                )
-                .await
-                .expect("competing transition wins the CAS");
-        }
-        self.inner
-            .commit_transition(
-                session_id,
-                expected_revision,
-                checkpoint,
-                next_status,
-                next_state,
-            )
-            .await
-    }
-
-    async fn settle_cancelled(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
-        self.inner
-            .settle_cancelled(session_id, expected_revision, checkpoint, next_state)
-            .await
-    }
-
-    async fn restore_pre_step(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        pre_step: &graph_flow::Session,
-    ) -> Result<(), EngineError> {
-        self.inner
-            .restore_pre_step(session_id, expected_revision, pre_step)
-            .await
-    }
-
-    async fn mark_step_in_flight(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        step_state: &crate::run_state::RunStateV1,
-    ) -> Result<(), EngineError> {
-        self.inner
-            .mark_step_in_flight(session_id, expected_revision, checkpoint, step_state)
-            .await
-    }
-
-    async fn persist_prompt_attempt(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        expected_step: Option<&str>,
-        expected_attempt_id: Option<&str>,
-        attempt: &crate::run_state::PromptAttempt,
-    ) -> Result<(), EngineError> {
-        self.inner
-            .persist_prompt_attempt(
-                session_id,
-                expected_revision,
-                expected_step,
-                expected_attempt_id,
-                attempt,
-            )
-            .await
-    }
-
-    async fn clear_prompt_attempt(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        expected_step: Option<&str>,
-        attempt_id: &str,
-    ) -> Result<(), EngineError> {
-        self.inner
-            .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
-            .await
-    }
-
-    async fn load_children(
-        &self,
-        parent_session_id: &SessionId,
-    ) -> Result<Vec<crate::run_state::RunRecord>, EngineError> {
-        self.inner.load_children(parent_session_id).await
-    }
-}
-
-/// Store wrapper that injects a Continue winner BETWEEN Cancel's initial
-/// read and its phase-1 fence commit (Finding 3, round 4): the FIRST
-/// `commit_transition` carrying the durable cancel intent (the phase-1
-/// fence) is pre-empted by a competing Continue that consumes the wait and
-/// commits a NEWER root position/context at the SAME revision. Cancel's
-/// fence then loses the CAS, reloads the winner row/root, and re-fences
-/// against the new revision. Every later commit passes through.
-///
-/// This is the deterministic Continue-v-cancel interleaving the round-3
-/// regression did not create: the Continue genuinely wins BEFORE the cancel
-/// fence, so the settlement must reload the authoritative root — the stale
-/// pre-fence root would clobber the winner's position/context.
-#[cfg(test)]
-struct ContinueWinsBeforeCancelFenceStore {
-    inner: Arc<dyn WorkflowStateStore>,
-    storage: Arc<dyn SessionStorage>,
-    injected: std::sync::atomic::AtomicBool,
-}
-
-#[cfg(test)]
-impl ContinueWinsBeforeCancelFenceStore {
-    fn new(inner: Arc<dyn WorkflowStateStore>, storage: Arc<dyn SessionStorage>) -> Self {
-        Self {
-            inner,
-            storage,
-            injected: std::sync::atomic::AtomicBool::new(false),
-        }
-    }
-
-    /// Whether the Continue winner was injected (the interleaving actually
-    /// happened — the cancel fence genuinely lost the CAS).
-    fn injected(&self) -> bool {
-        self.injected.load(std::sync::atomic::Ordering::SeqCst)
-    }
-}
-
-#[cfg(test)]
-#[async_trait]
-impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
-    async fn load_run(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<crate::run_state::RunRecord>, EngineError> {
-        self.inner.load_run(session_id).await
-    }
-
-    async fn start_run(
-        &self,
-        session_id: &SessionId,
-        descriptor: &crate::run_state::RunDescriptorV1,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
-        self.inner
-            .start_run(session_id, descriptor, checkpoint, next_state)
-            .await
-    }
-
-    async fn admit_schedule_run(
-        &self,
-        schedule_id: &str,
-        session_id: &SessionId,
-        descriptor: &crate::run_state::RunDescriptorV1,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
-        core_context_version: u32,
-        expected_core_context_version: u32,
-        admission_gate: Option<&crate::run_state::ScheduleAdmissionGate>,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
-        self.inner
-            .admit_schedule_run(
-                schedule_id,
-                session_id,
-                descriptor,
-                checkpoint,
-                next_state,
-                core_context_version,
-                expected_core_context_version,
-                admission_gate,
-            )
-            .await
-    }
-
-    async fn commit_transition(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_status: SessionStatus,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
-        // The phase-1 cancel fence is the first commit carrying the durable
-        // cancel intent on a non-terminal status. Inject the Continue winner
-        // at the SAME revision BEFORE the fence commits, so the fence loses
-        // the CAS and must reload/re-fence against the winner.
-        if next_state.cancel_requested
-            && next_status != SessionStatus::Interrupted
-            && !self
-                .injected
-                .swap(true, std::sync::atomic::Ordering::SeqCst)
-        {
-            let record = self
-                .inner
-                .load_run(session_id)
-                .await?
-                .expect("run exists at continue-v-cancel gate");
-            let mut winner_root = self
-                .storage
-                .get(&session_id.0)
-                .await
-                .expect("root session at continue-v-cancel gate")
-                .expect("root exists at continue-v-cancel gate");
-            winner_root.current_task_id = "winner-task".to_string();
-            winner_root
-                .context
-                .set("winner.marker", "continue-won")
-                .await;
-            self.inner
-                .commit_transition(
-                    session_id,
-                    record.state_revision,
-                    crate::run_state::RunCheckpoint {
-                        root: &winner_root,
-                        children: &[],
-                    },
-                    SessionStatus::Running,
-                    &crate::run_state::RunStateV1::default(),
-                )
-                .await
-                .expect("Continue wins the CAS before the cancel fence");
-        }
-        self.inner
-            .commit_transition(
-                session_id,
-                expected_revision,
-                checkpoint,
-                next_status,
-                next_state,
-            )
-            .await
-    }
-
-    async fn settle_cancelled(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
-        self.inner
-            .settle_cancelled(session_id, expected_revision, checkpoint, next_state)
-            .await
-    }
-
-    async fn restore_pre_step(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        pre_step: &graph_flow::Session,
-    ) -> Result<(), EngineError> {
-        self.inner
-            .restore_pre_step(session_id, expected_revision, pre_step)
-            .await
-    }
-
-    async fn mark_step_in_flight(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        step_state: &crate::run_state::RunStateV1,
-    ) -> Result<(), EngineError> {
-        self.inner
-            .mark_step_in_flight(session_id, expected_revision, checkpoint, step_state)
-            .await
-    }
-
-    async fn persist_prompt_attempt(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        expected_step: Option<&str>,
-        expected_attempt_id: Option<&str>,
-        attempt: &crate::run_state::PromptAttempt,
-    ) -> Result<(), EngineError> {
-        self.inner
-            .persist_prompt_attempt(
-                session_id,
-                expected_revision,
-                expected_step,
-                expected_attempt_id,
-                attempt,
-            )
-            .await
-    }
-
-    async fn clear_prompt_attempt(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        expected_step: Option<&str>,
-        attempt_id: &str,
-    ) -> Result<(), EngineError> {
-        self.inner
-            .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
-            .await
-    }
-
-    async fn load_children(
-        &self,
-        parent_session_id: &SessionId,
-    ) -> Result<Vec<crate::run_state::RunRecord>, EngineError> {
-        self.inner.load_children(parent_session_id).await
-    }
-}
-
-/// Store wrapper that makes the FIRST child-rollback `settle_cancelled`
-/// lose its revision CAS to a competing transition (P1, fix round 6): the
-/// competing transition advances the child row at the SAME revision BEFORE
-/// the rollback settle commits, so the settle returns `RevisionMismatch`
-/// and the engine's rollback retry must reload the child record and
-/// re-settle against the CURRENT revision. Every later call passes through.
-#[cfg(test)]
-struct ChildSettleCasLossStore {
-    inner: Arc<dyn WorkflowStateStore>,
-    storage: Arc<dyn SessionStorage>,
-    injected: std::sync::atomic::AtomicBool,
-}
-
-#[cfg(test)]
-impl ChildSettleCasLossStore {
-    fn new(inner: Arc<dyn WorkflowStateStore>, storage: Arc<dyn SessionStorage>) -> Self {
-        Self {
-            inner,
-            storage,
-            injected: std::sync::atomic::AtomicBool::new(false),
-        }
-    }
-
-    /// Whether the competing transition was injected (the rollback settle
-    /// genuinely lost the CAS).
-    fn injected(&self) -> bool {
-        self.injected.load(std::sync::atomic::Ordering::SeqCst)
-    }
-}
-
-#[cfg(test)]
-#[async_trait]
-impl WorkflowStateStore for ChildSettleCasLossStore {
-    async fn load_run(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<crate::run_state::RunRecord>, EngineError> {
-        self.inner.load_run(session_id).await
-    }
-
-    async fn start_run(
-        &self,
-        session_id: &SessionId,
-        descriptor: &crate::run_state::RunDescriptorV1,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
-        self.inner
-            .start_run(session_id, descriptor, checkpoint, next_state)
-            .await
-    }
-
-    async fn admit_schedule_run(
-        &self,
-        schedule_id: &str,
-        session_id: &SessionId,
-        descriptor: &crate::run_state::RunDescriptorV1,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
-        core_context_version: u32,
-        expected_core_context_version: u32,
-        admission_gate: Option<&crate::run_state::ScheduleAdmissionGate>,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
-        self.inner
-            .admit_schedule_run(
-                schedule_id,
-                session_id,
-                descriptor,
-                checkpoint,
-                next_state,
-                core_context_version,
-                expected_core_context_version,
-                admission_gate,
-            )
-            .await
-    }
-
-    async fn commit_transition(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_status: SessionStatus,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
-        self.inner
-            .commit_transition(
-                session_id,
-                expected_revision,
-                checkpoint,
-                next_status,
-                next_state,
-            )
-            .await
-    }
-
-    async fn settle_cancelled(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        next_state: &crate::run_state::RunStateV1,
-    ) -> Result<crate::run_state::RunRecord, EngineError> {
-        // The child-rollback settle is the first `settle_cancelled` on the
-        // freshly started child row. Inject a competing transition at the
-        // SAME revision BEFORE the settle commits, so the settle loses the
-        // CAS and the engine's rollback retry must reload and re-settle
-        // against the new revision.
-        if !self
-            .injected
-            .swap(true, std::sync::atomic::Ordering::SeqCst)
-        {
-            let record = self
-                .inner
-                .load_run(session_id)
-                .await?
-                .expect("child exists at rollback settle gate");
-            let mut winner_root = self
-                .storage
-                .get(&session_id.0)
-                .await
-                .expect("child session at rollback settle gate")
-                .expect("child session exists at rollback settle gate");
-            winner_root.current_task_id = "competing-winner".to_string();
-            winner_root
-                .context
-                .set("competing.marker", "advanced")
-                .await;
-            self.inner
-                .commit_transition(
-                    session_id,
-                    record.state_revision,
-                    crate::run_state::RunCheckpoint {
-                        root: &winner_root,
-                        children: &[],
-                    },
-                    SessionStatus::Running,
-                    &crate::run_state::RunStateV1::default(),
-                )
-                .await
-                .expect("competing transition wins the CAS before the child settle");
-        }
-        self.inner
-            .settle_cancelled(session_id, expected_revision, checkpoint, next_state)
-            .await
-    }
-
-    async fn restore_pre_step(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        pre_step: &graph_flow::Session,
-    ) -> Result<(), EngineError> {
-        self.inner
-            .restore_pre_step(session_id, expected_revision, pre_step)
-            .await
-    }
-
-    async fn mark_step_in_flight(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        checkpoint: crate::run_state::RunCheckpoint<'_>,
-        step_state: &crate::run_state::RunStateV1,
-    ) -> Result<(), EngineError> {
-        self.inner
-            .mark_step_in_flight(session_id, expected_revision, checkpoint, step_state)
-            .await
-    }
-
-    async fn persist_prompt_attempt(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        expected_step: Option<&str>,
-        expected_attempt_id: Option<&str>,
-        attempt: &crate::run_state::PromptAttempt,
-    ) -> Result<(), EngineError> {
-        self.inner
-            .persist_prompt_attempt(
-                session_id,
-                expected_revision,
-                expected_step,
-                expected_attempt_id,
-                attempt,
-            )
-            .await
-    }
-
-    async fn clear_prompt_attempt(
-        &self,
-        session_id: &SessionId,
-        expected_revision: u64,
-        expected_step: Option<&str>,
-        attempt_id: &str,
-    ) -> Result<(), EngineError> {
-        self.inner
-            .clear_prompt_attempt(session_id, expected_revision, expected_step, attempt_id)
-            .await
-    }
-
-    async fn load_children(
-        &self,
-        parent_session_id: &SessionId,
-    ) -> Result<Vec<crate::run_state::RunRecord>, EngineError> {
-        self.inner.load_children(parent_session_id).await
     }
 }

@@ -48,7 +48,6 @@ use nexus_contracts::PaginationInfo;
 use nexus_orchestration::preset_gates::{
     GateEvalError, PreviousPresetLookup, PreviousPresetResult,
 };
-use nexus_orchestration::run_state::WorkflowStateStore;
 use nexus_orchestration::schedule::work_schedule::{validate_cron_expr, validate_tz, WorkSchedule};
 use sqlx::Row;
 use std::sync::Arc;
@@ -515,7 +514,7 @@ pub async fn add_schedule(
                         .bind(&body.label)
                         .bind(now_ts)
                         .bind(now_ts)
-                        .bind(&work_id)
+                        .bind(work_id)
                         .bind(scheduled_at_ts)
                         .bind(execution_policy)
                         .bind(descriptor.as_deref())
@@ -778,7 +777,7 @@ fn insert_concurrency_and_schedule(
 
 /// Build the frozen execution descriptor for a new schedule (I-5): the
 /// serialized [`nexus_orchestration::run_state::RunDescriptorV1`] carrying
-/// the schedule's work_id, structured input, and agent bindings. Persisted
+/// the schedule's `work_id`, structured input, and agent bindings. Persisted
 /// with the schedule row (C-2) so admission can freeze the complete
 /// payload into the initial checkpoint.
 ///
@@ -880,7 +879,7 @@ fn build_execution_descriptor(
 /// atomic insertion, invoke the same coordinator/starter for immediately
 /// eligible new public rows. Returns the actual persisted admission status
 /// projection — `"running"` when the coordinator admitted and drove the
-/// run, `"pending"` when the row is not yet eligible (scheduled_at in the
+/// run, `"pending"` when the row is not yet eligible (`scheduled_at` in the
 /// future, dependency/concurrency blocked).
 async fn admit_new_schedule(
     state: &WorkspaceState,
@@ -1429,14 +1428,14 @@ pub async fn signal_schedule(
                 session_id = %session_id.0,
                 "explicit schedule start admitted driven run"
             );
-            return Ok((
+            Ok((
                 StatusCode::OK,
                 Json(SignalScheduleResponse {
                     schedule_id,
                     status: "running".to_string(),
                     current_wait_id: None,
                 }),
-            ));
+            ))
         }
         "pause" => {
             // R1+R4: Use supervisor method for consistent DB + cache update
@@ -1459,14 +1458,14 @@ pub async fn signal_schedule(
                 )));
             }
 
-            return Ok((
+            Ok((
                 StatusCode::OK,
                 Json(SignalScheduleResponse {
                     schedule_id,
                     status: "paused".to_string(),
                     current_wait_id: None,
                 }),
-            ));
+            ))
         }
         "resume" => {
             // R3+R7: Smart resume — direct to Running if admitted, else Pending
@@ -1491,14 +1490,14 @@ pub async fn signal_schedule(
                 }
             })?;
 
-            return Ok((
+            Ok((
                 StatusCode::OK,
                 Json(SignalScheduleResponse {
                     schedule_id,
                     status: new_status,
                     current_wait_id: None,
                 }),
-            ));
+            ))
         }
         "cancel" => match current_status_str.as_str() {
             "pending" | "running" | "paused" => {
@@ -1663,20 +1662,18 @@ pub async fn signal_schedule(
                     });
                 }
 
-                return Ok((
+                Ok((
                     StatusCode::OK,
                     Json(SignalScheduleResponse {
                         schedule_id,
                         status: terminal_status,
                         current_wait_id: None,
                     }),
-                ));
+                ))
             }
-            _ => {
-                return Err(NexusApiError::Conflict(format!(
-                    "cannot cancel schedule {schedule_id}: current status is {current_status_str}"
-                )));
-            }
+            _ => Err(NexusApiError::Conflict(format!(
+                "cannot cancel schedule {schedule_id}: current status is {current_status_str}"
+            ))),
         },
         "advance" => {
             // Advance is a pass-through signal for the session engine;
@@ -1733,20 +1730,18 @@ pub async fn signal_schedule(
                             }),
                         ));
                     }
-                    return Ok((
+                    Ok((
                         StatusCode::OK,
                         Json(SignalScheduleResponse {
                             schedule_id,
                             status: "running".to_string(),
                             current_wait_id: None,
                         }),
-                    ));
+                    ))
                 }
-                _ => {
-                    return Err(NexusApiError::Conflict(format!(
-                        "cannot advance schedule {schedule_id}: current status is {current_status_str}"
-                    )));
-                }
+                _ => Err(NexusApiError::Conflict(format!(
+                    "cannot advance schedule {schedule_id}: current status is {current_status_str}"
+                ))),
             }
         }
         "continue" => {
@@ -1844,25 +1839,23 @@ pub async fn signal_schedule(
                         message: other.to_string(),
                     },
                 })?;
-            return Ok((
+            Ok((
                 StatusCode::OK,
                 Json(SignalScheduleResponse {
                     schedule_id,
                     status: result.status,
                     current_wait_id: result.current_wait_id,
                 }),
-            ));
+            ))
         }
-        _ => {
-            return Err(NexusApiError::BadRequest {
-                code: "unknown_signal".into(),
-                message: format!(
-                    "unknown signal '{}'; expected start|pause|resume|cancel|advance|continue",
-                    body.signal
-                ),
-            });
-        }
-    };
+        _ => Err(NexusApiError::BadRequest {
+            code: "unknown_signal".into(),
+            message: format!(
+                "unknown signal '{}'; expected start|pause|resume|cancel|advance|continue",
+                body.signal
+            ),
+        }),
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -53,7 +53,9 @@ const FIXTURE: &str = concat!(
 static PROCESS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-    PROCESS_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    PROCESS_ENV_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 struct TestWorkspace {
@@ -71,7 +73,7 @@ fn setup_workspace() -> TestWorkspace {
     let tmp = TempDir::new().expect("temp dir");
     let workspace_root = tmp.path().join("workspace");
     let creator_ws = workspace_root.join("creator-a");
-    std::fs::create_dir_all(&creator_ws.join("sub")).expect("creator sub dir");
+    std::fs::create_dir_all(creator_ws.join("sub")).expect("creator sub dir");
     let config_path = tmp.path().join("config.toml");
     let fixture_log = tmp.path().join("fixture.log");
     let db_file = tempfile::NamedTempFile::new().expect("db temp file");
@@ -101,7 +103,7 @@ fn acp_provider_config(id: &str, fixture_log: &Path) -> ProviderConfig {
     }
 }
 
-fn timeouts() -> TimeoutConfig {
+const fn timeouts() -> TimeoutConfig {
     TimeoutConfig {
         launch_ms: 10_000,
         initialize_ms: 10_000,
@@ -156,7 +158,7 @@ fn read_fixture_log(path: &Path) -> Vec<serde_json::Value> {
 }
 
 /// Build the full production-shaped stack: real Host + real SQLite workflow
-/// store + HostPromptExecutor + capability registry with the executor.
+/// store + `HostPromptExecutor` + capability registry with the executor.
 async fn build_stack(
     ws: &TestWorkspace,
     provider_cfg: ProviderConfig,
@@ -1217,7 +1219,7 @@ struct EndTask;
 
 #[async_trait::async_trait]
 impl Task for EndTask {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "end_task"
     }
 

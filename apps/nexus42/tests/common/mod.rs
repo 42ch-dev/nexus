@@ -21,8 +21,6 @@ use std::process::Output;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
-use nexus_home_layout;
-
 pub mod rn_act4;
 
 /// A live in-process daemon + hermetic HOME pair.

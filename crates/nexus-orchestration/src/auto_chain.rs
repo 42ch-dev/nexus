@@ -1370,19 +1370,6 @@ pub async fn seed_core_context_version(
     Ok(())
 }
 
-/// Enqueue a new auto-chain schedule and update the Work checkpoint.
-///
-/// This is the single shared path for:
-/// 1. Supervisor `on_schedule_terminal` → `enqueue_auto_chain_step`
-/// 2. Boot `resume_auto_chain_work`
-///
-/// It owns: (a) schedule ID generation (`ACH{timestamp}`), (b) pending schedule
-/// INSERT into `creator_schedules`, (c) `set_driver` call on the Work.
-///
-/// # Errors
-///
-/// Returns `AutoChainError::InvalidState` if no schedule mapping exists for the
-/// given stage. Returns `AutoChainError::Database` if any DB operation fails.
 fn enqueue_descriptor_json(
     creator_id: &str,
     work_id: &str,
@@ -1425,6 +1412,26 @@ fn enqueue_descriptor_json(
         .map_err(|e| AutoChainError::InvalidState(format!("descriptor serialization failed: {e}")))
 }
 
+/// Enqueue a new auto-chain schedule and update the Work checkpoint.
+///
+/// This is the single shared path for:
+/// 1. Supervisor `on_schedule_terminal` → `enqueue_auto_chain_step`
+/// 2. Boot `resume_auto_chain_work`
+///
+/// It owns: (a) schedule ID generation (`ACH{timestamp}`), (b) pending schedule
+/// INSERT into `creator_schedules`, (c) `set_driver` call on the Work.
+///
+/// # Errors
+///
+/// Returns `AutoChainError::InvalidState` if no schedule mapping exists for the
+/// given stage. Returns `AutoChainError::Database` if any DB operation fails.
+///
+/// # Panics
+///
+/// Panics if the transaction is committed on a source-run conflict where
+/// `source_run_id` unexpectedly becomes `None` (the conflict arm is guarded by
+/// `source_run_id.is_some()`).
+#[allow(clippy::too_many_arguments, clippy::implicit_hasher)] // one coherent enqueue path; DefaultHasher bindings are fine at this boundary
 pub async fn enqueue_auto_chain_schedule(
     pool: &SqlitePool,
     creator_id: &str,
@@ -1442,7 +1449,7 @@ pub async fn enqueue_auto_chain_schedule(
     // commit (it is a separate resource, not part of the schedule row).
     let mut tx = nexus_local_db::begin_immediate(pool)
         .await
-        .map_err(|e| AutoChainError::Database(nexus_local_db::LocalDbError::from(e)))?;
+        .map_err(AutoChainError::Database)?;
 
     match enqueue_auto_chain_schedule_in_tx(
         &mut tx,
@@ -1487,8 +1494,9 @@ pub async fn enqueue_auto_chain_schedule(
             .fetch_optional(pool)
             .await
             .map_err(nexus_local_db::LocalDbError::from)?;
-            match existing {
-                Some(schedule_id) => {
+            existing.map_or_else(
+                || Err(e),
+                |schedule_id| {
                     tracing::info!(
                         work_id = %work_id,
                         schedule_id = %schedule_id,
@@ -1496,9 +1504,8 @@ pub async fn enqueue_auto_chain_schedule(
                         "auto-chain: duplicate terminal callback loaded existing child"
                     );
                     Ok(schedule_id)
-                }
-                None => Err(e),
-            }
+                },
+            )
         }
         Err(e) => Err(e),
     }
@@ -1578,6 +1585,7 @@ async fn acquire_auto_chain_runtime_lock(
 /// Returns [`AutoChainError::Database`] if any DB operation fails. A UNIQUE
 /// violation on `source_run_id` is surfaced to the caller, which loads the
 /// already-created child (never mints a second schedule).
+#[allow(clippy::too_many_arguments, clippy::implicit_hasher)] // mirrors enqueue_auto_chain_schedule; DefaultHasher bindings are fine at this boundary
 pub async fn enqueue_auto_chain_schedule_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     pool: &SqlitePool,
@@ -1769,6 +1777,7 @@ fn preset_version_for_id(preset_id: &str) -> i64 {
 /// # Errors
 ///
 /// Returns `AutoChainError::Database` if the schedule INSERT fails.
+#[allow(clippy::implicit_hasher)] // DefaultHasher bindings fine at enqueue boundary
 pub async fn enqueue_review_master_schedule(
     pool: &SqlitePool,
     creator_id: &str,
@@ -1830,7 +1839,7 @@ pub async fn enqueue_review_master_schedule(
     // is durable. Insert + seed commit in ONE transaction.
     let mut tx = nexus_local_db::begin_immediate(pool)
         .await
-        .map_err(|e| AutoChainError::Database(nexus_local_db::LocalDbError::from(e)))?;
+        .map_err(AutoChainError::Database)?;
     sqlx::query(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
@@ -1886,6 +1895,7 @@ pub async fn enqueue_review_master_schedule(
 /// # Errors
 ///
 /// Returns `AutoChainError::Database` if the schedule INSERT fails.
+#[allow(clippy::implicit_hasher)] // DefaultHasher bindings fine at enqueue boundary
 pub async fn enqueue_cron_schedule(
     pool: &SqlitePool,
     creator_id: &str,
@@ -1947,7 +1957,7 @@ pub async fn enqueue_cron_schedule(
     // is durable. Insert + seed commit in ONE transaction.
     let mut tx = nexus_local_db::begin_immediate(pool)
         .await
-        .map_err(|e| AutoChainError::Database(nexus_local_db::LocalDbError::from(e)))?;
+        .map_err(AutoChainError::Database)?;
     sqlx::query(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,

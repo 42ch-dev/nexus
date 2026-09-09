@@ -321,7 +321,9 @@ mod tests {
             >,
         > = std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
         {
-            let mut guard = map.write().unwrap_or_else(|e| e.into_inner());
+            let mut guard = map
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             for id in ids {
                 guard.insert(id.to_string(), tokio_util::sync::CancellationToken::new());
             }
@@ -347,7 +349,7 @@ mod tests {
             &self,
             request: PromptRequest,
         ) -> Result<crate::capability::PromptResult, CapabilityError> {
-            *self.captured_run_id.lock().expect("capture lock") = request.run_id.clone();
+            *self.captured_run_id.lock().expect("capture lock") = request.run_id;
             Ok(crate::capability::PromptResult {
                 full_text: "A concise summary of the content.".to_string(),
                 host_session_id: "host-sess".to_string(),

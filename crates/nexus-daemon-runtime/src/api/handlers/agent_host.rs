@@ -340,8 +340,7 @@ fn session_cwd_path(req: &CreateSessionRequest, state: &WorkspaceState) -> std::
 fn verified_workspace_root(state: &WorkspaceState) -> std::path::PathBuf {
     state
         .workspace_path()
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| state.nexus_home().clone())
+        .map_or_else(|| state.nexus_home().clone(), std::path::PathBuf::from)
 }
 
 /// Build the Host create request with verified owner metadata.

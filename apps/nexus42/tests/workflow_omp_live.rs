@@ -85,7 +85,7 @@ impl IsolatedQa {
             std::fs::create_dir_all(dir).expect("create QA_ROOT subtree");
         }
 
-        IsolatedQa {
+        Self {
             _root: root_dir,
             qa_root,
             qa_home,
@@ -101,7 +101,7 @@ impl IsolatedQa {
     }
 
     /// Verify every resolved DB/config/workspace/transport path starts inside
-    /// QA_ROOT before any work begins (A6 hard requirement).
+    /// `QA_ROOT` before any work begins (A6 hard requirement).
     fn assert_paths_inside_qa_root(&self) {
         for (label, p) in [
             ("NEXUS_HOME", self.nexus_home.as_path()),
@@ -140,8 +140,8 @@ impl IsolatedQa {
         );
     }
 
-    /// Env every Nexus process inherits (HOME + XDG under QA_HOME). The
-    /// daemon's own provider keys (e.g. OLLAMA_API_KEY / DEEPSEEK_API_KEY)
+    /// Env every Nexus process inherits (HOME + XDG under `QA_HOME`). The
+    /// daemon's own provider keys (e.g. `OLLAMA_API_KEY` / `DEEPSEEK_API_KEY`)
     /// stay in the ambient env so the omp child inherits them — never copied
     /// into a config file.
     fn nexus_env(&self) -> Vec<(String, String)> {
@@ -166,7 +166,7 @@ impl IsolatedQa {
         ]
     }
 
-    /// `$NEXUS_HOME/config.toml` pointing daemon_url at the isolated port.
+    /// `$NEXUS_HOME/config.toml` pointing `daemon_url` at the isolated port.
     fn write_nexus_config(&self) {
         let content = format!(
             "active_creator_id = \"{}\"\n\
@@ -188,9 +188,9 @@ impl IsolatedQa {
     ///
     /// argv is adapted from the A6 shorthand: `--no-tools` (instead of
     /// `--tools=read,glob`) forces the one-step live run to answer the single
-    /// prompt directly and end_turn, rather than enter omp's own agentic
+    /// prompt directly and `end_turn`, rather than enter omp's own agentic
     /// read/glob tool loop (which produced non-EndTurn stop and failed the
-    /// drive in the first live run). A6 explicitly allows adapting ProviderConfig
+    /// drive in the first live run). A6 explicitly allows adapting `ProviderConfig`
     /// argv and recording accepted args.
     ///
     /// NOTE: `nexus_agent_host::config::load_config(home)` is called from

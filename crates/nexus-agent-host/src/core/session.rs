@@ -653,7 +653,7 @@ mod tests {
         assert_eq!(registry.get(&id).unwrap().state, SessionState::Starting);
     }
 
-    /// A session retained as ErrorRecoverable after unconfirmed cleanup must
+    /// A session retained as `ErrorRecoverable` after unconfirmed cleanup must
     /// be able to complete a later ownership-safe cleanup retry through
     /// Stopping → Stopped and be removed (A5 / L2 Issue 3).
     #[test]

@@ -305,6 +305,7 @@ pub trait WorkflowStateStore: Send + Sync {
     /// # Errors
     /// Returns [`EngineError`] on storage failure, policy refusal, or when
     /// the schedule is not in an admissible state.
+    #[allow(clippy::too_many_arguments)] // atomic claim payload; grouping into a struct would leak the CAS-fence coupling
     async fn admit_schedule_run(
         &self,
         schedule_id: &str,

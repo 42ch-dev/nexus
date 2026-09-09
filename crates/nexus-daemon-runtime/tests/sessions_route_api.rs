@@ -26,7 +26,7 @@ struct EngineCtx {
 
 async fn test_server_with_engine() -> EngineCtx {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
-    let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let registry = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
@@ -185,7 +185,7 @@ async fn sessions_without_active_creator_returns_409_not_404() {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     std::fs::write(nexus_home.join("config.toml"), "").expect("clear active creator config");
 
-    let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let registry = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
     let engine = Arc::new(GraphFlowEngine::new_with_storage(

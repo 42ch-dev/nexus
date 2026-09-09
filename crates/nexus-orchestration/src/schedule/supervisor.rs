@@ -23,8 +23,10 @@ use super::admission::{admit, CompletedSet, RunningSet};
 use crate::run_state::WorkflowStateStore;
 
 /// `creator_schedules.execution_policy` value for a never-started legacy row
-/// (the migration default — no owned session, never started by boot/tick/cron
-/// until an explicit public `schedule start` opts it in).
+/// (the migration default).
+///
+/// No owned session, never started by boot/tick/cron until an explicit public
+/// `schedule start` opts it in.
 pub const EXECUTION_POLICY_LEGACY_INERT: &str = "legacy_inert";
 /// `creator_schedules.execution_policy` value for a new admission that IS
 /// driven by the daemon coordinator (`WorkflowRunCoordinator::admit_schedule`).
@@ -406,37 +408,34 @@ impl ScheduleSupervisor {
             let creator_id = candidate.creator_id.clone();
             let sid = candidate.id.0.clone();
 
-            match &schedule_starter {
-                Some(starter) => {
-                    match starter.start(&sid).await {
-                        Ok(session_id) => {
-                            tracing::debug!(
-                                schedule_id = %sid,
-                                session_id = %session_id.0,
-                                "tick: admitted driven_v1 schedule via daemon starter"
-                            );
-                            started.push((creator_id.clone(), sid.clone()));
-                        }
-                        Err(e) => {
-                            // A failed admission never marks the row Running
-                            // (no session was created); it stays pending for a
-                            // later tick / explicit start.
-                            tracing::warn!(
-                                schedule_id = %sid,
-                                error = %e,
-                                "tick: driven_v1 schedule admission failed; leaving pending"
-                            );
-                            continue;
-                        }
+            if let Some(starter) = &schedule_starter {
+                match starter.start(&sid).await {
+                    Ok(session_id) => {
+                        tracing::debug!(
+                            schedule_id = %sid,
+                            session_id = %session_id.0,
+                            "tick: admitted driven_v1 schedule via daemon starter"
+                        );
+                        started.push((creator_id.clone(), sid.clone()));
+                    }
+                    Err(e) => {
+                        // A failed admission never marks the row Running
+                        // (no session was created); it stays pending for a
+                        // later tick / explicit start.
+                        tracing::warn!(
+                            schedule_id = %sid,
+                            error = %e,
+                            "tick: driven_v1 schedule admission failed; leaving pending"
+                        );
+                        continue;
                     }
                 }
-                None => {
-                    // No daemon starter (tests / standalone supervisor): keep
-                    // the historical status-only flip so admission-gate tests
-                    // remain meaningful. Production always injects a starter.
-                    started.push((creator_id.clone(), sid.clone()));
-                    status_flip.push((creator_id, sid));
-                }
+            } else {
+                // No daemon starter (tests / standalone supervisor): keep
+                // the historical status-only flip so admission-gate tests
+                // remain meaningful. Production always injects a starter.
+                started.push((creator_id.clone(), sid.clone()));
+                status_flip.push((creator_id, sid));
             }
 
             // Immediately update the running set so subsequent candidates
@@ -720,7 +719,7 @@ impl ScheduleSupervisor {
     ///
     /// Only the schedule whose `current_session_id` equals `source_run_id`
     /// is updated. Post-commit work (running cache, runtime lock, terminal
-    /// hooks, starter handoff, WorkComplete, tick) mirrors the sequential
+    /// hooks, starter handoff, `WorkComplete`, tick) mirrors the sequential
     /// path.
     #[allow(clippy::too_many_lines)]
     async fn settle_and_chain_atomic(
@@ -882,24 +881,22 @@ impl ScheduleSupervisor {
 
         if terminal_status == ScheduleStatus::Completed && transitioned {
             self.run_completed_hooks(schedule_id, preset_id).await;
-            if let Some((action, _work)) = &chain {
-                if let ChainAction::WorkComplete { work_id } = action {
-                    if let Err(e) =
-                        auto_chain::mark_work_completed(&self.pool, creator_id, work_id).await
-                    {
-                        tracing::warn!(
-                            work_id = %work_id,
-                            error = %e,
-                            "auto-chain: failed to mark work completed"
-                        );
-                    } else {
-                        self.write_completion_lock_if_available(creator_id, work_id)
-                            .await;
-                        tracing::info!(
-                            work_id = %work_id,
-                            "auto-chain: work completed"
-                        );
-                    }
+            if let Some((ChainAction::WorkComplete { work_id }, _work)) = &chain {
+                if let Err(e) =
+                    auto_chain::mark_work_completed(&self.pool, creator_id, work_id).await
+                {
+                    tracing::warn!(
+                        work_id = %work_id,
+                        error = %e,
+                        "auto-chain: failed to mark work completed"
+                    );
+                } else {
+                    self.write_completion_lock_if_available(creator_id, work_id)
+                        .await;
+                    tracing::info!(
+                        work_id = %work_id,
+                        "auto-chain: work completed"
+                    );
                 }
             }
             if let Some(sid) = &child_id {
@@ -1015,54 +1012,46 @@ impl ScheduleSupervisor {
         stage: &str,
         work_id: &str,
     ) -> Option<std::collections::HashMap<String, crate::run_state::AgentBinding>> {
-        let Some(preset_id) = crate::stage_gates::preset_for_stage(stage) else {
-            return None;
-        };
-        match self.binding_provider.as_ref().as_ref() {
-            Some(provider_id) => {
-                match crate::preset::default_bindings_for_preset(preset_id, provider_id) {
-                    Some(bindings) => Some(bindings),
-                    None => {
-                        tracing::warn!(
-                            work_id = %work_id,
-                            stage = %stage,
-                            preset_id = %preset_id,
-                            "auto-chain: preset has prompt roles but no binding provider; \
-                             refusing to publish a drive-enabled row"
-                        );
-                        None
-                    }
+        let preset_id = crate::stage_gates::preset_for_stage(stage)?;
+        if let Some(provider_id) = self.binding_provider.as_ref().as_ref() {
+            crate::preset::default_bindings_for_preset(preset_id, provider_id).map_or_else(
+                || {
+                    tracing::warn!(
+                        work_id = %work_id,
+                        stage = %stage,
+                        preset_id = %preset_id,
+                        "auto-chain: preset has prompt roles but no binding provider; \
+                         refusing to publish a drive-enabled row"
+                    );
+                    None
+                },
+                Some,
+            )
+        } else {
+            // No configured provider: only presets WITHOUT prompt roles
+            // may be enqueued (empty map passes the completeness gate).
+            let caps = crate::capability::CapabilityRegistry::with_builtins();
+            if let Ok(loaded) = crate::preset::load_embedded_preset(preset_id, &caps) {
+                let roles = crate::preset::required_prompt_roles(&loaded);
+                if !roles.is_empty() {
+                    tracing::warn!(
+                        work_id = %work_id,
+                        stage = %stage,
+                        preset_id = %preset_id,
+                        "auto-chain: preset requires prompt roles but no binding \
+                         provider is configured; refusing to publish a drive-enabled row"
+                    );
+                    return None;
                 }
-            }
-            None => {
-                // No configured provider: only presets WITHOUT prompt roles
-                // may be enqueued (empty map passes the completeness gate).
-                let caps = crate::capability::CapabilityRegistry::with_builtins();
-                match crate::preset::load_embedded_preset(preset_id, &caps) {
-                    Ok(loaded) => {
-                        let roles = crate::preset::required_prompt_roles(&loaded);
-                        if !roles.is_empty() {
-                            tracing::warn!(
-                                work_id = %work_id,
-                                stage = %stage,
-                                preset_id = %preset_id,
-                                "auto-chain: preset requires prompt roles but no binding \
-                                 provider is configured; refusing to publish a drive-enabled row"
-                            );
-                            return None;
-                        }
-                        Some(std::collections::HashMap::new())
-                    }
-                    Err(_) => {
-                        tracing::warn!(
-                            work_id = %work_id,
-                            stage = %stage,
-                            preset_id = %preset_id,
-                            "auto-chain: preset not resolvable; refusing to publish a drive-enabled row"
-                        );
-                        None
-                    }
-                }
+                Some(std::collections::HashMap::new())
+            } else {
+                tracing::warn!(
+                    work_id = %work_id,
+                    stage = %stage,
+                    preset_id = %preset_id,
+                    "auto-chain: preset not resolvable; refusing to publish a drive-enabled row"
+                );
+                None
             }
         }
     }
@@ -1270,57 +1259,49 @@ impl ScheduleSupervisor {
         // no provider refuses the enqueue (never a drive-enabled row with an
         // empty binding map); a preset with no prompt roles accepts an empty
         // map.
-        let bindings = match self.binding_provider.as_ref().as_ref() {
-            Some(provider_id) => {
-                let Some(preset_id) = crate::stage_gates::preset_for_stage(stage) else {
-                    return Ok(());
-                };
-                match crate::preset::default_bindings_for_preset(preset_id, provider_id) {
-                    Some(bindings) => bindings,
-                    None => {
-                        tracing::warn!(
-                            work_id = %work_id,
-                            stage = %stage,
-                            preset_id = %preset_id,
-                            "auto-chain: preset has prompt roles but no binding provider; \
-                             refusing to publish a drive-enabled row"
-                        );
-                        return Ok(());
-                    }
-                }
+        let Some(preset_id) = crate::stage_gates::preset_for_stage(stage) else {
+            return Ok(());
+        };
+        let bindings = if let Some(provider_id) = self.binding_provider.as_ref().as_ref() {
+            if let Some(bindings) =
+                crate::preset::default_bindings_for_preset(preset_id, provider_id)
+            {
+                bindings
+            } else {
+                tracing::warn!(
+                    work_id = %work_id,
+                    stage = %stage,
+                    preset_id = %preset_id,
+                    "auto-chain: preset has prompt roles but no binding provider; \
+                     refusing to publish a drive-enabled row"
+                );
+                return Ok(());
             }
-            None => {
-                // No configured provider: only presets WITHOUT prompt roles
-                // may be enqueued (empty map passes the completeness gate).
-                let Some(preset_id) = crate::stage_gates::preset_for_stage(stage) else {
+        } else {
+            // No configured provider: only presets WITHOUT prompt roles
+            // may be enqueued (empty map passes the completeness gate).
+            let caps = crate::capability::CapabilityRegistry::with_builtins();
+            if let Ok(loaded) = crate::preset::load_embedded_preset(preset_id, &caps) {
+                let roles = crate::preset::required_prompt_roles(&loaded);
+                if !roles.is_empty() {
+                    tracing::warn!(
+                        work_id = %work_id,
+                        stage = %stage,
+                        preset_id = %preset_id,
+                        "auto-chain: preset requires prompt roles but no binding \
+                         provider is configured; refusing to publish a drive-enabled row"
+                    );
                     return Ok(());
-                };
-                let caps = crate::capability::CapabilityRegistry::with_builtins();
-                match crate::preset::load_embedded_preset(preset_id, &caps) {
-                    Ok(loaded) => {
-                        let roles = crate::preset::required_prompt_roles(&loaded);
-                        if !roles.is_empty() {
-                            tracing::warn!(
-                                work_id = %work_id,
-                                stage = %stage,
-                                preset_id = %preset_id,
-                                "auto-chain: preset requires prompt roles but no binding \
-                                 provider is configured; refusing to publish a drive-enabled row"
-                            );
-                            return Ok(());
-                        }
-                        std::collections::HashMap::new()
-                    }
-                    Err(_) => {
-                        tracing::warn!(
-                            work_id = %work_id,
-                            stage = %stage,
-                            preset_id = %preset_id,
-                            "auto-chain: preset not resolvable; refusing to publish a drive-enabled row"
-                        );
-                        return Ok(());
-                    }
                 }
+                std::collections::HashMap::new()
+            } else {
+                tracing::warn!(
+                    work_id = %work_id,
+                    stage = %stage,
+                    preset_id = %preset_id,
+                    "auto-chain: preset not resolvable; refusing to publish a drive-enabled row"
+                );
+                return Ok(());
             }
         };
 
@@ -1418,6 +1399,7 @@ impl ScheduleSupervisor {
             .await
     }
 
+    #[allow(clippy::too_many_lines)] // sequential duplicate-check → insert → claim wiring; splitting obscures the single INSERT path
     async fn insert_pending_inner(
         &self,
         schedule: Schedule,
@@ -1516,13 +1498,13 @@ impl ScheduleSupervisor {
         // (see auto_chain.rs); a compile-time `query!` here would require
         // regenerated `.sqlx` metadata for every column change.
         sqlx::query(
-            r#"INSERT INTO creator_schedules
+            r"INSERT INTO creator_schedules
                (schedule_id, creator_id, preset_id, preset_version, status,
                 concurrency_kind, concurrency_whitelist,
                 current_core_context_version, current_session_id,
                 scheduled_at, label, created_at, updated_at, terminated_at,
                 work_id, execution_policy, execution_descriptor_json)
-               VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?, ?)"#,
+               VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?, ?)",
         )
         .bind(&schedule_id)
         .bind(&creator_id)
@@ -1757,9 +1739,9 @@ impl ScheduleSupervisor {
                 // `creator_schedules.status` has no `interrupted` variant and
                 // an unmapped string projects as `Pending` (re-runnable), so
                 // writing a status string here would be strictly worse.
-                crate::engine::SessionStatus::Interrupted => continue,
-                // Non-terminal: the schedule stays running and is paused by
-                // `resume_running_as_paused` (or re-driven by recovery).
+                // Non-terminal (incl. `Interrupted`): the schedule stays
+                // running and is paused by `resume_running_as_paused` (or
+                // re-driven by recovery).
                 _ => continue,
             };
             if let Err(e) = self
@@ -1989,7 +1971,7 @@ impl ScheduleSupervisor {
             // coordinator (the caller drives it); a driven row without an
             // owned session goes through the normal admission path. Never
             // produce `running` without an owned session.
-            let owned_session: Option<String> = sqlx::query_scalar(
+            let _owned_session: Option<String> = sqlx::query_scalar(
                 "SELECT current_session_id FROM creator_schedules WHERE schedule_id = ?",
             )
             .bind(schedule_id)
@@ -2102,6 +2084,7 @@ struct StatusCreatorRow {
 /// Internal row for terminal settlement (T3): the schedule's creator,
 /// preset, and owned session (the `source_run_id` for auto-chain).
 #[derive(sqlx::FromRow)]
+#[allow(clippy::struct_field_names)] // columns mirror the `creator_schedules` schema; `id` postfix is the DB naming
 struct TerminalScheduleRow {
     creator_id: String,
     preset_id: String,

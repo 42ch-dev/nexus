@@ -100,7 +100,7 @@ async fn rig(
     tokio::task::JoinHandle<()>,
 ) {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
-    let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
     let deps = CapabilityRuntimeDeps {
         pool: None,

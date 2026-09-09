@@ -405,45 +405,40 @@ async fn try_fire_role(
             // roles and no provider refuses the fire (never a drive-enabled
             // row with an empty binding map); a preset with no prompt roles
             // accepts an empty map.
-            let bindings = match binding_provider {
-                Some(provider_id) => {
-                    match crate::preset::default_bindings_for_preset(preset_id, provider_id) {
-                        Some(bindings) => bindings,
-                        None => {
-                            warn!(
-                                work_id = %row.work_id, role = role_name, preset_id,
-                                "cron-supervisor: preset not resolvable; skipping fire"
-                            );
-                            summary.skipped_gated += 1;
-                            return;
-                        }
-                    }
+            let bindings = if let Some(provider_id) = binding_provider {
+                if let Some(bindings) =
+                    crate::preset::default_bindings_for_preset(preset_id, provider_id)
+                {
+                    bindings
+                } else {
+                    warn!(
+                        work_id = %row.work_id, role = role_name, preset_id,
+                        "cron-supervisor: preset not resolvable; skipping fire"
+                    );
+                    summary.skipped_gated += 1;
+                    return;
                 }
-                None => {
-                    let caps = crate::capability::CapabilityRegistry::with_builtins();
-                    match crate::preset::load_embedded_preset(preset_id, &caps) {
-                        Ok(loaded) => {
-                            let roles = crate::preset::required_prompt_roles(&loaded);
-                            if !roles.is_empty() {
-                                warn!(
-                                    work_id = %row.work_id, role = role_name, preset_id,
-                                    "cron-supervisor: preset requires prompt roles but no \
-                                     binding provider is configured; skipping fire"
-                                );
-                                summary.skipped_gated += 1;
-                                return;
-                            }
-                            std::collections::HashMap::new()
-                        }
-                        Err(_) => {
-                            warn!(
-                                work_id = %row.work_id, role = role_name, preset_id,
-                                "cron-supervisor: preset not resolvable; skipping fire"
-                            );
-                            summary.skipped_gated += 1;
-                            return;
-                        }
+            } else {
+                let caps = crate::capability::CapabilityRegistry::with_builtins();
+                if let Ok(loaded) = crate::preset::load_embedded_preset(preset_id, &caps) {
+                    let roles = crate::preset::required_prompt_roles(&loaded);
+                    if !roles.is_empty() {
+                        warn!(
+                            work_id = %row.work_id, role = role_name, preset_id,
+                            "cron-supervisor: preset requires prompt roles but no \
+                             binding provider is configured; skipping fire"
+                        );
+                        summary.skipped_gated += 1;
+                        return;
                     }
+                    std::collections::HashMap::new()
+                } else {
+                    warn!(
+                        work_id = %row.work_id, role = role_name, preset_id,
+                        "cron-supervisor: preset not resolvable; skipping fire"
+                    );
+                    summary.skipped_gated += 1;
+                    return;
                 }
             };
             for attempt in 1..=max_attempts {

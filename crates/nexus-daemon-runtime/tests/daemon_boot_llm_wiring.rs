@@ -64,10 +64,12 @@ fn session_cancels_with_test_session() -> std::sync::Arc<
     std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
 > {
     let map = empty_session_cancels();
-    map.write().unwrap_or_else(|e| e.into_inner()).insert(
-        "test_session".to_string(),
-        tokio_util::sync::CancellationToken::new(),
-    );
+    map.write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(
+            "test_session".to_string(),
+            tokio_util::sync::CancellationToken::new(),
+        );
     map
 }
 
@@ -118,7 +120,7 @@ async fn with_runtime_deps_wiring_makes_llm_extract_run() {
 // ─── Test 2: executor failure stays a typed failure ────────────────────────
 
 /// A failing executor surfaces its typed error — never a partial-output
-/// success (A1: only MessageDelta + EndTurn succeeds).
+/// success (A1: only `MessageDelta` + `EndTurn` succeeds).
 #[tokio::test]
 async fn executor_failure_stays_typed_failure() {
     struct FailingExecutor;

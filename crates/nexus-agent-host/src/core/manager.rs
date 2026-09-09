@@ -171,6 +171,8 @@ impl Default for HostManager {
     }
 }
 
+#[allow(clippy::too_many_lines)]
+// HostFacade start() runs sequential config-validation + spawn; splitting obscures the single code path
 #[async_trait]
 impl crate::HostFacade for HostManager {
     async fn start(&self, config: HostStartConfig) -> HostResult<()> {
@@ -482,11 +484,11 @@ impl crate::HostFacade for HostManager {
                         // ACP read loop (A5 "reuse serially").
                         let mut sess = sessions.write().await;
                         match sess.get(&sid).map(|s| s.state.clone()) {
-                            Some(crate::core::session::SessionState::Busy(op)) if &op == &oid => {
+                            Some(crate::core::session::SessionState::Busy(op)) if op == oid => {
                                 let _ = sess.transition_busy_to_ready(&sid, &oid);
                             }
                             Some(crate::core::session::SessionState::Cancelling(op))
-                                if &op == &oid =>
+                                if op == oid =>
                             {
                                 let _ = sess.transition_cancelling_to_ready(&sid, &oid);
                             }
@@ -783,6 +785,7 @@ impl crate::HostFacade for HostManager {
                 }
                 sessions.transition_to_error_recoverable(&session_id)?;
             }
+            drop(sessions); // release the write guard before returning
             return Err(HostError::cleanup_unconfirmed(format!(
                 "session {session_id} cleanup unconfirmed"
             ))

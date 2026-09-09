@@ -138,11 +138,12 @@ pub fn embedded_source_identity(preset_id: &str) -> Option<crate::run_state::Pre
 }
 
 /// Derive the complete effective prompt-role set for a loaded preset
-/// (N-4b/N-9): every `llm_judge` exit resolves the `default` role (the
-/// judge capability `judge.llm` binds `default` at prompt time), and every
-/// `acp_prompt` inner node resolves its `agent` field (or `default` when
-/// absent). A preset with NO prompt path yields an empty set — an empty
-/// binding map is then valid.
+/// (N-4b/N-9).
+///
+/// Every `llm_judge` exit resolves the `default` role (the judge capability
+/// `judge.llm` binds `default` at prompt time), and every `acp_prompt` inner
+/// node resolves its `agent` field (or `default` when absent). A preset with
+/// NO prompt path yields an empty set — an empty binding map is then valid.
 ///
 /// This is the single source of truth for both the admission
 /// binding-completeness validator and the daemon's internal binding
@@ -189,11 +190,13 @@ pub fn required_prompt_roles(loaded: &LoadedPreset) -> std::collections::HashSet
     required
 }
 
-/// Build a complete binding map for an EMBEDDED preset using one provider
-/// id (N-9): every effective prompt role (including `default`) is bound to
-/// the given provider. Returns `None` when the preset cannot be resolved —
-/// the caller must then refuse or stay inert, never publish a drive-enabled
-/// row with an incomplete binding map.
+/// Build a complete binding map for an EMBEDDED preset using one provider id
+/// (N-9).
+///
+/// Every effective prompt role (including `default`) is bound to the given
+/// provider. Returns `None` when the preset cannot be resolved — the caller
+/// must then refuse or stay inert, never publish a drive-enabled row with an
+/// incomplete binding map.
 ///
 /// The internal insertion paths (auto-chain, cron, review-master) use this
 /// to derive bindings consistent with the daemon's configured providers;

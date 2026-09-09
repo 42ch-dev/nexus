@@ -116,6 +116,104 @@ pub async fn project_for_session(
     project_execution(&record, gate_park_live, caps)
 }
 
+///
+/// `gate_park_live` is the exact A7 rule 5 marker for the run's current task
+/// (computed by the caller from the session context); without it a parked
+/// converge/merge run would misproject as `safe_boundary`.
+#[must_use]
+pub fn project_execution(
+    record: &RunRecord,
+    gate_park_live: bool,
+    caps: Option<&std::sync::Arc<nexus_orchestration::capability::CapabilityRegistry>>,
+) -> ExecutionProjection {
+    // v0 rows are explicitly legacy/unverified — never reinterpreted through
+    // the v1 classifier (A2/A7 rule 7).
+    if record.execution_version < 1 {
+        return ExecutionProjection {
+            execution_version: Some(record.execution_version),
+            state_revision: Some(record.state_revision),
+            recovery_class: "legacy_unverified".to_string(),
+            wait: None,
+            reason_code: None,
+            allowed_actions: vec!["cancel".to_string(), "new_run".to_string()],
+        };
+    }
+
+    let class = classify_recovery(&record.status, record.state.as_ref(), gate_park_live);
+    let recovery_class = match class {
+        RecoveryClass::Terminal => "terminal",
+        RecoveryClass::HumanWait => "human_wait",
+        RecoveryClass::SafeBoundary => "safe_boundary",
+        RecoveryClass::ConvergeMerge => "converge_merge",
+        RecoveryClass::Interrupted => "interrupted",
+        RecoveryClass::LegacyUnverified => "legacy_unverified",
+        RecoveryClass::Unreadable => "unreadable",
+    };
+    let allowed_actions: Vec<String> = match class {
+        RecoveryClass::Terminal => vec!["new_run".to_string()],
+        RecoveryClass::HumanWait => vec!["continue".to_string(), "cancel".to_string()],
+        // An unconfirmed stop is never retried (A5).
+        RecoveryClass::Interrupted => vec!["cancel".to_string(), "new_run".to_string()],
+        RecoveryClass::SafeBoundary | RecoveryClass::ConvergeMerge => {
+            vec!["cancel".to_string()]
+        }
+        RecoveryClass::LegacyUnverified | RecoveryClass::Unreadable => {
+            vec!["cancel".to_string(), "new_run".to_string()]
+        }
+    };
+    // A human wait whose frozen source can no longer be reconstructed must
+    // not advertise `continue` (tri-QC P1-C): legal actions degrade to
+    // cancel/new-run and the reason names the reconstruction failure.
+    let (allowed_actions, source_unavailable) = if class == RecoveryClass::HumanWait
+        && !record.descriptor.as_ref().is_some_and(|descriptor| {
+            let builtin;
+            let registry = if let Some(caps) = caps {
+                &**caps
+            } else {
+                builtin = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+                &builtin
+            };
+            frozen_source_reconstructable(descriptor, registry)
+        }) {
+        (vec!["cancel".to_string(), "new_run".to_string()], true)
+    } else {
+        (allowed_actions, false)
+    };
+    // The wait token is only operator-actionable for a human wait; exposing a
+    // stale token for another class would invite an invalid continue.
+    let wait = (class == RecoveryClass::HumanWait)
+        .then(|| {
+            record.state.as_ref().and_then(|state| {
+                state.wait.as_ref().map(|wait| ExecutionWait {
+                    wait_id: wait.wait_id.clone(),
+                    task_id: wait.task_id.clone(),
+                    child_session_id: wait.child_session_id.clone(),
+                    child_task_id: wait.child_task_id.clone(),
+                    kind: format!("{:?}", wait.kind).to_lowercase(),
+                })
+            })
+        })
+        .flatten();
+    let reason_code = if source_unavailable {
+        Some("reconstruction_unavailable".to_string())
+    } else {
+        match (&record.status, record.state.as_ref()) {
+            (SessionStatus::Interrupted, _) => Some("interrupted".to_string()),
+            (_, Some(state)) => state.failure.as_ref().map(|failure| failure.code.clone()),
+            _ => None,
+        }
+    };
+
+    ExecutionProjection {
+        execution_version: Some(record.execution_version),
+        state_revision: Some(record.state_revision),
+        recovery_class: recovery_class.to_string(),
+        wait,
+        reason_code,
+        allowed_actions,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,7 +312,7 @@ mod tests {
             workspace_root: std::path::PathBuf::from("/tmp"),
             preset_id: "memory-augmented".to_string(),
             preset_version: loaded.version,
-            source: loaded.source_identity.clone().expect("source identity"),
+            source: loaded.source_identity.expect("source identity"),
             input: serde_json::Map::new(),
             agent_bindings: std::collections::HashMap::new(),
             parent_session_id: None,
@@ -275,104 +373,5 @@ mod tests {
             projection.wait.is_none(),
             "a stale wait token must not be offered for a non-wait class"
         );
-    }
-}
-
-///
-/// `gate_park_live` is the exact A7 rule 5 marker for the run's current task
-/// (computed by the caller from the session context); without it a parked
-/// converge/merge run would misproject as `safe_boundary`.
-#[must_use]
-pub fn project_execution(
-    record: &RunRecord,
-    gate_park_live: bool,
-    caps: Option<&std::sync::Arc<nexus_orchestration::capability::CapabilityRegistry>>,
-) -> ExecutionProjection {
-    // v0 rows are explicitly legacy/unverified — never reinterpreted through
-    // the v1 classifier (A2/A7 rule 7).
-    if record.execution_version < 1 {
-        return ExecutionProjection {
-            execution_version: Some(record.execution_version),
-            state_revision: Some(record.state_revision),
-            recovery_class: "legacy_unverified".to_string(),
-            wait: None,
-            reason_code: None,
-            allowed_actions: vec!["cancel".to_string(), "new_run".to_string()],
-        };
-    }
-
-    let class = classify_recovery(&record.status, record.state.as_ref(), gate_park_live);
-    let recovery_class = match class {
-        RecoveryClass::Terminal => "terminal",
-        RecoveryClass::HumanWait => "human_wait",
-        RecoveryClass::SafeBoundary => "safe_boundary",
-        RecoveryClass::ConvergeMerge => "converge_merge",
-        RecoveryClass::Interrupted => "interrupted",
-        RecoveryClass::LegacyUnverified => "legacy_unverified",
-        RecoveryClass::Unreadable => "unreadable",
-    };
-    let allowed_actions: Vec<String> = match class {
-        RecoveryClass::Terminal => vec!["new_run".to_string()],
-        RecoveryClass::HumanWait => vec!["continue".to_string(), "cancel".to_string()],
-        // An unconfirmed stop is never retried (A5).
-        RecoveryClass::Interrupted => vec!["cancel".to_string(), "new_run".to_string()],
-        RecoveryClass::SafeBoundary | RecoveryClass::ConvergeMerge => {
-            vec!["cancel".to_string()]
-        }
-        RecoveryClass::LegacyUnverified | RecoveryClass::Unreadable => {
-            vec!["cancel".to_string(), "new_run".to_string()]
-        }
-    };
-    // A human wait whose frozen source can no longer be reconstructed must
-    // not advertise `continue` (tri-QC P1-C): legal actions degrade to
-    // cancel/new-run and the reason names the reconstruction failure.
-    let (allowed_actions, source_unavailable) = if class == RecoveryClass::HumanWait
-        && !record.descriptor.as_ref().is_some_and(|descriptor| {
-            let builtin;
-            let registry = match caps {
-                Some(caps) => &**caps,
-                None => {
-                    builtin = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
-                    &builtin
-                }
-            };
-            frozen_source_reconstructable(descriptor, registry)
-        }) {
-        (vec!["cancel".to_string(), "new_run".to_string()], true)
-    } else {
-        (allowed_actions, false)
-    };
-    // The wait token is only operator-actionable for a human wait; exposing a
-    // stale token for another class would invite an invalid continue.
-    let wait = (class == RecoveryClass::HumanWait)
-        .then(|| {
-            record.state.as_ref().and_then(|state| {
-                state.wait.as_ref().map(|wait| ExecutionWait {
-                    wait_id: wait.wait_id.clone(),
-                    task_id: wait.task_id.clone(),
-                    child_session_id: wait.child_session_id.clone(),
-                    child_task_id: wait.child_task_id.clone(),
-                    kind: format!("{:?}", wait.kind).to_lowercase(),
-                })
-            })
-        })
-        .flatten();
-    let reason_code = if source_unavailable {
-        Some("reconstruction_unavailable".to_string())
-    } else {
-        match (&record.status, record.state.as_ref()) {
-            (SessionStatus::Interrupted, _) => Some("interrupted".to_string()),
-            (_, Some(state)) => state.failure.as_ref().map(|failure| failure.code.clone()),
-            _ => None,
-        }
-    };
-
-    ExecutionProjection {
-        execution_version: Some(record.execution_version),
-        state_revision: Some(record.state_revision),
-        recovery_class: recovery_class.to_string(),
-        wait,
-        reason_code,
-        allowed_actions,
     }
 }

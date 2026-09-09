@@ -23,7 +23,7 @@ async fn sessions_ctx() -> TestCtx {
     let (tmp, nexus_home, db_path) =
         nexus_daemon_runtime::test_utils::create_test_workspace().await;
 
-    let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let registry = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());

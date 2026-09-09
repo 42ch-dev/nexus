@@ -568,7 +568,7 @@ mod tests {
     #[tokio::test]
     async fn list_sessions_excludes_system_preset_sessions() {
         let (_tmp, nexus_home, db_path) = create_test_workspace().await;
-        let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
         let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
         let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
@@ -609,7 +609,7 @@ mod tests {
     #[tokio::test]
     async fn list_sessions_idle_daemon_yields_empty_list() {
         let (_tmp, nexus_home, db_path) = create_test_workspace().await;
-        let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
         let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
         let caps = nexus_orchestration::CapabilityRegistryHolder::with_registry(Arc::new(
@@ -648,7 +648,7 @@ mod tests {
     #[tokio::test]
     async fn get_session_projects_durable_interrupted_after_failed_cleanup() {
         let (_tmp, nexus_home, db_path) = create_test_workspace().await;
-        let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
         let pool = state.pool().expect("test pool").clone();
         let sqlite = Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
@@ -997,7 +997,7 @@ mod tests {
     #[tokio::test]
     async fn get_session_projects_interrupted_after_first_failed_cancel() {
         let (_tmp, nexus_home, db_path) = create_test_workspace().await;
-        let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
         let pool = state.pool().expect("test pool").clone();
         let sqlite = Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
@@ -1074,7 +1074,7 @@ mod tests {
     #[tokio::test]
     async fn interrupted_write_exhaustion_is_conflict_never_successful_cancel() {
         let (_tmp, nexus_home, db_path) = create_test_workspace().await;
-        let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
         let pool = state.pool().expect("test pool").clone();
         let sqlite = Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
