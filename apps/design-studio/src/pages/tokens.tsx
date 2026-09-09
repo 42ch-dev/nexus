@@ -1888,8 +1888,8 @@ function ReadingChromeSpecimenRow({ spec }: { spec: ReadingChromeSpecimen }) {
         <span className="text-label-14 font-medium text-gray-1000">{spec.label}</span>
         <span className="text-copy-13-mono font-mono text-gray-700 break-all">{spec.varName}</span>
       </div>
-      <div className="flex-1 min-w-0 flex items-baseline gap-2">
-        <span ref={ref} className={`${spec.className} min-w-0`} style={style}>
+      <div className="flex-1 min-w-0 flex flex-col items-start gap-2">
+        <span ref={ref} className={`${spec.className} min-w-0 max-w-full`} style={style}>
           {spec.sample}
         </span>
         {readouts && (
