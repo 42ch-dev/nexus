@@ -342,13 +342,37 @@ const preset: Partial<Config> = {
       fontFamily: {
         sans: 'var(--font-sans)',
         mono: 'var(--font-mono)',
-        // V1.121 v0.4 — content-voice editorial serif (DESIGN.md typography.font-display).
+        // V1.121 v0.4 — content-voice display tier (DESIGN.md typography.font-display).
         display: 'var(--font-display)',
+        // Per-role family projection (supported Tailwind fontFamily keys). Each
+        // role's family follows the generated --text-<role>--font-family var so
+        // a DESIGN family edit re-projects through the same single chain. The
+        // fontSize tuple only carries supported options (lineHeight /
+        // letterSpacing / fontWeight); family lives here, not in the tuple.
+        'display-32': sv('text-display-32--font-family'),
+        'display-24': sv('text-display-24--font-family'),
+        'display-20': sv('text-display-20--font-family'),
+        'heading-32': sv('text-heading-32--font-family'),
+        'heading-24': sv('text-heading-24--font-family'),
+        'heading-20': sv('text-heading-20--font-family'),
+        'heading-16': sv('text-heading-16--font-family'),
+        'label-14': sv('text-label-14--font-family'),
+        'label-12': sv('text-label-12--font-family'),
+        'copy-16': sv('text-copy-16--font-family'),
+        'copy-14': sv('text-copy-14--font-family'),
+        'copy-13': sv('text-copy-13--font-family'),
+        'copy-12': sv('text-copy-12--font-family'),
+        'button-14': sv('text-button-14--font-family'),
+        'button-12': sv('text-button-12--font-family'),
+        'label-12-mono': sv('text-label-12-mono--font-family'),
+        'copy-13-mono': sv('text-copy-13-mono--font-family'),
       },
       fontSize: {
-        // V1.121 v0.4 display tier — content-voice titles (serif metrics;
-        // fontWeight 600 baked per DESIGN.md typography.display-* contract).
-        // Metrics consume the --text-display-* vars projected in tokens.css —
+        // All typography roles project from repo-root DESIGN.md frontmatter
+        // typography:* through tooling/design-tokens (generate-tokens.mjs →
+        // project-tokens.mjs → generated tokens.css --text-<role> / metric
+        // tuples). fontSize tuples carry only the supported options; each
+        // role's font-family is projected via the fontFamily theme above —
         // no handwritten duplicate literals here (single projection chain).
         'display-32': [
           sv('text-display-32'),
@@ -374,20 +398,118 @@ const preset: Partial<Config> = {
             fontWeight: sv('text-display-20--font-weight'),
           },
         ],
-        'heading-32': ['32px', { lineHeight: '1.18', letterSpacing: '-0.025em' }],
-        'heading-24': ['24px', { lineHeight: '1.25', letterSpacing: '-0.02em' }],
-        'heading-20': ['20px', { lineHeight: '1.3', letterSpacing: '-0.015em' }],
-        'heading-16': ['16px', { lineHeight: '1.4', letterSpacing: '-0.01em' }],
-        'label-14': ['14px', { lineHeight: '1.35' }],
-        'label-12': ['12px', { lineHeight: '1.35', letterSpacing: '0.02em' }],
-        'copy-16': ['16px', { lineHeight: '1.6' }],
-        'copy-14': ['14px', { lineHeight: '1.55' }],
-        'copy-13': ['13px', { lineHeight: '1.5' }],
-        'copy-12': ['12px', { lineHeight: '1.35' }],
-        'button-14': ['14px', { lineHeight: '1' }],
-        'button-12': ['12px', { lineHeight: '1', letterSpacing: '0.01em' }],
-        'label-12-mono': ['12px', { lineHeight: '1.4' }],
-        'copy-13-mono': ['13px', { lineHeight: '1.5' }],
+        'heading-32': [
+          sv('text-heading-32'),
+          {
+            lineHeight: sv('text-heading-32--line-height'),
+            letterSpacing: sv('text-heading-32--letter-spacing'),
+            fontWeight: sv('text-heading-32--font-weight'),
+          },
+        ],
+        'heading-24': [
+          sv('text-heading-24'),
+          {
+            lineHeight: sv('text-heading-24--line-height'),
+            letterSpacing: sv('text-heading-24--letter-spacing'),
+            fontWeight: sv('text-heading-24--font-weight'),
+          },
+        ],
+        'heading-20': [
+          sv('text-heading-20'),
+          {
+            lineHeight: sv('text-heading-20--line-height'),
+            letterSpacing: sv('text-heading-20--letter-spacing'),
+            fontWeight: sv('text-heading-20--font-weight'),
+          },
+        ],
+        'heading-16': [
+          sv('text-heading-16'),
+          {
+            lineHeight: sv('text-heading-16--line-height'),
+            letterSpacing: sv('text-heading-16--letter-spacing'),
+            fontWeight: sv('text-heading-16--font-weight'),
+          },
+        ],
+        'label-14': [
+          sv('text-label-14'),
+          {
+            lineHeight: sv('text-label-14--line-height'),
+            letterSpacing: sv('text-label-14--letter-spacing'),
+            fontWeight: sv('text-label-14--font-weight'),
+          },
+        ],
+        'label-12': [
+          sv('text-label-12'),
+          {
+            lineHeight: sv('text-label-12--line-height'),
+            letterSpacing: sv('text-label-12--letter-spacing'),
+            fontWeight: sv('text-label-12--font-weight'),
+          },
+        ],
+        'copy-16': [
+          sv('text-copy-16'),
+          {
+            lineHeight: sv('text-copy-16--line-height'),
+            letterSpacing: sv('text-copy-16--letter-spacing'),
+            fontWeight: sv('text-copy-16--font-weight'),
+          },
+        ],
+        'copy-14': [
+          sv('text-copy-14'),
+          {
+            lineHeight: sv('text-copy-14--line-height'),
+            letterSpacing: sv('text-copy-14--letter-spacing'),
+            fontWeight: sv('text-copy-14--font-weight'),
+          },
+        ],
+        'copy-13': [
+          sv('text-copy-13'),
+          {
+            lineHeight: sv('text-copy-13--line-height'),
+            letterSpacing: sv('text-copy-13--letter-spacing'),
+            fontWeight: sv('text-copy-13--font-weight'),
+          },
+        ],
+        'copy-12': [
+          sv('text-copy-12'),
+          {
+            lineHeight: sv('text-copy-12--line-height'),
+            letterSpacing: sv('text-copy-12--letter-spacing'),
+            fontWeight: sv('text-copy-12--font-weight'),
+          },
+        ],
+        'button-14': [
+          sv('text-button-14'),
+          {
+            lineHeight: sv('text-button-14--line-height'),
+            letterSpacing: sv('text-button-14--letter-spacing'),
+            fontWeight: sv('text-button-14--font-weight'),
+          },
+        ],
+        'button-12': [
+          sv('text-button-12'),
+          {
+            lineHeight: sv('text-button-12--line-height'),
+            letterSpacing: sv('text-button-12--letter-spacing'),
+            fontWeight: sv('text-button-12--font-weight'),
+          },
+        ],
+        'label-12-mono': [
+          sv('text-label-12-mono'),
+          {
+            lineHeight: sv('text-label-12-mono--line-height'),
+            letterSpacing: sv('text-label-12-mono--letter-spacing'),
+            fontWeight: sv('text-label-12-mono--font-weight'),
+          },
+        ],
+        'copy-13-mono': [
+          sv('text-copy-13-mono'),
+          {
+            lineHeight: sv('text-copy-13-mono--line-height'),
+            letterSpacing: sv('text-copy-13-mono--letter-spacing'),
+            fontWeight: sv('text-copy-13-mono--font-weight'),
+          },
+        ],
         'setup-wizard-step-label-typography': [
           cv('setup-wizard-step-label-typography'),
           { lineHeight: '1' },

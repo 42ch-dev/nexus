@@ -1,7 +1,9 @@
 /**
- * Studio fixtures for V1.132 P2 VI aesthetic retune — visual acceptance targets.
+ * Studio fixtures for VI aesthetic acceptance — visual acceptance targets.
  *
- * Proves VI-001..VI-005 acceptance states in light + dark (T3+ wires real primitives).
+ * Proves VI-001..VI-005 acceptance states. Brand specimens use a scoped dark
+ * reference panel so each asset split is inspectable on a light and a dark
+ * backing without wrapping the document in a second theme.
  */
 
 import type { ReactNode } from 'react';
@@ -88,14 +90,16 @@ function ThemePair({
         data-testid={`${testId}-light`}
         className="rounded-card border border-gray-alpha-300 bg-background-100 p-4"
       >
-        <p className="mb-3 text-label-14 font-medium text-gray-1000">Light shell</p>
+        <p className="mb-3 text-label-14 font-medium text-gray-1000">Light reference</p>
         {light}
       </div>
       <div
         data-testid={`${testId}-dark`}
-        className="rounded-card border border-gray-alpha-300 bg-[#08141C] p-4"
+        className="dark rounded-card border border-gray-alpha-300 bg-background-100 p-4 dark:bg-background-100"
       >
-        <p className="mb-3 text-label-14 font-medium text-brand-cyan">Dark shell</p>
+        <p className="mb-3 text-label-14 font-medium text-gray-1000 dark:text-brand-cyan">
+          Dark reference
+        </p>
         {dark}
       </div>
     </div>
@@ -328,7 +332,7 @@ function SquircleIconFrame({
 
   return (
     <div className="flex flex-col items-center gap-2" data-testid={testId}>
-      <div className="relative flex h-24 w-24 items-center justify-center overflow-hidden rounded-[22%] bg-[#1a1a1a] shadow-elevation-2">
+      <div className="relative flex h-24 w-24 items-center justify-center overflow-hidden rounded-[22%] bg-gray-900 dark:bg-background-300 shadow-elevation-2">
         <img
           src={logoPrimarySquareSrc}
           alt=""
@@ -370,7 +374,7 @@ export function ViBrandAppIconFixture() {
           </div>
         }
         dark={
-          <div className="flex flex-wrap items-start justify-center gap-8 rounded-card border border-gray-alpha-300 bg-[#08141C] p-6">
+          <div className="flex flex-wrap items-start justify-center gap-8 rounded-card border border-gray-alpha-300 bg-background-100 p-6">
             <SquircleIconFrame
               variant="full-bleed"
               label="Target — opaque full-bleed (macOS squircle)"

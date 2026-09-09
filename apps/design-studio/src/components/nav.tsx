@@ -18,7 +18,7 @@ const NAV_ITEMS = [
 
 export function TopNav() {
   return (
-    <nav aria-label="Gallery sections" className="flex items-center gap-1">
+    <nav aria-label="Gallery sections" className="flex flex-wrap items-center gap-1">
       {NAV_ITEMS.map(({ label, path }) => (
         <NavLink
           key={path}
