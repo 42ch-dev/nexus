@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 import {
   NexusLogo,
@@ -127,26 +127,23 @@ const VARIANT_THEMES: LogoVariantTheme[] = [
 
 interface ThemeCssSwatch {
   varName: string;
-  hex: string;
   description: string;
 }
 
-/** Static brand identity values from `@42ch/nexus-ui/theme.css`. These are
- *  constant across themes (no `.dark` variants in that file). */
+/** Brand CSS variables exported by `@42ch/nexus-ui/theme.css`. Values are
+ *  generated light snapshots from the DESIGN pair; the gallery reads them
+ *  live via the actual `var(--nexus-brand-*)` so the swatch tracks the SSOT. */
 const THEME_CSS_SWATCHES: ThemeCssSwatch[] = [
   {
     varName: '--nexus-brand-deep-blue',
-    hex: '#0D2B3E',
     description: 'Ink structure — titlebar fill, light text links, logo structure on light.',
   },
   {
     varName: '--nexus-brand-cyan',
-    hex: '#25D1E0',
-    description: 'Brand signal — shared light/dark accent (buttons, active bars, focus).',
+    description: 'Cobalt signal — shared light/dark accent (buttons, active bars, focus).',
   },
   {
     varName: '--nexus-brand-white',
-    hex: '#FFFFFF',
     description: 'Text on deep fills; logo on dark hero surfaces.',
   },
 ];
@@ -546,13 +543,24 @@ function SpecimensSection() {
 /* ---------- Theme CSS swatches ---------- */
 
 function ThemeCssSwatches() {
+  const [values, setValues] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const cs = getComputedStyle(document.documentElement);
+    setValues(
+      Object.fromEntries(THEME_CSS_SWATCHES.map((s) => [s.varName, cs.getPropertyValue(s.varName).trim()])),
+    );
+  }, []);
+
   return (
     <section>
       <SectionHeading id="brand-theme-css">Theme variables</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
         Brand CSS custom properties exported by{' '}
         <code className="font-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui/theme.css</code>.
-        These are static brand-identity values (no per-theme variants).
+        Values are generated <strong>light/default snapshots</strong> from the DESIGN pair —
+        theme-aware UI reads <code className="font-mono bg-gray-alpha-100 px-1 rounded">var()</code>{' '}
+        (via <code className="font-mono bg-gray-alpha-100 px-1 rounded">@nexus/design-tokens</code>),
+        not these constants. Swatches below read the live computed value.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -560,11 +568,13 @@ function ThemeCssSwatches() {
           <div key={s.varName} className="flex flex-col gap-3">
             <div
               className="w-full aspect-[3/2] rounded-card border border-gray-alpha-400"
-              style={{ backgroundColor: s.hex }}
+              style={{ backgroundColor: `var(${s.varName})` }}
             />
             <div className="flex flex-col gap-0.5">
               <code className="text-label-14 font-mono text-gray-1000 break-all">{s.varName}</code>
-              <span className="text-copy-13-mono text-gray-600">{s.hex}</span>
+              <span className="text-copy-13-mono text-gray-600">
+                {values[s.varName] || `var(${s.varName})`}
+              </span>
               <span className="text-copy-13 text-gray-600">{s.description}</span>
             </div>
           </div>

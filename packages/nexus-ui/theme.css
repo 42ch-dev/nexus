@@ -1,15 +1,40 @@
-/**
- * Nexus brand CSS custom properties — V1.83 foundation.
- * Consumers import via `@42ch/nexus-ui/theme.css`.
- * App-specific tokens live in root DESIGN.md / DESIGN.dark.md (sole SSOT).
+/*
+ * @42ch/nexus-ui — generated brand CSS custom properties.
+ *
+ * DERIVED OUTPUT — do not edit by hand. Source: repo-root DESIGN.md
+ * (light, :root) and DESIGN.dark.md (dark, .dark), §Brand Colors.
+ *
+ * Consumers import via `@42ch/nexus-ui/theme.css`; app-specific tokens
+ * live in @nexus/design-tokens/src/tokens.css (also generated).
  */
 :root {
-  --nexus-brand-deep-blue: #0d2b3e;
-  --nexus-brand-deep-blue-800: #0a2333;
-  --nexus-brand-deep-blue-900: #071a28;
-  --nexus-brand-cyan: #25d1e0;
-  --nexus-brand-cyan-800: #1fb8c6;
-  --nexus-brand-cyan-900: #1896a2;
-  --nexus-brand-cyan-1000: #117480;
-  --nexus-brand-white: #ffffff;
+  --nexus-brand-deep-blue: #202936;
+  --nexus-brand-cyan: #3263C7;
+  --nexus-brand-white: #FFFFFF;
+  --nexus-brand-deep-blue-800: #19212D;
+  --nexus-brand-deep-blue-900: #121923;
+  --nexus-brand-deep-blue-1000: #0C121B;
+  --nexus-brand-cyan-800: #2B56B0;
+  --nexus-brand-cyan-900: #254A98;
+  --nexus-brand-cyan-1000: #203F82;
+  --nexus-brand-deep-blue-alpha-100: #20293614;
+  --nexus-brand-deep-blue-alpha-200: #20293624;
+  --nexus-brand-cyan-alpha-100: #3263C71F;
+  --nexus-brand-cyan-alpha-200: #3263C733;
+}
+
+.dark {
+  --nexus-brand-deep-blue: #202936;
+  --nexus-brand-cyan: #8EB1F4;
+  --nexus-brand-white: #FFFFFF;
+  --nexus-brand-deep-blue-800: #344154;
+  --nexus-brand-deep-blue-900: #46576D;
+  --nexus-brand-deep-blue-1000: #596D86;
+  --nexus-brand-cyan-800: #A5C1F7;
+  --nexus-brand-cyan-900: #BDD1FA;
+  --nexus-brand-cyan-1000: #D7E3FC;
+  --nexus-brand-deep-blue-alpha-100: #8EB1F41A;
+  --nexus-brand-deep-blue-alpha-200: #8EB1F42E;
+  --nexus-brand-cyan-alpha-100: #8EB1F424;
+  --nexus-brand-cyan-alpha-200: #8EB1F438;
 }

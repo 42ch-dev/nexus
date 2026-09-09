@@ -224,7 +224,7 @@ describe('Chronos gallery acceptance', () => {
         elt instanceof HTMLElement ? elt.style.backgroundColor : '';
       if (bg === 'var(--color-blue-700)') {
         const paint = document.documentElement.classList.contains('dark')
-          ? 'rgb(37, 209, 224)'
+          ? 'rgb(142, 177, 244)'
           : 'rgb(1, 1, 1)';
         return new Proxy(style, {
           get(target, prop, receiver) {
@@ -245,9 +245,9 @@ describe('Chronos gallery acceptance', () => {
     const fill = swatch.querySelector('[style*="--color-blue-700"]');
     expect(fill).not.toBeNull();
     expect(swatch).toHaveTextContent('blue-700');
-    // Chronos blue-700 under .dark ≡ #25d1e0 / rgb(37, 209, 224)
+    // Chronos blue-700 under .dark ≡ #8EB1F4 / rgb(142, 177, 244)
     await waitFor(() => {
-      expect(swatch.textContent).toMatch(/rgb\(\s*37\s*,\s*209\s*,\s*224\s*\)|#25d1e0/i);
+      expect(swatch.textContent).toMatch(/rgb\(\s*142\s*,\s*177\s*,\s*244\s*\)|#8EB1F4/i);
     });
   });
 
@@ -258,11 +258,11 @@ describe('Chronos gallery acceptance', () => {
     expect(screen.getByText(/no N-network lockup/i)).toBeInTheDocument();
   });
 
-  it('surfaces index notes cyan active chrome on warm-paper / ink', () => {
+  it('surfaces index notes cobalt active chrome on silver-neutral / graphite', () => {
     mockMatchMedia(false);
     renderStudio('/surfaces');
-    expect(screen.getByTestId('surfaces-chronos-note')).toHaveTextContent(/cyan active affordances/i);
-    expect(screen.getByTestId('surfaces-chronos-note')).toHaveTextContent(/warm-paper/i);
+    expect(screen.getByTestId('surfaces-chronos-note')).toHaveTextContent(/cobalt active affordances/i);
+    expect(screen.getByTestId('surfaces-chronos-note')).toHaveTextContent(/silver-neutral/i);
   });
 });
 
@@ -1986,7 +1986,7 @@ describe('Components page — Card v0.4 matrix (interactive + title voice)', () 
     expect(card.className).not.toContain('hover:shadow-elevation-2');
   });
 
-  it('CardTitle voice="content" swaps to the serif display tier', () => {
+  it('CardTitle voice="content" swaps to the display tier', () => {
     const title = screen.getByTestId('card-title-content');
     expect(title.className).toContain('font-display');
     expect(title.className).toContain('text-display-20');
@@ -2001,7 +2001,7 @@ describe('Components page — Card v0.4 matrix (interactive + title voice)', () 
   });
 });
 
-describe('Components page — States v0.4 (error surface + serif empty headline)', () => {
+describe('Components page — States v0.4 (error surface + display empty headline)', () => {
   beforeEach(() => {
     mockMatchMedia(false);
     renderStudio('/components');
@@ -2012,7 +2012,7 @@ describe('Components page — States v0.4 (error surface + serif empty headline)
     expect(screen.getByTestId('states-loading')).toHaveTextContent('Loading data…');
   });
 
-  it('EmptyState headline uses the serif display tier (content voice)', () => {
+  it('EmptyState headline uses the display tier (content voice)', () => {
     const headline = screen
       .getByTestId('states-empty')
       .querySelector('.font-display');
@@ -2057,21 +2057,21 @@ describe('Components page — Dialog scrim convergence (V1.121)', () => {
   });
 });
 
-describe('Components page — serif discipline (AC-P1-5)', () => {
+describe('Components page — display voice confinement (AC-P1-5)', () => {
   beforeEach(() => {
     mockMatchMedia(false);
     renderStudio('/components');
   });
 
-  it('confines the serif display voice to content-voice opt-ins', () => {
+  it('confines the display voice to content-voice opt-ins', () => {
     // Only the CardTitle voice="content" fixture and the EmptyState headline
     // may carry font-display on this page — interface components (Button,
     // Badge, Input, Select, Tabs, Table) stay sans per DESIGN.md §Design
     // Concept.
     const allowedContainers = ['card-title-content', 'states-empty'];
-    const serifEls = Array.from(document.querySelectorAll('.font-display'));
-    expect(serifEls.length).toBeGreaterThan(0);
-    for (const el of serifEls) {
+    const displayEls = Array.from(document.querySelectorAll('.font-display'));
+    expect(displayEls.length).toBeGreaterThan(0);
+    for (const el of displayEls) {
       const inAllowed = allowedContainers.some(
         (testid) =>
           el.getAttribute('data-testid') === testid ||

@@ -21,7 +21,7 @@ const COLOR_GROUPS: TokenGroup[] = [
   {
     title: 'Brand',
     hint:
-      'Chronos dual-role anchors: deep-blue is ink structure (titlebar, light text links); mid-teal brand-cyan-1000 is light interactive fill (primary CTA, active bars); neon brand-cyan is dark primary + shared signal.',
+      'Chronos dual-role anchors: deep-blue is ink structure (titlebar, light text links); brand-cyan is the cobalt signal — light primary fill (blue-700 ≡ brand-cyan), dark brightens to blue-700 on dark.',
     tokens: [
       { label: 'brand-deep-blue', varName: '--color-brand-deep-blue' },
       { label: 'brand-cyan', varName: '--color-brand-cyan' },
@@ -32,7 +32,7 @@ const COLOR_GROUPS: TokenGroup[] = [
   {
     title: 'Background',
     hint:
-      'Warm paper on light (background-200/300 parchment tint); ink surfaces on dark. Shell chrome reads from these tokens.',
+      'Silver-neutral planes on light; graphite dark planes on dark. Shell chrome reads from these tokens.',
     tokens: [
       { label: 'background-100', varName: '--color-background-100' },
       { label: 'background-200', varName: '--color-background-200' },
@@ -68,7 +68,7 @@ const COLOR_GROUPS: TokenGroup[] = [
   {
     title: 'Blue',
     hint:
-      'Interactive cyan signal scale (light and dark). Light primary/active chrome uses blue-1000 ≡ brand-cyan-1000 (#117480); dark neon CTA uses blue-700 ≡ brand-cyan (#25D1E0). Focus rings: blue-1000 light / blue-700 dark. Not body-link ink on light (use brand-deep-blue).',
+      'Interactive cobalt scale (light and dark). Light primary/active chrome uses blue-1000 ≡ brand-cyan-1000; dark CTA uses blue-700 ≡ brand-cyan. Focus rings: blue-1000 light / blue-700 dark. Not body-link ink on light (use brand-deep-blue).',
     tokens: ['700', '800', '900', '1000', '1100'].map((s) => ({
       label: `blue-${s}`,
       varName: `--color-blue-${s}`,
@@ -135,7 +135,7 @@ const COLOR_GROUPS: TokenGroup[] = [
  * specimen's computed style — never hardcoded copies of the token values.
  *
  * Voice discipline (DESIGN.md §Design Concept): the display tier is the
- * content voice (Source Serif 4, `font-display`) — creative-entity titles
+ * content voice (offline system sans, `font-display`) — creative-entity titles
  * only; everything else stays interface voice (`font-sans` / `font-mono`).
  */
 
@@ -152,7 +152,7 @@ interface TypoSpecimen {
 }
 
 const TYPO_SPECIMENS: TypoSpecimen[] = [
-  // ── Content voice (V1.121 v0.4 display tier — Source Serif 4) ──
+  // ── Content voice (V1.121 v0.4 display tier — sans) ──
   { label: 'display-32', role: 'Content voice · page-level creative titles', textClass: 'text-display-32', familyClass: 'font-display', sampleText: 'The Orchard of Small Hours' },
   { label: 'display-24', role: 'Content voice · work / world titles', textClass: 'text-display-24', familyClass: 'font-display', sampleText: 'Chapter Six — The Long Descent' },
   { label: 'display-20', role: 'Content voice · card & chapter titles', textClass: 'text-display-20', familyClass: 'font-display', sampleText: 'A Field Guide to Tidal Magic' },
@@ -288,7 +288,7 @@ const CANVAS_TOKEN_GROUPS: CanvasTokenGroup[] = [
   {
     title: 'Ambient',
     hint:
-      'Canvas surface chrome — the dot-grid sits on the ink canvas in dark; light sits on warm paper. Grid gap / dot size are live metrics.',
+      'Canvas surface chrome — the dot-grid sits on graphite ink in dark; light sits on silver-white. Grid gap / dot size are live metrics.',
     tokens: [
       { label: 'canvas-surface', varName: '--color-canvas-surface' },
       { label: 'canvas-grid', varName: '--color-canvas-grid' },
@@ -1066,7 +1066,7 @@ function TypographySection() {
       <SectionHeading id="tokens-typography">Typography</SectionHeading>
       <p className="text-copy-14 text-gray-700 mb-4 max-w-prose">
         The display tier (<code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">font-display</code>,
-        Source Serif 4) is the <strong>content voice</strong> — creative-entity titles only, never nav,
+        offline system sans) is the <strong>content voice</strong> — creative-entity titles only, never nav,
         buttons, tables, badges, or labels. Everything else is the interface voice (sans / mono).
         Metrics are read live from each rendered specimen.
       </p>
