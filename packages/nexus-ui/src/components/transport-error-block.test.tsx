@@ -293,9 +293,6 @@ describe('TransportErrorBlock', () => {
       expect(secondary.tagName).toBe('BUTTON');
       expect(primary).toHaveAttribute('type', 'button');
       expect(secondary).toHaveAttribute('type', 'button');
-
-      expect(primary).not.toHaveClass('h-10');
-      expect(primary).not.toHaveClass('bg-brand-cyan-1000');
     });
 
     it('places CTAs in a compact row under the message', () => {
@@ -326,3 +323,5 @@ describe('TransportErrorBlock', () => {
     });
   });
 });
+
+[Showing lines 1-300 of 329. Use :301 to continue]

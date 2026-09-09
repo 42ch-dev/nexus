@@ -1354,9 +1354,10 @@ function RunStudioSection() {
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">RunStatusBadge</code>,{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">RunsTable</code>.
         Schema-driven form variants (basic-combat pickers, kitchen sink,
-        missing-schema empty state), proposal inspector variants (success with
-        all four parts, truncated, failed), and Runs history variants (all
-        statuses, empty). All copy is caller-owned literal English (studio is
+        missing-schema empty state, picker selected/disabled/invalid),
+        proposal inspector variants (success with all four parts, truncated,
+        failed), and Runs history variants (all statuses, empty, long
+        correlation id, read-only rows without Open Run). All copy is caller-owned literal English (studio is
         developer-auxiliary). Toggle the theme to verify light + dark.
       </p>
       <ComputeRunStudioFixtures />
@@ -1383,7 +1384,7 @@ function ComputeTimelineSection() {
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-canvas/*</code>{' '}
         node shell. Variants: compute node alongside KB events (direct run /
         preset / summary-less / selected / dragging), inspector (direct /
-        preset / sparse), Run Module entry chrome (toolbar + empty-state
+        preset / sparse / read-only), Run Module entry chrome (toolbar + empty-state
         hint), and Brief-layer-unaffected evidence. All copy is caller-owned
         literal English (studio is developer-auxiliary). Toggle the theme to
         verify light + dark.

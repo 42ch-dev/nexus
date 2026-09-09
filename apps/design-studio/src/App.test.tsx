@@ -993,18 +993,32 @@ describe('Components page — Toast matrix', () => {
     expect(screen.getByTestId('toast-matrix')).toBeInTheDocument();
   });
 
-  it('renders all four toast variant testids', async () => {
-    expect(screen.getByTestId('toast-variant-success')).toBeInTheDocument();
-    expect(screen.getByTestId('toast-variant-error')).toBeInTheDocument();
-    expect(screen.getByTestId('toast-variant-warning')).toBeInTheDocument();
-    expect(screen.getByTestId('toast-variant-info')).toBeInTheDocument();
+  it('queues variants when Show controls are activated', async () => {
+    const variants = ['success', 'error', 'warning', 'info'] as const;
+    for (const variant of variants) {
+      fireEvent.click(screen.getByTestId(`toast-show-${variant}`));
+      expect(screen.getByTestId(`toast-variant-${variant}`)).toBeInTheDocument();
+    }
   });
 
   it('uses error role on the error variant and status on others', async () => {
+    fireEvent.click(screen.getByTestId('toast-show-success'));
+    fireEvent.click(screen.getByTestId('toast-show-error'));
+    fireEvent.click(screen.getByTestId('toast-show-warning'));
+    fireEvent.click(screen.getByTestId('toast-show-info'));
+
     expect(screen.getByTestId('toast-variant-error')).toHaveAttribute('role', 'alert');
     expect(screen.getByTestId('toast-variant-success')).toHaveAttribute('role', 'status');
     expect(screen.getByTestId('toast-variant-warning')).toHaveAttribute('role', 'status');
     expect(screen.getByTestId('toast-variant-info')).toHaveAttribute('role', 'status');
+  });
+
+  it('dismisses the last queued toast via Dismiss last', async () => {
+    fireEvent.click(screen.getByTestId('toast-show-info'));
+    expect(screen.getByTestId('toast-variant-info')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('toast-dismiss-last'));
+    expect(screen.queryByTestId('toast-variant-info')).not.toBeInTheDocument();
   });
 });
 

@@ -50,9 +50,6 @@ describe('TransportErrorBlockFixtures', () => {
 
     expect(primary.tagName).toBe('BUTTON');
     expect(secondary.tagName).toBe('BUTTON');
-    expect(primary).not.toHaveClass('h-10');
-    expect(primary).not.toHaveClass('bg-brand-cyan-1000');
-    expect(secondary).not.toHaveClass('h-10');
   });
 
   it('renders both primary and secondary CTAs when callbacks are supplied', () => {

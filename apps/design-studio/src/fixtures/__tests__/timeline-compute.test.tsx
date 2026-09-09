@@ -135,13 +135,8 @@ describe('TimelineComputeFixtures render', () => {
     render(<TimelineComputeFixtures />);
 
     const matrix = screen.getByTestId('timeline-compute-narrative-matrix');
-    expect(
-      matrix.querySelectorAll('[class*="border-canvas-node-border-selected"]')
-        .length,
-    ).toBeGreaterThanOrEqual(1);
-    expect(
-      matrix.querySelectorAll('[class*="data-[dragging=true]"]').length,
-    ).toBeGreaterThanOrEqual(0);
+    expect(within(matrix).getByText('Compute result · selected')).toBeInTheDocument();
+    expect(matrix.querySelectorAll('[data-dragging="true"]').length).toBe(1);
   });
 
   it('renders the direct-run inspector with module, params, Run id, provenance, Open Run', () => {
