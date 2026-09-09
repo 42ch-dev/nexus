@@ -14,19 +14,20 @@ Parent rules: [`../AGENTS.md`](../AGENTS.md) (apps placement), root [`AGENTS.md`
 - Design tokens: repo-root [`DESIGN.md`](../../DESIGN.md) + [`DESIGN.dark.md`](../../DESIGN.dark.md) only
 - CSS projection: [`@nexus/design-tokens`](../../tooling/design-tokens) (`tokens.css` + Tailwind preset) — shared with `apps/web`
 - Normative spec: [`.mstar/specs/design-studio.md`](../../.mstar/specs/design-studio.md)
-- Merge rules: [`.mstar/iterations/v1.98/specs/design-unification.md`](../../.mstar/iterations/v1.98/specs/design-unification.md)
+- Import tiers and source categories: [`.mstar/specs/design-studio.md`](../../.mstar/specs/design-studio.md) §3.2, §7.5
 
 ## Import boundaries (HARD)
 
-### Two-tier import model (V1.128)
+### Import source categories (four)
 
-Design Studio and `apps/web` use **two distinct import tiers**. Do not treat every gallery import as `@42ch/nexus-ui`.
+Design Studio and `apps/web` use distinct import source categories. Do not treat every gallery import as `@42ch/nexus-ui`.
 
-| Tier | Import pattern | What it is | npm package? |
+| Category | Import pattern | What it is | npm package? |
 | --- | --- | --- | --- |
 | **Promoted primitive** | `@42ch/nexus-ui` | Pure presentational React exported from the workspace package after Studio visual acceptance | Yes (workspace / publishable) |
 | **App presentational extract** | `@web-layout/*`, `@web-canvas/*`, `@web-setup/*`, `@web-settings/*`, `@web-global-timeline/*`, `@web-shell/*`, … | Vite/tsconfig aliases to `apps/web/**/presentational/*` (or setup compositions) — props-driven chrome the App also uses | **No** — local monorepo alias only |
 | **Transitional primitive** | `@web-ui/*` | Unpromoted shadcn mirror from `apps/web/src/components/ui/*` until promotion | **No** — local alias only |
+| **Studio-local** | `@/fixtures/*`, `@/components/*`, `@/pages/*` | Gallery chrome and fixture composition — neither an app extract nor a package export | **No** — Studio source only |
 
 **Rules:**
 
@@ -34,7 +35,7 @@ Design Studio and `apps/web` use **two distinct import tiers**. Do not treat eve
 - `@web-*` aliases remain valid; V1.128+ success is **clarity**, not mass migration into `@42ch/nexus-ui`.
 - Promote only through the studio-first workflow and an explicit plan promotion list entry.
 
-Surfaces pages label each section with badges (`surface-source-badge-*` test ids). Normative iteration detail: [web-alias-clarity](../../.mstar/iterations/v1.128/specs/web-alias-clarity.md).
+Surfaces pages label each section with badges (`surface-source-badge-*` test ids). Source classification: [`.mstar/specs/design-studio.md`](../../.mstar/specs/design-studio.md) §7.5.
 
 ### Allowed
 
@@ -98,7 +99,7 @@ No daemon or Tauri required.
 - Theme toggle: `class` strategy on `<html>` — mirrors web `theme-provider` behavior
 - Read-only gallery — no YAML write-back, no localStorage token overrides
 - App chrome shows **Read-only · edit `DESIGN.md`** (repo-root SSOT helper)
-- Voice & Content and Surfaces fixture strings: [IA guide §4.4–§4.5](../../.mstar/iterations/v1.98/guides/design-studio-information-architecture.md) — sourced from DESIGN § Voice & Content and shipped product copy
+- Voice & Content and Surfaces fixture strings: [`.mstar/specs/design-studio.md`](../../.mstar/specs/design-studio.md) §7.4–§7.5 — sourced from DESIGN § Voice & Content and shipped product copy
 - Canvas surfaces fixture mirrors Outline + Strategy + WorldKB + World Timeline + Work Timeline node chrome, plus Global Timeline list chrome, Layer breadcrumb, and shared conflict-modal chrome (V1.124 P2).
 
 ## Audiences

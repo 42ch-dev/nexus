@@ -1,13 +1,16 @@
 # Reading Chrome Profile Checklist
 
 > **Version**: V1.91 — locked in P-1 Prepare.
-> **Source of truth**: repo-root [`DESIGN.md`](../../DESIGN.md) `## Reading Chrome` token section.
+> **Status**: Historical shipped acceptance record. The behavioral bar and profile coverage below remain the V1.91 record; the named visual values (for example "Georgia serif", weight 700, literal tints) were superseded by later DESIGN revisions. This file is not a live value authority.
+> **Active design authority**: repo-root [`DESIGN.md`](../../DESIGN.md) / [`DESIGN.dark.md`](../../DESIGN.dark.md) frontmatter `components.reading-chrome-*` tokens. The `## Reading Chrome` body section originally cited here no longer exists in either DESIGN file.
 > **Purpose**: Acceptance bar for P0 implementation of profile-specific reading chrome.
 > **Fallback rule**: unknown `work_profile` values render as `novel` chrome.
 
 ## Overview
 
 Each shipped `work_profile` must render with ≥2 distinct, token-driven visual markers sourced exclusively from `DESIGN.md` `reading-chrome-*` tokens. No ad-hoc CSS or Tailwind utilities for profile differentiation.
+
+Read the criteria below as the V1.91 bar, not as current values. Verify rendered chrome against the DESIGN pair's `components.reading-chrome-*` tokens; where a criterion names a literal family, weight, or tint, the token value wins.
 
 ## Profile: `novel`
 

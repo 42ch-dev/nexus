@@ -18,7 +18,7 @@ on 5173).
 | Section | Route | Content |
 | --- | --- | --- |
 | **Tokens** | `/tokens` | Colors (brand, gray, blue, red, amber, green, teal), typography scale, spacing, radius, elevation |
-| **Brand VI** | `/brand` | All four `@42ch/nexus-ui` logo variants + `NexusMark` + theme.css swatches + clear-space guidance |
+| **Brand VI** | `/brand` | All five `@42ch/nexus-ui` logo variants + `NexusMark` + theme.css swatches + clear-space guidance |
 | **Components** | `/components` | All 11 `apps/web/src/components/ui/*` primitives with variant/state matrices — promoted primitives (Button, Badge, Card, Input, Label, Textarea, Select, Tabs, Toast, TransportErrorBlock, RunFormFields, EntityPickerField, ProposalSections, RunStatusBadge, RunsTable) imported from `@42ch/nexus-ui`; unpromoted remain on `@web-ui/*` (Dialog, States, Table) |
 | **Voice & Content** | `/voice` | Labeled writing-pattern specimens from `DESIGN.md` §Voice & Content |
 | **Surfaces** | `/surfaces` | Setup wizard, App shell, AgentPicker, Settings shell chrome fixtures (studio-local; no daemon data) |
@@ -80,7 +80,7 @@ For detailed rules see [`AGENTS.md`](./AGENTS.md).
 
 ## Docs
 
-- [Studio spec](../../.mstar/specs/design-studio.md) — product contract, audiences, boundaries
-- [IA guide](../../.mstar/iterations/v1.98/guides/design-studio-information-architecture.md) — gallery section design
-- [Design unification spec](../../.mstar/iterations/v1.98/specs/design-unification.md) — merge rules (architect-owned)
-- [DESIGN.md SSOT](../../DESIGN.md) — sole normative design token source
+- [Studio spec](../../.mstar/specs/design-studio.md) — normative target contract, audiences, boundaries, gallery inventory
+- [DESIGN.md SSOT](../../DESIGN.md) — sole normative design token source (light/default)
+- [DESIGN.dark.md](../../DESIGN.dark.md) — dark companion with identical token paths
+- [Import boundaries and conventions](./AGENTS.md) — Studio-specific agent rules
