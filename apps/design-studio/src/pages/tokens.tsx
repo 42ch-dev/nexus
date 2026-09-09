@@ -1267,7 +1267,7 @@ function TypoRow({ specimen }: { specimen: TypoSpecimen }) {
     >
       <div className="w-44 shrink-0 flex flex-col gap-0.5">
         <span className="text-label-14 font-medium text-gray-1000">{specimen.label}</span>
-        <span className="text-label-12-mono font-mono text-gray-500">{specimen.familyClass}</span>
+        <span className="text-label-12-mono font-mono text-gray-700">{specimen.familyClass}</span>
         <span className="text-copy-13 text-gray-600">{specimen.role}</span>
       </div>
       <div className="flex-1 min-w-0">
@@ -1275,7 +1275,7 @@ function TypoRow({ specimen }: { specimen: TypoSpecimen }) {
           {specimen.sampleText}
         </div>
         {metrics && (
-          <div className="text-copy-13-mono font-mono text-gray-500 mt-1">{metrics}</div>
+          <div className="text-copy-13-mono font-mono text-gray-700 mt-1">{metrics}</div>
         )}
       </div>
     </div>
@@ -1304,7 +1304,7 @@ function SpacingBar({ step }: { step: SpacingStep }) {
     <div data-testid={`spacing-row-${step.label}`} className="flex items-center gap-4 py-2">
       <div className="w-32 shrink-0 flex flex-col gap-0.5">
         <span className="text-label-14 font-medium text-gray-1000">{step.label}</span>
-        <span className="text-copy-13-mono font-mono text-gray-500">{step.varName}</span>
+        <span className="text-copy-13-mono font-mono text-gray-700">{step.varName}</span>
       </div>
       <div className="flex-1 flex items-center gap-3">
         <div
@@ -1313,7 +1313,7 @@ function SpacingBar({ step }: { step: SpacingStep }) {
           style={{ width: `var(${step.varName})` }}
         />
         {hasValue && (
-          <span className="text-copy-13 text-gray-500 font-mono shrink-0">
+          <span className="text-copy-13 text-gray-700 font-mono shrink-0">
             {width} / {pxToRem(px)}
           </span>
         )}
@@ -1342,7 +1342,7 @@ function RadiusBox({ step }: { step: RadiusStep }) {
       />
       <div className="flex flex-col items-center gap-0.5">
         <span className="text-label-14 text-gray-1000">{step.label}</span>
-        <span className="text-copy-13-mono font-mono text-gray-500">{step.varName}</span>
+        <span className="text-copy-13-mono font-mono text-gray-700">{step.varName}</span>
         {radius && <span className="text-copy-13 text-gray-600 font-mono">{radius}</span>}
       </div>
     </div>
@@ -1368,12 +1368,12 @@ function ElevationCard({ token }: { token: ElevationToken }) {
         className="w-full aspect-[16/10] rounded-card bg-background-100 border border-gray-alpha-200 flex items-center justify-center"
         style={{ boxShadow: `var(${token.varName})` } as CSSProperties}
       >
-        <span className="text-copy-14 text-gray-500 font-mono">{token.label}</span>
+        <span className="text-copy-14 text-gray-700 font-mono">{token.label}</span>
       </div>
       <div className="flex flex-col gap-0.5">
         <span className="text-label-14 text-gray-1000">{token.label}</span>
         <span className="text-copy-13 text-gray-600">{token.usage}</span>
-        <span className="text-copy-13 text-gray-500 font-mono break-all">{computed}</span>
+        <span className="text-copy-13 text-gray-700 font-mono break-all">{computed}</span>
       </div>
     </div>
   );
@@ -1400,7 +1400,7 @@ function ElevationAliasRow({ alias }: { alias: (typeof ELEVATION_ALIASES)[number
       <span className="text-copy-13-mono font-mono text-gray-600 w-40 shrink-0">
         → {alias.target}
       </span>
-      <span className="text-copy-13 text-gray-500 font-mono break-all">{computed}</span>
+      <span className="text-copy-13 text-gray-700 font-mono break-all">{computed}</span>
     </div>
   );
 }
@@ -1886,14 +1886,14 @@ function ReadingChromeSpecimenRow({ spec }: { spec: ReadingChromeSpecimen }) {
     >
       <div className="w-60 shrink-0 flex flex-col gap-0.5">
         <span className="text-label-14 font-medium text-gray-1000">{spec.label}</span>
-        <span className="text-copy-13-mono font-mono text-gray-500 break-all">{spec.varName}</span>
+        <span className="text-copy-13-mono font-mono text-gray-700 break-all">{spec.varName}</span>
       </div>
       <div className="flex-1 min-w-0 flex items-baseline gap-2">
         <span ref={ref} className={`${spec.className} min-w-0`} style={style}>
           {spec.sample}
         </span>
         {readouts && (
-          <span className="text-copy-13-mono font-mono text-gray-500 min-w-0 break-words text-left">
+          <span className="text-copy-13-mono font-mono text-gray-700 min-w-0 break-words text-left">
             {readouts}
           </span>
         )}
@@ -2373,7 +2373,7 @@ function CanvasSection() {
         </div>
       </div>
 
-      <p className="text-copy-13 text-gray-500 mt-6">
+      <p className="text-copy-13 text-gray-700 mt-6">
         Accent spine shape mirrors{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">NodeChromeShell</code>{' '}
         — the same{' '}
@@ -2413,7 +2413,7 @@ export function TokensPage() {
       <StatesSection />
       <StructuralSection />
 
-      <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
+      <p className="text-copy-13 text-gray-700 mt-12 pt-8 border-t border-gray-alpha-200">
         Every gallery reads live values: colors, shadows, spacing, radius, motion, and canvas
         tokens from CSS custom properties (re-resolved on theme flip where theme-dependent);
         typography from the computed style of elements carrying the token&apos;s utility class.

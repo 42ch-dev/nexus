@@ -746,7 +746,7 @@ export function BrandPage() {
         <ViBrandAcceptanceFixtures />
       </section>
 
-      <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
+      <p className="text-copy-13 text-gray-700 mt-12 pt-8 border-t border-gray-alpha-200">
         Assets from <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>
         — SVG marks, inline <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">NexusMark</code>
         , and palette-driven{' '}
