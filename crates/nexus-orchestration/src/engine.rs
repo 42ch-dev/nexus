@@ -599,11 +599,16 @@ impl EngineSharedState {
         // v1 child under a v0 parent is still refused.
         if let Ok(Some(parent_record)) = store.load_run(parent_session_id).await {
             for child in &children {
-                validate_child_descriptor_identity(
+                if let Err(e) = validate_child_descriptor_identity(
                     parent_session_id,
                     parent_record.descriptor.as_ref(),
                     child,
-                )?;
+                ) {
+                    // Mirror the load-error discipline: never leave a stale
+                    // children-map entry behind a failed hydration (Minor 1).
+                    self.children.write().await.remove(&parent_session_id.0);
+                    return Err(e);
+                }
             }
         }
         let parent_context = match serde_json::to_value(&parent.context) {
@@ -2189,6 +2194,8 @@ fn validate_descendant_position(
     preset_id: &str,
     valid_inner: &std::collections::HashSet<&str>,
     expected_inner: Option<&str>,
+    parent_is_root: bool,
+    past_position_recorded: bool,
     parent_id: &str,
     parent_task: &str,
     child_id: &str,
@@ -2211,6 +2218,17 @@ fn validate_descendant_position(
     if terminal {
         return Ok(());
     }
+    // Inner graph nodes are `acp_prompt` only (no nested inner graphs), so a
+    // child session can never own a live descendant (P3 T1 rereview-5 P1).
+    if !parent_is_root {
+        return Err(EngineError::GraphFlow(
+            graph_flow::GraphError::StorageError(format!(
+                "R6: non-terminal child '{child_id}' under inner-graph session '{parent_id}' \
+                 (position '{parent_task}') — nested inner graphs do not exist \
+                 (tampered/unsupported metadata, non-replayable)"
+            )),
+        ));
+    }
     match expected_inner {
         Some(expected) if expected == name => Ok(()),
         Some(expected) => Err(EngineError::GraphFlow(
@@ -2220,11 +2238,18 @@ fn validate_descendant_position(
                  (tampered/unsupported metadata, non-replayable)"
             )),
         )),
-        // The parent is not at an inner-graph position (e.g. it advanced past
-        // the inner-graph state while the child row is still non-terminal).
-        // Attachment is only attempted from an inner-graph position, so this
-        // cannot mint a replacement child; membership above is the guard.
-        None => Ok(()),
+        // The root is past the inner-graph position (e.g. the bounded poller
+        // abandoned the child). Tolerated ONLY when the root context records
+        // this exact child under a state that enters its graph — otherwise a
+        // loop-back re-entry would miss attachment and mint a replacement.
+        None if past_position_recorded => Ok(()),
+        None => Err(EngineError::GraphFlow(
+            graph_flow::GraphError::StorageError(format!(
+                "R6: non-terminal child '{child_id}' under root '{parent_id}' (position \
+                 '{parent_task}') is not recorded by any inner-graph state \
+                 (tampered/unsupported metadata, non-replayable)"
+            )),
+        )),
     }
 }
 
@@ -3012,20 +3037,58 @@ impl GraphFlowEngine {
                 collected
             };
             for (parent, children) in snapshot {
-                let parent_task = self
+                let parent_session = self
                     .state
                     .storage
                     .get(&parent.0)
                     .await
-                    .map_err(EngineError::GraphFlow)?
+                    .map_err(EngineError::GraphFlow)?;
+                let parent_task = parent_session
+                    .as_ref()
                     .map(|session| session.current_task_id.clone())
                     .unwrap_or_default();
-                let expected_inner = inner_graph_entered_by_state(&loaded, &parent_task);
+                let parent_is_root = parent.0 == session_id.0;
+                let expected_inner = if parent_is_root {
+                    inner_graph_entered_by_state(&loaded, &parent_task)
+                } else {
+                    // Inner graph nodes cannot enter inner graphs.
+                    None
+                };
+                // Root context records the child session id per inner-graph
+                // state that owns it (`_inner_child_session_<state>`); a
+                // non-terminal child past the inner-graph position is only
+                // replayable when that record names it consistently.
+                let recorded: std::collections::HashMap<String, bool> = if parent_is_root {
+                    let data = parent_session
+                        .as_ref()
+                        .and_then(|session| serde_json::to_value(&session.context).ok())
+                        .and_then(|value| crate::resume_rules::context_data(&value).cloned());
+                    let mut map = std::collections::HashMap::new();
+                    if let Some(data) = data {
+                        for (key, value) in data {
+                            let Some(state) = key.strip_prefix("_inner_child_session_") else {
+                                continue;
+                            };
+                            let Some(child_id) = value.as_str() else {
+                                continue;
+                            };
+                            map.insert(
+                                child_id.to_string(),
+                                inner_graph_entered_by_state(&loaded, state).is_some(),
+                            );
+                        }
+                    }
+                    map
+                } else {
+                    std::collections::HashMap::new()
+                };
                 for child in children {
                     validate_descendant_position(
                         &loaded.id,
                         &valid_inner,
                         expected_inner,
+                        parent_is_root,
+                        recorded.get(&child.session.id).copied().unwrap_or(false),
                         &parent.0,
                         &parent_task,
                         &child.session.id,
@@ -3839,12 +3902,12 @@ mod tests {
         let valid: HashSet<&str> = ["graph_a", "graph_b"].into_iter().collect();
 
         validate_descendant_position(
-            "preset", &valid, Some("graph_a"), "parent", "s1", "child", Some("graph_a"), false,
+            "preset", &valid, Some("graph_a"), true, false, "parent", "s1", "child", Some("graph_a"), false,
         )
         .expect("matching non-terminal child is replayable");
 
         let err = validate_descendant_position(
-            "preset", &valid, Some("graph_a"), "parent", "s1", "child", Some("graph_b"), false,
+            "preset", &valid, Some("graph_a"), true, false, "parent", "s1", "child", Some("graph_b"), false,
         )
         .expect_err("valid-but-wrong-position must refuse");
         assert!(
@@ -3853,20 +3916,41 @@ mod tests {
         );
 
         let err = validate_descendant_position(
-            "preset", &valid, None, "parent", "s1", "child", Some("graph_c"), true,
+            "preset", &valid, None, true, false, "parent", "s1", "child", Some("graph_c"), true,
         )
         .expect_err("unknown inner graph must refuse even when terminal");
         assert!(err.to_string().contains("unknown inner graph"), "got {err}");
 
         validate_descendant_position(
-            "preset", &valid, Some("graph_a"), "parent", "s1", "child", Some("graph_b"), true,
+            "preset", &valid, Some("graph_a"), true, false, "parent", "s1", "child", Some("graph_b"), true,
         )
         .expect("terminal child is historical: membership suffices");
 
         validate_descendant_position(
-            "preset", &valid, None, "parent", "s2", "child", Some("graph_a"), false,
+            "preset", &valid, None, true, true, "parent", "s2", "child", Some("graph_a"), false,
         )
-        .expect("a parent past the inner-graph state is tolerated (membership is the guard)");
+        .expect("a recorded past-position child is tolerated");
+
+        let err = validate_descendant_position(
+            "preset", &valid, None, true, false, "parent", "s2", "child", Some("graph_a"), false,
+        )
+        .expect_err("an unrecorded past-position child must refuse (loop-back replay)");
+        assert!(
+            err.to_string().contains("not recorded by any inner-graph state"),
+            "got {err}"
+        );
+
+        // Inner graph nodes cannot enter inner graphs: a live descendant
+        // under a non-root parent is non-replayable.
+        let err = validate_descendant_position(
+            "preset", &valid, Some("graph_a"), false, false, "child-parent", "n1", "grandchild",
+            Some("graph_a"), false,
+        )
+        .expect_err("live descendant under an inner-graph session must refuse");
+        assert!(
+            err.to_string().contains("nested inner graphs do not exist"),
+            "got {err}"
+        );
     }
 
     #[tokio::test]

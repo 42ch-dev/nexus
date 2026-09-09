@@ -3785,7 +3785,23 @@ async fn child_effect_propagates_to_parent_interrupted_on_failed_commit() {
         .await
         .insert(parent_sid.0.clone(), vec![child_cp]);
     // Seed the child row then advance it so the submitted (rev 1) stale.
-    let child_descriptor = test_descriptor(&parent_sid.0);
+    // The child descriptor must carry the REAL inherited identity (same
+    // creator/preset/version/source as the parent, naming its parent and
+    // inner graph) — a bare test descriptor is refused as non-replayable.
+    let child_descriptor: RunDescriptorV1 = {
+        let parent_json: Vec<u8> = sqlx::query_scalar(
+            "SELECT run_descriptor_json FROM orchestration_sessions WHERE session_id = ?",
+        )
+        .bind(&parent_sid.0)
+        .fetch_one(&*pool)
+        .await
+        .expect("parent descriptor");
+        let mut descriptor: RunDescriptorV1 =
+            serde_json::from_slice(&parent_json).expect("parent descriptor json");
+        descriptor.parent_session_id = Some(SessionId(parent_sid.0.clone()));
+        descriptor.graph_name = Some("child_graph".to_string());
+        descriptor
+    };
     let child_root = root_session(child_id, "child_task").await;
     storage
         .start_run(
