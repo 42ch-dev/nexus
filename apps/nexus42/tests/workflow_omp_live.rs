@@ -238,21 +238,11 @@ XDG_CACHE_HOME = "{omp_home}/.cache"
             args_toml = args_toml,
             omp_home = self.qa_omp_home.display(),
         );
-        // Two consumers resolve the provider file differently:
-        // - the canonical `nexus_home/agent-host/config.toml` used by
-        //   `AgentHostSubsystem::start`;
-        // - `nexus_agent_host::config::load_config(home)` appends `.nexus42`
-        //   again, so the workspace registration reads
-        //   `$HOME/.nexus42/.nexus42/agent-host/config.toml`.
-        // Write BOTH so the provider the daemon registers is the one it starts.
-        for dir in [
-            self.nexus_home.join("agent-host"),
-            self.nexus_home.join(".nexus42").join("agent-host"),
-        ] {
-            std::fs::create_dir_all(&dir).expect("agent-host config dir");
-            std::fs::write(dir.join("config.toml"), &content)
-                .expect("write agent-host config.toml");
-        }
+        // The daemon resolves the canonical `$HOME/.nexus42/agent-host/config.toml`
+        // (single-nested) for BOTH registration and `AgentHostSubsystem` start.
+        let dir = self.nexus_home.join("agent-host");
+        std::fs::create_dir_all(&dir).expect("agent-host config dir");
+        std::fs::write(dir.join("config.toml"), &content).expect("write agent-host config.toml");
     }
 
     /// Seed the Creator workspace DB under `$NEXUS_HOME` (schema + creator row

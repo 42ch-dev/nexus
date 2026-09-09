@@ -326,8 +326,12 @@ impl WorkspaceState {
         // there is no active creator; the error resurfaces on the first Tier-2
         // request via `ensure_creator_pool`.
 
+        // `load_config` takes the USER home and resolves
+        // `$HOME/.nexus42/agent-host/config.toml` itself; passing the already
+        // resolved `nexus_home` double-nested the path and left the canonical
+        // file unread (tri-QC P1-A).
         let agent_host_config =
-            nexus_agent_host::config::load_config(&nexus_home).unwrap_or_else(|e| {
+            nexus_agent_host::config::load_config(&user_home).unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "failed to load agent host config; using defaults");
                 AgentHostConfig::default()
             });
