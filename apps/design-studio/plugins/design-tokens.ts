@@ -100,24 +100,30 @@ export function designTokensPlugin(repoRoot: string): Plugin {
 
     configureServer(server) {
       const invalidate = () => {
-        for (const virtual of [TOKENS_VIRTUAL, THEME_VIRTUAL]) {
-          for (const mod of server.moduleGraph.getModulesByFile(virtual) || []) {
+        // Invalidate every CSS module in the graph by id — including the two
+        // virtual shared-CSS modules (keyed by virtual id, not a real file,
+        // so getModulesByFile/filesById miss them) and the Studio entry
+        // src/index.css whose cached transform output embeds the compiled
+        // tokens. Without invalidating the entry module, full-reload re-fetches
+        // the stale transform result and the DESIGN edit is lost.
+        for (const [id, mod] of server.moduleGraph.idToModuleMap ?? []) {
+          if (
+            id === TOKENS_VIRTUAL ||
+            id === THEME_VIRTUAL ||
+            (typeof id === 'string' && id.endsWith('.css'))
+          ) {
             server.moduleGraph.invalidateModule(mod);
-          }
-        }
-        // The entry CSS module (src/index.css) carries the transform output
-        // that embeds the compiled tokens inline — invalidate it too so its
-        // transform re-runs on the next request and reflects the DESIGN edit
-        // after the full reload.
-        for (const file of server.moduleGraph.filesById?.keys() || []) {
-          if (file.endsWith('.css')) {
-            for (const mod of server.moduleGraph.getModulesByFile(file) || []) {
-              server.moduleGraph.invalidateModule(mod);
-            }
           }
         }
         server.ws.send({ type: 'full-reload' });
       };
+      // DESIGN.md / DESIGN.dark.md live at the repo root, which is outside
+      // Vite's watch root (apps/design-studio). The server.watcher only
+      // reports changes it is configured to watch; add the DESIGN pair
+      // explicitly so edits to them invalidate the CSS graphs and trigger a
+      // full reload. Without this the transform output stays cached and stale
+      // on every request (including manual reload / cold tabs).
+      server.watcher.add([designFile, darkFile]);
       const watcher = server.watcher as unknown as { on(e: string, cb: (p: string) => void): void };
       if (watcher && typeof watcher.on === 'function') {
         for (const ev of ['change', 'add', 'unlink'] as const) {
