@@ -93,6 +93,10 @@ struct InspectDto {
     /// Legal operator actions for the canonical recovery class (shared A2
     /// projection; tri-QC P1-B).
     allowed_actions: Vec<String>,
+    /// Stable machine reason for an uncertain/blocked outcome (e.g. a human
+    /// wait whose frozen source can no longer be reconstructed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason_code: Option<String>,
     current_task_id: Option<String>,
     created_at: i64,
     updated_at: i64,
@@ -416,6 +420,9 @@ fn project(row: &CheckpointRow) -> InspectDto {
         .then(|| run_state.as_ref())
         .flatten()
         .and_then(|s| s.wait.as_ref().map(|w| w.wait_id.clone()));
+    // Read-only frozen-source verification (A7): a human wait whose source
+    // can no longer be reconstructed must not advertise continue.
+    let source_ok = frozen_source_reconstructable(row.run_descriptor_json.as_deref());
 
     // For v1 rows the resumable verdict is projected from the canonical A7
     // class (authoritative status/state) — the legacy context-key cascade
@@ -436,10 +443,9 @@ fn project(row: &CheckpointRow) -> InspectDto {
         state_revision: row.state_revision,
         recovery_class,
         wait_id,
-        allowed_actions: allowed_actions_for(
-            recovery_class,
-            frozen_source_reconstructable(row.run_descriptor_json.as_deref()),
-        ),
+        allowed_actions: allowed_actions_for(recovery_class, source_ok),
+        reason_code: (recovery_class == RecoveryClass::HumanWait && !source_ok)
+            .then(|| "reconstruction_unavailable".to_string()),
         current_task_id: row.current_task_id.clone(),
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -507,6 +513,9 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
         .then(|| run_state.as_ref())
         .flatten()
         .and_then(|s| s.wait.as_ref().map(|w| w.wait_id.clone()));
+    // Read-only frozen-source verification (A7): a human wait whose source
+    // can no longer be reconstructed must not advertise continue.
+    let source_ok = frozen_source_reconstructable(row.run_descriptor_json.as_deref());
 
     let legacy_resumable = verdict_for(
         row.status.as_str(),
@@ -537,10 +546,9 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
         state_revision: row.state_revision,
         recovery_class,
         wait_id,
-        allowed_actions: allowed_actions_for(
-            recovery_class,
-            frozen_source_reconstructable(row.run_descriptor_json.as_deref()),
-        ),
+        allowed_actions: allowed_actions_for(recovery_class, source_ok),
+        reason_code: (recovery_class == RecoveryClass::HumanWait && !source_ok)
+            .then(|| "reconstruction_unavailable".to_string()),
         current_task_id: row.current_task_id.clone(),
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -745,6 +753,9 @@ fn render_detail(dto: &InspectDto) -> String {
     let _ = writeln!(out, "status:         {}", dto.db_status);
     let _ = writeln!(out, "recovery_class: {}", recovery_class_str(dto.recovery_class));
     let _ = writeln!(out, "allowed_actions: {}", dto.allowed_actions.join(", "));
+    if let Some(reason) = &dto.reason_code {
+        let _ = writeln!(out, "reason_code:    {reason}");
+    }
     let position = dto.current_task_id.as_deref().unwrap_or("(none recorded)");
     let _ = writeln!(out, "position:       {position}");
     let _ = writeln!(out, "created_at:     {}", render_ts(dto.created_at));
