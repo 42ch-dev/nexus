@@ -66,23 +66,28 @@ filters.
 ## Token-tuning workflow
 
 `DESIGN.md` / `DESIGN.dark.md` are the sole token SSOT. Editing them drives the
-gallery, the shared CSS, and the checked-in generated outputs.
+gallery and the in-memory dev CSS; checked-in generated artifacts are written
+only by the explicit generate command below.
 
 1. **Open studio** — `pnpm --filter design-studio dev` (port 5174; `apps/web`
    stays on 5173)
 2. **Baseline** — toggle light/dark; scan token tables, Brand, Components,
    Voice, and Surfaces
 3. **Edit SSOT** — change a value in root `DESIGN.md` or `DESIGN.dark.md`
-4. **Refresh** — the Studio dev plugin re-reads both DESIGN files in memory:
+4. **Refresh (dev/projection only)** — the Studio dev plugin re-reads both
+   DESIGN files in memory and re-projects tokens.css into the running app:
    editing either triggers a full reload so computed-value labels and CSS both
    reflect the change. A malformed YAML surfaces a Vite error overlay instead
-   of silently keeping the last-good tokens.
-5. **Regenerate checked-in outputs** — the build-time compiler also writes the
-   shared artifacts. After DESIGN edits, run:
+   of silently keeping the last-good tokens. **This does not touch the
+   checked-in generated files.**
+5. **Regenerate checked-in outputs** — only the compiler writes the shared
+   artifacts. After DESIGN edits, run exactly:
    ```bash
    pnpm --filter @nexus/design-tokens generate   # writes tokens.css + theme.css + generated-brand.ts
    pnpm --filter @nexus/design-tokens check      # verifies no drift / parity
    ```
+   Checked-in generated outputs are committed separately from the in-memory
+   dev projection.
 6. **Validate** — confirm Brand VI, Components, Voice, and Surfaces still look
    correct in both themes
 7. **Verify product** — run `pnpm --filter @42ch/nexus-ui build`, then

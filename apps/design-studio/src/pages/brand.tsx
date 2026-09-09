@@ -59,42 +59,42 @@ interface LogoDisplay {
 const LOGO_DISPLAYS: LogoDisplay[] = [
   {
     variant: 'primary',
-    label: 'Primary (plain)',
+    label: 'Primary (frozen)',
     fileName: logoVariants.primary,
     description:
-      'Plain timeline mark — frozen bright-cyan gradient (logo-primary.svg), no plate. Use inline on ink or paired with structure; square plate lockups use logo-primary-square.svg.',
+      'Frozen plain timeline mark — baked bright-cyan gradient (logo-primary.svg), no plate. Installed reference asset, not the live document palette. Square plate lockups use logo-primary-square.svg.',
     panelBgClass: 'bg-brand-deep-blue',
   },
   {
     variant: 'whiteBg',
-    label: 'White-bg (plain)',
+    label: 'White-bg (frozen)',
     fileName: logoVariants.whiteBg,
     description:
-      'Plain deep→cyan gradient mark (logo-white-bg.svg, frozen) for light surfaces. Plated lockups use logo-white-bg-square.svg.',
+      'Frozen plain deep→cyan gradient mark (logo-white-bg.svg) for light surfaces. Installed reference, separate from the live theme. Plated lockups use logo-white-bg-square.svg.',
     panelBgClass: 'bg-white',
   },
   {
     variant: 'white',
-    label: 'White',
+    label: 'White (frozen)',
     fileName: logoVariants.white,
     description:
-      'Dark-gray→white gradient mark — dark heroes, photography, high-contrast panels.',
+      'Frozen dark-gray→white gradient mark — dark heroes, photography, high-contrast panels. Installed reference asset, not the live document palette.',
     panelBgClass: 'bg-brand-deep-blue',
   },
   {
     variant: 'mono',
-    label: 'Mono',
+    label: 'Mono (frozen)',
     fileName: logoVariants.mono,
     description:
-      'Light-gray→black gradient mark (static). For tintable inline UI use <NexusMark>.',
+      'Frozen light-gray→black gradient mark (static). For tintable inline UI use <NexusMark>. Installed reference, not the active theme.',
     panelBgClass: 'bg-background-100',
   },
   {
     variant: 'text',
-    label: 'Text',
+    label: 'Text (frozen)',
     fileName: logoVariants.text,
     description:
-      'Wordmark (logo-text.svg) — the only approved Nexus logo text. Always render via <NexusLogo variant="text"> (apps/web: NexusTextLogo). Never typeset "nexus"/"Nexus" with UI fonts as a brand substitute. On dark heroes set color to white (inline) or invert img.',
+      'Frozen wordmark (logo-text.svg) — the only approved Nexus logo text. Always render via <NexusLogo variant="text"> (apps/web: NexusTextLogo). Never typeset "nexus"/"Nexus" with UI fonts as a brand substitute. On dark heroes set color to white (inline) or invert img. Installed reference, not live theme.',
     panelBgClass: 'bg-brand-deep-blue',
     invertForDark: true,
   },
@@ -103,18 +103,19 @@ const LOGO_DISPLAYS: LogoDisplay[] = [
 const LOGO_SQUARE_DISPLAYS = [
   {
     key: 'primary-square',
-    label: 'Primary plate',
+    label: 'Primary plate (frozen)',
     fileName: logoSquareVariants.primary,
     description:
-      'Square deep-blue plate lockup — sidebar shell, desktop icon compose source. Width-fill in gallery.',
+      'Frozen square deep-blue plate lockup — sidebar shell, desktop icon compose source. Installed reference asset, not the live document palette. Width-fill in gallery.',
     panelBgClass: 'bg-brand-deep-blue',
     src: logoPrimarySquareSrc,
   },
   {
     key: 'white-bg-square',
-    label: 'White-bg plate',
+    label: 'White-bg plate (frozen)',
     fileName: logoSquareVariants.whiteBg,
-    description: 'Square white plate lockup — only when a light/white surface is required.',
+    description:
+      'Frozen square white plate lockup — only when a light/white surface is required. Installed reference, separate from live theme.',
     panelBgClass: 'bg-white',
     src: logoWhiteBgSquareSrc,
   },
@@ -132,17 +133,58 @@ interface ThemeCssSwatch {
   description: string;
 }
 
-/** Brand CSS variables exported by `@42ch/nexus-ui/theme.css`. Values are
- *  generated light snapshots from the DESIGN pair; the gallery reads them
- *  live via the actual `var(--nexus-brand-*)` so the swatch tracks the SSOT. */
+/** All 13 brand CSS variables exported by `@42ch/nexus-ui/theme.css` (the
+ *  extended deep-blue/cyan steps + white + four alphas). Values are generated
+ *  per-theme snapshots from the DESIGN pair; the gallery reads them live via
+ *  the actual `var(--nexus-brand-*)` so the swatch tracks the SSOT. */
 const THEME_CSS_SWATCHES: ThemeCssSwatch[] = [
   {
     varName: '--nexus-brand-deep-blue',
     description: 'Ink structure — titlebar fill, light text links, logo structure on light.',
   },
   {
+    varName: '--nexus-brand-deep-blue-800',
+    description: 'Extended deep-blue step 800 (one notch lighter ink).',
+  },
+  {
+    varName: '--nexus-brand-deep-blue-900',
+    description: 'Extended deep-blue step 900 (deeper ink).',
+  },
+  {
+    varName: '--nexus-brand-deep-blue-1000',
+    description: 'Extended deep-blue step 1000 (deepest ink).',
+  },
+  {
     varName: '--nexus-brand-cyan',
     description: 'Cobalt signal — shared light/dark accent (buttons, active bars, focus).',
+  },
+  {
+    varName: '--nexus-brand-cyan-800',
+    description: 'Extended cyan step 800 (slightly deeper cobalt).',
+  },
+  {
+    varName: '--nexus-brand-cyan-900',
+    description: 'Extended cyan step 900 (deeper cobalt).',
+  },
+  {
+    varName: '--nexus-brand-cyan-1000',
+    description: 'Extended cyan step 1000 (deepest cobalt).',
+  },
+  {
+    varName: '--nexus-brand-deep-blue-alpha-100',
+    description: 'Deep-blue 10% alpha tint — translucent structure wash.',
+  },
+  {
+    varName: '--nexus-brand-deep-blue-alpha-200',
+    description: 'Deep-blue 14% alpha tint — stronger structure wash.',
+  },
+  {
+    varName: '--nexus-brand-cyan-alpha-100',
+    description: 'Cyan 12% alpha tint — translucent cobalt wash.',
+  },
+  {
+    varName: '--nexus-brand-cyan-alpha-200',
+    description: 'Cyan 20% alpha tint — stronger cobalt wash.',
   },
   {
     varName: '--nexus-brand-white',
@@ -263,6 +305,16 @@ function LogoGrid() {
         — plain wide marks, square plate lockups (<code className="font-mono bg-gray-alpha-100 px-1 rounded">logoSquareVariants</code>
         ), plus wordmark — on their recommended surfaces per DESIGN.md § Logo Usage.
       </p>
+      <p className="text-copy-16 text-gray-700 mb-4">
+        <strong className="font-medium text-gray-1000">Frozen assets, not the live doc theme.</strong>{' '}
+        Every logo below is an <em>installed reference</em> (baked-gradient SVG shipped in{' '}
+        <code className="font-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui/assets/logos</code>)
+        and is labeled <strong>(frozen)</strong> so it can never be mistaken for the active cobalt
+        palette. Live, theme-aware rendering lives in{' '}
+        <code className="font-mono bg-gray-alpha-100 px-1 rounded">&lt;NexusMark&gt;</code> and the{' '}
+        <code className="font-mono bg-gray-alpha-100 px-1 rounded">--nexus-brand-*</code> CSS
+        variables (below, under Theme variables).
+      </p>
       <p
         data-testid="brand-wordmark-contract"
         className="text-copy-16 text-gray-700 mb-6"
@@ -285,10 +337,11 @@ function LogoGrid() {
         ))}
       </div>
 
-      <h4 className="text-heading-16 font-heading text-gray-1000 mt-8 mb-4">Square plate lockups</h4>
+      <h4 className="text-heading-16 font-heading text-gray-1000 mt-8 mb-4">Square plate lockups (frozen)</h4>
       <p className="text-copy-16 text-gray-700 mb-4">
         Plated assets use the <code className="font-mono bg-gray-alpha-100 px-1 rounded">*-square.svg</code>{' '}
-        suffix — separate from plain wide marks above.
+        suffix — separate from plain wide marks above. Both square lockups are installed reference
+        assets (frozen gradients), never the active document palette.
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {LOGO_SQUARE_DISPLAYS.map((d) => (

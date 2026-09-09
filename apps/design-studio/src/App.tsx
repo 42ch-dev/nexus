@@ -33,8 +33,8 @@ export function App() {
     <div className="min-h-screen flex flex-col">
       {/* Header chrome */}
       <header className="sticky top-0 z-10 border-b border-gray-alpha-200 bg-background-100/80 backdrop-blur-sm">
-        <div className="max-w-6xl mx-auto flex items-center justify-between px-4 h-12">
-          <div className="flex items-center gap-6">
+        <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-2">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
             <Link to="/" className="text-heading-16 font-semibold text-gray-1000 no-underline hover:opacity-80 transition-opacity">
               Nexus Design Studio
             </Link>

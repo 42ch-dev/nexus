@@ -206,6 +206,76 @@ const COLOR_GROUPS: TokenGroup[] = [
   },
 ];
 
+/* ---------- Semantic role triples (bg + text + border applied together) ----
+ *
+ * DESIGN.md defines status and surface chips as a *combination* of fill,
+ * text and border. Flat swatches cannot show whether the trio reads as a
+ * control; these triples render the three roles as one compact pill so the
+ * reviewer sees the actual text-on-fill-with-border pairing (and can spot a
+ * contrast failure) rather than three isolated rectangles.
+ */
+interface SemanticTriple {
+  label: string;
+  bg: string;
+  text: string;
+  /** Border token; optional — some families (annotations) are bg+text only. */
+  border?: string;
+  /** Short role line rendered inside the pill (meaningful reader). */
+  sample: string;
+  /** Mirrors the chip shape: pill (status/badge), surface (state alert), or
+   *  highlight (inline annotated text — bg+text only, no border). */
+  shape?: 'pill' | 'surface' | 'highlight';
+}
+
+const FINDING_PILL_TRIPLES: SemanticTriple[] = [
+  { label: 'open', bg: '--color-finding-status-open-bg', text: '--color-finding-status-open-text', border: '--color-finding-status-open-border', sample: 'Open', shape: 'pill' },
+  { label: 'triaged', bg: '--color-finding-status-triaged-bg', text: '--color-finding-status-triaged-text', border: '--color-finding-status-triaged-border', sample: 'Triaged', shape: 'pill' },
+  { label: 'in-review', bg: '--color-finding-status-in-review-bg', text: '--color-finding-status-in-review-text', border: '--color-finding-status-in-review-border', sample: 'In review', shape: 'pill' },
+  { label: 'resolved', bg: '--color-finding-status-resolved-bg', text: '--color-finding-status-resolved-text', border: '--color-finding-status-resolved-border', sample: 'Resolved', shape: 'pill' },
+  { label: 'wont-fix', bg: '--color-finding-status-wont-fix-bg', text: '--color-finding-status-wont-fix-text', border: '--color-finding-status-wont-fix-border', sample: "Won't fix", shape: 'pill' },
+  { label: 'duplicate', bg: '--color-finding-status-duplicate-bg', text: '--color-finding-status-duplicate-text', border: '--color-finding-status-duplicate-border', sample: 'Duplicate', shape: 'pill' },
+];
+
+const MEMORY_TASK_KIND_TRIPLES: SemanticTriple[] = [
+  { label: 'brainstorm', bg: '--color-memory-task-kind-brainstorm-bg', text: '--color-memory-task-kind-brainstorm-text', border: '--color-memory-task-kind-brainstorm-border', sample: 'Brainstorm', shape: 'pill' },
+  { label: 'outline', bg: '--color-memory-task-kind-outline-bg', text: '--color-memory-task-kind-outline-text', border: '--color-memory-task-kind-outline-border', sample: 'Outline', shape: 'pill' },
+  { label: 'chapter', bg: '--color-memory-task-kind-chapter-bg', text: '--color-memory-task-kind-chapter-text', border: '--color-memory-task-kind-chapter-border', sample: 'Chapter', shape: 'pill' },
+  { label: 'research', bg: '--color-memory-task-kind-research-bg', text: '--color-memory-task-kind-research-text', border: '--color-memory-task-kind-research-border', sample: 'Research', shape: 'pill' },
+  { label: 'unknown', bg: '--color-memory-task-kind-unknown-bg', text: '--color-memory-task-kind-unknown-text', border: '--color-memory-task-kind-unknown-border', sample: 'Unknown', shape: 'pill' },
+];
+
+const READING_MATURATION_TRIPLES: SemanticTriple[] = [
+  { label: 'kb-density', bg: '--color-reading-maturation-kb-density-bg', text: '--color-reading-maturation-kb-density-text', border: '--color-reading-maturation-kb-density-border', sample: '12 KB', shape: 'pill' },
+  { label: 'open-findings', bg: '--color-reading-maturation-open-findings-bg', text: '--color-reading-maturation-open-findings-text', border: '--color-reading-maturation-open-findings-border', sample: '4 findings', shape: 'pill' },
+];
+
+const BADGE_SOFT_TRIPLES: SemanticTriple[] = [
+  ...['running', 'queued', 'warning', 'error', 'preset'].map((s) => ({
+    label: s,
+    bg: `--color-nexus-ui-badge-soft-${s}-bg`,
+    text: `--color-nexus-ui-badge-soft-${s}-text`,
+    border: `--color-nexus-ui-badge-soft-${s}-border`,
+    sample: s,
+    shape: 'pill' as const,
+  })),
+];
+
+const STATE_SURFACE_TRIPLES: SemanticTriple[] = [
+  { label: 'error-surface', bg: '--color-error-surface', text: '--color-red-1000', border: '--color-error-surface-border', sample: 'Error', shape: 'surface' },
+  { label: 'success-surface', bg: '--color-success-surface', text: '--color-green-1000', border: '--color-success-surface-border', sample: 'Success', shape: 'surface' },
+  { label: 'warning-surface', bg: '--color-warning-surface', text: '--color-amber-1000', border: '--color-warning-surface-border', sample: 'Warning', shape: 'surface' },
+  { label: 'info-surface', bg: '--color-info-surface', text: '--color-blue-1000', border: '--color-info-surface-border', sample: 'Info', shape: 'surface' },
+];
+
+// Annotation highlights carry bg + text only (DESIGN.md components.reading-annotation-highlight-*);
+// rendered as inline highlighted text — their actual role — with no fabricated border.
+const ANNOTATION_TRIPLES: SemanticTriple[] = [
+  { label: 'highlight-yellow', bg: '--color-reading-annotation-highlight-yellow-background', text: '--color-reading-annotation-highlight-yellow-text', sample: 'The tide-mark is faint here', shape: 'highlight' },
+  { label: 'highlight-blue', bg: '--color-reading-annotation-highlight-blue-background', text: '--color-reading-annotation-highlight-blue-text', sample: 'Recalled across the chapter', shape: 'highlight' },
+  { label: 'highlight-green', bg: '--color-reading-annotation-highlight-green-background', text: '--color-reading-annotation-highlight-green-text', sample: 'Verified against the source', shape: 'highlight' },
+  { label: 'highlight-pink', bg: '--color-reading-annotation-highlight-pink-background', text: '--color-reading-annotation-highlight-pink-text', sample: 'Questioned in the margin', shape: 'highlight' },
+];
+
 /* ---------- Typography specimens (DESIGN.md frontmatter typography:) ----------
  *
  * Class strings are written out literally so the Tailwind scanner emits them
@@ -596,90 +666,98 @@ interface ScalarToken {
   label: string;
   varName: string;
   usage: string;
+  /** Reading kind used to pick the honest, property-appropriate computed readout. */
+  kind?: 'color' | 'length' | 'shadow' | 'radius' | 'auto';
+  /** Which dimension to probe when kind is length (max-height/min-height probe height). */
+  prop?: 'width' | 'height';
 }
 
 const FOOTER_PROFILE_SCALARS: ScalarToken[] = [
-  { label: 'avatar-size', varName: '--color-footer-profile-avatar-size', usage: 'Avatar diameter (px)' },
-  { label: 'avatar-rounded', varName: '--color-footer-profile-avatar-rounded', usage: 'Avatar corner radius' },
-  { label: 'avatar-bg', varName: '--color-footer-profile-avatar-bg', usage: 'Avatar resting fill' },
-  { label: 'avatar-bg-hover', varName: '--color-footer-profile-avatar-bg-hover', usage: 'Avatar hover fill' },
-  { label: 'avatar-bg-active', varName: '--color-footer-profile-avatar-bg-active', usage: 'Avatar selected fill' },
-  { label: 'avatar-text', varName: '--color-footer-profile-avatar-text', usage: 'Avatar label text' },
-  { label: 'avatar-text-active', varName: '--color-footer-profile-avatar-text-active', usage: 'Avatar selected text' },
-  { label: 'avatar-fallback-bg', varName: '--color-footer-profile-avatar-fallback-bg', usage: 'Avatar fallback initials fill' },
-  { label: 'avatar-fallback-text', varName: '--color-footer-profile-avatar-fallback-text', usage: 'Avatar fallback initials text' },
-  { label: 'add-button-bg', varName: '--color-footer-profile-add-button-bg', usage: 'Add-profile button fill' },
-  { label: 'add-button-border', varName: '--color-footer-profile-add-button-border', usage: 'Add-profile button border' },
-  { label: 'add-button-text', varName: '--color-footer-profile-add-button-text', usage: 'Add-profile button text' },
-  { label: 'add-button-hover-bg', varName: '--color-footer-profile-add-button-hover-bg', usage: 'Add-profile hover fill' },
-  { label: 'add-button-hover-border', varName: '--color-footer-profile-add-button-hover-border', usage: 'Add-profile hover border' },
-  { label: 'add-button-hover-text', varName: '--color-footer-profile-add-button-hover-text', usage: 'Add-profile hover text' },
-  { label: 'gap', varName: '--color-footer-profile-gap', usage: 'Inter-avatar gap' },
+  { label: 'avatar-size', varName: '--color-footer-profile-avatar-size', usage: 'Avatar diameter (px)', kind: 'length' },
+  { label: 'avatar-rounded', varName: '--color-footer-profile-avatar-rounded', usage: 'Avatar corner radius', kind: 'radius' },
+  { label: 'avatar-bg', varName: '--color-footer-profile-avatar-bg', usage: 'Avatar resting fill', kind: 'color' },
+  { label: 'avatar-bg-hover', varName: '--color-footer-profile-avatar-bg-hover', usage: 'Avatar hover fill', kind: 'color' },
+  { label: 'avatar-bg-active', varName: '--color-footer-profile-avatar-bg-active', usage: 'Avatar selected fill', kind: 'color' },
+  { label: 'avatar-text', varName: '--color-footer-profile-avatar-text', usage: 'Avatar label text', kind: 'color' },
+  { label: 'avatar-text-active', varName: '--color-footer-profile-avatar-text-active', usage: 'Avatar selected text', kind: 'color' },
+  { label: 'avatar-fallback-bg', varName: '--color-footer-profile-avatar-fallback-bg', usage: 'Avatar fallback initials fill', kind: 'color' },
+  { label: 'avatar-fallback-text', varName: '--color-footer-profile-avatar-fallback-text', usage: 'Avatar fallback initials text', kind: 'color' },
+  { label: 'add-button-bg', varName: '--color-footer-profile-add-button-bg', usage: 'Add-profile button fill (transparent → no fill)', kind: 'color' },
+  { label: 'add-button-border', varName: '--color-footer-profile-add-button-border', usage: 'Add-profile button border', kind: 'color' },
+  { label: 'add-button-text', varName: '--color-footer-profile-add-button-text', usage: 'Add-profile button text', kind: 'color' },
+  { label: 'add-button-hover-bg', varName: '--color-footer-profile-add-button-hover-bg', usage: 'Add-profile hover fill', kind: 'color' },
+  { label: 'add-button-hover-border', varName: '--color-footer-profile-add-button-hover-border', usage: 'Add-profile hover border', kind: 'color' },
+  { label: 'add-button-hover-text', varName: '--color-footer-profile-add-button-hover-text', usage: 'Add-profile hover text', kind: 'color' },
+  { label: 'gap', varName: '--color-footer-profile-gap', usage: 'Inter-avatar gap', kind: 'length' },
 ];
 
 const SETUP_WIZARD_STEP_SCALARS: ScalarToken[] = [
-  { label: 'step-row-height', varName: '--color-setup-wizard-step-row-height', usage: 'Step row height' },
-  { label: 'step-circle-size', varName: '--color-setup-wizard-step-circle-size', usage: 'Status circle diameter' },
-  { label: 'step-circle-active-bg', varName: '--color-setup-wizard-step-circle-active-bg', usage: 'Active step circle fill' },
-  { label: 'step-circle-active-text', varName: '--color-setup-wizard-step-circle-active-text', usage: 'Active step circle text' },
-  { label: 'step-circle-complete-bg', varName: '--color-setup-wizard-step-circle-complete-bg', usage: 'Complete step fill' },
-  { label: 'step-circle-complete-text', varName: '--color-setup-wizard-step-circle-complete-text', usage: 'Complete step text' },
-  { label: 'step-circle-pending-bg', varName: '--color-setup-wizard-step-circle-pending-bg', usage: 'Pending step fill' },
-  { label: 'step-circle-pending-text', varName: '--color-setup-wizard-step-circle-pending-text', usage: 'Pending step text' },
-  { label: 'step-connector', varName: '--color-setup-wizard-step-connector', usage: 'Step connector stroke' },
-  { label: 'step-label-active-color', varName: '--color-setup-wizard-step-label-active-color', usage: 'Active step label' },
-  { label: 'step-label-pending-color', varName: '--color-setup-wizard-step-label-pending-color', usage: 'Pending step label' },
-  { label: 'step-label-typography', varName: '--color-setup-wizard-step-label-typography', usage: 'Step label font-size' },
+  { label: 'wizard-max-width', varName: '--color-setup-wizard-wizard-max-width', usage: 'Wizard card max width', kind: 'length' },
+  { label: 'wizard-max-height', varName: '--color-setup-wizard-wizard-max-height', usage: 'Wizard card max height', kind: 'length', prop: 'height' },
+  { label: 'wizard-padding', varName: '--color-setup-wizard-wizard-padding', usage: 'Wizard card padding', kind: 'length' },
+  { label: 'step-row-height', varName: '--color-setup-wizard-step-row-height', usage: 'Step row height', kind: 'length', prop: 'height' },
+  { label: 'step-circle-size', varName: '--color-setup-wizard-step-circle-size', usage: 'Status circle diameter', kind: 'length' },
+  { label: 'step-circle-active-bg', varName: '--color-setup-wizard-step-circle-active-bg', usage: 'Active step circle fill', kind: 'color' },
+  { label: 'step-circle-active-text', varName: '--color-setup-wizard-step-circle-active-text', usage: 'Active step circle text', kind: 'color' },
+  { label: 'step-circle-complete-bg', varName: '--color-setup-wizard-step-circle-complete-bg', usage: 'Complete step fill', kind: 'color' },
+  { label: 'step-circle-complete-text', varName: '--color-setup-wizard-step-circle-complete-text', usage: 'Complete step text', kind: 'color' },
+  { label: 'step-circle-pending-bg', varName: '--color-setup-wizard-step-circle-pending-bg', usage: 'Pending step fill', kind: 'color' },
+  { label: 'step-circle-pending-text', varName: '--color-setup-wizard-step-circle-pending-text', usage: 'Pending step text', kind: 'color' },
+  { label: 'step-connector', varName: '--color-setup-wizard-step-connector', usage: 'Step connector stroke', kind: 'color' },
+  { label: 'step-label-active-color', varName: '--color-setup-wizard-step-label-active-color', usage: 'Active step label', kind: 'color' },
+  { label: 'step-label-pending-color', varName: '--color-setup-wizard-step-label-pending-color', usage: 'Pending step label', kind: 'color' },
+  { label: 'step-label-typography', varName: '--color-setup-wizard-step-label-typography', usage: 'Step label font-size', kind: 'length' },
 ];
 
 const SETUP_WIZARD_SURFACE_SCALARS: ScalarToken[] = [
-  { label: 'card-bg', varName: '--color-setup-wizard-surface-card-bg', usage: 'Wizard card fill' },
-  { label: 'card-border', varName: '--color-setup-wizard-surface-card-border', usage: 'Wizard card border' },
-  { label: 'step-panel-width', varName: '--color-setup-wizard-surface-step-panel-width', usage: 'Left step-panel width' },
-  { label: 'step-panel-right-divider', varName: '--color-setup-wizard-surface-step-panel-right-divider', usage: 'Step-panel divider' },
-  { label: 'step-panel-padding-x', varName: '--color-setup-wizard-surface-step-panel-padding-x', usage: 'Step-panel horizontal padding' },
-  { label: 'step-panel-padding-y', varName: '--color-setup-wizard-surface-step-panel-padding-y', usage: 'Step-panel vertical padding' },
-  { label: 'content-panel-padding-x', varName: '--color-setup-wizard-surface-content-panel-padding-x', usage: 'Content-panel horizontal padding' },
-  { label: 'content-panel-padding-y', varName: '--color-setup-wizard-surface-content-panel-padding-y', usage: 'Content-panel vertical padding' },
-  { label: 'input-row-bg', varName: '--color-setup-wizard-surface-input-row-bg', usage: 'Path/input row fill' },
-  { label: 'input-row-border', varName: '--color-setup-wizard-surface-input-row-border', usage: 'Path/input row border' },
-  { label: 'input-row-gap', varName: '--color-setup-wizard-surface-input-row-gap', usage: 'Input-row gap' },
-  { label: 'input-row-min-height', varName: '--color-setup-wizard-surface-input-row-min-height', usage: 'Input-row min height' },
-  { label: 'input-row-rounded', varName: '--color-setup-wizard-surface-input-row-rounded', usage: 'Input-row radius' },
-  { label: 'input-row-label-color', varName: '--color-setup-wizard-surface-input-row-label-color', usage: 'Input-row label' },
-  { label: 'input-row-path-color', varName: '--color-setup-wizard-surface-input-row-path-color', usage: 'Input-row path text' },
-  { label: 'input-row-icon-color', varName: '--color-setup-wizard-surface-input-row-icon-color', usage: 'Input-row icon' },
-  { label: 'input-row-padding-x', varName: '--color-setup-wizard-surface-input-row-padding-x', usage: 'Input-row horizontal padding' },
-  { label: 'input-row-padding-y', varName: '--color-setup-wizard-surface-input-row-padding-y', usage: 'Input-row vertical padding' },
-  { label: 'cta-primary-max-width', varName: '--color-setup-wizard-surface-cta-primary-max-width', usage: 'Primary CTA max width' },
-  { label: 'cta-container-gap', varName: '--color-setup-wizard-surface-cta-container-gap', usage: 'CTA container gap' },
+  { label: 'card-bg', varName: '--color-setup-wizard-surface-card-bg', usage: 'Wizard card fill', kind: 'color' },
+  { label: 'card-border', varName: '--color-setup-wizard-surface-card-border', usage: 'Wizard card border', kind: 'color' },
+  { label: 'step-panel-width', varName: '--color-setup-wizard-surface-step-panel-width', usage: 'Left step-panel width', kind: 'length' },
+  { label: 'step-panel-right-divider', varName: '--color-setup-wizard-surface-step-panel-right-divider', usage: 'Step-panel divider', kind: 'color' },
+  { label: 'step-panel-padding-x', varName: '--color-setup-wizard-surface-step-panel-padding-x', usage: 'Step-panel horizontal padding', kind: 'length' },
+  { label: 'step-panel-padding-y', varName: '--color-setup-wizard-surface-step-panel-padding-y', usage: 'Step-panel vertical padding', kind: 'length', prop: 'height' },
+  { label: 'content-panel-padding-x', varName: '--color-setup-wizard-surface-content-panel-padding-x', usage: 'Content-panel horizontal padding', kind: 'length' },
+  { label: 'content-panel-padding-y', varName: '--color-setup-wizard-surface-content-panel-padding-y', usage: 'Content-panel vertical padding', kind: 'length', prop: 'height' },
+  { label: 'input-row-bg', varName: '--color-setup-wizard-surface-input-row-bg', usage: 'Path/input row fill', kind: 'color' },
+  { label: 'input-row-border', varName: '--color-setup-wizard-surface-input-row-border', usage: 'Path/input row border', kind: 'color' },
+  { label: 'input-row-gap', varName: '--color-setup-wizard-surface-input-row-gap', usage: 'Input-row gap', kind: 'length' },
+  { label: 'input-row-min-height', varName: '--color-setup-wizard-surface-input-row-min-height', usage: 'Input-row min height', kind: 'length', prop: 'height' },
+  { label: 'input-row-rounded', varName: '--color-setup-wizard-surface-input-row-rounded', usage: 'Input-row radius', kind: 'radius' },
+  { label: 'input-row-label-color', varName: '--color-setup-wizard-surface-input-row-label-color', usage: 'Input-row label', kind: 'color' },
+  { label: 'input-row-path-color', varName: '--color-setup-wizard-surface-input-row-path-color', usage: 'Input-row path text', kind: 'color' },
+  { label: 'input-row-icon-color', varName: '--color-setup-wizard-surface-input-row-icon-color', usage: 'Input-row icon', kind: 'color' },
+  { label: 'input-row-padding-x', varName: '--color-setup-wizard-surface-input-row-padding-x', usage: 'Input-row horizontal padding', kind: 'length' },
+  { label: 'input-row-padding-y', varName: '--color-setup-wizard-surface-input-row-padding-y', usage: 'Input-row vertical padding', kind: 'length', prop: 'height' },
+  { label: 'cta-primary-max-width', varName: '--color-setup-wizard-surface-cta-primary-max-width', usage: 'Primary CTA max width', kind: 'length' },
+  { label: 'cta-container-gap', varName: '--color-setup-wizard-surface-cta-container-gap', usage: 'CTA container gap', kind: 'length' },
 ];
 
 const CHROME_SCALARS: ScalarToken[] = [
-  { label: 'sidebar-nav-width', varName: '--sidebar-nav-width', usage: 'App sidebar width' },
-  { label: 'sidebar-nav-item-height', varName: '--sidebar-nav-item-height', usage: 'Sidebar nav item height' },
-  { label: 'dialog-width', varName: '--dialog-width', usage: 'Dialog width (calc-based)' },
-  { label: 'dialog-max-height', varName: '--dialog-max-height', usage: 'Dialog max height' },
-  { label: 'dialog-max-width', varName: '--color-dialog-max-width', usage: 'Dialog max width' },
-  { label: 'sheet-width', varName: '--sheet-width', usage: 'Sheet width (min-based)' },
-  { label: 'listbox-max-height', varName: '--color-listbox-max-height', usage: 'Listbox max height' },
+  { label: 'sidebar-nav-width', varName: '--sidebar-nav-width', usage: 'App sidebar width', kind: 'length' },
+  { label: 'sidebar-nav-item-height', varName: '--sidebar-nav-item-height', usage: 'Sidebar nav item height', kind: 'length', prop: 'height' },
+  { label: 'dialog-width', varName: '--dialog-width', usage: 'Dialog width (calc-based)', kind: 'length' },
+  { label: 'dialog-max-height', varName: '--dialog-max-height', usage: 'Dialog max height', kind: 'length', prop: 'height' },
+  { label: 'dialog-max-width', varName: '--color-dialog-max-width', usage: 'Dialog max width', kind: 'length' },
+  { label: 'sheet-width', varName: '--sheet-width', usage: 'Sheet width (min-based)', kind: 'length' },
+  { label: 'listbox-max-height', varName: '--color-listbox-max-height', usage: 'Listbox max height', kind: 'length', prop: 'height' },
 ];
 
 const READING_CHROME_SCALARS: ScalarToken[] = [
-  { label: 'reading-annotation-inspector-background', varName: '--color-reading-annotation-inspector-background', usage: 'Annotation inspector surface' },
-  { label: 'reading-annotation-inspector-border', varName: '--color-reading-annotation-inspector-border', usage: 'Annotation inspector border' },
-  { label: 'reading-annotation-inspector-text', varName: '--color-reading-annotation-inspector-text', usage: 'Annotation inspector text' },
-  { label: 'reading-selection-toolbar-background', varName: '--color-reading-selection-toolbar-background', usage: 'Selection toolbar surface' },
-  { label: 'reading-selection-toolbar-border', varName: '--color-reading-selection-toolbar-border', usage: 'Selection toolbar border' },
-  { label: 'reading-selection-toolbar-text', varName: '--color-reading-selection-toolbar-text', usage: 'Selection toolbar text' },
-  { label: 'reading-annotation-highlight-yellow-background', varName: '--color-reading-annotation-highlight-yellow-background', usage: 'Yellow highlight fill' },
-  { label: 'reading-annotation-highlight-yellow-text', varName: '--color-reading-annotation-highlight-yellow-text', usage: 'Yellow highlight text' },
-  { label: 'reading-annotation-highlight-blue-background', varName: '--color-reading-annotation-highlight-blue-background', usage: 'Blue highlight fill' },
-  { label: 'reading-annotation-highlight-blue-text', varName: '--color-reading-annotation-highlight-blue-text', usage: 'Blue highlight text' },
-  { label: 'reading-annotation-highlight-green-background', varName: '--color-reading-annotation-highlight-green-background', usage: 'Green highlight fill' },
-  { label: 'reading-annotation-highlight-green-text', varName: '--color-reading-annotation-highlight-green-text', usage: 'Green highlight text' },
-  { label: 'reading-annotation-highlight-pink-background', varName: '--color-reading-annotation-highlight-pink-background', usage: 'Pink highlight fill' },
-  { label: 'reading-annotation-highlight-pink-text', varName: '--color-reading-annotation-highlight-pink-text', usage: 'Pink highlight text' },
+  { label: 'reading-annotation-inspector-background', varName: '--color-reading-annotation-inspector-background', usage: 'Annotation inspector surface', kind: 'color' },
+  { label: 'reading-annotation-inspector-border', varName: '--color-reading-annotation-inspector-border', usage: 'Annotation inspector border', kind: 'color' },
+  { label: 'reading-annotation-inspector-text', varName: '--color-reading-annotation-inspector-text', usage: 'Annotation inspector text', kind: 'color' },
+  { label: 'reading-selection-toolbar-background', varName: '--color-reading-selection-toolbar-background', usage: 'Selection toolbar surface', kind: 'color' },
+  { label: 'reading-selection-toolbar-border', varName: '--color-reading-selection-toolbar-border', usage: 'Selection toolbar border', kind: 'color' },
+  { label: 'reading-selection-toolbar-text', varName: '--color-reading-selection-toolbar-text', usage: 'Selection toolbar text', kind: 'color' },
+  { label: 'reading-selection-toolbar-shadow', varName: '--color-reading-selection-toolbar-shadow', usage: 'Selection toolbar elevation', kind: 'shadow' },
+  { label: 'reading-annotation-highlight-yellow-background', varName: '--color-reading-annotation-highlight-yellow-background', usage: 'Yellow highlight fill', kind: 'color' },
+  { label: 'reading-annotation-highlight-yellow-text', varName: '--color-reading-annotation-highlight-yellow-text', usage: 'Yellow highlight text', kind: 'color' },
+  { label: 'reading-annotation-highlight-blue-background', varName: '--color-reading-annotation-highlight-blue-background', usage: 'Blue highlight fill', kind: 'color' },
+  { label: 'reading-annotation-highlight-blue-text', varName: '--color-reading-annotation-highlight-blue-text', usage: 'Blue highlight text', kind: 'color' },
+  { label: 'reading-annotation-highlight-green-background', varName: '--color-reading-annotation-highlight-green-background', usage: 'Green highlight fill', kind: 'color' },
+  { label: 'reading-annotation-highlight-green-text', varName: '--color-reading-annotation-highlight-green-text', usage: 'Green highlight text', kind: 'color' },
+  { label: 'reading-annotation-highlight-pink-background', varName: '--color-reading-annotation-highlight-pink-background', usage: 'Pink highlight fill', kind: 'color' },
+  { label: 'reading-annotation-highlight-pink-text', varName: '--color-reading-annotation-highlight-pink-text', usage: 'Pink highlight text', kind: 'color' },
 ];
 
 interface ReadingChromeSpecimen {
@@ -688,6 +766,13 @@ interface ReadingChromeSpecimen {
   varName: string;
   sample: string;
   className: string;
+  /** Extra inline style applied via the live generated vars (non-color leaves). */
+  styleVarNames?: Record<string, string>;
+  /** Computed CSS properties to read live and append to the row (font-size,
+   *  line-height, letter-spacing, margin-top, padding-left, text-align,
+   *  text-transform, border-left, background-color, …). Key is the computed
+   *  property, value is the var resolved by that property. */
+  readouts?: Array<{ prop: string; varName: string }>;
 }
 
 const READING_CHROME_SPECIMENS: ReadingChromeSpecimen[] = [
@@ -695,61 +780,213 @@ const READING_CHROME_SPECIMENS: ReadingChromeSpecimen[] = [
     label: 'novel · chapter-title',
     varName: '--reading-chrome-novel-chapter-title-color',
     sample: 'Chapter Twelve — The Tidal Gate',
-    className: 'font-display text-[28px] font-semibold',
+    className: 'font-display',
+    styleVarNames: {
+      fontSize: '--reading-chrome-novel-chapter-title-font-size',
+      lineHeight: '--reading-chrome-novel-chapter-title-line-height',
+      letterSpacing: '--reading-chrome-novel-chapter-title-letter-spacing',
+      fontWeight: '--reading-chrome-novel-chapter-title-font-weight',
+      fontFamily: '--reading-chrome-novel-chapter-title-font-family',
+    },
+    readouts: [
+      { prop: 'fontSize', varName: '--reading-chrome-novel-chapter-title-font-size' },
+      { prop: 'lineHeight', varName: '--reading-chrome-novel-chapter-title-line-height' },
+      { prop: 'letterSpacing', varName: '--reading-chrome-novel-chapter-title-letter-spacing' },
+    ],
+  },
+  {
+    label: 'novel · scene-separator',
+    varName: '--reading-chrome-novel-scene-separator-color',
+    sample: '· · ·',
+    className: 'block',
+    styleVarNames: {
+      color: '--reading-chrome-novel-scene-separator-color',
+      fontSize: '--reading-chrome-novel-scene-separator-font-size',
+      textAlign: '--reading-chrome-novel-scene-separator-text-align',
+      paddingBlock: '--reading-chrome-novel-scene-separator-padding-block',
+    },
+    readouts: [
+      { prop: 'fontSize', varName: '--reading-chrome-novel-scene-separator-font-size' },
+      { prop: 'textAlign', varName: '--reading-chrome-novel-scene-separator-text-align' },
+      { prop: 'paddingTop', varName: '--reading-chrome-novel-scene-separator-padding-block' },
+    ],
   },
   {
     label: 'novel · epigraph',
     varName: '--reading-chrome-novel-epigraph-color',
     sample: '“Water remembers every shore.”',
-    className: 'italic text-right',
+    className: 'block',
+    styleVarNames: {
+      color: '--reading-chrome-novel-epigraph-color',
+      fontStyle: '--reading-chrome-novel-epigraph-font-style',
+      textAlign: '--reading-chrome-novel-epigraph-text-align',
+      paddingLeft: '--reading-chrome-novel-epigraph-padding-left',
+    },
+    readouts: [
+      { prop: 'fontStyle', varName: '--reading-chrome-novel-epigraph-font-style' },
+      { prop: 'textAlign', varName: '--reading-chrome-novel-epigraph-text-align' },
+      { prop: 'paddingLeft', varName: '--reading-chrome-novel-epigraph-padding-left' },
+    ],
   },
   {
     label: 'essay · section-heading',
     varName: '--reading-chrome-essay-section-heading-color',
     sample: 'The Long Descent',
-    className: 'font-medium',
+    className: 'block',
+    styleVarNames: {
+      color: '--reading-chrome-essay-section-heading-color',
+      fontSize: '--reading-chrome-essay-section-heading-font-size',
+      fontWeight: '--reading-chrome-essay-section-heading-font-weight',
+      lineHeight: '--reading-chrome-essay-section-heading-line-height',
+      letterSpacing: '--reading-chrome-essay-section-heading-letter-spacing',
+      marginTop: '--reading-chrome-essay-section-heading-margin-top',
+    },
+    readouts: [
+      { prop: 'fontSize', varName: '--reading-chrome-essay-section-heading-font-size' },
+      { prop: 'lineHeight', varName: '--reading-chrome-essay-section-heading-line-height' },
+      { prop: 'marginTop', varName: '--reading-chrome-essay-section-heading-margin-top' },
+    ],
   },
   {
     label: 'essay · blockquote',
     varName: '--reading-chrome-essay-blockquote-color',
     sample: '“Precision is patience, applied.”',
-    className: 'italic',
+    className: 'block',
+    styleVarNames: {
+      color: '--reading-chrome-essay-blockquote-color',
+      borderLeft: '--reading-chrome-essay-blockquote-border-left',
+      paddingLeft: '--reading-chrome-essay-blockquote-padding-left',
+      fontStyle: '--reading-chrome-essay-blockquote-font-style',
+    },
+    readouts: [
+      { prop: 'borderLeftColor', varName: '--reading-chrome-essay-blockquote-border-left' },
+      { prop: 'paddingLeft', varName: '--reading-chrome-essay-blockquote-padding-left' },
+      { prop: 'fontStyle', varName: '--reading-chrome-essay-blockquote-font-style' },
+    ],
   },
   {
     label: 'essay · footnote-marker',
     varName: '--reading-chrome-essay-footnote-marker-color',
     sample: '1',
-    className: 'align-super text-xs',
+    className: 'inline-block',
+    styleVarNames: {
+      color: '--reading-chrome-essay-footnote-marker-color',
+      verticalAlign: '--reading-chrome-essay-footnote-marker-vertical-align',
+      fontSize: '--reading-chrome-essay-footnote-marker-font-size',
+    },
+    readouts: [
+      { prop: 'verticalAlign', varName: '--reading-chrome-essay-footnote-marker-vertical-align' },
+      { prop: 'fontSize', varName: '--reading-chrome-essay-footnote-marker-font-size' },
+    ],
   },
   {
     label: 'script · character-name',
     varName: '--reading-chrome-script-character-name-color',
     sample: 'MARSH',
-    className: 'font-bold text-sm uppercase',
+    className: 'block',
+    styleVarNames: {
+      color: '--reading-chrome-script-character-name-color',
+      textAlign: '--reading-chrome-script-character-name-text-align',
+      textTransform: '--reading-chrome-script-character-name-text-transform',
+      fontWeight: '--reading-chrome-script-character-name-font-weight',
+      fontSize: '--reading-chrome-script-character-name-font-size',
+      letterSpacing: '--reading-chrome-script-character-name-letter-spacing',
+      marginTop: '--reading-chrome-script-character-name-margin-top',
+    },
+    readouts: [
+      { prop: 'textTransform', varName: '--reading-chrome-script-character-name-text-transform' },
+      { prop: 'letterSpacing', varName: '--reading-chrome-script-character-name-letter-spacing' },
+      { prop: 'marginTop', varName: '--reading-chrome-script-character-name-margin-top' },
+    ],
   },
   {
     label: 'script · parenthetical',
     varName: '--reading-chrome-script-parenthetical-color',
     sample: '(glances at the folded chart)',
-    className: 'italic',
+    className: 'block',
+    styleVarNames: {
+      color: '--reading-chrome-script-parenthetical-color',
+      fontStyle: '--reading-chrome-script-parenthetical-font-style',
+      paddingLeft: '--reading-chrome-script-parenthetical-padding-left',
+    },
+    readouts: [
+      { prop: 'fontStyle', varName: '--reading-chrome-script-parenthetical-font-style' },
+      { prop: 'paddingLeft', varName: '--reading-chrome-script-parenthetical-padding-left' },
+    ],
   },
   {
     label: 'script · scene-heading',
     varName: '--reading-chrome-script-scene-heading-color',
     sample: 'EXT. TIDEPOOL — NIGHT',
-    className: 'font-bold text-sm uppercase',
+    className: 'block',
+    styleVarNames: {
+      color: '--reading-chrome-script-scene-heading-color',
+      textTransform: '--reading-chrome-script-scene-heading-text-transform',
+      fontWeight: '--reading-chrome-script-scene-heading-font-weight',
+      fontSize: '--reading-chrome-script-scene-heading-font-size',
+      letterSpacing: '--reading-chrome-script-scene-heading-letter-spacing',
+      marginTop: '--reading-chrome-script-scene-heading-margin-top',
+    },
+    readouts: [
+      { prop: 'textTransform', varName: '--reading-chrome-script-scene-heading-text-transform' },
+      { prop: 'marginTop', varName: '--reading-chrome-script-scene-heading-margin-top' },
+      { prop: 'letterSpacing', varName: '--reading-chrome-script-scene-heading-letter-spacing' },
+    ],
   },
   {
     label: 'game-bible · term-link',
     varName: '--reading-chrome-game-bible-term-link-color',
     sample: 'tide-mark',
-    className: 'underline decoration-dotted',
+    className: 'inline',
+    styleVarNames: {
+      color: '--reading-chrome-game-bible-term-link-color',
+      textDecoration: '--reading-chrome-game-bible-term-link-text-decoration',
+    },
+    readouts: [
+      { prop: 'textDecorationLine', varName: '--reading-chrome-game-bible-term-link-text-decoration' },
+    ],
+  },
+  {
+    label: 'game-bible · definition-callout',
+    varName: '--reading-chrome-game-bible-definition-callout-background-color',
+    sample: 'tide-mark — a watermark left by the turning of the sea',
+    className: 'block',
+    styleVarNames: {
+      backgroundColor: '--reading-chrome-game-bible-definition-callout-background-color',
+      borderLeft: '--reading-chrome-game-bible-definition-callout-border-left',
+      padding: '--reading-chrome-game-bible-definition-callout-padding',
+    },
+    readouts: [
+      { prop: 'backgroundColor', varName: '--reading-chrome-game-bible-definition-callout-background-color' },
+      { prop: 'borderLeftColor', varName: '--reading-chrome-game-bible-definition-callout-border-left' },
+      { prop: 'paddingLeft', varName: '--reading-chrome-game-bible-definition-callout-padding' },
+    ],
+  },
+  {
+    label: 'game-bible · definition-callout-label',
+    varName: '--reading-chrome-game-bible-definition-callout-label-color',
+    sample: 'TIDE-MARK',
+    className: 'block',
+    styleVarNames: {
+      color: '--reading-chrome-game-bible-definition-callout-label-color',
+      fontWeight: '--reading-chrome-game-bible-definition-callout-label-font-weight',
+    },
+    readouts: [
+      { prop: 'fontWeight', varName: '--reading-chrome-game-bible-definition-callout-label-font-weight' },
+    ],
   },
   {
     label: 'game-bible · category-badge',
     varName: '--reading-chrome-game-bible-category-badge-color',
     sample: 'FLORA',
-    className: 'font-semibold',
+    className: 'inline-flex items-center',
+    styleVarNames: {
+      color: '--reading-chrome-game-bible-category-badge-color',
+      backgroundColor: '--reading-chrome-game-bible-category-badge-background-color',
+    },
+    readouts: [
+      { prop: 'backgroundColor', varName: '--reading-chrome-game-bible-category-badge-background-color' },
+    ],
   },
 ];
 
@@ -884,6 +1121,66 @@ function ColorSwatch({ token }: { token: ColorToken }) {
       <div className="flex flex-col gap-0.5 min-w-0">
         <span className="text-label-14 text-gray-1000 truncate">{token.label}</span>
         <span className="text-copy-13 text-gray-700 truncate font-mono">{computed}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Semantic role reader — applies bg + text + border as ONE compact control so
+ * the reviewer sees the actual readable pairing (and either a contrast pass or
+ * failure) instead of three unrelated flat rectangles. Shape mirrors the chip
+ * usage: pill for status/badge chips, surface for state alert blocks.
+ */
+function SemanticRoleReader({ triple }: { triple: SemanticTriple }) {
+  const { resolvedTheme } = useTheme();
+  const ref = useRef<HTMLDivElement>(null);
+  const [readouts, setReadouts] = useState('');
+
+  useEffect(() => {
+    if (!ref.current) return;
+    const rafId = requestAnimationFrame(() => {
+      const cs = getComputedStyle(ref.current!);
+      const parts = [`bg ${cs.backgroundColor}`, `text ${cs.color}`];
+      if (triple.border) parts.push(`border ${cs.borderTopColor}`);
+      setReadouts(parts.join(' · '));
+    });
+    return () => cancelAnimationFrame(rafId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedTheme]);
+
+  const base =
+    triple.shape === 'surface'
+      ? 'rounded-card p-4 min-h-[64px] flex flex-col justify-center text-copy-14 border'
+      : triple.shape === 'highlight'
+        ? 'rounded-pill px-3 py-1.5 text-copy-14'
+        : 'rounded-pill px-3 py-1.5 text-label-12 border';
+
+  const style: CSSProperties = {
+    backgroundColor: `var(${triple.bg})`,
+    color: `var(${triple.text})`,
+  };
+  if (triple.border) style.borderColor = `var(${triple.border})`;
+
+  return (
+    <div className="flex flex-col gap-2" data-testid={`semantic-role-${triple.label}`}>
+      <div
+        ref={ref}
+        className={`${base} w-full`}
+        style={style}
+      >
+        <span className="font-semibold">{triple.sample}</span>
+        {triple.shape === 'surface' && (
+          <span className="mt-1 opacity-90" style={{ color: 'var(--color-gray-600)' }}>
+            state surface — translucent tint + border
+          </span>
+        )}
+      </div>
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <span className="text-label-14 text-gray-1000 truncate">{triple.label}</span>
+        <span className="text-copy-13 text-gray-700 truncate font-mono">
+          {readouts || '…'}
+        </span>
       </div>
     </div>
   );
@@ -1389,36 +1686,99 @@ function DisabledWashDemo() {
 }
 
 /**
+ * Read a structural CSS custom property using a property-appropriate probe.
+ *
+ * We do NOT force every token through backgroundColor (which turns
+ * `--dialog-width: calc(100% - 2rem)` into an empty/zero readout and any
+ * transparent color into "0px"), nor do we measure a `display:none` length
+ * (viewport/percentage/calc expressions cannot resolve against a hidden
+ * element and always collapse to 0px).
+ *
+ * Instead each scalar declares how it is *used* (kind): colors probe
+ * background-color, shadows probe box-shadow, and lengths probe the actual
+ * dimension of a visible off-canvas element so calc/min/`%` expressions
+ * resolve against a real containing block. The declared token value is
+ * read from the document root and shown alongside the applied result so the
+ * reviewer sees both the source expression and the computed result.
+ */
+function resolveScalarValue(
+  varName: string,
+  kind: ScalarToken['kind'] | undefined,
+  prop: ScalarToken['prop'] | undefined,
+): string {
+  const root = getComputedStyle(window.document.documentElement);
+  const declared = root.getPropertyValue(varName).trim();
+
+  if (kind === 'color') {
+    const el = document.createElement('div');
+    el.style.backgroundColor = `var(${varName})`;
+    el.style.display = 'none';
+    document.body.appendChild(el);
+    const computed = getComputedStyle(el).backgroundColor;
+    document.body.removeChild(el);
+    // Transparent stays transparent — never turn it into "0px".
+    if (computed === 'transparent' || computed === 'rgba(0, 0, 0, 0)') {
+      return `${declared} → transparent`;
+    }
+    return computed ? `${declared} → ${computed}` : declared;
+  }
+
+  if (kind === 'shadow') {
+    const el = document.createElement('div');
+    el.style.boxShadow = `var(${varName})`;
+    el.style.display = 'none';
+    document.body.appendChild(el);
+    const computed = getComputedStyle(el).boxShadow;
+    document.body.removeChild(el);
+    return computed && computed !== 'none' ? `${declared} → ${computed}` : declared;
+  }
+
+  if (kind === 'radius') {
+    const el = document.createElement('div');
+    el.style.borderRadius = `var(${varName})`;
+    el.style.position = 'fixed';
+    el.style.left = '-9999px';
+    document.body.appendChild(el);
+    const computed = getComputedStyle(el).borderRadius;
+    document.body.removeChild(el);
+    return computed && computed !== '0px' ? `${declared} → ${computed}` : declared;
+  }
+
+  // Length (or auto) — probe the relevant dimension on a VISIBLE (not
+  // display:none / hidden) element so viewport/percentage/calc resolve
+  // against a real box. We use `position:fixed; left:-9999px` to keep the
+  // probe off-screen without removing it from layout resolution.
+  const isHeight = prop === 'height';
+  const el = document.createElement('div');
+  el.style.position = 'fixed';
+  el.style.left = '-9999px';
+  el.style.top = '0';
+  el.style.width = isHeight ? 'auto' : `var(${varName})`;
+  el.style.height = isHeight ? `var(${varName})` : 'auto';
+  document.body.appendChild(el);
+  const applied = getComputedStyle(el)[isHeight ? 'height' : 'width'];
+  document.body.removeChild(el);
+  const validApplied = applied && /^(?!0px$).*px$/.test(applied) && applied.trim() !== '0px';
+  return validApplied ? `${declared} → ${applied}` : declared;
+}
+
+/**
  * Scalar token row — reads the live computed value of a structural CSS var
- * (length / color / radius) via a probe element, re-resolving on theme flip.
+ * (length / color / shadow / radius) via a property-appropriate probe
+ * element, re-resolving on theme flip, and shows BOTH the declared token
+ * expression and the applied browser-computed result.
  */
 function ScalarRow({ token }: { token: ScalarToken }) {
   const { resolvedTheme } = useTheme();
   const [computed, setComputed] = useState('');
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const el = document.createElement('div');
-    el.style.backgroundColor = `var(${token.varName})`;
-    el.style.display = 'none';
-    document.body.appendChild(el);
-    const bg = getComputedStyle(el).backgroundColor;
-    document.body.removeChild(el);
-    let value = '';
-    if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') {
-      value = bg;
-    } else {
-      const el2 = document.createElement('div');
-      el2.style.width = `var(${token.varName})`;
-      el2.style.display = 'none';
-      document.body.appendChild(el2);
-      const w = getComputedStyle(el2).width;
-      document.body.removeChild(el2);
-      if (w.endsWith('px')) value = w;
-    }
-    const rafId = requestAnimationFrame(() => setComputed(value || ''));
+    const rafId = requestAnimationFrame(() =>
+      setComputed(resolveScalarValue(token.varName, token.kind, token.prop)),
+    );
     return () => cancelAnimationFrame(rafId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedTheme, token.varName]);
+  }, [resolvedTheme, token.varName, token.kind, token.prop]);
 
   return (
     <div
@@ -1426,7 +1786,7 @@ function ScalarRow({ token }: { token: ScalarToken }) {
       data-testid={`scalar-row-${token.label}`}
     >
       <span className="text-label-14 font-medium text-gray-1000 w-56 shrink-0 truncate">{token.label}</span>
-      <span className="text-copy-13-mono font-mono text-gray-600 w-56 shrink-0 break-all">
+      <span className="text-copy-13-mono font-mono text-gray-600 w-64 shrink-0 break-all">
         {computed || token.varName}
       </span>
       <span className="text-copy-13 text-gray-600">{token.usage}</span>
@@ -1434,18 +1794,33 @@ function ScalarRow({ token }: { token: ScalarToken }) {
   );
 }
 
-/** Reading-chrome specimen — sample text styled with the flattened css var. */
+/** Reading-chrome specimen — sample text styled with the flattened css vars. */
 function ReadingChromeSpecimenRow({ spec }: { spec: ReadingChromeSpecimen }) {
   const { resolvedTheme } = useTheme();
-  const [color, setColor] = useState('');
+  const [readouts, setReadouts] = useState('');
   const ref = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const rafId = requestAnimationFrame(() => setColor(getComputedStyle(el).color));
+    const rafId = requestAnimationFrame(() => {
+      const cs = getComputedStyle(el);
+      const parts: string[] = [];
+      // Always show the resolved color readout first.
+      parts.push(cs.color);
+      for (const { prop } of spec.readouts ?? []) {
+        const v = cs[prop as keyof CSSStyleDeclaration] as string;
+        if (typeof v === 'string' && v) parts.push(`${prop}: ${v}`);
+      }
+      setReadouts(parts.join(' · '));
+    });
     return () => cancelAnimationFrame(rafId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedTheme]);
+  }, [resolvedTheme, spec]);
+
+  const style: CSSProperties = { color: `var(${spec.varName})` };
+  for (const [cssProp, varName] of Object.entries(spec.styleVarNames ?? {})) {
+    style[cssProp as keyof CSSProperties] = `var(${varName})` as never;
+  }
 
   return (
     <div
@@ -1457,14 +1832,14 @@ function ReadingChromeSpecimenRow({ spec }: { spec: ReadingChromeSpecimen }) {
         <span className="text-copy-13-mono font-mono text-gray-500 break-all">{spec.varName}</span>
       </div>
       <div className="flex-1 min-w-0 flex items-baseline gap-2">
-        <span
-          ref={ref}
-          className={spec.className}
-          style={{ color: `var(${spec.varName})` }}
-        >
+        <span ref={ref} className={`${spec.className} min-w-0`} style={style}>
           {spec.sample}
         </span>
-        {color && <span className="text-copy-13-mono font-mono text-gray-500 ml-auto shrink-0">{color}</span>}
+        {readouts && (
+          <span className="text-copy-13-mono font-mono text-gray-500 min-w-0 break-words text-left">
+            {readouts}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -1620,6 +1995,39 @@ function ColorsSection() {
           </div>
         </div>
       ))}
+
+      {/* Semantic role readers — the trio bg/text/border as one control, so
+          the reviewer sees the actual readable state pill (or a contrast
+          failure) instead of separate flat rectangles. */}
+      <div className="mt-10 border-t border-gray-alpha-200 pt-8" data-testid="semantic-role-readers">
+        <h4 className="text-heading-16 font-semibold text-gray-900 mb-2">
+          Semantic bg · text · border in context
+        </h4>
+        <p className="text-copy-13 text-gray-600 mb-4 max-w-prose">
+          The families on this page also resolve as whole controls. Each reader applies the fill,
+          text, and border tokens together as one compact pill or state surface — the same way the
+          product paints them — so a readable pairing (or a contrast failure) is visible directly,
+          not inferred from separate flat swatches.
+        </p>
+
+        {[
+          { title: 'Finding status pills', triples: FINDING_PILL_TRIPLES },
+          { title: 'Memory task-kind chips', triples: MEMORY_TASK_KIND_TRIPLES },
+          { title: 'Reading maturation badges', triples: READING_MATURATION_TRIPLES },
+          { title: 'nexus-ui Badge soft variants', triples: BADGE_SOFT_TRIPLES },
+          { title: 'State surface fills & borders', triples: STATE_SURFACE_TRIPLES },
+          { title: 'Reading annotation highlights', triples: ANNOTATION_TRIPLES },
+        ].map(({ title, triples }) => (
+          <div key={title} className="mb-6">
+            <h5 className="text-label-14 font-medium text-gray-1000 mb-2">{title}</h5>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 items-start">
+              {triples.map((t) => (
+                <SemanticRoleReader key={t.label} triple={t} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
