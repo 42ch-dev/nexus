@@ -307,7 +307,7 @@ async fn wait_for_run_status(
     expected: &str,
     timeout_secs: u64,
 ) -> (String, Value) {
-    match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
+    if let Ok(record) = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
         loop {
             let record = load_run_record(daemon, session_id).await;
             if record.0 == expected {
@@ -318,11 +318,10 @@ async fn wait_for_run_status(
     })
     .await
     {
-        Ok(record) => record,
-        Err(_) => {
-            let (status, state) = load_run_record(daemon, session_id).await;
-            panic!("run {session_id} did not reach {expected}; status={status} state={state:?}");
-        }
+        record
+    } else {
+        let (status, state) = load_run_record(daemon, session_id).await;
+        panic!("run {session_id} did not reach {expected}; status={status} state={state:?}");
     }
 }
 
@@ -384,38 +383,38 @@ async fn admission_production_host_progress_non_echo() {
 
     // The drive loop steps recall → generate (Host prompt) → persist, then
     // parks at the manual wait. Wait for the prompt to be recorded.
-    let prompts = match tokio::time::timeout(std::time::Duration::from_secs(15), async {
-        loop {
-            let prompts = host.prompts();
-            if !prompts.is_empty() {
-                return prompts;
+    let prompts = if let Ok(prompts) =
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            loop {
+                let prompts = host.prompts();
+                if !prompts.is_empty() {
+                    return prompts;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-    })
-    .await
+        })
+        .await
     {
-        Ok(prompts) => prompts,
-        Err(_) => {
-            // Diagnostic: dump the durable run state so a drive failure is
-            // visible instead of a bare timeout.
-            let row = load_drive_row(&daemon, &schedule_id).await;
-            let sid = row.current_session_id.unwrap_or_default();
-            let record: (String, Option<Vec<u8>>) = sqlx::query_as(
-                "SELECT status, run_state_json FROM orchestration_sessions WHERE session_id = ?",
-            )
-            .bind(&sid)
-            .fetch_one(&daemon.pool)
-            .await
-            .expect("load run record for diagnostic");
-            panic!(
-                "host prompt not recorded; schedule status={} session={} run_status={} state={:?}",
-                row.status,
-                sid,
-                record.0,
-                record.1.map(|b| String::from_utf8_lossy(&b).to_string())
-            );
-        }
+        prompts
+    } else {
+        // Diagnostic: dump the durable run state so a drive failure is
+        // visible instead of a bare timeout.
+        let row = load_drive_row(&daemon, &schedule_id).await;
+        let sid = row.current_session_id.unwrap_or_default();
+        let record: (String, Option<Vec<u8>>) = sqlx::query_as(
+            "SELECT status, run_state_json FROM orchestration_sessions WHERE session_id = ?",
+        )
+        .bind(&sid)
+        .fetch_one(&daemon.pool)
+        .await
+        .expect("load run record for diagnostic");
+        panic!(
+            "host prompt not recorded; schedule status={} session={} run_status={} state={:?}",
+            row.status,
+            sid,
+            record.0,
+            record.1.map(|b| String::from_utf8_lossy(&b).to_string())
+        );
     };
 
     assert!(
@@ -442,40 +441,40 @@ async fn admission_production_host_progress_non_echo() {
         .as_deref()
         .expect("driven schedule must own a session")
         .to_string();
-    let (status, state) = match tokio::time::timeout(std::time::Duration::from_secs(15), async {
-        loop {
-            let record: (String, Option<Vec<u8>>) = sqlx::query_as(
+    let (status, state) = if let Ok(parked) =
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            loop {
+                let record: (String, Option<Vec<u8>>) = sqlx::query_as(
                 "SELECT status, run_state_json FROM orchestration_sessions WHERE session_id = ?",
             )
             .bind(&sid)
             .fetch_one(&daemon.pool)
             .await
             .expect("load run record");
-            if record.0 == "waiting_for_input" {
-                let state: Value = serde_json::from_slice(record.1.as_deref().unwrap_or(b"{}"))
-                    .expect("run state json");
-                return (record.0, state);
+                if record.0 == "waiting_for_input" {
+                    let state: Value = serde_json::from_slice(record.1.as_deref().unwrap_or(b"{}"))
+                        .expect("run state json");
+                    return (record.0, state);
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-    })
-    .await
+        })
+        .await
     {
-        Ok(parked) => parked,
-        Err(_) => {
-            let record: (String, Option<Vec<u8>>) = sqlx::query_as(
-                "SELECT status, run_state_json FROM orchestration_sessions WHERE session_id = ?",
-            )
-            .bind(&sid)
-            .fetch_one(&daemon.pool)
-            .await
-            .expect("load run record for diagnostic");
-            panic!(
-                "run did not park at manual wait; status={} state={:?}",
-                record.0,
-                record.1.map(|b| String::from_utf8_lossy(&b).to_string())
-            );
-        }
+        parked
+    } else {
+        let record: (String, Option<Vec<u8>>) = sqlx::query_as(
+            "SELECT status, run_state_json FROM orchestration_sessions WHERE session_id = ?",
+        )
+        .bind(&sid)
+        .fetch_one(&daemon.pool)
+        .await
+        .expect("load run record for diagnostic");
+        panic!(
+            "run did not park at manual wait; status={} state={:?}",
+            record.0,
+            record.1.map(|b| String::from_utf8_lossy(&b).to_string())
+        );
     };
     assert_eq!(status, "waiting_for_input");
     assert!(
@@ -1595,42 +1594,42 @@ async fn admission_internal_insertion_branches_durable() {
         .start(&chain_id)
         .await
         .expect("auto-chain admitted through the production starter");
-    let chain_prompts = match tokio::time::timeout(std::time::Duration::from_secs(15), async {
-        loop {
-            let prompts = host.prompts();
-            if !prompts.is_empty() {
-                return prompts;
+    let chain_prompts = if let Ok(prompts) =
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            loop {
+                let prompts = host.prompts();
+                if !prompts.is_empty() {
+                    return prompts;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-    })
-    .await
+        })
+        .await
     {
-        Ok(prompts) => prompts,
-        Err(_) => {
-            let (status, state) = load_run_record(&daemon, &chain_sid.0).await;
-            let row = load_drive_row(&daemon, &chain_id).await;
-            let ctx: Option<Vec<u8>> = sqlx::query_scalar(
-                "SELECT context_json FROM orchestration_sessions WHERE session_id = ?",
-            )
-            .bind(&chain_sid.0)
-            .fetch_one(&daemon.pool)
-            .await
-            .expect("load context");
-            let ctx_text = ctx
-                .map(|b| String::from_utf8_lossy(&b).to_string())
-                .unwrap_or_default();
-            let run_error = serde_json::from_str::<Value>(&ctx_text)
-                .ok()
-                .and_then(|v| v.get("data").cloned())
-                .and_then(|d| d.get("_run_error").cloned())
-                .unwrap_or(Value::Null);
-            panic!(
-                "auto-chain host prompt not recorded; session={} status={} state={:?} \
-                 schedule_status={} schedule_session={:?} run_error={:?}",
-                chain_sid.0, status, state, row.status, row.current_session_id, run_error
-            );
-        }
+        prompts
+    } else {
+        let (status, state) = load_run_record(&daemon, &chain_sid.0).await;
+        let row = load_drive_row(&daemon, &chain_id).await;
+        let ctx: Option<Vec<u8>> = sqlx::query_scalar(
+            "SELECT context_json FROM orchestration_sessions WHERE session_id = ?",
+        )
+        .bind(&chain_sid.0)
+        .fetch_one(&daemon.pool)
+        .await
+        .expect("load context");
+        let ctx_text = ctx
+            .map(|b| String::from_utf8_lossy(&b).to_string())
+            .unwrap_or_default();
+        let run_error = serde_json::from_str::<Value>(&ctx_text)
+            .ok()
+            .and_then(|v| v.get("data").cloned())
+            .and_then(|d| d.get("_run_error").cloned())
+            .unwrap_or(Value::Null);
+        panic!(
+            "auto-chain host prompt not recorded; session={} status={} state={:?} \
+             schedule_status={} schedule_session={:?} run_error={:?}",
+            chain_sid.0, status, state, row.status, row.current_session_id, run_error
+        );
     };
     assert!(
         chain_prompts
@@ -1758,7 +1757,7 @@ async fn admission_internal_insertion_branches_durable() {
 }
 
 /// N-4b: a schedule add with NO bindings for a preset whose graphs issue
-/// prompts refuses loudly (400 invalid_input) before any run row is created
+/// prompts refuses loudly (400 `invalid_input`) before any run row is created
 /// — the completeness gate, not the prompt executor, is the admission
 /// validator.
 #[tokio::test]
@@ -1891,44 +1890,44 @@ async fn admission_force_gates_insertion_driven() {
     // Driven with real Host progress: the `gather` enter action
     // (`creator.inject_prompt`) enqueues the durable prompt injection; the
     // exit judge (`judge.llm` → acp.prompt) reaches the Host.
-    let prompts = match tokio::time::timeout(std::time::Duration::from_secs(15), async {
-        loop {
-            let prompts = host.prompts();
-            if !prompts.is_empty() {
-                return prompts;
+    let prompts = if let Ok(prompts) =
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            loop {
+                let prompts = host.prompts();
+                if !prompts.is_empty() {
+                    return prompts;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-    })
-    .await
+        })
+        .await
     {
-        Ok(prompts) => prompts,
-        Err(_) => {
-            let row = load_drive_row(&daemon, &schedule_id).await;
-            let sid = row.current_session_id.clone().unwrap_or_default();
-            let (status, state) = load_run_record(&daemon, &sid).await;
-            let ctx: Option<Vec<u8>> = sqlx::query_scalar(
-                "SELECT context_json FROM orchestration_sessions WHERE session_id = ?",
-            )
-            .bind(&sid)
-            .fetch_one(&daemon.pool)
-            .await
-            .expect("load context");
-            let ctx_text = ctx
-                .map(|b| String::from_utf8_lossy(&b).to_string())
-                .unwrap_or_default();
-            let run_error = serde_json::from_str::<Value>(&ctx_text)
-                .ok()
-                .and_then(|v| v.get("data").cloned())
-                .and_then(|d| d.get("_run_error").cloned())
-                .unwrap_or(Value::Null);
-            panic!(
-                "force-gates host prompt not recorded; schedule={schedule_id} \
-                 schedule_status={} schedule_session={:?} session={sid} \
-                 status={status} state={state:?} run_error={run_error:?}",
-                row.status, row.current_session_id,
-            );
-        }
+        prompts
+    } else {
+        let row = load_drive_row(&daemon, &schedule_id).await;
+        let sid = row.current_session_id.clone().unwrap_or_default();
+        let (status, state) = load_run_record(&daemon, &sid).await;
+        let ctx: Option<Vec<u8>> = sqlx::query_scalar(
+            "SELECT context_json FROM orchestration_sessions WHERE session_id = ?",
+        )
+        .bind(&sid)
+        .fetch_one(&daemon.pool)
+        .await
+        .expect("load context");
+        let ctx_text = ctx
+            .map(|b| String::from_utf8_lossy(&b).to_string())
+            .unwrap_or_default();
+        let run_error = serde_json::from_str::<Value>(&ctx_text)
+            .ok()
+            .and_then(|v| v.get("data").cloned())
+            .and_then(|d| d.get("_run_error").cloned())
+            .unwrap_or(Value::Null);
+        panic!(
+            "force-gates host prompt not recorded; schedule={schedule_id} \
+             schedule_status={} schedule_session={:?} session={sid} \
+             status={status} state={state:?} run_error={run_error:?}",
+            row.status, row.current_session_id,
+        );
     };
     assert!(
         prompts
@@ -2031,44 +2030,44 @@ async fn admission_gated_work_insertion_driven() {
         Some("running"),
         "gated row must be admitted immediately: {body}"
     );
-    let prompts = match tokio::time::timeout(std::time::Duration::from_secs(15), async {
-        loop {
-            let prompts = host.prompts();
-            if !prompts.is_empty() {
-                return prompts;
+    let prompts = if let Ok(prompts) =
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            loop {
+                let prompts = host.prompts();
+                if !prompts.is_empty() {
+                    return prompts;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-    })
-    .await
+        })
+        .await
     {
-        Ok(prompts) => prompts,
-        Err(_) => {
-            let row = load_drive_row(&daemon, &schedule_id).await;
-            let sid = row.current_session_id.clone().unwrap_or_default();
-            let (status, state) = load_run_record(&daemon, &sid).await;
-            let ctx: Option<Vec<u8>> = sqlx::query_scalar(
-                "SELECT context_json FROM orchestration_sessions WHERE session_id = ?",
-            )
-            .bind(&sid)
-            .fetch_one(&daemon.pool)
-            .await
-            .expect("load context");
-            let ctx_text = ctx
-                .map(|b| String::from_utf8_lossy(&b).to_string())
-                .unwrap_or_default();
-            let run_error = serde_json::from_str::<Value>(&ctx_text)
-                .ok()
-                .and_then(|v| v.get("data").cloned())
-                .and_then(|d| d.get("_run_error").cloned())
-                .unwrap_or(Value::Null);
-            panic!(
-                "gated host prompt not recorded; schedule={schedule_id} \
-                 schedule_status={} schedule_session={:?} session={sid} \
-                 status={status} state={state:?} run_error={run_error:?}",
-                row.status, row.current_session_id,
-            );
-        }
+        prompts
+    } else {
+        let row = load_drive_row(&daemon, &schedule_id).await;
+        let sid = row.current_session_id.clone().unwrap_or_default();
+        let (status, state) = load_run_record(&daemon, &sid).await;
+        let ctx: Option<Vec<u8>> = sqlx::query_scalar(
+            "SELECT context_json FROM orchestration_sessions WHERE session_id = ?",
+        )
+        .bind(&sid)
+        .fetch_one(&daemon.pool)
+        .await
+        .expect("load context");
+        let ctx_text = ctx
+            .map(|b| String::from_utf8_lossy(&b).to_string())
+            .unwrap_or_default();
+        let run_error = serde_json::from_str::<Value>(&ctx_text)
+            .ok()
+            .and_then(|v| v.get("data").cloned())
+            .and_then(|d| d.get("_run_error").cloned())
+            .unwrap_or(Value::Null);
+        panic!(
+            "gated host prompt not recorded; schedule={schedule_id} \
+             schedule_status={} schedule_session={:?} session={sid} \
+             status={status} state={state:?} run_error={run_error:?}",
+            row.status, row.current_session_id,
+        );
     };
     assert!(
         prompts
@@ -2170,8 +2169,8 @@ async fn admission_gated_work_insertion_driven() {
 }
 
 /// N-14: work-linked vs general insertion — a work-linked add freezes the
-/// work_id into the schedule row and descriptor; a general add (no
-/// work_id) stays work-less. Both are driven through the production
+/// `work_id` into the schedule row and descriptor; a general add (no
+/// `work_id`) stays work-less. Both are driven through the production
 /// coordinator.
 #[tokio::test]
 async fn admission_work_linked_vs_general_insertion() {
@@ -2305,50 +2304,50 @@ async fn admission_work_linked_vs_general_insertion() {
 
     // Both driven with real Host progress: wait until BOTH prompts are
     // recorded (the linked run is admitted first, the general run second).
-    let prompts = match tokio::time::timeout(std::time::Duration::from_secs(15), async {
-        loop {
-            let prompts = host.prompts();
-            if prompts.iter().any(|p| p.contains("p2-t1-linked-topic"))
-                && prompts.iter().any(|p| p.contains("p2-t1-general-topic"))
-            {
-                return prompts;
+    let prompts = if let Ok(prompts) =
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            loop {
+                let prompts = host.prompts();
+                if prompts.iter().any(|p| p.contains("p2-t1-linked-topic"))
+                    && prompts.iter().any(|p| p.contains("p2-t1-general-topic"))
+                {
+                    return prompts;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-    })
-    .await
+        })
+        .await
     {
-        Ok(prompts) => prompts,
-        Err(_) => {
-            let prompts = host.prompts();
-            let mut diag = String::new();
-            for id in [&linked_id, &general_id] {
-                let row = load_drive_row(&daemon, id).await;
-                let sid = row.current_session_id.clone().unwrap_or_default();
-                let (status, state) = load_run_record(&daemon, &sid).await;
-                let ctx: Option<Vec<u8>> = sqlx::query_scalar(
-                    "SELECT context_json FROM orchestration_sessions WHERE session_id = ?",
-                )
-                .bind(&sid)
-                .fetch_one(&daemon.pool)
-                .await
-                .expect("load context");
-                let ctx_text = ctx
-                    .map(|b| String::from_utf8_lossy(&b).to_string())
-                    .unwrap_or_default();
-                let run_error = serde_json::from_str::<Value>(&ctx_text)
-                    .ok()
-                    .and_then(|v| v.get("data").cloned())
-                    .and_then(|d| d.get("_run_error").cloned())
-                    .unwrap_or(Value::Null);
-                diag.push_str(&format!(
-                    "schedule={id} schedule_status={} schedule_session={:?} \
-                     session={sid} status={status} state={state:?} run_error={run_error:?}; ",
-                    row.status, row.current_session_id,
-                ));
-            }
-            panic!("work-linked/general prompts not both recorded; prompts={prompts:?} {diag}");
+        prompts
+    } else {
+        let prompts = host.prompts();
+        let mut diag = String::new();
+        for id in [&linked_id, &general_id] {
+            let row = load_drive_row(&daemon, id).await;
+            let sid = row.current_session_id.clone().unwrap_or_default();
+            let (status, state) = load_run_record(&daemon, &sid).await;
+            let ctx: Option<Vec<u8>> = sqlx::query_scalar(
+                "SELECT context_json FROM orchestration_sessions WHERE session_id = ?",
+            )
+            .bind(&sid)
+            .fetch_one(&daemon.pool)
+            .await
+            .expect("load context");
+            let ctx_text = ctx
+                .map(|b| String::from_utf8_lossy(&b).to_string())
+                .unwrap_or_default();
+            let run_error = serde_json::from_str::<Value>(&ctx_text)
+                .ok()
+                .and_then(|v| v.get("data").cloned())
+                .and_then(|d| d.get("_run_error").cloned())
+                .unwrap_or(Value::Null);
+            diag.push_str(&format!(
+                "schedule={id} schedule_status={} schedule_session={:?} \
+                 session={sid} status={status} state={state:?} run_error={run_error:?}; ",
+                row.status, row.current_session_id,
+            ));
         }
+        panic!("work-linked/general prompts not both recorded; prompts={prompts:?} {diag}");
     };
     assert!(
         prompts.iter().any(|p| p.contains("p2-t1-linked-topic")),
@@ -2511,7 +2510,7 @@ async fn admission_failed_driver_transition_refuses_reentry() {
 
 /// Deterministic blocking Host fixture (T2): the first prompt BLOCKS until
 /// `release()` is called (or the operation is cancelled), then emits a
-/// transformed delta + EndTurn. Every prompt increments the effect counter.
+/// transformed delta + `EndTurn`. Every prompt increments the effect counter.
 /// `cancel` records the cancelled op id AND releases any blocked stream so
 /// the prompt executor's drain loop can observe cancellation. `shutdown_session`
 /// increments the reap counter. This is the deterministic production-daemon
@@ -3230,7 +3229,7 @@ async fn control_completed_vs_cancel_race_completed_wins() {
     assert_eq!(run_status, "completed", "completed remains completed");
 }
 
-/// T2: restart/hydration leaves a HumanWait blocked — the durable wait
+/// T2: restart/hydration leaves a `HumanWait` blocked — the durable wait
 /// token survives and the run is never auto-advanced at boot.
 #[tokio::test]
 async fn control_restart_wait_stays_blocked() {

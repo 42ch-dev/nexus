@@ -363,8 +363,8 @@ pub fn load_preset(
 /// Compute the content-addressed [`PresetSourceIdentity`] (A2/A7).
 ///
 /// The content hash is over the manifest **and** every referenced asset
-/// (template_file, prompt_file, system_prompt_file in capability args, and
-/// role system_prompt_file) — not the YAML hash alone — so a changed
+/// (`template_file`, `prompt_file`, `system_prompt_file` in capability args, and
+/// role `system_prompt_file`) — not the YAML hash alone — so a changed
 /// template invalidates the identity and recovery refuses to fall back to
 /// current bytes.
 ///
@@ -1264,7 +1264,7 @@ fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
 /// and per-run coordinator cancellation tokens are wired into every inner
 /// graph `acp_prompt` node at wired-graph build time — the loader-only
 /// graphs stay executor-free for validation/test construction.
-#[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value, clippy::implicit_hasher)]
 pub fn build_wired_outer_graph(
     loaded: &LoadedPreset,
     engine: &Arc<dyn crate::engine::OrchestrationEngine>,
@@ -1422,6 +1422,7 @@ fn extract_output_bindings(manifest: &PresetManifest) -> HashMap<String, String>
 /// The production `PromptExecutor` and the per-run coordinator cancellation
 /// tokens are wired into every `acp_prompt` node so graph prompt execution
 /// goes through the Host plane — never an echo/worker fallback.
+#[allow(clippy::implicit_hasher, clippy::needless_pass_by_value)] // DefaultHasher inner-graph map; owned executor/cancels args mirror the wired-graph API
 fn build_inner_graphs(
     manifest: &PresetManifest,
     preset_id: &str,

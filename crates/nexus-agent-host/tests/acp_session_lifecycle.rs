@@ -36,7 +36,9 @@ const FIXTURE: &str = concat!(
 static PROCESS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-    PROCESS_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    PROCESS_ENV_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 struct TestWorkspace {
@@ -53,8 +55,8 @@ fn setup_workspace() -> TestWorkspace {
     let workspace_root = tmp.path().join("workspace");
     let creator_ws_a = workspace_root.join("creator-a");
     let creator_ws_b = workspace_root.join("creator-b");
-    std::fs::create_dir_all(&creator_ws_a.join("sub")).expect("creator-a sub dir");
-    std::fs::create_dir_all(&creator_ws_b.join("sub")).expect("creator-b sub dir");
+    std::fs::create_dir_all(creator_ws_a.join("sub")).expect("creator-a sub dir");
+    std::fs::create_dir_all(creator_ws_b.join("sub")).expect("creator-b sub dir");
     let config_path = tmp.path().join("config.toml");
     let fixture_log = tmp.path().join("fixture.log");
     TestWorkspace {
@@ -177,6 +179,7 @@ async fn wait_for_event(path: &Path, event: &str) -> Vec<serde_json::Value> {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // env_lock() serializes env-mutating tests process-wide across the whole async body
 async fn no_boot_spawn_and_truthful_catalog_recipe() {
     let _lock = env_lock();
     let ws = setup_workspace();
@@ -208,7 +211,9 @@ async fn no_boot_spawn_and_truthful_catalog_recipe() {
                 "catalog reports sanitized env keys"
             );
         }
-        other => panic!("expected Acp launch strategy, got {other:?}"),
+        other @ LaunchStrategy::NativeCli { .. } => {
+            panic!("expected Acp launch strategy, got {other:?}")
+        }
     }
     assert!(entry.health.available, "configured+enabled is available");
     // The manager's runtime catalog reports the registered recipe; the
@@ -233,6 +238,7 @@ async fn no_boot_spawn_and_truthful_catalog_recipe() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // env_lock() serializes env-mutating tests process-wide
 async fn lazy_per_session_pid_and_creator_cwd_isolation() {
     let _lock = env_lock();
     let ws = setup_workspace();
@@ -311,6 +317,7 @@ async fn lazy_per_session_pid_and_creator_cwd_isolation() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // env_lock() serializes env-mutating tests process-wide
 async fn prompt_returns_non_echo_agent_output() {
     let _lock = env_lock();
     let ws = setup_workspace();
@@ -366,6 +373,7 @@ async fn prompt_returns_non_echo_agent_output() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // env_lock() serializes env-mutating tests process-wide
 async fn missing_and_disabled_providers_refuse() {
     let _lock = env_lock();
     let ws = setup_workspace();
@@ -409,6 +417,7 @@ async fn missing_and_disabled_providers_refuse() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock, clippy::cast_possible_truncation)] // env_lock() held process-wide; OS pid fits u32
 async fn cancel_reaches_owned_operation_and_shutdown_reaps_exact_process() {
     let _lock = env_lock();
     let ws = setup_workspace();
@@ -489,6 +498,7 @@ async fn cancel_reaches_owned_operation_and_shutdown_reaps_exact_process() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock, clippy::cast_possible_truncation)] // env_lock() held process-wide; OS pid fits u32
 async fn shutdown_reaps_owned_process_tree_descendants() {
     let _lock = env_lock();
     let ws = setup_workspace();
@@ -535,6 +545,7 @@ async fn shutdown_reaps_owned_process_tree_descendants() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // env_lock() serializes env-mutating tests process-wide
 async fn eof_after_initialize_is_typed_failure() {
     let _lock = env_lock();
     let ws = setup_workspace();
@@ -575,8 +586,7 @@ fn process_alive(pid: u32) -> bool {
         .arg("-0")
         .arg(pid.to_string())
         .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+        .is_ok_and(|s| s.success())
 }
 
 #[cfg(not(unix))]

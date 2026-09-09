@@ -1556,7 +1556,7 @@ fn write_user_wait_preset(home: &Path, template_body: &str) {
         .join(".nexus42")
         .join("presets")
         .join("p3-restart-wait");
-    std::fs::create_dir_all(&bundle.join("prompts")).expect("bundle dirs");
+    std::fs::create_dir_all(bundle.join("prompts")).expect("bundle dirs");
     std::fs::write(
         bundle.join("preset.yaml"),
         r#"preset:
@@ -2116,14 +2116,14 @@ async fn daemon_restart_corrupt_child_identity_wait_preserved_continue_refuses()
     )
     .bind(child)
     .bind(parent)
-    .bind(&plain_context())
-    .bind(&wait_state_with_token(
+    .bind(plain_context())
+    .bind(wait_state_with_token(
         "child-bad-tok",
         "persist",
         None,
         None,
     ))
-    .bind(&memory_augmented_descriptor(Some((
+    .bind(memory_augmented_descriptor(Some((
         parent,
         "generate_graph",
     ))))
@@ -2194,7 +2194,7 @@ async fn daemon_restart_corrupt_child_identity_wait_preserved_continue_refuses()
 /// crash happened after the external effect but before the result
 /// checkpoint). The restart classifies interrupted, NEVER re-drives (zero
 /// Host effects), never rewrites the row, and refuses control signals with
-/// workflow_state_conflict.
+/// `workflow_state_conflict`.
 #[tokio::test]
 async fn daemon_restart_dispatch_before_output_crash_interrupted_no_retry() {
     let host = RestartMockHost::new();
@@ -2308,7 +2308,7 @@ async fn daemon_restart_final_checkpoint_before_settlement_settles_terminal() {
     )
     .bind(now)
     .bind(now)
-    .bind(&memory_augmented_descriptor(None))
+    .bind(memory_augmented_descriptor(None))
     .bind(sid)
     .execute(&daemon.pool)
     .await

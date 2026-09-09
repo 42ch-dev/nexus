@@ -122,7 +122,10 @@ impl HostPromptExecutor {
     /// The lock object lives in the shared `op_locks` map; the caller keeps
     /// both the Arc and the guard alive for the operation's tenure.
     fn run_op_lock(&self, run_id: &str) -> Arc<tokio::sync::Mutex<()>> {
-        let mut locks = self.op_locks.lock().unwrap_or_else(|e| e.into_inner());
+        let mut locks = self
+            .op_locks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         locks
             .entry(run_id.to_string())
             .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
@@ -347,7 +350,7 @@ impl HostPromptExecutor {
             let mut locks = self
                 .creation_locks
                 .lock()
-                .unwrap_or_else(|e| e.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             locks
                 .entry(key.clone())
                 .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
@@ -425,8 +428,7 @@ impl HostPromptExecutor {
                 self.host.shutdown_session(sid),
             )
             .await
-            .map(|r| r.is_ok())
-            .unwrap_or(false);
+            .is_ok_and(|r| r.is_ok());
             if confirmed {
                 self.sessions.write().await.remove(key);
             } else {
@@ -641,34 +643,33 @@ impl PromptExecutor for HostPromptExecutor {
         //    un-serialized launch path: a cancellation observed before
         //    admission refuses the launch; one observed during the stream
         //    cancels the owned operation and bounds cleanup (step 8-9).
-        let permission_scope = match request.tool_policy.permission_scope() {
-            Some(scope) => Some(nexus_agent_host::capability::model::PromptPermissionScope {
+        let permission_scope = if let Some(scope) = request.tool_policy.permission_scope() {
+            Some(nexus_agent_host::capability::model::PromptPermissionScope {
                 allow_read: scope.allow_read,
                 allow_write: scope.allow_write,
                 allow_destructive: scope.allow_destructive,
-            }),
-            None => {
-                // M-001: RequestPolicy (or any policy without a narrowing
-                // scope) refuses for workflow prompt execution — fail
-                // closed before the external Host effect.
-                self.cleanup_created_session(&key, created_by_us).await;
-                self.clear_attempt(
-                    &request.run_id,
-                    expected_revision,
-                    expected_step.as_deref(),
-                    &attempt_id,
-                )
-                .await;
-                return Err(CapabilityError::Forbidden(
-                    "workflow prompt requires a narrowing permission scope (RequestPolicy is not supported for orchestration prompts)"
-                        .to_string(),
-                ));
-            }
+            })
+        } else {
+            // M-001: RequestPolicy (or any policy without a narrowing
+            // scope) refuses for workflow prompt execution — fail
+            // closed before the external Host effect.
+            self.cleanup_created_session(&key, created_by_us).await;
+            self.clear_attempt(
+                &request.run_id,
+                expected_revision,
+                expected_step.as_deref(),
+                &attempt_id,
+            )
+            .await;
+            return Err(CapabilityError::Forbidden(
+                "workflow prompt requires a narrowing permission scope (RequestPolicy is not supported for orchestration prompts)"
+                    .to_string(),
+            ));
         };
         let cancel_at_exec = request.cancellation.clone();
         let stream = tokio::select! {
             biased;
-            _ = cancel_at_exec.cancelled() => {
+            () = cancel_at_exec.cancelled() => {
                 self.cleanup_created_session(&key, created_by_us).await;
                 self.clear_attempt(
                     &request.run_id,
@@ -708,7 +709,7 @@ impl PromptExecutor for HostPromptExecutor {
         let terminal = loop {
             tokio::select! {
                 biased;
-                _ = cancel.cancelled(), if !cancel_triggered => {
+                () = cancel.cancelled(), if !cancel_triggered => {
                     cancel_triggered = true;
                     // P1 (rereview-4): the Host cancel request is bounded by
                     // the configured shutdown timeout. A provider that fails
@@ -826,7 +827,7 @@ impl PromptExecutor for HostPromptExecutor {
                 let drain_result = tokio::time::timeout(self.timeouts.shutdown_duration(), async {
                     let mut drain = std::pin::pin!(stream);
                     while let Some(event) = drain.next().await {
-                        if let Ok(HostEvent::OpFinished(_)) | Ok(HostEvent::OpFailed(_)) = event {
+                        if let Ok(HostEvent::OpFinished(_) | HostEvent::OpFailed(_)) = event {
                             break;
                         }
                     }
@@ -845,8 +846,7 @@ impl PromptExecutor for HostPromptExecutor {
                 self.host.shutdown_session(host_session_id.clone()),
             )
             .await
-            .map(|r| r.is_ok())
-            .unwrap_or(false);
+            .is_ok_and(|r| r.is_ok());
             if confirmed {
                 self.sessions.write().await.remove(&key);
             } else {
@@ -1443,7 +1443,9 @@ mod tests {
         // stream. The operation admits (revision R+1 + step marker), the
         // Host session is created, and the Host operation parks.
         let token = {
-            let cancels = session_cancels.read().unwrap_or_else(|e| e.into_inner());
+            let cancels = session_cancels
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             cancels
                 .get(&session_id.0)
                 .cloned()
@@ -1633,7 +1635,9 @@ mod tests {
         // Drive a REAL execute against the deterministic blocking Host
         // stream; the Host operation parks.
         let token = {
-            let cancels = session_cancels.read().unwrap_or_else(|e| e.into_inner());
+            let cancels = session_cancels
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             cancels
                 .get(&session_id.0)
                 .cloned()

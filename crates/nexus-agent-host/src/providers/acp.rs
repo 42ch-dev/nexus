@@ -111,7 +111,7 @@ impl AcpProvider {
         }
         if !config.enabled {
             return Err(HostError::provider_unavailable(
-                config.id.clone(),
+                config.id,
                 "provider is disabled",
             ));
         }
@@ -186,6 +186,7 @@ impl AcpProvider {
     /// cwd (never the daemon cwd), wires the permission handler, performs the
     /// initialize handshake, and creates the ACP session. The exact owned
     /// child is stored in the session state for bounded cancel/shutdown/reap.
+    #[allow(clippy::too_many_lines)] // sequential spawn/handshake/session setup; splitting obscures the single connection path
     async fn connect_session(
         &self,
         spec: &crate::capability::model::LaunchSpec,
@@ -429,6 +430,7 @@ impl AcpProvider {
     }
 
     /// Convert an `AcpStreamUpdate` to a `HostEvent`.
+    #[allow(clippy::too_many_lines)] // exhaustive per-variant event mapping; a helper per variant would add noise
     fn stream_update_to_event(
         update: AcpStreamUpdate,
         session_id: &HostSessionId,
@@ -572,7 +574,9 @@ impl AcpProvider {
                     session.session_id
                 ))
             })?;
-            (Arc::clone(&state.client), state.acp_session_id.clone())
+            let out = (Arc::clone(&state.client), state.acp_session_id.clone());
+            drop(sessions); // release read guard before awaiting client RPC
+            out
         };
 
         client.set_mode(acp_session_id, mode).await.map_err(|e| {
@@ -627,11 +631,13 @@ impl AcpProvider {
                 })
             });
 
-            (
+            let out = (
                 Arc::clone(&state.client),
                 state.acp_session_id.clone(),
                 config_id,
-            )
+            );
+            drop(sessions); // release read guard before awaiting client RPC
+            out
         };
 
         let Some(config_id) = model_config_id else {
@@ -942,7 +948,7 @@ impl ProviderAdapter for AcpProvider {
                 active_permission_scope,
             )),
             |state| async move {
-                let Some((
+                let (
                     mut rx,
                     client,
                     acp_sid,
@@ -952,10 +958,7 @@ impl ProviderAdapter for AcpProvider {
                     dur,
                     cancel_dur,
                     scope,
-                )) = state
-                else {
-                    return None;
-                };
+                ) = state?;
 
                 match tokio::time::timeout(dur, rx.recv()).await {
                     Ok(Some(update)) => {
@@ -1056,7 +1059,9 @@ impl ProviderAdapter for AcpProvider {
                     session.session_id
                 ))
             })?;
-            (Arc::clone(&state.client), state.acp_session_id.clone())
+            let out = (Arc::clone(&state.client), state.acp_session_id.clone());
+            drop(sessions); // release read guard before awaiting client RPC
+            out
         };
 
         client

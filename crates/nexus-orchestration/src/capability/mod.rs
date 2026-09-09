@@ -56,6 +56,7 @@ pub enum CapabilityError {
 /// Returns [`CapabilityError::CancellationUnavailable`] when `session_id` has
 /// no registered coordinator token, or [`CapabilityError::Internal`] when the
 /// shared map lock is poisoned.
+#[allow(clippy::implicit_hasher)] // DefaultHasher session-cancel map; hashing is not hot on this lookup path
 pub fn resolve_session_cancellation(
     session_cancels: &std::sync::RwLock<
         std::collections::HashMap<String, tokio_util::sync::CancellationToken>,

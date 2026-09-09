@@ -6,8 +6,8 @@
 //! migrations, no seed, no lock upgrades) and projects the v1.186 A7
 //! seven-class recovery classifier
 //! (`nexus_orchestration::resume_rules::classify_recovery` — terminal /
-//! unreadable / interrupted / human_wait / converge_merge / safe_boundary /
-//! legacy_unverified) into a resumable verdict via the shared
+//! unreadable / interrupted / `human_wait` / `converge_merge` / `safe_boundary` /
+//! `legacy_unverified`) into a resumable verdict via the shared
 //! `nexus_orchestration::resume_rules` module; the daemon's boot-time
 //! in-memory half (`engine.has_runner`, runner reconstruction) is carried as
 //! the separate `runner_check` caveat — never folded into the verdict. v0
@@ -417,7 +417,7 @@ fn project(row: &CheckpointRow) -> InspectDto {
     // is `HumanWait`. A terminal/interrupted/unreadable row carrying stale
     // wait bytes must not advertise a usable wait token (round-2 Minor).
     let wait_id = (recovery_class == RecoveryClass::HumanWait)
-        .then(|| run_state.as_ref())
+        .then_some(run_state.as_ref())
         .flatten()
         .and_then(|s| s.wait.as_ref().map(|w| w.wait_id.clone()));
     // Read-only frozen-source verification (A7): a human wait whose source
@@ -510,7 +510,7 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
     // Durable human-wait token (A4): exposed ONLY when the canonical class
     // is `HumanWait` (round-2 Minor — list must agree with detail).
     let wait_id = (recovery_class == RecoveryClass::HumanWait)
-        .then(|| run_state.as_ref())
+        .then_some(run_state.as_ref())
         .flatten()
         .and_then(|s| s.wait.as_ref().map(|w| w.wait_id.clone()));
     // Read-only frozen-source verification (A7): a human wait whose source
@@ -745,7 +745,7 @@ fn ops_capability_registry() -> nexus_orchestration::capability::CapabilityRegis
     CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &user_caps_dir).0
 }
 
-fn recovery_class_str(class: RecoveryClass) -> &'static str {
+const fn recovery_class_str(class: RecoveryClass) -> &'static str {
     match class {
         RecoveryClass::Terminal => "terminal",
         RecoveryClass::Unreadable => "unreadable",

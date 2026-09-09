@@ -124,7 +124,7 @@ impl Capability for AcpPrompt {
             .and_then(|v| v.as_str())
             .map_or_else(
                 || Ok(ToolPolicy::AutoGrantReadOnly),
-                |s| std::str::FromStr::from_str(s).map_err(|e| CapabilityError::InputInvalid(e)),
+                |s| std::str::FromStr::from_str(s).map_err(CapabilityError::InputInvalid),
             )?;
 
         // Security: only accept context-injected identity fields (prefixed _).
@@ -228,7 +228,7 @@ mod tests {
             &self,
             request: PromptRequest,
         ) -> Result<crate::capability::PromptResult, CapabilityError> {
-            *self.captured.lock().expect("capture lock") = Some(request.clone());
+            *self.captured.lock().expect("capture lock") = Some(request);
             Ok(crate::capability::PromptResult {
                 full_text: "transformed:hello".to_string(),
                 host_session_id: "host-sess".to_string(),
@@ -245,10 +245,13 @@ mod tests {
         // Seed the run's coordinator token (fail-closed contract: unregistered
         // runs refuse CancellationUnavailable; production registers at admission).
         let cancels = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
-        cancels.write().unwrap_or_else(|e| e.into_inner()).insert(
-            "sess".to_string(),
-            tokio_util::sync::CancellationToken::new(),
-        );
+        cancels
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(
+                "sess".to_string(),
+                tokio_util::sync::CancellationToken::new(),
+            );
         let cap = AcpPrompt::with_prompt_executor(executor.clone()).with_session_cancels(cancels);
         let input = json!({
             "prompt": "hello",

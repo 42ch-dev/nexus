@@ -481,6 +481,7 @@ fn child_descriptor(
 /// failed: a stale revision (child moved on) or a terminal child at a stale
 /// revision. SQL read failures are propagated so callers never mistake an
 /// unreadable row for an absent row.
+#[allow(clippy::cast_possible_wrap)] // SQLite column is i64; u64 revision fits signed range for all realistic runs
 async fn child_cas_outcome(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     child_id: &str,
@@ -572,6 +573,13 @@ async fn read_root_descriptor(
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    clippy::cast_possible_wrap,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::items_after_statements
+)] // SQLite column types are i64; every cast is bounds-checked above the cast site
 #[async_trait]
 impl WorkflowStateStore for SqliteSessionStorage {
     async fn load_run(&self, session_id: &SessionId) -> Result<Option<RunRecord>, EngineError> {
@@ -1245,7 +1253,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         // but cannot be mutated into partially reconstructed v1 runs.
         let expected_revision_i64 = expected_revision as i64;
         let result = sqlx::query(
-            r#"
+            r"
             UPDATE orchestration_sessions
             SET status = ?, current_task_id = ?, context_json = ?,
                 updated_at = ?, state_revision = state_revision + 1,
@@ -1253,7 +1261,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
             WHERE session_id = ? AND state_revision = ?
               AND execution_version = 1
               AND status NOT IN ('completed', 'failed', 'cancelled', 'interrupted')
-            "#,
+            ",
         )
         .bind(status_str)
         .bind(&current_task_id)
@@ -1482,7 +1490,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         // `failed` is never overwritten by a retry.
         let expected_revision_i64 = expected_revision as i64;
         let result = sqlx::query(
-            r#"
+            r"
             UPDATE orchestration_sessions
             SET status = 'cancelled', current_task_id = ?, context_json = ?,
                 updated_at = ?, state_revision = state_revision + 1,
@@ -1490,7 +1498,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
             WHERE session_id = ? AND state_revision = ?
               AND execution_version = 1
               AND status IN ('running', 'paused', 'waiting_for_input', 'interrupted')
-            "#,
+            ",
         )
         .bind(&current_task_id)
         .bind(&context_bytes)
@@ -1808,13 +1816,13 @@ impl WorkflowStateStore for SqliteSessionStorage {
         // marker cannot subsequently erase it.
         let expected_revision_i64 = expected_revision as i64;
         let result = sqlx::query(
-            r#"
+            r"
             UPDATE orchestration_sessions
             SET current_task_id = ?, context_json = ?, updated_at = ?, run_state_json = ?,
                 state_revision = state_revision + 1
             WHERE session_id = ? AND status IN ('running', 'paused')
               AND state_revision = ?
-            "#,
+            ",
         )
         .bind(current_task_id)
         .bind(context_bytes)
@@ -1923,7 +1931,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
         };
         let sql = match expected_step {
             Some(_) => format!(
-                r#"
+                r"
                 UPDATE orchestration_sessions
                 SET run_state_json = json_set(
                         COALESCE(run_state_json, '{{}}'),
@@ -1935,10 +1943,10 @@ impl WorkflowStateStore for SqliteSessionStorage {
                   AND state_revision = ?
                   AND json_extract(COALESCE(run_state_json, '{{}}'), '$.step_in_flight') = ?
                 {owner_cas_sql}
-                "#
+                "
             ),
             None => format!(
-                r#"
+                r"
                 UPDATE orchestration_sessions
                 SET run_state_json = json_set(
                         COALESCE(run_state_json, '{{}}'),
@@ -1949,7 +1957,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 WHERE session_id = ? AND status IN ('running', 'paused')
                   AND state_revision = ?
                 {owner_cas_sql}
-                "#
+                "
             ),
         };
         let mut q = sqlx::query(&sql)
@@ -2051,35 +2059,33 @@ impl WorkflowStateStore for SqliteSessionStorage {
         let id = session_id.0.clone();
         let expected_revision_i64 = expected_revision as i64;
         let sql = match expected_step {
-            Some(_) => format!(
-                r#"
+            Some(_) => r"
                 UPDATE orchestration_sessions
                 SET run_state_json = json_set(
-                        COALESCE(run_state_json, '{{}}'),
+                        COALESCE(run_state_json, '{}'),
                         '$.in_flight',
                         json('null')
                     ),
                     updated_at = ?
                 WHERE session_id = ? AND status IN ('running', 'paused')
                   AND state_revision = ?
-                  AND json_extract(COALESCE(run_state_json, '{{}}'), '$.step_in_flight') = ?
-                  AND json_extract(COALESCE(run_state_json, '{{}}'), '$.in_flight.attempt_id') = ?
-                "#
-            ),
-            None => format!(
-                r#"
+                  AND json_extract(COALESCE(run_state_json, '{}'), '$.step_in_flight') = ?
+                  AND json_extract(COALESCE(run_state_json, '{}'), '$.in_flight.attempt_id') = ?
+                "
+            .to_string(),
+            None => r"
                 UPDATE orchestration_sessions
                 SET run_state_json = json_set(
-                        COALESCE(run_state_json, '{{}}'),
+                        COALESCE(run_state_json, '{}'),
                         '$.in_flight',
                         json('null')
                     ),
                     updated_at = ?
                 WHERE session_id = ? AND status IN ('running', 'paused')
                   AND state_revision = ?
-                  AND json_extract(COALESCE(run_state_json, '{{}}'), '$.in_flight.attempt_id') = ?
-                "#
-            ),
+                  AND json_extract(COALESCE(run_state_json, '{}'), '$.in_flight.attempt_id') = ?
+                "
+            .to_string(),
         };
         let mut q = sqlx::query(&sql)
             .bind(chrono::Utc::now().timestamp())

@@ -340,8 +340,7 @@ impl Task for InnerGraphTask {
             .engine
             .get_status(&child_sid)
             .await
-            .map(|s| s.is_terminal())
-            .unwrap_or(false);
+            .is_ok_and(|s| s.is_terminal());
 
         // 4. Poll child session to completion (only for a non-terminal child —
         //    a terminal reattached child is consumed, never re-stepped,
@@ -1304,7 +1303,7 @@ impl StateCompositeTask {
     /// state-scoped and written by the gate itself. A manual/nested wait
     /// reached through a labeled/conditional path never carries a live marker
     /// for its own state, so it stays `waiting_for_input` with a fresh token.
-    async fn set_gate_park(context: &graph_flow::Context, state_id: &str, parked: bool) {
+    fn set_gate_park(context: &graph_flow::Context, state_id: &str, parked: bool) {
         let key = format!("_gate_park_{state_id}");
         if parked {
             context.set_sync(&key, true);
@@ -1374,7 +1373,7 @@ impl StateCompositeTask {
         // fired (reroute or typed failure). Clear the current-gate marker
         // so a later WaitForInput outcome at this state is never misread
         // as a scheduler park.
-        Self::set_gate_park(context, &self.id, false).await;
+        Self::set_gate_park(context, &self.id, false);
 
         if let Some(target) = &self.on_timeout {
             let note = format!(
@@ -1770,7 +1769,7 @@ impl Task for StateCompositeTask {
                 // scheduler park (paused + tokenless). Historical/broad join
                 // keys written by labeled/conditional ROUTING are not
                 // authoritative park evidence; this state-scoped marker is.
-                Self::set_gate_park(&context, &self.id, true).await;
+                Self::set_gate_park(&context, &self.id, true);
                 return Ok(TaskResult::new(
                     Some(format!(
                         "merge node '{state_id}': {arrived_count}/{expected} arrivals, waiting",
@@ -1785,7 +1784,7 @@ impl Task for StateCompositeTask {
             // Success-leave: the join has passed, so the gate is no longer
             // parked (a later re-entry at this state must never be misread
             // as a scheduler park).
-            Self::set_gate_park(&context, &self.id, false).await;
+            Self::set_gate_park(&context, &self.id, false);
             tracing::info!(
                 state_id = %self.id,
                 arrived = arrived_count,
@@ -1827,7 +1826,7 @@ impl Task for StateCompositeTask {
                     );
                     // Round-4 Critical 1: CURRENT-GATE park marker (see the
                     // merge gate above).
-                    Self::set_gate_park(&context, &self.id, true).await;
+                    Self::set_gate_park(&context, &self.id, true);
                     return Ok(TaskResult::new(
                         Some(format!(
                             "converge node '{state_id}': {arrived_count}/{expected} arrivals, waiting ({:?})",
@@ -1842,7 +1841,7 @@ impl Task for StateCompositeTask {
                     .set(&self.converge_key, serde_json::Value::Null)
                     .await;
                 // Success-leave: the join has passed (see merge gate above).
-                Self::set_gate_park(&context, &self.id, false).await;
+                Self::set_gate_park(&context, &self.id, false);
                 tracing::info!(
                     state_id = %self.id,
                     arrived = arrived_count,
@@ -3264,9 +3263,9 @@ mod tests {
         // capability resolves run id "" — register its coordinator token
         // (fail-closed contract) so the prompt reaches the mock executor.
         map.write()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entry(String::new())
-            .or_insert_with(tokio_util::sync::CancellationToken::new);
+            .or_default();
         let deps = CapabilityRuntimeDeps {
             pool: None,
             prompt_executor: Some(std::sync::Arc::new(MockExtractProvider {
@@ -3858,10 +3857,12 @@ mod tests {
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     > {
         let map = empty_session_cancels();
-        map.write().unwrap_or_else(|e| e.into_inner()).insert(
-            session_id.to_string(),
-            tokio_util::sync::CancellationToken::new(),
-        );
+        map.write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(
+                session_id.to_string(),
+                tokio_util::sync::CancellationToken::new(),
+            );
         map
     }
 
@@ -4105,9 +4106,9 @@ mod tests {
         for sid in ["default", "sess_42ch_001", "real_session"] {
             session_cancels
                 .write()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .entry(sid.to_string())
-                .or_insert_with(tokio_util::sync::CancellationToken::new);
+                .or_default();
         }
         let deps = crate::capability::CapabilityRuntimeDeps {
             pool: None,

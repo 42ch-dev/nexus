@@ -393,8 +393,8 @@ fn hot_rebuild_and_swap(
 /// Shared by the production boot path and the daemon-level restart helper
 /// so every restart runs the SAME A7 recovery order: each recovered session
 /// is classified by the durable v1 record (Terminal / Unreadable /
-/// Interrupted / HumanWait / SafeBoundary skip immediately; only
-/// ConvergeMerge is re-driven from its persisted position — completed
+/// Interrupted / `HumanWait` / `SafeBoundary` skip immediately; only
+/// `ConvergeMerge` is re-driven from its persisted position — completed
 /// edges are never re-executed).
 ///
 /// Runner reconstruction covers embedded AND user-directory presets through
@@ -1904,41 +1904,38 @@ async fn resume_auto_chain_work(
     // configured default provider. A preset with prompt roles and no
     // provider refuses the enqueue (never a drive-enabled row with an empty
     // binding map); a preset with no prompt roles accepts an empty map.
-    let bindings = match binding_provider {
-        Some(provider_id) => {
-            let Some(preset_id) = nexus_orchestration::stage_gates::preset_for_stage(stage) else {
-                return Err(format!("no preset mapping for stage '{stage}'"));
-            };
-            match nexus_orchestration::preset::default_bindings_for_preset(preset_id, provider_id) {
-                Some(bindings) => bindings,
-                None => {
-                    return Err(format!(
-                        "preset '{preset_id}' not resolvable; refusing to publish a drive-enabled row"
-                    ));
-                }
+    let bindings = if let Some(provider_id) = binding_provider {
+        let Some(preset_id) = nexus_orchestration::stage_gates::preset_for_stage(stage) else {
+            return Err(format!("no preset mapping for stage '{stage}'"));
+        };
+        match nexus_orchestration::preset::default_bindings_for_preset(preset_id, provider_id) {
+            Some(bindings) => bindings,
+            None => {
+                return Err(format!(
+                    "preset '{preset_id}' not resolvable; refusing to publish a drive-enabled row"
+                ));
             }
         }
-        None => {
-            let Some(preset_id) = nexus_orchestration::stage_gates::preset_for_stage(stage) else {
-                return Err(format!("no preset mapping for stage '{stage}'"));
-            };
-            let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
-            match nexus_orchestration::preset::load_embedded_preset(preset_id, &caps) {
-                Ok(loaded) => {
-                    let roles = nexus_orchestration::preset::required_prompt_roles(&loaded);
-                    if !roles.is_empty() {
-                        return Err(format!(
-                            "preset '{preset_id}' requires prompt roles but no binding \
-                             provider is configured; refusing to publish a drive-enabled row"
-                        ));
-                    }
-                    std::collections::HashMap::new()
-                }
-                Err(e) => {
+    } else {
+        let Some(preset_id) = nexus_orchestration::stage_gates::preset_for_stage(stage) else {
+            return Err(format!("no preset mapping for stage '{stage}'"));
+        };
+        let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+        match nexus_orchestration::preset::load_embedded_preset(preset_id, &caps) {
+            Ok(loaded) => {
+                let roles = nexus_orchestration::preset::required_prompt_roles(&loaded);
+                if !roles.is_empty() {
                     return Err(format!(
-                        "preset '{preset_id}' not resolvable: {e}; refusing to publish a drive-enabled row"
+                        "preset '{preset_id}' requires prompt roles but no binding \
+                         provider is configured; refusing to publish a drive-enabled row"
                     ));
                 }
+                std::collections::HashMap::new()
+            }
+            Err(e) => {
+                return Err(format!(
+                    "preset '{preset_id}' not resolvable: {e}; refusing to publish a drive-enabled row"
+                ));
             }
         }
     };

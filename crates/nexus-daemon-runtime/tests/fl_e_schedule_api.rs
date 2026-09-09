@@ -43,8 +43,7 @@ struct TestCtx {
 async fn test_ctx() -> TestCtx {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
 
-    let mut state =
-        WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
+    let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
 
     // Wire a schedule supervisor using a separate pool to the same DB.
     // This mirrors how boot.rs creates the schedule supervisor.

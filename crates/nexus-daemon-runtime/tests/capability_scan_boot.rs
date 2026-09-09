@@ -78,7 +78,7 @@ fn write_capability_dir(root: &Path, name: &str) {
 /// resolved path.
 async fn server_with_scan(scan_dir: &Path) -> (TestTempRoot, TestServer, WorkspaceState) {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
-    let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
     let deps = CapabilityRuntimeDeps {
         pool: None,

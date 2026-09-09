@@ -315,7 +315,7 @@ pub enum ResumeDecision {
 ///    conservative legacy cascade below (rule 7).
 /// 2. Its persisted context carries NO typed-failure record
 ///    (`_run_status` / `_run_error`) — v0/no-store rows only: a v1
-///    ConvergeMerge row is classified by the authoritative A7 gate, so
+///    `ConvergeMerge` row is classified by the authoritative A7 gate, so
 ///    stale context failure keys cannot suppress its re-drive.
 /// 3. It is not a human wait: `waiting_for_input` without a live
 ///    converge/merge join key is never stepped at boot (A7 rule 4 — the
@@ -843,7 +843,7 @@ impl WorkflowRunCoordinator {
     /// handle is absent (tests, standalone coordinator).
     #[must_use]
     pub fn with_schedule_supervisor(
-        mut self,
+        self,
         supervisor: Arc<nexus_orchestration::schedule::supervisor::ScheduleSupervisor>,
     ) -> Self {
         *self
@@ -2038,7 +2038,7 @@ impl WorkflowRunCoordinator {
                     descriptor.work_id.clone(),
                     descriptor.input.clone(),
                     descriptor.agent_bindings.clone(),
-                    Some(descriptor.source.clone()),
+                    Some(descriptor.source),
                 )
             }
             None => (
@@ -2326,7 +2326,7 @@ struct ScheduleAdmissionRow {
 /// A row is eligible only when: `scheduled_at` is absent or due, every
 /// `depends_on` entry is completed/cancelled, and the per-creator
 /// concurrency rule passes (serial: no other driven run for the creator;
-/// parallel_with: every running driven run is whitelisted; parallel_any:
+/// `parallel_with`: every running driven run is whitelisted; `parallel_any`:
 /// always). Only `driven_v1` rows count toward the running set — legacy/
 /// system-inert rows are excluded from execution capacity (A3).
 async fn schedule_eligible(
@@ -3450,8 +3450,7 @@ mod tests {
         assert!(
             matches!(&decisions[0], ResumeDecision::SkippedUnreadable { session_id, .. }
                 if session_id.0 == "v1:corrupt"),
-            "corrupt v1 metadata must be surfaced as unreadable/non-replayable: {:?}",
-            decisions
+            "corrupt v1 metadata must be surfaced as unreadable/non-replayable: {decisions:?}"
         );
         assert!(
             engine.script.lock().len() == 1,
@@ -3596,8 +3595,7 @@ mod tests {
                 if session_id.0 == "v1:stale-unreadable"
                     && error.contains("run_state_json")),
             "corrupt v1 metadata must surface as unreadable from the v1 run-state \
-             deserialization, not legacy chain evidence: {:?}",
-            decisions
+             deserialization, not legacy chain evidence: {decisions:?}"
         );
         assert!(
             engine.script.lock().len() == 1,

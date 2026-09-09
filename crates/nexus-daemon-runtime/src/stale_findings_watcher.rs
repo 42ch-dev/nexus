@@ -256,33 +256,29 @@ async fn maybe_enqueue_review_master(
     // the configured default provider. The preset's graphs issue prompts
     // (`acp.prompt` + `judge.llm`), so a missing provider refuses the
     // enqueue — never a drive-enabled row with an empty binding map.
-    let bindings = match binding_provider {
-        Some(provider_id) => {
-            match nexus_orchestration::preset::default_bindings_for_preset(
-                "novel-review-master",
-                provider_id,
-            ) {
-                Some(bindings) => bindings,
-                None => {
-                    tracing::warn!(
-                        creator_id,
-                        work_id,
-                        "stale-findings: novel-review-master preset not resolvable; \
-                         refusing to publish a drive-enabled row"
-                    );
-                    return;
-                }
-            }
-        }
-        None => {
+    let bindings = if let Some(provider_id) = binding_provider {
+        if let Some(bindings) = nexus_orchestration::preset::default_bindings_for_preset(
+            "novel-review-master",
+            provider_id,
+        ) {
+            bindings
+        } else {
             tracing::warn!(
                 creator_id,
                 work_id,
-                "stale-findings: no binding provider configured; \
-                 refusing to publish a drive-enabled novel-review-master row"
+                "stale-findings: novel-review-master preset not resolvable; \
+                 refusing to publish a drive-enabled row"
             );
             return;
         }
+    } else {
+        tracing::warn!(
+            creator_id,
+            work_id,
+            "stale-findings: no binding provider configured; \
+             refusing to publish a drive-enabled novel-review-master row"
+        );
+        return;
     };
 
     match nexus_orchestration::auto_chain::enqueue_review_master_schedule(
