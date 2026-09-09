@@ -590,20 +590,20 @@ impl EngineSharedState {
             .await
             .map_err(EngineError::GraphFlow)?
             .ok_or_else(|| EngineError::SessionNotFound(parent_session_id.0.clone()))?;
-        // A7 rule 2 (P3 T1 rereview-2 P1): every persisted child of a v1
-        // root must still carry the trusted frozen identity. A parseable but
-        // tampered child descriptor makes the whole owned closure
-        // non-replayable — the root must not be reconstructed over it (and a
-        // later reattachment must never fall back to minting a fresh child).
+        // A7 rule 2 (P3 T1 rereview-2/3 P1): every persisted child must still
+        // carry the trusted frozen identity. A parseable but tampered child
+        // descriptor makes the whole owned closure non-replayable — the root
+        // must not be reconstructed over it (and a later reattachment must
+        // never fall back to minting a fresh child). Legacy v0 children are
+        // left to the shipped conservative path by the validator itself, so a
+        // v1 child under a v0 parent is still refused.
         if let Ok(Some(parent_record)) = store.load_run(parent_session_id).await {
-            if parent_record.execution_version >= 1 {
-                for child in &children {
-                    validate_child_descriptor_identity(
-                        parent_session_id,
-                        parent_record.descriptor.as_ref(),
-                        child,
-                    )?;
-                }
+            for child in &children {
+                validate_child_descriptor_identity(
+                    parent_session_id,
+                    parent_record.descriptor.as_ref(),
+                    child,
+                )?;
             }
         }
         let parent_context = match serde_json::to_value(&parent.context) {
@@ -2135,6 +2135,12 @@ fn validate_child_descriptor_identity(
             child.session_id.0
         )))
     };
+    // Legacy v0 children keep the shipped conservative classifier; only v1
+    // children carry the frozen identity this validator enforces. A v1 child
+    // under a v0 parent reaches the `parent` check below and is refused.
+    if child.execution_version < 1 {
+        return Ok(());
+    }
     let Some(parent) = parent else {
         return Err(non_replayable(format!(
             "parent '{}' has no frozen v1 descriptor; child identity unverifiable",
@@ -2146,12 +2152,6 @@ fn validate_child_descriptor_identity(
             "child has no frozen v1 descriptor".to_string(),
         ));
     };
-    if child.execution_version < 1 {
-        return Err(non_replayable(format!(
-            "child execution_version {} is not v1",
-            child.execution_version
-        )));
-    }
     if child_descriptor.parent_session_id.as_ref() != Some(parent_session_id) {
         return Err(non_replayable(format!(
             "parent_session_id {:?} does not name the recovering root",
@@ -2911,6 +2911,43 @@ impl GraphFlowEngine {
                     session_id.0, version, loaded.version
                 )),
             ));
+        }
+
+        // P3 T1 rereview-3 P1 (A7 rule 2): every persisted descendant's
+        // `graph_name` must name an inner graph the frozen preset actually
+        // defines. A parseable but tampered graph_name would otherwise miss
+        // the reattachment lookup and make `InnerGraphTask` spawn a fresh
+        // child and replay the work.
+        {
+            let valid_inner: std::collections::HashSet<&str> =
+                loaded.inner_graphs.keys().map(String::as_str).collect();
+            let children_map = self.state.children.read().await;
+            let mut queue: std::collections::VecDeque<SessionId> =
+                std::collections::VecDeque::new();
+            queue.push_back(session_id.clone());
+            while let Some(parent) = queue.pop_front() {
+                let Some(children) = children_map.get(&parent.0) else {
+                    continue;
+                };
+                for child in children {
+                    let name = child.graph_name.as_deref().ok_or_else(|| {
+                        EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                            "R6: child '{}' has no graph_name (non-replayable)",
+                            child.session.id
+                        )))
+                    })?;
+                    if !valid_inner.contains(name) {
+                        return Err(EngineError::GraphFlow(
+                            graph_flow::GraphError::StorageError(format!(
+                                "R6: child '{}' names unknown inner graph '{}' for preset '{}' \
+                                 (tampered/unsupported metadata, non-replayable)",
+                                child.session.id, name, loaded.id
+                            )),
+                        ));
+                    }
+                    queue.push_back(SessionId(child.session.id.clone()));
+                }
+            }
         }
 
         // Build the wired outer graph using EngineProxy + capabilities.
