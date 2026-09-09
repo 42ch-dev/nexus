@@ -1849,12 +1849,28 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 }
 
 /// Create subsystem bootstraps for lifecycle.
+/// Mandatory core subsystems (spec §5): every kind in
+/// [`crate::lifecycle::SubsystemKind::mandatory`] must be produced here or the
+/// production HSM can never reach `Running`.
+fn core_subsystems(
+    state: &WorkspaceState,
+    port: u16,
+) -> Vec<Arc<dyn crate::lifecycle::SubsystemBootstrap>> {
+    use crate::lifecycle::{DbSubsystem, EngineSubsystem, HttpSubsystem};
+    vec![
+        Arc::new(HttpSubsystem::new(port)),
+        Arc::new(DbSubsystem::new(state.database_path())),
+        // Engine is MANDATORY: without its Up the HSM never reaches Running.
+        Arc::new(EngineSubsystem::new()),
+    ]
+}
+
 fn create_subsystems(
     state: &WorkspaceState,
     port: u16,
     agent_host_facade: Arc<dyn nexus_agent_host::HostFacade>,
 ) -> Vec<Arc<dyn crate::lifecycle::SubsystemBootstrap>> {
-    use crate::lifecycle::{AgentHostSubsystem, DbSubsystem, HttpSubsystem};
+    use crate::lifecycle::AgentHostSubsystem;
 
     let nexus_home = state.nexus_home();
     let agent_host_config_path = nexus_home.join("agent-host").join("config.toml");
@@ -1862,10 +1878,7 @@ fn create_subsystems(
         .workspace_path()
         .map_or_else(|| nexus_home.clone(), std::path::PathBuf::from);
 
-    let mut subsystems: Vec<Arc<dyn crate::lifecycle::SubsystemBootstrap>> = vec![
-        Arc::new(HttpSubsystem::new(port)),
-        Arc::new(DbSubsystem::new(state.database_path())),
-    ];
+    let mut subsystems = core_subsystems(state, port);
 
     // Agent Host is an optional subsystem — failure does not block daemon startup
     subsystems.push(Arc::new(AgentHostSubsystem::new(
@@ -2122,6 +2135,39 @@ mod tests {
         assert_eq!(
             shutdown_grace_duration(&config),
             Duration::from_millis(1234)
+        );
+    }
+
+    /// The production subsystem list must cover every mandatory kind or the
+    /// HSM can never reach `Running` (T3 rereview P1-1).
+    #[tokio::test]
+    async fn core_subsystems_cover_every_mandatory_kind() {
+        use crate::lifecycle::SubsystemKind;
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let user_home = tmp.path();
+        let nexus_home = user_home.join(".nexus42");
+        std::fs::create_dir_all(&nexus_home).expect("create nexus_home");
+        let db_path = nexus_home.join("state.db");
+        let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+
+        let kinds: Vec<SubsystemKind> = core_subsystems(&state, 0)
+            .iter()
+            .map(|subsystem| subsystem.kind())
+            .collect();
+        for mandatory in SubsystemKind::mandatory() {
+            assert!(
+                kinds.contains(mandatory),
+                "mandatory subsystem {mandatory:?} missing from production core subsystems: {kinds:?}"
+            );
+        }
+        let mut unique = kinds.clone();
+        unique.sort_by_key(|kind| format!("{kind:?}"));
+        unique.dedup_by_key(|kind| format!("{kind:?}"));
+        assert_eq!(
+            unique.len(),
+            kinds.len(),
+            "core subsystems must not be duplicated: {kinds:?}"
         );
     }
 
