@@ -103,7 +103,7 @@ spoke-schemas = { workspace = true, optional = true }
 # V1.174 P0 T2 (AR-67): persistent Ed25519 identity seed generation.
 # getrandom 0.2 is the already-locked default-graph CSPRNG stack (uuid et
 # al.); optional keeps the feature-off graph unchanged.
-getrandom = { version = "0.2", optional = true }
+getrandom = { version = "0.4", optional = true }
 # V1.179 P0 T1 (DF-88): embedded MCP server (Model B) — in-process rmcp
 # over sink/stream. Optional + wired to `connect-client` (the shared
 # bridge core compiles there); the embedded server module compiles only

@@ -1414,7 +1414,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c54e03a951783e8b327515db3f2a2fd0e3bed362a96b066f341ce66ed49b4ead"
 dependencies = [
  "data-encoding",
- "syn 3.0.3",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -3809,7 +3809,7 @@ dependencies = [
  "ed25519-dalek",
  "futures-channel",
  "futures-util",
- "getrandom 0.2.17",
+ "getrandom 0.4.3",
  "graph-flow",
  "http-body-util",
  "hyper",
